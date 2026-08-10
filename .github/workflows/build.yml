@@ -35,14 +35,19 @@ jobs:
           HOST=app/src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java
           WEB=app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
           LOGIN=app/src/main/java/com/shaterguy/chatgptselfrun/LoginActivity.java
+          MAIN=app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java
+          NEW=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java
           SERVICE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          DOM=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java
           PROTOCOL=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java
           HISTORY=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryActivity.java
+          LOGMENU=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogMenuActivity.java
           LOGS=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogsActivity.java
           test "$(grep -c 'android:screenOrientation=' "$MANIFEST" || true)" -eq 0
           grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' "$MANIFEST"
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
-          grep -q 'android:exported="false"' "$MANIFEST"
+          grep -q 'SelfRunNewActivity' "$MANIFEST"
+          grep -q 'SelfRunLogMenuActivity' "$MANIFEST"
           ! grep -q 'SCHEDULE_EXACT_ALARM' "$MANIFEST"
           grep -q 'WIDTH = 1440' "$HOST"
           grep -q 'HEIGHT = 900' "$HOST"
@@ -51,12 +56,21 @@ jobs:
           grep -q 'applyAutomation(webView)' "$SERVICE"
           grep -q 'setUseWideViewPort(true)' "$WEB"
           grep -q 'setUseWideViewPort(false)' "$WEB"
-          grep -q 'setAllowFileAccess(false)' "$WEB"
+          grep -q 'getUserAgentString' "$WEB"
+          ! grep -q 'Windows NT 10.0' "$WEB"
+          grep -q '새 작업' "$MAIN"
+          ! grep -q 'new EditText' "$MAIN"
+          grep -q 'SOFT_INPUT_STATE_ALWAYS_HIDDEN' "$NEW"
+          grep -q 'prepareInitialContext' "$DOM"
+          grep -q 'EXISTING_CONVERSATION' "$DOM"
+          grep -q 'DOM_EVALUATE' "$SERVICE"
+          grep -q 'DOM_RESULT' "$SERVICE"
           grep -q '"luna".equals(model)' "$PROTOCOL"
           grep -q '"max".equals(reasoning)' "$PROTOCOL"
           grep -q '"ultra".equals(reasoning)' "$PROTOCOL"
           grep -q '작업 이력' "$HISTORY"
-          grep -q 'KIND_DEBUG' "$LOGS"
+          grep -q '현재 실행 중인 작업과 과거 작업' "$LOGMENU"
+          grep -q 'ACTION_CREATE_DOCUMENT' "$LOGS"
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build unsigned release APK
@@ -67,14 +81,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev2-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev3-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='2'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.1.0-dev2'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='3'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.1.0-dev3'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -82,9 +96,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.1.0-dev2-unsigned
+          name: chatgpt-selfrun-android-v0.1.0-dev3-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev2-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev3-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt
