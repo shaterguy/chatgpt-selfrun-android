@@ -25,11 +25,17 @@ final class SelfRunRunLog {
     private static final String DIR = "selfrun-logs";
     private static final String PREFIX = "run-";
     private static final String SUFFIX = ".jsonl";
-    private static final long MAX_BYTES = 512L * 1024L;
+    private static final long MAX_BYTES = 1024L * 1024L;
     private static final int MAX_FILES = 100;
+    private static final long NOISY_HEARTBEAT_MS = 30_000L;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
     private final File directory;
+    private String lastEvaluatePhase = "";
+    private long lastEvaluateAt;
+    private String lastResultDetail = "";
+    private long lastResultAt;
+    private long lastBaselineWaitAt;
 
     SelfRunRunLog(Context context) {
         directory = new File(context.getNoBackupFilesDir(), DIR);
@@ -39,18 +45,43 @@ final class SelfRunRunLog {
         if (store == null || store.runId().isEmpty()) return;
         try {
             if (!directory.exists() && !directory.mkdirs()) return;
+            String safeEvent = safeEvent(event);
+            String safeDetail = sanitize(detail);
+            if (suppressNoisyDuplicate(store, safeEvent, safeDetail)) return;
             JSONObject item = new JSONObject();
             item.put("timestamp_kst", OffsetDateTime.now(KST).format(TIME));
             item.put("run_id", safeToken(store.runId()));
-            item.put("event", safeEvent(event));
+            item.put("event", safeEvent);
             item.put("phase", safeToken(store.phase()));
             item.put("role", safeToken(store.role()));
             item.put("turn", store.turn());
             item.put("status", bounded(store.status(), 180));
-            item.put("detail", sanitize(detail));
+            item.put("detail", safeDetail);
             append(store.runId(), item.toString());
         } catch (Throwable ignored) {
         }
+    }
+
+    private boolean suppressNoisyDuplicate(SelfRunStore store, String event, String detail) {
+        long now = System.currentTimeMillis();
+        if ("DOM_EVALUATE".equals(event)) {
+            String phase = store.phase();
+            if (phase.equals(lastEvaluatePhase) && now - lastEvaluateAt < NOISY_HEARTBEAT_MS) return true;
+            lastEvaluatePhase = phase;
+            lastEvaluateAt = now;
+            return false;
+        }
+        if ("DOM_RESULT".equals(event)) {
+            if (detail.equals(lastResultDetail) && now - lastResultAt < NOISY_HEARTBEAT_MS) return true;
+            lastResultDetail = detail;
+            lastResultAt = now;
+            return false;
+        }
+        if ("ASSISTANT_BASELINE_WAIT".equals(event)) {
+            if (now - lastBaselineWaitAt < NOISY_HEARTBEAT_MS) return true;
+            lastBaselineWaitAt = now;
+        }
+        return false;
     }
 
     synchronized List<String> readDebug(String runId, int maxLines) {
@@ -109,7 +140,7 @@ final class SelfRunRunLog {
                 long size = line.getBytes(StandardCharsets.UTF_8).length + 1L;
                 lines.addLast(line);
                 bytes += size;
-                while (bytes > MAX_BYTES / 2L && !lines.isEmpty()) {
+                while (bytes > MAX_BYTES * 3L / 4L && !lines.isEmpty()) {
                     String removed = lines.removeFirst();
                     bytes -= removed.getBytes(StandardCharsets.UTF_8).length + 1L;
                 }
