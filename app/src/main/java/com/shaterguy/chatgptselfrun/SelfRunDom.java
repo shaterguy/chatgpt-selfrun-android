@@ -35,8 +35,9 @@ final class SelfRunDom {
                 + projectGuard(project) + authGuard() + textHelpers(expected)
                 + "const p2=location.pathname.split('/').filter(Boolean);const ci=p2.indexOf('c');const conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';"
                 + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const present=users.some(t=>t===canonical(expected));"
+                + assistantSnapshot()
                 + durableMarkerRead(marker)
-                + "if(conv&&present)return result('CONFIRMED','첫 요청과 새 conversation 확인',{conversationUrl:location.href});"
+                + "if(conv&&present)return result('CONFIRMED','첫 요청과 새 conversation 확인',{conversationUrl:location.href,assistantKey});"
                 + "if(conv&&prior)return result('SUBMITTED','새 conversation URL 생성 후 첫 요청 DOM 확인 대기');"
                 + "if(conv)return result('EXISTING_CONVERSATION','제출 전에 기존 conversation으로 이동했습니다.');"
                 + "if(prior)return result('SUBMITTED','첫 요청 제출 확인 대기');"
@@ -47,11 +48,12 @@ final class SelfRunDom {
                 + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'첫 요청 입력 대기');})()";
     }
 
-    static String observeAssistant(String conversationUrl) {
-        return "(() =>{const result=(status,text='')=>JSON.stringify({status,text,url:location.href});"
+    static String observeAssistant(String conversationUrl, String baselineKey) {
+        return "(() =>{const result=(status,text='',extra={})=>JSON.stringify({status,text,url:location.href,...extra});"
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))
                 + "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const stopping=[...document.querySelectorAll('button')].filter(visible).some(b=>/stop|중지|생성 중지/i.test((b.dataset?.testid||'')+' '+(b.getAttribute('aria-label')||'')+' '+(b.title||'')));"
-                + "const a=[...document.querySelectorAll('[data-message-author-role=\"assistant\"],article[data-turn=\"assistant\"]')];if(!a.length)return result('WAIT','');const latest=a[a.length-1],text=String(latest.innerText||latest.textContent||'').trim();if(stopping)return result('GENERATING',text);return text?result('COMPLETE',text):result('WAIT','');})()";
+                + assistantSnapshot()
+                + "if(!assistantKey)return result('WAIT','');if(assistantKey===" + q(baselineKey) + ")return result('STALE','', {assistantKey});if(stopping)return result('GENERATING',assistantText,{assistantKey});return assistantText?result('COMPLETE',assistantText,{assistantKey}):result('WAIT','',{assistantKey});})()";
     }
 
     static String sendTurn(String conversationUrl, String prompt, String runId, int turn) {
@@ -59,7 +61,9 @@ final class SelfRunDom {
         String marker = q("chatgpt-selfrun:turn:" + runId + ":" + turn);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
-                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));if(users.some(t=>t===canonical(expected)))return result('CONFIRMED','사용자 턴 확인');"
+                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));"
+                + assistantSnapshot()
+                + "if(users.some(t=>t===canonical(expected)))return JSON.stringify({status:'CONFIRMED',detail:'사용자 턴 확인',url:location.href,assistantKey});"
                 + durableMarkerRead(marker)
                 + "if(prior)return result('SUBMITTED','사용자 턴 DOM 확인 대기');"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
@@ -95,6 +99,10 @@ final class SelfRunDom {
 
     private static String input() {
         return "composer.focus();if('value'in composer){const p=Object.getPrototypeOf(composer),own=Object.getOwnPropertyDescriptor(p,'value'),base=typeof HTMLTextAreaElement!=='undefined'?Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value'):null,setter=own?.set||base?.set;if(setter)setter.call(composer,expected);else composer.value=expected;composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:expected}));composer.dispatchEvent(new Event('change',{bubbles:true}));}else{const sel=window.getSelection(),range=document.createRange();range.selectNodeContents(composer);sel.removeAllRanges();sel.addRange(range);try{document.execCommand('delete',false,null);document.execCommand('insertText',false,expected);}catch(_){composer.textContent=expected;composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:expected}));}}";
+    }
+
+    private static String assistantSnapshot() {
+        return "const assistantNodes=[...document.querySelectorAll('[data-message-author-role=\"assistant\"],article[data-turn=\"assistant\"]')];const assistantLatest=assistantNodes[assistantNodes.length-1]||null;const assistantText=assistantLatest?String(assistantLatest.innerText||assistantLatest.textContent||'').trim():'';const assistantDigest=s=>{let h=2166136261;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);return (h>>>0).toString(36)};const assistantIdentity=assistantLatest?(assistantLatest.getAttribute('data-message-id')||assistantLatest.dataset?.messageId||assistantLatest.id||'index'):'none';const assistantKey=assistantLatest?(assistantIdentity+':'+(assistantNodes.length-1)+':'+assistantDigest(assistantText)) : '';";
     }
 
     private static String durableMarkerRead(String marker) {

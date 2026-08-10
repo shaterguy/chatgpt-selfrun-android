@@ -59,6 +59,18 @@ public class SelfRunDomTest {
         assertTrue(next.contains("MARKER_FAILED"));
         assertTrue(next.contains("SUBMITTED"));
         assertTrue(next.contains("CONFIRMED"));
+        assertTrue(initial.contains("assistantKey"));
+        assertTrue(next.contains("assistantKey"));
+    }
+
+    @Test
+    public void assistantObserverRejectsTheSubmissionBaseline() {
+        String script = SelfRunDom.observeAssistant(
+                "https://chatgpt.com/g/g-p-demo/project/c/abc", "message-1:0");
+        assertTrue(script.contains("assistantKey"));
+        assertTrue(script.contains("STALE"));
+        assertTrue(script.contains("message-1:0"));
+        assertTrue(script.contains("COMPLETE"));
     }
 
     @Test

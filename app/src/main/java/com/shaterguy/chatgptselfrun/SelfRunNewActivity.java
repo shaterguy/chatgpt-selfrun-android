@@ -57,6 +57,7 @@ public final class SelfRunNewActivity extends Activity {
         projectUrl.setSingleLine(true);
         projectUrl.setHint("https://chatgpt.com/g/<project-id>");
         projectUrl.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        projectUrl.setText(store.defaultProjectUrl());
         root.addView(projectUrl);
 
         root.addView(Ui.section(this, "실행 모드"));
@@ -99,6 +100,7 @@ public final class SelfRunNewActivity extends Activity {
             Toast.makeText(this, "셀프런 명령을 입력하세요.", Toast.LENGTH_LONG).show();
             return;
         }
+        store.setDefaultProjectUrl(project);
         if (!store.runId().isEmpty()) history.sync(store);
         stopService(new Intent(this, SelfRunService.class));
         String selectedMode = MODE_VALUES[mode.getSelectedItemPosition()];

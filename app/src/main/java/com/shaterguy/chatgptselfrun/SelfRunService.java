@@ -33,6 +33,7 @@ public final class SelfRunService extends Service {
     private static final int MAX_SUBMITTED_OBSERVATIONS = 40;
     private static final long STARTUP_TIMEOUT_MS = 120_000L;
     private static final long PREF_TIMEOUT_MS = 120_000L;
+    private static final long ASSISTANT_RESPONSE_TIMEOUT_MS = 12 * 60_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable stepRunnable = this::runStep;
@@ -227,7 +228,7 @@ public final class SelfRunService extends Service {
                     script = SelfRunDom.sendInitial(store.projectUrl(),
                             SelfRunProtocol.bootstrap(store.runId(), store.mode(), store.requirement()), store.runId());
             case SelfRunStore.PHASE_WAIT_ASSISTANT ->
-                    script = SelfRunDom.observeAssistant(store.conversationUrl());
+                    script = SelfRunDom.observeAssistant(store.conversationUrl(), store.assistantBaselineKey());
             case SelfRunStore.PHASE_APPLY_PREFS ->
                     script = WorkPreferenceDom.modelForConversation(store.conversationUrl(), store.pendingModel());
             case PHASE_APPLY_REASONING ->
@@ -254,6 +255,11 @@ public final class SelfRunService extends Service {
                 || SelfRunStore.PHASE_APPLY_PREFS.equals(phase) || PHASE_APPLY_REASONING.equals(phase))
                 && age >= PREF_TIMEOUT_MS) {
             pause("WORK_PREFERENCES_TIMEOUT", "120초 동안 Work 모델·추론 설정의 실제 적용을 확인하지 못했습니다.");
+            return true;
+        }
+        if (SelfRunStore.PHASE_WAIT_ASSISTANT.equals(phase) && age >= ASSISTANT_RESPONSE_TIMEOUT_MS) {
+            pause("ASSISTANT_RESPONSE_TIMEOUT",
+                    "12분 동안 새 assistant 응답을 확인하지 못해 자동 대기를 중지했습니다.");
             return true;
         }
         return false;
@@ -298,7 +304,11 @@ public final class SelfRunService extends Service {
                 submittedWait(detail.isEmpty() ? "제출 확인 대기" : detail);
                 return;
             }
-            if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)) {
+            if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)
+                    || "STALE".equals(status)) {
+                if ("STALE".equals(status)) {
+                    runLog.record(store, "ASSISTANT_BASELINE_WAIT", "previous_assistant");
+                }
                 uiWait(detail.isEmpty() ? status : detail);
                 return;
             }
@@ -337,6 +347,7 @@ public final class SelfRunService extends Service {
                 return;
             }
             store.setConversationUrl(url);
+            store.setAssistantBaselineKey(result.optString("assistantKey", ""));
             runLog.record(store, "BOOTSTRAP_CONFIRMED", "conversation=captured");
             transition(SelfRunStore.PHASE_WAIT_ASSISTANT, "첫 assistant 응답 대기", "conversation_captured");
             cleanupWebView();
@@ -344,7 +355,7 @@ public final class SelfRunService extends Service {
             return;
         }
         if (SelfRunStore.PHASE_WAIT_ASSISTANT.equals(phase) && "COMPLETE".equals(status)) {
-            handleAssistant(result.optString("text", ""));
+            handleAssistant(result.optString("text", ""), result.optString("assistantKey", ""));
             return;
         }
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase) && "READY".equals(status)) {
@@ -360,6 +371,7 @@ public final class SelfRunService extends Service {
         }
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase) && "CONFIRMED".equals(status)) {
             store.setTurn(store.turn() + 1);
+            store.setAssistantBaselineKey(result.optString("assistantKey", ""));
             transition(SelfRunStore.PHASE_WAIT_ASSISTANT,
                     "다음 assistant 응답 대기 · " + store.role(), "continuation_confirmed");
             scheduleStep(700L);
@@ -369,11 +381,12 @@ public final class SelfRunService extends Service {
         else uiWait("화면 상태 재평가");
     }
 
-    private void handleAssistant(String text) {
+    private void handleAssistant(String text, String assistantKey) {
         submittedObservationCount = 0;
         if (text == null || text.isBlank()) { uiWait("assistant 본문 대기"); return; }
-        String key = Integer.toHexString(text.hashCode()) + ":" + text.length();
-        if (key.equals(store.lastAssistantKey())) { scheduleStep(1_200L); return; }
+        if (assistantKey == null || assistantKey.isBlank()) { uiWait("assistant 노드 식별 대기"); return; }
+        String key = assistantKey + ":" + Integer.toHexString(text.hashCode()) + ":" + text.length();
+        if (key.equals(store.lastAssistantKey())) { uiWait("새 assistant 응답 대기"); return; }
         SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest(text, store.runId(), store.mode());
         if (signal.type == SelfRunProtocol.Type.NONE) {
             if (store.signalRecoveryCount() >= 1) {

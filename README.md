@@ -43,16 +43,16 @@ ChatGPT에서 하나의 conversation을 처음부터 끝까지 유지하면서 �
 
 ## WebView
 
-- Android 화면: landscape 고정
+- Android 화면: 기기 기본 방향 및 시스템 라이트·다크 모드
 - 자동화 가상 디스플레이: 1440×900 / 160 dpi
-- desktop user agent
+- 실제 Android WebView user agent
 - wide viewport / overview mode
 - 로그인 화면과 백그라운드 자동화는 같은 앱 CookieManager를 사용합니다.
 
 ## 현재 개발 버전
 
-- versionName: `0.1.0-dev1`
-- versionCode: `1`
+- versionName: `0.1.0-dev4`
+- versionCode: `4`
 - applicationId: `com.shaterguy.chatgptselfrun`
 - Android 8.0 이상
 
