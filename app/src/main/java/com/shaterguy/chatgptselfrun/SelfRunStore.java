@@ -41,6 +41,7 @@ final class SelfRunStore {
                 .putString("pendingReasoning", MODE_WORK.equals(mode) ? "xhigh" : "")
                 .putString("lastSignal", "")
                 .putString("lastAssistantKey", "")
+                .putString("assistantBaselineKey", "")
                 .putString("lastErrorCode", "")
                 .putString("lastErrorMessage", "")
                 .putInt("turn", 0)
@@ -52,13 +53,17 @@ final class SelfRunStore {
         syncHistory();
     }
 
-    void clear() { prefs.edit().clear().apply(); }
+    void clear() {
+        String defaultProject = defaultProjectUrl();
+        prefs.edit().clear().putString("defaultProjectUrl", defaultProject).apply();
+    }
 
     String runId() { return prefs.getString("runId", ""); }
     long createdAt() { return prefs.getLong("createdAt", 0L); }
     long phaseStartedAt() { return prefs.getLong("phaseStartedAt", createdAt()); }
     String mode() { return prefs.getString("mode", MODE_WORK); }
     String projectUrl() { return prefs.getString("projectUrl", ""); }
+    String defaultProjectUrl() { return prefs.getString("defaultProjectUrl", ""); }
     String requirement() { return prefs.getString("requirement", ""); }
     String conversationUrl() { return prefs.getString("conversationUrl", ""); }
     String phase() { return prefs.getString("phase", PHASE_IDLE); }
@@ -68,6 +73,7 @@ final class SelfRunStore {
     String pendingReasoning() { return prefs.getString("pendingReasoning", ""); }
     String lastSignal() { return prefs.getString("lastSignal", ""); }
     String lastAssistantKey() { return prefs.getString("lastAssistantKey", ""); }
+    String assistantBaselineKey() { return prefs.getString("assistantBaselineKey", ""); }
     String lastErrorCode() { return prefs.getString("lastErrorCode", ""); }
     String lastErrorMessage() { return prefs.getString("lastErrorMessage", ""); }
     int turn() { return prefs.getInt("turn", 0); }
@@ -77,6 +83,7 @@ final class SelfRunStore {
     boolean userStopped() { return prefs.getBoolean("userStopped", false); }
 
     void setConversationUrl(String value) { put("conversationUrl", value); }
+    void setDefaultProjectUrl(String value) { put("defaultProjectUrl", value); }
     void setPhase(String value) {
         prefs.edit().putString("phase", safe(value)).putLong("phaseStartedAt", System.currentTimeMillis()).apply();
         syncHistory();
@@ -87,6 +94,7 @@ final class SelfRunStore {
     void setPendingReasoning(String value) { put("pendingReasoning", value); }
     void setLastSignal(String value) { put("lastSignal", value); }
     void setLastAssistantKey(String value) { put("lastAssistantKey", value); }
+    void setAssistantBaselineKey(String value) { put("assistantBaselineKey", value); }
     void setLastError(String code, String message) {
         prefs.edit().putString("lastErrorCode", safe(code)).putString("lastErrorMessage", safe(message)).apply();
         syncHistory();

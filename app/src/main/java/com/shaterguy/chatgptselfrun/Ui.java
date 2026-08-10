@@ -3,7 +3,10 @@ package com.shaterguy.chatgptselfrun;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -60,6 +63,38 @@ final class Ui {
     }
 
     static void setContent(Activity activity, View content) {
+        Window window = activity.getWindow();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+            window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+            window.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+        }
+        final int left = content.getPaddingLeft();
+        final int top = content.getPaddingTop();
+        final int right = content.getPaddingRight();
+        final int bottom = content.getPaddingBottom();
+        content.setOnApplyWindowInsetsListener((view, insets) -> {
+            int insetLeft;
+            int insetTop;
+            int insetRight;
+            int insetBottom;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.graphics.Insets safe = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+                insetLeft = safe.left;
+                insetTop = safe.top;
+                insetRight = safe.right;
+                insetBottom = safe.bottom;
+            } else {
+                insetLeft = insets.getSystemWindowInsetLeft();
+                insetTop = insets.getSystemWindowInsetTop();
+                insetRight = insets.getSystemWindowInsetRight();
+                insetBottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(left + insetLeft, top + insetTop, right + insetRight, bottom + insetBottom);
+            return insets;
+        });
         activity.setContentView(content);
+        content.requestApplyInsets();
     }
 }
