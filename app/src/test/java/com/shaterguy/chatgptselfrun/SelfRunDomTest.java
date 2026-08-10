@@ -18,7 +18,7 @@ public class SelfRunDomTest {
                 "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_WORK, "SR-1");
         assertTrue(script.contains("EXISTING_CONVERSATION"));
         assertTrue(script.contains("프로젝트 새 대화 입력창 대기"));
-        assertTrue(script.contains("Work 모드 실제 적용 상태 대기"));
+        assertTrue(script.contains("실행 모드 실제 상태 대기"));
         assertTrue(script.contains("chatgpt-selfrun:mode:SR-1"));
     }
 
@@ -37,10 +37,14 @@ public class SelfRunDomTest {
     }
 
     @Test
-    public void chatBootstrapDoesNotContainWorkPreferenceSelection() {
+    public void chatBootstrapFailsClosedWithoutActualModeReadback() {
         String script = SelfRunDom.prepareInitialContext(
                 "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_CHAT, "SR-1");
-        assertTrue(script.contains("requested:'chat'"));
+        assertTrue(script.contains("requestedMode="));
+        assertTrue(script.contains("currentMode"));
+        assertTrue(script.contains("modeTriggerFound"));
+        assertTrue(script.contains("modeReadback"));
+        assertTrue(script.contains("if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기'"));
         assertFalse(script.contains("sol|terra|luna"));
         assertFalse(script.contains("reasoningDiagnostics"));
     }
