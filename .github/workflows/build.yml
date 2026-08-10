@@ -34,42 +34,51 @@ jobs:
           MANIFEST=app/src/main/AndroidManifest.xml
           HOST=app/src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java
           WEB=app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
+          LOGIN=app/src/main/java/com/shaterguy/chatgptselfrun/LoginActivity.java
+          SERVICE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
           PROTOCOL=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java
-          test "$(grep -c 'android:screenOrientation="landscape"' "$MANIFEST")" -eq 2
+          HISTORY=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryActivity.java
+          LOGS=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogsActivity.java
+          test "$(grep -c 'android:screenOrientation=' "$MANIFEST" || true)" -eq 0
+          grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' "$MANIFEST"
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
           grep -q 'android:exported="false"' "$MANIFEST"
+          ! grep -q 'SCHEDULE_EXACT_ALARM' "$MANIFEST"
           grep -q 'WIDTH = 1440' "$HOST"
           grep -q 'HEIGHT = 900' "$HOST"
           grep -q 'DENSITY_DPI = 160' "$HOST"
+          grep -q 'applyLogin(webView)' "$LOGIN"
+          grep -q 'applyAutomation(webView)' "$SERVICE"
           grep -q 'setUseWideViewPort(true)' "$WEB"
-          grep -q 'setLoadWithOverviewMode(true)' "$WEB"
+          grep -q 'setUseWideViewPort(false)' "$WEB"
           grep -q 'setAllowFileAccess(false)' "$WEB"
-          grep -q 'setAllowUniversalAccessFromFileURLs(false)' "$WEB"
           grep -q '"luna".equals(model)' "$PROTOCOL"
           grep -q '"max".equals(reasoning)' "$PROTOCOL"
           grep -q '"ultra".equals(reasoning)' "$PROTOCOL"
+          grep -q '작업 이력' "$HISTORY"
+          grep -q 'KIND_DEBUG' "$LOGS"
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
-      - name: Build debug APK
-        run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
-      - name: Verify APK
+      - name: Build unsigned release APK
+        run: gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
+      - name: Verify unsigned release APK
         run: |
           set -euo pipefail
-          APK=app/build/outputs/apk/debug/app-debug.apk
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
           test -s "$APK"
-          $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | tee app/build/outputs/apk/debug/BADGING.txt
-          grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/debug/BADGING.txt
-          grep -q "versionCode='1'" app/build/outputs/apk/debug/BADGING.txt
-          grep -q "versionName='0.1.0-dev1'" app/build/outputs/apk/debug/BADGING.txt
+          $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
+          grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='2'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.1.0-dev2'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
-          sha256sum "$APK" | tee app/build/outputs/apk/debug/SHA256SUMS.txt
-      - name: Upload APK
+          sha256sum "$APK" | tee app/build/outputs/apk/release/SHA256SUMS.txt
+      - name: Upload unsigned release APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.1.0-dev1
+          name: chatgpt-selfrun-android-v0.1.0-dev2-unsigned
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/BADGING.txt
-            app/build/outputs/apk/debug/SHA256SUMS.txt
+            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/BADGING.txt
+            app/build/outputs/apk/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
