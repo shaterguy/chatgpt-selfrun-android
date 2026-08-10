@@ -25,7 +25,7 @@ final class SelfRunRunLog {
     private static final String DIR = "selfrun-logs";
     private static final String PREFIX = "run-";
     private static final String SUFFIX = ".jsonl";
-    private static final long MAX_BYTES = 256L * 1024L;
+    private static final long MAX_BYTES = 512L * 1024L;
     private static final int MAX_FILES = 100;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
@@ -46,7 +46,7 @@ final class SelfRunRunLog {
             item.put("phase", safeToken(store.phase()));
             item.put("role", safeToken(store.role()));
             item.put("turn", store.turn());
-            item.put("status", bounded(store.status(), 160));
+            item.put("status", bounded(store.status(), 180));
             item.put("detail", sanitize(detail));
             append(store.runId(), item.toString());
         } catch (Throwable ignored) {
@@ -136,8 +136,10 @@ final class SelfRunRunLog {
     private static boolean isExecutionEvent(String event) {
         return event.startsWith("UI_") || event.startsWith("SERVICE_") || event.startsWith("SIGNAL_")
                 || event.startsWith("RATE_LIMIT") || event.startsWith("WEBVIEW_")
-                || event.equals("PAUSED") || event.equals("DONE") || event.equals("STATE_TRANSITION")
-                || event.equals("PREFERENCE_VERIFIED");
+                || event.startsWith("BOOTSTRAP_") || event.equals("PAUSED") || event.equals("DONE")
+                || event.equals("STATE_TRANSITION") || event.equals("PREFERENCE_VERIFIED")
+                || event.equals("TARGET_DRIFT") || event.equals("TARGET_RESTORE")
+                || event.equals("RENDERER_GONE") || event.equals("WEBVIEW_INIT_FAILED");
     }
 
     private static String label(String event) {
@@ -147,8 +149,18 @@ final class SelfRunRunLog {
             case "UI_STOP" -> "사용자 중지";
             case "SERVICE_START" -> "백그라운드 실행 시작";
             case "WEBVIEW_LAUNCH" -> "자동화 WebView 시작";
+            case "WEBVIEW_PAGE_START" -> "ChatGPT 화면 로딩 시작";
+            case "WEBVIEW_PAGE_FINISH" -> "ChatGPT 화면 로딩 완료";
+            case "WEBVIEW_NAVIGATION" -> "ChatGPT 화면 이동";
+            case "WEBVIEW_ERROR" -> "WebView 오류";
+            case "BOOTSTRAP_CONTEXT_READY" -> "프로젝트 새 대화 준비 완료";
+            case "BOOTSTRAP_SUBMITTED" -> "첫 요청 제출";
+            case "BOOTSTRAP_CONFIRMED" -> "새 conversation 확인";
             case "SIGNAL_ACCEPTED" -> "제어 신호 수신";
             case "PREFERENCE_VERIFIED" -> "모델/추론 적용 확인";
+            case "STATE_TRANSITION" -> "상태 전이";
+            case "TARGET_DRIFT" -> "대상 화면 이탈 감지";
+            case "TARGET_RESTORE" -> "대상 화면 복구";
             case "RATE_LIMIT" -> "요청 제한 대기";
             case "PAUSED" -> "일시중지";
             case "DONE" -> "완료";
@@ -164,7 +176,7 @@ final class SelfRunRunLog {
                 || lower.contains("token") || lower.contains("prompt") || lower.contains("chatgpt.com")) {
             return "redacted";
         }
-        return bounded(value, 160);
+        return bounded(value, 240);
     }
 
     private static String safeToken(String value) {
