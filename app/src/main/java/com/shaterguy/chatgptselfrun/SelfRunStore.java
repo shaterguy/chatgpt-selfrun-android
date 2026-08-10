@@ -25,9 +25,11 @@ final class SelfRunStore {
     }
 
     void start(String runId, String mode, String projectUrl, String requirement) {
+        long now = System.currentTimeMillis();
         prefs.edit()
                 .putString("runId", runId)
-                .putLong("createdAt", System.currentTimeMillis())
+                .putLong("createdAt", now)
+                .putLong("phaseStartedAt", now)
                 .putString("mode", mode)
                 .putString("projectUrl", projectUrl)
                 .putString("requirement", requirement)
@@ -50,12 +52,11 @@ final class SelfRunStore {
         syncHistory();
     }
 
-    void clear() {
-        prefs.edit().clear().apply();
-    }
+    void clear() { prefs.edit().clear().apply(); }
 
     String runId() { return prefs.getString("runId", ""); }
     long createdAt() { return prefs.getLong("createdAt", 0L); }
+    long phaseStartedAt() { return prefs.getLong("phaseStartedAt", createdAt()); }
     String mode() { return prefs.getString("mode", MODE_WORK); }
     String projectUrl() { return prefs.getString("projectUrl", ""); }
     String requirement() { return prefs.getString("requirement", ""); }
@@ -76,7 +77,10 @@ final class SelfRunStore {
     boolean userStopped() { return prefs.getBoolean("userStopped", false); }
 
     void setConversationUrl(String value) { put("conversationUrl", value); }
-    void setPhase(String value) { put("phase", value); }
+    void setPhase(String value) {
+        prefs.edit().putString("phase", safe(value)).putLong("phaseStartedAt", System.currentTimeMillis()).apply();
+        syncHistory();
+    }
     void setStatus(String value) { put("status", value); }
     void setRole(String value) { put("role", value); }
     void setPendingModel(String value) { put("pendingModel", value); }
