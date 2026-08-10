@@ -35,6 +35,7 @@ public final class SelfRunService extends Service {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable stepRunnable = this::runStep;
     private SelfRunStore store;
+    private SelfRunRunLog runLog;
     private HeadlessWebViewHost host;
     private WebView webView;
     private boolean evaluationInFlight;
@@ -49,6 +50,7 @@ public final class SelfRunService extends Service {
     public void onCreate() {
         super.onCreate();
         store = new SelfRunStore(this);
+        runLog = new SelfRunRunLog(this);
         NotificationHelper.ensureChannel(this);
         PowerManager power = getSystemService(PowerManager.class);
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, getPackageName() + ":selfrun");
@@ -67,6 +69,7 @@ public final class SelfRunService extends Service {
         }
         startForegroundCompat();
         acquireWakeLock();
+        runLog.record(store, "SERVICE_START", intent == null ? "sticky_recreate" : "explicit_start");
         handler.post(this::ensureEngine);
         return START_STICKY;
     }
@@ -109,7 +112,8 @@ public final class SelfRunService extends Service {
         try {
             host = HeadlessWebViewHost.create(this);
             webView = host.webView();
-            WebViewConfig.apply(webView, false);
+            WebViewConfig.applyAutomation(webView);
+            runLog.record(store, "WEBVIEW_LAUNCH", store.conversationUrl().isEmpty() ? "project" : "conversation");
             WebView active = webView;
             webView.setWebViewClient(new WebViewClient() {
                 @Override
@@ -278,6 +282,7 @@ public final class SelfRunService extends Service {
             return;
         }
         if (PHASE_BOOTSTRAP_REASONING.equals(phase) && "READY".equals(status)) {
+            runLog.record(store, "PREFERENCE_VERIFIED", "sol_xhigh");
             store.setPhase(PHASE_BOOTSTRAP_SEND);
             store.setStatus("첫 Work 요청 전송 준비");
             scheduleStep(250L);
@@ -307,6 +312,7 @@ public final class SelfRunService extends Service {
             return;
         }
         if (PHASE_APPLY_REASONING.equals(phase) && "READY".equals(status)) {
+            runLog.record(store, "PREFERENCE_VERIFIED", store.pendingModel() + "_" + store.pendingReasoning());
             store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
             store.setStatus("다음 턴 continuation 준비");
             scheduleStep(250L);
@@ -345,10 +351,13 @@ public final class SelfRunService extends Service {
         store.setLastAssistantKey(key);
         store.setLastSignal(signal.raw);
         store.setSignalRecoveryCount(0);
+        runLog.record(store, "SIGNAL_ACCEPTED", signal.type.name());
         if (signal.type == SelfRunProtocol.Type.DONE) {
+            store.clearLastError();
             store.setPhase(SelfRunStore.PHASE_DONE);
             store.setStatus("SelfRun 완료");
             store.setActive(false);
+            runLog.record(store, "DONE", "terminal");
             NotificationHelper.notifyUser(this, "SelfRun 완료", store.runId());
             stopRelay();
             return;
@@ -358,6 +367,7 @@ public final class SelfRunService extends Service {
             store.setPhase(SelfRunStore.PHASE_PAUSED);
             store.setStatus(signal.type == SelfRunProtocol.Type.USER_ACTION
                     ? "사용자 조치 대기 · " + signal.actionId : "SelfRun 일시중지");
+            runLog.record(store, "PAUSED", signal.type.name());
             NotificationHelper.notifyUser(this, "SelfRun 일시중지", store.status());
             stopRelay();
             return;
@@ -404,6 +414,7 @@ public final class SelfRunService extends Service {
         long delay = RATE_LIMIT_DELAYS[rateLimitAttempt - 1];
         rateLimitedUntilElapsed = now + delay;
         store.setStatus(reason + " · " + (delay / 1000L) + "초 동안 DOM 실행 중지");
+        runLog.record(store, "RATE_LIMIT", "attempt=" + rateLimitAttempt + ";delay=" + delay);
         handler.removeCallbacks(stepRunnable);
         handler.postDelayed(() -> {
             if (!canRun()) return;
@@ -458,9 +469,11 @@ public final class SelfRunService extends Service {
     }
 
     private void pause(String code, String message) {
+        store.setLastError(code, message);
         store.setPaused(true);
         store.setPhase(SelfRunStore.PHASE_PAUSED);
         store.setStatus(code + " · " + message);
+        runLog.record(store, "PAUSED", code);
         NotificationHelper.notifyUser(this, "SelfRun 확인 필요", store.status());
         stopRelay();
     }
