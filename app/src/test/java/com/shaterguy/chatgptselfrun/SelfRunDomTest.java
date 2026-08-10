@@ -13,6 +13,16 @@ public class SelfRunDomTest {
     }
 
     @Test
+    public void bootstrapRequiresProjectNewConversationContext() {
+        String script = SelfRunDom.prepareInitialContext(
+                "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_WORK, "SR-1");
+        assertTrue(script.contains("EXISTING_CONVERSATION"));
+        assertTrue(script.contains("프로젝트 새 대화 입력창 대기"));
+        assertTrue(script.contains("Work 모드 실제 적용 상태 대기"));
+        assertTrue(script.contains("chatgpt-selfrun:mode:SR-1"));
+    }
+
+    @Test
     public void workModelAndReasoningAreSeparateEvaluations() {
         String model = WorkPreferenceDom.modelForConversation(
                 "https://chatgpt.com/g/p/c/abc", "luna");
@@ -20,19 +30,19 @@ public class SelfRunDomTest {
                 "https://chatgpt.com/g/p/c/abc", "max");
         assertTrue(model.contains("wanted=\"luna\""));
         assertTrue(model.contains("modelOf"));
-        assertFalse(model.contains("effort="));
+        assertTrue(model.contains("openMenu"));
         assertTrue(reasoning.contains("wanted=\"max\""));
         assertTrue(reasoning.contains("effort="));
-        assertFalse(reasoning.contains("modelOf"));
+        assertTrue(reasoning.contains("openMenu"));
     }
 
     @Test
-    public void chatModePreparationDoesNotContainModelSelection() {
-        String script = SelfRunDom.prepareMode(
+    public void chatBootstrapDoesNotContainWorkPreferenceSelection() {
+        String script = SelfRunDom.prepareInitialContext(
                 "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_CHAT, "SR-1");
-        assertTrue(script.contains("Chat 모드"));
+        assertTrue(script.contains("requested:'chat'"));
         assertFalse(script.contains("sol|terra|luna"));
-        assertFalse(script.contains("reasoning"));
+        assertFalse(script.contains("reasoningDiagnostics"));
     }
 
     @Test
@@ -42,6 +52,7 @@ public class SelfRunDomTest {
         String next = SelfRunDom.sendTurn(
                 "https://chatgpt.com/g/g-p-demo/c/abc", "[SELF_RUN_CONTINUE SR-1]", "SR-1", 2);
         assertTrue(initial.contains("chatgpt-selfrun:bootstrap:SR-1"));
+        assertTrue(initial.contains("EXISTING_CONVERSATION"));
         assertTrue(next.contains("chatgpt-selfrun:turn:SR-1:2"));
         assertTrue(initial.contains("localStorage.setItem"));
         assertTrue(next.contains("localStorage.setItem"));
