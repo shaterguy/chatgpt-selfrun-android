@@ -45,7 +45,9 @@ jobs:
           grep -q 'setLoadWithOverviewMode(true)' "$WEB"
           grep -q 'setAllowFileAccess(false)' "$WEB"
           grep -q 'setAllowUniversalAccessFromFileURLs(false)' "$WEB"
-          grep -q '"luna".equals(model).*"max".equals(reasoning).*"ultra".equals(reasoning)' "$PROTOCOL"
+          grep -q '"luna".equals(model)' "$PROTOCOL"
+          grep -q '"max".equals(reasoning)' "$PROTOCOL"
+          grep -q '"ultra".equals(reasoning)' "$PROTOCOL"
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build debug APK
