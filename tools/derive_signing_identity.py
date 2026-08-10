@@ -111,23 +111,34 @@ def derive_certificate(secret: bytes, key):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pass-file", required=True)
-    parser.add_argument("--out-p12", required=True)
+    parser.add_argument("--out-p12")
+    parser.add_argument("--out-key")
     parser.add_argument("--out-cert", required=True)
     args = parser.parse_args()
+    if not args.out_p12 and not args.out_key:
+        raise SystemExit("provide --out-p12 and/or --out-key")
 
     secret = Path(args.pass_file).read_bytes().strip()
     if len(secret) < 20:
         raise SystemExit("signing passphrase is unexpectedly short")
     key = derive_key(secret)
     cert = derive_certificate(secret, key)
-    p12 = pkcs12.serialize_key_and_certificates(
-        b"selfrun",
-        key,
-        cert,
-        None,
-        serialization.BestAvailableEncryption(secret),
-    )
-    Path(args.out_p12).write_bytes(p12)
+
+    if args.out_p12:
+        p12 = pkcs12.serialize_key_and_certificates(
+            b"selfrun",
+            key,
+            cert,
+            None,
+            serialization.BestAvailableEncryption(secret),
+        )
+        Path(args.out_p12).write_bytes(p12)
+    if args.out_key:
+        Path(args.out_key).write_bytes(key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ))
     Path(args.out_cert).write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     print(cert.fingerprint(hashes.SHA256()).hex())
 
