@@ -29,6 +29,7 @@ public final class SelfRunService extends Service {
     private static final String PHASE_BOOTSTRAP_SEND = "BOOTSTRAP_SEND";
     private static final String PHASE_APPLY_REASONING = "APPLY_REASONING";
     private static final long[] RATE_LIMIT_DELAYS = {2_000L, 5_000L, 10_000L, 20_000L, 40_000L, 60_000L};
+    private static final int MAX_SUBMITTED_OBSERVATIONS = 40;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable stepRunnable = this::runStep;
@@ -38,6 +39,7 @@ public final class SelfRunService extends Service {
     private boolean evaluationInFlight;
     private int generation;
     private int uiWaitCount;
+    private int submittedObservationCount;
     private int rateLimitAttempt;
     private PowerManager.WakeLock wakeLock;
 
@@ -127,9 +129,7 @@ public final class SelfRunService extends Service {
 
                 @Override
                 public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-                    if (request.isForMainFrame() && response.getStatusCode() == 429) {
-                        rateLimit("HTTP 429");
-                    }
+                    if (request.isForMainFrame() && response.getStatusCode() == 429) rateLimit("HTTP 429");
                 }
 
                 @Override
@@ -147,9 +147,7 @@ public final class SelfRunService extends Service {
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     if (!request.isForMainFrame()) return false;
                     String requested = String.valueOf(request.getUrl());
-                    if (store.conversationUrl().isEmpty()) {
-                        return !sameProject(store.projectUrl(), requested);
-                    }
+                    if (store.conversationUrl().isEmpty()) return !sameProject(store.projectUrl(), requested);
                     if (sameConversation(store.conversationUrl(), requested)) return false;
                     handler.postDelayed(() -> restoreCanonical("navigation"), 800L);
                     return true;
@@ -230,8 +228,15 @@ public final class SelfRunService extends Service {
                 pause("AUTH_REQUIRED", "ChatGPT 로그인이 필요합니다.");
                 return;
             }
-            if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)
-                    || "SUBMITTED".equals(status)) {
+            if ("MARKER_FAILED".equals(status)) {
+                pause("SUBMIT_MARKER_FAILED", "중복 방지 표식을 저장하지 못해 자동 제출을 중지했습니다.");
+                return;
+            }
+            if ("SUBMITTED".equals(status)) {
+                submittedWait(result.optString("detail", "제출 확인 대기"));
+                return;
+            }
+            if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)) {
                 uiWait(result.optString("detail", status));
                 return;
             }
@@ -241,6 +246,7 @@ public final class SelfRunService extends Service {
 
     private void handleResult(String phase, String status, JSONObject result) {
         uiWaitCount = 0;
+        submittedObservationCount = 0;
         if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase) && "READY".equals(status)) {
             if (SelfRunStore.MODE_WORK.equals(store.mode())) {
                 store.setPhase(PHASE_BOOTSTRAP_MODEL);
@@ -300,14 +306,12 @@ public final class SelfRunService extends Service {
             scheduleStep(700L);
             return;
         }
-        if ("READY".equals(status) || "CONFIRMED".equals(status)) {
-            scheduleStep(500L);
-        } else {
-            uiWait("화면 상태 재평가");
-        }
+        if ("READY".equals(status) || "CONFIRMED".equals(status)) scheduleStep(500L);
+        else uiWait("화면 상태 재평가");
     }
 
     private void handleAssistant(String text) {
+        submittedObservationCount = 0;
         if (text == null || text.isBlank()) { uiWait("assistant 본문 대기"); return; }
         String key = Integer.toHexString(text.hashCode()) + ":" + text.length();
         if (key.equals(store.lastAssistantKey())) { scheduleStep(1_200L); return; }
@@ -363,6 +367,17 @@ public final class SelfRunService extends Service {
         long delay = Math.min(5_000L, 500L + (long) uiWaitCount * 500L);
         store.setStatus(detail + " · 같은 화면 재확인");
         scheduleStep(delay);
+    }
+
+    private void submittedWait(String detail) {
+        submittedObservationCount++;
+        if (submittedObservationCount >= MAX_SUBMITTED_OBSERVATIONS) {
+            pause("SUBMISSION_AMBIGUOUS",
+                    "전송 클릭 표식은 있으나 사용자 메시지 DOM을 확인하지 못했습니다. 중복 전송하지 않습니다.");
+            return;
+        }
+        store.setStatus(detail + " · 재전송 없이 확인 중");
+        scheduleStep(1_500L);
     }
 
     private void rateLimit(String reason) {
