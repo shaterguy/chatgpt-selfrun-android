@@ -20,7 +20,7 @@ public class SelfRunDomTest {
                 "https://chatgpt.com/g/p/c/abc", "max");
         assertTrue(model.contains("wanted=\"luna\""));
         assertTrue(model.contains("modelOf"));
-        assertFalse(model.contains("wantedReasoning"));
+        assertFalse(model.contains("effort="));
         assertTrue(reasoning.contains("wanted=\"max\""));
         assertTrue(reasoning.contains("effort="));
         assertFalse(reasoning.contains("modelOf"));
@@ -36,13 +36,16 @@ public class SelfRunDomTest {
     }
 
     @Test
-    public void initialAndContinuationSubmissionHaveDurableSessionMarkers() {
+    public void initialAndContinuationSubmissionHavePersistentGuards() {
         String initial = SelfRunDom.sendInitial(
                 "https://chatgpt.com/g/g-p-demo", "hello", "SR-1");
         String next = SelfRunDom.sendTurn(
                 "https://chatgpt.com/g/g-p-demo/c/abc", "[SELF_RUN_CONTINUE SR-1]", "SR-1", 2);
         assertTrue(initial.contains("chatgpt-selfrun:bootstrap:SR-1"));
         assertTrue(next.contains("chatgpt-selfrun:turn:SR-1:2"));
+        assertTrue(initial.contains("localStorage.setItem"));
+        assertTrue(next.contains("localStorage.setItem"));
+        assertTrue(next.contains("MARKER_FAILED"));
         assertTrue(next.contains("SUBMITTED"));
         assertTrue(next.contains("CONFIRMED"));
     }
