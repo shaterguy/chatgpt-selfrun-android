@@ -46,6 +46,38 @@ public class SelfRunDomTest {
     }
 
     @Test
+    public void continuationUsesPerTurnBaselineInsteadOfAnyHistoricalMatch() {
+        String next = SelfRunDom.sendTurn(
+                "https://chatgpt.com/g/g-p-demo/c/abc", "[SELF_RUN_CONTINUE SR-1]", "SR-1", 2);
+        assertTrue(next.contains("chatgpt-selfrun:turn:SR-1:2"));
+        assertTrue(next.contains("const matching="));
+        assertTrue(next.contains("baseline:matching"));
+        assertTrue(next.contains("matching>baseline"));
+        assertTrue(next.contains("현재 사용자 턴 확인"));
+        assertFalse(next.contains("if(users.some(t=>t===canonical(expected)))return"));
+    }
+
+    @Test
+    public void assistantObserverOnlyAcceptsAssistantAfterLatestUserTurn() {
+        String script = SelfRunDom.observeAssistant(
+                "https://chatgpt.com/g/g-p-demo/project/c/abc", "message-1:0");
+        assertTrue(script.contains("userIndex=-1"));
+        assertTrue(script.contains("for(let i=userIndex+1"));
+        assertTrue(script.contains("if(role==='user')break"));
+        assertTrue(script.contains("새 assistant 응답 대기"));
+        assertTrue(script.contains("assistantKey"));
+        assertTrue(script.contains("STALE"));
+    }
+
+    @Test
+    public void assistantIdentityDoesNotDependOnRenderedTextDigest() {
+        String initial = SelfRunDom.sendInitial(
+                "https://chatgpt.com/g/g-p-demo", "hello", "SR-1");
+        assertTrue(initial.contains("assistantKey"));
+        assertFalse(initial.contains("assistantDigest"));
+    }
+
+    @Test
     public void initialAndContinuationSubmissionHavePersistentGuards() {
         String initial = SelfRunDom.sendInitial(
                 "https://chatgpt.com/g/g-p-demo", "hello", "SR-1");
@@ -59,18 +91,6 @@ public class SelfRunDomTest {
         assertTrue(next.contains("MARKER_FAILED"));
         assertTrue(next.contains("SUBMITTED"));
         assertTrue(next.contains("CONFIRMED"));
-        assertTrue(initial.contains("assistantKey"));
-        assertTrue(next.contains("assistantKey"));
-    }
-
-    @Test
-    public void assistantObserverRejectsTheSubmissionBaseline() {
-        String script = SelfRunDom.observeAssistant(
-                "https://chatgpt.com/g/g-p-demo/project/c/abc", "message-1:0");
-        assertTrue(script.contains("assistantKey"));
-        assertTrue(script.contains("STALE"));
-        assertTrue(script.contains("message-1:0"));
-        assertTrue(script.contains("COMPLETE"));
     }
 
     @Test
