@@ -27,6 +27,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
+      - name: Static SelfRun policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST=app/src/main/AndroidManifest.xml
+          HOST=app/src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java
+          WEB=app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
+          PROTOCOL=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java
+          test "$(grep -c 'android:screenOrientation="landscape"' "$MANIFEST")" -eq 2
+          grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
+          grep -q 'android:exported="false"' "$MANIFEST"
+          grep -q 'WIDTH = 1440' "$HOST"
+          grep -q 'HEIGHT = 900' "$HOST"
+          grep -q 'DENSITY_DPI = 160' "$HOST"
+          grep -q 'setUseWideViewPort(true)' "$WEB"
+          grep -q 'setLoadWithOverviewMode(true)' "$WEB"
+          grep -q 'setAllowFileAccess(false)' "$WEB"
+          grep -q 'setAllowUniversalAccessFromFileURLs(false)' "$WEB"
+          grep -q '"luna".equals(model).*"max".equals(reasoning).*"ultra".equals(reasoning)' "$PROTOCOL"
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build debug APK
