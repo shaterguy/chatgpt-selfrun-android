@@ -65,7 +65,7 @@ jobs:
           grep -q 'prepareInitialContext' "$DOM"
           grep -q 'EXISTING_CONVERSATION' "$DOM"
           grep -q 'const matching=' "$DOM"
-          grep -q 'baseline:matching' "$DOM"
+          grep -q 'durableMarkerWriteWithBaseline(marker, "matching")' "$DOM"
           grep -q 'matching>baseline' "$DOM"
           grep -q 'userIndex=-1' "$DOM"
           grep -q 'for(let i=userIndex+1' "$DOM"
