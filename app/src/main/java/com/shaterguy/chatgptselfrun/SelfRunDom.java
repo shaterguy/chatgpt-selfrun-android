@@ -48,28 +48,40 @@ final class SelfRunDom {
                 + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'첫 요청 입력 대기');})()";
     }
 
+    /**
+     * Observe only an assistant turn that follows the latest user turn. This mirrors the scheduler's
+     * proven turn-order guard and prevents a completed previous assistant message from being reused.
+     */
     static String observeAssistant(String conversationUrl, String baselineKey) {
         return "(() =>{const result=(status,text='',extra={})=>JSON.stringify({status,text,url:location.href,...extra});"
-                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))
-                + "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const stopping=[...document.querySelectorAll('button')].filter(visible).some(b=>/stop|중지|생성 중지/i.test((b.dataset?.testid||'')+' '+(b.getAttribute('aria-label')||'')+' '+(b.title||'')));"
-                + assistantSnapshot()
-                + "if(!assistantKey)return result('WAIT','');if(assistantKey===" + q(baselineKey) + ")return result('STALE','', {assistantKey});if(stopping)return result('GENERATING',assistantText,{assistantKey});return assistantText?result('COMPLETE',assistantText,{assistantKey}):result('WAIT','',{assistantKey});})()";
+                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard()
+                + "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const roleOf=e=>e.getAttribute('data-message-author-role')||e.getAttribute('data-turn')||e.querySelector('[data-message-author-role]')?.getAttribute('data-message-author-role')||'';"
+                + "const turns=[...document.querySelectorAll('article,[data-message-author-role]')].filter((e,i,a)=>!a.some((p,j)=>j<i&&p.contains(e)));let userIndex=-1;for(let i=0;i<turns.length;i++){if(roleOf(turns[i])==='user')userIndex=i;}"
+                + "if(userIndex<0)return result('WAIT','최근 사용자 턴 대기');let assistant=null,assistantIndex=-1;for(let i=userIndex+1;i<turns.length;i++){const role=roleOf(turns[i]);if(role==='user')break;if(role==='assistant'){assistant=turns[i];assistantIndex=i;break;}}"
+                + "const stopping=[...document.querySelectorAll('button')].filter(visible).some(b=>b.dataset?.testid==='stop-button'||/stop generating|응답 중지|생성 중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));"
+                + "if(!assistant)return result(stopping?'GENERATING':'WAIT',stopping?'어시스턴트 응답 생성 중':'새 assistant 응답 대기');"
+                + "const assistantText=String(assistant.innerText||assistant.textContent||'').trim();const streaming=assistant.getAttribute('aria-busy')==='true'||assistant.getAttribute('data-is-streaming')==='true'||!!assistant.querySelector('[aria-busy=\"true\"],[data-is-streaming=\"true\"],[class*=\"spinner\" i],[class*=\"loading\" i]');"
+                + "const assistantIdentity=assistant.getAttribute('data-message-id')||assistant.dataset?.messageId||assistant.id||'index';const assistantKey=assistantIdentity+':'+assistantIndex;"
+                + "if(assistantKey===" + q(baselineKey) + ")return result('STALE','',{assistantKey});if(stopping||streaming)return result('GENERATING',assistantText,{assistantKey});return assistantText?result('COMPLETE',assistantText,{assistantKey}):result('WAIT','',{assistantKey});})()";
     }
 
+    /**
+     * Continuation prompts are intentionally identical across turns. A previous matching user turn
+     * must therefore never count as confirmation for the current turn. The per-turn marker stores
+     * the matching-user baseline before the click and confirms only after that count increases.
+     */
     static String sendTurn(String conversationUrl, String prompt, String runId, int turn) {
         String expected = q(prompt);
         String marker = q("chatgpt-selfrun:turn:" + runId + ":" + turn);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
-                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));"
-                + assistantSnapshot()
-                + "if(users.some(t=>t===canonical(expected)))return JSON.stringify({status:'CONFIRMED',detail:'사용자 턴 확인',url:location.href,assistantKey});"
-                + durableMarkerRead(marker)
-                + "if(prior)return result('SUBMITTED','사용자 턴 DOM 확인 대기');"
+                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const matching=users.filter(t=>t===canonical(expected)).length;"
+                + assistantSnapshot() + durableMarkerRead(marker)
+                + "if(prior){let markerData=null;try{markerData=JSON.parse(prior);}catch(_){}if(markerData&&Number.isFinite(Number(markerData.baseline))){const baseline=Number(markerData.baseline);if(matching>baseline)return JSON.stringify({status:'CONFIRMED',detail:'현재 사용자 턴 확인',url:location.href,assistantKey});return result('SUBMITTED','현재 사용자 턴 DOM 확인 대기');}return result('SUBMITTED','이전 버전 제출 표식 확인 대기');}"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
                 + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
-                + durableMarkerWrite(marker)
-                + "if(!persisted)return result('MARKER_FAILED','중복 방지 표식을 저장하지 못했습니다.');send.click();return result('SUBMITTED','사용자 턴 제출 클릭');}"
+                + durableMarkerWriteWithBaseline(marker, "matching")
+                + "if(!persisted)return result('MARKER_FAILED','중복 방지 표식을 저장하지 못했습니다.');send.click();return result('SUBMITTED','현재 사용자 턴 제출 클릭');}"
                 + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'사용자 턴 입력 대기');})()";
     }
 
@@ -101,8 +113,9 @@ final class SelfRunDom {
         return "composer.focus();if('value'in composer){const p=Object.getPrototypeOf(composer),own=Object.getOwnPropertyDescriptor(p,'value'),base=typeof HTMLTextAreaElement!=='undefined'?Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value'):null,setter=own?.set||base?.set;if(setter)setter.call(composer,expected);else composer.value=expected;composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:expected}));composer.dispatchEvent(new Event('change',{bubbles:true}));}else{const sel=window.getSelection(),range=document.createRange();range.selectNodeContents(composer);sel.removeAllRanges();sel.addRange(range);try{document.execCommand('delete',false,null);document.execCommand('insertText',false,expected);}catch(_){composer.textContent=expected;composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:expected}));}}";
     }
 
+    /** Stable identity excludes assistant text so late DOM decoration cannot masquerade as a new turn. */
     private static String assistantSnapshot() {
-        return "const assistantNodes=[...document.querySelectorAll('[data-message-author-role=\"assistant\"],article[data-turn=\"assistant\"]')];const assistantLatest=assistantNodes[assistantNodes.length-1]||null;const assistantText=assistantLatest?String(assistantLatest.innerText||assistantLatest.textContent||'').trim():'';const assistantDigest=s=>{let h=2166136261;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);return (h>>>0).toString(36)};const assistantIdentity=assistantLatest?(assistantLatest.getAttribute('data-message-id')||assistantLatest.dataset?.messageId||assistantLatest.id||'index'):'none';const assistantKey=assistantLatest?(assistantIdentity+':'+(assistantNodes.length-1)+':'+assistantDigest(assistantText)) : '';";
+        return "const assistantNodes=[...document.querySelectorAll('[data-message-author-role=\"assistant\"],article[data-turn=\"assistant\"]')];const assistantLatest=assistantNodes[assistantNodes.length-1]||null;const assistantIdentity=assistantLatest?(assistantLatest.getAttribute('data-message-id')||assistantLatest.dataset?.messageId||assistantLatest.id||'index'):'none';const assistantKey=assistantLatest?(assistantIdentity+':'+(assistantNodes.length-1)) : '';";
     }
 
     private static String durableMarkerRead(String marker) {
@@ -111,6 +124,10 @@ final class SelfRunDom {
 
     private static String durableMarkerWrite(String marker) {
         return "const markerKey2=" + marker + ",v=JSON.stringify({at:Date.now(),url:location.href});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}";
+    }
+
+    private static String durableMarkerWriteWithBaseline(String marker, String baselineExpression) {
+        return "const markerKey2=" + marker + ",v=JSON.stringify({at:Date.now(),url:location.href,baseline:" + baselineExpression + "});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}";
     }
 
     private static String q(String value) { return SelfRunScript.quote(value); }
