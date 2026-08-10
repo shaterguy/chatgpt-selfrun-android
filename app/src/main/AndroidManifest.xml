@@ -15,15 +15,17 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
 
-        <activity android:name=".SelfRunLogsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name=".SelfRunDetailActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name=".SelfRunHistoryActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".SelfRunLogsActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+        <activity android:name=".SelfRunLogMenuActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+        <activity android:name=".SelfRunDetailActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+        <activity android:name=".SelfRunHistoryActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+        <activity android:name=".SelfRunNewActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".LoginActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
