@@ -29,7 +29,7 @@ public final class LoginActivity extends Activity {
                 Ui.button(this, "닫기", v -> finish())));
 
         webView = new WebView(this);
-        WebViewConfig.apply(webView, true);
+        WebViewConfig.applyLogin(webView);
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient());
         root.addView(webView, new LinearLayout.LayoutParams(
