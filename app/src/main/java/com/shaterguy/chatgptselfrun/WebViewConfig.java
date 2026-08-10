@@ -5,9 +5,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 final class WebViewConfig {
-    static final String DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 ChatGPTSelfRun/0.1.0";
-
     private WebViewConfig() {}
 
     @SuppressWarnings("SetJavaScriptEnabled")
@@ -15,7 +12,10 @@ final class WebViewConfig {
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
-        settings.setUserAgentString(DESKTOP_UA);
+        String current = settings.getUserAgentString();
+        if (current != null && !current.contains("ChatGPTSelfRun/0.1.0")) {
+            settings.setUserAgentString(current + " ChatGPTSelfRun/0.1.0");
+        }
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         webView.setInitialScale(100);
@@ -25,7 +25,6 @@ final class WebViewConfig {
     @SuppressWarnings("SetJavaScriptEnabled")
     static void applyLogin(WebView webView) {
         WebSettings settings = common(webView);
-        // Keep Android WebView's normal mobile user agent and viewport for the user-visible login UI.
         settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);
         settings.setBuiltInZoomControls(false);
