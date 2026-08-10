@@ -19,7 +19,7 @@ public final class SelfRunDetailActivity extends Activity {
         super.onCreate(savedInstanceState);
         String runId = getIntent().getStringExtra(EXTRA_RUN_ID);
         JSONObject item = new SelfRunHistoryStore(this).get(runId);
-        ScrollView scroll = Ui.scroll(this);
+        ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
