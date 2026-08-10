@@ -7,26 +7,33 @@ final class SelfRunDom {
     static String prepareInitialContext(String projectUrl, String mode, String runId) {
         String project = q(SelfRunScript.projectId(projectUrl));
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
-        String desired = work ? "['work','작업']" : "['chat','채팅']";
+        String desiredLabels = work ? "['work','작업']" : "['chat','채팅']";
         String requested = work ? "work" : "chat";
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,url:location.href,diagnostics});"
                 + projectGuard(project)
-                + "const parts=location.pathname.split('/').filter(Boolean),after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};const actualConversation=after('c');"
+                + "const parts=location.pathname.split('/').filter(Boolean),after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?p[i+1]:''};const actualConversation=after('c');"
                 + "if(actualConversation)return result('EXISTING_CONVERSATION','새 대화 화면 대신 기존 conversation이 열렸습니다.',{actualConversation});"
                 + authGuard()
                 + "const clip=(s,n=160)=>{s=String(s??'');return s.length>n?s.slice(0,n):s};const exact=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();"
-                + "const desiredModeLabels=" + desired + ";const forbidden=/new chat|새 채팅|새 대화|new conversation/i;"
-                + "const modeCandidates=[...document.querySelectorAll('button,[role=\"button\"],[role=\"menuitemradio\"],[role=\"radio\"],[role=\"tab\"]')];"
-                + "const mode=modeCandidates.find(e=>{const inner=exact(e.innerText||''),aria=exact(e.getAttribute('aria-label')||''),combined=exact(inner+' '+aria);if(forbidden.test(combined))return false;const role=e.getAttribute('role')||'',test=exact(e.dataset?.testid||'');const strong=e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||['menuitemradio','radio','tab'].includes(role)||e.getAttribute('aria-haspopup')==='menu'||/mode|experience/.test(test);return strong&&(desiredModeLabels.includes(inner)||desiredModeLabels.includes(aria));});"
-                + "const modeKey='chatgpt-selfrun:mode:" + esc(runId) + "';let prior='';try{prior=sessionStorage.getItem(modeKey)||'';}catch(_){}"
-                + "const selected=!!mode&&(mode.getAttribute('aria-pressed')==='true'||mode.getAttribute('aria-checked')==='true'||/active|selected|checked/.test(exact(mode.dataset?.state||'')));"
-                + "const diagnostics={requested:'" + requested + "',candidateFound:!!mode,candidateLabel:mode?clip(exact((mode.innerText||'')+' '+(mode.getAttribute('aria-label')||''))):'',selected,priorClick:!!prior};"
-                + "if(mode&&!selected&&!prior){const value=JSON.stringify({at:Date.now(),label:diagnostics.candidateLabel});try{sessionStorage.setItem(modeKey,value);}catch(_){}mode.click();return result('UI_WAIT','모드 전환 반영 대기',diagnostics);}"
-                + (work ? "if(!selected)return result('UI_WAIT','Work 모드 실제 적용 상태 대기',diagnostics);" : "")
+                + "const requestedMode=" + q(requested) + ";const desiredModeLabels=" + desiredLabels + ";const forbidden=/new chat|새 채팅|새 대화|new conversation/i;"
+                + "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;"
+                + "const labelOf=e=>exact((e?.innerText||'')+' '+(e?.getAttribute?.('aria-label')||''));"
+                + "const modeOf=s=>{const v=exact(s);if(forbidden.test(v))return'';const tokens=v.split(/[^a-z0-9가-힣]+/).filter(Boolean);if(tokens.includes('chat')||tokens.includes('채팅'))return'chat';if(tokens.includes('work')||tokens.includes('작업'))return'work';return''};"
+                + "const composerAnchor=[...document.querySelectorAll('textarea#prompt-textarea,textarea[data-testid=\"prompt-textarea\"],div#prompt-textarea[contenteditable=\"true\"],main form [contenteditable=\"true\"]')].find(visible)||null;"
+                + "const composerForm=composerAnchor?.closest?.('form')||null;"
+                + "const near=e=>{if(!e||!composerAnchor)return false;if(composerForm)return composerForm.contains(e);const a=e.getBoundingClientRect(),b=composerAnchor.getBoundingClientRect();return a.bottom>=b.top-240&&a.top<=b.bottom+240&&a.right>=b.left-320&&a.left<=b.right+320};"
+                + "const selectedState=e=>!!e&&(e.getAttribute('aria-checked')==='true'||e.getAttribute('aria-pressed')==='true'||e.getAttribute('aria-selected')==='true'||/^(checked|selected|active|on)$/.test(exact(e.dataset?.state||'')));"
+                + "const modeNodes=[...document.querySelectorAll('button,[role=\"button\"],[role=\"tab\"],[role=\"menuitemradio\"],[role=\"radio\"],[role=\"option\"],[role=\"menuitem\"]')].filter(visible);"
+                + "const triggerCandidates=modeNodes.filter(e=>{const role=e.getAttribute('role')||'';if(['menuitemradio','radio','option','menuitem'].includes(role))return false;const m=modeOf(labelOf(e));if(!m)return false;return e.getAttribute('aria-haspopup')==='menu'||e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||(e.tagName==='BUTTON'&&near(e));});"
+                + "const modeTrigger=triggerCandidates.sort((a,b)=>Number(near(b))-Number(near(a)))[0]||null;const currentMode=modeOf(labelOf(modeTrigger));const menuOpen=!!modeTrigger&&modeTrigger.getAttribute('aria-expanded')==='true';"
+                + "const desiredOption=modeNodes.find(e=>['menuitemradio','radio','option','menuitem'].includes(e.getAttribute('role')||'')&&modeOf(labelOf(e))===requestedMode)||null;const optionSelected=selectedState(desiredOption);"
+                + "const modeKey='chatgpt-selfrun:mode:" + esc(runId) + "';let priorAt=0;try{const raw=sessionStorage.getItem(modeKey);const data=raw?JSON.parse(raw):null;priorAt=Number(data?.at||0);}catch(_){}const recentlyClicked=priorAt>0&&Date.now()-priorAt<4000;"
+                + "let action='',modeReadback=false;if(currentMode===requestedMode){modeReadback=true;if(menuOpen){modeTrigger.click();action='close-mode-menu';}}else if(desiredOption&&optionSelected){modeReadback=true;if(menuOpen&&modeTrigger){modeTrigger.click();action='close-selected-mode-menu';}}else if(desiredOption&&!recentlyClicked){desiredOption.click();try{sessionStorage.setItem(modeKey,JSON.stringify({at:Date.now(),action:'select-mode'}));}catch(_){}action='select-mode';}else if(modeTrigger&&currentMode&&currentMode!==requestedMode&&!menuOpen&&!recentlyClicked){modeTrigger.click();try{sessionStorage.setItem(modeKey,JSON.stringify({at:Date.now(),action:'open-mode-menu'}));}catch(_){}action='open-mode-menu';}"
+                + "const diagnostics={requested:requestedMode,currentMode,modeTriggerFound:!!modeTrigger,triggerLabel:modeTrigger?clip(labelOf(modeTrigger)):'' ,menuOpen,desiredOptionFound:!!desiredOption,optionSelected,modeReadback,recentlyClicked,action};"
+                + "if(action)return result('UI_WAIT','모드 전환 반영 대기',diagnostics);if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기',diagnostics);try{sessionStorage.removeItem(modeKey);}catch(_){}"
                 + composer() + "if(!composer)return result('UI_WAIT','프로젝트 새 대화 입력창 대기',diagnostics);"
                 + "return result('READY','프로젝트 새 대화 화면 확인',{...diagnostics,composer:true});})()";
     }
-
     static String sendInitial(String projectUrl, String prompt, String runId) {
         String project = q(SelfRunScript.projectId(projectUrl));
         String expected = q(prompt);
