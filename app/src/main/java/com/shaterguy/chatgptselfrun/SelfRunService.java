@@ -31,6 +31,8 @@ public final class SelfRunService extends Service {
     private static final String PHASE_APPLY_REASONING = "APPLY_REASONING";
     private static final long[] RATE_LIMIT_DELAYS = {2_000L, 5_000L, 10_000L, 20_000L, 40_000L, 60_000L};
     private static final int MAX_SUBMITTED_OBSERVATIONS = 40;
+    private static final long STARTUP_TIMEOUT_MS = 120_000L;
+    private static final long PREF_TIMEOUT_MS = 120_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable stepRunnable = this::runStep;
@@ -44,6 +46,7 @@ public final class SelfRunService extends Service {
     private int submittedObservationCount;
     private int rateLimitAttempt;
     private long rateLimitedUntilElapsed;
+    private long evaluationCount;
     private PowerManager.WakeLock wakeLock;
 
     @Override
@@ -113,7 +116,7 @@ public final class SelfRunService extends Service {
             host = HeadlessWebViewHost.create(this);
             webView = host.webView();
             WebViewConfig.applyAutomation(webView);
-            runLog.record(store, "WEBVIEW_LAUNCH", store.conversationUrl().isEmpty() ? "project" : "conversation");
+            runLog.record(store, "WEBVIEW_LAUNCH", store.conversationUrl().isEmpty() ? "target=project" : "target=conversation");
             WebView active = webView;
             webView.setWebViewClient(new WebViewClient() {
                 @Override
@@ -122,6 +125,8 @@ public final class SelfRunService extends Service {
                     evaluationInFlight = false;
                     handler.removeCallbacks(stepRunnable);
                     store.setStatus("ChatGPT 화면 로딩 중");
+                    runLog.record(store, "WEBVIEW_PAGE_START", store.conversationUrl().isEmpty()
+                            ? "route=project" : "route=conversation");
                     startForegroundCompat();
                 }
 
@@ -130,21 +135,27 @@ public final class SelfRunService extends Service {
                     if (isRateLimited()) return;
                     uiWaitCount = 0;
                     store.setStatus("ChatGPT 화면 준비 확인 중");
+                    runLog.record(store, "WEBVIEW_PAGE_FINISH", "progress=" + view.getProgress());
                     scheduleStep(900L);
                 }
 
                 @Override
                 public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-                    if (request.isForMainFrame() && response.getStatusCode() == 429) rateLimit("HTTP 429");
+                    if (!request.isForMainFrame()) return;
+                    int code = response.getStatusCode();
+                    runLog.record(store, "WEBVIEW_ERROR", "type=http;code=" + code);
+                    if (code == 429) rateLimit("HTTP 429");
                 }
 
                 @Override
                 public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                     if (!request.isForMainFrame()) return;
-                    if (error != null && error.getErrorCode() == -15) {
+                    int code = error == null ? 0 : error.getErrorCode();
+                    runLog.record(store, "WEBVIEW_ERROR", "type=network;code=" + code);
+                    if (code == -15) {
                         rateLimit("WebView ERROR_TOO_MANY_REQUESTS");
                     } else {
-                        store.setStatus("일시적 네트워크 오류 · 3초 후 같은 대화 복구");
+                        store.setStatus("일시적 네트워크 오류 · 3초 후 같은 대상 복구");
                         handler.removeCallbacks(stepRunnable);
                         handler.postDelayed(() -> {
                             if (webView != null && canRun() && !isRateLimited()) webView.loadUrl(targetUrl());
@@ -156,8 +167,11 @@ public final class SelfRunService extends Service {
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     if (!request.isForMainFrame()) return false;
                     String requested = String.valueOf(request.getUrl());
-                    if (store.conversationUrl().isEmpty()) return !sameProject(store.projectUrl(), requested);
-                    if (sameConversation(store.conversationUrl(), requested)) return false;
+                    boolean allowed = store.conversationUrl().isEmpty()
+                            ? sameProject(store.projectUrl(), requested)
+                            : sameConversation(store.conversationUrl(), requested);
+                    runLog.record(store, "WEBVIEW_NAVIGATION", "allowed=" + (allowed ? "1" : "0"));
+                    if (allowed) return false;
                     handler.postDelayed(() -> restoreCanonical("navigation"), 800L);
                     return true;
                 }
@@ -165,11 +179,13 @@ public final class SelfRunService extends Service {
                 @Override
                 public void onReceivedSslError(WebView view, SslErrorHandler sslHandler, SslError error) {
                     sslHandler.cancel();
+                    runLog.record(store, "WEBVIEW_ERROR", "type=ssl");
                     pause("SSL_ERROR", "SSL 오류로 SelfRun을 일시중지했습니다.");
                 }
 
                 @Override
                 public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                    runLog.record(store, "RENDERER_GONE", "crash=" + (detail != null && detail.didCrash()));
                     cleanupWebView();
                     store.setStatus("WebView 렌더러 복구 중");
                     handler.postDelayed(SelfRunService.this::ensureEngine, 2_000L);
@@ -178,6 +194,7 @@ public final class SelfRunService extends Service {
             });
             active.loadUrl(target);
         } catch (Throwable error) {
+            runLog.record(store, "WEBVIEW_INIT_FAILED", error.getClass().getSimpleName());
             cleanupWebView();
             store.setStatus("WebView 초기화 재시도");
             handler.postDelayed(this::ensureEngine, 2_500L);
@@ -192,14 +209,16 @@ public final class SelfRunService extends Service {
         }
         String actual = webView.getUrl();
         if (!routeAcceptable(actual)) {
+            runLog.record(store, "TARGET_DRIFT", store.conversationUrl().isEmpty() ? "expected=project" : "expected=conversation");
             restoreCanonical("step");
             return;
         }
         String phase = store.phase();
+        if (timedOut(phase)) return;
         String script;
         switch (phase) {
             case SelfRunStore.PHASE_BOOTSTRAP ->
-                    script = SelfRunDom.prepareMode(store.projectUrl(), store.mode(), store.runId());
+                    script = SelfRunDom.prepareInitialContext(store.projectUrl(), store.mode(), store.runId());
             case PHASE_BOOTSTRAP_MODEL ->
                     script = WorkPreferenceDom.modelForProject(store.projectUrl(), "sol");
             case PHASE_BOOTSTRAP_REASONING ->
@@ -224,15 +243,35 @@ public final class SelfRunService extends Service {
         evaluate(phase, script);
     }
 
+    private boolean timedOut(String phase) {
+        long age = Math.max(0L, System.currentTimeMillis() - store.phaseStartedAt());
+        if ((SelfRunStore.PHASE_BOOTSTRAP.equals(phase) || PHASE_BOOTSTRAP_SEND.equals(phase))
+                && age >= STARTUP_TIMEOUT_MS) {
+            pause("CHAT_CREATE_TIMEOUT", "120초 동안 프로젝트 새 대화 생성·첫 요청 확인을 완료하지 못했습니다.");
+            return true;
+        }
+        if ((PHASE_BOOTSTRAP_MODEL.equals(phase) || PHASE_BOOTSTRAP_REASONING.equals(phase)
+                || SelfRunStore.PHASE_APPLY_PREFS.equals(phase) || PHASE_APPLY_REASONING.equals(phase))
+                && age >= PREF_TIMEOUT_MS) {
+            pause("WORK_PREFERENCES_TIMEOUT", "120초 동안 Work 모델·추론 설정의 실제 적용을 확인하지 못했습니다.");
+            return true;
+        }
+        return false;
+    }
+
     private void evaluate(String phase, String script) {
         WebView active = webView;
         int activeGeneration = generation;
         evaluationInFlight = true;
+        evaluationCount = evaluationCount == Long.MAX_VALUE ? Long.MAX_VALUE : evaluationCount + 1L;
+        runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase);
         active.evaluateJavascript(script, raw -> {
             evaluationInFlight = false;
             if (active != webView || activeGeneration != generation || !canRun()) return;
             JSONObject result = parse(raw);
             String status = result.optString("status", "SCRIPT_ERROR");
+            String detail = result.optString("detail", "");
+            runLog.record(store, "DOM_RESULT", "phase=" + phase + ";status=" + status + ";detail=" + detail);
             if (!"SCRIPT_ERROR".equals(status)) {
                 rateLimitAttempt = 0;
                 rateLimitedUntilElapsed = 0L;
@@ -245,16 +284,22 @@ public final class SelfRunService extends Service {
                 pause("AUTH_REQUIRED", "ChatGPT 로그인이 필요합니다.");
                 return;
             }
+            if ("EXISTING_CONVERSATION".equals(status)) {
+                pause("CONVERSATION_NOT_NEW", "프로젝트 새 대화 화면 대신 기존 conversation이 열렸습니다.");
+                return;
+            }
             if ("MARKER_FAILED".equals(status)) {
                 pause("SUBMIT_MARKER_FAILED", "중복 방지 표식을 저장하지 못해 자동 제출을 중지했습니다.");
                 return;
             }
             if ("SUBMITTED".equals(status)) {
-                submittedWait(result.optString("detail", "제출 확인 대기"));
+                if (PHASE_BOOTSTRAP_SEND.equals(phase) && submittedObservationCount == 0)
+                    runLog.record(store, "BOOTSTRAP_SUBMITTED", "first_prompt");
+                submittedWait(detail.isEmpty() ? "제출 확인 대기" : detail);
                 return;
             }
             if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)) {
-                uiWait(result.optString("detail", status));
+                uiWait(detail.isEmpty() ? status : detail);
                 return;
             }
             handleResult(phase, status, result);
@@ -265,26 +310,23 @@ public final class SelfRunService extends Service {
         uiWaitCount = 0;
         submittedObservationCount = 0;
         if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase) && "READY".equals(status)) {
+            runLog.record(store, "BOOTSTRAP_CONTEXT_READY", "mode=" + store.mode());
             if (SelfRunStore.MODE_WORK.equals(store.mode())) {
-                store.setPhase(PHASE_BOOTSTRAP_MODEL);
-                store.setStatus("첫 턴 Work 모델 Sol 적용 중");
+                transition(PHASE_BOOTSTRAP_MODEL, "첫 턴 Work 모델 Sol 적용 중", "bootstrap_context_ready");
             } else {
-                store.setPhase(PHASE_BOOTSTRAP_SEND);
-                store.setStatus("첫 일반 Chat 요청 전송 준비");
+                transition(PHASE_BOOTSTRAP_SEND, "첫 일반 Chat 요청 전송 준비", "bootstrap_context_ready");
             }
             scheduleStep(250L);
             return;
         }
         if (PHASE_BOOTSTRAP_MODEL.equals(phase) && "READY".equals(status)) {
-            store.setPhase(PHASE_BOOTSTRAP_REASONING);
-            store.setStatus("첫 턴 Work 추론 xHigh 적용 중");
+            transition(PHASE_BOOTSTRAP_REASONING, "첫 턴 Work 추론 xHigh 적용 중", "bootstrap_model_ready");
             scheduleStep(250L);
             return;
         }
         if (PHASE_BOOTSTRAP_REASONING.equals(phase) && "READY".equals(status)) {
             runLog.record(store, "PREFERENCE_VERIFIED", "sol_xhigh");
-            store.setPhase(PHASE_BOOTSTRAP_SEND);
-            store.setStatus("첫 Work 요청 전송 준비");
+            transition(PHASE_BOOTSTRAP_SEND, "첫 Work 요청 전송 준비", "bootstrap_preferences_ready");
             scheduleStep(250L);
             return;
         }
@@ -295,8 +337,8 @@ public final class SelfRunService extends Service {
                 return;
             }
             store.setConversationUrl(url);
-            store.setPhase(SelfRunStore.PHASE_WAIT_ASSISTANT);
-            store.setStatus("첫 assistant 응답 대기");
+            runLog.record(store, "BOOTSTRAP_CONFIRMED", "conversation=captured");
+            transition(SelfRunStore.PHASE_WAIT_ASSISTANT, "첫 assistant 응답 대기", "conversation_captured");
             cleanupWebView();
             handler.post(this::ensureEngine);
             return;
@@ -306,22 +348,20 @@ public final class SelfRunService extends Service {
             return;
         }
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase) && "READY".equals(status)) {
-            store.setPhase(PHASE_APPLY_REASONING);
-            store.setStatus("다음 턴 추론 적용 중");
+            transition(PHASE_APPLY_REASONING, "다음 턴 추론 적용 중", "model_ready");
             scheduleStep(250L);
             return;
         }
         if (PHASE_APPLY_REASONING.equals(phase) && "READY".equals(status)) {
             runLog.record(store, "PREFERENCE_VERIFIED", store.pendingModel() + "_" + store.pendingReasoning());
-            store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
-            store.setStatus("다음 턴 continuation 준비");
+            transition(SelfRunStore.PHASE_SEND_CONTINUE, "다음 턴 continuation 준비", "preferences_ready");
             scheduleStep(250L);
             return;
         }
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase) && "CONFIRMED".equals(status)) {
             store.setTurn(store.turn() + 1);
-            store.setPhase(SelfRunStore.PHASE_WAIT_ASSISTANT);
-            store.setStatus("다음 assistant 응답 대기 · " + store.role());
+            transition(SelfRunStore.PHASE_WAIT_ASSISTANT,
+                    "다음 assistant 응답 대기 · " + store.role(), "continuation_confirmed");
             scheduleStep(700L);
             return;
         }
@@ -343,8 +383,7 @@ public final class SelfRunService extends Service {
             store.setLastAssistantKey(key);
             store.setLastSignal("RECOVERY");
             store.setSignalRecoveryCount(store.signalRecoveryCount() + 1);
-            store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
-            store.setStatus("제어 신호 복구 요청 전송 준비");
+            transition(SelfRunStore.PHASE_SEND_CONTINUE, "제어 신호 복구 요청 전송 준비", "signal_recovery");
             scheduleStep(250L);
             return;
         }
@@ -354,8 +393,7 @@ public final class SelfRunService extends Service {
         runLog.record(store, "SIGNAL_ACCEPTED", signal.type.name());
         if (signal.type == SelfRunProtocol.Type.DONE) {
             store.clearLastError();
-            store.setPhase(SelfRunStore.PHASE_DONE);
-            store.setStatus("SelfRun 완료");
+            transition(SelfRunStore.PHASE_DONE, "SelfRun 완료", "terminal_signal");
             store.setActive(false);
             runLog.record(store, "DONE", "terminal");
             NotificationHelper.notifyUser(this, "SelfRun 완료", store.runId());
@@ -364,9 +402,10 @@ public final class SelfRunService extends Service {
         }
         if (signal.type == SelfRunProtocol.Type.USER_ACTION || signal.type == SelfRunProtocol.Type.PAUSE) {
             store.setPaused(true);
-            store.setPhase(SelfRunStore.PHASE_PAUSED);
-            store.setStatus(signal.type == SelfRunProtocol.Type.USER_ACTION
-                    ? "사용자 조치 대기 · " + signal.actionId : "SelfRun 일시중지");
+            transition(SelfRunStore.PHASE_PAUSED,
+                    signal.type == SelfRunProtocol.Type.USER_ACTION
+                            ? "사용자 조치 대기 · " + signal.actionId : "SelfRun 일시중지",
+                    signal.type.name());
             runLog.record(store, "PAUSED", signal.type.name());
             NotificationHelper.notifyUser(this, "SelfRun 일시중지", store.status());
             stopRelay();
@@ -376,18 +415,27 @@ public final class SelfRunService extends Service {
         if (SelfRunStore.MODE_WORK.equals(store.mode())) {
             store.setPendingModel(signal.model);
             store.setPendingReasoning(signal.reasoning);
-            store.setPhase(SelfRunStore.PHASE_APPLY_PREFS);
-            store.setStatus("다음 턴 " + signal.role + " · " + signal.model + " / " + signal.reasoning + " 적용 중");
+            transition(SelfRunStore.PHASE_APPLY_PREFS,
+                    "다음 턴 " + signal.role + " · " + signal.model + " / " + signal.reasoning + " 적용 중",
+                    "next_work_turn");
         } else {
-            store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
-            store.setStatus("다음 일반 Chat 역할 · " + signal.role);
+            transition(SelfRunStore.PHASE_SEND_CONTINUE,
+                    "다음 일반 Chat 역할 · " + signal.role, "next_chat_turn");
         }
         scheduleStep(250L);
     }
 
+    private void transition(String next, String status, String reason) {
+        String previous = store.phase();
+        store.setPhase(next);
+        store.setStatus(status);
+        runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=" + next + ";reason=" + reason);
+        startForegroundCompat();
+    }
+
     private void uiWait(String detail) {
-        uiWaitCount = Math.min(uiWaitCount + 1, 10);
-        long delay = Math.min(5_000L, 500L + (long) uiWaitCount * 500L);
+        uiWaitCount = Math.min(uiWaitCount + 1, 20);
+        long delay = Math.min(5_000L, 500L + (long) uiWaitCount * 400L);
         store.setStatus(detail + " · 같은 화면 재확인");
         scheduleStep(delay);
     }
@@ -427,6 +475,7 @@ public final class SelfRunService extends Service {
         if (!canRun() || isRateLimited()) return;
         String target = targetUrl();
         store.setStatus("대상 화면 복구 중 · " + source);
+        runLog.record(store, "TARGET_RESTORE", "source=" + source);
         handler.removeCallbacks(stepRunnable);
         handler.postDelayed(() -> {
             if (webView != null && !isRateLimited()) webView.loadUrl(target);
@@ -471,8 +520,10 @@ public final class SelfRunService extends Service {
     private void pause(String code, String message) {
         store.setLastError(code, message);
         store.setPaused(true);
+        String previous = store.phase();
         store.setPhase(SelfRunStore.PHASE_PAUSED);
         store.setStatus(code + " · " + message);
+        runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=PAUSED;reason=" + code);
         runLog.record(store, "PAUSED", code);
         NotificationHelper.notifyUser(this, "SelfRun 확인 필요", store.status());
         stopRelay();
