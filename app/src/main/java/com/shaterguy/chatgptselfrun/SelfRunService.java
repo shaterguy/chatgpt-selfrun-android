@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebResourceError;
@@ -41,6 +42,7 @@ public final class SelfRunService extends Service {
     private int uiWaitCount;
     private int submittedObservationCount;
     private int rateLimitAttempt;
+    private long rateLimitedUntilElapsed;
     private PowerManager.WakeLock wakeLock;
 
     @Override
@@ -121,7 +123,7 @@ public final class SelfRunService extends Service {
 
                 @Override
                 public void onPageFinished(WebView view, String url) {
-                    rateLimitAttempt = 0;
+                    if (isRateLimited()) return;
                     uiWaitCount = 0;
                     store.setStatus("ChatGPT 화면 준비 확인 중");
                     scheduleStep(900L);
@@ -138,8 +140,11 @@ public final class SelfRunService extends Service {
                     if (error != null && error.getErrorCode() == -15) {
                         rateLimit("WebView ERROR_TOO_MANY_REQUESTS");
                     } else {
-                        store.setStatus("일시적 네트워크 오류 · 같은 화면에서 재시도");
-                        scheduleStep(3_000L);
+                        store.setStatus("일시적 네트워크 오류 · 3초 후 같은 대화 복구");
+                        handler.removeCallbacks(stepRunnable);
+                        handler.postDelayed(() -> {
+                            if (webView != null && canRun() && !isRateLimited()) webView.loadUrl(targetUrl());
+                        }, 3_000L);
                     }
                 }
 
@@ -177,6 +182,10 @@ public final class SelfRunService extends Service {
 
     private void runStep() {
         if (!canRun() || webView == null || evaluationInFlight) return;
+        if (isRateLimited()) {
+            scheduleStep(Math.max(250L, rateLimitedUntilElapsed - SystemClock.elapsedRealtime()));
+            return;
+        }
         String actual = webView.getUrl();
         if (!routeAcceptable(actual)) {
             restoreCanonical("step");
@@ -220,6 +229,10 @@ public final class SelfRunService extends Service {
             if (active != webView || activeGeneration != generation || !canRun()) return;
             JSONObject result = parse(raw);
             String status = result.optString("status", "SCRIPT_ERROR");
+            if (!"SCRIPT_ERROR".equals(status)) {
+                rateLimitAttempt = 0;
+                rateLimitedUntilElapsed = 0L;
+            }
             if ("TARGET_ERROR".equals(status)) {
                 restoreCanonical("script");
                 return;
@@ -380,10 +393,17 @@ public final class SelfRunService extends Service {
         scheduleStep(1_500L);
     }
 
+    private boolean isRateLimited() {
+        return rateLimitedUntilElapsed > SystemClock.elapsedRealtime();
+    }
+
     private void rateLimit(String reason) {
+        long now = SystemClock.elapsedRealtime();
+        if (rateLimitedUntilElapsed > now) return;
         rateLimitAttempt = Math.min(rateLimitAttempt + 1, RATE_LIMIT_DELAYS.length);
         long delay = RATE_LIMIT_DELAYS[rateLimitAttempt - 1];
-        store.setStatus(reason + " · " + (delay / 1000L) + "초 후 같은 대화 재시도");
+        rateLimitedUntilElapsed = now + delay;
+        store.setStatus(reason + " · " + (delay / 1000L) + "초 동안 DOM 실행 중지");
         handler.removeCallbacks(stepRunnable);
         handler.postDelayed(() -> {
             if (!canRun()) return;
@@ -393,12 +413,12 @@ public final class SelfRunService extends Service {
     }
 
     private void restoreCanonical(String source) {
-        if (!canRun()) return;
+        if (!canRun() || isRateLimited()) return;
         String target = targetUrl();
         store.setStatus("대상 화면 복구 중 · " + source);
         handler.removeCallbacks(stepRunnable);
         handler.postDelayed(() -> {
-            if (webView != null) webView.loadUrl(target);
+            if (webView != null && !isRateLimited()) webView.loadUrl(target);
             else ensureEngine();
         }, 1_200L);
     }
