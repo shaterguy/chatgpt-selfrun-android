@@ -1,22 +1,30 @@
 package com.shaterguy.chatgptselfrun;
 
-/** Runtime DOM adapter. Each action is isolated and fail-closed around user-message submission. */
+/** Runtime DOM adapter. Startup behavior is aligned with the scheduler's proven project bootstrap flow. */
 final class SelfRunDom {
     private SelfRunDom() {}
 
-    static String prepareMode(String projectUrl, String mode, String runId) {
+    static String prepareInitialContext(String projectUrl, String mode, String runId) {
         String project = q(SelfRunScript.projectId(projectUrl));
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
-        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+        String desired = work ? "['work','작업']" : "['chat','채팅']";
+        String requested = work ? "work" : "chat";
+        return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,url:location.href,diagnostics});"
                 + projectGuard(project)
-                + "const text=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;"
-                + "const forbidden=/new chat|새 채팅|새 대화|new conversation/i;const candidates=[...document.querySelectorAll('button,[role=\"button\"],[role=\"menuitemradio\"],[role=\"radio\"],[role=\"tab\"]')].filter(visible);"
-                + "const pick=labels=>candidates.find(e=>{const inner=text(e.innerText||''),aria=text(e.getAttribute('aria-label')||''),combined=text(inner+' '+aria);if(forbidden.test(combined))return false;const role=e.getAttribute('role')||'',test=text(e.dataset?.testid||'');const strong=e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||['menuitemradio','radio','tab'].includes(role)||e.getAttribute('aria-haspopup')==='menu'||/mode|experience/.test(test);return strong&&(labels.includes(inner)||labels.includes(aria));});"
-                + "const selected=e=>!!e&&(e.getAttribute('aria-pressed')==='true'||e.getAttribute('aria-checked')==='true'||/active|selected|checked/.test(text(e.dataset?.state||'')));"
-                + (work
-                ? "const target=pick(['work','작업']);const key='chatgpt-selfrun:mode:" + esc(runId) + "';let prior='';try{prior=localStorage.getItem(key)||sessionStorage.getItem(key)||'';}catch(_){}if(target&&selected(target))return result('READY','Work 모드 확인');if(!target&&prior)return result('READY','Work 모드 클릭 이력 확인');if(!target)return result('UI_WAIT','Work 모드 항목 대기');const v=String(Date.now());try{localStorage.setItem(key,v);sessionStorage.setItem(key,v);}catch(_){}target.click();return result('UI_WAIT','Work 모드 반영 대기');"
-                : "const chat=pick(['chat','채팅']),work=pick(['work','작업']);if(work&&selected(work)){if(!chat)return result('UI_WAIT','Chat 모드 항목 대기');chat.click();return result('UI_WAIT','Chat 모드 반영 대기');}return result('READY','Chat 모드 유지');")
-                + "})()";
+                + "const parts=location.pathname.split('/').filter(Boolean),after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};const actualConversation=after('c');"
+                + "if(actualConversation)return result('EXISTING_CONVERSATION','새 대화 화면 대신 기존 conversation이 열렸습니다.',{actualConversation});"
+                + authGuard()
+                + "const clip=(s,n=160)=>{s=String(s??'');return s.length>n?s.slice(0,n):s};const exact=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();"
+                + "const desiredModeLabels=" + desired + ";const forbidden=/new chat|새 채팅|새 대화|new conversation/i;"
+                + "const modeCandidates=[...document.querySelectorAll('button,[role=\"button\"],[role=\"menuitemradio\"],[role=\"radio\"],[role=\"tab\"]')];"
+                + "const mode=modeCandidates.find(e=>{const inner=exact(e.innerText||''),aria=exact(e.getAttribute('aria-label')||''),combined=exact(inner+' '+aria);if(forbidden.test(combined))return false;const role=e.getAttribute('role')||'',test=exact(e.dataset?.testid||'');const strong=e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||['menuitemradio','radio','tab'].includes(role)||e.getAttribute('aria-haspopup')==='menu'||/mode|experience/.test(test);return strong&&(desiredModeLabels.includes(inner)||desiredModeLabels.includes(aria));});"
+                + "const modeKey='chatgpt-selfrun:mode:" + esc(runId) + "';let prior='';try{prior=sessionStorage.getItem(modeKey)||'';}catch(_){}"
+                + "const selected=!!mode&&(mode.getAttribute('aria-pressed')==='true'||mode.getAttribute('aria-checked')==='true'||/active|selected|checked/.test(exact(mode.dataset?.state||'')));"
+                + "const diagnostics={requested:'" + requested + "',candidateFound:!!mode,candidateLabel:mode?clip(exact((mode.innerText||'')+' '+(mode.getAttribute('aria-label')||''))):'',selected,priorClick:!!prior};"
+                + "if(mode&&!selected&&!prior){const value=JSON.stringify({at:Date.now(),label:diagnostics.candidateLabel});try{sessionStorage.setItem(modeKey,value);}catch(_){}mode.click();return result('UI_WAIT','모드 전환 반영 대기',diagnostics);}"
+                + (work ? "if(!selected)return result('UI_WAIT','Work 모드 실제 적용 상태 대기',diagnostics);" : "")
+                + composer() + "if(!composer)return result('UI_WAIT','프로젝트 새 대화 입력창 대기',diagnostics);"
+                + "return result('READY','프로젝트 새 대화 화면 확인',{...diagnostics,composer:true});})()";
     }
 
     static String sendInitial(String projectUrl, String prompt, String runId) {
@@ -24,16 +32,19 @@ final class SelfRunDom {
         String expected = q(prompt);
         String marker = q("chatgpt-selfrun:bootstrap:" + runId);
         return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
-                + projectGuard(project) + textHelpers(expected)
+                + projectGuard(project) + authGuard() + textHelpers(expected)
                 + "const p2=location.pathname.split('/').filter(Boolean);const ci=p2.indexOf('c');const conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';"
-                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));if(conv&&users.some(t=>t===canonical(expected)))return result('CONFIRMED','첫 요청 확인',{conversationUrl:location.href});"
+                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const present=users.some(t=>t===canonical(expected));"
                 + durableMarkerRead(marker)
+                + "if(conv&&present)return result('CONFIRMED','첫 요청과 새 conversation 확인',{conversationUrl:location.href});"
+                + "if(conv&&prior)return result('SUBMITTED','새 conversation URL 생성 후 첫 요청 DOM 확인 대기');"
+                + "if(conv)return result('EXISTING_CONVERSATION','제출 전에 기존 conversation으로 이동했습니다.');"
                 + "if(prior)return result('SUBMITTED','첫 요청 제출 확인 대기');"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
                 + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
                 + durableMarkerWrite(marker)
                 + "if(!persisted)return result('MARKER_FAILED','중복 방지 표식을 저장하지 못했습니다.');send.click();return result('SUBMITTED','첫 요청 제출 클릭');}"
-                + input() + "return result('UI_WAIT',same()?'입력 반영 대기':'첫 요청 입력 대기');})()";
+                + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'첫 요청 입력 대기');})()";
     }
 
     static String observeAssistant(String conversationUrl) {
@@ -47,7 +58,7 @@ final class SelfRunDom {
         String expected = q(prompt);
         String marker = q("chatgpt-selfrun:turn:" + runId + ":" + turn);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + textHelpers(expected)
+                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
                 + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));if(users.some(t=>t===canonical(expected)))return result('CONFIRMED','사용자 턴 확인');"
                 + durableMarkerRead(marker)
                 + "if(prior)return result('SUBMITTED','사용자 턴 DOM 확인 대기');"
@@ -55,15 +66,19 @@ final class SelfRunDom {
                 + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
                 + durableMarkerWrite(marker)
                 + "if(!persisted)return result('MARKER_FAILED','중복 방지 표식을 저장하지 못했습니다.');send.click();return result('SUBMITTED','사용자 턴 제출 클릭');}"
-                + input() + "return result('UI_WAIT',same()?'입력 반영 대기':'사용자 턴 입력 대기');})()";
+                + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'사용자 턴 입력 대기');})()";
     }
 
     private static String projectGuard(String project) {
-        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');const parts=location.pathname.split('/').filter(Boolean);const after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};if(after('g')!==" + project + ")return result('TARGET_ERROR','프로젝트 불일치');";
+        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');const p=location.pathname.split('/').filter(Boolean);const afterProject=k=>{const i=p.indexOf(k);return i>=0&&i+1<p.length?p[i+1]:''};if(afterProject('g')!==" + project + ")return result('TARGET_ERROR','프로젝트 불일치');";
     }
 
     private static String conversationGuard(String conversation) {
-        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');const parts=location.pathname.split('/').filter(Boolean);const after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};if(after('c')!==" + conversation + ")return result('TARGET_ERROR','canonical conversation 이탈');";
+        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');const p=location.pathname.split('/').filter(Boolean);const afterConversation=k=>{const i=p.indexOf(k);return i>=0&&i+1<p.length?p[i+1]:''};if(afterConversation('c')!==" + conversation + ")return result('TARGET_ERROR','canonical conversation 이탈');";
+    }
+
+    private static String authGuard() {
+        return "const authVisible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const auth=[...document.querySelectorAll('[data-testid*=login],a[href*=\"/auth/login\"],button')].filter(authVisible).some(e=>/^(log in|sign up|로그인|가입)$/i.test(String(e.innerText||e.getAttribute('aria-label')||'').trim()));if(auth)return result('AUTH_REQUIRED','ChatGPT 로그인이 필요합니다.');";
     }
 
     private static String textHelpers(String expected) {
