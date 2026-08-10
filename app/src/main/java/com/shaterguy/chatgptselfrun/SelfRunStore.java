@@ -16,14 +16,18 @@ final class SelfRunStore {
     static final String PHASE_DONE = "DONE";
 
     private final SharedPreferences prefs;
+    private final SelfRunHistoryStore history;
 
     SelfRunStore(Context context) {
-        prefs = context.getSharedPreferences("selfrun", Context.MODE_PRIVATE);
+        Context app = context.getApplicationContext();
+        prefs = app.getSharedPreferences("selfrun", Context.MODE_PRIVATE);
+        history = new SelfRunHistoryStore(app);
     }
 
     void start(String runId, String mode, String projectUrl, String requirement) {
         prefs.edit()
                 .putString("runId", runId)
+                .putLong("createdAt", System.currentTimeMillis())
                 .putString("mode", mode)
                 .putString("projectUrl", projectUrl)
                 .putString("requirement", requirement)
@@ -35,11 +39,15 @@ final class SelfRunStore {
                 .putString("pendingReasoning", MODE_WORK.equals(mode) ? "xhigh" : "")
                 .putString("lastSignal", "")
                 .putString("lastAssistantKey", "")
+                .putString("lastErrorCode", "")
+                .putString("lastErrorMessage", "")
                 .putInt("turn", 0)
                 .putInt("signalRecoveryCount", 0)
                 .putBoolean("active", true)
                 .putBoolean("paused", false)
+                .putBoolean("userStopped", false)
                 .apply();
+        syncHistory();
     }
 
     void clear() {
@@ -47,6 +55,7 @@ final class SelfRunStore {
     }
 
     String runId() { return prefs.getString("runId", ""); }
+    long createdAt() { return prefs.getLong("createdAt", 0L); }
     String mode() { return prefs.getString("mode", MODE_WORK); }
     String projectUrl() { return prefs.getString("projectUrl", ""); }
     String requirement() { return prefs.getString("requirement", ""); }
@@ -58,10 +67,13 @@ final class SelfRunStore {
     String pendingReasoning() { return prefs.getString("pendingReasoning", ""); }
     String lastSignal() { return prefs.getString("lastSignal", ""); }
     String lastAssistantKey() { return prefs.getString("lastAssistantKey", ""); }
+    String lastErrorCode() { return prefs.getString("lastErrorCode", ""); }
+    String lastErrorMessage() { return prefs.getString("lastErrorMessage", ""); }
     int turn() { return prefs.getInt("turn", 0); }
     int signalRecoveryCount() { return prefs.getInt("signalRecoveryCount", 0); }
     boolean active() { return prefs.getBoolean("active", false); }
     boolean paused() { return prefs.getBoolean("paused", false); }
+    boolean userStopped() { return prefs.getBoolean("userStopped", false); }
 
     void setConversationUrl(String value) { put("conversationUrl", value); }
     void setPhase(String value) { put("phase", value); }
@@ -71,12 +83,23 @@ final class SelfRunStore {
     void setPendingReasoning(String value) { put("pendingReasoning", value); }
     void setLastSignal(String value) { put("lastSignal", value); }
     void setLastAssistantKey(String value) { put("lastAssistantKey", value); }
-    void setTurn(int value) { prefs.edit().putInt("turn", value).apply(); }
-    void setSignalRecoveryCount(int value) { prefs.edit().putInt("signalRecoveryCount", value).apply(); }
-    void setPaused(boolean value) { prefs.edit().putBoolean("paused", value).apply(); }
-    void setActive(boolean value) { prefs.edit().putBoolean("active", value).apply(); }
+    void setLastError(String code, String message) {
+        prefs.edit().putString("lastErrorCode", safe(code)).putString("lastErrorMessage", safe(message)).apply();
+        syncHistory();
+    }
+    void clearLastError() { setLastError("", ""); }
+    void setTurn(int value) { prefs.edit().putInt("turn", value).apply(); syncHistory(); }
+    void setSignalRecoveryCount(int value) { prefs.edit().putInt("signalRecoveryCount", value).apply(); syncHistory(); }
+    void setPaused(boolean value) { prefs.edit().putBoolean("paused", value).apply(); syncHistory(); }
+    void setActive(boolean value) { prefs.edit().putBoolean("active", value).apply(); syncHistory(); }
+    void setUserStopped(boolean value) { prefs.edit().putBoolean("userStopped", value).apply(); syncHistory(); }
+
+    void syncHistory() { history.sync(this); }
 
     private void put(String key, String value) {
-        prefs.edit().putString(key, value == null ? "" : value).apply();
+        prefs.edit().putString(key, safe(value)).apply();
+        syncHistory();
     }
+
+    private static String safe(String value) { return value == null ? "" : value; }
 }
