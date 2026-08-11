@@ -51,8 +51,8 @@ ChatGPT에서 하나의 conversation을 처음부터 끝까지 유지하면서 �
 
 ## 현재 개발 버전
 
-- versionName: `0.1.0-dev5`
-- versionCode: `5`
+- versionName: `0.1.0-dev6`
+- versionCode: `6`
 - applicationId: `com.shaterguy.chatgptselfrun`
 - Android 8.0 이상
 
