@@ -156,6 +156,7 @@ public final class SelfRunService extends Service {
                     if (code == -15) {
                         rateLimit("WebView ERROR_TOO_MANY_REQUESTS");
                     } else {
+                        resetPhaseClock();
                         store.setStatus("일시적 네트워크 오류 · 3초 후 같은 대상 복구");
                         handler.removeCallbacks(stepRunnable);
                         handler.postDelayed(() -> {
@@ -181,12 +182,14 @@ public final class SelfRunService extends Service {
                 public void onReceivedSslError(WebView view, SslErrorHandler sslHandler, SslError error) {
                     sslHandler.cancel();
                     runLog.record(store, "WEBVIEW_ERROR", "type=ssl");
-                    pause("SSL_ERROR", "SSL 오류로 SelfRun을 일시중지했습니다.");
+                    handler.post(() -> recoverStalledPhase("ssl_error",
+                            "SSL 오류 취소 · 같은 대상 재접속", 2_000L));
                 }
 
                 @Override
                 public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
                     runLog.record(store, "RENDERER_GONE", "crash=" + (detail != null && detail.didCrash()));
+                    resetPhaseClock();
                     cleanupWebView();
                     store.setStatus("WebView 렌더러 복구 중");
                     handler.postDelayed(SelfRunService.this::ensureEngine, 2_000L);
@@ -196,6 +199,7 @@ public final class SelfRunService extends Service {
             active.loadUrl(target);
         } catch (Throwable error) {
             runLog.record(store, "WEBVIEW_INIT_FAILED", error.getClass().getSimpleName());
+            resetPhaseClock();
             cleanupWebView();
             store.setStatus("WebView 초기화 재시도");
             handler.postDelayed(this::ensureEngine, 2_500L);
@@ -248,18 +252,20 @@ public final class SelfRunService extends Service {
         long age = Math.max(0L, System.currentTimeMillis() - store.phaseStartedAt());
         if ((SelfRunStore.PHASE_BOOTSTRAP.equals(phase) || PHASE_BOOTSTRAP_SEND.equals(phase))
                 && age >= STARTUP_TIMEOUT_MS) {
-            pause("CHAT_CREATE_TIMEOUT", "120초 동안 프로젝트 새 대화 생성·첫 요청 확인을 완료하지 못했습니다.");
+            recoverStalledPhase("bootstrap_stalled",
+                    "프로젝트 새 대화 준비가 오래 정체되어 같은 대상 재접속", 1_500L);
             return true;
         }
         if ((PHASE_BOOTSTRAP_MODEL.equals(phase) || PHASE_BOOTSTRAP_REASONING.equals(phase)
                 || SelfRunStore.PHASE_APPLY_PREFS.equals(phase) || PHASE_APPLY_REASONING.equals(phase))
                 && age >= PREF_TIMEOUT_MS) {
-            pause("WORK_PREFERENCES_TIMEOUT", "120초 동안 Work 모델·추론 설정의 실제 적용을 확인하지 못했습니다.");
+            recoverStalledPhase("preferences_stalled",
+                    "모델·추론 적용 화면이 오래 정체되어 같은 대상 재접속", 1_500L);
             return true;
         }
         if (SelfRunStore.PHASE_WAIT_ASSISTANT.equals(phase) && age >= ASSISTANT_RESPONSE_TIMEOUT_MS) {
-            pause("ASSISTANT_RESPONSE_TIMEOUT",
-                    "12분 동안 새 assistant 응답을 확인하지 못해 자동 대기를 중지했습니다.");
+            recoverStalledPhase("assistant_wait_stalled",
+                    "assistant 응답 대기가 오래 정체되어 같은 conversation 재접속", 1_500L);
             return true;
         }
         return false;
@@ -291,11 +297,11 @@ public final class SelfRunService extends Service {
                 return;
             }
             if ("EXISTING_CONVERSATION".equals(status)) {
-                pause("CONVERSATION_NOT_NEW", "프로젝트 새 대화 화면 대신 기존 conversation이 열렸습니다.");
+                restoreCanonical("unexpected_existing_conversation");
                 return;
             }
             if ("MARKER_FAILED".equals(status)) {
-                pause("SUBMIT_MARKER_FAILED", "중복 방지 표식을 저장하지 못해 자동 제출을 중지했습니다.");
+                uiWait("중복 방지 표식 저장 재시도");
                 return;
             }
             if ("SUBMITTED".equals(status)) {
@@ -389,13 +395,10 @@ public final class SelfRunService extends Service {
         if (key.equals(store.lastAssistantKey())) { uiWait("새 assistant 응답 대기"); return; }
         SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest(text, store.runId(), store.mode());
         if (signal.type == SelfRunProtocol.Type.NONE) {
-            if (store.signalRecoveryCount() >= 1) {
-                pause("SIGNAL_MISSING", "SelfRun 제어 신호가 두 번 연속 누락되었습니다.");
-                return;
-            }
             store.setLastAssistantKey(key);
             store.setLastSignal("RECOVERY");
-            store.setSignalRecoveryCount(store.signalRecoveryCount() + 1);
+            int recoveryCount = store.signalRecoveryCount();
+            store.setSignalRecoveryCount(recoveryCount == Integer.MAX_VALUE ? recoveryCount : recoveryCount + 1);
             transition(SelfRunStore.PHASE_SEND_CONTINUE, "제어 신호 복구 요청 전송 준비", "signal_recovery");
             scheduleStep(250L);
             return;
@@ -456,8 +459,8 @@ public final class SelfRunService extends Service {
     private void submittedWait(String detail) {
         submittedObservationCount++;
         if (submittedObservationCount >= MAX_SUBMITTED_OBSERVATIONS) {
-            pause("SUBMISSION_AMBIGUOUS",
-                    "전송 클릭 표식은 있으나 사용자 메시지 DOM을 확인하지 못했습니다. 중복 전송하지 않습니다.");
+            recoverStalledPhase("submission_observation_stalled",
+                    "제출 표식은 유지 · 같은 대상 재접속 후 계속 확인", 1_500L);
             return;
         }
         store.setStatus(detail + " · 재전송 없이 확인 중");
@@ -474,6 +477,7 @@ public final class SelfRunService extends Service {
         rateLimitAttempt = Math.min(rateLimitAttempt + 1, RATE_LIMIT_DELAYS.length);
         long delay = RATE_LIMIT_DELAYS[rateLimitAttempt - 1];
         rateLimitedUntilElapsed = now + delay;
+        resetPhaseClock();
         store.setStatus(reason + " · " + (delay / 1000L) + "초 동안 DOM 실행 중지");
         runLog.record(store, "RATE_LIMIT", "attempt=" + rateLimitAttempt + ";delay=" + delay);
         handler.removeCallbacks(stepRunnable);
@@ -487,6 +491,7 @@ public final class SelfRunService extends Service {
     private void restoreCanonical(String source) {
         if (!canRun() || isRateLimited()) return;
         String target = targetUrl();
+        resetPhaseClock();
         store.setStatus("대상 화면 복구 중 · " + source);
         runLog.record(store, "TARGET_RESTORE", "source=" + source);
         handler.removeCallbacks(stepRunnable);
@@ -494,6 +499,23 @@ public final class SelfRunService extends Service {
             if (webView != null && !isRateLimited()) webView.loadUrl(target);
             else ensureEngine();
         }, 1_200L);
+    }
+
+    private void recoverStalledPhase(String reason, String status, long delay) {
+        if (!canRun()) return;
+        String phase = store.phase();
+        resetPhaseClock();
+        submittedObservationCount = 0;
+        uiWaitCount = 0;
+        store.setStatus(status);
+        runLog.record(store, "AUTO_RECOVERY", "reason=" + reason + ";phase=" + phase);
+        startForegroundCompat();
+        cleanupWebView();
+        handler.postDelayed(this::ensureEngine, delay);
+    }
+
+    private void resetPhaseClock() {
+        if (store != null && canRun()) store.setPhase(store.phase());
     }
 
     private boolean routeAcceptable(String actual) {
