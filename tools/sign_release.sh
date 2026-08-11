@@ -49,7 +49,6 @@ rm -f "$OUTPUT"
   --ks-type PKCS12 \
   --ks-key-alias selfrun \
   --ks-pass "file:$PASS_FILE" \
-  --key-pass "file:$PASS_FILE" \
   --v2-signing-enabled true \
   --v3-signing-enabled true \
   --v4-signing-enabled false \
