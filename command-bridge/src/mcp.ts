@@ -1,6 +1,11 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import {
+  createMcpHandler,
+  isLegacyRequest,
+  McpServer,
+  WebStandardStreamableHTTPServerTransport,
+  type AuthInfo,
+  type ServerContext,
+} from "@modelcontextprotocol/server";
 import { withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 
@@ -10,23 +15,59 @@ import { getRuntimeConfig } from "./config.js";
 import { insertCommand } from "./db.js";
 
 const WRITE_SCOPE = "commands:write";
+const SERVER_INFO = {
+  name: "SelfRun Command Bridge",
+  version: "0.1.0",
+} as const;
 
-function registerTools(server: any): void {
+function exposeChatGptSecuritySchemes(server: McpServer): void {
+  // ChatGPT's current connector reads the OAuth declaration from the
+  // top-level tool entry. MCP v2 keeps application metadata under _meta, so
+  // mirror the declaration at the connector boundary without changing the
+  // protocol or weakening the server-side scope check.
+  const requestHandlers = (server.server as any)._requestHandlers as
+    | Map<string, (request: unknown, context: unknown) => Promise<any>>
+    | undefined;
+  const originalListHandler = requestHandlers?.get("tools/list");
+  if (!originalListHandler) return;
+
+  server.server.setRequestHandler(
+    "tools/list",
+    async (request: any, context: any) => {
+      const result = await originalListHandler(request, context);
+      return {
+        ...result,
+        tools: result.tools.map((tool: Record<string, unknown>) =>
+          tool.name === "save_selfrun_command"
+            ? {
+                ...tool,
+                securitySchemes: [
+                  { type: "oauth2", scopes: [WRITE_SCOPE] },
+                ],
+              }
+            : tool,
+        ),
+      };
+    },
+  );
+}
+
+function registerTools(server: McpServer): void {
   server.registerTool(
     "save_selfrun_command",
     {
       title: "Save SelfRun command",
       description:
         "Save one complete SelfRun command and return its durable ID, timestamp, and SHA-256 hash.",
-      inputSchema: {
+      inputSchema: z.object({
         command: z.string().min(1),
-      },
+      }),
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: [WRITE_SCOPE] }],
       },
     },
-    async ({ command }: { command: string }, extra: any) => {
-      const authInfo = extra?.authInfo;
+    async ({ command }, context: ServerContext) => {
+      const authInfo = context.http?.authInfo;
       if (!authInfo) {
         return oauthChallenge(
           "Authentication required: connect the Command Bridge with OAuth before saving.",
@@ -65,36 +106,28 @@ function registerTools(server: any): void {
     },
   );
 
-  // The SDK version used by mcp-handler exposes custom metadata under _meta,
-  // while ChatGPT's current connector contract reads securitySchemes from the
-  // tool definition itself. Wrap the SDK's generated tools/list response so
-  // both surfaces remain available.
-  const underlying = server.server as any;
-  const originalListHandler = underlying._requestHandlers?.get("tools/list");
-  if (originalListHandler) {
-    underlying.setRequestHandler(
-      ListToolsRequestSchema,
-      async (request: any, extra: any) => {
-        const result = await originalListHandler(request, extra);
-        return {
-          ...result,
-          tools: result.tools.map((tool: Record<string, unknown>) =>
-            tool.name === "save_selfrun_command"
-              ? {
-                  ...tool,
-                  securitySchemes: [
-                    { type: "oauth2", scopes: [WRITE_SCOPE] },
-                  ],
-                }
-              : tool,
-          ),
-        };
-      },
-    );
-  }
+  exposeChatGptSecuritySchemes(server);
+}
+
+function createServer(): McpServer {
+  const server = new McpServer(SERVER_INFO);
+  registerTools(server);
+  return server;
 }
 
 const config = getRuntimeConfig();
+
+// Modern 2026-07-28 traffic is handled by the v2 SDK directly so the
+// responseMode option is available. The legacy leg is routed below because
+// the SDK's built-in stateless fallback intentionally defaults to SSE, while
+// the existing ChatGPT connector expects a JSON response body.
+const modernHandler = createMcpHandler(
+  async () => createServer(),
+  {
+    legacy: "reject",
+    responseMode: "auto",
+  },
+);
 
 function mcpErrorResponse(message: string, status: number): Response {
   return new Response(
@@ -110,10 +143,7 @@ function mcpErrorResponse(message: string, status: number): Response {
   );
 }
 
-function normalizedMcpRequest(
-  request: Request,
-  body: string,
-): Request {
+function normalizeMcpRequest(request: Request, body: string): Request {
   const originalAccept = (request.headers.get("accept") ?? "").toLowerCase();
   const acceptsJson =
     originalAccept.includes("application/json") ||
@@ -124,9 +154,6 @@ function normalizedMcpRequest(
     originalAccept.includes("text/*") ||
     originalAccept.includes("*/*");
 
-  // The MCP SDK validates the standard dual Accept header before it reaches
-  // the handler. ChatGPT's connected tool currently sends application/json
-  // only, so normalize JSON-capable legacy clients to the standard header.
   const headers = new Headers(request.headers);
   if (!originalAccept || acceptsJson || acceptsEventStream) {
     headers.set("Accept", "application/json, text/event-stream");
@@ -135,11 +162,32 @@ function normalizedMcpRequest(
     headers.set("Content-Type", "application/json");
   }
 
-  return new Request(request.url, {
+  const normalized = new Request(request.url, {
     method: "POST",
     headers,
     body,
+  }) as Request & { auth?: AuthInfo };
+  normalized.auth = (request as Request & { auth?: AuthInfo }).auth;
+  return normalized;
+}
+
+async function handleLegacyRequest(
+  request: Request,
+  authInfo?: AuthInfo,
+): Promise<Response> {
+  const server = createServer();
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
   });
+
+  try {
+    await server.connect(transport);
+    return await transport.handleRequest(request, { authInfo });
+  } finally {
+    await transport.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+  }
 }
 
 async function handleMcpRequest(request: Request): Promise<Response> {
@@ -148,25 +196,13 @@ async function handleMcpRequest(request: Request): Promise<Response> {
   }
 
   const body = await request.text();
-  const normalized = normalizedMcpRequest(request, body);
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
-  const server = new McpServer({
-    name: "SelfRun Command Bridge",
-    version: "0.1.0",
-  });
-  registerTools(server);
+  const normalized = normalizeMcpRequest(request, body);
+  const authInfo = (request as Request & { auth?: AuthInfo }).auth;
 
-  await server.connect(transport);
-  try {
-    return await transport.handleRequest(normalized, {
-      authInfo: (request as Request & { auth?: unknown }).auth as any,
-    });
-  } finally {
-    await server.close();
+  if (await isLegacyRequest(normalized)) {
+    return handleLegacyRequest(normalized, authInfo);
   }
+  return modernHandler.fetch(normalized, { authInfo });
 }
 
 export const handler = withMcpAuth(handleMcpRequest, verifyAccessToken, {
