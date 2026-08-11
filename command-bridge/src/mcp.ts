@@ -143,6 +143,18 @@ function normalizedMcpRequest(
 }
 
 async function handleMcpRequest(request: Request): Promise<Response> {
+  console.info(
+    "mcp_request",
+    JSON.stringify({
+      method: request.method,
+      accept: request.headers.get("accept"),
+      contentType: request.headers.get("content-type"),
+      protocolVersion: request.headers.get("mcp-protocol-version"),
+      sessionPresent: Boolean(request.headers.get("mcp-session-id")),
+      authorizationPresent: Boolean(request.headers.get("authorization")),
+      authInfoPresent: Boolean((request as Request & { auth?: unknown }).auth),
+    }),
+  );
   if (request.method !== "POST") {
     return mcpErrorResponse("Method not allowed.", 405);
   }
