@@ -31,4 +31,17 @@ public class SelfRunContinuationSubmissionTest {
         assertTrue(script.contains("이전 버전 제출 표식 DOM 확인 대기"));
         assertTrue(script.contains("matching>baseline"));
     }
+
+    @Test
+    public void bootstrapConversationUrlAndMarkerDoNotRequireExactUserDomEcho() {
+        String script = SelfRunDom.sendInitial(
+                "https://chatgpt.com/g/g-p-demo/project",
+                "hello",
+                "SR-boot");
+
+        assertTrue(script.contains("chatgpt-selfrun:bootstrap:SR-boot"));
+        assertTrue(script.contains("if(conv&&prior)return result('CONFIRMED'"));
+        assertTrue(script.contains("새 conversation URL과 제출 표식 확인"));
+        assertTrue(script.contains("conversationUrl:location.href"));
+    }
 }
