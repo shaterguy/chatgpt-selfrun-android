@@ -131,7 +131,7 @@ function normalizedMcpRequest(
   if (!originalAccept || acceptsJson || acceptsEventStream) {
     headers.set("Accept", "application/json, text/event-stream");
   }
-  if (!headers.has("Content-Type")) {
+  if (!headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
     headers.set("Content-Type", "application/json");
   }
 
