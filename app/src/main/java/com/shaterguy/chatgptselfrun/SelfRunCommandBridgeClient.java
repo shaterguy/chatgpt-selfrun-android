@@ -74,17 +74,33 @@ final class SelfRunCommandBridgeClient {
 
             int statusCode = connection.getResponseCode();
             String body = readBody(statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream());
-            if (statusCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
-                return Result.failure("브리지 인증에 실패했습니다.");
+            return parseResponse(statusCode, body);
+        } catch (Exception error) {
+            String message = error.getMessage();
+            if (message == null || message.trim().isEmpty()) {
+                message = error.getClass().getSimpleName();
             }
-            if (statusCode == 503) {
-                return Result.failure("브리지가 아직 구성되지 않았습니다.");
+            return Result.failure("브리지 연결 실패: " + message);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
             }
-            if (statusCode < 200 || statusCode >= 300) {
-                return Result.failure("브리지 요청이 실패했습니다. HTTP " + statusCode);
-            }
+        }
+    }
 
-            JSONObject json = new JSONObject(body);
+    static Result parseResponse(int statusCode, String body) {
+        if (statusCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            return Result.failure("브리지 인증에 실패했습니다.");
+        }
+        if (statusCode == 503) {
+            return Result.failure("브리지가 아직 구성되지 않았습니다.");
+        }
+        if (statusCode < 200 || statusCode >= 300) {
+            return Result.failure("브리지 요청이 실패했습니다. HTTP " + statusCode);
+        }
+
+        try {
+            JSONObject json = new JSONObject(body == null ? "" : body);
             String status = json.optString("status", "");
             if ("empty".equals(status)) {
                 return Result.empty("저장된 최신 명령이 없습니다.");
@@ -104,16 +120,15 @@ final class SelfRunCommandBridgeClient {
             }
             return Result.success(command, savedAt);
         } catch (Exception error) {
-            String message = error.getMessage();
-            if (message == null || message.trim().isEmpty()) {
-                message = error.getClass().getSimpleName();
-            }
-            return Result.failure("브리지 연결 실패: " + message);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
+            return Result.failure("브리지 응답을 해석할 수 없습니다.");
         }
+    }
+
+    static String commandForInput(String currentInput, Result result) {
+        if (result != null && result.status == Status.SUCCESS) {
+            return result.command;
+        }
+        return currentInput == null ? "" : currentInput;
     }
 
     private static String readBody(InputStream stream) throws IOException {
@@ -135,7 +150,7 @@ final class SelfRunCommandBridgeClient {
         }
     }
 
-    private static String sha256(String value) throws NoSuchAlgorithmException {
+    static String sha256(String value) throws NoSuchAlgorithmException {
         byte[] digest = MessageDigest.getInstance("SHA-256")
                 .digest(value.getBytes(StandardCharsets.UTF_8));
         StringBuilder hex = new StringBuilder(digest.length * 2);

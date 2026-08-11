@@ -26,9 +26,11 @@ public class SelfRunProtocolTest {
     @Test
     public void lunaCannotGoBelowMax() {
         assertTrue(SelfRunProtocol.validWorkProfile("luna", "max"));
-        assertTrue(SelfRunProtocol.validWorkProfile("luna", "ultra"));
+        assertFalse(SelfRunProtocol.validWorkProfile("luna", "ultra"));
         assertFalse(SelfRunProtocol.validWorkProfile("luna", "xhigh"));
         assertFalse(SelfRunProtocol.validWorkProfile("luna", "high"));
+        assertTrue(SelfRunProtocol.validWorkProfile("sol", "ultra"));
+        assertFalse(SelfRunProtocol.validWorkProfile("terra", "ultra"));
     }
 
     @Test
@@ -37,6 +39,19 @@ public class SelfRunProtocolTest {
                 "[SELF_RUN_NEXT SR-1 ROLE=BUILDER MODEL=luna REASONING=xhigh]",
                 "SR-1", SelfRunStore.MODE_WORK);
         assertEquals(SelfRunProtocol.Type.NONE, signal.type);
+    }
+
+    @Test
+    public void ultraIsAcceptedOnlyForSol() {
+        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest(
+                "[SELF_RUN_NEXT SR-1 ROLE=BUILDER MODEL=terra REASONING=ultra]",
+                "SR-1", SelfRunStore.MODE_WORK);
+        assertEquals(SelfRunProtocol.Type.NONE, signal.type);
+
+        signal = SelfRunProtocol.parseLatest(
+                "[SELF_RUN_NEXT SR-1 ROLE=BUILDER MODEL=sol REASONING=ultra]",
+                "SR-1", SelfRunStore.MODE_WORK);
+        assertEquals(SelfRunProtocol.Type.NEXT, signal.type);
     }
 
     @Test

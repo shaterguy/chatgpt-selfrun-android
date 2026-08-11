@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/selfrun-capability-blob
       - agent/selfrun-v0.1.0
       - agent/selfrun-command-bridge-builder
       - work/updateable-apk

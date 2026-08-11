@@ -104,8 +104,9 @@ public final class SelfRunNewActivity extends Activity {
                     SelfRunCommandBridgeClient.fetch(endpoint, token);
             runOnUiThread(() -> {
                 latestCommandButton.setEnabled(true);
+                String currentInput = requirement.getText().toString();
+                requirement.setText(SelfRunCommandBridgeClient.commandForInput(currentInput, result));
                 if (result.status == SelfRunCommandBridgeClient.Status.SUCCESS) {
-                    requirement.setText(result.command);
                     requirement.setSelection(requirement.length());
                     latestCommandStatus.setText("최신 명령을 불러왔습니다. 저장 시각: " + result.savedAt);
                 } else {

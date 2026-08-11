@@ -69,7 +69,8 @@ final class SelfRunProtocol {
         if (!("sol".equals(model) || "terra".equals(model) || "luna".equals(model))) return false;
         if (!("high".equals(reasoning) || "xhigh".equals(reasoning)
                 || "max".equals(reasoning) || "ultra".equals(reasoning))) return false;
-        return !"luna".equals(model) || "max".equals(reasoning) || "ultra".equals(reasoning);
+        if ("luna".equals(model) && !"max".equals(reasoning)) return false;
+        return !"ultra".equals(reasoning) || "sol".equals(model);
     }
 
     static String bootstrap(String runId, String mode, String requirement) {
