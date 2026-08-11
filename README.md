@@ -49,11 +49,11 @@ ChatGPT에서 하나의 conversation을 처음부터 끝까지 유지하면서 �
 - wide viewport / overview mode
 - 로그인 화면과 백그라운드 자동화는 같은 앱 CookieManager를 사용합니다.
 
-## 현재 개발 버전
+## 현재 정식 버전
 
-- versionName: `0.1.0-dev6`
-- versionCode: `6`
+- versionName: `0.1.0`
+- versionCode: `7`
 - applicationId: `com.shaterguy.chatgptselfrun`
 - Android 8.0 이상
 
-개발 브랜치 `agent/selfrun-v0.1.0`의 GitHub Actions가 단위 테스트, debug APK 빌드, 패키지·버전 검증과 SHA-256 계산을 수행합니다.
+GitHub Actions가 SelfRun 정책 검사, 단위 테스트, release APK 빌드, zipalign, 패키지·버전 검증과 SHA-256 계산을 수행합니다.
