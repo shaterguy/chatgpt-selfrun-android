@@ -14,7 +14,6 @@ export default function handler(
       endpoints: {
         health: "/api/health",
         latest: "/api/selfrun/latest",
-        mcp: "/mcp",
       },
     },
     200,

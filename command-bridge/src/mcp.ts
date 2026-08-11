@@ -3,54 +3,17 @@ import {
   isLegacyRequest,
   McpServer,
   WebStandardStreamableHTTPServerTransport,
-  type AuthInfo,
-  type ServerContext,
 } from "@modelcontextprotocol/server";
-import { withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 
-import { oauthChallenge, verifyAccessToken } from "./auth.js";
-import { commandHash, validateCommand } from "./command.js";
-import { getRuntimeConfig } from "./config.js";
-import { insertCommand } from "./db.js";
+import { hasValidMcpCapability, notFoundResponse } from "./capability.js";
+import { saveLatestCommand } from "./blob.js";
+import { validateCommand } from "./command.js";
 
-const WRITE_SCOPE = "commands:write";
 const SERVER_INFO = {
   name: "SelfRun Command Bridge",
-  version: "0.1.0",
+  version: "0.1.1-dev1",
 } as const;
-
-function exposeChatGptSecuritySchemes(server: McpServer): void {
-  // ChatGPT's current connector reads the OAuth declaration from the
-  // top-level tool entry. MCP v2 keeps application metadata under _meta, so
-  // mirror the declaration at the connector boundary without changing the
-  // protocol or weakening the server-side scope check.
-  const requestHandlers = (server.server as any)._requestHandlers as
-    | Map<string, (request: unknown, context: unknown) => Promise<any>>
-    | undefined;
-  const originalListHandler = requestHandlers?.get("tools/list");
-  if (!originalListHandler) return;
-
-  server.server.setRequestHandler(
-    "tools/list",
-    async (request: any, context: any) => {
-      const result = await originalListHandler(request, context);
-      return {
-        ...result,
-        tools: result.tools.map((tool: Record<string, unknown>) =>
-          tool.name === "save_selfrun_command"
-            ? {
-                ...tool,
-                securitySchemes: [
-                  { type: "oauth2", scopes: [WRITE_SCOPE] },
-                ],
-              }
-            : tool,
-        ),
-      };
-    },
-  );
-}
 
 function registerTools(server: McpServer): void {
   server.registerTool(
@@ -58,32 +21,16 @@ function registerTools(server: McpServer): void {
     {
       title: "Save SelfRun command",
       description:
-        "Save one complete SelfRun command and return its durable ID, timestamp, and SHA-256 hash.",
+        "Save one complete SelfRun command and return its timestamp and SHA-256 hash.",
       inputSchema: z.object({
         command: z.string().min(1),
       }),
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WRITE_SCOPE] }],
-      },
     },
-    async ({ command }, context: ServerContext) => {
-      const authInfo = context.http?.authInfo;
-      if (!authInfo) {
-        return oauthChallenge(
-          "Authentication required: connect the Command Bridge with OAuth before saving.",
-        );
-      }
-      if (!authInfo.scopes?.includes(WRITE_SCOPE)) {
-        return oauthChallenge(
-          "Insufficient scope: " + WRITE_SCOPE + " is required.",
-        );
-      }
-
+    async ({ command }) => {
       try {
         validateCommand(command);
-        const saved = await insertCommand(command, commandHash(command));
+        const saved = await saveLatestCommand(command);
         const result = {
-          command_id: saved.commandId,
           saved_at: saved.savedAt,
           hash: saved.hash,
         };
@@ -105,8 +52,6 @@ function registerTools(server: McpServer): void {
       }
     },
   );
-
-  exposeChatGptSecuritySchemes(server);
 }
 
 function createServer(): McpServer {
@@ -114,8 +59,6 @@ function createServer(): McpServer {
   registerTools(server);
   return server;
 }
-
-const config = getRuntimeConfig();
 
 // Modern 2026-07-28 traffic is handled by the v2 SDK directly so the
 // responseMode option is available. The legacy leg is routed below because
@@ -166,8 +109,7 @@ function normalizeMcpRequest(request: Request, body: string): Request {
     method: "POST",
     headers,
     body,
-  }) as Request & { auth?: AuthInfo };
-  normalized.auth = (request as Request & { auth?: AuthInfo }).auth;
+  });
   return normalized;
 }
 
@@ -223,29 +165,12 @@ function normalizeClaimlessLegacyProtocolHeader(
     method: "POST",
     headers,
     body,
-  }) as Request & { auth?: AuthInfo };
-  normalized.auth = (request as Request & { auth?: AuthInfo }).auth;
+  });
   return normalized;
 }
 
 
 type McpRoute = "legacy" | "modern";
-type McpAuthState =
-  | "verified"
-  | "header_without_verified_context"
-  | "anonymous";
-
-function mcpAuthState(
-  request: Request,
-  authInfo?: AuthInfo,
-): McpAuthState {
-  if (authInfo) return "verified";
-  if (request.headers.has("authorization")) {
-    return "header_without_verified_context";
-  }
-  return "anonymous";
-}
-
 function mcpProtocolVersionState(
   request: Request,
 ): "absent" | "2026-07-28" | "other_date" | "invalid" {
@@ -366,14 +291,12 @@ function normalizeModernRequestHeaders(
     method: "POST",
     headers,
     body,
-  }) as Request & { auth?: AuthInfo };
-  normalized.auth = (request as Request & { auth?: AuthInfo }).auth;
+  });
   return normalized;
 }
 
 async function handleLegacyRequest(
   request: Request,
-  authInfo?: AuthInfo,
 ): Promise<Response> {
   const server = createServer();
   const transport = new WebStandardStreamableHTTPServerTransport({
@@ -383,7 +306,7 @@ async function handleLegacyRequest(
 
   try {
     await server.connect(transport);
-    return await transport.handleRequest(request, { authInfo });
+    return await transport.handleRequest(request);
   } finally {
     await transport.close().catch(() => undefined);
     await server.close().catch(() => undefined);
@@ -396,7 +319,6 @@ async function handleMcpRequest(request: Request): Promise<Response> {
   }
 
   const body = await request.text();
-  const authInfo = (request as Request & { auth?: AuthInfo }).auth;
   let parsedBody: unknown;
   try {
     parsedBody = JSON.parse(body);
@@ -404,11 +326,8 @@ async function handleMcpRequest(request: Request): Promise<Response> {
     parsedBody = undefined;
   }
 
-  const authState = mcpAuthState(request, authInfo);
   logMcpTransportDiagnostic({
     event: "request",
-    authState,
-    authorizationHeaderPresent: request.headers.has("authorization"),
     protocolVersion: mcpProtocolVersionState(request),
     sessionHeaderPresent: request.headers.has("mcp-session-id"),
     bodyMethod: mcpBodyMethod(parsedBody),
@@ -425,20 +344,18 @@ async function handleMcpRequest(request: Request): Promise<Response> {
 
   try {
     const response = legacy
-      ? await handleLegacyRequest(compatibilityNormalized, authInfo)
+      ? await handleLegacyRequest(compatibilityNormalized)
       : await modernHandler.fetch(
         normalizeModernRequestHeaders(
           compatibilityNormalized,
           body,
           parsedBody,
         ),
-        { authInfo },
       );
 
     logMcpTransportDiagnostic({
       event: "response",
       route,
-      authState,
       status: response.status,
       category: await classifyMcpResponse(response),
     });
@@ -447,15 +364,16 @@ async function handleMcpRequest(request: Request): Promise<Response> {
     logMcpTransportDiagnostic({
       event: "exception",
       route,
-      authState,
       errorName: error instanceof Error ? error.name : "unknown",
     });
     throw error;
   }
 }
 
-export const handler = withMcpAuth(handleMcpRequest, verifyAccessToken, {
-  required: false,
-  requiredScopes: [WRITE_SCOPE],
-  resourceUrl: config.mcpResourceUrl,
-});
+export async function handler(
+  request: Request,
+  capability?: string,
+): Promise<Response> {
+  if (!hasValidMcpCapability(capability)) return notFoundResponse();
+  return handleMcpRequest(request);
+}

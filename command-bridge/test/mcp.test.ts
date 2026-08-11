@@ -1,82 +1,82 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const testMocks = vi.hoisted(() => ({
-  verifyAccessToken: vi.fn(),
-  insertCommand: vi.fn(),
-  authInfo: {
-    token: "test-token",
-    clientId: "test-client",
-    scopes: ["commands:write"],
-    expiresAt: Math.floor(Date.now() / 1000) + 3600,
-    resource: new URL("https://selfrun-command-bridge.vercel.app"),
-  },
+  saveLatestCommand: vi.fn(),
 }));
 
-vi.mock("../src/auth.js", () => ({
-  verifyAccessToken: testMocks.verifyAccessToken,
-  oauthChallenge: (
-    message: string,
-    error: "invalid_token" | "insufficient_scope" = "insufficient_scope",
-  ) => ({
-    content: [{ type: "text", text: message }],
-    isError: true,
-    _meta: {
-      "mcp/www_authenticate": [
-        `Bearer resource_metadata="https://selfrun-command-bridge.vercel.app/.well-known/oauth-protected-resource", error="${error}"`,
-      ],
-    },
-  }),
-}));
-
-vi.mock("../src/db.js", () => ({
-  insertCommand: testMocks.insertCommand,
+vi.mock("../src/blob.js", () => ({
+  saveLatestCommand: testMocks.saveLatestCommand,
 }));
 
 import { handler } from "../src/mcp.js";
 
+const CAPABILITY = "a".repeat(43);
+
 function mcpRequest(accept: string, body: unknown): Request {
-  return new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-    method: "POST",
-    headers: {
-      Accept: accept,
-      "Content-Type": "application/json",
+  return new Request(
+    "https://selfrun-command-bridge.vercel.app/mcp/" + CAPABILITY,
+    {
+      method: "POST",
+      headers: {
+        Accept: accept,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+  );
 }
 
-function authenticatedMcpRequest(
-  body: unknown,
-  extraHeaders: Record<string, string> = {},
-): Request {
-  return new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: "Bearer test-token",
-      ...extraHeaders,
+function call(request: Request): Promise<Response> {
+  return handler(request, CAPABILITY);
+}
+
+function saveCall(id: number, command: string, modern = false): Request {
+  return new Request(
+    "https://selfrun-command-bridge.vercel.app/mcp/" + CAPABILITY,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(modern ? { "MCP-Protocol-Version": "2026-07-28" } : {}),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name: "save_selfrun_command",
+          arguments: { command },
+          ...(modern
+            ? {
+                _meta: {
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/clientInfo": {
+                    name: "test-client",
+                    version: "1.0.0",
+                  },
+                },
+              }
+            : {}),
+        },
+      }),
     },
-    body: JSON.stringify(body),
-  });
+  );
 }
 
 describe("SelfRun MCP transport negotiation", () => {
   beforeEach(() => {
-    testMocks.verifyAccessToken.mockReset();
-    testMocks.verifyAccessToken.mockImplementation(
-      async (_request: Request, bearerToken?: string) =>
-        bearerToken === "test-token" ? testMocks.authInfo : undefined,
-    );
-    testMocks.insertCommand.mockReset();
-    testMocks.insertCommand.mockResolvedValue({
-      commandId: "verified-command",
-      savedAt: "2026-08-11T00:00:00.000Z",
+    process.env.SELF_RUN_MCP_CAPABILITY = CAPABILITY;
+    testMocks.saveLatestCommand.mockReset();
+    testMocks.saveLatestCommand.mockResolvedValue({
+      savedAt: "2026-08-12T00:00:00.000Z",
       hash: "verified-hash",
     });
   });
-  it("accepts a JSON-only client and returns a JSON tools/list response", async () => {
-    const response = await handler(
+
+  it("accepts a JSON-only client without exposing OAuth security metadata", async () => {
+    const response = await call(
       mcpRequest("application/json", {
         jsonrpc: "2.0",
         id: 1,
@@ -86,52 +86,35 @@ describe("SelfRun MCP transport negotiation", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain(
-      "application/json",
-    );
-
+    expect(response.headers.get("content-type")).toContain("application/json");
     const payload = await response.json();
     const saveTool = payload.result.tools.find(
       (tool: { name: string }) => tool.name === "save_selfrun_command",
     );
-    expect(saveTool.securitySchemes).toEqual([
-      { type: "oauth2", scopes: ["commands:write"] },
-    ]);
+    expect(saveTool.securitySchemes).toBeUndefined();
+    expect(JSON.stringify(saveTool).toLowerCase()).not.toContain("oauth");
+    expect(JSON.stringify(saveTool)).not.toContain("commands:write");
   });
 
-  it("keeps the standard dual Accept header interoperable", async () => {
-    const response = await handler(
-      mcpRequest("application/json, text/event-stream", {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "save_selfrun_command",
-          arguments: { command: "test command" },
-        },
-      }),
-    );
-
+  it("keeps the standard dual Accept header interoperable and saves", async () => {
+    const response = await call(saveCall(2, "test command"));
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain(
-      "application/json",
-    );
+    expect(response.headers.get("content-type")).toContain("application/json");
     const payload = await response.json();
-    expect(payload.result.isError).toBe(true);
-    expect(payload.result._meta["mcp/www_authenticate"][0]).toContain(
-      "resource_metadata=",
-    );
+    expect(payload.result.isError).not.toBe(true);
+    expect(payload.result.structuredContent).toMatchObject({
+      saved_at: "2026-08-12T00:00:00.000Z",
+      hash: "verified-hash",
+    });
+    expect(testMocks.saveLatestCommand).toHaveBeenCalledWith("test command");
   });
 
   it("normalizes a legacy non-JSON content type for a JSON body", async () => {
     const request = new Request(
-      "https://selfrun-command-bridge.vercel.app/mcp",
+      "https://selfrun-command-bridge.vercel.app/mcp/" + CAPABILITY,
       {
         method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "text/plain",
-        },
+        headers: { Accept: "application/json", "Content-Type": "text/plain" },
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 3,
@@ -140,300 +123,102 @@ describe("SelfRun MCP transport negotiation", () => {
         }),
       },
     );
-    const response = await handler(request);
-
+    const response = await call(request);
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain(
-      "application/json",
-    );
+    expect(response.headers.get("content-type")).toContain("application/json");
   });
 
   it("serves the v2 modern envelope with a JSON response", async () => {
-    const response = await handler(
-      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "Mcp-Method": "server/discover",
-          "MCP-Protocol-Version": "2026-07-28",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 4,
-          method: "server/discover",
-          params: {
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-              "io.modelcontextprotocol/clientInfo": {
-                name: "test-client",
-                version: "1.0.0",
+    const response = await call(
+      new Request(
+        "https://selfrun-command-bridge.vercel.app/mcp/" + CAPABILITY,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "Mcp-Method": "server/discover",
+            "MCP-Protocol-Version": "2026-07-28",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 4,
+            method: "server/discover",
+            params: {
+              _meta: {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {
+                  name: "test-client",
+                  version: "1.0.0",
+                },
               },
             },
-          },
-        }),
-      }),
+          }),
+        },
+      ),
     );
-
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain(
-      "application/json",
-    );
+    expect(response.headers.get("content-type")).toContain("application/json");
     const payload = await response.json();
     expect(payload.result.supportedVersions).toContain("2026-07-28");
   });
 
   it("fills missing modern standard headers from the JSON-RPC body", async () => {
-    const response = await handler(
-      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 5,
-          method: "tools/call",
-          params: {
-            name: "save_selfrun_command",
-            arguments: { command: "test command" },
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-              "io.modelcontextprotocol/clientInfo": {
-                name: "test-client",
-                version: "1.0.0",
-              },
-            },
-          },
-        }),
-      }),
-    );
-
+    const response = await call(saveCall(5, "modern header synthesis", true));
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.result.isError).toBe(true);
-    expect(payload.result._meta["mcp/www_authenticate"][0]).toContain(
-      "resource_metadata=",
+    expect(payload.result.isError).not.toBe(true);
+    expect(testMocks.saveLatestCommand).toHaveBeenCalledWith(
+      "modern header synthesis",
     );
   });
 
   it("preserves an existing mismatched Mcp-Method header", async () => {
-    const response = await handler(
-      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "Mcp-Method": "tools/list",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 6,
-          method: "server/discover",
-          params: {
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-              "io.modelcontextprotocol/clientInfo": {
-                name: "test-client",
-                version: "1.0.0",
-              },
-            },
-          },
-        }),
-      }),
-    );
-
+    const request = saveCall(6, "test", true);
+    request.headers.set("Mcp-Method", "tools/list");
+    const response = await call(request);
     expect(response.status).toBe(400);
   });
 
   it("preserves an existing mismatched Mcp-Name header", async () => {
-    const response = await handler(
-      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "Mcp-Method": "tools/call",
-          "Mcp-Name": "different_tool",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 7,
-          method: "tools/call",
-          params: {
-            name: "save_selfrun_command",
-            arguments: { command: "test command" },
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-              "io.modelcontextprotocol/clientInfo": {
-                name: "test-client",
-                version: "1.0.0",
-              },
-            },
-          },
-        }),
-      }),
-    );
-
+    const request = saveCall(7, "test", true);
+    request.headers.set("Mcp-Method", "tools/call");
+    request.headers.set("Mcp-Name", "different_tool");
+    const response = await call(request);
     expect(response.status).toBe(400);
   });
 
   it("downgrades a claim-less modern protocol header to the legacy path", async () => {
-    const response = await handler(
-      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "MCP-Protocol-Version": "2026-07-28",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 8,
-          method: "tools/call",
-          params: {
-            name: "save_selfrun_command",
-            arguments: { command: "test command" },
-          },
-        }),
-      }),
-    );
-
+    const request = saveCall(8, "legacy header downgrade");
+    request.headers.set("MCP-Protocol-Version", "2026-07-28");
+    request.headers.set("Mcp-Method", "tools/call");
+    request.headers.set("Mcp-Name", "save_selfrun_command");
+    const response = await call(request);
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.result.isError).toBe(true);
-    expect(payload.result._meta["mcp/www_authenticate"][0]).toContain(
-      "resource_metadata=",
+    expect(payload.result.isError).not.toBe(true);
+    expect(testMocks.saveLatestCommand).toHaveBeenCalledWith(
+      "legacy header downgrade",
     );
   });
 
   it("preserves a modern header/body protocol-version mismatch", async () => {
-    const response = await handler(
-      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "MCP-Protocol-Version": "2025-11-25",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 9,
-          method: "tools/call",
-          params: {
-            name: "save_selfrun_command",
-            arguments: { command: "test command" },
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-              "io.modelcontextprotocol/clientInfo": {
-                name: "test-client",
-                version: "1.0.0",
-              },
-            },
-          },
-        }),
-      }),
-    );
-
+    const request = saveCall(9, "test", true);
+    request.headers.set("MCP-Protocol-Version", "2025-11-25");
+    const response = await call(request);
     expect(response.status).toBe(400);
   });
-  it("passes verified auth context through the modern handler path", async () => {
-    const response = await handler(
-      authenticatedMcpRequest(
-        {
-          jsonrpc: "2.0",
-          id: 10,
-          method: "tools/call",
-          params: {
-            name: "save_selfrun_command",
-            arguments: { command: "modern authenticated command" },
-            _meta: {
-  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-  "io.modelcontextprotocol/clientCapabilities": {},
-  "io.modelcontextprotocol/clientInfo": {
-    name: "test-client",
-    version: "1.0.0",
-  },
-},
-          },
-        },
-        { "MCP-Protocol-Version": "2026-07-28" },
-      ),
-    );
 
-    expect(response.status).toBe(200);
-    const payload = await response.json();
-    expect(payload.result.isError).not.toBe(true);
-    expect(payload.result.structuredContent).toMatchObject({
-      command_id: "verified-command",
-    });
-    expect(testMocks.insertCommand).toHaveBeenCalledWith(
-      "modern authenticated command",
-      expect.any(String),
-    );
+  it("blocks a missing or wrong capability with an opaque 404", async () => {
+    const request = saveCall(10, "must not save");
+    const missing = await handler(request);
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toBe("");
+
+    const wrong = await handler(request, "b".repeat(43));
+    expect(wrong.status).toBe(404);
+    expect(await wrong.text()).toBe("");
+    expect(testMocks.saveLatestCommand).not.toHaveBeenCalled();
   });
-
-  it("passes verified auth context through the claim-less legacy path", async () => {
-    const response = await handler(
-      authenticatedMcpRequest(
-        {
-          jsonrpc: "2.0",
-          id: 11,
-          method: "tools/call",
-          params: {
-            name: "save_selfrun_command",
-            arguments: { command: "legacy authenticated command" },
-          },
-        },
-        {
-          "Mcp-Method": "tools/call",
-          "Mcp-Name": "save_selfrun_command",
-          "MCP-Protocol-Version": "2026-07-28",
-        },
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    const payload = await response.json();
-    expect(payload.result.isError).not.toBe(true);
-    expect(payload.result.structuredContent).toMatchObject({
-      command_id: "verified-command",
-    });
-    expect(testMocks.insertCommand).toHaveBeenCalledWith(
-      "legacy authenticated command",
-      expect.any(String),
-    );
-  });
-
-  it("returns a 403 scope challenge before the authenticated MCP handler", async () => {
-    testMocks.verifyAccessToken.mockResolvedValueOnce({
-      ...testMocks.authInfo,
-      scopes: [],
-    });
-
-    const response = await handler(
-      authenticatedMcpRequest({
-        jsonrpc: "2.0",
-        id: 12,
-        method: "tools/call",
-        params: {
-          name: "save_selfrun_command",
-          arguments: { command: "should not be stored" },
-        },
-      }),
-    );
-
-    expect(response.status).toBe(403);
-    expect(response.headers.get("www-authenticate")).toContain(
-      'scope="commands:write"',
-    );
-    expect(testMocks.insertCommand).not.toHaveBeenCalled();
-  });
-
 });

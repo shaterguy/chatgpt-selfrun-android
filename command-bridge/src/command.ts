@@ -15,8 +15,7 @@ export class CommandInputError extends Error {
   }
 }
 
-export interface CommandRecord {
-  commandId: string;
+export interface LatestCommandRecord {
   command: string;
   savedAt: string;
   hash: string;
@@ -39,21 +38,4 @@ export function validateCommand(command: unknown): asserts command is string {
 
 export function commandHash(command: string): string {
   return createHash("sha256").update(command, "utf8").digest("hex");
-}
-
-export function toIsoString(value: unknown): string {
-  if (value instanceof Date) return value.toISOString();
-  const text = String(value ?? "");
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.valueOf()) ? text : parsed.toISOString();
-}
-
-export function recordFromRow(row: Record<string, unknown>): CommandRecord {
-  const command = String(row.command ?? "");
-  return {
-    commandId: String(row.id ?? ""),
-    command,
-    savedAt: toIsoString(row.saved_at),
-    hash: String(row.hash ?? commandHash(command)),
-  };
 }

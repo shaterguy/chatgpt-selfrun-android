@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { capabilityFromMcpUrl } from "../src/capability.js";
 import { handler as mcpHandler } from "../src/mcp.js";
 import { toWebRequest, writeWebResponse } from "../src/vercel-adapter.js";
 
@@ -14,6 +15,9 @@ export default async function handler(
   response: ServerResponse,
 ): Promise<void> {
   const webRequest = await toWebRequest(request);
-  const webResponse = await mcpHandler(webRequest);
+  const webResponse = await mcpHandler(
+    webRequest,
+    capabilityFromMcpUrl(webRequest.url),
+  );
   await writeWebResponse(response, webResponse);
 }
