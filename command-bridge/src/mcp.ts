@@ -1,5 +1,7 @@
-import { createMcpHandler, withMcpAuth } from "mcp-handler";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 
 import { oauthChallenge, verifyAccessToken } from "./auth.js";
@@ -93,23 +95,81 @@ function registerTools(server: any): void {
 }
 
 const config = getRuntimeConfig();
-const mcpHandler = createMcpHandler(
-  registerTools,
-  {
-    serverInfo: {
-      name: "SelfRun Command Bridge",
-      version: "0.1.0",
-    },
-  },
-  {
-    basePath: "/",
-    disableSse: true,
-    maxDuration: 60,
-    verboseLogs: false,
-  },
-);
 
-export const handler = withMcpAuth(mcpHandler, verifyAccessToken, {
+function mcpErrorResponse(message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: { code: -32000, message },
+      id: null,
+    }),
+    {
+      status,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+function normalizedMcpRequest(
+  request: Request,
+  body: string,
+): Request {
+  const originalAccept = (request.headers.get("accept") ?? "").toLowerCase();
+  const acceptsJson =
+    originalAccept.includes("application/json") ||
+    originalAccept.includes("application/*") ||
+    originalAccept.includes("*/*");
+  const acceptsEventStream =
+    originalAccept.includes("text/event-stream") ||
+    originalAccept.includes("text/*") ||
+    originalAccept.includes("*/*");
+
+  // The MCP SDK validates the standard dual Accept header before it reaches
+  // the handler. ChatGPT's connected tool currently sends application/json
+  // only, so normalize JSON-capable legacy clients to the standard header.
+  const headers = new Headers(request.headers);
+  if (!originalAccept || acceptsJson || acceptsEventStream) {
+    headers.set("Accept", "application/json, text/event-stream");
+  }
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return new Request(request.url, {
+    method: "POST",
+    headers,
+    body,
+  });
+}
+
+async function handleMcpRequest(request: Request): Promise<Response> {
+  if (request.method !== "POST") {
+    return mcpErrorResponse("Method not allowed.", 405);
+  }
+
+  const body = await request.text();
+  const normalized = normalizedMcpRequest(request, body);
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  const server = new McpServer({
+    name: "SelfRun Command Bridge",
+    version: "0.1.0",
+  });
+  registerTools(server);
+
+  await server.connect(transport);
+  try {
+    return await transport.handleRequest(normalized, {
+      authInfo: (request as Request & { auth?: unknown }).auth as any,
+    });
+  } finally {
+    await server.close();
+  }
+}
+
+export const handler = withMcpAuth(handleMcpRequest, verifyAccessToken, {
   required: false,
   resourceUrl: config.mcpResourceUrl,
 });
