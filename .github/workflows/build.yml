@@ -48,6 +48,7 @@ jobs:
           HISTORY=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryActivity.java
           LOGMENU=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogMenuActivity.java
           LOGS=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogsActivity.java
+          SIGNING_SCRIPT=tools/sign_release.sh
           ICON_FOREGROUND=app/src/main/res/drawable/ic_launcher_foreground.xml
           ICON_MONOCHROME=app/src/main/res/drawable/ic_launcher_monochrome.xml
           ICON_V26=app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
@@ -69,6 +70,15 @@ jobs:
           grep -q '<adaptive-icon' "$ICON_ROUND_V26"
           grep -q '<monochrome android:drawable="@drawable/ic_launcher_monochrome"' "$ICON_V33"
           grep -q '<monochrome android:drawable="@drawable/ic_launcher_monochrome"' "$ICON_ROUND_V33"
+          test -s "$SIGNING_SCRIPT"
+          ! grep -q 'jarsigner' "$SIGNING_SCRIPT"
+          grep -q 'APKSIGNER' "$SIGNING_SCRIPT"
+          grep -q -- '--ks-type PKCS12' "$SIGNING_SCRIPT"
+          grep -q -- '--ks-key-alias selfrun' "$SIGNING_SCRIPT"
+          grep -q -- '--v2-signing-enabled true' "$SIGNING_SCRIPT"
+          grep -q -- '--v3-signing-enabled true' "$SIGNING_SCRIPT"
+          grep -q 'verify --verbose --print-certs' "$SIGNING_SCRIPT"
+          grep -q 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' "$SIGNING_SCRIPT"
           grep -q 'SelfRunNewActivity' "$MANIFEST"
           grep -q 'SelfRunLogMenuActivity' "$MANIFEST"
           ! grep -q 'SCHEDULE_EXACT_ALARM' "$MANIFEST"
