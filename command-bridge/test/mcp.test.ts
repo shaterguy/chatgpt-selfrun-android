@@ -121,4 +121,103 @@ describe("SelfRun MCP transport negotiation", () => {
     const payload = await response.json();
     expect(payload.result.supportedVersions).toContain("2026-07-28");
   });
+
+  it("fills missing modern standard headers from the JSON-RPC body", async () => {
+    const response = await handler(
+      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: {
+            name: "save_selfrun_command",
+            arguments: { command: "test command" },
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "test-client",
+                version: "1.0.0",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.result.isError).toBe(true);
+    expect(payload.result._meta["mcp/www_authenticate"][0]).toContain(
+      "resource_metadata=",
+    );
+  });
+
+  it("preserves an existing mismatched Mcp-Method header", async () => {
+    const response = await handler(
+      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "Mcp-Method": "tools/list",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 6,
+          method: "server/discover",
+          params: {
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "test-client",
+                version: "1.0.0",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("preserves an existing mismatched Mcp-Name header", async () => {
+    const response = await handler(
+      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "different_tool",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: {
+            name: "save_selfrun_command",
+            arguments: { command: "test command" },
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "test-client",
+                version: "1.0.0",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+  });
 });
