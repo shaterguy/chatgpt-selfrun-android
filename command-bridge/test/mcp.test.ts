@@ -411,4 +411,29 @@ describe("SelfRun MCP transport negotiation", () => {
     );
   });
 
+  it("returns a 403 scope challenge before the authenticated MCP handler", async () => {
+    testMocks.verifyAccessToken.mockResolvedValueOnce({
+      ...testMocks.authInfo,
+      scopes: [],
+    });
+
+    const response = await handler(
+      authenticatedMcpRequest({
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: {
+          name: "save_selfrun_command",
+          arguments: { command: "should not be stored" },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toContain(
+      'scope="commands:write"',
+    );
+    expect(testMocks.insertCommand).not.toHaveBeenCalled();
+  });
+
 });
