@@ -228,6 +228,93 @@ function normalizeClaimlessLegacyProtocolHeader(
   return normalized;
 }
 
+
+type McpRoute = "legacy" | "modern";
+type McpAuthState =
+  | "verified"
+  | "header_without_verified_context"
+  | "anonymous";
+
+function mcpAuthState(
+  request: Request,
+  authInfo?: AuthInfo,
+): McpAuthState {
+  if (authInfo) return "verified";
+  if (request.headers.has("authorization")) {
+    return "header_without_verified_context";
+  }
+  return "anonymous";
+}
+
+function mcpProtocolVersionState(
+  request: Request,
+): "absent" | "2026-07-28" | "other_date" | "invalid" {
+  const value = request.headers
+    .get(MCP_PROTOCOL_VERSION_HEADER)
+    ?.trim();
+  if (!value) return "absent";
+  if (value === FIRST_MODERN_PROTOCOL_VERSION) return "2026-07-28";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return "other_date";
+  return "invalid";
+}
+
+function mcpBodyMethod(body: unknown): string {
+  if (!isRecord(body) || typeof body.method !== "string") return "unknown";
+  const knownMethods = new Set([
+    "server/discover",
+    "initialize",
+    "tools/list",
+    "tools/call",
+    "prompts/get",
+    "resources/read",
+  ]);
+  return knownMethods.has(body.method) ? body.method : "other";
+}
+
+function logMcpTransportDiagnostic(
+  details: Record<string, unknown>,
+): void {
+  console.info("mcp_transport", JSON.stringify(details));
+}
+
+async function classifyMcpResponse(response: Response): Promise<string> {
+  if (response.status < 400) return "ok";
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("application/json")) {
+    return `http_${response.status}_non_json`;
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.clone().json();
+  } catch {
+    return `http_${response.status}_unparseable_json`;
+  }
+
+  const error = isRecord(payload) && isRecord(payload.error)
+    ? payload.error
+    : undefined;
+  const code = error?.code;
+  const message =
+    typeof error?.message === "string"
+      ? error.message.toLowerCase()
+      : "";
+
+  if (message.includes("envelope") || message.includes("_meta")) {
+    return "modern_envelope_validation";
+  }
+  if (message.includes("header") || message.includes("mcp-")) {
+    return "request_header_validation";
+  }
+  if (message.includes("protocol")) {
+    return "protocol_validation";
+  }
+  if (typeof code === "number") return `jsonrpc_${code}`;
+  return `http_${response.status}`;
+}
+
+
 const MCP_NAME_HEADER_SOURCES = {
   "tools/call": "name",
   "prompts/get": "name",
@@ -317,22 +404,54 @@ async function handleMcpRequest(request: Request): Promise<Response> {
     parsedBody = undefined;
   }
 
+  const authState = mcpAuthState(request, authInfo);
+  logMcpTransportDiagnostic({
+    event: "request",
+    authState,
+    authorizationHeaderPresent: request.headers.has("authorization"),
+    protocolVersion: mcpProtocolVersionState(request),
+    sessionHeaderPresent: request.headers.has("mcp-session-id"),
+    bodyMethod: mcpBodyMethod(parsedBody),
+  });
+
   const normalized = normalizeMcpRequest(request, body);
   const compatibilityNormalized = normalizeClaimlessLegacyProtocolHeader(
     normalized,
     body,
     parsedBody,
   );
+  const legacy = await isLegacyRequest(compatibilityNormalized, parsedBody);
+  const route: McpRoute = legacy ? "legacy" : "modern";
 
-  if (await isLegacyRequest(compatibilityNormalized, parsedBody)) {
-    return handleLegacyRequest(compatibilityNormalized, authInfo);
+  try {
+    const response = legacy
+      ? await handleLegacyRequest(compatibilityNormalized, authInfo)
+      : await modernHandler.fetch(
+        normalizeModernRequestHeaders(
+          compatibilityNormalized,
+          body,
+          parsedBody,
+        ),
+        { authInfo },
+      );
+
+    logMcpTransportDiagnostic({
+      event: "response",
+      route,
+      authState,
+      status: response.status,
+      category: await classifyMcpResponse(response),
+    });
+    return response;
+  } catch (error) {
+    logMcpTransportDiagnostic({
+      event: "exception",
+      route,
+      authState,
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
+    throw error;
   }
-  const modernRequest = normalizeModernRequestHeaders(
-    compatibilityNormalized,
-    body,
-    parsedBody,
-  );
-  return modernHandler.fetch(modernRequest, { authInfo });
 }
 
 export const handler = withMcpAuth(handleMcpRequest, verifyAccessToken, {
