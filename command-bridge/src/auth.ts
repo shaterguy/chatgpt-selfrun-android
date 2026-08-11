@@ -52,15 +52,6 @@ export async function verifyAccessToken(
     !config.auth0JwksUrl ||
     config.auth0AllowedSubjects.length === 0
   ) {
-    console.warn(
-      "mcp_auth_unconfigured",
-      JSON.stringify({
-        issuer: Boolean(config.auth0Issuer),
-        audience: Boolean(config.auth0Audience),
-        jwks: Boolean(config.auth0JwksUrl),
-        allowedSubjects: config.auth0AllowedSubjects.length,
-      }),
-    );
     return undefined;
   }
 
@@ -83,16 +74,6 @@ export async function verifyAccessToken(
       !config.auth0AllowedSubjects.includes(subject) ||
       !resourceMatches(payload, config.mcpResourceUrl)
     ) {
-      console.warn(
-        "mcp_auth_claim_rejected",
-        JSON.stringify({
-          subject: Boolean(subject),
-          unexpired: expiresAt !== undefined &&
-            expiresAt > Math.floor(Date.now() / 1000),
-          allowedSubject: config.auth0AllowedSubjects.includes(subject),
-          resource: resourceMatches(payload, config.mcpResourceUrl),
-        }),
-      );
       return undefined;
     }
     return {
@@ -106,17 +87,7 @@ export async function verifyAccessToken(
       resource: new URL(config.mcpResourceUrl),
       extra: { sub: subject },
     };
-  } catch (error) {
-    console.warn(
-      "mcp_auth_token_rejected",
-      JSON.stringify({
-        name: error instanceof Error ? error.name : "unknown",
-        code:
-          error && typeof error === "object" && "code" in error
-            ? String((error as { code?: unknown }).code)
-            : undefined,
-      }),
-    );
+  } catch {
     return undefined;
   }
 }
