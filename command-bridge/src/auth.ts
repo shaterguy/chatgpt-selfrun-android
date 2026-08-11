@@ -39,6 +39,33 @@ function jwksFor(url: string): ReturnType<typeof createRemoteJWKSet> {
   return keys;
 }
 
+function logAuthDiagnostic(
+  status: "unconfigured" | "rejected" | "accepted",
+  reason: string,
+  details: Record<string, unknown> = {},
+): void {
+  console.info(
+    "mcp_auth",
+    JSON.stringify({ status, reason, ...details }),
+  );
+}
+
+function authFailureReason(error: unknown): string {
+  if (!(error instanceof Error)) return "token_verification_failed";
+  switch (error.name) {
+    case "JWTExpired":
+      return "expired";
+    case "JWTClaimValidationFailed":
+      return "claim_validation_failed";
+    case "JWSSignatureVerificationFailed":
+      return "signature_verification_failed";
+    case "JWKSTimeout":
+      return "jwks_timeout";
+    default:
+      return "token_verification_failed";
+  }
+}
+
 export async function verifyAccessToken(
   _request: Request,
   bearerToken?: string,
@@ -51,6 +78,12 @@ export async function verifyAccessToken(
     !config.auth0JwksUrl ||
     config.auth0AllowedSubjects.length === 0
   ) {
+    logAuthDiagnostic("unconfigured", "missing_runtime_config", {
+      issuerConfigured: Boolean(config.auth0Issuer),
+      audienceConfigured: Boolean(config.auth0Audience),
+      jwksConfigured: Boolean(config.auth0JwksUrl),
+      allowedSubjectCount: config.auth0AllowedSubjects.length,
+    });
     return undefined;
   }
 
@@ -66,27 +99,41 @@ export async function verifyAccessToken(
     );
     const subject = typeof payload.sub === "string" ? payload.sub : "";
     const expiresAt = payload.exp;
+    const claimChecks = {
+      subjectPresent: Boolean(subject),
+      unexpired:
+        expiresAt !== undefined &&
+        expiresAt > Math.floor(Date.now() / 1000),
+      allowedSubject: config.auth0AllowedSubjects.includes(subject),
+      resourceMatch: resourceMatches(payload, config.mcpResourceUrl),
+    };
     if (
-      !subject ||
-      expiresAt === undefined ||
-      expiresAt <= Math.floor(Date.now() / 1000) ||
-      !config.auth0AllowedSubjects.includes(subject) ||
-      !resourceMatches(payload, config.mcpResourceUrl)
+      !claimChecks.subjectPresent ||
+      !claimChecks.unexpired ||
+      !claimChecks.allowedSubject ||
+      !claimChecks.resourceMatch
     ) {
+      logAuthDiagnostic("rejected", "claim_validation_failed", claimChecks);
       return undefined;
     }
+
+    const scopes = scopesFromPayload(payload);
+    logAuthDiagnostic("accepted", "jwt_verified", {
+      scopeWritePresent: scopes.includes("commands:write"),
+    });
     return {
       token: bearerToken,
       clientId:
         typeof payload.azp === "string" && payload.azp
           ? payload.azp
           : subject,
-      scopes: scopesFromPayload(payload),
+      scopes,
       expiresAt,
       resource: new URL(config.mcpResourceUrl),
       extra: { sub: subject },
     };
-  } catch {
+  } catch (error) {
+    logAuthDiagnostic("rejected", authFailureReason(error));
     return undefined;
   }
 }
