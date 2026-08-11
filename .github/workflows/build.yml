@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - agent/selfrun-v0.1.0
+      - agent/selfrun-command-bridge-builder
       - work/updateable-apk
     tags:
       - 'v*'
@@ -31,10 +32,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
+      - name: Command bridge checks
+        working-directory: command-bridge
+        run: |
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm test
       - name: Static SelfRun policy checks
         shell: bash
         run: |
           set -euo pipefail
+          BRIDGE=command-bridge
           MANIFEST=app/src/main/AndroidManifest.xml
           HOST=app/src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java
           WEB=app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
@@ -56,6 +64,20 @@ jobs:
           ICON_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher.xml
           ICON_ROUND_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher_round.xml
           test "$(grep -c 'android:screenOrientation=' "$MANIFEST" || true)" -eq 0
+          test -s "$BRIDGE/package.json"
+          test -s "$BRIDGE/package-lock.json"
+          test -s "$BRIDGE/schema.sql"
+          grep -q 'save_selfrun_command' "$BRIDGE/src/mcp.ts"
+          grep -q 'securitySchemes' "$BRIDGE/src/mcp.ts"
+          grep -q 'commands:write' "$BRIDGE/src/mcp.ts"
+          grep -q 'SELF_RUN_ANDROID_READ_TOKEN' "$BRIDGE/src/config.ts"
+          grep -q 'timingSafeEqual' "$BRIDGE/src/android-auth.ts"
+          grep -q 'no-store' "$BRIDGE/src/http.ts"
+          grep -q 'https' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunCommandBridgeClient.java
+          grep -q 'setInstanceFollowRedirects(false)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunCommandBridgeClient.java
+          grep -q 'MessageDigest' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunCommandBridgeClient.java
+          grep -q '0.1.0-dev6' app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java
+          ! grep -R -n 'SELF_RUN_ANDROID_READ_TOKEN=[A-Za-z0-9]' app command-bridge/src command-bridge/api
           grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' "$MANIFEST"
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
@@ -117,6 +139,8 @@ jobs:
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build unsigned release APK
+        env:
+          SELF_RUN_ANDROID_READ_TOKEN: ''
         run: gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
       - name: Align and verify unsigned release APK
         shell: bash
@@ -124,14 +148,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev6-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='7'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.1.0'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='8'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.1.0-dev6'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -139,9 +163,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.1.0-unsigned
+          name: chatgpt-selfrun-android-v0.1.0-dev6-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev6-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt

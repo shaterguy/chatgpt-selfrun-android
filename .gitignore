@@ -4,5 +4,6 @@ local.properties
 *.iml
 /build/
 app/build/
+command-bridge/node_modules/
 *.apk
 *.aab
