@@ -41,12 +41,29 @@ public class SelfRunDomTest {
         String script = SelfRunDom.prepareInitialContext(
                 "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_CHAT, "SR-1");
         assertTrue(script.contains("requestedMode="));
+        assertTrue(script.contains("modeCandidates"));
+        assertTrue(script.contains("modeSelected"));
+        assertTrue(script.contains("mode.click()"));
+        assertTrue(script.contains("aria-pressed"));
         assertTrue(script.contains("currentMode"));
-        assertTrue(script.contains("modeTriggerFound"));
+        assertTrue(script.contains("modeFound"));
         assertTrue(script.contains("modeReadback"));
         assertTrue(script.contains("if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기'"));
         assertFalse(script.contains("sol|terra|luna"));
         assertFalse(script.contains("reasoningDiagnostics"));
+    }
+
+    @Test
+    public void bootstrapUsesRequestedTopSwitchButtonForBothModes() {
+        String chat = SelfRunDom.prepareInitialContext(
+                "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_CHAT, "SR-chat");
+        String work = SelfRunDom.prepareInitialContext(
+                "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_WORK, "SR-work");
+        assertTrue(chat.contains("['chat','채팅']"));
+        assertTrue(work.contains("['work','작업']"));
+        assertTrue(chat.contains("[role=\"tab\"]"));
+        assertTrue(chat.contains("modeSelected"));
+        assertFalse(chat.contains("triggerCandidates"));
     }
 
     @Test
