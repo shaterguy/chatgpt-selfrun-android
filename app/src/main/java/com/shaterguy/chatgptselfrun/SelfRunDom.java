@@ -29,6 +29,7 @@ final class SelfRunDom {
                 + composer() + "if(!composer)return result('UI_WAIT','프로젝트 새 대화 입력창 대기',diagnostics);"
                 + "return result('READY','프로젝트 새 대화 화면 확인',{...diagnostics,composer:true});})()";
     }
+
     static String sendInitial(String projectUrl, String prompt, String runId) {
         String project = q(SelfRunScript.projectId(projectUrl));
         String expected = q(prompt);
@@ -40,7 +41,7 @@ final class SelfRunDom {
                 + assistantSnapshot()
                 + durableMarkerRead(marker)
                 + "if(conv&&present)return result('CONFIRMED','첫 요청과 새 conversation 확인',{conversationUrl:location.href,assistantKey});"
-                + "if(conv&&prior)return result('SUBMITTED','새 conversation URL 생성 후 첫 요청 DOM 확인 대기');"
+                + "if(conv&&prior)return result('CONFIRMED','새 conversation URL과 제출 표식 확인',{conversationUrl:location.href,assistantKey});"
                 + "if(conv)return result('EXISTING_CONVERSATION','제출 전에 기존 conversation으로 이동했습니다.');"
                 + "if(prior)return result('SUBMITTED','첫 요청 제출 확인 대기');"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
