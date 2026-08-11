@@ -171,6 +171,63 @@ function normalizeMcpRequest(request: Request, body: string): Request {
   return normalized;
 }
 
+const MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version";
+const MCP_PROTOCOL_VERSION_META_KEY =
+  "io.modelcontextprotocol/protocolVersion";
+const FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasModernProtocolEnvelopeClaim(body: unknown): boolean {
+  if (!isRecord(body) || !isRecord(body.params)) return false;
+  const meta = body.params._meta;
+  return isRecord(meta) &&
+    Object.prototype.hasOwnProperty.call(meta, MCP_PROTOCOL_VERSION_META_KEY);
+}
+
+function isClaimlessRequestMessage(body: unknown): boolean {
+  if (!isRecord(body) || typeof body.method !== "string") return false;
+  if (body.method === "initialize") return false;
+  if (!Object.prototype.hasOwnProperty.call(body, "id")) return false;
+  return !hasModernProtocolEnvelopeClaim(body);
+}
+
+function hasModernProtocolVersionHeader(request: Request): boolean {
+  const protocolVersion = request.headers
+    .get(MCP_PROTOCOL_VERSION_HEADER)
+    ?.trim();
+  return (
+    protocolVersion !== undefined &&
+    /^\d{4}-\d{2}-\d{2}$/.test(protocolVersion) &&
+    protocolVersion >= FIRST_MODERN_PROTOCOL_VERSION
+  );
+}
+
+function normalizeClaimlessLegacyProtocolHeader(
+  request: Request,
+  body: string,
+  parsedBody: unknown,
+): Request {
+  if (
+    !isClaimlessRequestMessage(parsedBody) ||
+    !hasModernProtocolVersionHeader(request)
+  ) {
+    return request;
+  }
+
+  const headers = new Headers(request.headers);
+  headers.delete(MCP_PROTOCOL_VERSION_HEADER);
+  const normalized = new Request(request.url, {
+    method: "POST",
+    headers,
+    body,
+  }) as Request & { auth?: AuthInfo };
+  normalized.auth = (request as Request & { auth?: AuthInfo }).auth;
+  return normalized;
+}
+
 const MCP_NAME_HEADER_SOURCES = {
   "tools/call": "name",
   "prompts/get": "name",
@@ -252,7 +309,6 @@ async function handleMcpRequest(request: Request): Promise<Response> {
   }
 
   const body = await request.text();
-  const normalized = normalizeMcpRequest(request, body);
   const authInfo = (request as Request & { auth?: AuthInfo }).auth;
   let parsedBody: unknown;
   try {
@@ -261,11 +317,18 @@ async function handleMcpRequest(request: Request): Promise<Response> {
     parsedBody = undefined;
   }
 
-  if (await isLegacyRequest(normalized, parsedBody)) {
-    return handleLegacyRequest(normalized, authInfo);
+  const normalized = normalizeMcpRequest(request, body);
+  const compatibilityNormalized = normalizeClaimlessLegacyProtocolHeader(
+    normalized,
+    body,
+    parsedBody,
+  );
+
+  if (await isLegacyRequest(compatibilityNormalized, parsedBody)) {
+    return handleLegacyRequest(compatibilityNormalized, authInfo);
   }
   const modernRequest = normalizeModernRequestHeaders(
-    normalized,
+    compatibilityNormalized,
     body,
     parsedBody,
   );
