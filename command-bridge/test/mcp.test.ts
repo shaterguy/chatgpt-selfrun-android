@@ -1,4 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const testMocks = vi.hoisted(() => ({
+  verifyAccessToken: vi.fn(),
+  insertCommand: vi.fn(),
+  authInfo: {
+    token: "test-token",
+    clientId: "test-client",
+    scopes: ["commands:write"],
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    resource: new URL("https://selfrun-command-bridge.vercel.app"),
+  },
+}));
+
+vi.mock("../src/auth.js", () => ({
+  verifyAccessToken: testMocks.verifyAccessToken,
+  oauthChallenge: (
+    message: string,
+    error: "invalid_token" | "insufficient_scope" = "insufficient_scope",
+  ) => ({
+    content: [{ type: "text", text: message }],
+    isError: true,
+    _meta: {
+      "mcp/www_authenticate": [
+        `Bearer resource_metadata="https://selfrun-command-bridge.vercel.app/.well-known/oauth-protected-resource", error="${error}"`,
+      ],
+    },
+  }),
+}));
+
+vi.mock("../src/db.js", () => ({
+  insertCommand: testMocks.insertCommand,
+}));
 
 import { handler } from "../src/mcp.js";
 
@@ -13,7 +45,36 @@ function mcpRequest(accept: string, body: unknown): Request {
   });
 }
 
+function authenticatedMcpRequest(
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+): Request {
+  return new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: "Bearer test-token",
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("SelfRun MCP transport negotiation", () => {
+  beforeEach(() => {
+    testMocks.verifyAccessToken.mockReset();
+    testMocks.verifyAccessToken.mockImplementation(
+      async (_request: Request, bearerToken?: string) =>
+        bearerToken === "test-token" ? testMocks.authInfo : undefined,
+    );
+    testMocks.insertCommand.mockReset();
+    testMocks.insertCommand.mockResolvedValue({
+      commandId: "verified-command",
+      savedAt: "2026-08-11T00:00:00.000Z",
+      hash: "verified-hash",
+    });
+  });
   it("accepts a JSON-only client and returns a JSON tools/list response", async () => {
     const response = await handler(
       mcpRequest("application/json", {
@@ -282,4 +343,72 @@ describe("SelfRun MCP transport negotiation", () => {
 
     expect(response.status).toBe(400);
   });
+  it("passes verified auth context through the modern handler path", async () => {
+    const response = await handler(
+      authenticatedMcpRequest(
+        {
+          jsonrpc: "2.0",
+          id: 10,
+          method: "tools/call",
+          params: {
+            name: "save_selfrun_command",
+            arguments: { command: "modern authenticated command" },
+            _meta: {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientCapabilities": {},
+  "io.modelcontextprotocol/clientInfo": {
+    name: "test-client",
+    version: "1.0.0",
+  },
+},
+          },
+        },
+        { "MCP-Protocol-Version": "2026-07-28" },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.result.isError).not.toBe(true);
+    expect(payload.result.structuredContent).toMatchObject({
+      command_id: "verified-command",
+    });
+    expect(testMocks.insertCommand).toHaveBeenCalledWith(
+      "modern authenticated command",
+      expect.any(String),
+    );
+  });
+
+  it("passes verified auth context through the claim-less legacy path", async () => {
+    const response = await handler(
+      authenticatedMcpRequest(
+        {
+          jsonrpc: "2.0",
+          id: 11,
+          method: "tools/call",
+          params: {
+            name: "save_selfrun_command",
+            arguments: { command: "legacy authenticated command" },
+          },
+        },
+        {
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "save_selfrun_command",
+          "MCP-Protocol-Version": "2026-07-28",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.result.isError).not.toBe(true);
+    expect(payload.result.structuredContent).toMatchObject({
+      command_id: "verified-command",
+    });
+    expect(testMocks.insertCommand).toHaveBeenCalledWith(
+      "legacy authenticated command",
+      expect.any(String),
+    );
+  });
+
 });
