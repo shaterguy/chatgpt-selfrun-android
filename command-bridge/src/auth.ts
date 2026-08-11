@@ -17,11 +17,6 @@ function scopesFromPayload(payload: JWTPayload): string[] {
       scopes.add(scope);
     }
   }
-  if (Array.isArray(payload.permissions)) {
-    for (const permission of payload.permissions) {
-      if (typeof permission === "string" && permission) scopes.add(permission);
-    }
-  }
   return [...scopes];
 }
 

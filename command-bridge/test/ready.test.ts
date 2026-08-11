@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testMocks = vi.hoisted(() => ({ probeBlob: vi.fn() }));
 
@@ -12,10 +12,52 @@ describe("SelfRun readiness contract", () => {
     testMocks.probeBlob.mockReset();
   });
 
+  afterEach(() => {
+    delete process.env.SELF_RUN_ANDROID_READ_TOKEN;
+  });
+
   it("requires the Android bearer token before probing Blob", async () => {
     const response = await readyResponse(undefined);
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toBe("Bearer");
+    expect(testMocks.probeBlob).not.toHaveBeenCalled();
+  });
+
+  it("returns the same unauthorized response for an invalid configured bearer", async () => {
+    const response = await readyResponse("Bearer invalid");
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+    await expect(response.json()).resolves.toEqual({
+      service: "selfrun-command-bridge",
+      status: "error",
+      error: "unauthorized",
+    });
+    expect(testMocks.probeBlob).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal missing token configuration to an anonymous caller", async () => {
+    delete process.env.SELF_RUN_ANDROID_READ_TOKEN;
+    const response = await readyResponse(undefined);
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+    await expect(response.json()).resolves.toEqual({
+      service: "selfrun-command-bridge",
+      status: "error",
+      error: "unauthorized",
+    });
+    expect(testMocks.probeBlob).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal missing token configuration to an invalid bearer caller", async () => {
+    delete process.env.SELF_RUN_ANDROID_READ_TOKEN;
+    const response = await readyResponse("Bearer invalid");
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+    await expect(response.json()).resolves.toEqual({
+      service: "selfrun-command-bridge",
+      status: "error",
+      error: "unauthorized",
+    });
     expect(testMocks.probeBlob).not.toHaveBeenCalled();
   });
 
