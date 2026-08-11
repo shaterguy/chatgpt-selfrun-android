@@ -5,30 +5,33 @@
 ## Production endpoints
 
 - GET /api/health
+- GET /api/ready
 - GET /api/selfrun/latest
-- POST /mcp/<capability>
+- POST /mcp
+- GET /.well-known/oauth-protected-resource
 
-정확한 고엔트로피 capability path만 MCP endpoint로 동작합니다. `/mcp`, 잘못된 capability와 `/api/mcp`는 도구나 인증 구조를 알리지 않는 404입니다. Android 최신 명령 조회는 `SELF_RUN_ANDROID_READ_TOKEN` Bearer token으로 별도 보호됩니다.
+/mcp는 Auth0 OAuth 2.1과 commands:write scope로 보호됩니다. 공개 health는 상수비용 liveness만 확인하고, /api/ready는 Android Bearer token으로 보호된 Blob metadata readiness를 제공합니다. Android 최신 명령 조회는 SELF_RUN_ANDROID_READ_TOKEN Bearer token으로 별도 보호됩니다.
 
 ## Required environment variables
 
 ### Vercel
 
 - SELF_RUN_ANDROID_READ_TOKEN
-- SELF_RUN_MCP_CAPABILITY: 32바이트 base64url 난수
-- Vercel Blob store의 project-scoped OIDC 설정 (`VERCEL_OIDC_TOKEN`, `BLOB_STORE_ID`)
+- AUTH0_ISSUER
+- AUTH0_AUDIENCE
+- AUTH0_ALLOWED_SUB
+- 선택: AUTH0_JWKS_URL, MCP_RESOURCE_URL
+- Vercel Blob store의 project-scoped OIDC 설정 (VERCEL_OIDC_TOKEN, BLOB_STORE_ID)
 
 실제 값은 저장소나 로그에 기록하지 않습니다.
 
 ## Local commands
 
-~~~text
-npm ci
-npm run typecheck
-npm test
-~~~
+    npm ci
+    npm run typecheck
+    npm test
 
-Vercel Blob의 `selfrun/latest-command.json`만 사용합니다. 저장은 private same-path overwrite이며 읽기는 `useCache: false`로 origin에서 최신 값을 확인합니다.
+Vercel Blob의 selfrun/latest-command.json만 사용합니다. 저장은 private same-path overwrite이며 읽기는 useCache: false로 origin에서 최신 값을 확인합니다. readiness는 명령 본문을 읽지 않고 metadata head만 호출합니다.
 
 ## Android development build
 

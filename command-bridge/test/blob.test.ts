@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const testMocks = vi.hoisted(() => ({
   get: vi.fn(),
+  head: vi.fn(),
   put: vi.fn(),
 }));
 
@@ -10,6 +11,7 @@ vi.mock("@vercel/blob", () => testMocks);
 import {
   LATEST_COMMAND_PATHNAME,
   latestCommand,
+  probeBlob,
   saveLatestCommand,
 } from "../src/blob.js";
 import { commandHash, MAX_COMMAND_BYTES } from "../src/command.js";
@@ -17,7 +19,15 @@ import { commandHash, MAX_COMMAND_BYTES } from "../src/command.js";
 describe("SelfRun latest Blob slot", () => {
   beforeEach(() => {
     testMocks.get.mockReset();
+    testMocks.head.mockReset();
     testMocks.put.mockReset();
+  });
+
+  it("checks readiness with Blob metadata without reading the command body", async () => {
+    testMocks.head.mockResolvedValueOnce({ etag: "etag" });
+    await expect(probeBlob()).resolves.toBe("ok");
+    expect(testMocks.head).toHaveBeenCalledWith(LATEST_COMMAND_PATHNAME);
+    expect(testMocks.get).not.toHaveBeenCalled();
   });
 
   it("preserves complex command bytes and uses the fixed private overwrite path", async () => {

@@ -1,4 +1,4 @@
-import { get, put } from "@vercel/blob";
+import { BlobNotFoundError, get, head, put } from "@vercel/blob";
 
 import {
   commandHash,
@@ -66,6 +66,12 @@ export async function latestCommand(): Promise<LatestCommandRecord | null> {
   return validateRecord(await new Response(result.stream).json());
 }
 
-export async function probeBlob(): Promise<void> {
-  await latestCommand();
+export async function probeBlob(): Promise<"ok" | "empty"> {
+  try {
+    await head(LATEST_COMMAND_PATHNAME);
+    return "ok";
+  } catch (error) {
+    if (error instanceof BlobNotFoundError) return "empty";
+    throw error;
+  }
 }

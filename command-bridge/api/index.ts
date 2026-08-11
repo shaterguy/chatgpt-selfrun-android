@@ -12,7 +12,10 @@ export default function handler(
       service: "selfrun-command-bridge",
       status: "ok",
       endpoints: {
+        mcp: "/mcp",
+        oauthProtectedResource: "/.well-known/oauth-protected-resource",
         health: "/api/health",
+        ready: "/api/ready",
         latest: "/api/selfrun/latest",
       },
     },

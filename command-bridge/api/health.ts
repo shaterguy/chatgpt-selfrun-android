@@ -7,5 +7,5 @@ export default async function handler(
   _request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  await writeWebResponse(response, await healthResponse());
+  await writeWebResponse(response, healthResponse());
 }
