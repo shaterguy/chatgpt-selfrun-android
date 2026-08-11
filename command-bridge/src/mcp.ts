@@ -456,5 +456,6 @@ async function handleMcpRequest(request: Request): Promise<Response> {
 
 export const handler = withMcpAuth(handleMcpRequest, verifyAccessToken, {
   required: false,
+  requiredScopes: [WRITE_SCOPE],
   resourceUrl: config.mcpResourceUrl,
 });
