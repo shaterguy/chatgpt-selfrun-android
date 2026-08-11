@@ -3,8 +3,11 @@ name: Build SelfRun APK
 on:
   push:
     branches:
+      - main
       - agent/selfrun-v0.1.0
       - work/updateable-apk
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -45,9 +48,27 @@ jobs:
           HISTORY=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryActivity.java
           LOGMENU=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogMenuActivity.java
           LOGS=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogsActivity.java
+          ICON_FOREGROUND=app/src/main/res/drawable/ic_launcher_foreground.xml
+          ICON_MONOCHROME=app/src/main/res/drawable/ic_launcher_monochrome.xml
+          ICON_V26=app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          ICON_ROUND_V26=app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          ICON_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher.xml
+          ICON_ROUND_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher_round.xml
           test "$(grep -c 'android:screenOrientation=' "$MANIFEST" || true)" -eq 0
           grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' "$MANIFEST"
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
+          grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
+          grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST"
+          test -s "$ICON_FOREGROUND"
+          test -s "$ICON_MONOCHROME"
+          test -s "$ICON_V26"
+          test -s "$ICON_ROUND_V26"
+          test -s "$ICON_V33"
+          test -s "$ICON_ROUND_V33"
+          grep -q '<adaptive-icon' "$ICON_V26"
+          grep -q '<adaptive-icon' "$ICON_ROUND_V26"
+          grep -q '<monochrome android:drawable="@drawable/ic_launcher_monochrome"' "$ICON_V33"
+          grep -q '<monochrome android:drawable="@drawable/ic_launcher_monochrome"' "$ICON_ROUND_V33"
           grep -q 'SelfRunNewActivity' "$MANIFEST"
           grep -q 'SelfRunLogMenuActivity' "$MANIFEST"
           ! grep -q 'SCHEDULE_EXACT_ALARM' "$MANIFEST"
@@ -93,14 +114,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev6-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='6'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.1.0-dev6'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='7'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.1.0'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -108,9 +129,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.1.0-dev6-unsigned
+          name: chatgpt-selfrun-android-v0.1.0-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-dev6-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.1.0-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt
