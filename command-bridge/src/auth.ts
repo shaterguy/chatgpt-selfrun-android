@@ -1,6 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AuthInfo, CallToolResult } from "@modelcontextprotocol/server";
 
 import { getRuntimeConfig } from "./config.js";
 
