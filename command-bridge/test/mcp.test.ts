@@ -86,4 +86,39 @@ describe("SelfRun MCP transport negotiation", () => {
       "application/json",
     );
   });
+
+  it("serves the v2 modern envelope with a JSON response", async () => {
+    const response = await handler(
+      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "Mcp-Method": "server/discover",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "server/discover",
+          params: {
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "test-client",
+                version: "1.0.0",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain(
+      "application/json",
+    );
+    const payload = await response.json();
+    expect(payload.result.supportedVersions).toContain("2026-07-28");
+  });
 });
