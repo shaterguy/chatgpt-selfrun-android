@@ -95,6 +95,7 @@ describe("SelfRun MCP transport negotiation", () => {
           Accept: "application/json",
           "Content-Type": "application/json",
           "Mcp-Method": "server/discover",
+          "MCP-Protocol-Version": "2026-07-28",
         },
         body: JSON.stringify({
           jsonrpc: "2.0",
@@ -201,6 +202,67 @@ describe("SelfRun MCP transport negotiation", () => {
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 7,
+          method: "tools/call",
+          params: {
+            name: "save_selfrun_command",
+            arguments: { command: "test command" },
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "test-client",
+                version: "1.0.0",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("downgrades a claim-less modern protocol header to the legacy path", async () => {
+    const response = await handler(
+      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2026-07-28",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 8,
+          method: "tools/call",
+          params: {
+            name: "save_selfrun_command",
+            arguments: { command: "test command" },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.result.isError).toBe(true);
+    expect(payload.result._meta["mcp/www_authenticate"][0]).toContain(
+      "resource_metadata=",
+    );
+  });
+
+  it("preserves a modern header/body protocol-version mismatch", async () => {
+    const response = await handler(
+      new Request("https://selfrun-command-bridge.vercel.app/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 9,
           method: "tools/call",
           params: {
             name: "save_selfrun_command",
