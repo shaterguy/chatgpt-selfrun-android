@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/selfrun-v0.1.0
+      - work/updateable-apk
   workflow_dispatch:
 
 permissions:
