@@ -70,7 +70,8 @@ final class SelfRunDom {
     /**
      * Continuation prompts are intentionally identical across turns. A previous matching user turn
      * must therefore never count as confirmation for the current turn. The per-turn marker stores
-     * the matching-user baseline before the click and confirms only after that count increases.
+     * the matching-user count and the pre-click assistant baseline. Once that durable click marker
+     * exists, the relay advances without requiring ChatGPT to echo the user turn back into the DOM.
      */
     static String sendTurn(String conversationUrl, String prompt, String runId, int turn) {
         String expected = q(prompt);
@@ -79,7 +80,7 @@ final class SelfRunDom {
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
                 + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const matching=users.filter(t=>t===canonical(expected)).length;"
                 + assistantSnapshot() + durableMarkerRead(marker)
-                + "if(prior){let markerData=null;try{markerData=JSON.parse(prior);}catch(_){}if(markerData&&Number.isFinite(Number(markerData.baseline))){const baseline=Number(markerData.baseline);if(matching>baseline)return JSON.stringify({status:'CONFIRMED',detail:'현재 사용자 턴 확인',url:location.href,assistantKey});return result('SUBMITTED','현재 사용자 턴 DOM 확인 대기');}return result('SUBMITTED','이전 버전 제출 표식 확인 대기');}"
+                + "if(prior){let markerData=null;try{markerData=JSON.parse(prior);}catch(_){}if(markerData&&Number.isFinite(Number(markerData.baseline))){const baseline=Number(markerData.baseline);const assistantBaselineKey=String(markerData.assistantBaselineKey||'');if(assistantBaselineKey)return JSON.stringify({status:'CONFIRMED',detail:matching>baseline?'현재 사용자 턴 확인':'전송 클릭 표식으로 현재 턴 인계',url:location.href,assistantKey:assistantBaselineKey});if(matching>baseline)return JSON.stringify({status:'CONFIRMED',detail:'현재 사용자 턴 확인',url:location.href,assistantKey});return result('SUBMITTED','이전 버전 제출 표식 DOM 확인 대기');}return result('SUBMITTED','이전 버전 제출 표식 확인 대기');}"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
                 + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
                 + durableMarkerWriteWithBaseline(marker, "matching")
@@ -129,7 +130,7 @@ final class SelfRunDom {
     }
 
     private static String durableMarkerWriteWithBaseline(String marker, String baselineExpression) {
-        return "const markerKey2=" + marker + ",v=JSON.stringify({at:Date.now(),url:location.href,baseline:" + baselineExpression + "});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}";
+        return "const markerKey2=" + marker + ",v=JSON.stringify({at:Date.now(),url:location.href,baseline:" + baselineExpression + ",assistantBaselineKey:typeof assistantKey==='string'?assistantKey:''});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}";
     }
 
     private static String q(String value) { return SelfRunScript.quote(value); }
