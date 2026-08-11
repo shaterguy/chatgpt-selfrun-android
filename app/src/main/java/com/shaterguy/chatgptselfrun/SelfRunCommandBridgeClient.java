@@ -112,16 +112,32 @@ final class SelfRunCommandBridgeClient {
             String command = json.optString("command", "");
             String savedAt = json.optString("saved_at", "");
             String serverHash = json.optString("hash", "").toLowerCase(Locale.US);
-            if (command.isEmpty() || savedAt.isEmpty() || serverHash.isEmpty()) {
-                return Result.failure("브리지 응답에 필수 값이 없습니다.");
-            }
-            if (!serverHash.equals(sha256(command))) {
-                return Result.failure("브리지 명령 무결성 검증에 실패했습니다.");
-            }
-            return Result.success(command, savedAt);
+            return validatePayload(status, command, savedAt, serverHash);
         } catch (Exception error) {
             return Result.failure("브리지 응답을 해석할 수 없습니다.");
         }
+    }
+
+    static Result validatePayload(String status, String command, String savedAt, String serverHash) {
+        if ("empty".equals(status)) {
+            return Result.empty("저장된 최신 명령이 없습니다.");
+        }
+        if (!"ok".equals(status)) {
+            return Result.failure("브리지 응답 형식이 올바르지 않습니다.");
+        }
+        if (command == null || command.isEmpty()
+                || savedAt == null || savedAt.isEmpty()
+                || serverHash == null || serverHash.isEmpty()) {
+            return Result.failure("브리지 응답에 필수 값이 없습니다.");
+        }
+        try {
+            if (!serverHash.toLowerCase(Locale.US).equals(sha256(command))) {
+                return Result.failure("브리지 명령 무결성 검증에 실패했습니다.");
+            }
+        } catch (NoSuchAlgorithmException error) {
+            return Result.failure("브리지 명령 무결성 검증을 실행할 수 없습니다.");
+        }
+        return Result.success(command, savedAt);
     }
 
     static String commandForInput(String currentInput, Result result) {

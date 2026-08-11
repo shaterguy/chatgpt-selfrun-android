@@ -1,6 +1,5 @@
 package com.shaterguy.chatgptselfrun;
 
-import org.json.JSONObject;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -10,14 +9,10 @@ public class SelfRunCommandBridgeClientTest {
     @Test
     public void validResponsePreservesCommandAndVerifiesHash() throws Exception {
         String command = "한글\n```text\nquote=\\\"value\"\n```";
-        JSONObject response = new JSONObject()
-                .put("status", "ok")
-                .put("command", command)
-                .put("saved_at", "2026-08-12T00:00:00.000Z")
-                .put("hash", SelfRunCommandBridgeClient.sha256(command));
-
         SelfRunCommandBridgeClient.Result result =
-                SelfRunCommandBridgeClient.parseResponse(200, response.toString());
+                SelfRunCommandBridgeClient.validatePayload(
+                        "ok", command, "2026-08-12T00:00:00.000Z",
+                        SelfRunCommandBridgeClient.sha256(command));
 
         assertEquals(SelfRunCommandBridgeClient.Status.SUCCESS, result.status);
         assertEquals(command, result.command);
@@ -27,14 +22,10 @@ public class SelfRunCommandBridgeClientTest {
     @Test
     public void hashMismatchIsRejectedAndExistingInputIsPreserved() throws Exception {
         String existing = "기존 요구사항\n두 번째 줄";
-        JSONObject response = new JSONObject()
-                .put("status", "ok")
-                .put("command", "새 명령")
-                .put("saved_at", "2026-08-12T00:00:00.000Z")
-                .put("hash", SelfRunCommandBridgeClient.sha256("다른 명령"));
-
         SelfRunCommandBridgeClient.Result result =
-                SelfRunCommandBridgeClient.parseResponse(200, response.toString());
+                SelfRunCommandBridgeClient.validatePayload(
+                        "ok", "새 명령", "2026-08-12T00:00:00.000Z",
+                        SelfRunCommandBridgeClient.sha256("다른 명령"));
 
         assertEquals(SelfRunCommandBridgeClient.Status.FAILURE, result.status);
         assertEquals(existing, SelfRunCommandBridgeClient.commandForInput(existing, result));
@@ -58,7 +49,7 @@ public class SelfRunCommandBridgeClientTest {
     public void emptyResponseDoesNotReplaceExistingInput() {
         String existing = "사용자가 입력한 명령";
         SelfRunCommandBridgeClient.Result result =
-                SelfRunCommandBridgeClient.parseResponse(200, "{\"status\":\"empty\"}");
+                SelfRunCommandBridgeClient.validatePayload("empty", "", "", "");
 
         assertEquals(SelfRunCommandBridgeClient.Status.EMPTY, result.status);
         assertEquals(existing, SelfRunCommandBridgeClient.commandForInput(existing, result));
