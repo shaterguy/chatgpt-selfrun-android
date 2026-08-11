@@ -77,7 +77,7 @@ final class SelfRunCommandBridgeClient {
             if (statusCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
                 return Result.failure("브리지 인증에 실패했습니다.");
             }
-            if (statusCode == HttpURLConnection.HTTP_SERVICE_UNAVAILABLE) {
+            if (statusCode == 503) {
                 return Result.failure("브리지가 아직 구성되지 않았습니다.");
             }
             if (statusCode < 200 || statusCode >= 300) {
