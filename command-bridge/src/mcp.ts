@@ -171,6 +171,62 @@ function normalizeMcpRequest(request: Request, body: string): Request {
   return normalized;
 }
 
+const MCP_NAME_HEADER_SOURCES = {
+  "tools/call": "name",
+  "prompts/get": "name",
+  "resources/read": "uri",
+} as const;
+
+function normalizeModernRequestHeaders(
+  request: Request,
+  body: string,
+  parsedBody: unknown,
+): Request {
+  if (
+    parsedBody === null ||
+    typeof parsedBody !== "object" ||
+    Array.isArray(parsedBody)
+  ) {
+    return request;
+  }
+
+  const message = parsedBody as {
+    method?: unknown;
+    params?: unknown;
+  };
+  const headers = new Headers(request.headers);
+
+  if (!headers.has("Mcp-Method") && typeof message.method === "string") {
+    headers.set("Mcp-Method", message.method);
+  }
+
+  const sourceField =
+    typeof message.method === "string"
+      ? MCP_NAME_HEADER_SOURCES[
+          message.method as keyof typeof MCP_NAME_HEADER_SOURCES
+        ]
+      : undefined;
+  const params =
+    message.params !== null &&
+    typeof message.params === "object" &&
+    !Array.isArray(message.params)
+      ? (message.params as Record<string, unknown>)
+      : undefined;
+  const sourceValue = sourceField === undefined ? undefined : params?.[sourceField];
+
+  if (!headers.has("Mcp-Name") && typeof sourceValue === "string") {
+    headers.set("Mcp-Name", sourceValue);
+  }
+
+  const normalized = new Request(request.url, {
+    method: "POST",
+    headers,
+    body,
+  }) as Request & { auth?: AuthInfo };
+  normalized.auth = (request as Request & { auth?: AuthInfo }).auth;
+  return normalized;
+}
+
 async function handleLegacyRequest(
   request: Request,
   authInfo?: AuthInfo,
@@ -198,11 +254,22 @@ async function handleMcpRequest(request: Request): Promise<Response> {
   const body = await request.text();
   const normalized = normalizeMcpRequest(request, body);
   const authInfo = (request as Request & { auth?: AuthInfo }).auth;
+  let parsedBody: unknown;
+  try {
+    parsedBody = JSON.parse(body);
+  } catch {
+    parsedBody = undefined;
+  }
 
-  if (await isLegacyRequest(normalized)) {
+  if (await isLegacyRequest(normalized, parsedBody)) {
     return handleLegacyRequest(normalized, authInfo);
   }
-  return modernHandler.fetch(normalized, { authInfo });
+  const modernRequest = normalizeModernRequestHeaders(
+    normalized,
+    body,
+    parsedBody,
+  );
+  return modernHandler.fetch(modernRequest, { authInfo });
 }
 
 export const handler = withMcpAuth(handleMcpRequest, verifyAccessToken, {
