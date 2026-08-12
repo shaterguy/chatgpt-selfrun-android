@@ -377,7 +377,7 @@ public final class SelfRunService extends Service {
         evaluationCount = saturatingIncrement(evaluationCount);
         runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase + ";trigger=" + trigger);
         active.evaluateJavascript(script, raw -> {
-            if (!isCurrentExecution(active, activeGeneration, activeRunId)) return;
+            if (!isCurrentExecution(active, activeGeneration, activeRunId) || isRateLimited()) return;
             evaluationInFlight = false;
             try {
                 JSONObject result = parse(raw);
@@ -793,6 +793,9 @@ public final class SelfRunService extends Service {
         rateLimitAttempt = Math.min(rateLimitAttempt + 1, RATE_LIMIT_DELAYS.length);
         long delay = RATE_LIMIT_DELAYS[rateLimitAttempt - 1];
         rateLimitedUntilElapsed = now + delay;
+        generation++;
+        evaluationInFlight = false;
+        domEvaluationPending = false;
         recoveryInProgress = false;
         resetPhaseClock();
         store.setStatus(reason + " · " + (delay / 1000L) + "초 동안 DOM 실행 중지");
