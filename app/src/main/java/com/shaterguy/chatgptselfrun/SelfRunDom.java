@@ -25,9 +25,9 @@ final class SelfRunDom {
                 + "const modeSelected=!!mode&&selectedState(mode);const modeLabel=mode?exactText(mode.innerText||'')||exactText(mode.getAttribute('aria-label')||''):'';const currentMode=modeOf(modeLabel);const modeExpanded=!!mode&&mode.getAttribute('aria-expanded')==='true';let action='',modeReadback=modeSelected&&currentMode===requestedMode;"
                 + "if(mode&&!modeSelected&&!modePrior){try{sessionStorage.setItem(modeKey,JSON.stringify({at:Date.now(),action:'select-mode'}));}catch(_){}mode.click();action='select-mode';modeReadback=false;}"
                 + "const diagnostics={requested:requestedMode,currentMode,modeCandidates:modeCandidates.length,modeFound:!!mode,modeLabel,modeSelected,modeExpanded,modeReadback,recentClick:!!modePrior,action};"
-                + "if(action)return result('UI_WAIT','모드 전환 반영 대기',diagnostics);if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기',diagnostics);try{sessionStorage.removeItem(modeKey);}catch(_){}"
+                + "if(action)return result('UI_WAIT','모드 전환 반영 대기',diagnostics);"
                 + composer() + "if(!composer)return result('UI_WAIT','프로젝트 새 대화 입력창 대기',diagnostics);"
-                + "return result('READY','프로젝트 새 대화 화면 확인',{...diagnostics,composer:true});})()";
+                + "try{sessionStorage.removeItem(modeKey);}catch(_){}return result('READY','프로젝트 새 대화 화면 확인',{...diagnostics,composer:true});})()";
     }
 
     static String sendInitial(String projectUrl, String prompt, String runId) {
