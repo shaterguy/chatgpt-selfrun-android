@@ -43,4 +43,22 @@ public class SelfRunPauseResumeTest {
         assertTrue(queueClear < webViewPause);
         assertTrue(generationAdvance < webViewPause);
     }
+
+    @Test
+    public void staleEvaluateGuardRunsBeforeSharedInFlightMutation() throws Exception {
+        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
+        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+        int method = text.indexOf("private void evaluate(String phase, String script)");
+        int nextMethod = text.indexOf("private void handleResult", method);
+        assertTrue(method >= 0 && nextMethod > method);
+        String body = text.substring(method, nextMethod);
+        int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
+        int staleGuard = body.indexOf("if (active != webView || activeGeneration != generation) return;", callback);
+        int clearInFlight = body.indexOf("evaluationInFlight = false;", callback);
+        int canRunGuard = body.indexOf("if (!canRun()) return;", callback);
+        assertTrue(callback >= 0);
+        assertTrue(staleGuard > callback);
+        assertTrue(clearInFlight > staleGuard);
+        assertTrue(canRunGuard > clearInFlight);
+    }
 }
