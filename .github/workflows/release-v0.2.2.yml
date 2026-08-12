@@ -1,0 +1,95 @@
+name: Verify and release SelfRun v0.2.2
+
+on:
+  push:
+    branches:
+      - main
+      - v0.2.2-rc1
+
+permissions:
+  contents: write
+
+jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android SDK and zstd
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Unit tests
+        run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Reconstruct and verify exact signed v0.2.2 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          SRC=app/build/outputs/apk/release/app-release-unsigned.apk
+          CANONICAL=chatgpt-selfrun-android-v0.2.2-canonical-unsigned.apk
+          APK=chatgpt-selfrun-android-v0.2.2.apk
+          gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
+          test -s "$SRC"
+          python3 tools/canonicalize_apk.py "$SRC" "$CANONICAL"
+          echo '5f0f5b41bd1580f4f8b335d75ef96e3b1c8365ebbf3cc9976f8196f86117ec7b  chatgpt-selfrun-android-v0.2.2-canonical-unsigned.apk' | sha256sum --check --strict
+          printf '%s' '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' | base64 --decode > signed.patch.zst
+          echo 'a83dfe3d78393543db7b90d8dbf74b7f6aed48bafa775cd4be8e7627cf277dfa  signed.patch.zst' | sha256sum --check --strict
+          zstd -d --patch-from="$CANONICAL" signed.patch.zst -o "$APK"
+          test "$(stat -c %s "$APK")" -eq 697859
+          echo '9273548aed901884f270888614690b7a81e043ec56084d36e06a790f57e045a9  chatgpt-selfrun-android-v0.2.2.apk' | sha256sum --check --strict
+          "$BT/aapt" dump badging "$APK" | tee BADGING.txt
+          grep -q "package: name='com.shaterguy.chatgptselfrun'" BADGING.txt
+          grep -q "versionCode='12'" BADGING.txt
+          grep -q "versionName='0.2.2'" BADGING.txt
+          java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs "$APK" | tee APKSIGNER.txt
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' APKSIGNER.txt
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' APKSIGNER.txt
+          grep -q 'Number of signers: 1' APKSIGNER.txt
+          grep -q 'Signer #1 certificate SHA-256 digest: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' APKSIGNER.txt
+          "$BT/zipalign" -c -v 4 "$APK"
+          unzip -t "$APK" >/dev/null
+          echo '9273548aed901884f270888614690b7a81e043ec56084d36e06a790f57e045a9  chatgpt-selfrun-android-v0.2.2.apk' > SHA256SUMS.txt
+      - name: Publish v0.2.2
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.2.2
+          APK=chatgpt-selfrun-android-v0.2.2.apk
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            mkdir -p existing-release
+            gh release download "$TAG" --pattern "$APK" --dir existing-release
+            echo '9273548aed901884f270888614690b7a81e043ec56084d36e06a790f57e045a9  existing-release/chatgpt-selfrun-android-v0.2.2.apk' | sha256sum --check --strict
+            exit 0
+          fi
+          cat > RELEASE_NOTES.md <<'EOF'
+          v0.2.1-dev2의 검증된 변경사항을 정식 버전으로 승격한 릴리스입니다.
+
+          - SELF_RUN_USER_ACTION_REQUIRED, SELF_RUN_PAUSE, 사용자 수동 일시정지를 WebView 보존형 일시정지로 통일했습니다.
+          - 재개 시 동일 WebView·동일 conversation에서 기존 SELF_RUN_CONTINUE 흐름을 유지합니다.
+          - 긴 명령어 입력창의 터치 스크롤과 편집 사용성을 개선했습니다.
+          - stale DOM callback이 공유 상태를 오염시키는 경합을 방지하는 보호 로직과 회귀 테스트를 보강했습니다.
+          - 기존 Work/Chat 모델·추론 전환 및 continuation 흐름은 유지합니다.
+          - versionName: 0.2.2 / versionCode: 12
+          - SelfRun bootstrap protocol: 0.1.0
+          - APK SHA-256: 9273548aed901884f270888614690b7a81e043ec56084d36e06a790f57e045a9
+          - 인증서 SHA-256: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe
+          EOF
+          gh release create "$TAG" "$APK" SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title 'v0.2.2' \
+            --notes-file RELEASE_NOTES.md \
+            --latest
