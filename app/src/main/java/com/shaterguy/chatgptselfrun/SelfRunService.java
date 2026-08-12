@@ -42,23 +42,33 @@ public final class SelfRunService extends Service {
     private static final long ASSISTANT_RESPONSE_TIMEOUT_MS = 12 * 60_000L;
     private static final long SUBMISSION_STALL_TIMEOUT_MS = 60_000L;
     private static final long DOM_WATCHDOG_MS = 15_000L;
-    private static final long DOM_EVENT_DEBOUNCE_MS = 180L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable stepRunnable = this::runStep;
+    private final Runnable watchdogRunnable = this::runDomWatchdog;
     private SelfRunStore store;
     private SelfRunRunLog runLog;
     private HeadlessWebViewHost host;
     private WebView webView;
     private WebMessagePort observerPort;
     private boolean evaluationInFlight;
+    private boolean domEvaluationPending;
     private boolean observerInstallInFlight;
+    private boolean observerHealthInFlight;
     private int generation;
     private int observerEpoch;
     private int rateLimitAttempt;
     private long rateLimitedUntilElapsed;
     private long evaluationCount;
+    private long observerMaintenanceEvaluationCount;
+    private long observerEventCount;
+    private long observerDuplicateEventCount;
+    private long watchdogCount;
+    private long watchdogRecoveryCount;
     private long submissionWaitStartedElapsed;
+    private String observerLease = "";
+    private String lastObserverState = "";
+    private String pendingEvaluationTrigger = "startup";
     private PowerManager.WakeLock wakeLock;
 
     @Override
@@ -131,7 +141,7 @@ public final class SelfRunService extends Service {
         updateWakeLockForState();
         if (webView != null) {
             ensureDomObserver();
-            scheduleStep(200L);
+            scheduleWatchdog();
             return;
         }
         launchWebView(target);
@@ -161,6 +171,7 @@ public final class SelfRunService extends Service {
                     invalidateDomObserverForNavigation();
                     generation++;
                     evaluationInFlight = false;
+                    domEvaluationPending = false;
                     handler.removeCallbacks(stepRunnable);
                     if (store.paused()) {
                         releaseWakeLock();
@@ -186,7 +197,7 @@ public final class SelfRunService extends Service {
                     store.setStatus("ChatGPT 화면 준비 확인 중");
                     runLog.record(store, "WEBVIEW_PAGE_FINISH", "progress=" + view.getProgress());
                     ensureDomObserver();
-                    scheduleStep(250L);
+                    scheduleWatchdog();
                 }
 
                 @Override
@@ -272,12 +283,17 @@ public final class SelfRunService extends Service {
     }
 
     private void runStep() {
-        if (!canRun() || webView == null || evaluationInFlight) return;
-        if (isRateLimited()) {
-            updateWakeLockForState();
-            scheduleStep(Math.max(250L, rateLimitedUntilElapsed - SystemClock.elapsedRealtime()));
+        if (!canRun() || webView == null) return;
+        if (evaluationInFlight) {
+            domEvaluationPending = true;
             return;
         }
+        if (isRateLimited()) {
+            updateWakeLockForState();
+            requestDomEvaluation(Math.max(250L, rateLimitedUntilElapsed - SystemClock.elapsedRealtime()), "rate_limit_expiry");
+            return;
+        }
+        domEvaluationPending = false;
         updateWakeLockForState();
         String actual = webView.getUrl();
         if (!routeAcceptable(actual)) {
@@ -341,55 +357,60 @@ public final class SelfRunService extends Service {
     private void evaluate(String phase, String script) {
         WebView active = webView;
         int activeGeneration = generation;
+        String trigger = pendingEvaluationTrigger;
         evaluationInFlight = true;
-        evaluationCount = evaluationCount == Long.MAX_VALUE ? Long.MAX_VALUE : evaluationCount + 1L;
-        runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase);
+        evaluationCount = saturatingIncrement(evaluationCount);
+        runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase + ";trigger=" + trigger);
         active.evaluateJavascript(script, raw -> {
             if (active != webView || activeGeneration != generation) return;
             evaluationInFlight = false;
             if (!canRun()) return;
-            JSONObject result = parse(raw);
-            String status = result.optString("status", "SCRIPT_ERROR");
-            String detail = result.optString("detail", "");
-            if (isWaitingStatus(status)) {
-                runLog.record(store, "DOM_WAIT", "phase=" + phase + ";status=" + status);
-            } else {
-                runLog.record(store, "DOM_RESULT", "phase=" + phase + ";status=" + status + ";detail=" + detail);
-            }
-            if (!"SCRIPT_ERROR".equals(status)) {
-                rateLimitAttempt = 0;
-                rateLimitedUntilElapsed = 0L;
-            }
-            if ("TARGET_ERROR".equals(status)) {
-                restoreCanonical("script");
-                return;
-            }
-            if ("AUTH_REQUIRED".equals(status)) {
-                pause("AUTH_REQUIRED", "ChatGPT 로그인이 필요합니다.");
-                return;
-            }
-            if ("EXISTING_CONVERSATION".equals(status)) {
-                restoreCanonical("unexpected_existing_conversation");
-                return;
-            }
-            if ("MARKER_FAILED".equals(status)) {
-                uiWait("중복 방지 표식 저장 재시도");
-                return;
-            }
-            if ("SUBMITTED".equals(status)) {
-                if (PHASE_BOOTSTRAP_SEND.equals(phase) && submissionWaitStartedElapsed == 0L)
-                    runLog.record(store, "BOOTSTRAP_SUBMITTED", "first_prompt");
-                submittedWait(detail.isEmpty() ? "제출 확인 대기" : detail);
-                return;
-            }
-            if (isWaitingStatus(status)) {
-                if ("STALE".equals(status)) {
-                    runLog.record(store, "ASSISTANT_BASELINE_WAIT", "previous_assistant");
+            try {
+                JSONObject result = parse(raw);
+                String status = result.optString("status", "SCRIPT_ERROR");
+                String detail = result.optString("detail", "");
+                if (isWaitingStatus(status)) {
+                    runLog.record(store, "DOM_WAIT", "phase=" + phase + ";status=" + status);
+                } else {
+                    runLog.record(store, "DOM_RESULT", "phase=" + phase + ";status=" + status + ";detail=" + detail);
                 }
-                uiWait(detail.isEmpty() ? status : detail);
-                return;
+                if (!"SCRIPT_ERROR".equals(status)) {
+                    rateLimitAttempt = 0;
+                    rateLimitedUntilElapsed = 0L;
+                }
+                if ("TARGET_ERROR".equals(status)) {
+                    restoreCanonical("script");
+                    return;
+                }
+                if ("AUTH_REQUIRED".equals(status)) {
+                    pause("AUTH_REQUIRED", "ChatGPT 로그인이 필요합니다.");
+                    return;
+                }
+                if ("EXISTING_CONVERSATION".equals(status)) {
+                    restoreCanonical("unexpected_existing_conversation");
+                    return;
+                }
+                if ("MARKER_FAILED".equals(status)) {
+                    uiWait("중복 방지 표식 저장 재시도");
+                    return;
+                }
+                if ("SUBMITTED".equals(status)) {
+                    if (PHASE_BOOTSTRAP_SEND.equals(phase) && submissionWaitStartedElapsed == 0L)
+                        runLog.record(store, "BOOTSTRAP_SUBMITTED", "first_prompt");
+                    submittedWait(detail.isEmpty() ? "제출 확인 대기" : detail);
+                    return;
+                }
+                if (isWaitingStatus(status)) {
+                    if ("STALE".equals(status)) {
+                        runLog.record(store, "ASSISTANT_BASELINE_WAIT", "previous_assistant");
+                    }
+                    uiWait(detail.isEmpty() ? status : detail);
+                    return;
+                }
+                handleResult(phase, status, result);
+            } finally {
+                drainPendingDomEvaluation();
             }
-            handleResult(phase, status, result);
         });
     }
 
@@ -546,7 +567,75 @@ public final class SelfRunService extends Service {
     }
 
     private void scheduleWatchdog() {
-        scheduleStep(DOM_WATCHDOG_MS);
+        handler.removeCallbacks(watchdogRunnable);
+        if (webView != null && canRun()) handler.postDelayed(watchdogRunnable, DOM_WATCHDOG_MS);
+    }
+
+    private void runDomWatchdog() {
+        if (!canRun() || webView == null) return;
+        if (isRateLimited()) {
+            scheduleWatchdog();
+            return;
+        }
+        watchdogCount = saturatingIncrement(watchdogCount);
+        if (observerPort == null || observerInstallInFlight || observerLease.isEmpty()) {
+            watchdogRecoveryCount = saturatingIncrement(watchdogRecoveryCount);
+            runLog.record(store, "DOM_WATCHDOG_RECOVERY", "count=" + watchdogCount + ";reason=observer_missing");
+            ensureDomObserver();
+            requestDomEvaluation(0L, "watchdog_observer_missing");
+            scheduleWatchdog();
+            return;
+        }
+        if (observerHealthInFlight) {
+            scheduleWatchdog();
+            return;
+        }
+
+        WebView active = webView;
+        int activeGeneration = generation;
+        int activeEpoch = observerEpoch;
+        String activeRunId = store.runId();
+        String activeLease = observerLease;
+        observerHealthInFlight = true;
+        observerMaintenanceEvaluationCount = saturatingIncrement(observerMaintenanceEvaluationCount);
+        runLog.record(store, "DOM_OBSERVER_HEALTH_EVALUATE",
+                "count=" + observerMaintenanceEvaluationCount + ";watchdog=" + watchdogCount);
+        active.evaluateJavascript(SelfRunDomObserver.health(activeLease), raw -> {
+            if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
+                    || !activeRunId.equals(store.runId()) || !activeLease.equals(observerLease)) return;
+            observerHealthInFlight = false;
+            if (!canRun()) return;
+            JSONObject health = parse(raw);
+            String status = health.optString("status", "SCRIPT_ERROR");
+            boolean alive = "ALIVE".equals(status)
+                    && activeLease.equals(health.optString("lease", ""))
+                    && health.optBoolean("port", false)
+                    && health.optBoolean("rootConnected", false);
+            if (!alive) {
+                watchdogRecoveryCount = saturatingIncrement(watchdogRecoveryCount);
+                runLog.record(store, "DOM_WATCHDOG_RECOVERY",
+                        "count=" + watchdogCount + ";reason=" + status.toLowerCase());
+                detachDomObserver("watchdog_" + status.toLowerCase());
+                ensureDomObserver();
+                requestDomEvaluation(0L, "watchdog_observer_recovery");
+                scheduleWatchdog();
+                return;
+            }
+
+            String pageState = health.optString("fingerprint", "");
+            long suppressed = health.optLong("suppressed", 0L);
+            if (!pageState.isEmpty() && !pageState.equals(lastObserverState)) {
+                watchdogRecoveryCount = saturatingIncrement(watchdogRecoveryCount);
+                lastObserverState = pageState;
+                runLog.record(store, "DOM_WATCHDOG_RECOVERY",
+                        "count=" + watchdogCount + ";reason=missed_state_event;suppressed=" + suppressed);
+                requestDomEvaluation(0L, "watchdog_missed_event");
+            } else {
+                runLog.record(store, "DOM_WATCHDOG_HEALTH",
+                        "count=" + watchdogCount + ";observer=alive;suppressed=" + suppressed);
+            }
+            scheduleWatchdog();
+        });
     }
 
     private void ensureDomObserver() {
@@ -554,6 +643,8 @@ public final class SelfRunService extends Service {
         if (active == null || !canRun() || isRateLimited() || observerPort != null || observerInstallInFlight) return;
         Uri targetOrigin = chatGptOrigin(active.getUrl());
         if (targetOrigin == null) {
+            watchdogRecoveryCount = saturatingIncrement(watchdogRecoveryCount);
+            requestDomEvaluation(0L, "observer_origin_recovery");
             scheduleWatchdog();
             return;
         }
@@ -561,9 +652,16 @@ public final class SelfRunService extends Service {
         int activeEpoch = ++observerEpoch;
         String activeRunId = store.runId();
         String token = UUID.randomUUID().toString();
+        String lease = activeRunId + ":" + activeGeneration + ":" + activeEpoch + ":" + UUID.randomUUID();
+        observerLease = lease;
+        lastObserverState = "";
         observerInstallInFlight = true;
-        active.evaluateJavascript(SelfRunDomObserver.install(token), raw -> {
-            if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch) return;
+        observerMaintenanceEvaluationCount = saturatingIncrement(observerMaintenanceEvaluationCount);
+        runLog.record(store, "DOM_OBSERVER_INSTALL_EVALUATE",
+                "count=" + observerMaintenanceEvaluationCount + ";generation=" + activeGeneration + ";epoch=" + activeEpoch);
+        active.evaluateJavascript(SelfRunDomObserver.install(token, lease), raw -> {
+            if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
+                    || !lease.equals(observerLease)) return;
             observerInstallInFlight = false;
             if (!canRun() || !activeRunId.equals(store.runId())) return;
             try {
@@ -575,21 +673,38 @@ public final class SelfRunService extends Service {
                     @Override
                     public void onMessage(WebMessagePort port, WebMessage message) {
                         if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
-                                || observerPort != port || !canRun() || !activeRunId.equals(store.runId())) return;
+                                || observerPort != port || !canRun() || !activeRunId.equals(store.runId())
+                                || !lease.equals(observerLease)) return;
                         String data = message == null ? "" : message.getData();
-                        if ("ready".equals(data)) {
-                            runLog.record(store, "DOM_OBSERVER_ATTACHED", "phase=" + store.phase());
-                            scheduleStep(100L);
-                        } else if ("changed".equals(data)) {
-                            scheduleStep(DOM_EVENT_DEBOUNCE_MS);
+                        if (data.startsWith("ready|")) {
+                            lastObserverState = data.substring("ready|".length());
+                            runLog.record(store, "DOM_OBSERVER_ATTACHED",
+                                    "phase=" + store.phase() + ";generation=" + activeGeneration + ";epoch=" + activeEpoch);
+                            requestDomEvaluation(0L, "observer_ready");
+                            scheduleWatchdog();
+                        } else if (data.startsWith("state|")) {
+                            String nextState = data.substring("state|".length());
+                            if (nextState.equals(lastObserverState)) {
+                                observerDuplicateEventCount = saturatingIncrement(observerDuplicateEventCount);
+                                return;
+                            }
+                            lastObserverState = nextState;
+                            observerEventCount = saturatingIncrement(observerEventCount);
+                            runLog.record(store, "DOM_OBSERVER_STATE",
+                                    "count=" + observerEventCount + ";phase=" + store.phase());
+                            requestDomEvaluation(0L, "observer_state");
+                            scheduleWatchdog();
                         }
                     }
                 });
                 observerPort = nativePort;
                 active.postWebMessage(new WebMessage(token, new WebMessagePort[]{pagePort}), targetOrigin);
             } catch (Throwable error) {
+                observerLease = "";
                 closeObserverPort();
+                watchdogRecoveryCount = saturatingIncrement(watchdogRecoveryCount);
                 runLog.record(store, "DOM_OBSERVER_FAILED", error.getClass().getSimpleName());
+                requestDomEvaluation(0L, "observer_install_failed_recovery");
                 scheduleWatchdog();
             }
         });
@@ -609,20 +724,30 @@ public final class SelfRunService extends Service {
 
     private void detachDomObserver(String cause) {
         WebView active = webView;
-        boolean hadObserver = observerPort != null || observerInstallInFlight;
+        boolean hadObserver = observerPort != null || observerInstallInFlight || !observerLease.isEmpty();
+        handler.removeCallbacks(watchdogRunnable);
         observerEpoch++;
         observerInstallInFlight = false;
+        observerHealthInFlight = false;
+        observerLease = "";
+        lastObserverState = "";
         closeObserverPort();
         if (active != null) {
-            try { active.evaluateJavascript(SelfRunDomObserver.detach(), null); }
-            catch (Throwable ignored) {}
+            try {
+                observerMaintenanceEvaluationCount = saturatingIncrement(observerMaintenanceEvaluationCount);
+                active.evaluateJavascript(SelfRunDomObserver.detach(), null);
+            } catch (Throwable ignored) {}
         }
         if (hadObserver) runLog.record(store, "DOM_OBSERVER_DETACHED", "cause=" + cause);
     }
 
     private void invalidateDomObserverForNavigation() {
+        handler.removeCallbacks(watchdogRunnable);
         observerEpoch++;
         observerInstallInFlight = false;
+        observerHealthInFlight = false;
+        observerLease = "";
+        lastObserverState = "";
         closeObserverPort();
     }
 
@@ -649,6 +774,7 @@ public final class SelfRunService extends Service {
         store.setStatus(reason + " · " + (delay / 1000L) + "초 동안 DOM 실행 중지");
         runLog.record(store, "RATE_LIMIT", "attempt=" + rateLimitAttempt + ";delay=" + delay);
         handler.removeCallbacks(stepRunnable);
+        handler.removeCallbacks(watchdogRunnable);
         detachDomObserver("rate_limit");
         updateWakeLockForState();
         handler.postDelayed(() -> {
@@ -666,6 +792,7 @@ public final class SelfRunService extends Service {
         store.setStatus("대상 화면 복구 중 · " + source);
         runLog.record(store, "TARGET_RESTORE", "source=" + source);
         handler.removeCallbacks(stepRunnable);
+        handler.removeCallbacks(watchdogRunnable);
         detachDomObserver("target_restore");
         handler.postDelayed(() -> {
             if (!canRun()) return;
@@ -709,8 +836,22 @@ public final class SelfRunService extends Service {
     }
 
     private void scheduleStep(long delay) {
+        requestDomEvaluation(delay, "phase_transition");
+    }
+
+    private void requestDomEvaluation(long delay, String trigger) {
+        if (webView == null || !canRun()) return;
+        pendingEvaluationTrigger = trigger;
+        domEvaluationPending = true;
+        if (evaluationInFlight) return;
         handler.removeCallbacks(stepRunnable);
-        if (webView != null && canRun()) handler.postDelayed(stepRunnable, delay);
+        handler.postDelayed(stepRunnable, Math.max(0L, delay));
+    }
+
+    private void drainPendingDomEvaluation() {
+        if (!domEvaluationPending || evaluationInFlight || webView == null || !canRun()) return;
+        handler.removeCallbacks(stepRunnable);
+        handler.post(stepRunnable);
     }
 
     private JSONObject parse(String raw) {
@@ -764,7 +905,7 @@ public final class SelfRunService extends Service {
 
         if (preserved) {
             ensureDomObserver();
-            scheduleStep(100L);
+            scheduleWatchdog();
         } else {
             runLog.record(store, "WEBVIEW_RECOVERY_RECONNECT", store.conversationUrl().isEmpty()
                     ? "source=resume;target=project" : "source=resume;target=persisted_conversation");
@@ -780,12 +921,14 @@ public final class SelfRunService extends Service {
         handler.removeCallbacksAndMessages(null);
         generation++;
         evaluationInFlight = false;
+        domEvaluationPending = false;
         submissionWaitStartedElapsed = 0L;
         detachDomObserver(cause);
         releaseWakeLock();
         startForegroundCompat();
         runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=PAUSED;reason=" + cause);
         runLog.record(store, "PAUSED", cause + ";webview=preserved;automation=stopped;low_power=1");
+        logDomEfficiency("pause");
     }
 
     private void updateWakeLockForState() {
@@ -803,10 +946,15 @@ public final class SelfRunService extends Service {
 
     private void cleanupWebView() {
         handler.removeCallbacks(stepRunnable);
+        handler.removeCallbacks(watchdogRunnable);
         observerEpoch++;
         observerInstallInFlight = false;
+        observerHealthInFlight = false;
+        observerLease = "";
+        lastObserverState = "";
         closeObserverPort();
         evaluationInFlight = false;
+        domEvaluationPending = false;
         generation++;
         if (host != null) {
             host.destroy();
@@ -816,10 +964,27 @@ public final class SelfRunService extends Service {
     }
 
     private void stopRelay() {
+        logDomEfficiency("stop");
         cleanupWebView();
         releaseWakeLock();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
+    }
+
+    private void logDomEfficiency(String cause) {
+        if (runLog == null || store == null) return;
+        runLog.record(store, "DOM_EFFICIENCY",
+                "cause=" + cause
+                        + ";fullChecks=" + evaluationCount
+                        + ";maintenanceEvaluations=" + observerMaintenanceEvaluationCount
+                        + ";stateEvents=" + observerEventCount
+                        + ";nativeDuplicates=" + observerDuplicateEventCount
+                        + ";watchdogs=" + watchdogCount
+                        + ";watchdogRecoveries=" + watchdogRecoveryCount);
+    }
+
+    private static long saturatingIncrement(long value) {
+        return value == Long.MAX_VALUE ? Long.MAX_VALUE : value + 1L;
     }
 
     @Override
