@@ -27,21 +27,48 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void preservedPauseInvalidatesPrePauseAutomationBeforeWebViewPause() throws Exception {
+    public void preservedPauseStopsOnlySelfRunAutomationAndKeepsWebViewAlive() throws Exception {
         Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
         String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
         int method = text.indexOf("private void enterPreservedPause(String cause, String status)");
-        int nextMethod = text.indexOf("private void pauseCurrentWebView", method);
+        int nextMethod = text.indexOf("private void updateWakeLockForState", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         int queueClear = body.indexOf("handler.removeCallbacksAndMessages(null);");
         int generationAdvance = body.indexOf("generation++;");
-        int webViewPause = body.indexOf("pauseCurrentWebView(cause);");
+        int observerDetach = body.indexOf("detachDomObserver(cause);");
+        int wakeRelease = body.indexOf("releaseWakeLock();");
         assertTrue(queueClear >= 0);
         assertTrue(generationAdvance >= 0);
-        assertTrue(webViewPause >= 0);
-        assertTrue(queueClear < webViewPause);
-        assertTrue(generationAdvance < webViewPause);
+        assertTrue(observerDetach >= 0);
+        assertTrue(wakeRelease >= 0);
+        assertTrue(queueClear < observerDetach);
+        assertTrue(generationAdvance < observerDetach);
+        assertTrue(observerDetach < wakeRelease);
+        assertFalse(body.contains("cleanupWebView()"));
+        assertFalse(body.contains("stopRelay()"));
+        assertFalse(body.contains("loadUrl("));
+        assertFalse(body.contains("reload("));
+        assertFalse(body.contains("onPause()"));
+        assertFalse(body.contains("pauseTimers"));
+    }
+
+    @Test
+    public void preservedResumeReattachesObserverWithoutWebViewLifecycleOrNavigation() throws Exception {
+        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
+        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+        int method = text.indexOf("private void resumeFromUi()");
+        int nextMethod = text.indexOf("private void enterPreservedPause", method);
+        assertTrue(method >= 0 && nextMethod > method);
+        String body = text.substring(method, nextMethod);
+        assertTrue(body.contains("boolean preserved = webView != null;"));
+        assertTrue(body.contains("if (preserved)"));
+        assertTrue(body.contains("ensureDomObserver();"));
+        assertTrue(body.contains("scheduleStep(100L);"));
+        assertFalse(body.contains("webView.onResume()"));
+        assertFalse(body.contains("loadUrl("));
+        assertFalse(body.contains("reload("));
+        assertFalse(body.contains("cleanupWebView()"));
     }
 
     @Test
@@ -49,7 +76,7 @@ public class SelfRunPauseResumeTest {
         Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
         String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
         int method = text.indexOf("private void evaluate(String phase, String script)");
-        int nextMethod = text.indexOf("private void handleResult", method);
+        int nextMethod = text.indexOf("private static boolean isWaitingStatus", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");

@@ -27,7 +27,7 @@ final class SelfRunRunLog {
     private static final String SUFFIX = ".jsonl";
     private static final long MAX_BYTES = 1024L * 1024L;
     private static final int MAX_FILES = 100;
-    private static final long NOISY_HEARTBEAT_MS = 30_000L;
+    private static final long NOISY_HEARTBEAT_MS = 60_000L;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
     private final File directory;
@@ -35,6 +35,8 @@ final class SelfRunRunLog {
     private long lastEvaluateAt;
     private String lastResultDetail = "";
     private long lastResultAt;
+    private String lastWaitDetail = "";
+    private long lastWaitAt;
     private long lastBaselineWaitAt;
 
     SelfRunRunLog(Context context) {
@@ -75,6 +77,12 @@ final class SelfRunRunLog {
             if (detail.equals(lastResultDetail) && now - lastResultAt < NOISY_HEARTBEAT_MS) return true;
             lastResultDetail = detail;
             lastResultAt = now;
+            return false;
+        }
+        if ("DOM_WAIT".equals(event)) {
+            if (detail.equals(lastWaitDetail) && now - lastWaitAt < NOISY_HEARTBEAT_MS) return true;
+            lastWaitDetail = detail;
+            lastWaitAt = now;
             return false;
         }
         if ("ASSISTANT_BASELINE_WAIT".equals(event)) {
@@ -167,7 +175,8 @@ final class SelfRunRunLog {
     private static boolean isExecutionEvent(String event) {
         return event.startsWith("UI_") || event.startsWith("SERVICE_") || event.startsWith("SIGNAL_")
                 || event.startsWith("RATE_LIMIT") || event.startsWith("WEBVIEW_")
-                || event.startsWith("BOOTSTRAP_") || event.equals("PAUSED") || event.equals("DONE")
+                || event.startsWith("BOOTSTRAP_") || event.startsWith("DOM_OBSERVER_")
+                || event.equals("PAUSED") || event.equals("DONE")
                 || event.equals("STATE_TRANSITION") || event.equals("PREFERENCE_VERIFIED")
                 || event.equals("TARGET_DRIFT") || event.equals("TARGET_RESTORE")
                 || event.equals("RENDERER_GONE") || event.equals("WEBVIEW_INIT_FAILED");
@@ -193,6 +202,9 @@ final class SelfRunRunLog {
             case "TARGET_DRIFT" -> "대상 화면 이탈 감지";
             case "TARGET_RESTORE" -> "대상 화면 복구";
             case "RATE_LIMIT" -> "요청 제한 대기";
+            case "DOM_OBSERVER_ATTACHED" -> "DOM 이벤트 감시 연결";
+            case "DOM_OBSERVER_DETACHED" -> "DOM 이벤트 감시 해제";
+            case "DOM_OBSERVER_FAILED" -> "DOM 이벤트 감시 오류";
             case "PAUSED" -> "일시중지";
             case "DONE" -> "완료";
             default -> event.replace('_', ' ');

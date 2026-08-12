@@ -82,35 +82,57 @@ final class SelfRunStore {
     boolean paused() { return prefs.getBoolean("paused", false); }
     boolean userStopped() { return prefs.getBoolean("userStopped", false); }
 
-    void setConversationUrl(String value) { put("conversationUrl", value); }
-    void setDefaultProjectUrl(String value) { put("defaultProjectUrl", value); }
+    void setConversationUrl(String value) { putString("conversationUrl", value, true); }
+    void setDefaultProjectUrl(String value) { putString("defaultProjectUrl", value, false); }
     void setPhase(String value) {
-        prefs.edit().putString("phase", safe(value)).putLong("phaseStartedAt", System.currentTimeMillis()).apply();
+        String next = safe(value);
+        if (next.equals(phase())) return;
+        prefs.edit().putString("phase", next).putLong("phaseStartedAt", System.currentTimeMillis()).apply();
         syncHistory();
     }
-    void setStatus(String value) { put("status", value); }
-    void setRole(String value) { put("role", value); }
-    void setPendingModel(String value) { put("pendingModel", value); }
-    void setPendingReasoning(String value) { put("pendingReasoning", value); }
-    void setLastSignal(String value) { put("lastSignal", value); }
-    void setLastAssistantKey(String value) { put("lastAssistantKey", value); }
-    void setAssistantBaselineKey(String value) { put("assistantBaselineKey", value); }
+    void restartPhaseClock() {
+        prefs.edit().putLong("phaseStartedAt", System.currentTimeMillis()).apply();
+    }
+    void setStatus(String value) { putString("status", value, true); }
+    void setRole(String value) { putString("role", value, true); }
+    void setPendingModel(String value) { putString("pendingModel", value, true); }
+    void setPendingReasoning(String value) { putString("pendingReasoning", value, true); }
+    void setLastSignal(String value) { putString("lastSignal", value, true); }
+    void setLastAssistantKey(String value) { putString("lastAssistantKey", value, false); }
+    void setAssistantBaselineKey(String value) { putString("assistantBaselineKey", value, false); }
     void setLastError(String code, String message) {
-        prefs.edit().putString("lastErrorCode", safe(code)).putString("lastErrorMessage", safe(message)).apply();
+        String nextCode = safe(code), nextMessage = safe(message);
+        if (nextCode.equals(lastErrorCode()) && nextMessage.equals(lastErrorMessage())) return;
+        prefs.edit().putString("lastErrorCode", nextCode).putString("lastErrorMessage", nextMessage).apply();
         syncHistory();
     }
     void clearLastError() { setLastError("", ""); }
-    void setTurn(int value) { prefs.edit().putInt("turn", value).apply(); syncHistory(); }
-    void setSignalRecoveryCount(int value) { prefs.edit().putInt("signalRecoveryCount", value).apply(); syncHistory(); }
-    void setPaused(boolean value) { prefs.edit().putBoolean("paused", value).apply(); syncHistory(); }
-    void setActive(boolean value) { prefs.edit().putBoolean("active", value).apply(); syncHistory(); }
-    void setUserStopped(boolean value) { prefs.edit().putBoolean("userStopped", value).apply(); syncHistory(); }
+    void setTurn(int value) {
+        if (value == turn()) return;
+        prefs.edit().putInt("turn", value).apply();
+        syncHistory();
+    }
+    void setSignalRecoveryCount(int value) {
+        if (value == signalRecoveryCount()) return;
+        prefs.edit().putInt("signalRecoveryCount", value).apply();
+    }
+    void setPaused(boolean value) { putBoolean("paused", value, true); }
+    void setActive(boolean value) { putBoolean("active", value, true); }
+    void setUserStopped(boolean value) { putBoolean("userStopped", value, true); }
 
     void syncHistory() { history.sync(this); }
 
-    private void put(String key, String value) {
-        prefs.edit().putString(key, safe(value)).apply();
-        syncHistory();
+    private void putString(String key, String value, boolean historyRelevant) {
+        String next = safe(value);
+        if (next.equals(prefs.getString(key, ""))) return;
+        prefs.edit().putString(key, next).apply();
+        if (historyRelevant) syncHistory();
+    }
+
+    private void putBoolean(String key, boolean value, boolean historyRelevant) {
+        if (value == prefs.getBoolean(key, false)) return;
+        prefs.edit().putBoolean(key, value).apply();
+        if (historyRelevant) syncHistory();
     }
 
     private static String safe(String value) { return value == null ? "" : value; }

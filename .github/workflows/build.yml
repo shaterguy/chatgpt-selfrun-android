@@ -6,6 +6,7 @@ on:
       - main
       - v0.2.2-rc1
       - v0.2.3-dev1
+      - v0.2.3-dev2
     tags:
       - 'v*'
   workflow_dispatch:
@@ -18,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36b0a4fa3a3ec7
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -35,6 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          BUILD=app/build.gradle
           MANIFEST=app/src/main/AndroidManifest.xml
           HOST=app/src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java
           WEB=app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
@@ -43,6 +45,9 @@ jobs:
           NEW=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java
           SERVICE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
           DOM=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java
+          OBSERVER=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDomObserver.java
+          STORE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
+          HISTORY_STORE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryStore.java
           RUNLOG=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRunLog.java
           PROTOCOL=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java
           HISTORY=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryActivity.java
@@ -60,6 +65,9 @@ jobs:
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
           grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST"
+          grep -q "applicationId 'com.shaterguy.chatgptselfrun'" "$BUILD"
+          grep -q 'versionCode 14' "$BUILD"
+          grep -q "versionName '0.2.3-dev2'" "$BUILD"
           test -s "$ICON_FOREGROUND"
           test -s "$ICON_MONOCHROME"
           test -s "$ICON_V26"
@@ -85,6 +93,7 @@ jobs:
           grep -q 'WIDTH = 1440' "$HOST"
           grep -q 'HEIGHT = 900' "$HOST"
           grep -q 'DENSITY_DPI = 160' "$HOST"
+          ! grep -q 'setRendererPriorityPolicy' "$HOST"
           grep -q 'applyLogin(webView)' "$LOGIN"
           grep -q 'applyAutomation(webView)' "$SERVICE"
           grep -q 'setUseWideViewPort(true)' "$WEB"
@@ -92,7 +101,7 @@ jobs:
           grep -q 'getUserAgentString' "$WEB"
           ! grep -q 'Windows NT 10.0' "$WEB"
           grep -q 'v0.2.3' "$MAIN"
-          grep -q 'ChatGPTSelfRun/0.2.3' "$WEB"
+          grep -q 'ChatGPTSelfRun/0.2.3-dev2' "$WEB"
           grep -q '새 작업' "$MAIN"
           ! grep -q 'new EditText' "$MAIN"
           grep -q '일시정지' "$MAIN"
@@ -123,16 +132,39 @@ jobs:
           grep -q 'userIndex=-1' "$DOM"
           grep -q 'for(let i=userIndex+1' "$DOM"
           ! grep -q 'assistantDigest' "$DOM"
+          grep -q 'new MutationObserver' "$OBSERVER"
+          grep -q "postMessage('changed')" "$OBSERVER"
+          grep -q 'observer?.disconnect()' "$OBSERVER"
+          grep -q 'clearTimeout' "$OBSERVER"
+          ! grep -q 'setInterval' "$OBSERVER"
+          grep -q 'DOM_WATCHDOG_MS = 15_000L' "$SERVICE"
+          grep -q 'createWebMessageChannel()' "$SERVICE"
+          grep -q 'postWebMessage(new WebMessage(token' "$SERVICE"
+          grep -q 'return Uri.parse("https://" + host);' "$SERVICE"
+          grep -q 'ensureDomObserver()' "$SERVICE"
+          grep -q 'detachDomObserver(cause)' "$SERVICE"
+          grep -q 'scheduleWatchdog()' "$SERVICE"
+          grep -q 'wakeLock.acquire();' "$SERVICE"
+          grep -q 'updateWakeLockForState()' "$SERVICE"
           grep -q 'DOM_EVALUATE' "$SERVICE"
           grep -q 'DOM_RESULT' "$SERVICE"
+          grep -q 'DOM_WAIT' "$SERVICE"
           grep -q 'static final String ACTION_PAUSE' "$SERVICE"
           grep -q 'static final String ACTION_RESUME' "$SERVICE"
           grep -q 'enterPreservedPause' "$SERVICE"
-          grep -q 'webView.onPause()' "$SERVICE"
-          grep -q 'webView.onResume()' "$SERVICE"
           grep -q 'WEBVIEW_RECOVERY_RECONNECT' "$SERVICE"
+          ! grep -q 'webView.onPause()' "$SERVICE"
+          ! grep -q 'webView.onResume()' "$SERVICE"
           ! grep -q 'pauseTimers' "$SERVICE"
-          grep -q 'NOISY_HEARTBEAT_MS' "$RUNLOG"
+          ! grep -q 'addJavascriptInterface' "$SERVICE"
+          ! grep -q 'WorkManager' "$SERVICE"
+          ! grep -q 'AlarmManager' "$SERVICE"
+          ! grep -q 'setRendererPriorityPolicy' "$SERVICE"
+          ! grep -q 'wakeLock.acquire(10 \* 60_000L)' "$SERVICE"
+          grep -q 'restartPhaseClock' "$STORE"
+          grep -q 'if (next.equals(prefs.getString(key, ""))) return;' "$STORE"
+          grep -q 'sameSnapshot(previousSnapshot, nextSnapshot)' "$HISTORY_STORE"
+          grep -q 'NOISY_HEARTBEAT_MS = 60_000L' "$RUNLOG"
           grep -q '"luna".equals(model)' "$PROTOCOL"
           grep -q '"max".equals(reasoning)' "$PROTOCOL"
           grep -q '"ultra".equals(reasoning)' "$PROTOCOL"
@@ -149,14 +181,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev2-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='13'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.2.3'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='14'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.2.3-dev2'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -164,9 +196,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.2.3-dev1-unsigned
+          name: chatgpt-selfrun-android-v0.2.3-dev2-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev2-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt

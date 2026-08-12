@@ -21,8 +21,12 @@ final class SelfRunHistoryStore {
     synchronized boolean sync(SelfRunStore store) {
         if (store == null || store.runId().isEmpty()) return true;
         JSONArray current = read();
+        JSONObject nextSnapshot = snapshot(store);
+        JSONObject previousSnapshot = find(current, store.runId());
+        if (sameSnapshot(previousSnapshot, nextSnapshot)) return true;
+
         JSONArray next = new JSONArray();
-        next.put(snapshot(store));
+        next.put(nextSnapshot);
         for (int i = 0; i < current.length() && next.length() < MAX_RUNS; i++) {
             JSONObject item = current.optJSONObject(i);
             if (item == null || store.runId().equals(item.optString("runId"))) continue;
@@ -41,15 +45,33 @@ final class SelfRunHistoryStore {
 
     synchronized JSONObject get(String runId) {
         if (runId == null || runId.isEmpty()) return null;
-        JSONArray array = read();
+        JSONObject item = find(read(), runId);
+        if (item == null) return null;
+        try { return new JSONObject(item.toString()); }
+        catch (Exception ignored) { return null; }
+    }
+
+    private static JSONObject find(JSONArray array, String runId) {
         for (int i = 0; i < array.length(); i++) {
             JSONObject item = array.optJSONObject(i);
-            if (item != null && runId.equals(item.optString("runId"))) {
-                try { return new JSONObject(item.toString()); }
-                catch (Exception ignored) { return null; }
-            }
+            if (item != null && runId.equals(item.optString("runId"))) return item;
         }
         return null;
+    }
+
+    private static boolean sameSnapshot(JSONObject previous, JSONObject next) {
+        if (previous == null || next == null) return false;
+        String[] strings = {"runId", "mode", "projectUrl", "requirement", "conversationUrl", "phase", "status",
+                "role", "pendingModel", "pendingReasoning", "lastSignal", "lastErrorCode", "lastErrorMessage"};
+        for (String key : strings) {
+            if (!previous.optString(key).equals(next.optString(key))) return false;
+        }
+        if (previous.optLong("createdAt") != next.optLong("createdAt")) return false;
+        if (previous.optInt("turn") != next.optInt("turn")) return false;
+        if (previous.optBoolean("active") != next.optBoolean("active")) return false;
+        if (previous.optBoolean("paused") != next.optBoolean("paused")) return false;
+        if (previous.optBoolean("userStopped") != next.optBoolean("userStopped")) return false;
+        return previous.optBoolean("terminal") == next.optBoolean("terminal");
     }
 
     private static JSONObject snapshot(SelfRunStore store) {

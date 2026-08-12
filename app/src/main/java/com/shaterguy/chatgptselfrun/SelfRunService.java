@@ -4,6 +4,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Handler;
@@ -13,6 +14,8 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
+import android.webkit.WebMessage;
+import android.webkit.WebMessagePort;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -21,6 +24,8 @@ import android.webkit.WebViewClient;
 
 import org.json.JSONObject;
 import org.json.JSONTokener;
+
+import java.util.UUID;
 
 public final class SelfRunService extends Service {
     static final String ACTION_RUN = "com.shaterguy.chatgptselfrun.RUN";
@@ -32,10 +37,12 @@ public final class SelfRunService extends Service {
     private static final String PHASE_BOOTSTRAP_SEND = "BOOTSTRAP_SEND";
     private static final String PHASE_APPLY_REASONING = "APPLY_REASONING";
     private static final long[] RATE_LIMIT_DELAYS = {2_000L, 5_000L, 10_000L, 20_000L, 40_000L, 60_000L};
-    private static final int MAX_SUBMITTED_OBSERVATIONS = 40;
     private static final long STARTUP_TIMEOUT_MS = 120_000L;
     private static final long PREF_TIMEOUT_MS = 120_000L;
     private static final long ASSISTANT_RESPONSE_TIMEOUT_MS = 12 * 60_000L;
+    private static final long SUBMISSION_STALL_TIMEOUT_MS = 60_000L;
+    private static final long DOM_WATCHDOG_MS = 15_000L;
+    private static final long DOM_EVENT_DEBOUNCE_MS = 180L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable stepRunnable = this::runStep;
@@ -43,13 +50,15 @@ public final class SelfRunService extends Service {
     private SelfRunRunLog runLog;
     private HeadlessWebViewHost host;
     private WebView webView;
+    private WebMessagePort observerPort;
     private boolean evaluationInFlight;
+    private boolean observerInstallInFlight;
     private int generation;
-    private int uiWaitCount;
-    private int submittedObservationCount;
+    private int observerEpoch;
     private int rateLimitAttempt;
     private long rateLimitedUntilElapsed;
     private long evaluationCount;
+    private long submissionWaitStartedElapsed;
     private PowerManager.WakeLock wakeLock;
 
     @Override
@@ -84,14 +93,15 @@ public final class SelfRunService extends Service {
         }
         if (store.paused()) {
             startForegroundCompat();
+            handler.removeCallbacksAndMessages(null);
+            detachDomObserver("service_paused");
             releaseWakeLock();
-            pauseCurrentWebView("service_paused");
             runLog.record(store, "SERVICE_PAUSED", "automation_stopped;webview_preserved="
                     + (webView == null ? "0" : "1"));
             return START_STICKY;
         }
         startForegroundCompat();
-        acquireWakeLock();
+        updateWakeLockForState();
         runLog.record(store, "SERVICE_START", intent == null ? "sticky_recreate" : "explicit_start");
         handler.post(this::ensureEngine);
         return START_STICKY;
@@ -108,6 +118,7 @@ public final class SelfRunService extends Service {
 
     private void ensureEngine() {
         if (store.paused()) {
+            detachDomObserver("ensure_engine_paused");
             releaseWakeLock();
             return;
         }
@@ -117,8 +128,10 @@ public final class SelfRunService extends Service {
             pause("TARGET_MISSING", "대상 프로젝트 또는 conversation URL이 없습니다.");
             return;
         }
+        updateWakeLockForState();
         if (webView != null) {
-            scheduleStep(300L);
+            ensureDomObserver();
+            scheduleStep(200L);
             return;
         }
         launchWebView(target);
@@ -145,13 +158,16 @@ public final class SelfRunService extends Service {
             webView.setWebViewClient(new WebViewClient() {
                 @Override
                 public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                    if (store.paused()) {
-                        runLog.record(store, "WEBVIEW_EVENT_IGNORED", "page_start;paused=1");
-                        return;
-                    }
+                    invalidateDomObserverForNavigation();
                     generation++;
                     evaluationInFlight = false;
                     handler.removeCallbacks(stepRunnable);
+                    if (store.paused()) {
+                        releaseWakeLock();
+                        runLog.record(store, "WEBVIEW_EVENT_IGNORED", "page_start;paused=1");
+                        return;
+                    }
+                    updateWakeLockForState();
                     store.setStatus("ChatGPT 화면 로딩 중");
                     runLog.record(store, "WEBVIEW_PAGE_START", store.conversationUrl().isEmpty()
                             ? "route=project" : "route=conversation");
@@ -161,14 +177,16 @@ public final class SelfRunService extends Service {
                 @Override
                 public void onPageFinished(WebView view, String url) {
                     if (store.paused()) {
+                        releaseWakeLock();
                         runLog.record(store, "WEBVIEW_EVENT_IGNORED", "page_finish;paused=1");
                         return;
                     }
                     if (isRateLimited()) return;
-                    uiWaitCount = 0;
+                    updateWakeLockForState();
                     store.setStatus("ChatGPT 화면 준비 확인 중");
                     runLog.record(store, "WEBVIEW_PAGE_FINISH", "progress=" + view.getProgress());
-                    scheduleStep(900L);
+                    ensureDomObserver();
+                    scheduleStep(250L);
                 }
 
                 @Override
@@ -191,6 +209,7 @@ public final class SelfRunService extends Service {
                     } else {
                         resetPhaseClock();
                         store.setStatus("일시적 네트워크 오류 · 3초 후 같은 대상 복구");
+                        detachDomObserver("network_error");
                         handler.removeCallbacks(stepRunnable);
                         handler.postDelayed(() -> {
                             if (webView != null && canRun() && !isRateLimited()) webView.loadUrl(targetUrl());
@@ -235,11 +254,13 @@ public final class SelfRunService extends Service {
                         releaseWakeLock();
                     } else {
                         store.setStatus("WebView 렌더러 복구 중");
+                        updateWakeLockForState();
                         handler.postDelayed(SelfRunService.this::ensureEngine, 2_000L);
                     }
                     return true;
                 }
             });
+            updateWakeLockForState();
             active.loadUrl(target);
         } catch (Throwable error) {
             runLog.record(store, "WEBVIEW_INIT_FAILED", error.getClass().getSimpleName());
@@ -253,9 +274,11 @@ public final class SelfRunService extends Service {
     private void runStep() {
         if (!canRun() || webView == null || evaluationInFlight) return;
         if (isRateLimited()) {
+            updateWakeLockForState();
             scheduleStep(Math.max(250L, rateLimitedUntilElapsed - SystemClock.elapsedRealtime()));
             return;
         }
+        updateWakeLockForState();
         String actual = webView.getUrl();
         if (!routeAcceptable(actual)) {
             runLog.record(store, "TARGET_DRIFT", store.conversationUrl().isEmpty() ? "expected=project" : "expected=conversation");
@@ -328,7 +351,11 @@ public final class SelfRunService extends Service {
             JSONObject result = parse(raw);
             String status = result.optString("status", "SCRIPT_ERROR");
             String detail = result.optString("detail", "");
-            runLog.record(store, "DOM_RESULT", "phase=" + phase + ";status=" + status + ";detail=" + detail);
+            if (isWaitingStatus(status)) {
+                runLog.record(store, "DOM_WAIT", "phase=" + phase + ";status=" + status);
+            } else {
+                runLog.record(store, "DOM_RESULT", "phase=" + phase + ";status=" + status + ";detail=" + detail);
+            }
             if (!"SCRIPT_ERROR".equals(status)) {
                 rateLimitAttempt = 0;
                 rateLimitedUntilElapsed = 0L;
@@ -350,13 +377,12 @@ public final class SelfRunService extends Service {
                 return;
             }
             if ("SUBMITTED".equals(status)) {
-                if (PHASE_BOOTSTRAP_SEND.equals(phase) && submittedObservationCount == 0)
+                if (PHASE_BOOTSTRAP_SEND.equals(phase) && submissionWaitStartedElapsed == 0L)
                     runLog.record(store, "BOOTSTRAP_SUBMITTED", "first_prompt");
                 submittedWait(detail.isEmpty() ? "제출 확인 대기" : detail);
                 return;
             }
-            if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)
-                    || "STALE".equals(status)) {
+            if (isWaitingStatus(status)) {
                 if ("STALE".equals(status)) {
                     runLog.record(store, "ASSISTANT_BASELINE_WAIT", "previous_assistant");
                 }
@@ -367,9 +393,13 @@ public final class SelfRunService extends Service {
         });
     }
 
+    private static boolean isWaitingStatus(String status) {
+        return "UI_WAIT".equals(status) || "WAIT".equals(status) || "GENERATING".equals(status)
+                || "STALE".equals(status);
+    }
+
     private void handleResult(String phase, String status, JSONObject result) {
-        uiWaitCount = 0;
-        submittedObservationCount = 0;
+        submissionWaitStartedElapsed = 0L;
         if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase) && "READY".equals(status)) {
             runLog.record(store, "BOOTSTRAP_CONTEXT_READY", "mode=" + store.mode());
             if (SelfRunStore.MODE_WORK.equals(store.mode())) {
@@ -425,15 +455,15 @@ public final class SelfRunService extends Service {
             store.setAssistantBaselineKey(result.optString("assistantKey", ""));
             transition(SelfRunStore.PHASE_WAIT_ASSISTANT,
                     "다음 assistant 응답 대기 · " + store.role(), "continuation_confirmed");
-            scheduleStep(700L);
+            scheduleStep(250L);
             return;
         }
-        if ("READY".equals(status) || "CONFIRMED".equals(status)) scheduleStep(500L);
+        if ("READY".equals(status) || "CONFIRMED".equals(status)) scheduleStep(250L);
         else uiWait("화면 상태 재평가");
     }
 
     private void handleAssistant(String text, String assistantKey) {
-        submittedObservationCount = 0;
+        submissionWaitStartedElapsed = 0L;
         if (text == null || text.isBlank()) { uiWait("assistant 본문 대기"); return; }
         if (assistantKey == null || assistantKey.isBlank()) { uiWait("assistant 노드 식별 대기"); return; }
         String key = assistantKey + ":" + Integer.toHexString(text.hashCode()) + ":" + text.length();
@@ -493,24 +523,115 @@ public final class SelfRunService extends Service {
         store.setStatus(status);
         runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=" + next + ";reason=" + reason);
         startForegroundCompat();
+        updateWakeLockForState();
     }
 
     private void uiWait(String detail) {
-        uiWaitCount = Math.min(uiWaitCount + 1, 20);
-        long delay = Math.min(5_000L, 500L + (long) uiWaitCount * 400L);
-        store.setStatus(detail + " · 같은 화면 재확인");
-        scheduleStep(delay);
+        store.setStatus(detail + " · DOM 변화 대기");
+        ensureDomObserver();
+        scheduleWatchdog();
     }
 
     private void submittedWait(String detail) {
-        submittedObservationCount++;
-        if (submittedObservationCount >= MAX_SUBMITTED_OBSERVATIONS) {
+        long now = SystemClock.elapsedRealtime();
+        if (submissionWaitStartedElapsed == 0L) submissionWaitStartedElapsed = now;
+        if (now - submissionWaitStartedElapsed >= SUBMISSION_STALL_TIMEOUT_MS) {
             recoverStalledPhase("submission_observation_stalled",
                     "제출 표식은 유지 · 같은 대상 재접속 후 계속 확인", 1_500L);
             return;
         }
-        store.setStatus(detail + " · 재전송 없이 확인 중");
-        scheduleStep(1_500L);
+        store.setStatus(detail + " · 재전송 없이 DOM 변화 대기");
+        ensureDomObserver();
+        scheduleWatchdog();
+    }
+
+    private void scheduleWatchdog() {
+        scheduleStep(DOM_WATCHDOG_MS);
+    }
+
+    private void ensureDomObserver() {
+        WebView active = webView;
+        if (active == null || !canRun() || isRateLimited() || observerPort != null || observerInstallInFlight) return;
+        Uri targetOrigin = chatGptOrigin(active.getUrl());
+        if (targetOrigin == null) {
+            scheduleWatchdog();
+            return;
+        }
+        int activeGeneration = generation;
+        int activeEpoch = ++observerEpoch;
+        String activeRunId = store.runId();
+        String token = UUID.randomUUID().toString();
+        observerInstallInFlight = true;
+        active.evaluateJavascript(SelfRunDomObserver.install(token), raw -> {
+            if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch) return;
+            observerInstallInFlight = false;
+            if (!canRun() || !activeRunId.equals(store.runId())) return;
+            try {
+                WebMessagePort[] channel = active.createWebMessageChannel();
+                if (channel == null || channel.length < 2) throw new IllegalStateException("web message channel unavailable");
+                WebMessagePort nativePort = channel[0];
+                WebMessagePort pagePort = channel[1];
+                nativePort.setWebMessageCallback(new WebMessagePort.WebMessageCallback() {
+                    @Override
+                    public void onMessage(WebMessagePort port, WebMessage message) {
+                        if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
+                                || observerPort != port || !canRun() || !activeRunId.equals(store.runId())) return;
+                        String data = message == null ? "" : message.getData();
+                        if ("ready".equals(data)) {
+                            runLog.record(store, "DOM_OBSERVER_ATTACHED", "phase=" + store.phase());
+                            scheduleStep(100L);
+                        } else if ("changed".equals(data)) {
+                            scheduleStep(DOM_EVENT_DEBOUNCE_MS);
+                        }
+                    }
+                });
+                observerPort = nativePort;
+                active.postWebMessage(new WebMessage(token, new WebMessagePort[]{pagePort}), targetOrigin);
+            } catch (Throwable error) {
+                closeObserverPort();
+                runLog.record(store, "DOM_OBSERVER_FAILED", error.getClass().getSimpleName());
+                scheduleWatchdog();
+            }
+        });
+    }
+
+    private static Uri chatGptOrigin(String url) {
+        try {
+            Uri parsed = Uri.parse(url == null ? "" : url);
+            String host = parsed.getHost();
+            if (!"https".equalsIgnoreCase(parsed.getScheme())) return null;
+            if (!"chatgpt.com".equals(host) && !"www.chatgpt.com".equals(host)) return null;
+            return Uri.parse("https://" + host);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private void detachDomObserver(String cause) {
+        WebView active = webView;
+        boolean hadObserver = observerPort != null || observerInstallInFlight;
+        observerEpoch++;
+        observerInstallInFlight = false;
+        closeObserverPort();
+        if (active != null) {
+            try { active.evaluateJavascript(SelfRunDomObserver.detach(), null); }
+            catch (Throwable ignored) {}
+        }
+        if (hadObserver) runLog.record(store, "DOM_OBSERVER_DETACHED", "cause=" + cause);
+    }
+
+    private void invalidateDomObserverForNavigation() {
+        observerEpoch++;
+        observerInstallInFlight = false;
+        closeObserverPort();
+    }
+
+    private void closeObserverPort() {
+        WebMessagePort port = observerPort;
+        observerPort = null;
+        if (port != null) {
+            try { port.close(); } catch (Throwable ignored) {}
+        }
     }
 
     private boolean isRateLimited() {
@@ -528,8 +649,11 @@ public final class SelfRunService extends Service {
         store.setStatus(reason + " · " + (delay / 1000L) + "초 동안 DOM 실행 중지");
         runLog.record(store, "RATE_LIMIT", "attempt=" + rateLimitAttempt + ";delay=" + delay);
         handler.removeCallbacks(stepRunnable);
+        detachDomObserver("rate_limit");
+        updateWakeLockForState();
         handler.postDelayed(() -> {
             if (!canRun()) return;
+            updateWakeLockForState();
             if (webView != null) webView.loadUrl(targetUrl());
             else ensureEngine();
         }, delay);
@@ -542,6 +666,7 @@ public final class SelfRunService extends Service {
         store.setStatus("대상 화면 복구 중 · " + source);
         runLog.record(store, "TARGET_RESTORE", "source=" + source);
         handler.removeCallbacks(stepRunnable);
+        detachDomObserver("target_restore");
         handler.postDelayed(() -> {
             if (!canRun()) return;
             if (webView != null && !isRateLimited()) webView.loadUrl(target);
@@ -553,17 +678,17 @@ public final class SelfRunService extends Service {
         if (!canRun()) return;
         String phase = store.phase();
         resetPhaseClock();
-        submittedObservationCount = 0;
-        uiWaitCount = 0;
+        submissionWaitStartedElapsed = 0L;
         store.setStatus(status);
         runLog.record(store, "AUTO_RECOVERY", "reason=" + reason + ";phase=" + phase);
         startForegroundCompat();
         cleanupWebView();
+        updateWakeLockForState();
         handler.postDelayed(this::ensureEngine, delay);
     }
 
     private void resetPhaseClock() {
-        if (store != null && canRun()) store.setPhase(store.phase());
+        if (store != null && canRun()) store.restartPhaseClock();
     }
 
     private boolean routeAcceptable(String actual) {
@@ -621,17 +746,6 @@ public final class SelfRunService extends Service {
     private void resumeFromUi() {
         if (!store.paused() || store.userStopped() || store.runId().isEmpty()) return;
         boolean preserved = webView != null;
-        if (preserved) {
-            try {
-                webView.onResume();
-                runLog.record(store, "WEBVIEW_RESUME", "mode=preserved;conversation=reused");
-            } catch (Throwable error) {
-                runLog.record(store, "WEBVIEW_RESUME_FAILED", error.getClass().getSimpleName());
-                cleanupWebView();
-                preserved = false;
-            }
-        }
-
         store.setPaused(false);
         store.setActive(true);
         store.setUserStopped(false);
@@ -646,10 +760,11 @@ public final class SelfRunService extends Service {
                         : "사용자 재개 · WebView 소실 복구 후 continuation 준비");
         runLog.record(store, "UI_RESUME", preserved ? "same_webview" : "webview_recovery");
         startForegroundCompat();
-        acquireWakeLock();
+        updateWakeLockForState();
 
         if (preserved) {
-            scheduleStep(250L);
+            ensureDomObserver();
+            scheduleStep(100L);
         } else {
             runLog.record(store, "WEBVIEW_RECOVERY_RECONNECT", store.conversationUrl().isEmpty()
                     ? "source=resume;target=project" : "source=resume;target=persisted_conversation");
@@ -665,30 +780,21 @@ public final class SelfRunService extends Service {
         handler.removeCallbacksAndMessages(null);
         generation++;
         evaluationInFlight = false;
-        submittedObservationCount = 0;
-        uiWaitCount = 0;
+        submissionWaitStartedElapsed = 0L;
+        detachDomObserver(cause);
         releaseWakeLock();
-        pauseCurrentWebView(cause);
         startForegroundCompat();
         runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=PAUSED;reason=" + cause);
         runLog.record(store, "PAUSED", cause + ";webview=preserved;automation=stopped;low_power=1");
     }
 
-    private void pauseCurrentWebView(String cause) {
-        if (webView == null) {
-            runLog.record(store, "WEBVIEW_PAUSE", "cause=" + cause + ";webview=missing");
-            return;
-        }
-        try {
-            webView.onPause();
-            runLog.record(store, "WEBVIEW_PAUSE", "cause=" + cause + ";webview=preserved");
-        } catch (Throwable error) {
-            runLog.record(store, "WEBVIEW_PAUSE_FAILED", error.getClass().getSimpleName());
-        }
+    private void updateWakeLockForState() {
+        if (canRun() && !isRateLimited()) acquireWakeLock();
+        else releaseWakeLock();
     }
 
     private void acquireWakeLock() {
-        if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(10 * 60_000L);
+        if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire();
     }
 
     private void releaseWakeLock() {
@@ -697,6 +803,9 @@ public final class SelfRunService extends Service {
 
     private void cleanupWebView() {
         handler.removeCallbacks(stepRunnable);
+        observerEpoch++;
+        observerInstallInFlight = false;
+        closeObserverPort();
         evaluationInFlight = false;
         generation++;
         if (host != null) {
