@@ -27,9 +27,8 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void preservedPauseStopsOnlySelfRunAutomationAndKeepsWebViewAlive() throws Exception {
-        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+    public void preservedPauseStopsAutomationBeforePowerReleaseAndKeepsWebViewAlive() throws Exception {
+        String text = source();
         int method = text.indexOf("private void enterPreservedPause(String cause, String status)");
         int nextMethod = text.indexOf("private void updateWakeLockForState", method);
         assertTrue(method >= 0 && nextMethod > method);
@@ -37,14 +36,14 @@ public class SelfRunPauseResumeTest {
         int queueClear = body.indexOf("handler.removeCallbacksAndMessages(null);");
         int generationAdvance = body.indexOf("generation++;");
         int observerDetach = body.indexOf("detachDomObserver(cause);");
-        int wakeRelease = body.indexOf("releaseWakeLock();");
+        int powerRelease = body.indexOf("setWakeLockState(WakeLockController.State.PAUSED");
         assertTrue(queueClear >= 0);
         assertTrue(generationAdvance >= 0);
         assertTrue(observerDetach >= 0);
-        assertTrue(wakeRelease >= 0);
+        assertTrue(powerRelease >= 0);
         assertTrue(queueClear < observerDetach);
         assertTrue(generationAdvance < observerDetach);
-        assertTrue(observerDetach < wakeRelease);
+        assertTrue(observerDetach < powerRelease);
         assertFalse(body.contains("cleanupWebView()"));
         assertFalse(body.contains("stopRelay()"));
         assertFalse(body.contains("loadUrl("));
@@ -54,29 +53,34 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void preservedResumeReattachesObserverWithoutWebViewLifecycleOrNavigation() throws Exception {
-        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+    public void preservedResumeAcquiresPowerBeforeObserverReattachWithoutNavigation() throws Exception {
+        String text = source();
         int method = text.indexOf("private void resumeFromUi()");
         int nextMethod = text.indexOf("private void enterPreservedPause", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         assertTrue(body.contains("boolean preserved = webView != null;"));
         assertTrue(body.contains("if (preserved)"));
-        assertTrue(body.contains("ensureDomObserver();"));
-        assertTrue(body.contains("scheduleWatchdog();"));
+        int wake = body.indexOf("updateWakeLockForState(\"resume_prepare\")");
+        int preserved = body.indexOf("if (preserved)");
+        int observer = body.indexOf("ensureDomObserver();", preserved);
+        int watchdog = body.indexOf("scheduleWatchdog();", preserved);
+        assertTrue(wake >= 0);
+        assertTrue(observer > wake);
+        assertTrue(watchdog > wake);
         assertFalse(body.contains("scheduleStep("));
         assertFalse(body.contains("requestDomEvaluation("));
         assertFalse(body.contains("webView.onResume()"));
-        assertFalse(body.contains("loadUrl("));
         assertFalse(body.contains("reload("));
-        assertFalse(body.contains("cleanupWebView()"));
+        int elseBlock = body.indexOf("} else {", preserved);
+        String preservedBody = body.substring(preserved, elseBlock);
+        assertFalse(preservedBody.contains("loadUrl("));
+        assertFalse(preservedBody.contains("cleanupWebView()"));
     }
 
     @Test
     public void observerReadyDrivesTheFirstPostResumeDomEvaluation() throws Exception {
-        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+        String text = source();
         int observer = text.indexOf("private void ensureDomObserver()");
         int nextMethod = text.indexOf("private static Uri chatGptOrigin", observer);
         assertTrue(observer >= 0 && nextMethod > observer);
@@ -88,20 +92,57 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void staleEvaluateGuardRunsBeforeSharedInFlightMutation() throws Exception {
-        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+    public void staleEvaluateGuardIncludesRunGenerationAndWebViewBeforeSharedMutation() throws Exception {
+        String text = source();
         int method = text.indexOf("private void evaluate(String phase, String script)");
         int nextMethod = text.indexOf("private static boolean isWaitingStatus", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
-        int staleGuard = body.indexOf("if (active != webView || activeGeneration != generation) return;", callback);
+        int staleGuard = body.indexOf("if (!isCurrentExecution(active, activeGeneration, activeRunId)) return;", callback);
         int clearInFlight = body.indexOf("evaluationInFlight = false;", callback);
-        int canRunGuard = body.indexOf("if (!canRun()) return;", callback);
         assertTrue(callback >= 0);
         assertTrue(staleGuard > callback);
         assertTrue(clearInFlight > staleGuard);
-        assertTrue(canRunGuard > clearInFlight);
+    }
+
+    @Test
+    public void powerPolicySeparatesAutomationFromPauseRateLimitAndTerminalStates() {
+        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
+                SelfRunStore.PHASE_WAIT_ASSISTANT, false, false) == WakeLockController.State.AUTOMATION);
+        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
+                SelfRunStore.PHASE_WAIT_ASSISTANT, false, true) == WakeLockController.State.RECOVERY);
+        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
+                SelfRunStore.PHASE_WAIT_ASSISTANT, true, false) == WakeLockController.State.RATE_LIMIT);
+        assertTrue(SelfRunService.wakeLockStateFor(true, true, false,
+                SelfRunStore.PHASE_PAUSED, false, false) == WakeLockController.State.PAUSED);
+        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
+                SelfRunStore.PHASE_DONE, false, false) == WakeLockController.State.DONE);
+        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
+                SelfRunStore.PHASE_IDLE, false, false) == WakeLockController.State.IDLE);
+        assertTrue(SelfRunService.wakeLockStateFor(false, false, true,
+                SelfRunStore.PHASE_IDLE, false, false) == WakeLockController.State.STOPPED);
+    }
+
+    @Test
+    public void terminalCleanupClosesControllerAndCancelsLateCallbacks() throws Exception {
+        String text = source();
+        int stop = text.indexOf("private void stopRelay()");
+        int log = text.indexOf("private void logDomEfficiency", stop);
+        String stopBody = text.substring(stop, log);
+        assertTrue(stopBody.contains("handler.removeCallbacksAndMessages(null)"));
+        assertTrue(stopBody.contains("setWakeLockState(WakeLockController.State.STOPPED"));
+        assertTrue(stopBody.contains("wakeLockController.close(\"stop_relay\")"));
+
+        int destroy = text.indexOf("public void onDestroy()");
+        assertTrue(destroy >= 0);
+        String destroyBody = text.substring(destroy);
+        assertTrue(destroyBody.contains("handler.removeCallbacksAndMessages(null)"));
+        assertTrue(destroyBody.contains("wakeLockController.close(\"on_destroy\")"));
+    }
+
+    private static String source() throws Exception {
+        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
+        return new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
     }
 }

@@ -8,6 +8,7 @@ on:
       - v0.2.3-dev1
       - v0.2.3-dev2
       - v0.2.3-dev3
+      - v0.2.3-dev4
     tags:
       - 'v*'
   workflow_dispatch:
@@ -45,6 +46,7 @@ jobs:
           MAIN=app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java
           NEW=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java
           SERVICE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          WAKE=app/src/main/java/com/shaterguy/chatgptselfrun/WakeLockController.java
           DOM=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java
           OBSERVER=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDomObserver.java
           STORE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
@@ -67,8 +69,8 @@ jobs:
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
           grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST"
           grep -q "applicationId 'com.shaterguy.chatgptselfrun'" "$BUILD"
-          grep -q 'versionCode 15' "$BUILD"
-          grep -q "versionName '0.2.3-dev3'" "$BUILD"
+          grep -q 'versionCode 16' "$BUILD"
+          grep -q "versionName '0.2.3-dev4'" "$BUILD"
           test -s "$ICON_FOREGROUND"
           test -s "$ICON_MONOCHROME"
           test -s "$ICON_V26"
@@ -101,8 +103,8 @@ jobs:
           grep -q 'setUseWideViewPort(false)' "$WEB"
           grep -q 'getUserAgentString' "$WEB"
           ! grep -q 'Windows NT 10.0' "$WEB"
-          grep -q 'v0.2.3-dev3' "$MAIN"
-          grep -q 'ChatGPTSelfRun/0.2.3-dev3' "$WEB"
+          grep -q 'v0.2.3-dev4' "$MAIN"
+          grep -q 'ChatGPTSelfRun/0.2.3-dev4' "$WEB"
           grep -q '새 작업' "$MAIN"
           ! grep -q 'new EditText' "$MAIN"
           grep -q '일시정지' "$MAIN"
@@ -155,8 +157,23 @@ jobs:
           grep -q 'ensureDomObserver()' "$SERVICE"
           grep -q 'detachDomObserver(cause)' "$SERVICE"
           grep -q 'scheduleWatchdog()' "$SERVICE"
-          grep -q 'wakeLock.acquire();' "$SERVICE"
-          grep -q 'updateWakeLockForState()' "$SERVICE"
+          grep -q 'WakeLockController wakeLockController' "$SERVICE"
+          grep -q 'wakeLockStateFor' "$SERVICE"
+          grep -q 'WAKELOCK_STATE' "$SERVICE"
+          grep -q 'WAKELOCK_EFFICIENCY' "$SERVICE"
+          grep -q 'beginRecovery' "$SERVICE"
+          grep -q 'finishRecovery' "$SERVICE"
+          ! grep -q 'PowerManager.WakeLock' "$SERVICE"
+          ! grep -q 'wakeLock.acquire' "$SERVICE"
+          ! grep -q 'wakeLock.release' "$SERVICE"
+          test -s "$WAKE"
+          grep -q 'PowerManager.PARTIAL_WAKE_LOCK' "$WAKE"
+          grep -q 'setReferenceCounted(false)' "$WAKE"
+          grep -q 'lock.acquire()' "$WAKE"
+          grep -q 'lock.release()' "$WAKE"
+          grep -q 'State.AUTOMATION' "$SERVICE"
+          grep -q 'State.RECOVERY' "$SERVICE"
+          grep -q 'State.RATE_LIMIT' "$SERVICE"
           grep -q 'DOM_EVALUATE' "$SERVICE"
           grep -q 'DOM_RESULT' "$SERVICE"
           grep -q 'DOM_WAIT' "$SERVICE"
@@ -171,7 +188,6 @@ jobs:
           ! grep -q 'WorkManager' "$SERVICE"
           ! grep -q 'AlarmManager' "$SERVICE"
           ! grep -q 'setRendererPriorityPolicy' "$SERVICE"
-          ! grep -q 'wakeLock.acquire(10 \* 60_000L)' "$SERVICE"
           grep -q 'restartPhaseClock' "$STORE"
           grep -q 'if (next.equals(prefs.getString(key, ""))) return;' "$STORE"
           grep -q 'sameSnapshot(previousSnapshot, nextSnapshot)' "$HISTORY_STORE"
@@ -192,14 +208,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev3-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev4-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='15'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.2.3-dev3'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='16'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.2.3-dev4'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -207,9 +223,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.2.3-dev3-unsigned
+          name: chatgpt-selfrun-android-v0.2.3-dev4-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev3-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev4-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt
