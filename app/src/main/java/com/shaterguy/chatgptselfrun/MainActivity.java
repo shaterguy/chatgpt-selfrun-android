@@ -33,6 +33,7 @@ public final class MainActivity extends Activity {
     private SelfRunRunLog runLog;
     private TextView currentStatus;
     private TextView backgroundStatus;
+    private Button pauseButton;
     private Button resumeButton;
     private Button stopButton;
     private Button currentLogsButton;
@@ -87,9 +88,10 @@ public final class MainActivity extends Activity {
         root.addView(Ui.section(this, "현재 SelfRun"));
         currentStatus = Ui.body(this, "");
         root.addView(currentStatus);
+        pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
         stopButton = Ui.button(this, "중지", v -> stopSelfRun());
-        root.addView(Ui.row(this, resumeButton, stopButton));
+        root.addView(Ui.row(this, pauseButton, resumeButton, stopButton));
         currentLogsButton = Ui.button(this, "현재 작업 로그", v -> openCurrentLogs());
         root.addView(currentLogsButton);
 
@@ -110,6 +112,7 @@ public final class MainActivity extends Activity {
         String runId = store.runId();
         if (runId.isEmpty()) {
             currentStatus.setText("실행 중이거나 선택된 SelfRun이 없습니다.");
+            pauseButton.setEnabled(false);
             resumeButton.setEnabled(false);
             stopButton.setEnabled(false);
             currentLogsButton.setEnabled(false);
@@ -126,8 +129,13 @@ public final class MainActivity extends Activity {
                 + "\n턴: " + store.turn()
                 + "\nconversation: " + dash(store.conversationUrl())
                 + "\n마지막 오류: " + errorSummary());
-        resumeButton.setEnabled(store.paused() && !store.userStopped());
-        stopButton.setEnabled(store.active() || store.paused());
+        boolean paused = store.paused() && !store.userStopped();
+        boolean running = store.active() && !store.paused() && !store.userStopped()
+                && !SelfRunStore.PHASE_DONE.equals(store.phase())
+                && !SelfRunStore.PHASE_IDLE.equals(store.phase());
+        pauseButton.setEnabled(running);
+        resumeButton.setEnabled(paused);
+        stopButton.setEnabled(running || paused);
         currentLogsButton.setEnabled(true);
     }
 
@@ -136,21 +144,14 @@ public final class MainActivity extends Activity {
         return store.lastErrorCode() + " · " + store.lastErrorMessage();
     }
 
+    private void pauseSelfRun() {
+        if (!store.active() || store.paused() || store.userStopped() || store.runId().isEmpty()) return;
+        sendRunnerAction(SelfRunService.ACTION_PAUSE);
+    }
+
     private void resumeSelfRun() {
-        if (!store.paused() || store.runId().isEmpty()) return;
-        store.setPaused(false);
-        store.setActive(true);
-        store.setUserStopped(false);
-        store.clearLastError();
-        store.setLastSignal("USER_RESUME");
-        if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);
-        else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
-        store.setStatus(store.conversationUrl().isEmpty()
-                ? "사용자 재개 · 새 대화 bootstrap 복구 중"
-                : "사용자 재개 · 같은 conversation 확인 중");
-        runLog.record(store, "UI_RESUME", "resume");
-        startRunner();
-        refreshCurrent();
+        if (!store.paused() || store.userStopped() || store.runId().isEmpty()) return;
+        sendRunnerAction(SelfRunService.ACTION_RESUME);
     }
 
     private void stopSelfRun() {
@@ -174,8 +175,12 @@ public final class MainActivity extends Activity {
     }
 
     private void startRunner() {
+        sendRunnerAction(SelfRunService.ACTION_RUN);
+    }
+
+    private void sendRunnerAction(String action) {
         Intent intent = new Intent(this, SelfRunService.class);
-        intent.setAction(SelfRunService.ACTION_RUN);
+        intent.setAction(action);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
     }
 
