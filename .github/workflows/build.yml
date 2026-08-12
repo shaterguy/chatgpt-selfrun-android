@@ -7,6 +7,7 @@ on:
       - v0.2.2-rc1
       - v0.2.3-dev1
       - v0.2.3-dev2
+      - v0.2.3-dev3
     tags:
       - 'v*'
   workflow_dispatch:
@@ -66,8 +67,8 @@ jobs:
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
           grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST"
           grep -q "applicationId 'com.shaterguy.chatgptselfrun'" "$BUILD"
-          grep -q 'versionCode 14' "$BUILD"
-          grep -q "versionName '0.2.3-dev2'" "$BUILD"
+          grep -q 'versionCode 15' "$BUILD"
+          grep -q "versionName '0.2.3-dev3'" "$BUILD"
           test -s "$ICON_FOREGROUND"
           test -s "$ICON_MONOCHROME"
           test -s "$ICON_V26"
@@ -100,8 +101,8 @@ jobs:
           grep -q 'setUseWideViewPort(false)' "$WEB"
           grep -q 'getUserAgentString' "$WEB"
           ! grep -q 'Windows NT 10.0' "$WEB"
-          grep -q 'v0.2.3' "$MAIN"
-          grep -q 'ChatGPTSelfRun/0.2.3-dev2' "$WEB"
+          grep -q 'v0.2.3-dev3' "$MAIN"
+          grep -q 'ChatGPTSelfRun/0.2.3-dev3' "$WEB"
           grep -q '새 작업' "$MAIN"
           ! grep -q 'new EditText' "$MAIN"
           grep -q '일시정지' "$MAIN"
@@ -133,11 +134,21 @@ jobs:
           grep -q 'for(let i=userIndex+1' "$DOM"
           ! grep -q 'assistantDigest' "$DOM"
           grep -q 'new MutationObserver' "$OBSERVER"
-          grep -q "postMessage('changed')" "$OBSERVER"
+          grep -q "postMessage('state|' + fingerprint)" "$OBSERVER"
+          grep -q 'fingerprint === state.lastFingerprint' "$OBSERVER"
+          grep -q 'state.suppressed++' "$OBSERVER"
+          grep -q "status:'ALIVE'" "$OBSERVER"
+          grep -q 'rootConnected' "$OBSERVER"
           grep -q 'observer?.disconnect()' "$OBSERVER"
           grep -q 'clearTimeout' "$OBSERVER"
           ! grep -q 'setInterval' "$OBSERVER"
           grep -q 'DOM_WATCHDOG_MS = 15_000L' "$SERVICE"
+          grep -q 'watchdogRunnable = this::runDomWatchdog' "$SERVICE"
+          grep -q 'SelfRunDomObserver.health(activeLease)' "$SERVICE"
+          grep -q 'DOM_OBSERVER_HEALTH_EVALUATE' "$SERVICE"
+          grep -q 'watchdog_missed_event' "$SERVICE"
+          grep -q 'domEvaluationPending' "$SERVICE"
+          grep -q 'DOM_EFFICIENCY' "$SERVICE"
           grep -q 'createWebMessageChannel()' "$SERVICE"
           grep -q 'postWebMessage(new WebMessage(token' "$SERVICE"
           grep -q 'return Uri.parse("https://" + host);' "$SERVICE"
@@ -181,14 +192,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev2-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev3-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='14'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.2.3-dev2'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='15'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.2.3-dev3'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -196,9 +207,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.2.3-dev2-unsigned
+          name: chatgpt-selfrun-android-v0.2.3-dev3-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev2-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev3-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt
