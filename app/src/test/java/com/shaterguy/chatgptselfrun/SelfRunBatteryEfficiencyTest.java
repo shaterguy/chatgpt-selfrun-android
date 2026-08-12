@@ -11,14 +11,30 @@ import static org.junit.Assert.assertTrue;
 
 public class SelfRunBatteryEfficiencyTest {
     @Test
-    public void domObserverUsesMutationEventsAndSelfRunOwnedDebounceOnly() {
-        String install = SelfRunDomObserver.install("test-token");
+    public void domObserverDebouncesAndSuppressesEquivalentPageState() {
+        String install = SelfRunDomObserver.install("test-token", "test-lease");
+        String health = SelfRunDomObserver.health("test-lease");
         String detach = SelfRunDomObserver.detach();
+
         assertTrue(install.contains("new MutationObserver"));
-        assertTrue(install.contains("postMessage('changed')"));
         assertTrue(install.contains("setTimeout"));
+        assertTrue(install.contains("lastFingerprint"));
+        assertTrue(install.contains("fingerprint === state.lastFingerprint"));
+        assertTrue(install.contains("state.suppressed++"));
+        assertTrue(install.contains("postMessage('state|' + fingerprint)"));
+        assertTrue(install.contains("assistantIdentity"));
+        assertTrue(install.contains("streaming"));
+        assertTrue(install.contains("sendDisabled"));
+        assertFalse(install.contains("postMessage('changed')"));
         assertFalse(install.contains("setInterval"));
         assertFalse(install.contains("pauseTimers"));
+
+        assertTrue(health.contains("status:'ALIVE'"));
+        assertTrue(health.contains("rootConnected"));
+        assertTrue(health.contains("fingerprint"));
+        assertTrue(health.contains("suppressed"));
+        assertFalse(health.contains("querySelectorAll"));
+
         assertTrue(detach.contains("observer?.disconnect()"));
         assertTrue(detach.contains("clearTimeout"));
         assertTrue(detach.contains("removeEventListener"));
@@ -26,20 +42,32 @@ public class SelfRunBatteryEfficiencyTest {
     }
 
     @Test
-    public void serviceUsesOriginScopedMessageChannelAndLowFrequencyWatchdog() throws Exception {
+    public void serviceUsesOriginScopedMessageChannelAndRecoveryOnlyWatchdog() throws Exception {
         String text = source("SelfRunService.java");
         assertTrue(text.contains("DOM_WATCHDOG_MS = 15_000L"));
+        assertTrue(text.contains("watchdogRunnable = this::runDomWatchdog"));
         assertTrue(text.contains("createWebMessageChannel()"));
         assertTrue(text.contains("postWebMessage(new WebMessage(token"));
+        assertTrue(text.contains("SelfRunDomObserver.health(activeLease)"));
+        assertTrue(text.contains("DOM_OBSERVER_HEALTH_EVALUATE"));
+        assertTrue(text.contains("watchdog_missed_event"));
         assertTrue(text.contains("return Uri.parse(\"https://\" + host);"));
         assertFalse(text.contains("addJavascriptInterface"));
         assertFalse(text.contains("WorkManager"));
         assertFalse(text.contains("AlarmManager"));
         assertFalse(text.contains("setRendererPriorityPolicy"));
+
+        int watchdog = text.indexOf("private void scheduleWatchdog()");
+        int runWatchdog = text.indexOf("private void runDomWatchdog()", watchdog);
+        assertTrue(watchdog >= 0 && runWatchdog > watchdog);
+        String scheduleBody = text.substring(watchdog, runWatchdog);
+        assertTrue(scheduleBody.contains("handler.postDelayed(watchdogRunnable, DOM_WATCHDOG_MS)"));
+        assertFalse(scheduleBody.contains("scheduleStep("));
+        assertFalse(scheduleBody.contains("stepRunnable"));
     }
 
     @Test
-    public void normalWaitsArmObserverAndWatchdogInsteadOfFastPolling() throws Exception {
+    public void normalWaitsArmObserverAndWatchdogWithoutPollingThePhase() throws Exception {
         String text = source("SelfRunService.java");
         int method = text.indexOf("private void uiWait(String detail)");
         int nextMethod = text.indexOf("private void submittedWait", method);
@@ -47,12 +75,52 @@ public class SelfRunBatteryEfficiencyTest {
         String body = text.substring(method, nextMethod);
         assertTrue(body.contains("ensureDomObserver();"));
         assertTrue(body.contains("scheduleWatchdog();"));
-        assertFalse(body.contains("scheduleStep(1_500L)"));
-        assertFalse(body.contains("Math.min(5_000L"));
+        assertFalse(body.contains("scheduleStep("));
+        assertFalse(body.contains("requestDomEvaluation("));
     }
 
     @Test
-    public void wakeLockIsStateManagedAndPreservedPauseNeverPausesWholeWebView() throws Exception {
+    public void observerEventsAreLeaseGuardedDeduplicatedAndCoalesced() throws Exception {
+        String text = source("SelfRunService.java");
+        assertTrue(text.contains("active != webView || activeGeneration != generation || activeEpoch != observerEpoch"));
+        assertTrue(text.contains("!activeRunId.equals(store.runId())"));
+        assertTrue(text.contains("!lease.equals(observerLease)"));
+        assertTrue(text.contains("nextState.equals(lastObserverState)"));
+        assertTrue(text.contains("observerDuplicateEventCount"));
+        assertTrue(text.contains("domEvaluationPending"));
+        assertTrue(text.contains("drainPendingDomEvaluation()"));
+        assertTrue(text.contains("requestDomEvaluation(0L, \"observer_state\")"));
+        assertTrue(text.contains("requestDomEvaluation(0L, \"watchdog_missed_event\")"));
+    }
+
+    @Test
+    public void preservedPauseStopsObserverAndWatchdogAndResumeOnlyReattaches() throws Exception {
+        String text = source("SelfRunService.java");
+        int pause = text.indexOf("private void enterPreservedPause");
+        int wake = text.indexOf("private void updateWakeLockForState", pause);
+        assertTrue(pause >= 0 && wake > pause);
+        String pauseBody = text.substring(pause, wake);
+        assertTrue(pauseBody.contains("handler.removeCallbacksAndMessages(null)"));
+        assertTrue(pauseBody.contains("detachDomObserver(cause)"));
+        assertTrue(pauseBody.contains("releaseWakeLock()"));
+        assertFalse(pauseBody.contains("pauseTimers"));
+
+        int resume = text.indexOf("private void resumeFromUi()");
+        assertTrue(resume >= 0 && pause > resume);
+        String resumeBody = text.substring(resume, pause);
+        assertTrue(resumeBody.contains("if (preserved)"));
+        assertTrue(resumeBody.contains("ensureDomObserver();"));
+        assertTrue(resumeBody.contains("scheduleWatchdog();"));
+        int preservedBlock = resumeBody.indexOf("if (preserved)");
+        int elseBlock = resumeBody.indexOf("} else {", preservedBlock);
+        String preservedBody = resumeBody.substring(preservedBlock, elseBlock);
+        assertFalse(preservedBody.contains("loadUrl("));
+        assertFalse(preservedBody.contains("cleanupWebView()"));
+        assertFalse(preservedBody.contains("scheduleStep("));
+    }
+
+    @Test
+    public void wakeLockAndEfficiencyInstrumentationRemainStateManaged() throws Exception {
         String text = source("SelfRunService.java");
         assertTrue(text.contains("private void updateWakeLockForState()"));
         assertTrue(text.contains("if (canRun() && !isRateLimited()) acquireWakeLock();"));
@@ -61,6 +129,11 @@ public class SelfRunBatteryEfficiencyTest {
         assertFalse(text.contains("webView.onPause()"));
         assertFalse(text.contains("webView.onResume()"));
         assertFalse(text.contains("pauseTimers"));
+        assertTrue(text.contains("DOM_EFFICIENCY"));
+        assertTrue(text.contains("fullChecks="));
+        assertTrue(text.contains("maintenanceEvaluations="));
+        assertTrue(text.contains("stateEvents="));
+        assertTrue(text.contains("watchdogRecoveries="));
     }
 
     @Test
