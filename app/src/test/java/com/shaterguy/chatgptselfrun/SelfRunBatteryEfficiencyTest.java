@@ -207,7 +207,12 @@ public class SelfRunBatteryEfficiencyTest {
         assertTrue(rateBody.contains("recoveryInProgress = false"));
         assertTrue(rateBody.contains("updateWakeLockForState(\"rate_limit_wait\")"));
         assertTrue(rateBody.contains("scheduleRateLimitExpiry()"));
-        assertTrue(rateBody.contains("isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId)"));
+        assertTrue(rateBody.contains("rateLimitTimerEpoch"));
+        assertTrue(rateBody.contains("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)"));
+        assertTrue(rateBody.contains("expectedRunId.equals(store.runId())"));
+        assertTrue(rateBody.contains("expectedTimerEpoch == rateLimitTimerEpoch"));
+        assertTrue(rateBody.contains("expectedDeadline == rateLimitedUntilElapsed"));
+        assertFalse(rateBody.contains("isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId)"));
         assertTrue(rateBody.contains("beginRecovery(\"rate_limit_expired\")"));
 
         assertTrue(text.contains("beginRecovery(\"renderer_gone\")"));
