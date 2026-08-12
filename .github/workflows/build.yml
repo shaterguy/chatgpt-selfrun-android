@@ -7,6 +7,7 @@ on:
       - agent/selfrun-v0.1.0
       - work/updateable-apk
       - v0.2.1-dev1
+      - v0.2.1-dev2
     tags:
       - 'v*'
   workflow_dispatch:
@@ -96,7 +97,14 @@ jobs:
           grep -q 'ChatGPTSelfRun/0.2.1' "$WEB"
           grep -q '새 작업' "$MAIN"
           ! grep -q 'new EditText' "$MAIN"
+          grep -q '일시정지' "$MAIN"
+          grep -q 'ACTION_PAUSE' "$MAIN"
+          grep -q 'ACTION_RESUME' "$MAIN"
           grep -q 'SOFT_INPUT_STATE_ALWAYS_HIDDEN' "$NEW"
+          grep -q 'setVerticalScrollBarEnabled(true)' "$NEW"
+          grep -q 'setHorizontallyScrolling(false)' "$NEW"
+          grep -q 'canScrollVertically' "$NEW"
+          grep -q 'requestDisallowInterceptTouchEvent' "$NEW"
           grep -q 'prepareInitialContext' "$DOM"
           grep -q 'EXISTING_CONVERSATION' "$DOM"
           grep -q 'currentMode' "$DOM"
@@ -113,6 +121,13 @@ jobs:
           ! grep -q 'assistantDigest' "$DOM"
           grep -q 'DOM_EVALUATE' "$SERVICE"
           grep -q 'DOM_RESULT' "$SERVICE"
+          grep -q 'static final String ACTION_PAUSE' "$SERVICE"
+          grep -q 'static final String ACTION_RESUME' "$SERVICE"
+          grep -q 'enterPreservedPause' "$SERVICE"
+          grep -q 'webView.onPause()' "$SERVICE"
+          grep -q 'webView.onResume()' "$SERVICE"
+          grep -q 'WEBVIEW_RECOVERY_RECONNECT' "$SERVICE"
+          ! grep -q 'pauseTimers' "$SERVICE"
           grep -q 'NOISY_HEARTBEAT_MS' "$RUNLOG"
           grep -q '"luna".equals(model)' "$PROTOCOL"
           grep -q '"max".equals(reasoning)' "$PROTOCOL"
@@ -136,7 +151,7 @@ jobs:
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='10'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='11'" app/build/outputs/apk/release/BADGING.txt
           grep -q "versionName='0.2.1'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
