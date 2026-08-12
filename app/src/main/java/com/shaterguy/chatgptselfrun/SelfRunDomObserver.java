@@ -28,7 +28,9 @@ final class SelfRunDomObserver {
                   cleanup(window[key]);
                   const state = {
                     lease, observer:null, timer:0, bridgeListener:null, eventListener:null, port:null, root:null,
-                    lastFingerprint:'', lastMutationAt:Date.now(), lastDispatchAt:0, suppressed:0
+                    probe:null, probeSent:0, probeAck:0, lastObserverCallbackAt:Date.now(),
+                    lastFingerprint:'', lastMutationAt:Date.now(), lastDispatchAt:0, suppressed:0,
+                    lastStreaming:false, lastAssistantNode:null
                   };
                   window[key] = state;
                   const visible = e => !!e && e.isConnected && e.offsetParent !== null;
@@ -94,13 +96,23 @@ final class SelfRunDomObserver {
                     const streaming = !!assistant && (stop || assistant.getAttribute('aria-busy') === 'true'
                       || assistant.getAttribute('data-is-streaming') === 'true'
                       || !!assistant.querySelector('[aria-busy="true"],[data-is-streaming="true"],[class*="spinner" i],[class*="loading" i]'));
+                    state.lastStreaming = streaming;
+                    state.lastAssistantNode = assistant;
+                    let completedDigest = '';
+                    let controlDigest = '';
+                    if (assistant && !streaming) {
+                      const completedText = String(assistant.innerText || assistant.textContent || '');
+                      completedDigest = hash(completedText);
+                      const controls = completedText.match(/\\[SELF_RUN_[A-Z_]+[^\\]\\r\\n]*\\]/g) || [];
+                      controlDigest = controls.length ? hash(controls[controls.length - 1]) : '';
+                    }
                     const selected = [...document.querySelectorAll('[aria-checked="true"],[aria-selected="true"],[aria-pressed="true"],input[type="radio"]:checked')]
                       .filter(visible).slice(-24).map(e => compact(e.innerText || e.getAttribute?.('aria-label') || e.value || e.dataset?.state || '')).filter(Boolean);
                     const overlays = [...document.querySelectorAll('[role="menu"],[role="listbox"]')].filter(visible).length;
                     return JSON.stringify({
                       path:location.pathname, auth, composer:!!c, composerKey:hash(cText),
                       send:!!send, sendDisabled:!!send && (send.disabled || send.getAttribute('aria-disabled') === 'true'),
-                      stop, userCount, assistantIdentity, streaming, selected, overlays
+                      stop, userCount, assistantIdentity, streaming, completedDigest, controlDigest, selected, overlays
                     });
                   };
                   const notify = () => {
@@ -117,7 +129,22 @@ final class SelfRunDomObserver {
                     }, 180);
                   };
                   const onMutations = mutations => {
+                    state.lastObserverCallbackAt = Date.now();
                     for (const mutation of mutations) {
+                      if (mutation.target === state.probe && mutation.attributeName === 'data-selfrun-probe') {
+                        const ack = Number(state.probe?.getAttribute('data-selfrun-probe') || 0);
+                        if (ack > state.probeAck) state.probeAck = ack;
+                        continue;
+                      }
+                      if (mutation.type === 'characterData') {
+                        state.lastMutationAt = Date.now();
+                        if (state.lastAssistantNode?.contains(mutation.target)
+                            && !state.lastStreaming && !state.timer) {
+                          notify();
+                          return;
+                        }
+                        continue;
+                      }
                       if (mutation.type === 'attributes') { notify(); return; }
                       if (mutation.type === 'childList') {
                         const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
@@ -133,15 +160,21 @@ final class SelfRunDomObserver {
                     try { state.port.start?.(); } catch (_) {}
                     const root = document.body || document.documentElement;
                     state.root = root;
+                    state.observer = new MutationObserver(onMutations);
                     if (root) {
-                      state.observer = new MutationObserver(onMutations);
                       state.observer.observe(root, {
                         subtree:true,
                         childList:true,
+                        characterData:true,
                         attributes:true,
                         attributeFilter:['aria-busy','aria-disabled','aria-checked','aria-selected','aria-pressed','data-is-streaming','data-state','disabled']
                       });
                     }
+                    state.probe = document.createElement('span');
+                    state.observer.observe(state.probe, {
+                      attributes:true,
+                      attributeFilter:['data-selfrun-probe']
+                    });
                     state.eventListener = notify;
                     for (const name of eventNames) {
                       try { document.addEventListener(name, state.eventListener, true); } catch (_) {}
@@ -162,9 +195,38 @@ final class SelfRunDomObserver {
                   const state = window.__chatgptSelfRunDomObserver;
                   if (!state) return JSON.stringify({status:'MISSING'});
                   if (state.lease !== %s) return JSON.stringify({status:'STALE', lease:state.lease || ''});
+                  const previousProbe = Number(state.probeSent || 0);
+                  const previousAck = Number(state.probeAck || 0);
+                  if (previousProbe > 0 && previousAck < previousProbe) {
+                    return JSON.stringify({
+                      status:'STALLED', lease:state.lease, port:!!state.port,
+                      rootConnected:!!state.root && state.root.isConnected,
+                      probeSent:previousProbe, probeAck:previousAck,
+                      lastObserverCallbackAt:Number(state.lastObserverCallbackAt || 0),
+                      fingerprint:String(state.lastFingerprint || ''),
+                      suppressed:Number(state.suppressed || 0)
+                    });
+                  }
+                  const nextProbe = previousProbe + 1;
+                  state.probeSent = nextProbe;
+                  try {
+                    if (!state.probe) throw new Error('probe_missing');
+                    state.probe.setAttribute('data-selfrun-probe', String(nextProbe));
+                  } catch (_) {
+                    return JSON.stringify({
+                      status:'STALLED', lease:state.lease, port:!!state.port,
+                      rootConnected:!!state.root && state.root.isConnected,
+                      probeSent:nextProbe, probeAck:previousAck,
+                      lastObserverCallbackAt:Number(state.lastObserverCallbackAt || 0),
+                      fingerprint:String(state.lastFingerprint || ''),
+                      suppressed:Number(state.suppressed || 0)
+                    });
+                  }
                   return JSON.stringify({
                     status:'ALIVE', lease:state.lease, port:!!state.port,
                     rootConnected:!!state.root && state.root.isConnected,
+                    probeSent:nextProbe, probeAck:previousAck,
+                    lastObserverCallbackAt:Number(state.lastObserverCallbackAt || 0),
                     lastMutationAt:Number(state.lastMutationAt || 0),
                     lastDispatchAt:Number(state.lastDispatchAt || 0),
                     fingerprint:String(state.lastFingerprint || ''),
