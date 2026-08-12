@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -28,7 +29,7 @@ public class SelfRunPauseResumeTest {
     @Test
     public void preservedPauseInvalidatesPrePauseAutomationBeforeWebViewPause() throws Exception {
         Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = Files.readString(source);
+        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
         int method = text.indexOf("private void enterPreservedPause(String cause, String status)");
         int nextMethod = text.indexOf("private void pauseCurrentWebView", method);
         assertTrue(method >= 0 && nextMethod > method);
