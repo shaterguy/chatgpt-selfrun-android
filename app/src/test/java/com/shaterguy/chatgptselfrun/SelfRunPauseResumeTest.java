@@ -92,18 +92,42 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void staleEvaluateGuardIncludesRunGenerationAndWebViewBeforeSharedMutation() throws Exception {
+    public void staleEvaluateGuardIncludesRunGenerationWebViewAndRateLimitBeforeSharedMutation() throws Exception {
         String text = source();
         int method = text.indexOf("private void evaluate(String phase, String script)");
         int nextMethod = text.indexOf("private static boolean isWaitingStatus", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
-        int staleGuard = body.indexOf("if (!isCurrentExecution(active, activeGeneration, activeRunId)) return;", callback);
+        int staleGuard = body.indexOf(
+                "if (!isCurrentExecution(active, activeGeneration, activeRunId) || isRateLimited()) return;", callback);
         int clearInFlight = body.indexOf("evaluationInFlight = false;", callback);
+        int clearRateLimit = body.indexOf("rateLimitedUntilElapsed = 0L;", callback);
         assertTrue(callback >= 0);
         assertTrue(staleGuard > callback);
         assertTrue(clearInFlight > staleGuard);
+        assertTrue(clearRateLimit > staleGuard);
+    }
+
+    @Test
+    public void rateLimitInvalidatesInFlightEvaluationBeforePowerReleaseAndExpiryScheduling() throws Exception {
+        String text = source();
+        int method = text.indexOf("private void rateLimit(String reason)");
+        int nextMethod = text.indexOf("private void scheduleRateLimitExpiry()", method);
+        assertTrue(method >= 0 && nextMethod > method);
+        String body = text.substring(method, nextMethod);
+        int deadline = body.indexOf("rateLimitedUntilElapsed = now + delay;");
+        int generationAdvance = body.indexOf("generation++;", deadline);
+        int clearInFlight = body.indexOf("evaluationInFlight = false;", generationAdvance);
+        int clearPending = body.indexOf("domEvaluationPending = false;", clearInFlight);
+        int powerRelease = body.indexOf("updateWakeLockForState(\"rate_limit_wait\")", clearPending);
+        int expirySchedule = body.indexOf("scheduleRateLimitExpiry();", powerRelease);
+        assertTrue(deadline >= 0);
+        assertTrue(generationAdvance > deadline);
+        assertTrue(clearInFlight > generationAdvance);
+        assertTrue(clearPending > clearInFlight);
+        assertTrue(powerRelease > clearPending);
+        assertTrue(expirySchedule > powerRelease);
     }
 
     @Test
