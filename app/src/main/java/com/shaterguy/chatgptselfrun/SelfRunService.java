@@ -661,7 +661,8 @@ public final class SelfRunService extends Service {
         store.setPaused(true);
         store.setPhase(SelfRunStore.PHASE_PAUSED);
         store.setStatus(status);
-        handler.removeCallbacks(stepRunnable);
+        handler.removeCallbacksAndMessages(null);
+        generation++;
         evaluationInFlight = false;
         submittedObservationCount = 0;
         uiWaitCount = 0;
