@@ -1,4 +1,4 @@
-name: Apply v0.2.3-dev5 lifecycle patch (wake gate)
+name: Apply v0.2.3-dev5 lifecycle patch (wake gate 2)
 
 on:
   push:
