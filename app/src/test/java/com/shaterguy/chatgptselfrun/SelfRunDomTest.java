@@ -18,7 +18,8 @@ public class SelfRunDomTest {
                 "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_WORK, "SR-1");
         assertTrue(script.contains("EXISTING_CONVERSATION"));
         assertTrue(script.contains("프로젝트 새 대화 입력창 대기"));
-        assertTrue(script.contains("실행 모드 실제 상태 대기"));
+        assertTrue(script.contains("모드 전환 반영 대기"));
+        assertFalse(script.contains("실행 모드 실제 상태 대기"));
         assertTrue(script.contains("chatgpt-selfrun:mode:SR-1"));
     }
 
@@ -37,7 +38,7 @@ public class SelfRunDomTest {
     }
 
     @Test
-    public void chatBootstrapFailsClosedWithoutActualModeReadback() {
+    public void chatBootstrapDoesNotBlockOnMissingAriaSelectionAfterSingleClick() {
         String script = SelfRunDom.prepareInitialContext(
                 "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_CHAT, "SR-1");
         assertTrue(script.contains("requestedMode="));
@@ -48,9 +49,23 @@ public class SelfRunDomTest {
         assertTrue(script.contains("currentMode"));
         assertTrue(script.contains("modeFound"));
         assertTrue(script.contains("modeReadback"));
-        assertTrue(script.contains("if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기'"));
+        assertTrue(script.contains("if(action)return result('UI_WAIT','모드 전환 반영 대기'"));
+        assertFalse(script.contains("if(!modeReadback)return result('UI_WAIT'"));
+        assertFalse(script.contains("실행 모드 실제 상태 대기"));
         assertFalse(script.contains("sol|terra|luna"));
         assertFalse(script.contains("reasoningDiagnostics"));
+    }
+
+    @Test
+    public void bootstrapKeepsSingleClickGuardUntilComposerIsReady() {
+        String script = SelfRunDom.prepareInitialContext(
+                "https://chatgpt.com/g/g-p-demo", SelfRunStore.MODE_CHAT, "SR-chat");
+        int composerWait = script.indexOf("프로젝트 새 대화 입력창 대기");
+        int clearMarker = script.indexOf("sessionStorage.removeItem(modeKey)");
+        assertTrue(script.contains("sessionStorage.getItem(modeKey)"));
+        assertTrue(script.contains("mode&&!modeSelected&&!modePrior"));
+        assertTrue(composerWait >= 0);
+        assertTrue(clearMarker > composerWait);
     }
 
     @Test
