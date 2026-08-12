@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(Ui.title(this, "ChatGPT SelfRun"));
-        root.addView(Ui.body(this, "v0.2.1-dev1 · 첫 화면은 작업 대시보드입니다. 입력은 ‘새 작업’을 눌렀을 때만 열립니다."));
+        root.addView(Ui.body(this, "v0.2.1 · 첫 화면은 작업 대시보드입니다. 입력은 ‘새 작업’을 눌렀을 때만 열립니다."));
 
         root.addView(Ui.section(this, "메뉴"));
         root.addView(Ui.row(this,
