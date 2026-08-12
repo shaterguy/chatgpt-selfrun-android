@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.view.MotionEvent;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -74,6 +75,10 @@ public final class SelfRunNewActivity extends Activity {
         requirement.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
         requirement.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        requirement.setVerticalScrollBarEnabled(true);
+        requirement.setHorizontalScrollBarEnabled(false);
+        requirement.setHorizontallyScrolling(false);
+        configureNestedCommandScrolling(requirement);
         root.addView(requirement);
 
         root.addView(Ui.section(this, "시작"));
@@ -83,6 +88,34 @@ public final class SelfRunNewActivity extends Activity {
         projectUrl.clearFocus();
         requirement.clearFocus();
         root.requestFocus();
+    }
+
+    private static void configureNestedCommandScrolling(EditText editor) {
+        final float[] lastY = {0f};
+        editor.setOnTouchListener((view, event) -> {
+            if (view.getParent() == null) return false;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN -> {
+                    lastY[0] = event.getY();
+                    boolean canScroll = editor.canScrollVertically(-1) || editor.canScrollVertically(1);
+                    view.getParent().requestDisallowInterceptTouchEvent(canScroll);
+                }
+                case MotionEvent.ACTION_MOVE -> {
+                    float currentY = event.getY();
+                    float deltaY = currentY - lastY[0];
+                    lastY[0] = currentY;
+                    int direction = deltaY < 0f ? 1 : (deltaY > 0f ? -1 : 0);
+                    boolean canScroll = direction == 0
+                            ? editor.canScrollVertically(-1) || editor.canScrollVertically(1)
+                            : editor.canScrollVertically(direction);
+                    view.getParent().requestDisallowInterceptTouchEvent(canScroll);
+                }
+                case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        view.getParent().requestDisallowInterceptTouchEvent(false);
+                default -> { }
+            }
+            return false;
+        });
     }
 
     private void startSelfRun() {
