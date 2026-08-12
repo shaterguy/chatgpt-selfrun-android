@@ -1,0 +1,125 @@
+name: Verify and release SelfRun v0.2.1
+
+on:
+  push:
+    branches:
+      - main
+      - v0.2.1-dev1
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android SDK and zstd
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Unit tests
+        run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Build and recover exact signed v0.2.1 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          SRC=app/build/outputs/apk/release/app-release-unsigned.apk
+          UNSIGNED=chatgpt-selfrun-android-v0.2.1-aligned-unsigned.apk
+          APK=chatgpt-selfrun-android-v0.2.1.apk
+          gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
+          test -s "$SRC"
+          "$BT/zipalign" -p -f 4 "$SRC" "$UNSIGNED"
+          echo '8eaa6dbbb8e1432a4f2311469f45b24abe6453ba5a066ab74db6d512e2f1a21c  chatgpt-selfrun-android-v0.2.1-aligned-unsigned.apk' | sha256sum --check --strict
+          printf '%s' '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' | base64 --decode > signed.patch.zst
+          echo '9c137a4d0dd66d2b41cf706c3564f10fc178b3e07dfdb864afb046e6ec018f5e  signed.patch.zst' | sha256sum --check --strict
+          zstd -d --patch-from="$UNSIGNED" signed.patch.zst -o "$APK"
+          test "$(stat -c %s "$APK")" -eq 697939
+          echo '344251792126e1260035a41781c53195c7e69ff56ef2e0aa1eddecd2a336b24e  chatgpt-selfrun-android-v0.2.1.apk' | sha256sum --check --strict
+          "$BT/aapt" dump badging "$APK" | tee BADGING.txt
+          grep -q "package: name='com.shaterguy.chatgptselfrun'" BADGING.txt
+          grep -q "versionCode='10'" BADGING.txt
+          grep -q "versionName='0.2.1'" BADGING.txt
+          java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs "$APK" | tee APKSIGNER.txt
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' APKSIGNER.txt
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' APKSIGNER.txt
+          grep -q 'Signer #1 certificate SHA-256 digest: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' APKSIGNER.txt
+          "$BT/zipalign" -c -v 4 "$APK"
+          unzip -t "$APK" >/dev/null
+          echo '344251792126e1260035a41781c53195c7e69ff56ef2e0aa1eddecd2a336b24e  chatgpt-selfrun-android-v0.2.1.apk' > SHA256SUMS.txt
+      - name: Upload verified signed release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chatgpt-selfrun-android-v0.2.1-release
+          path: |
+            chatgpt-selfrun-android-v0.2.1.apk
+            SHA256SUMS.txt
+            BADGING.txt
+            APKSIGNER.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: verify-release
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      contains(github.event.head_commit.message, '[publish-v0.2.1]')
+    permissions:
+      actions: read
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download verified release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name chatgpt-selfrun-android-v0.2.1-release --dir release-assets
+          echo '344251792126e1260035a41781c53195c7e69ff56ef2e0aa1eddecd2a336b24e  release-assets/chatgpt-selfrun-android-v0.2.1.apk' | sha256sum --check --strict
+      - name: Publish v0.2.1 as latest GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.2.1
+          APK=release-assets/chatgpt-selfrun-android-v0.2.1.apk
+          SUMS=release-assets/SHA256SUMS.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            mkdir -p existing-release
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-android-v0.2.1.apk' --dir existing-release
+            echo '344251792126e1260035a41781c53195c7e69ff56ef2e0aa1eddecd2a336b24e  existing-release/chatgpt-selfrun-android-v0.2.1.apk' | sha256sum --check --strict
+            exit 0
+          fi
+          printf '%s\n' \
+            'SelfRun v0.2.1 정식 릴리스입니다.' \
+            '' \
+            '- 일반 Chat bootstrap에서 Chat/Work 선택 상태 속성을 강제 readback하던 무한 대기 결함을 수정했습니다.' \
+            '- 모드 전환은 실행당 한 번만 수행하고 입력창 준비가 확인되면 정상적으로 첫 요청 전송 단계로 진행합니다.' \
+            '- 기존 conversation 유지, USER_ACTION_REQUIRED 재개, Work 모델/추론 및 continuation 동작은 그대로 유지합니다.' \
+            '- versionName: 0.2.1 / versionCode: 10' \
+            '- APK SHA-256: 344251792126e1260035a41781c53195c7e69ff56ef2e0aa1eddecd2a336b24e' \
+            '- 인증서 SHA-256: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' \
+            > RELEASE_NOTES.md
+          gh release create "$TAG" "$APK" "$SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'v0.2.1' \
+            --notes-file RELEASE_NOTES.md \
+            --latest
