@@ -1,0 +1,67 @@
+name: V02 Rework
+
+on:
+  push:
+    branches: [v0.2.3-dev4]
+    paths:
+      - .github/workflows/v02-rework.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: v0.2.3-dev4
+          fetch-depth: 0
+      - name: Apply V-02 minimal rework
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service_path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          test_path = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java')
+          service = service_path.read_text()
+          tests = test_path.read_text()
+
+          def replace_once(text, old, new, label):
+              if text.count(old) != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, got {text.count(old)}')
+              return text.replace(old, new, 1)
+
+          service = replace_once(service,
+              '''    private int rateLimitAttempt;\n    private long rateLimitedUntilElapsed;\n''',
+              '''    private int rateLimitAttempt;\n    private long rateLimitTimerEpoch;\n    private long rateLimitedUntilElapsed;\n''',
+              'rate limit timer field')
+
+          old_expiry = '''    private void scheduleRateLimitExpiry() {\n        long delay = Math.max(0L, rateLimitedUntilElapsed - SystemClock.elapsedRealtime());\n        WebView expectedWebView = webView;\n        int expectedGeneration = generation;\n        String expectedRunId = store.runId();\n        handler.postDelayed(() -> {\n            if (!isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId)) return;\n            if (isRateLimited()) {\n                scheduleRateLimitExpiry();\n                return;\n            }\n            beginRecovery("rate_limit_expired");\n            if (webView != null) webView.loadUrl(targetUrl());\n            else ensureEngine();\n        }, delay);\n    }\n'''
+          new_expiry = '''    private void scheduleRateLimitExpiry() {\n        long expectedDeadline = rateLimitedUntilElapsed;\n        long expectedTimerEpoch = rateLimitTimerEpoch == Long.MAX_VALUE ? 1L : rateLimitTimerEpoch + 1L;\n        rateLimitTimerEpoch = expectedTimerEpoch;\n        String expectedRunId = store.runId();\n        long delay = Math.max(0L, expectedDeadline - SystemClock.elapsedRealtime());\n        handler.postDelayed(() -> {\n            if (!isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)) return;\n            if (isRateLimited()) {\n                scheduleRateLimitExpiry();\n                return;\n            }\n            beginRecovery("rate_limit_expired");\n            if (webView != null) webView.loadUrl(targetUrl());\n            else ensureEngine();\n        }, delay);\n    }\n\n    private boolean isCurrentRateLimitTimer(String expectedRunId, long expectedTimerEpoch, long expectedDeadline) {\n        return expectedRunId != null && expectedRunId.equals(store.runId())\n                && expectedTimerEpoch == rateLimitTimerEpoch\n                && expectedDeadline == rateLimitedUntilElapsed\n                && !store.userStopped() && canRun();\n    }\n'''
+          service = replace_once(service, old_expiry, new_expiry, 'run-level rate limit expiry')
+
+          old_resume = '''        if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);\n        else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);\n        recoveryInProgress = !preserved;\n        store.setStatus(store.conversationUrl().isEmpty()\n                ? "사용자 재개 · 새 대화 bootstrap 복구 중"\n                : preserved\n                        ? "사용자 재개 · 동일 WebView continuation 준비"\n                        : "사용자 재개 · WebView 소실 복구 후 continuation 준비");\n        runLog.record(store, "UI_RESUME", preserved ? "same_webview" : "webview_recovery");\n        startForegroundCompat();\n        updateWakeLockForState("resume_prepare");\n\n        if (preserved) {\n'''
+          new_resume = '''        if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);\n        else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);\n        boolean rateLimited = isRateLimited();\n        recoveryInProgress = !preserved && !rateLimited;\n        store.setStatus(rateLimited\n                ? "사용자 재개 · rate-limit 만료 대기"\n                : store.conversationUrl().isEmpty()\n                        ? "사용자 재개 · 새 대화 bootstrap 복구 중"\n                        : preserved\n                                ? "사용자 재개 · 동일 WebView continuation 준비"\n                                : "사용자 재개 · WebView 소실 복구 후 continuation 준비");\n        runLog.record(store, "UI_RESUME", rateLimited ? "rate_limit_wait" : preserved ? "same_webview" : "webview_recovery");\n        startForegroundCompat();\n        updateWakeLockForState("resume_prepare");\n        if (rateLimited) {\n            scheduleRateLimitExpiry();\n            return;\n        }\n\n        if (preserved) {\n'''
+          service = replace_once(service, old_resume, new_resume, 'resume rate limit rearm')
+
+          marker = '''    @Test\n    public void powerPolicySeparatesAutomationFromPauseRateLimitAndTerminalStates() {\n'''
+          additions = '''    @Test\n    public void rateLimitExpiryIsRunLevelAndIgnoresWebViewNavigationGeneration() throws Exception {\n        String text = source();\n        int schedule = text.indexOf("private void scheduleRateLimitExpiry()");\n        int restore = text.indexOf("private void restoreCanonical", schedule);\n        assertTrue(schedule >= 0 && restore > schedule);\n        String body = text.substring(schedule, restore);\n        assertTrue(body.contains("long expectedDeadline = rateLimitedUntilElapsed;"));\n        assertTrue(body.contains("long expectedTimerEpoch = rateLimitTimerEpoch == Long.MAX_VALUE ? 1L : rateLimitTimerEpoch + 1L;"));\n        assertTrue(body.contains("rateLimitTimerEpoch = expectedTimerEpoch;"));\n        assertTrue(body.contains("String expectedRunId = store.runId();"));\n        assertTrue(body.contains("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)"));\n        assertTrue(body.contains("expectedTimerEpoch == rateLimitTimerEpoch"));\n        assertTrue(body.contains("expectedDeadline == rateLimitedUntilElapsed"));\n        assertTrue(body.contains("expectedRunId.equals(store.runId())"));\n        assertTrue(body.contains("!store.userStopped() && canRun()"));\n        assertFalse(body.contains("expectedGeneration"));\n        assertFalse(body.contains("expectedWebView"));\n        assertFalse(body.contains("isCurrentExecution("));\n        int guard = body.indexOf("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)");\n        int recovery = body.indexOf("beginRecovery(\\"rate_limit_expired\\")", guard);\n        assertTrue(recovery > guard);\n    }\n\n    @Test\n    public void rateLimitResumeRearmsRunLevelExpiryBeforeAutomationRestarts() throws Exception {\n        String text = source();\n        int resume = text.indexOf("private void resumeFromUi()");\n        int pause = text.indexOf("private void enterPreservedPause", resume);\n        assertTrue(resume >= 0 && pause > resume);\n        String body = text.substring(resume, pause);\n        int capture = body.indexOf("boolean rateLimited = isRateLimited();");\n        int recovery = body.indexOf("recoveryInProgress = !preserved && !rateLimited;", capture);\n        int wake = body.indexOf("updateWakeLockForState(\\"resume_prepare\\")", recovery);\n        int wait = body.indexOf("if (rateLimited)", wake);\n        int schedule = body.indexOf("scheduleRateLimitExpiry();", wait);\n        int stop = body.indexOf("return;", schedule);\n        int preserved = body.indexOf("if (preserved)", stop);\n        assertTrue(capture >= 0);\n        assertTrue(recovery > capture);\n        assertTrue(wake > recovery);\n        assertTrue(wait > wake);\n        assertTrue(schedule > wait);\n        assertTrue(stop > schedule);\n        assertTrue(preserved > stop);\n    }\n\n'''
+          if tests.count(marker) != 1:
+              raise SystemExit(f'test marker: expected exactly one match, got {tests.count(marker)}')
+          tests = tests.replace(marker, additions + marker, 1)
+
+          service_path.write_text(service)
+          test_path.write_text(tests)
+          PY
+          git diff --check
+          git diff -- app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java
+      - name: Commit V-02 rework
+        shell: bash
+        run: |
+          git config user.name 'SHatergUY'
+          git config user.email '108107617+shaterguy@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java
+          git commit -m 'Make rate-limit expiry navigation-safe'
+          git push origin HEAD:v0.2.3-dev4
