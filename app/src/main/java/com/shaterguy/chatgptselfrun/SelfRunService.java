@@ -24,6 +24,8 @@ import org.json.JSONTokener;
 
 public final class SelfRunService extends Service {
     static final String ACTION_RUN = "com.shaterguy.chatgptselfrun.RUN";
+    static final String ACTION_PAUSE = "com.shaterguy.chatgptselfrun.PAUSE";
+    static final String ACTION_RESUME = "com.shaterguy.chatgptselfrun.RESUME";
     private static final int NOTIFICATION_ID = 7021;
     private static final String PHASE_BOOTSTRAP_MODEL = "BOOTSTRAP_MODEL";
     private static final String PHASE_BOOTSTRAP_REASONING = "BOOTSTRAP_REASONING";
@@ -63,7 +65,16 @@ public final class SelfRunService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && !ACTION_RUN.equals(intent.getAction())) {
+        String action = intent == null ? ACTION_RUN : intent.getAction();
+        if (ACTION_PAUSE.equals(action)) {
+            pauseFromUi();
+            return store.active() ? START_STICKY : START_NOT_STICKY;
+        }
+        if (ACTION_RESUME.equals(action)) {
+            resumeFromUi();
+            return store.active() ? START_STICKY : START_NOT_STICKY;
+        }
+        if (intent != null && !ACTION_RUN.equals(action)) {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
@@ -72,12 +83,9 @@ public final class SelfRunService extends Service {
             return START_NOT_STICKY;
         }
         if (store.paused()) {
-            // A user-action pause keeps this service and its current WebView alive so
-            // resume can submit directly in the same conversation.  If Android
-            // recreated the service, webView is null and the normal resume path will
-            // use the persisted conversation URL as the exceptional recovery path.
             startForegroundCompat();
             releaseWakeLock();
+            pauseCurrentWebView("service_paused");
             runLog.record(store, "SERVICE_PAUSED", "automation_stopped;webview_preserved="
                     + (webView == null ? "0" : "1"));
             return START_STICKY;
@@ -137,6 +145,10 @@ public final class SelfRunService extends Service {
             webView.setWebViewClient(new WebViewClient() {
                 @Override
                 public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                    if (store.paused()) {
+                        runLog.record(store, "WEBVIEW_EVENT_IGNORED", "page_start;paused=1");
+                        return;
+                    }
                     generation++;
                     evaluationInFlight = false;
                     handler.removeCallbacks(stepRunnable);
@@ -148,6 +160,10 @@ public final class SelfRunService extends Service {
 
                 @Override
                 public void onPageFinished(WebView view, String url) {
+                    if (store.paused()) {
+                        runLog.record(store, "WEBVIEW_EVENT_IGNORED", "page_finish;paused=1");
+                        return;
+                    }
                     if (isRateLimited()) return;
                     uiWaitCount = 0;
                     store.setStatus("ChatGPT 화면 준비 확인 중");
@@ -160,6 +176,7 @@ public final class SelfRunService extends Service {
                     if (!request.isForMainFrame()) return;
                     int code = response.getStatusCode();
                     runLog.record(store, "WEBVIEW_ERROR", "type=http;code=" + code);
+                    if (store.paused()) return;
                     if (code == 429) rateLimit("HTTP 429");
                 }
 
@@ -168,6 +185,7 @@ public final class SelfRunService extends Service {
                     if (!request.isForMainFrame()) return;
                     int code = error == null ? 0 : error.getErrorCode();
                     runLog.record(store, "WEBVIEW_ERROR", "type=network;code=" + code);
+                    if (store.paused()) return;
                     if (code == -15) {
                         rateLimit("WebView ERROR_TOO_MANY_REQUESTS");
                     } else {
@@ -183,6 +201,7 @@ public final class SelfRunService extends Service {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     if (!request.isForMainFrame()) return false;
+                    if (store.paused()) return false;
                     String requested = String.valueOf(request.getUrl());
                     boolean allowed = store.conversationUrl().isEmpty()
                             ? sameProject(store.projectUrl(), requested)
@@ -197,17 +216,27 @@ public final class SelfRunService extends Service {
                 public void onReceivedSslError(WebView view, SslErrorHandler sslHandler, SslError error) {
                     sslHandler.cancel();
                     runLog.record(store, "WEBVIEW_ERROR", "type=ssl");
+                    if (store.paused()) return;
                     handler.post(() -> recoverStalledPhase("ssl_error",
                             "SSL 오류 취소 · 같은 대상 재접속", 2_000L));
                 }
 
                 @Override
                 public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-                    runLog.record(store, "RENDERER_GONE", "crash=" + (detail != null && detail.didCrash()));
+                    boolean paused = store.paused();
+                    runLog.record(store, "RENDERER_GONE", "crash=" + (detail != null && detail.didCrash())
+                            + ";paused=" + (paused ? "1" : "0"));
                     resetPhaseClock();
                     cleanupWebView();
-                    store.setStatus("WebView 렌더러 복구 중");
-                    handler.postDelayed(SelfRunService.this::ensureEngine, 2_000L);
+                    if (paused) {
+                        store.setStatus("SelfRun 일시정지 · WebView 소실 · 재개 시 conversation 복구");
+                        runLog.record(store, "WEBVIEW_RECOVERY_DEFERRED", "renderer_gone_while_paused");
+                        startForegroundCompat();
+                        releaseWakeLock();
+                    } else {
+                        store.setStatus("WebView 렌더러 복구 중");
+                        handler.postDelayed(SelfRunService.this::ensureEngine, 2_000L);
+                    }
                     return true;
                 }
             });
@@ -432,21 +461,11 @@ public final class SelfRunService extends Service {
             return;
         }
         if (preservesWebViewOnPause(signal.type)) {
-            store.setPaused(true);
-            transition(SelfRunStore.PHASE_PAUSED,
-                    "사용자 조치 대기 · " + signal.actionId,
-                    signal.type.name());
-            runLog.record(store, "PAUSED", signal.type.name() + ";webview=preserved");
+            String status = signal.type == SelfRunProtocol.Type.USER_ACTION
+                    ? "사용자 조치 대기 · " + signal.actionId
+                    : "SelfRun 일시정지";
+            enterPreservedPause(signal.type.name(), status);
             NotificationHelper.notifyUser(this, "SelfRun 일시중지", store.status());
-            pauseForUserAction();
-            return;
-        }
-        if (signal.type == SelfRunProtocol.Type.PAUSE) {
-            store.setPaused(true);
-            transition(SelfRunStore.PHASE_PAUSED, "SelfRun 일시중지", signal.type.name());
-            runLog.record(store, "PAUSED", signal.type.name());
-            NotificationHelper.notifyUser(this, "SelfRun 일시중지", store.status());
-            stopRelay();
             return;
         }
         store.setRole(signal.role);
@@ -464,7 +483,7 @@ public final class SelfRunService extends Service {
     }
 
     static boolean preservesWebViewOnPause(SelfRunProtocol.Type signalType) {
-        return signalType == SelfRunProtocol.Type.USER_ACTION;
+        return signalType == SelfRunProtocol.Type.USER_ACTION || signalType == SelfRunProtocol.Type.PAUSE;
     }
 
     private void transition(String next, String status, String reason) {
@@ -498,6 +517,7 @@ public final class SelfRunService extends Service {
     }
 
     private void rateLimit(String reason) {
+        if (!canRun()) return;
         long now = SystemClock.elapsedRealtime();
         if (rateLimitedUntilElapsed > now) return;
         rateLimitAttempt = Math.min(rateLimitAttempt + 1, RATE_LIMIT_DELAYS.length);
@@ -591,22 +611,86 @@ public final class SelfRunService extends Service {
         stopRelay();
     }
 
+    private void pauseFromUi() {
+        if (!store.active() || store.paused() || store.userStopped() || store.runId().isEmpty()) return;
+        runLog.record(store, "UI_PAUSE", "user_pause");
+        enterPreservedPause("UI_PAUSE", "사용자 일시정지");
+    }
+
+    private void resumeFromUi() {
+        if (!store.paused() || store.userStopped() || store.runId().isEmpty()) return;
+        boolean preserved = webView != null;
+        if (preserved) {
+            try {
+                webView.onResume();
+                runLog.record(store, "WEBVIEW_RESUME", "mode=preserved;conversation=reused");
+            } catch (Throwable error) {
+                runLog.record(store, "WEBVIEW_RESUME_FAILED", error.getClass().getSimpleName());
+                cleanupWebView();
+                preserved = false;
+            }
+        }
+
+        store.setPaused(false);
+        store.setActive(true);
+        store.setUserStopped(false);
+        store.clearLastError();
+        store.setLastSignal("USER_RESUME");
+        if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);
+        else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
+        store.setStatus(store.conversationUrl().isEmpty()
+                ? "사용자 재개 · 새 대화 bootstrap 복구 중"
+                : preserved
+                        ? "사용자 재개 · 동일 WebView continuation 준비"
+                        : "사용자 재개 · WebView 소실 복구 후 continuation 준비");
+        runLog.record(store, "UI_RESUME", preserved ? "same_webview" : "webview_recovery");
+        startForegroundCompat();
+        acquireWakeLock();
+
+        if (preserved) {
+            scheduleStep(250L);
+        } else {
+            runLog.record(store, "WEBVIEW_RECOVERY_RECONNECT", store.conversationUrl().isEmpty()
+                    ? "source=resume;target=project" : "source=resume;target=persisted_conversation");
+            handler.post(this::ensureEngine);
+        }
+    }
+
+    private void enterPreservedPause(String cause, String status) {
+        String previous = store.phase();
+        store.setPaused(true);
+        store.setPhase(SelfRunStore.PHASE_PAUSED);
+        store.setStatus(status);
+        handler.removeCallbacks(stepRunnable);
+        evaluationInFlight = false;
+        submittedObservationCount = 0;
+        uiWaitCount = 0;
+        releaseWakeLock();
+        pauseCurrentWebView(cause);
+        startForegroundCompat();
+        runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=PAUSED;reason=" + cause);
+        runLog.record(store, "PAUSED", cause + ";webview=preserved;automation=stopped;low_power=1");
+    }
+
+    private void pauseCurrentWebView(String cause) {
+        if (webView == null) {
+            runLog.record(store, "WEBVIEW_PAUSE", "cause=" + cause + ";webview=missing");
+            return;
+        }
+        try {
+            webView.onPause();
+            runLog.record(store, "WEBVIEW_PAUSE", "cause=" + cause + ";webview=preserved");
+        } catch (Throwable error) {
+            runLog.record(store, "WEBVIEW_PAUSE_FAILED", error.getClass().getSimpleName());
+        }
+    }
+
     private void acquireWakeLock() {
         if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(10 * 60_000L);
     }
 
     private void releaseWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-    }
-
-    private void pauseForUserAction() {
-        // Do not call cleanupWebView(), stopRelay(), or loadUrl() here.  The current
-        // page is the user's action surface and must remain available for direct
-        // continuation submission after resume.
-        handler.removeCallbacks(stepRunnable);
-        evaluationInFlight = false;
-        releaseWakeLock();
-        startForegroundCompat();
     }
 
     private void cleanupWebView() {
