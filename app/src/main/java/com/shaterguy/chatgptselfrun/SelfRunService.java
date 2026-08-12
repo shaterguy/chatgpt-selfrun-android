@@ -322,8 +322,9 @@ public final class SelfRunService extends Service {
         evaluationCount = evaluationCount == Long.MAX_VALUE ? Long.MAX_VALUE : evaluationCount + 1L;
         runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase);
         active.evaluateJavascript(script, raw -> {
+            if (active != webView || activeGeneration != generation) return;
             evaluationInFlight = false;
-            if (active != webView || activeGeneration != generation || !canRun()) return;
+            if (!canRun()) return;
             JSONObject result = parse(raw);
             String status = result.optString("status", "SCRIPT_ERROR");
             String detail = result.optString("detail", "");
