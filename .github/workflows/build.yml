@@ -148,12 +148,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  release-dev6:
+  release-v020:
     needs: build
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      contains(github.event.head_commit.message, '[publish-v0.1.0-dev6]')
+      contains(github.event.head_commit.message, '[publish-v0.2.0]')
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -165,57 +165,58 @@ jobs:
       - name: Install APK verification tools
         run: |
           sdkmanager 'platform-tools' 'build-tools;36.0.0'
-      - name: Recover and verify the exact signed dev6 APK
+      - name: Recover and verify the exact signed v0.2.0 APK
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          APK=chatgpt-selfrun-android-v0.1.0-dev6.apk
+          APK=chatgpt-selfrun-android-v0.2.0.apk
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/84064164e75a4ecabffe6921ea646fec6cb3b8b2" --jq .content \
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/1b532d443b38528f9cd13531a9f4c08ed7bf57f9" --jq .content \
             | tr -d '\n' | base64 --decode > "$APK"
           test "$(stat -c %s "$APK")" -eq 697939
-          echo '4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120  chatgpt-selfrun-android-v0.1.0-dev6.apk' \
+          echo '2ebe9bf383a4a86268c89c3f3ce96fdba1c30be89c4b4942172058fa288ff727  chatgpt-selfrun-android-v0.2.0.apk' \
             | sha256sum --check --strict
           "$BT/aapt" dump badging "$APK" | tee BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" BADGING.txt
-          grep -q "versionCode='8'" BADGING.txt
-          grep -q "versionName='0.1.0'" BADGING.txt
+          grep -q "versionCode='9'" BADGING.txt
+          grep -q "versionName='0.2.0'" BADGING.txt
           java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs "$APK" | tee APKSIGNER.txt
           grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' APKSIGNER.txt
           grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' APKSIGNER.txt
           grep -q 'Signer #1 certificate SHA-256 digest: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' APKSIGNER.txt
           "$BT/zipalign" -c -v 4 "$APK"
           unzip -t "$APK" >/dev/null
-          echo '4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120  chatgpt-selfrun-android-v0.1.0-dev6.apk' > SHA256SUMS.txt
-      - name: Publish v0.1.0-dev6 as the latest GitHub Release
+          echo '2ebe9bf383a4a86268c89c3f3ce96fdba1c30be89c4b4942172058fa288ff727  chatgpt-selfrun-android-v0.2.0.apk' > SHA256SUMS.txt
+      - name: Publish v0.2.0 as the latest GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG=v0.1.0-dev6
-          APK=chatgpt-selfrun-android-v0.1.0-dev6.apk
+          TAG=v0.2.0
+          APK=chatgpt-selfrun-android-v0.2.0.apk
           if gh release view "$TAG" >/dev/null 2>&1; then
             mkdir existing-release
             gh release download "$TAG" --pattern "$APK" --dir existing-release
-            echo '4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120  existing-release/chatgpt-selfrun-android-v0.1.0-dev6.apk' \
+            echo '2ebe9bf383a4a86268c89c3f3ce96fdba1c30be89c4b4942172058fa288ff727  existing-release/chatgpt-selfrun-android-v0.2.0.apk' \
               | sha256sum --check --strict
             exit 0
           fi
           printf '%s\n' \
-            '수정된 dev6를 main에 통합한 최신 릴리스입니다.' \
+            'dev6 기능을 그대로 유지하고 앱 버전을 0.2.0으로 올린 정식 릴리스입니다.' \
             '' \
             '- USER_ACTION_REQUIRED에서 현재 WebView와 conversation을 유지합니다.' \
             '- 재개 시 동일 WebView에서 SELF_RUN_CONTINUE를 전송합니다.' \
             '- 중단된 Auth0/command-bridge 작업은 포함하지 않습니다.' \
-            '- versionName: 0.1.0 / versionCode: 8' \
-            '- APK SHA-256: 4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120' \
+            '- versionName: 0.2.0 / versionCode: 9' \
+            '- SelfRun bootstrap protocol: 0.1.0 (호환성 유지)' \
+            '- APK SHA-256: 2ebe9bf383a4a86268c89c3f3ce96fdba1c30be89c4b4942172058fa288ff727' \
             '- 인증서 SHA-256: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' \
             > RELEASE_NOTES.md
           gh release create "$TAG" "$APK" SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
-            --title 'v0.1.0-dev6' \
+            --title 'v0.2.0' \
             --notes-file RELEASE_NOTES.md \
             --latest
