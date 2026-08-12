@@ -34,6 +34,8 @@ jobs:
         run: sed -i '0,/ChatGPTSelfRun\/0.2.3-dev4/s//ChatGPTSelfRun\/0.2.3-dev5/' app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
       - name: Apply patch
         run: python3 tools/dev5_apply.py
+      - name: Fix generated lifecycle test escaping
+        run: python3 tools/dev5_fix_generated.py
       - name: Source policy checks
         shell: bash
         run: |
@@ -79,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/dev5-apply.yml tools/dev5_apply.py
+          rm .github/workflows/dev5-apply.yml tools/dev5_apply.py tools/dev5_fix_generated.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
