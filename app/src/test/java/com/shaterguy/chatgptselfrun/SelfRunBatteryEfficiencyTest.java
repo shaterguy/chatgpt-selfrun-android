@@ -24,21 +24,58 @@ public class SelfRunBatteryEfficiencyTest {
         assertTrue(install.contains("postMessage('state|' + fingerprint)"));
         assertTrue(install.contains("assistantIdentity"));
         assertTrue(install.contains("streaming"));
+        assertTrue(install.contains("completedDigest"));
+        assertTrue(install.contains("controlDigest"));
         assertTrue(install.contains("sendDisabled"));
         assertFalse(install.contains("postMessage('changed')"));
         assertFalse(install.contains("setInterval"));
         assertFalse(install.contains("pauseTimers"));
 
         assertTrue(health.contains("status:'ALIVE'"));
+        assertTrue(health.contains("status:'STALLED'"));
         assertTrue(health.contains("rootConnected"));
         assertTrue(health.contains("fingerprint"));
         assertTrue(health.contains("suppressed"));
+        assertTrue(health.contains("probeSent"));
+        assertTrue(health.contains("probeAck"));
         assertFalse(health.contains("querySelectorAll"));
+        assertFalse(health.contains("snapshot()"));
 
         assertTrue(detach.contains("observer?.disconnect()"));
         assertTrue(detach.contains("clearTimeout"));
         assertTrue(detach.contains("removeEventListener"));
         assertTrue(detach.contains("port?.close()"));
+    }
+
+    @Test
+    public void watchdogHealthSelfProbesTheObserverWithoutAFullDomScan() {
+        String install = SelfRunDomObserver.install("test-token", "test-lease");
+        String health = SelfRunDomObserver.health("test-lease");
+
+        assertTrue(install.contains("probe:null, probeSent:0, probeAck:0"));
+        assertTrue(install.contains("mutation.target === state.probe"));
+        assertTrue(install.contains("state.probeAck = ack"));
+        assertTrue(install.contains("state.observer.observe(state.probe"));
+        assertTrue(health.contains("previousProbe > 0 && previousAck < previousProbe"));
+        assertTrue(health.contains("state.probe.setAttribute('data-selfrun-probe', String(nextProbe))"));
+        assertTrue(health.contains("status:'STALLED'"));
+        assertFalse(health.contains("querySelector"));
+        assertFalse(health.contains("querySelectorAll"));
+    }
+
+    @Test
+    public void completedAssistantTextFinalizationIsObservedWithoutStreamingTokenChurn() {
+        String install = SelfRunDomObserver.install("test-token", "test-lease");
+
+        assertTrue(install.contains("characterData:true"));
+        assertTrue(install.contains("state.lastStreaming = streaming"));
+        assertTrue(install.contains("state.lastAssistantNode = assistant"));
+        assertTrue(install.contains("state.lastAssistantNode?.contains(mutation.target)"));
+        assertTrue(install.contains("&& !state.lastStreaming && !state.timer"));
+        assertTrue(install.contains("const completedText = String(assistant.innerText || assistant.textContent || '')"));
+        assertTrue(install.contains("completedText.match(/\\[SELF_RUN_"));
+        assertTrue(install.contains("completedDigest = hash(completedText)"));
+        assertTrue(install.contains("controlDigest = controls.length ? hash(controls[controls.length - 1]) : ''"));
     }
 
     @Test
