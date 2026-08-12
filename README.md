@@ -51,9 +51,9 @@ ChatGPT에서 하나의 conversation을 처음부터 끝까지 유지하면서 �
 
 ## 현재 최신 릴리스
 
-- 릴리스 태그: `v0.2.0`
-- versionName: `0.2.0`
-- versionCode: `9`
+- 릴리스 태그: `v0.2.1`
+- versionName: `0.2.1`
+- versionCode: `10`
 - applicationId: `com.shaterguy.chatgptselfrun`
 - Android 8.0 이상
 
