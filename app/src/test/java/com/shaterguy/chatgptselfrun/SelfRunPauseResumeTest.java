@@ -26,16 +26,20 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void preservedPauseInvalidatesPrePauseAutomation() throws Exception {
+    public void preservedPauseInvalidatesPrePauseAutomationBeforeWebViewPause() throws Exception {
         Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
         String text = Files.readString(source);
         int method = text.indexOf("private void enterPreservedPause(String cause, String status)");
         int nextMethod = text.indexOf("private void pauseCurrentWebView", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
-        assertTrue(body.contains("handler.removeCallbacksAndMessages(null);"));
-        assertTrue(body.contains("generation++;"));
-        assertTrue(body.indexOf("handler.removeCallbacksAndMessages(null);") < body.indexOf("webView.onPause()")
-                || !body.contains("webView.onPause()"));
+        int queueClear = body.indexOf("handler.removeCallbacksAndMessages(null);");
+        int generationAdvance = body.indexOf("generation++;");
+        int webViewPause = body.indexOf("pauseCurrentWebView(cause);");
+        assertTrue(queueClear >= 0);
+        assertTrue(generationAdvance >= 0);
+        assertTrue(webViewPause >= 0);
+        assertTrue(queueClear < webViewPause);
+        assertTrue(generationAdvance < webViewPause);
     }
 }
