@@ -72,6 +72,9 @@ public class SelfRunBatteryEfficiencyTest {
         assertTrue(install.contains("state.lastAssistantNode = assistant"));
         assertTrue(install.contains("state.lastAssistantNode?.contains(mutation.target)"));
         assertTrue(install.contains("&& !state.lastStreaming && !state.timer"));
+        int firstCompletionGuard = install.indexOf("state.lastAssistantNode?.contains(mutation.target)");
+        int secondCompletionGuard = install.indexOf("state.lastAssistantNode?.contains(mutation.target)", firstCompletionGuard + 1);
+        assertTrue(firstCompletionGuard >= 0 && secondCompletionGuard > firstCompletionGuard);
         assertTrue(install.contains("const completedText = String(assistant.innerText || assistant.textContent || '')"));
         assertTrue(install.contains("completedText.match(/\\[SELF_RUN_"));
         assertTrue(install.contains("completedDigest = hash(completedText)"));
