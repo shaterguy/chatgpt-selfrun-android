@@ -75,7 +75,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(Ui.title(this, "ChatGPT SelfRun"));
-        root.addView(Ui.body(this, "v0.2.3 · 첫 화면은 작업 대시보드입니다. 입력은 ‘새 작업’을 눌렀을 때만 열립니다."));
+        root.addView(Ui.body(this, "v0.2.3-dev2 · 첫 화면은 작업 대시보드입니다. 입력은 ‘새 작업’을 눌렀을 때만 열립니다."));
 
         root.addView(Ui.section(this, "메뉴"));
         root.addView(Ui.row(this,
@@ -101,7 +101,7 @@ public final class MainActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "알림 권한", v -> requestNotificationPermission()),
                 Ui.button(this, "배터리 최적화 제외", v -> requestBatteryExemption())));
-        root.addView(Ui.body(this, "실행 중에는 Foreground Service와 partial WakeLock을 사용합니다. 예약 알람이나 부팅 자동실행은 사용하지 않습니다."));
+        root.addView(Ui.body(this, "실행 중에는 Foreground Service를 유지하고, partial WakeLock은 SelfRun 작업에 필요한 동안만 사용합니다. 예약 알람이나 부팅 자동실행은 사용하지 않습니다."));
 
         Ui.setContent(this, scroll);
         root.requestFocus();
