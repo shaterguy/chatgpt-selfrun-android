@@ -59,6 +59,7 @@ public final class SelfRunService extends Service {
     private int generation;
     private int observerEpoch;
     private int rateLimitAttempt;
+    private long rateLimitTimerEpoch;
     private long rateLimitedUntilElapsed;
     private long evaluationCount;
     private long observerMaintenanceEvaluationCount;
@@ -808,12 +809,13 @@ public final class SelfRunService extends Service {
     }
 
     private void scheduleRateLimitExpiry() {
-        long delay = Math.max(0L, rateLimitedUntilElapsed - SystemClock.elapsedRealtime());
-        WebView expectedWebView = webView;
-        int expectedGeneration = generation;
+        long expectedDeadline = rateLimitedUntilElapsed;
+        long expectedTimerEpoch = rateLimitTimerEpoch == Long.MAX_VALUE ? 1L : rateLimitTimerEpoch + 1L;
+        rateLimitTimerEpoch = expectedTimerEpoch;
         String expectedRunId = store.runId();
+        long delay = Math.max(0L, expectedDeadline - SystemClock.elapsedRealtime());
         handler.postDelayed(() -> {
-            if (!isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId)) return;
+            if (!isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)) return;
             if (isRateLimited()) {
                 scheduleRateLimitExpiry();
                 return;
@@ -822,6 +824,13 @@ public final class SelfRunService extends Service {
             if (webView != null) webView.loadUrl(targetUrl());
             else ensureEngine();
         }, delay);
+    }
+
+    private boolean isCurrentRateLimitTimer(String expectedRunId, long expectedTimerEpoch, long expectedDeadline) {
+        return expectedRunId != null && expectedRunId.equals(store.runId())
+                && expectedTimerEpoch == rateLimitTimerEpoch
+                && expectedDeadline == rateLimitedUntilElapsed
+                && !store.userStopped() && canRun();
     }
 
     private void restoreCanonical(String source) {
@@ -964,15 +973,22 @@ public final class SelfRunService extends Service {
         store.setLastSignal("USER_RESUME");
         if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);
         else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
-        recoveryInProgress = !preserved;
-        store.setStatus(store.conversationUrl().isEmpty()
-                ? "사용자 재개 · 새 대화 bootstrap 복구 중"
-                : preserved
-                        ? "사용자 재개 · 동일 WebView continuation 준비"
-                        : "사용자 재개 · WebView 소실 복구 후 continuation 준비");
-        runLog.record(store, "UI_RESUME", preserved ? "same_webview" : "webview_recovery");
+        boolean rateLimited = isRateLimited();
+        recoveryInProgress = !preserved && !rateLimited;
+        store.setStatus(rateLimited
+                ? "사용자 재개 · rate-limit 만료 대기"
+                : store.conversationUrl().isEmpty()
+                        ? "사용자 재개 · 새 대화 bootstrap 복구 중"
+                        : preserved
+                                ? "사용자 재개 · 동일 WebView continuation 준비"
+                                : "사용자 재개 · WebView 소실 복구 후 continuation 준비");
+        runLog.record(store, "UI_RESUME", rateLimited ? "rate_limit_wait" : preserved ? "same_webview" : "webview_recovery");
         startForegroundCompat();
         updateWakeLockForState("resume_prepare");
+        if (rateLimited) {
+            scheduleRateLimitExpiry();
+            return;
+        }
 
         if (preserved) {
             ensureDomObserver();

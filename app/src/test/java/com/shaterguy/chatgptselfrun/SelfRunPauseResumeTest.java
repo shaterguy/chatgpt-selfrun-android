@@ -131,6 +131,53 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
+    public void rateLimitExpiryIsRunLevelAndIgnoresWebViewNavigationGeneration() throws Exception {
+        String text = source();
+        int schedule = text.indexOf("private void scheduleRateLimitExpiry()");
+        int restore = text.indexOf("private void restoreCanonical", schedule);
+        assertTrue(schedule >= 0 && restore > schedule);
+        String body = text.substring(schedule, restore);
+        assertTrue(body.contains("long expectedDeadline = rateLimitedUntilElapsed;"));
+        assertTrue(body.contains("long expectedTimerEpoch = rateLimitTimerEpoch == Long.MAX_VALUE ? 1L : rateLimitTimerEpoch + 1L;"));
+        assertTrue(body.contains("rateLimitTimerEpoch = expectedTimerEpoch;"));
+        assertTrue(body.contains("String expectedRunId = store.runId();"));
+        assertTrue(body.contains("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)"));
+        assertTrue(body.contains("expectedTimerEpoch == rateLimitTimerEpoch"));
+        assertTrue(body.contains("expectedDeadline == rateLimitedUntilElapsed"));
+        assertTrue(body.contains("expectedRunId.equals(store.runId())"));
+        assertTrue(body.contains("!store.userStopped() && canRun()"));
+        assertFalse(body.contains("expectedGeneration"));
+        assertFalse(body.contains("expectedWebView"));
+        assertFalse(body.contains("isCurrentExecution("));
+        int guard = body.indexOf("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)");
+        int recovery = body.indexOf("beginRecovery(\"rate_limit_expired\")", guard);
+        assertTrue(recovery > guard);
+    }
+
+    @Test
+    public void rateLimitResumeRearmsRunLevelExpiryBeforeAutomationRestarts() throws Exception {
+        String text = source();
+        int resume = text.indexOf("private void resumeFromUi()");
+        int pause = text.indexOf("private void enterPreservedPause", resume);
+        assertTrue(resume >= 0 && pause > resume);
+        String body = text.substring(resume, pause);
+        int capture = body.indexOf("boolean rateLimited = isRateLimited();");
+        int recovery = body.indexOf("recoveryInProgress = !preserved && !rateLimited;", capture);
+        int wake = body.indexOf("updateWakeLockForState(\"resume_prepare\")", recovery);
+        int wait = body.indexOf("if (rateLimited)", wake);
+        int schedule = body.indexOf("scheduleRateLimitExpiry();", wait);
+        int stop = body.indexOf("return;", schedule);
+        int preserved = body.indexOf("if (preserved)", stop);
+        assertTrue(capture >= 0);
+        assertTrue(recovery > capture);
+        assertTrue(wake > recovery);
+        assertTrue(wait > wake);
+        assertTrue(schedule > wait);
+        assertTrue(stop > schedule);
+        assertTrue(preserved > stop);
+    }
+
+    @Test
     public void powerPolicySeparatesAutomationFromPauseRateLimitAndTerminalStates() {
         assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
                 SelfRunStore.PHASE_WAIT_ASSISTANT, false, false) == WakeLockController.State.AUTOMATION);
