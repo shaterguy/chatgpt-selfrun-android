@@ -147,6 +147,11 @@ final class SelfRunDomObserver {
                       }
                       if (mutation.type === 'attributes') { notify(); return; }
                       if (mutation.type === 'childList') {
+                        if (state.lastAssistantNode?.contains(mutation.target)
+                            && !state.lastStreaming && !state.timer) {
+                          notify();
+                          return;
+                        }
                         const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
                         if (nodes.some(relevantNode)) { notify(); return; }
                       }
