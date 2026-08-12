@@ -7,12 +7,10 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
@@ -30,8 +28,6 @@ public final class SelfRunNewActivity extends Activity {
     private EditText projectUrl;
     private EditText requirement;
     private Spinner mode;
-    private Button latestCommandButton;
-    private TextView latestCommandStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -80,11 +76,6 @@ public final class SelfRunNewActivity extends Activity {
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         root.addView(requirement);
 
-        latestCommandButton = Ui.button(this, "최신 명령 불러오기", v -> loadLatestCommand());
-        root.addView(latestCommandButton);
-        latestCommandStatus = Ui.body(this, "브리지에서 명령을 불러오면 현재 요구사항을 교체합니다. 자동으로 실행하지 않습니다.");
-        root.addView(latestCommandStatus);
-
         root.addView(Ui.section(this, "시작"));
         root.addView(Ui.button(this, "SelfRun 시작", v -> startSelfRun()));
 
@@ -92,27 +83,6 @@ public final class SelfRunNewActivity extends Activity {
         projectUrl.clearFocus();
         requirement.clearFocus();
         root.requestFocus();
-    }
-
-    private void loadLatestCommand() {
-        latestCommandButton.setEnabled(false);
-        latestCommandStatus.setText("최신 명령을 불러오는 중입니다.");
-        String endpoint = BuildConfig.SELF_RUN_COMMAND_BRIDGE_URL + "/api/selfrun/latest";
-        String token = BuildConfig.SELF_RUN_ANDROID_READ_TOKEN;
-        new Thread(() -> {
-            SelfRunCommandBridgeClient.Result result =
-                    SelfRunCommandBridgeClient.fetch(endpoint, token);
-            runOnUiThread(() -> {
-                latestCommandButton.setEnabled(true);
-                if (result.status == SelfRunCommandBridgeClient.Status.SUCCESS) {
-                    requirement.setText(result.command);
-                    requirement.setSelection(requirement.length());
-                    latestCommandStatus.setText("최신 명령을 불러왔습니다. 저장 시각: " + result.savedAt);
-                } else {
-                    latestCommandStatus.setText(result.message);
-                }
-            });
-        }, "selfrun-command-bridge").start();
     }
 
     private void startSelfRun() {

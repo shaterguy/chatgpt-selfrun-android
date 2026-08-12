@@ -67,9 +67,20 @@ public final class SelfRunService extends Service {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
-        if (!store.active() || store.paused()) {
+        if (!store.active()) {
             stopRelay();
             return START_NOT_STICKY;
+        }
+        if (store.paused()) {
+            // A user-action pause keeps this service and its current WebView alive so
+            // resume can submit directly in the same conversation.  If Android
+            // recreated the service, webView is null and the normal resume path will
+            // use the persisted conversation URL as the exceptional recovery path.
+            startForegroundCompat();
+            releaseWakeLock();
+            runLog.record(store, "SERVICE_PAUSED", "automation_stopped;webview_preserved="
+                    + (webView == null ? "0" : "1"));
+            return START_STICKY;
         }
         startForegroundCompat();
         acquireWakeLock();
@@ -88,7 +99,11 @@ public final class SelfRunService extends Service {
     }
 
     private void ensureEngine() {
-        if (!canRun()) { stopRelay(); return; }
+        if (store.paused()) {
+            releaseWakeLock();
+            return;
+        }
+        if (!store.active()) { stopRelay(); return; }
         String target = targetUrl();
         if (target.isEmpty()) {
             pause("TARGET_MISSING", "대상 프로젝트 또는 conversation URL이 없습니다.");
@@ -416,12 +431,19 @@ public final class SelfRunService extends Service {
             stopRelay();
             return;
         }
-        if (signal.type == SelfRunProtocol.Type.USER_ACTION || signal.type == SelfRunProtocol.Type.PAUSE) {
+        if (preservesWebViewOnPause(signal.type)) {
             store.setPaused(true);
             transition(SelfRunStore.PHASE_PAUSED,
-                    signal.type == SelfRunProtocol.Type.USER_ACTION
-                            ? "사용자 조치 대기 · " + signal.actionId : "SelfRun 일시중지",
+                    "사용자 조치 대기 · " + signal.actionId,
                     signal.type.name());
+            runLog.record(store, "PAUSED", signal.type.name() + ";webview=preserved");
+            NotificationHelper.notifyUser(this, "SelfRun 일시중지", store.status());
+            pauseForUserAction();
+            return;
+        }
+        if (signal.type == SelfRunProtocol.Type.PAUSE) {
+            store.setPaused(true);
+            transition(SelfRunStore.PHASE_PAUSED, "SelfRun 일시중지", signal.type.name());
             runLog.record(store, "PAUSED", signal.type.name());
             NotificationHelper.notifyUser(this, "SelfRun 일시중지", store.status());
             stopRelay();
@@ -439,6 +461,10 @@ public final class SelfRunService extends Service {
                     "다음 일반 Chat 역할 · " + signal.role, "next_chat_turn");
         }
         scheduleStep(250L);
+    }
+
+    static boolean preservesWebViewOnPause(SelfRunProtocol.Type signalType) {
+        return signalType == SelfRunProtocol.Type.USER_ACTION;
     }
 
     private void transition(String next, String status, String reason) {
@@ -496,6 +522,7 @@ public final class SelfRunService extends Service {
         runLog.record(store, "TARGET_RESTORE", "source=" + source);
         handler.removeCallbacks(stepRunnable);
         handler.postDelayed(() -> {
+            if (!canRun()) return;
             if (webView != null && !isRateLimited()) webView.loadUrl(target);
             else ensureEngine();
         }, 1_200L);
@@ -568,6 +595,20 @@ public final class SelfRunService extends Service {
         if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(10 * 60_000L);
     }
 
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+    }
+
+    private void pauseForUserAction() {
+        // Do not call cleanupWebView(), stopRelay(), or loadUrl() here.  The current
+        // page is the user's action surface and must remain available for direct
+        // continuation submission after resume.
+        handler.removeCallbacks(stepRunnable);
+        evaluationInFlight = false;
+        releaseWakeLock();
+        startForegroundCompat();
+    }
+
     private void cleanupWebView() {
         handler.removeCallbacks(stepRunnable);
         evaluationInFlight = false;
@@ -581,7 +622,7 @@ public final class SelfRunService extends Service {
 
     private void stopRelay() {
         cleanupWebView();
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        releaseWakeLock();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -589,7 +630,7 @@ public final class SelfRunService extends Service {
     @Override
     public void onDestroy() {
         cleanupWebView();
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        releaseWakeLock();
         super.onDestroy();
     }
 

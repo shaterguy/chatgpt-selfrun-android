@@ -49,10 +49,11 @@ ChatGPT에서 하나의 conversation을 처음부터 끝까지 유지하면서 �
 - wide viewport / overview mode
 - 로그인 화면과 백그라운드 자동화는 같은 앱 CookieManager를 사용합니다.
 
-## 현재 정식 버전
+## 현재 최신 릴리스
 
+- 릴리스 태그: `v0.1.0-dev6`
 - versionName: `0.1.0`
-- versionCode: `7`
+- versionCode: `8`
 - applicationId: `com.shaterguy.chatgptselfrun`
 - Android 8.0 이상
 

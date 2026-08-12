@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - agent/selfrun-v0.1.0
-      - agent/selfrun-command-bridge-builder
       - work/updateable-apk
     tags:
       - 'v*'
@@ -32,17 +31,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
-      - name: Command bridge checks
-        working-directory: command-bridge
-        run: |
-          npm ci --ignore-scripts
-          npm run typecheck
-          npm test
       - name: Static SelfRun policy checks
         shell: bash
         run: |
           set -euo pipefail
-          BRIDGE=command-bridge
           MANIFEST=app/src/main/AndroidManifest.xml
           HOST=app/src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java
           WEB=app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
@@ -64,20 +56,6 @@ jobs:
           ICON_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher.xml
           ICON_ROUND_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher_round.xml
           test "$(grep -c 'android:screenOrientation=' "$MANIFEST" || true)" -eq 0
-          test -s "$BRIDGE/package.json"
-          test -s "$BRIDGE/package-lock.json"
-          test -s "$BRIDGE/schema.sql"
-          grep -q 'save_selfrun_command' "$BRIDGE/src/mcp.ts"
-          grep -q 'securitySchemes' "$BRIDGE/src/mcp.ts"
-          grep -q 'commands:write' "$BRIDGE/src/mcp.ts"
-          grep -q 'SELF_RUN_ANDROID_READ_TOKEN' "$BRIDGE/src/config.ts"
-          grep -q 'timingSafeEqual' "$BRIDGE/src/android-auth.ts"
-          grep -q 'no-store' "$BRIDGE/src/http.ts"
-          grep -q 'https' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunCommandBridgeClient.java
-          grep -q 'setInstanceFollowRedirects(false)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunCommandBridgeClient.java
-          grep -q 'MessageDigest' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunCommandBridgeClient.java
-          grep -q '0.1.0-dev6' app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java
-          ! grep -R -n 'SELF_RUN_ANDROID_READ_TOKEN=[A-Za-z0-9]' app command-bridge/src command-bridge/api
           grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' "$MANIFEST"
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
@@ -139,8 +117,6 @@ jobs:
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build unsigned release APK
-        env:
-          SELF_RUN_ANDROID_READ_TOKEN: ''
         run: gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
       - name: Align and verify unsigned release APK
         shell: bash
@@ -155,7 +131,7 @@ jobs:
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
           grep -q "versionCode='8'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.1.0-dev6'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.1.0'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -171,3 +147,73 @@ jobs:
             app/build/outputs/apk/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+
+  release-dev6:
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      contains(github.event.head_commit.message, '[publish-v0.1.0-dev6]')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install APK verification tools
+        run: |
+          sdkmanager 'platform-tools' 'build-tools;36.0.0'
+      - name: Recover and verify the exact signed dev6 APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK=chatgpt-selfrun-android-v0.1.0-dev6.apk
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/84064164e75a4ecabffe6921ea646fec6cb3b8b2" --jq .content \
+            | tr -d '\n' | base64 --decode > "$APK"
+          test "$(stat -c %s "$APK")" -eq 697939
+          echo '4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120  chatgpt-selfrun-android-v0.1.0-dev6.apk' \
+            | sha256sum --check --strict
+          "$BT/aapt" dump badging "$APK" | tee BADGING.txt
+          grep -q "package: name='com.shaterguy.chatgptselfrun'" BADGING.txt
+          grep -q "versionCode='8'" BADGING.txt
+          grep -q "versionName='0.1.0'" BADGING.txt
+          java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs "$APK" | tee APKSIGNER.txt
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' APKSIGNER.txt
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' APKSIGNER.txt
+          grep -q 'Signer #1 certificate SHA-256 digest: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' APKSIGNER.txt
+          "$BT/zipalign" -c -v 4 "$APK"
+          unzip -t "$APK" >/dev/null
+          echo '4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120  chatgpt-selfrun-android-v0.1.0-dev6.apk' > SHA256SUMS.txt
+      - name: Publish v0.1.0-dev6 as the latest GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.1.0-dev6
+          APK=chatgpt-selfrun-android-v0.1.0-dev6.apk
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            mkdir existing-release
+            gh release download "$TAG" --pattern "$APK" --dir existing-release
+            echo '4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120  existing-release/chatgpt-selfrun-android-v0.1.0-dev6.apk' \
+              | sha256sum --check --strict
+            exit 0
+          fi
+          printf '%s\n' \
+            '수정된 dev6를 main에 통합한 최신 릴리스입니다.' \
+            '' \
+            '- USER_ACTION_REQUIRED에서 현재 WebView와 conversation을 유지합니다.' \
+            '- 재개 시 동일 WebView에서 SELF_RUN_CONTINUE를 전송합니다.' \
+            '- 중단된 Auth0/command-bridge 작업은 포함하지 않습니다.' \
+            '- versionName: 0.1.0 / versionCode: 8' \
+            '- APK SHA-256: 4e354f9556b48f6480d969c2f4df28c6a21910e85e6ef1699e5f91d467d77120' \
+            '- 인증서 SHA-256: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' \
+            > RELEASE_NOTES.md
+          gh release create "$TAG" "$APK" SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title 'v0.1.0-dev6' \
+            --notes-file RELEASE_NOTES.md \
+            --latest
