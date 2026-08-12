@@ -65,6 +65,11 @@ replace_once(
 )
 replace_once(
     battery,
+    '        int next = text.indexOf("private static Uri chatGptOrigin", observer);',
+    '        int next = text.indexOf("private boolean observerPageReady", observer);',
+)
+replace_once(
+    battery,
     "    public void preservedPauseStopsObserverAndWatchdogAndResumeAcquiresBeforeReattach() throws Exception {",
     "    public void preservedPauseStopsObserverAndWatchdogAndResumeWaitsForReadyBeforeAcquire() throws Exception {",
 )
