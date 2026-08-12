@@ -14,7 +14,7 @@ public class SelfRunBatteryEfficiencyTest {
     public void domObserverDebouncesAndSuppressesEquivalentPageState() {
         String install = SelfRunDomObserver.install("test-token", "test-lease");
         String health = SelfRunDomObserver.health("test-lease");
-        String detach = SelfRunDomObserver.detach();
+        String detach = SelfRunDomObserver.detach("test-lease");
 
         assertTrue(install.contains("new MutationObserver"));
         assertTrue(install.contains("setTimeout"));
@@ -41,6 +41,9 @@ public class SelfRunBatteryEfficiencyTest {
         assertFalse(health.contains("querySelectorAll"));
         assertFalse(health.contains("snapshot()"));
 
+        assertTrue(detach.contains("state.lease !== expectedLease"));
+        assertTrue(detach.contains("state.active = false"));
+        assertTrue(detach.contains("takeRecords"));
         assertTrue(detach.contains("observer?.disconnect()"));
         assertTrue(detach.contains("clearTimeout"));
         assertTrue(detach.contains("removeEventListener"));
@@ -124,25 +127,28 @@ public class SelfRunBatteryEfficiencyTest {
     @Test
     public void observerEventsAreLeaseGuardedDeduplicatedAndCoalesced() throws Exception {
         String text = source("SelfRunService.java");
-        assertTrue(text.contains("active != webView || activeGeneration != generation || activeEpoch != observerEpoch"));
+        assertTrue(text.contains("active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch"));
+        assertTrue(text.contains("activeEpoch != observerEpoch"));
         assertTrue(text.contains("!activeRunId.equals(store.runId())"));
         assertTrue(text.contains("!lease.equals(observerLease)"));
         assertTrue(text.contains("nextState.equals(lastObserverState)"));
         assertTrue(text.contains("observerDuplicateEventCount"));
         assertTrue(text.contains("domEvaluationPending"));
+        assertTrue(text.contains("activeExecutionEpoch != executionEpoch"));
+        assertTrue(text.contains("resumeObserverGate"));
         assertTrue(text.contains("drainPendingDomEvaluation()"));
         assertTrue(text.contains("requestDomEvaluation(0L, \"observer_state\")"));
         assertTrue(text.contains("requestDomEvaluation(0L, \"watchdog_missed_event\")"));
 
         int observer = text.indexOf("private void ensureDomObserver()");
-        int next = text.indexOf("private static Uri chatGptOrigin", observer);
+        int next = text.indexOf("private boolean observerPageReady", observer);
         String observerBody = text.substring(observer, next);
         assertFalse(observerBody.contains("updateWakeLockForState"));
         assertFalse(observerBody.contains("setWakeLockState"));
     }
 
     @Test
-    public void preservedPauseStopsObserverAndWatchdogAndResumeAcquiresBeforeReattach() throws Exception {
+    public void preservedPauseStopsObserverAndWatchdogAndResumeWaitsForReadyBeforeAcquire() throws Exception {
         String text = source("SelfRunService.java");
         int pause = text.indexOf("private void enterPreservedPause");
         int wake = text.indexOf("private void updateWakeLockForState", pause);
@@ -160,9 +166,24 @@ public class SelfRunBatteryEfficiencyTest {
         int wakePrepare = resumeBody.indexOf("updateWakeLockForState(\"resume_prepare\")");
         int preservedBlock = resumeBody.indexOf("if (preserved)");
         int observerAttach = resumeBody.indexOf("ensureDomObserver();", preservedBlock);
+        assertTrue(resumeBody.contains("resumeObserverGate = preserved && !rateLimited;"));
         assertTrue(wakePrepare >= 0);
         assertTrue(preservedBlock > wakePrepare);
         assertTrue(observerAttach > wakePrepare);
+
+        int updateWake = text.indexOf("private void updateWakeLockForState");
+        int setWake = text.indexOf("private void setWakeLockState", updateWake);
+        String wakeBody = text.substring(updateWake, setWake);
+        assertTrue(wakeBody.contains("if (resumeObserverGate)"));
+        assertTrue(wakeBody.contains("WakeLockController.State.PAUSED"));
+        assertTrue(wakeBody.contains("reason + \"_resume_gate\""));
+
+        int openGate = text.indexOf("private boolean openResumeObserverGate");
+        int origin = text.indexOf("private static Uri chatGptOrigin", openGate);
+        String gateBody = text.substring(openGate, origin);
+        assertTrue(gateBody.contains("resumeObserverGate = false;"));
+        assertTrue(gateBody.contains("updateWakeLockForState(\"resume_observer_ready\")"));
+        assertTrue(gateBody.indexOf("updateWakeLockForState") < gateBody.indexOf("requestDomEvaluation"));
         int elseBlock = resumeBody.indexOf("} else {", preservedBlock);
         String preservedBody = resumeBody.substring(preservedBlock, elseBlock);
         assertFalse(preservedBody.contains("loadUrl("));

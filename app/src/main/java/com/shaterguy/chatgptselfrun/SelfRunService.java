@@ -59,6 +59,8 @@ public final class SelfRunService extends Service {
     private int generation;
     private int observerEpoch;
     private int rateLimitAttempt;
+    private long executionEpoch;
+    private boolean resumeObserverGate;
     private long rateLimitTimerEpoch;
     private long rateLimitedUntilElapsed;
     private long evaluationCount;
@@ -181,6 +183,8 @@ public final class SelfRunService extends Service {
                 public void onPageStarted(WebView view, String url, Bitmap favicon) {
                     invalidateDomObserverForNavigation();
                     generation++;
+                    invalidateExecutionEpoch();
+                    resumeObserverGate = false;
                     evaluationInFlight = false;
                     domEvaluationPending = false;
                     handler.removeCallbacks(stepRunnable);
@@ -300,7 +304,7 @@ public final class SelfRunService extends Service {
     }
 
     private void runStep() {
-        if (!canRun() || webView == null) return;
+        if (!canRun() || resumeObserverGate || webView == null) return;
         if (evaluationInFlight) {
             domEvaluationPending = true;
             return;
@@ -372,13 +376,14 @@ public final class SelfRunService extends Service {
     private void evaluate(String phase, String script) {
         WebView active = webView;
         int activeGeneration = generation;
+        long activeExecutionEpoch = executionEpoch;
         String activeRunId = store.runId();
         String trigger = pendingEvaluationTrigger;
         evaluationInFlight = true;
         evaluationCount = saturatingIncrement(evaluationCount);
         runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase + ";trigger=" + trigger);
         active.evaluateJavascript(script, raw -> {
-            if (!isCurrentExecution(active, activeGeneration, activeRunId) || isRateLimited()) return;
+            if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId) || isRateLimited()) return;
             evaluationInFlight = false;
             try {
                 JSONObject result = parse(raw);
@@ -617,6 +622,7 @@ public final class SelfRunService extends Service {
 
         WebView active = webView;
         int activeGeneration = generation;
+        long activeExecutionEpoch = executionEpoch;
         int activeEpoch = observerEpoch;
         String activeRunId = store.runId();
         String activeLease = observerLease;
@@ -625,8 +631,9 @@ public final class SelfRunService extends Service {
         runLog.record(store, "DOM_OBSERVER_HEALTH_EVALUATE",
                 "count=" + observerMaintenanceEvaluationCount + ";watchdog=" + watchdogCount);
         active.evaluateJavascript(SelfRunDomObserver.health(activeLease), raw -> {
-            if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
-                    || !activeRunId.equals(store.runId()) || !activeLease.equals(observerLease)) return;
+            if (active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch
+                    || activeEpoch != observerEpoch || !activeRunId.equals(store.runId())
+                    || !activeLease.equals(observerLease)) return;
             observerHealthInFlight = false;
             if (!canRun() || isRateLimited()) return;
             JSONObject health = parse(raw);
@@ -642,6 +649,12 @@ public final class SelfRunService extends Service {
                 detachDomObserver("watchdog_" + status.toLowerCase());
                 ensureDomObserver();
                 requestDomEvaluation(0L, "watchdog_observer_recovery");
+                scheduleWatchdog();
+                return;
+            }
+
+            if (openResumeObserverGate(active, activeGeneration, activeExecutionEpoch, activeEpoch,
+                    activeRunId, activeLease, "watchdog_health")) {
                 scheduleWatchdog();
                 return;
             }
@@ -665,6 +678,10 @@ public final class SelfRunService extends Service {
     private void ensureDomObserver() {
         WebView active = webView;
         if (active == null || !canRun() || isRateLimited() || observerPort != null || observerInstallInFlight) return;
+        if (!observerPageReady(active)) {
+            scheduleWatchdog();
+            return;
+        }
         Uri targetOrigin = chatGptOrigin(active.getUrl());
         if (targetOrigin == null) {
             watchdogRecoveryCount = saturatingIncrement(watchdogRecoveryCount);
@@ -673,6 +690,7 @@ public final class SelfRunService extends Service {
             return;
         }
         int activeGeneration = generation;
+        long activeExecutionEpoch = executionEpoch;
         int activeEpoch = ++observerEpoch;
         String activeRunId = store.runId();
         String token = UUID.randomUUID().toString();
@@ -683,9 +701,9 @@ public final class SelfRunService extends Service {
         observerMaintenanceEvaluationCount = saturatingIncrement(observerMaintenanceEvaluationCount);
         runLog.record(store, "DOM_OBSERVER_INSTALL_EVALUATE",
                 "count=" + observerMaintenanceEvaluationCount + ";generation=" + activeGeneration + ";epoch=" + activeEpoch);
-        active.evaluateJavascript(SelfRunDomObserver.install(token, lease), raw -> {
-            if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
-                    || !lease.equals(observerLease)) return;
+        active.evaluateJavascript(SelfRunDomObserver.install(token, lease, activeRunId, activeGeneration, activeEpoch), raw -> {
+            if (active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch
+                    || activeEpoch != observerEpoch || !lease.equals(observerLease)) return;
             observerInstallInFlight = false;
             if (!canRun() || isRateLimited() || !activeRunId.equals(store.runId())) return;
             try {
@@ -696,15 +714,17 @@ public final class SelfRunService extends Service {
                 nativePort.setWebMessageCallback(new WebMessagePort.WebMessageCallback() {
                     @Override
                     public void onMessage(WebMessagePort port, WebMessage message) {
-                        if (active != webView || activeGeneration != generation || activeEpoch != observerEpoch
-                                || observerPort != port || !canRun() || isRateLimited()
+                        if (active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch
+                                || activeEpoch != observerEpoch || observerPort != port || !canRun() || isRateLimited()
                                 || !activeRunId.equals(store.runId()) || !lease.equals(observerLease)) return;
                         String data = message == null ? "" : message.getData();
                         if (data.startsWith("ready|")) {
                             lastObserverState = data.substring("ready|".length());
                             runLog.record(store, "DOM_OBSERVER_ATTACHED",
                                     "phase=" + store.phase() + ";generation=" + activeGeneration + ";epoch=" + activeEpoch);
-                            requestDomEvaluation(0L, "observer_ready");
+                            boolean resumed = openResumeObserverGate(active, activeGeneration, activeExecutionEpoch,
+                                    activeEpoch, activeRunId, lease, "observer_ready");
+                            if (!resumed) requestDomEvaluation(0L, "observer_ready");
                             scheduleWatchdog();
                         } else if (data.startsWith("state|")) {
                             String nextState = data.substring("state|".length());
@@ -734,6 +754,25 @@ public final class SelfRunService extends Service {
         });
     }
 
+    private boolean observerPageReady(WebView active) {
+        return active != null && active == webView && canRun() && !recoveryInProgress
+                && active.getProgress() >= 100 && routeAcceptable(active.getUrl());
+    }
+
+    private boolean openResumeObserverGate(WebView active, int activeGeneration, long activeExecutionEpoch,
+            int activeEpoch, String activeRunId, String activeLease, String source) {
+        if (!resumeObserverGate) return false;
+        if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId)
+                || activeEpoch != observerEpoch || observerPort == null
+                || !activeLease.equals(observerLease) || !observerPageReady(active)) return false;
+        resumeObserverGate = false;
+        runLog.record(store, "RESUME_OBSERVER_READY",
+                "source=" + source + ";generation=" + activeGeneration + ";epoch=" + activeEpoch);
+        updateWakeLockForState("resume_observer_ready");
+        requestDomEvaluation(0L, "resume_observer_ready");
+        return true;
+    }
+
     private static Uri chatGptOrigin(String url) {
         try {
             Uri parsed = Uri.parse(url == null ? "" : url);
@@ -748,7 +787,8 @@ public final class SelfRunService extends Service {
 
     private void detachDomObserver(String cause) {
         WebView active = webView;
-        boolean hadObserver = observerPort != null || observerInstallInFlight || !observerLease.isEmpty();
+        String detachedLease = observerLease;
+        boolean hadObserver = observerPort != null || observerInstallInFlight || !detachedLease.isEmpty();
         handler.removeCallbacks(watchdogRunnable);
         observerEpoch++;
         observerInstallInFlight = false;
@@ -756,10 +796,10 @@ public final class SelfRunService extends Service {
         observerLease = "";
         lastObserverState = "";
         closeObserverPort();
-        if (active != null) {
+        if (active != null && !detachedLease.isEmpty()) {
             try {
                 observerMaintenanceEvaluationCount = saturatingIncrement(observerMaintenanceEvaluationCount);
-                active.evaluateJavascript(SelfRunDomObserver.detach(), null);
+                active.evaluateJavascript(SelfRunDomObserver.detach(detachedLease), null);
             } catch (Throwable ignored) {}
         }
         if (hadObserver) runLog.record(store, "DOM_OBSERVER_DETACHED", "cause=" + cause);
@@ -795,6 +835,8 @@ public final class SelfRunService extends Service {
         long delay = RATE_LIMIT_DELAYS[rateLimitAttempt - 1];
         rateLimitedUntilElapsed = now + delay;
         generation++;
+        invalidateExecutionEpoch();
+        resumeObserverGate = false;
         evaluationInFlight = false;
         domEvaluationPending = false;
         recoveryInProgress = false;
@@ -865,17 +907,24 @@ public final class SelfRunService extends Service {
     private void postRecovery(long delay, String reason, Runnable action) {
         WebView expectedWebView = webView;
         int expectedGeneration = generation;
+        long expectedExecutionEpoch = executionEpoch;
         String expectedRunId = store.runId();
         handler.postDelayed(() -> {
-            if (!isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId) || isRateLimited()) return;
+            if (!isCurrentExecution(expectedWebView, expectedGeneration, expectedExecutionEpoch, expectedRunId) || isRateLimited()) return;
             beginRecovery(reason);
             action.run();
         }, Math.max(0L, delay));
     }
 
-    private boolean isCurrentExecution(WebView expectedWebView, int expectedGeneration, String expectedRunId) {
+    private boolean isCurrentExecution(WebView expectedWebView, int expectedGeneration,
+            long expectedExecutionEpoch, String expectedRunId) {
         return expectedWebView == webView && expectedGeneration == generation
+                && expectedExecutionEpoch == executionEpoch
                 && expectedRunId != null && expectedRunId.equals(store.runId()) && canRun();
+    }
+
+    private void invalidateExecutionEpoch() {
+        executionEpoch = executionEpoch == Long.MAX_VALUE ? 1L : executionEpoch + 1L;
     }
 
     private void beginRecovery(String reason) {
@@ -917,7 +966,7 @@ public final class SelfRunService extends Service {
     }
 
     private void requestDomEvaluation(long delay, String trigger) {
-        if (webView == null || !canRun() || isRateLimited()) return;
+        if (webView == null || !canRun() || resumeObserverGate || isRateLimited()) return;
         pendingEvaluationTrigger = trigger;
         domEvaluationPending = true;
         if (evaluationInFlight) return;
@@ -926,7 +975,8 @@ public final class SelfRunService extends Service {
     }
 
     private void drainPendingDomEvaluation() {
-        if (!domEvaluationPending || evaluationInFlight || webView == null || !canRun() || isRateLimited()) return;
+        if (!domEvaluationPending || evaluationInFlight || webView == null || !canRun()
+                || resumeObserverGate || isRateLimited()) return;
         handler.removeCallbacks(stepRunnable);
         handler.post(stepRunnable);
     }
@@ -966,6 +1016,7 @@ public final class SelfRunService extends Service {
     private void resumeFromUi() {
         if (!store.paused() || store.userStopped() || store.runId().isEmpty()) return;
         boolean preserved = webView != null;
+        invalidateExecutionEpoch();
         store.setPaused(false);
         store.setActive(true);
         store.setUserStopped(false);
@@ -974,23 +1025,30 @@ public final class SelfRunService extends Service {
         if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);
         else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
         boolean rateLimited = isRateLimited();
+        resumeObserverGate = preserved && !rateLimited;
         recoveryInProgress = !preserved && !rateLimited;
         store.setStatus(rateLimited
                 ? "사용자 재개 · rate-limit 만료 대기"
                 : store.conversationUrl().isEmpty()
                         ? "사용자 재개 · 새 대화 bootstrap 복구 중"
                         : preserved
-                                ? "사용자 재개 · 동일 WebView continuation 준비"
+                                ? "사용자 재개 · 동일 WebView observer 복구 후 continuation 준비"
                                 : "사용자 재개 · WebView 소실 복구 후 continuation 준비");
         runLog.record(store, "UI_RESUME", rateLimited ? "rate_limit_wait" : preserved ? "same_webview" : "webview_recovery");
         startForegroundCompat();
         updateWakeLockForState("resume_prepare");
         if (rateLimited) {
+            resumeObserverGate = false;
             scheduleRateLimitExpiry();
             return;
         }
 
         if (preserved) {
+            if (!routeAcceptable(webView.getUrl())) {
+                resumeObserverGate = false;
+                restoreCanonical("resume_route");
+                return;
+            }
             ensureDomObserver();
             scheduleWatchdog();
         } else {
@@ -1006,7 +1064,8 @@ public final class SelfRunService extends Service {
         store.setPhase(SelfRunStore.PHASE_PAUSED);
         store.setStatus(status);
         handler.removeCallbacksAndMessages(null);
-        generation++;
+        invalidateExecutionEpoch();
+        resumeObserverGate = false;
         evaluationInFlight = false;
         domEvaluationPending = false;
         submissionWaitStartedElapsed = 0L;
@@ -1022,6 +1081,10 @@ public final class SelfRunService extends Service {
 
     private void updateWakeLockForState(String reason) {
         if (wakeLockController == null) return;
+        if (resumeObserverGate) {
+            setWakeLockState(WakeLockController.State.PAUSED, reason + "_resume_gate");
+            return;
+        }
         WakeLockController.State desired = wakeLockStateFor(store.active(), store.paused(), store.userStopped(),
                 store.phase(), isRateLimited(), recoveryInProgress);
         setWakeLockState(desired, reason);
@@ -1053,6 +1116,8 @@ public final class SelfRunService extends Service {
         closeObserverPort();
         evaluationInFlight = false;
         domEvaluationPending = false;
+        resumeObserverGate = false;
+        invalidateExecutionEpoch();
         generation++;
         if (host != null) {
             host.destroy();

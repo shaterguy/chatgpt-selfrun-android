@@ -5,14 +5,23 @@ final class SelfRunDomObserver {
     private SelfRunDomObserver() {}
 
     static String install(String token, String lease) {
+        return install(token, lease, "", 0, 0);
+    }
+
+    static String install(String token, String lease, String runId, int generation, int epoch) {
         return """
                 (() => {
                   const key = '__chatgptSelfRunDomObserver';
                   const token = %s;
                   const lease = %s;
+                  const runId = %s;
+                  const generation = %d;
+                  const epoch = %d;
                   const eventNames = ['input', 'change', 'click', 'submit'];
                   const cleanup = state => {
                     if (!state) return;
+                    state.active = false;
+                    try { state.observer?.takeRecords?.(); } catch (_) {}
                     try { state.observer?.disconnect(); } catch (_) {}
                     if (state.timer) { try { clearTimeout(state.timer); } catch (_) {} }
                     if (state.bridgeListener) {
@@ -25,14 +34,25 @@ final class SelfRunDomObserver {
                     }
                     try { state.port?.close(); } catch (_) {}
                   };
-                  cleanup(window[key]);
+                  const previous = window[key];
+                  if (previous) {
+                    const sameRun = String(previous.runId || '') === runId;
+                    const previousGeneration = Number(previous.generation || 0);
+                    const previousEpoch = Number(previous.epoch || 0);
+                    if (sameRun && (previousGeneration > generation
+                        || (previousGeneration === generation && previousEpoch >= epoch))) return 'STALE_INSTALL';
+                    cleanup(previous);
+                  }
                   const state = {
-                    lease, observer:null, timer:0, bridgeListener:null, eventListener:null, port:null, root:null,
+                    lease, runId, generation, epoch, active:true, observer:null, timer:0, bridgeListener:null, eventListener:null, port:null, root:null,
                     probe:null, probeSent:0, probeAck:0, lastObserverCallbackAt:Date.now(),
                     lastFingerprint:'', lastMutationAt:Date.now(), lastDispatchAt:0, suppressed:0,
                     lastStreaming:false, lastAssistantNode:null
                   };
                   window[key] = state;
+                  const current = () => window[key] === state && state.active
+                    && state.lease === lease && state.runId === runId
+                    && state.generation === generation && state.epoch === epoch;
                   const visible = e => !!e && e.isConnected && e.offsetParent !== null;
                   const compact = value => String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, 160);
                   const hash = value => {
@@ -116,10 +136,12 @@ final class SelfRunDomObserver {
                     });
                   };
                   const notify = () => {
+                    if (!current()) return;
                     state.lastMutationAt = Date.now();
                     if (!state.port) return;
                     if (state.timer) clearTimeout(state.timer);
                     state.timer = setTimeout(() => {
+                      if (!current()) return;
                       state.timer = 0;
                       const fingerprint = snapshot();
                       if (fingerprint === state.lastFingerprint) { state.suppressed++; return; }
@@ -129,6 +151,7 @@ final class SelfRunDomObserver {
                     }, 180);
                   };
                   const onMutations = mutations => {
+                    if (!current()) return;
                     state.lastObserverCallbackAt = Date.now();
                     for (const mutation of mutations) {
                       if (mutation.target === state.probe && mutation.attributeName === 'data-selfrun-probe') {
@@ -158,7 +181,7 @@ final class SelfRunDomObserver {
                     }
                   };
                   state.bridgeListener = event => {
-                    if (event.data !== token || !event.ports || event.ports.length < 1) return;
+                    if (!current() || event.data !== token || !event.ports || event.ports.length < 1) return;
                     try { window.removeEventListener('message', state.bridgeListener); } catch (_) {}
                     state.bridgeListener = null;
                     state.port = event.ports[0];
@@ -191,7 +214,7 @@ final class SelfRunDomObserver {
                   window.addEventListener('message', state.bridgeListener);
                   return 'WAIT_PORT';
                 })()
-                """.formatted(q(token), q(lease));
+                """.formatted(q(token), q(lease), q(runId), generation, epoch);
     }
 
     static String health(String lease) {
@@ -199,6 +222,7 @@ final class SelfRunDomObserver {
                 (() => {
                   const state = window.__chatgptSelfRunDomObserver;
                   if (!state) return JSON.stringify({status:'MISSING'});
+                  if (!state.active) return JSON.stringify({status:'STALE', lease:state.lease || ''});
                   if (state.lease !== %s) return JSON.stringify({status:'STALE', lease:state.lease || ''});
                   const previousProbe = Number(state.probeSent || 0);
                   const previousAck = Number(state.probeAck || 0);
@@ -241,12 +265,16 @@ final class SelfRunDomObserver {
                 """.formatted(q(lease));
     }
 
-    static String detach() {
+    static String detach(String lease) {
         return """
                 (() => {
                   const key = '__chatgptSelfRunDomObserver';
+                  const expectedLease = %s;
                   const state = window[key];
                   if (!state) return 'MISSING';
+                  if (state.lease !== expectedLease) return 'STALE';
+                  state.active = false;
+                  try { state.observer?.takeRecords?.(); } catch (_) {}
                   try { state.observer?.disconnect(); } catch (_) {}
                   if (state.timer) { try { clearTimeout(state.timer); } catch (_) {} }
                   if (state.bridgeListener) {
@@ -258,10 +286,12 @@ final class SelfRunDomObserver {
                     }
                   }
                   try { state.port?.close(); } catch (_) {}
-                  try { delete window[key]; } catch (_) { window[key] = null; }
+                  if (window[key] === state) {
+                    try { delete window[key]; } catch (_) { window[key] = null; }
+                  }
                   return 'DETACHED';
                 })()
-                """;
+                """.formatted(q(lease));
     }
 
     private static String q(String value) {

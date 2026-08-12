@@ -34,15 +34,16 @@ public class SelfRunPauseResumeTest {
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         int queueClear = body.indexOf("handler.removeCallbacksAndMessages(null);");
-        int generationAdvance = body.indexOf("generation++;");
+        int executionAdvance = body.indexOf("invalidateExecutionEpoch();");
         int observerDetach = body.indexOf("detachDomObserver(cause);");
         int powerRelease = body.indexOf("setWakeLockState(WakeLockController.State.PAUSED");
         assertTrue(queueClear >= 0);
-        assertTrue(generationAdvance >= 0);
+        assertTrue(executionAdvance >= 0);
+        assertFalse(body.contains("generation++;"));
         assertTrue(observerDetach >= 0);
         assertTrue(powerRelease >= 0);
         assertTrue(queueClear < observerDetach);
-        assertTrue(generationAdvance < observerDetach);
+        assertTrue(executionAdvance < observerDetach);
         assertTrue(observerDetach < powerRelease);
         assertFalse(body.contains("cleanupWebView()"));
         assertFalse(body.contains("stopRelay()"));
@@ -60,6 +61,7 @@ public class SelfRunPauseResumeTest {
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         assertTrue(body.contains("boolean preserved = webView != null;"));
+        assertTrue(body.contains("resumeObserverGate = preserved && !rateLimited;"));
         assertTrue(body.contains("if (preserved)"));
         int wake = body.indexOf("updateWakeLockForState(\"resume_prepare\")");
         int preserved = body.indexOf("if (preserved)");
@@ -100,7 +102,7 @@ public class SelfRunPauseResumeTest {
         String body = text.substring(method, nextMethod);
         int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
         int staleGuard = body.indexOf(
-                "if (!isCurrentExecution(active, activeGeneration, activeRunId) || isRateLimited()) return;", callback);
+                "if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId) || isRateLimited()) return;", callback);
         int clearInFlight = body.indexOf("evaluationInFlight = false;", callback);
         int clearRateLimit = body.indexOf("rateLimitedUntilElapsed = 0L;", callback);
         assertTrue(callback >= 0);
