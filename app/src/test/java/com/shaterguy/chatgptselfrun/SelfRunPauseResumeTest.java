@@ -12,8 +12,13 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void protocolPauseKeepsExistingCleanupBehavior() {
-        assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.PAUSE));
+    public void protocolPauseUsesTheSamePreservedWebViewPolicy() {
+        assertTrue(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.PAUSE));
+    }
+
+    @Test
+    public void terminalSignalsDoNotUseResumablePausePolicy() {
         assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.DONE));
+        assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.NEXT));
     }
 }
