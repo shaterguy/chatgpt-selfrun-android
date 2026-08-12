@@ -7,27 +7,27 @@ final class SelfRunDom {
     static String prepareInitialContext(String projectUrl, String mode, String runId) {
         String project = q(SelfRunScript.projectId(projectUrl));
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
-        String desiredLabels = work ? "['work','작업']" : "['chat','채팅']";
         String requested = work ? "work" : "chat";
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,url:location.href,diagnostics});"
                 + projectGuard(project)
                 + "const parts=location.pathname.split('/').filter(Boolean),after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};const actualConversation=after('c');"
                 + "if(actualConversation)return result('EXISTING_CONVERSATION','새 대화 화면 대신 기존 conversation이 열렸습니다.',{actualConversation});"
                 + authGuard()
-                + "const clip=(s,n=160)=>{s=String(s??'');return s.length>n?s.slice(0,n):s};const exact=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();"
-                + "const requestedMode=" + q(requested) + ";const desiredModeLabels=" + desiredLabels + ";const forbiddenMode=/new chat|새 채팅|새 대화|new conversation/i;"
+                + "const requestedMode=" + q(requested) + ";const forbiddenMode=/new chat|새 채팅|새 대화|new conversation/i;"
                 + "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const exactText=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();"
-                + "const selectedState=e=>!!e&&(e.getAttribute('aria-checked')==='true'||e.getAttribute('aria-pressed')==='true'||e.getAttribute('aria-selected')==='true'||/^(checked|selected|active|on)$/.test(exactText(e.dataset?.state||'')));"
+                + "const labelOf=e=>exactText(e?.innerText||'')||exactText(e?.getAttribute?.('aria-label')||'');"
+                + "const selectedState=e=>!!e&&(e.getAttribute('aria-checked')==='true'||e.getAttribute('aria-pressed')==='true'||e.getAttribute('aria-selected')==='true'||(typeof e.checked==='boolean'&&e.checked)||e.dataset?.active==='true'||e.dataset?.selected==='true'||/^(checked|selected|active|on)$/.test(exactText(e.dataset?.state||'')));"
                 + "const modeOf=s=>{const v=exactText(s);if(forbiddenMode.test(v))return'';const tokens=v.split(/[^a-z0-9가-힣]+/).filter(Boolean);if(tokens.includes('chat')||tokens.includes('채팅'))return'chat';if(tokens.includes('work')||tokens.includes('작업'))return'work';return''};"
-                + "const modeCandidates=[...document.querySelectorAll('button,[role=\"button\"],[role=\"menuitemradio\"],[role=\"radio\"],[role=\"tab\"]')].filter(visible);"
-                + "const mode=modeCandidates.find(e=>{const inner=exactText(e.innerText||'');const aria=exactText(e.getAttribute('aria-label')||'');const combined=exactText(inner+' '+aria);if(forbiddenMode.test(combined))return false;const role=e.getAttribute('role')||'';const testId=exactText(e.dataset?.testid||'');const strong=e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||e.hasAttribute('aria-selected')||['menuitemradio','radio','tab'].includes(role)||e.getAttribute('aria-haspopup')==='menu'||/mode|experience/.test(testId)||((e.tagName==='BUTTON'||role==='button')&&modeOf(inner)!=='');return strong&&(desiredModeLabels.includes(inner)||desiredModeLabels.includes(aria));});"
-                + "const modeKey='chatgpt-selfrun:mode:" + esc(runId) + "';let modePrior='';try{modePrior=sessionStorage.getItem(modeKey)||'';}catch(_){}"
-                + "const modeSelected=!!mode&&selectedState(mode);const modeLabel=mode?exactText(mode.innerText||'')||exactText(mode.getAttribute('aria-label')||''):'';const currentMode=modeOf(modeLabel);const modeExpanded=!!mode&&mode.getAttribute('aria-expanded')==='true';let action='',modeReadback=modeSelected&&currentMode===requestedMode;"
-                + "if(mode&&!modeSelected&&!modePrior){try{sessionStorage.setItem(modeKey,JSON.stringify({at:Date.now(),action:'select-mode'}));}catch(_){}mode.click();action='select-mode';modeReadback=false;}"
-                + "const diagnostics={requested:requestedMode,currentMode,modeCandidates:modeCandidates.length,modeFound:!!mode,modeLabel,modeSelected,modeExpanded,modeReadback,recentClick:!!modePrior,action};"
-                + "if(action)return result('UI_WAIT','모드 전환 반영 대기',diagnostics);"
-                + composer() + "if(!composer)return result('UI_WAIT','프로젝트 새 대화 입력창 대기',diagnostics);"
-                + "try{sessionStorage.removeItem(modeKey);}catch(_){}return result('READY','프로젝트 새 대화 화면 확인',{...diagnostics,composer:true});})()";
+                + "const rawModeControls=[...document.querySelectorAll('button,[role=\"button\"],[role=\"radio\"],[role=\"tab\"],input[type=\"radio\"]')].filter(visible).filter(e=>{if(e.closest('[role=\"menu\"],[role=\"listbox\"]'))return false;const m=modeOf(labelOf(e));if(!m)return false;const role=e.getAttribute('role')||'';const testId=exactText(e.dataset?.testid||'');return e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||e.hasAttribute('aria-selected')||role==='radio'||role==='tab'||e.matches('input[type=\"radio\"]')||/mode|experience/.test(testId)||e.tagName==='BUTTON';});"
+                + "const groups=[];for(const e of rawModeControls){let p=e.parentElement;for(let depth=0;p&&depth<4;depth++,p=p.parentElement){if(!groups.includes(p))groups.push(p);}}const modeGroup=groups.find(g=>{const inside=rawModeControls.filter(e=>g.contains(e));return inside.some(e=>modeOf(labelOf(e))==='chat')&&inside.some(e=>modeOf(labelOf(e))==='work');})||null;"
+                + "const modeControls=modeGroup?rawModeControls.filter(e=>modeGroup.contains(e)):[];const chatControl=modeControls.find(e=>modeOf(labelOf(e))==='chat')||null;const workControl=modeControls.find(e=>modeOf(labelOf(e))==='work')||null;const target=requestedMode==='work'?workControl:chatControl;const targetFound=!!target;const targetSelected=selectedState(target);"
+                + "const selectedModes=[...new Set(modeControls.filter(selectedState).map(e=>modeOf(labelOf(e))).filter(Boolean))];const currentMode=selectedModes.length===1?selectedModes[0]:(selectedModes.length>1?'ambiguous':'unknown');"
+                + "const modeKey='chatgpt-selfrun:mode:" + esc(runId) + "';let priorAt=0;try{const raw=sessionStorage.getItem(modeKey)||'';const parsed=raw?JSON.parse(raw):null;priorAt=Number(parsed?.at||0);}catch(_){}const retryIntervalMs=1200;const recentClick=priorAt>0&&Date.now()-priorAt<retryIntervalMs;"
+                + "let action='';let modeReadback=targetFound&&targetSelected&&currentMode===requestedMode&&selectedModes.length===1;if(!modeReadback&&targetFound&&!recentClick){try{sessionStorage.setItem(modeKey,JSON.stringify({at:Date.now(),action:'select-mode',requested:requestedMode}));}catch(_){}target.focus?.();target.click();action='select-mode';modeReadback=false;}"
+                + "const diagnostics={requested:requestedMode,currentMode,modeCandidates:rawModeControls.length,groupFound:!!modeGroup,targetFound,targetSelected,selectedModes,recentClick,action,finalReadback:modeReadback};const modeDiag=()=>`requested=${requestedMode};current=${currentMode};targetFound=${targetFound?1:0};targetSelected=${targetSelected?1:0};attempt=${action||'none'};readback=${modeReadback?1:0}`;"
+                + "if(action)return result('UI_WAIT','모드 전환 반영 대기 · '+modeDiag(),diagnostics);if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기 · '+modeDiag(),diagnostics);try{sessionStorage.removeItem(modeKey);}catch(_){}"
+                + composer() + "if(!composer)return result('UI_WAIT','프로젝트 새 대화 입력창 대기 · '+modeDiag(),diagnostics);"
+                + "return result('READY','프로젝트 새 대화 화면 확인 · '+modeDiag(),{...diagnostics,composer:true});})()";
     }
 
     static String sendInitial(String projectUrl, String prompt, String runId) {
