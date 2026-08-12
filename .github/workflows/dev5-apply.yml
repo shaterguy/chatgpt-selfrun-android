@@ -1,4 +1,4 @@
-name: Apply v0.2.3-dev5 lifecycle patch (wake gate 2)
+name: Apply v0.2.3-dev5 lifecycle patch (source push)
 
 on:
   push:
@@ -78,11 +78,12 @@ jobs:
           grep -q "versionName='0.2.3-dev5'" app/build/outputs/apk/release/BUILDER_BADGING.txt
           unzip -t "$OUT" >/dev/null
           sha256sum "$OUT" | tee app/build/outputs/apk/release/BUILDER_SHA256SUMS.txt
-      - name: Commit verified builder changes
+      - name: Commit verified source changes
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/dev5-apply.yml tools/dev5_apply.py tools/dev5_fix_generated.py
+          git restore --source=HEAD -- .github/workflows/build.yml .github/workflows/dev5-apply.yml
+          rm tools/dev5_apply.py tools/dev5_fix_generated.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
