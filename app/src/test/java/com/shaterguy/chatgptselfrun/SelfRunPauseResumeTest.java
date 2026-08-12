@@ -64,11 +64,27 @@ public class SelfRunPauseResumeTest {
         assertTrue(body.contains("boolean preserved = webView != null;"));
         assertTrue(body.contains("if (preserved)"));
         assertTrue(body.contains("ensureDomObserver();"));
-        assertTrue(body.contains("scheduleStep(100L);"));
+        assertTrue(body.contains("scheduleWatchdog();"));
+        assertFalse(body.contains("scheduleStep("));
+        assertFalse(body.contains("requestDomEvaluation("));
         assertFalse(body.contains("webView.onResume()"));
         assertFalse(body.contains("loadUrl("));
         assertFalse(body.contains("reload("));
         assertFalse(body.contains("cleanupWebView()"));
+    }
+
+    @Test
+    public void observerReadyDrivesTheFirstPostResumeDomEvaluation() throws Exception {
+        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
+        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+        int observer = text.indexOf("private void ensureDomObserver()");
+        int nextMethod = text.indexOf("private static Uri chatGptOrigin", observer);
+        assertTrue(observer >= 0 && nextMethod > observer);
+        String body = text.substring(observer, nextMethod);
+        int ready = body.indexOf("if (data.startsWith(\"ready|\"))");
+        int evaluation = body.indexOf("requestDomEvaluation(0L, \"observer_ready\");", ready);
+        assertTrue(ready >= 0);
+        assertTrue(evaluation > ready);
     }
 
     @Test
