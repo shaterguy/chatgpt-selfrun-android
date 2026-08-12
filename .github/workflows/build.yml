@@ -92,8 +92,8 @@ jobs:
           grep -q 'setUseWideViewPort(false)' "$WEB"
           grep -q 'getUserAgentString' "$WEB"
           ! grep -q 'Windows NT 10.0' "$WEB"
-          grep -q 'v0.2.1-dev1' "$MAIN"
-          grep -q 'ChatGPTSelfRun/0.2.1-dev1' "$WEB"
+          grep -q 'v0.2.1' "$MAIN"
+          grep -q 'ChatGPTSelfRun/0.2.1' "$WEB"
           grep -q '새 작업' "$MAIN"
           ! grep -q 'new EditText' "$MAIN"
           grep -q 'SOFT_INPUT_STATE_ALWAYS_HIDDEN' "$NEW"
@@ -130,14 +130,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.1-dev1-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.1-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
           grep -q "versionCode='10'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.2.1-dev1'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.2.1'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -145,9 +145,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.2.1-dev1-unsigned
+          name: chatgpt-selfrun-android-v0.2.1-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.1-dev1-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.1-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt
