@@ -1,4 +1,4 @@
-name: Apply v0.2.3-dev5 lifecycle patch
+name: Apply v0.2.3-dev5 lifecycle patch (wake gate)
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         run: sed -i '0,/ChatGPTSelfRun\/0.2.3-dev4/s//ChatGPTSelfRun\/0.2.3-dev5/' app/src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java
       - name: Apply patch
         run: python3 tools/dev5_apply.py
-      - name: Fix generated lifecycle test escaping
+      - name: Harden generated lifecycle and WakeLock tests
         run: python3 tools/dev5_fix_generated.py
       - name: Source policy checks
         shell: bash
@@ -50,6 +50,7 @@ jobs:
           grep -q 'SelfRunDomObserver.detach(detachedLease)' "$SERVICE"
           grep -q 'SelfRunDomObserver.install(token, lease, activeRunId, activeGeneration, activeEpoch)' "$SERVICE"
           grep -q 'activeExecutionEpoch != executionEpoch' "$SERVICE"
+          grep -q 'updateWakeLockForState("resume_observer_ready")' "$SERVICE"
           grep -q 'DOM_WATCHDOG_MS = 15_000L' "$SERVICE"
           grep -q 'if (!current()) return;' "$OBSERVER"
           grep -q "if (state.lease !== expectedLease) return 'STALE'" "$OBSERVER"
