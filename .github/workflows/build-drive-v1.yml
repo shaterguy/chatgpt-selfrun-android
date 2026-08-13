@@ -3,7 +3,7 @@ name: Build SelfRun Drive v1
 on:
   push:
     branches:
-      - v1.0.0-dev1
+      - selfrun-drive/v1.0.0-dev2
   workflow_dispatch:
 
 permissions:
@@ -77,7 +77,7 @@ jobs:
                   if not name.startswith(package + '.') and not allowed_gms:
                       raise SystemExit('fixed custom permission is forbidden')
           PY
-      - name: Verify package, version, label and installation identity
+      - name: Verify package, version, label and prepare release input
         shell: bash
         run: |
           set -euo pipefail
@@ -90,16 +90,20 @@ jobs:
             BADGING="$($BT/aapt dump badging "$APK")"
             grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
             ! grep -Fq "package: name='com.shaterguy.chatgptselfrun' " <<<"$BADGING"
-            grep -Fq "versionCode='1000001'" <<<"$BADGING"
-            grep -Fq "versionName='1.0.0-dev1'" <<<"$BADGING"
+            grep -Fq "versionCode='1000002'" <<<"$BADGING"
+            grep -Fq "versionName='1.0.0-dev2'" <<<"$BADGING"
             grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
           done
           mkdir -p app/build/outputs/selfrun-drive
-          cp "$DEBUG" app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1-debug.apk
-          "$BT/zipalign" -p -f 4 "$RELEASE" app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1-aligned-unsigned.apk
-          "$BT/zipalign" -c -v 4 app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1-aligned-unsigned.apk
+          "$BT/zipalign" -p -f 4 "$RELEASE" app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2-aligned-unsigned.apk
+          "$BT/zipalign" -c -v 4 app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2-aligned-unsigned.apk
           printf '%s\n' "com.shaterguy.chatgptselfrun" "com.shaterguy.chatgptselfrun.drive" > app/build/outputs/selfrun-drive/COINSTALL_PACKAGES.txt
-          sha256sum app/build/outputs/selfrun-drive/*.apk > app/build/outputs/selfrun-drive/SHA256SUMS.txt
+          cat > app/build/outputs/selfrun-drive/INSTALLABLE_APK_POLICY.txt <<'EOF'
+          The Gradle debug APK is intentionally not published because GitHub-hosted runners use an ephemeral debug signing key.
+          Only chatgpt-selfrun-drive-v1.0.0-dev2.apk, when present, is an installable/update-lineage artifact.
+          The aligned-unsigned APK is build evidence only and cannot be installed.
+          EOF
+          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2-aligned-unsigned.apk > app/build/outputs/selfrun-drive/SHA256SUMS.txt
       - name: Create private signing pass-file
         id: signing
         shell: bash
@@ -109,11 +113,13 @@ jobs:
           set -euo pipefail
           if [[ -z "$SIGNING_PASSPHRASE" ]]; then
             echo 'available=false' >> "$GITHUB_OUTPUT"
+            printf '%s\n' 'stable_signing=unavailable' 'reason=SELFRUN_SIGNING_PASSPHRASE secret is not configured' > app/build/outputs/selfrun-drive/SIGNING_STATUS.txt
             exit 0
           fi
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/selfrun-drive-signing-pass"
           echo 'available=true' >> "$GITHUB_OUTPUT"
+          printf '%s\n' 'stable_signing=available' > app/build/outputs/selfrun-drive/SIGNING_STATUS.txt
       - name: Install signing dependency
         if: ${{ steps.signing.outputs.available == 'true' }}
         run: python3 -m pip install --disable-pip-version-check 'cryptography==45.0.6'
@@ -126,19 +132,23 @@ jobs:
           set -euo pipefail
           trap 'rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"' EXIT
           tools/sign_release.sh \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1-aligned-unsigned.apk \
+            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2-aligned-unsigned.apk \
             "$RUNNER_TEMP/selfrun-drive-signing-pass" \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1.apk \
+            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2.apk \
             > app/build/outputs/selfrun-drive/APKSIGNER_VERIFY.txt
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1.apk \
+            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2.apk \
             > app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" \
             app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
+          grep -Fq "versionCode='1000002'" app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
+          grep -Fq "versionName='1.0.0-dev2'" app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
           "$APKSIGNER" verify --verbose --print-certs \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1.apk \
+            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2.apk \
             > app/build/outputs/selfrun-drive/APK_CERT.txt
-          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev1.apk \
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' \
+            app/build/outputs/selfrun-drive/APK_CERT.txt
+          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev2.apk \
             >> app/build/outputs/selfrun-drive/SHA256SUMS.txt
       - name: Remove signing pass-file
         if: ${{ always() }}
@@ -146,7 +156,7 @@ jobs:
       - name: Upload SelfRun Drive build evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-drive-v1.0.0-dev1
+          name: chatgpt-selfrun-drive-v1.0.0-dev2
           path: app/build/outputs/selfrun-drive/
           if-no-files-found: error
           retention-days: 30
@@ -220,7 +230,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-drive-v1.0.0-dev1-coinstall-evidence
+          name: chatgpt-selfrun-drive-v1.0.0-dev2-coinstall-evidence
           path: |
             coinstall-evidence.txt
             legacy-badging.txt
