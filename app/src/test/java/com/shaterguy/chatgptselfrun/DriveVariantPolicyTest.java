@@ -38,19 +38,26 @@ public class DriveVariantPolicyTest {
         assertTrue(service.contains("CONTINUATION_GUARD_MS = 45_000L"));
     }
 
-    @Test public void creationUsesReservedFolderIdAndNeverDiscoversOrRecreatesUnknownDocument() throws Exception {
+    @Test public void creationUsesReservedFolderIdAndBoundedUnknownDocumentReconciliation() throws Exception {
         String service = source("SelfRunService.java");
         assertTrue(service.contains("drive.generateFolderId(accessToken)"));
         assertTrue(service.contains("store.reserveJobFolderId(reservedId)"));
         assertTrue(service.contains("drive.createJobFolder(accessToken, folderId, driveOperationRunId, base)"));
-        assertTrue(service.contains("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN"));
+        assertTrue(service.contains("DRIVE_DOCUMENT_CREATE_RESULT_PENDING"));
+        assertTrue(service.contains("drive.findSingleTurnDocument"));
         assertFalse(service.contains("recoverAmbiguousCreate"));
         String api = source("DriveApiClient.java");
         assertTrue(api.contains("files/generateIds"));
         assertTrue(api.contains(".put(\"id\", folderId)"));
         assertTrue(api.contains("OutcomeUnknownException"));
-        assertFalse(api.contains("pageSize="));
-        assertFalse(api.contains("&q="));
+        assertTrue(api.contains("Metadata findSingleTurnDocument"));
+        assertTrue(api.contains("pageSize=10"));
+        assertTrue(api.contains("&q="));
+        assertTrue(api.contains("!jobId.equals(candidate.name)"));
+        assertTrue(api.contains("!parentId.equals(candidate.parentId)"));
+        assertTrue(api.contains("candidate.appProperties.optString(\"job_id\")"));
+        assertTrue(api.contains("candidate.appProperties.optString(\"selfrun_kind\")"));
+        assertTrue(api.contains("multiple turn documents found for one SelfRun job"));
     }
 
     @Test public void criticalStateWritesAreSynchronousAndChecked() throws Exception {
