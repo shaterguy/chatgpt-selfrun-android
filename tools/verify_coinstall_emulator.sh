@@ -22,7 +22,7 @@ LEGACY_MAIN="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
 DRIVE_MAIN="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
 LEGACY_SERVICE="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunService"
 DRIVE_SERVICE="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunService"
-DRIVE_EXPECTED_VERSION="1.0.0-dev3"
+DRIVE_EXPECTED_VERSION="1.0.0-dev2"
 
 fail() {
   echo "COINSTALL_VERIFY_FAILED: $*" >&2
