@@ -81,7 +81,8 @@ import xml.etree.ElementTree as ET
 wanted = sys.argv[1]
 root = ET.fromstring(sys.stdin.read())
 for node in root.iter("node"):
-    if node.attrib.get("text") != wanted:
+    candidate = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+    if candidate != wanted:
         continue
     match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.attrib.get("bounds", ""))
     if match:
@@ -96,12 +97,18 @@ for node in root.iter("node"):
     fi
     sleep 1
   done
+  echo "UI_DIAGNOSTIC_BEGIN" >&2
+  "$ADB" shell dumpsys activity activities 2>/dev/null \
+    | grep -E 'mResumedActivity|topResumedActivity|Hist #[0-2]' >&2 || true
+  printf '%s\n' "$xml" >&2
+  echo "UI_DIAGNOSTIC_END" >&2
   fail "UI text not found: $wanted"
 }
 
 launch_and_tap() {
   local main="$1" text="$2"
   "$ADB" shell am start -W -n "$main" >/dev/null
+  sleep 2
   tap_text "$text"
 }
 
