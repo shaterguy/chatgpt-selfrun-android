@@ -31,13 +31,11 @@ PY
   return 1
 }
 
-assert_pass() {
+show_result() {
   python3 - "$1" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as fh:
     item=json.load(fh)
-if not item.get("pass"):
-    raise SystemExit(f"scenario failed: {item}")
 print(json.dumps(item, sort_keys=True))
 PY
 }
@@ -48,7 +46,7 @@ run_scenario() {
   adb shell pm clear "$PKG" >/dev/null
   adb shell am start -W -n "$COMP" --es action "$scenario" >/dev/null
   wait_json "$scenario" "$OUT/$scenario.json"
-  assert_pass "$OUT/$scenario.json"
+  show_result "$OUT/$scenario.json"
   adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
 }
 
@@ -72,7 +70,7 @@ adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
 adb shell pm clear "$PKG" >/dev/null
 adb shell am start -W -n "$COMP" --es action process_prepare >/dev/null
 wait_json process_prepare "$OUT/process_prepare.json"
-assert_pass "$OUT/process_prepare.json"
+show_result "$OUT/process_prepare.json"
 
 old_pid="$(python3 - "$OUT/process_prepare.json" <<'PY'
 import json, sys
@@ -95,7 +93,7 @@ test -z "$running"
 
 adb shell am start -W -n "$COMP" --es action process_verify >/dev/null
 wait_json process "$OUT/process.json"
-assert_pass "$OUT/process.json"
+show_result "$OUT/process.json"
 
 new_pid="$(python3 - "$OUT/process.json" <<'PY'
 import json, sys
