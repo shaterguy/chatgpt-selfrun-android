@@ -73,20 +73,20 @@ public class SelfRunProtocolTest {
     }
 
     @Test
-    public void driveBootstrapCarriesOnlyExactRunMetadataAndRequirement() {
+    public void driveBootstrapCarriesOnlyDriveModeDocumentAndFinalWriteInstruction() {
         String text = SelfRunProtocol.bootstrapDrive("SR-1", SelfRunStore.MODE_CHAT, "do work",
-                "runsFolder_12345678", "jobFolder_12345678", "document_12345678",
-                "https://docs.google.com/document/d/document_12345678/edit", 1);
+                "document_12345678");
+        assertTrue(text.startsWith("[SELF_RUN_BOOTSTRAP 0.1.0 SR-1 MODE=CHAT]\n"));
         assertTrue(text.contains("SELF_RUN_CLIENT=DRIVE_V1"));
-        assertTrue(text.contains("ANDROID_APPLICATION_ID=com.shaterguy.chatgptselfrun.drive"));
-        assertTrue(text.contains("DRIVE_PROTOCOL_VERSION=1"));
-        assertTrue(text.contains("DRIVE_JOB_ID=SR-1"));
-        assertTrue(text.contains("DRIVE_RUNS_BASE_FOLDER_ID=runsFolder_12345678"));
-        assertTrue(text.contains("DRIVE_JOB_FOLDER_ID=jobFolder_12345678"));
         assertTrue(text.contains("DRIVE_TURN_DOCUMENT_ID=document_12345678"));
-        assertTrue(text.contains("DRIVE_EXPECTED_TURN=1"));
+        assertTrue(text.contains("최종 답변 출력 직전에 위 작업문서에 이 턴의 SelfRun 완료 신호와 완료 시점을 기록한다."));
         assertTrue(text.endsWith("\n\ndo work"));
-        assertFalse(text.contains("Drive V1 실행 계약:"));
-        assertFalse(text.contains("commit 작성, 동일 문서 readback"));
+        assertFalse(text.contains("ANDROID_APPLICATION_ID="));
+        assertFalse(text.contains("DRIVE_PROTOCOL_VERSION="));
+        assertFalse(text.contains("DRIVE_JOB_ID="));
+        assertFalse(text.contains("DRIVE_RUNS_BASE_FOLDER_ID="));
+        assertFalse(text.contains("DRIVE_JOB_FOLDER_ID="));
+        assertFalse(text.contains("DRIVE_TURN_DOCUMENT_URL="));
+        assertFalse(text.contains("DRIVE_EXPECTED_TURN="));
     }
 }

@@ -19,6 +19,7 @@ public class SelfRunPauseResumeTest {
         assertTrue(stop.contains("removeCallbacks(webRunnable)"));
         assertTrue(stop.contains("removeCallbacks(guardRunnable)"));
         assertTrue(stop.contains("removeCallbacks(driveRetryRunnable)"));
+        assertTrue(stop.contains("removeCallbacks(submissionRetryRunnable)"));
 
         String pause = method(source, "private void enterPreservedPause", "private void removeAutomationCallbacks()");
         assertTrue(pause.contains("removeAutomationCallbacks()"));
@@ -45,18 +46,18 @@ public class SelfRunPauseResumeTest {
         assertFalse(gate.contains("PHASE_DRIVE_COMMIT_GUARD"));
     }
 
-    @Test public void continuationRecoveryChecksMarkerBeforeTimeoutPause() throws Exception {
+    @Test public void continuationRecoveryChecksSuccessBeforeFiveMinuteRetryAndNeverTimeoutPauses() throws Exception {
         String source = source("SelfRunService.java");
-        int checkScript = source.indexOf("SelfRunDom.checkDriveTurnSubmitted");
-        int timeout = source.indexOf("SUBMISSION_CONFIRMATION_TIMEOUT");
-        assertTrue(checkScript >= 0);
-        assertTrue(timeout > checkScript);
+        assertTrue(source.contains("SelfRunDom.checkDriveTurnSubmitted"));
+        assertTrue(source.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));
+        assertTrue(source.contains("scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE"));
+        assertFalse(source.contains("SUBMISSION_CONFIRMATION_TIMEOUT"));
     }
 
     @Test
     public void continuationCrashRecoveryChecksOnlyUserMessageMarker() {
         String script = SelfRunDom.checkDriveTurnSubmitted(
-                "https://chatgpt.com/g/g-p-demo/c/abc", "[SELF_RUN_CONTINUE SR-1]", "SR-1:1:1");
+                "https://chatgpt.com/g/g-p-demo/c/abc", "[SELF_RUN_CONTINUE SR-1]", "SR-1:1:1", 2);
         assertTrue(script.contains("data-message-author-role=\"user\""));
         assertTrue(script.contains("[SELF_RUN_CONTINUE SR-1]"));
         assertTrue(script.contains("beforeCount"));

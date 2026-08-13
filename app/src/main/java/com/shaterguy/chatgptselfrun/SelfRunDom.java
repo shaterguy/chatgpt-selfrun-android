@@ -97,6 +97,23 @@ final class SelfRunDom {
                 + "return result('BOOTSTRAP_SUBMITTED',prior?'첫 요청 conversation 확인 대기':'bootstrap marker 소실');})()";
     }
 
+    /** Retry bootstrap only after the previous click has remained unconfirmed for the retry interval. */
+    static String prepareDriveInitialRetry(String projectUrl, String prompt, String runId) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:bootstrap:" + runId);
+        return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
+                + projectGuard(project) + authGuard() + textHelpers(expected)
+                + "const p2=location.pathname.split('/').filter(Boolean),ci=p2.indexOf('c'),conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';"
+                + durableMarkerRead(marker)
+                + "if(conv&&prior)return result('CONFIRMED','재시도 전 기존 bootstrap conversation 확인',{conversationUrl:location.href});"
+                + "if(conv)return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','conversation은 존재하지만 bootstrap 표식이 없습니다.',{conversationUrl:location.href});"
+                + composer() + "if(!composer)return result('UI_WAIT','bootstrap 재시도 입력창 대기');" + composerOps()
+                + input()
+                + "if(!same())return result('UI_WAIT','bootstrap 재시도 입력 반영 대기');const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','bootstrap 재시도 전송 버튼 대기');"
+                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),runId:" + q(runId) + ",retry:true});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','bootstrap 재시도 표식 저장 실패');return result('READY_TO_SUBMIT','bootstrap 재시도 준비 완료');})()";
+    }
+
     /** Stage the unchanged legacy continuation line while keeping the Drive commit ID internal. */
     static String prepareDriveTurn(String conversationUrl, String prompt, String commitId) {
         String expected = q(prompt);
@@ -107,11 +124,27 @@ final class SelfRunDom {
                 + durableMarkerRead(marker) + "if(prior){try{const data=JSON.parse(prior);if(data.state==='clicked'&&countPrompt()>Number(data.beforeCount||0))return result('CONFIRMED','continuation 사용자 턴 증가 확인');}catch(_){}return result('SUBMISSION_PENDING','기존 제출 준비 표식 존재');}"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
                 + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
-                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),commitId:" + q(commitId) + ",beforeCount:countPrompt()});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','commit 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"
+                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),commitId:" + q(commitId) + ",beforeCount:countPrompt()});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}"
+                + "if(!persisted)return result('MARKER_FAILED','commit 표식 저장 실패');return JSON.stringify({status:'READY_TO_SUBMIT',detail:'continuation 제출 준비 완료',url:location.href,beforeCount:countPrompt()});}"
                 + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";
     }
 
-    /** Clicks at most once, and only after Android has durably stored SUBMISSION_STARTED. */
+    /** Retry path: re-check late success first, then establish a fresh baseline before another click. */
+    static String prepareDriveTurnRetry(String conversationUrl, String prompt, String commitId, int androidBaseline) {
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:commit:" + commitId);
+        return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
+                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
+                + "const countPrompt=()=>[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||'')).filter(t=>t===expected).length;"
+                + durableMarkerRead(marker)
+                + "const androidBaseline=" + androidBaseline + ";let markerBaseline=-1;try{const data=prior?JSON.parse(prior):null;markerBaseline=Number(data?.beforeCount??-1);}catch(_){}const baseline=androidBaseline>=0?androidBaseline:markerBaseline;if(baseline>=0&&countPrompt()>baseline)return result('CONFIRMED','재시도 전 기존 continuation 사용자 턴 확인');"
+                + composer() + "if(!composer)return result('UI_WAIT','재시도 입력창 대기');" + composerOps()
+                + input()
+                + "if(!same())return result('UI_WAIT','재시도 입력 반영 대기');const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','재시도 전송 버튼 대기');const before=countPrompt();"
+                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),commitId:" + q(commitId) + ",beforeCount:before,retry:true});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','commit 재시도 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 재시도 준비 완료',{beforeCount:before});})()";
+    }
+
+    /** Clicks at most once per attempt, only after Android durably stores the baseline and SUBMISSION_STARTED. */
     static String clickPreparedDriveTurn(String conversationUrl, String prompt, String commitId) {
         String expected = q(prompt);
         String marker = q("selfrun-drive:commit:" + commitId);
@@ -125,13 +158,13 @@ final class SelfRunDom {
     }
 
     /** Crash recovery checks an increase in the unchanged continuation user line. */
-    static String checkDriveTurnSubmitted(String conversationUrl, String prompt, String commitId) {
+    static String checkDriveTurnSubmitted(String conversationUrl, String prompt, String commitId, int androidBaseline) {
         String expected = q(prompt);
         String marker = q("selfrun-drive:commit:" + commitId);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard()
                 + textHelpers(expected) + durableMarkerRead(marker)
-                + "if(!prior)return result('WAIT','commit 제출 표식 미확인');let data;try{data=JSON.parse(prior);}catch(_){return result('WAIT','commit 제출 표식 해석 실패');}const count=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||'')).filter(t=>t===expected).length;return data.state==='clicked'&&count>Number(data.beforeCount||0)?result('CONFIRMED','continuation 사용자 턴 증가 확인'):result('WAIT','continuation 사용자 턴 미확인');})()";
+                + "const count=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||'')).filter(t=>t===expected).length;const androidBaseline=" + androidBaseline + ";if(androidBaseline>=0&&count>androidBaseline)return result('CONFIRMED','Android baseline 이후 continuation 사용자 턴 증가 확인');if(!prior)return result('WAIT','commit 제출 표식 미확인');let data;try{data=JSON.parse(prior);}catch(_){return result('WAIT','commit 제출 표식 해석 실패');}const markerBaseline=Number(data.beforeCount??-1);return data.state==='clicked'&&markerBaseline>=0&&count>markerBaseline?result('CONFIRMED','continuation 사용자 턴 증가 확인'):result('WAIT','continuation 사용자 턴 미확인');})()";
     }
 
     /**

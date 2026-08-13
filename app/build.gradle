@@ -10,8 +10,8 @@ android {
         applicationId 'com.shaterguy.chatgptselfrun.drive'
         minSdk 26
         targetSdk 36
-        versionCode 1000002
-        versionName '1.0.0-dev2'
+        versionCode 1000003
+        versionName '1.0.0-dev3'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
@@ -44,8 +44,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (android.defaultConfig.applicationId != expectedId) {
             throw new GradleException("SelfRun Drive applicationId must be ${expectedId}")
         }
-        if (android.defaultConfig.versionCode != 1000002
-                || android.defaultConfig.versionName != '1.0.0-dev2') {
+        if (android.defaultConfig.versionCode != 1000003
+                || android.defaultConfig.versionName != '1.0.0-dev3') {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
         def manifest = file('src/main/AndroidManifest.xml').getText('UTF-8')

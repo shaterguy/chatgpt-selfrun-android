@@ -78,19 +78,11 @@ final class SelfRunProtocol {
         return "[SELF_RUN_BOOTSTRAP 0.1.0 " + runId + " MODE=" + mode + "]\n\n" + requirement.trim();
     }
 
-    static String bootstrapDrive(String runId, String mode, String requirement, String baseFolderId,
-                                 String jobFolderId, String documentId, String documentUrl,
-                                 int expectedTurn) {
+    static String bootstrapDrive(String runId, String mode, String requirement, String documentId) {
         return "[SELF_RUN_BOOTSTRAP 0.1.0 " + runId + " MODE=" + mode + "]\n"
                 + "SELF_RUN_CLIENT=DRIVE_V1\n"
-                + "ANDROID_APPLICATION_ID=" + BuildConfig.APPLICATION_ID + "\n"
-                + "DRIVE_PROTOCOL_VERSION=1\n"
-                + "DRIVE_JOB_ID=" + runId + "\n"
-                + "DRIVE_RUNS_BASE_FOLDER_ID=" + baseFolderId + "\n"
-                + "DRIVE_JOB_FOLDER_ID=" + jobFolderId + "\n"
                 + "DRIVE_TURN_DOCUMENT_ID=" + documentId + "\n"
-                + "DRIVE_TURN_DOCUMENT_URL=" + documentUrl + "\n"
-                + "DRIVE_EXPECTED_TURN=" + expectedTurn + "\n\n"
+                + "최종 답변 출력 직전에 위 작업문서에 이 턴의 SelfRun 완료 신호와 완료 시점을 기록한다.\n\n"
                 + requirement.trim();
     }
 

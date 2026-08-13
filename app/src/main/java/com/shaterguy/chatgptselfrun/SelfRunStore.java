@@ -44,6 +44,8 @@ final class SelfRunStore {
     static final String BOOTSTRAP_NOT_STARTED = "BOOTSTRAP_NOT_STARTED";
     static final String BOOTSTRAP_SUBMISSION_STARTED = "BOOTSTRAP_SUBMISSION_STARTED";
     static final String BOOTSTRAP_SUBMISSION_CONFIRMED = "BOOTSTRAP_SUBMISSION_CONFIRMED";
+    static final String RETRY_BOOTSTRAP = "BOOTSTRAP";
+    static final String RETRY_CONTINUE = "CONTINUE";
 
     private final SharedPreferences prefs;
     private final SelfRunHistoryStore history;
@@ -83,7 +85,10 @@ final class SelfRunStore {
                 .putLong("pendingEventSeq", 0L).putInt("pendingTurn", 0).putString("pendingSignalRaw", "")
                 .putString("pendingCommitId", "").putLong("commitDetectedAt", 0L).putLong("guardDueAt", 0L)
                 .putString("submissionState", EVENT_CONSUMED).putLong("submissionStartedAt", 0L)
-                .putString("lastSubmittedCommitId", "")
+                .putInt("submissionBaselineCount", -1).putString("lastSubmittedCommitId", "")
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putInt("submissionRetryAttempt", 0)
+                .putBoolean("submissionRetryReady", false)
                 .putString("creationStage", CREATION_NONE).putLong("bootstrapSubmittedAt", 0L)
                 .putString("bootstrapSubmissionState", BOOTSTRAP_NOT_STARTED)
                 .putString("pausedFromPhase", "")
@@ -174,6 +179,21 @@ final class SelfRunStore {
     String submissionState() { return get("submissionState"); }
     long submissionStartedAt() { return prefs.getLong("submissionStartedAt", 0L); }
     String lastSubmittedCommitId() { return get("lastSubmittedCommitId"); }
+    int submissionBaselineCount() { return prefs.getInt("submissionBaselineCount", -1); }
+    String submissionRetryKind() { return get("submissionRetryKind"); }
+    String submissionRetryReason() { return get("submissionRetryReason"); }
+    long submissionRetryDueAt() { return prefs.getLong("submissionRetryDueAt", 0L); }
+    int submissionRetryAttempt() { return prefs.getInt("submissionRetryAttempt", 0); }
+    boolean submissionRetryReady() { return prefs.getBoolean("submissionRetryReady", false); }
+    boolean hasSubmissionRetry() {
+        return (RETRY_BOOTSTRAP.equals(submissionRetryKind()) || RETRY_CONTINUE.equals(submissionRetryKind()))
+                && submissionRetryDueAt() > 0L;
+    }
+    boolean submissionRetryDue() {
+        return hasSubmissionRetry() && System.currentTimeMillis() >= submissionRetryDueAt();
+    }
+    boolean retryForBootstrap() { return RETRY_BOOTSTRAP.equals(submissionRetryKind()); }
+    boolean retryForContinue() { return RETRY_CONTINUE.equals(submissionRetryKind()); }
     String creationStage() { return getOr("creationStage", CREATION_NONE); }
     long bootstrapSubmittedAt() { return prefs.getLong("bootstrapSubmittedAt", 0L); }
     String bootstrapSubmissionState() { return getOr("bootstrapSubmissionState", BOOTSTRAP_NOT_STARTED); }
@@ -207,6 +227,16 @@ final class SelfRunStore {
                 .putLong("bootstrapSubmittedAt", System.currentTimeMillis()));
     }
 
+    void markBootstrapRetryStarted() {
+        if (!BOOTSTRAP_SUBMISSION_STARTED.equals(bootstrapSubmissionState())
+                || !retryForBootstrap() || !submissionRetryReady()) {
+            throw new IllegalStateException("bootstrap retry is not ready");
+        }
+        commitOrThrow(prefs.edit().putLong("bootstrapSubmittedAt", System.currentTimeMillis())
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false));
+    }
+
     void confirmBootstrap(String conversationUrl) {
         if (!BOOTSTRAP_SUBMISSION_STARTED.equals(bootstrapSubmissionState())
                 || SelfRunScript.conversationId(conversationUrl).isEmpty()) {
@@ -214,6 +244,9 @@ final class SelfRunStore {
         }
         commitOrThrow(prefs.edit().putString("conversationUrl", safe(conversationUrl))
                 .putString("bootstrapSubmissionState", BOOTSTRAP_SUBMISSION_CONFIRMED)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false)
+                .putInt("submissionRetryAttempt", 0)
                 .putString("phase", PHASE_WAIT_DRIVE_COMMIT)
                 .putString("status", "Drive 턴 완료 기록 대기")
                 .putLong("phaseStartedAt", System.currentTimeMillis()));
@@ -241,13 +274,45 @@ final class SelfRunStore {
         commitOrThrow(prefs.edit().putLong("pendingEventSeq", commit.eventSeq).putInt("pendingTurn", commit.turn)
                 .putString("pendingSignalRaw", commit.signalRaw).putString("pendingCommitId", commit.id())
                 .putString("lastCommittedAt", commit.committedAt).putLong("commitDetectedAt", detectedAt)
-                .putLong("guardDueAt", dueAt).putString("submissionState", EVENT_DETECTED));
+                .putLong("guardDueAt", dueAt).putString("submissionState", EVENT_DETECTED)
+                .putInt("submissionBaselineCount", -1)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false)
+                .putInt("submissionRetryAttempt", 0));
         syncHistory();
     }
 
     void markGuarding() { commitOrThrow(prefs.edit().putString("submissionState", EVENT_GUARDING)); }
-    void markSubmissionStarted() { commitOrThrow(prefs.edit().putString("submissionState", SUBMISSION_STARTED)
-            .putLong("submissionStartedAt", System.currentTimeMillis())); }
+
+    void markSubmissionStarted(int beforeCount) {
+        if (beforeCount < 0) throw new IllegalArgumentException("submission baseline is required");
+        commitOrThrow(prefs.edit().putString("submissionState", SUBMISSION_STARTED)
+                .putLong("submissionStartedAt", System.currentTimeMillis())
+                .putInt("submissionBaselineCount", beforeCount)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false));
+    }
+
+    void scheduleSubmissionRetry(String kind, String reason, long dueAt) {
+        if (!(RETRY_BOOTSTRAP.equals(kind) || RETRY_CONTINUE.equals(kind)) || dueAt <= 0L) {
+            throw new IllegalArgumentException("valid retry state required");
+        }
+        int prior = submissionRetryAttempt();
+        int next = prior == Integer.MAX_VALUE ? Integer.MAX_VALUE : prior + 1;
+        commitOrThrow(prefs.edit().putString("submissionRetryKind", kind)
+                .putString("submissionRetryReason", safe(reason))
+                .putLong("submissionRetryDueAt", dueAt).putInt("submissionRetryAttempt", next)
+                .putBoolean("submissionRetryReady", false));
+        syncHistory();
+    }
+
+    void markSubmissionRetryReady() {
+        if (!hasSubmissionRetry() || !submissionRetryDue()) {
+            throw new IllegalStateException("submission retry is not due");
+        }
+        commitOrThrow(prefs.edit().putBoolean("submissionRetryReady", true));
+        syncHistory();
+    }
 
     void markSubmissionConfirmed(String commitId) {
         if (!safe(commitId).equals(pendingCommitId())) {
@@ -268,6 +333,10 @@ final class SelfRunStore {
                 .putLong("pendingEventSeq", 0L).putInt("pendingTurn", 0).putString("pendingSignalRaw", "")
                 .putString("pendingCommitId", "").putLong("commitDetectedAt", 0L).putLong("guardDueAt", 0L)
                 .putString("submissionState", EVENT_CONSUMED).putLong("submissionStartedAt", 0L)
+                .putInt("submissionBaselineCount", -1)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false)
+                .putInt("submissionRetryAttempt", 0)
                 .putBoolean("resumeNeedsContinuation", false).putString("phase", PHASE_WAIT_DRIVE_COMMIT)
                 .putString("status", "Drive commit 대기 · 턴 " + (completedTurn + 1))
                 .putLong("phaseStartedAt", System.currentTimeMillis()));
@@ -280,7 +349,11 @@ final class SelfRunStore {
                 .putInt("turn", commit.turn).putString("lastSignal", commit.signalRaw)
                 .putLong("pendingEventSeq", 0L).putInt("pendingTurn", 0).putString("pendingSignalRaw", "")
                 .putString("pendingCommitId", "").putString("submissionState", EVENT_CONSUMED)
-                .putLong("submissionStartedAt", 0L).putLong("phaseStartedAt", System.currentTimeMillis());
+                .putLong("submissionStartedAt", 0L).putInt("submissionBaselineCount", -1)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false)
+                .putInt("submissionRetryAttempt", 0)
+                .putLong("phaseStartedAt", System.currentTimeMillis());
         switch (commit.signal.type) {
             case DONE -> editor.putString("phase", PHASE_DONE).putString("status", "SelfRun Drive 완료")
                     .putBoolean("active", false).putBoolean("paused", false);
@@ -309,6 +382,10 @@ final class SelfRunStore {
                 .putString("pendingSignalRaw", SelfRunProtocol.continuation(runId()))
                 .putString("pendingCommitId", id).putLong("commitDetectedAt", System.currentTimeMillis())
                 .putLong("guardDueAt", System.currentTimeMillis()).putString("submissionState", EVENT_GUARDING)
+                .putInt("submissionBaselineCount", -1)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false)
+                .putInt("submissionRetryAttempt", 0)
                 .putBoolean("resumeNeedsContinuation", false).putBoolean("paused", false)
                 .putBoolean("active", true).putBoolean("userStopped", false)
                 .putString("phase", PHASE_SEND_CONTINUE)

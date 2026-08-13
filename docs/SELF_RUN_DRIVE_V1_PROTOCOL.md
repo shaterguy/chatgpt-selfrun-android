@@ -1,98 +1,73 @@
-# SelfRun orchestration: legacy 0.2.x + Drive V1
+# SelfRun orchestration: legacy WebView + Drive V1
 
-이 문서는 저장소 코드와 함께 관리되는 Drive V1 운영 규격입니다. 외부의 공식 `SELF_RUN_ORCHESTRATION_SKILL`에는 같은 조건부 규칙을 반영하고, 수정 후 그 문서의 file ID, parent, MIME type, modifiedTime과 본문을 readback해야 합니다. 앱이나 CI는 외부 운영문서를 자동 수정하지 않습니다.
+이 문서는 Drive V1 차이 규격이다. SelfRun의 작업 해석, HANDOFF, NEXT/DONE/PAUSE/USER_ACTION_REQUIRED 의미와 역할 전환은 기존 공통 SelfRun 운영 규칙을 그대로 사용한다. Drive 버전용 SelfRun 규칙 전체를 복제하지 않는다.
 
-## 모드 판별
+## Drive V1 판별
 
-다음 세 값이 모두 있을 때만 Drive V1이다.
+ChatGPT에 전달되는 bootstrap에서 다음 두 정보만으로 Drive V1을 판별한다.
 
 ```text
 SELF_RUN_CLIENT=DRIVE_V1
-DRIVE_PROTOCOL_VERSION=1
-DRIVE_TURN_DOCUMENT_ID=<value>
+DRIVE_TURN_DOCUMENT_ID=<documentId>
 ```
 
-하나라도 없으면 legacy 0.2.x로 처리한다. legacy bootstrap과 기존 답변 말미 신호 문법, WebView 기반 완료 감시는 그대로 유지하며 Drive 문서 생성이나 갱신을 요구하지 않는다.
+Android application ID, Runs 기준 폴더 ID, Job 폴더 ID, 문서 URL, Drive protocol version, expected turn과 앱 내부 상태관리 값은 ChatGPT bootstrap에 전달하지 않는다. 이 값들은 필요한 경우 Android 앱 내부 Drive API 상태로만 유지한다.
 
-## Drive V1 소유권
-
-Android 앱이 ChatGPT bootstrap 전 다음 순서로 Job 폴더와 실행턴 Google Docs 문서를 직접 생성·초기화·readback한다.
+실제 첫 프롬프트 형식은 다음과 같다.
 
 ```text
-DRIVE_ACCOUNT_CHECK
-DRIVE_BASE_FOLDER_CHECK
-JOB_ID_CREATE
-DRIVE_JOB_FOLDER_CREATE
-DRIVE_TURN_DOCUMENT_CREATE
-DRIVE_DOCUMENT_INIT
-DRIVE_DOCUMENT_READBACK
-BOOTSTRAP
-BOOTSTRAP_MODEL
-BOOTSTRAP_REASONING
-BOOTSTRAP_SEND
-WAIT_DRIVE_COMMIT
+[SELF_RUN_BOOTSTRAP 0.1.0 <RUN_ID> MODE=<MODE>]
+SELF_RUN_CLIENT=DRIVE_V1
+DRIVE_TURN_DOCUMENT_ID=<documentId>
+최종 답변 출력 직전에 위 작업문서에 이 턴의 SelfRun 완료 신호와 완료 시점을 기록한다.
+
+<사용자의 실제 작업 지시>
 ```
 
-ChatGPT 실행 측은 bootstrap에 전달된 정확한 `DRIVE_TURN_DOCUMENT_ID` 또는 URL만 사용한다. Job 폴더나 문서를 만들거나 이름, 경로, Job ID로 검색하지 않는다.
+## Drive V1의 유일한 실행 차이
 
-앱의 bootstrap은 위 판별 필드와 현재 Job의 ID·URL·예상 턴 등 실행별 metadata, 그리고 사용자의 실제 작업 지시만 전달한다. 아래 실행 규격 전체를 매 bootstrap에 복제하지 않는다. Drive V1을 판별한 ChatGPT 실행 측은 공식 `SELF_RUN_ORCHESTRATION_SKILL`의 Drive V1 절을 권위 규격으로 적용한다.
+기존 WebView SelfRun은 assistant 답변 완료 여부를 WebView에서 판정한다. Drive V1은 그 완료 판정만 Google Drive 작업문서의 새 완료 기록으로 대체한다.
 
-## 최초 bootstrap 제출 확인(Android 구현)
+현재 턴의 실제 작업과 검증을 마친 뒤 최종 답변을 출력하기 직전에 지정된 `DRIVE_TURN_DOCUMENT_ID` 문서에 해당 턴의 SelfRun 완료 신호와 완료 시점을 기록하고 readback한다. 그 밖의 SelfRun 제어 의미는 공통 운영 규칙을 따른다.
 
-새 conversation URL이 생긴 직후에는 정확한 bootstrap 사용자 턴 DOM이 아직 나타나지 않을 수 있다. 앱은 이를 즉시 제출 실패로 판단하지 않고 conversation URL을 먼저 영속 저장한 뒤 최대 120초 동안 정확한 사용자 턴을 확인한다. 이 대기 중 최초 prompt를 다시 클릭하거나 전송하지 않으며 assistant 답변, 생성 상태, 중지 버튼 또는 streaming DOM을 확인하지 않는다. 제한 시간 안에 사용자 턴을 확인하지 못하거나 conversation ID가 바뀌면 `BOOTSTRAP_SUBMISSION_RESULT_UNKNOWN` 또는 conversation mismatch 보존형 일시정지로 전환한다.
-
-## 기존 SelfRun 실행 규칙 유지
-
-Drive V1에서도 ChatGPT가 작업 지시, 이전 HANDOFF와 기존 SelfRun 신호의 의미를 해석한다. 기존 턴 수행 방식은 바뀌지 않는다. Android 앱은 중간 연결·진행 상태를 판단하지 않으며, 차이는 현재 턴이 완전히 끝난 뒤 답변을 출력하기 직전에 아래 완료 commit을 실행턴 문서에 추가한다는 점뿐이다.
-
-## 턴 완료 commit
-
-현재 턴의 모든 작업·검증·HANDOFF와 출력할 기존 SelfRun 신호가 확정된 마지막 단계에 완전한 블록 하나를 append한다.
+Android 쪽 정상 루프는 다음과 같다.
 
 ```text
-[SELF_RUN_DRIVE_COMMIT_V1]
-PROTOCOL_VERSION=1
-CLIENT_ID=SELFRUN_DRIVE_ANDROID
-JOB_ID=<JOB_ID>
-TURN=<TURN>
-EVENT_SEQ=<strictly increasing integer>
-COMMIT_KIND=<CONTINUE|DONE|PAUSE|USER_ACTION_REQUIRED>
-STATE=<TURN_COMMITTED|RUN_DONE|RUN_PAUSED|USER_ACTION_REQUIRED>
-COMMITTED_AT=<ISO 8601 with offset>
-SIGNAL_BEGIN
-<exactly one existing SelfRunProtocol signal line>
-SIGNAL_END
-[/SELF_RUN_DRIVE_COMMIT_V1]
+프롬프트 제출
+→ 제출 성공만 확인
+→ Drive 작업문서 업데이트 대기
+→ 새 완료 기록 수락
+→ 45초 UI 안정 대기
+→ 같은 conversation 입력창 확보
+→ [SELF_RUN_CONTINUE <RUN_ID>] 강제 입력·제출
+→ 제출 성공만 확인
+→ Drive 작업문서 업데이트 대기
 ```
 
-매핑은 다음과 같다.
+45초 지연은 assistant completion을 재확인하기 위한 시간이 아니다. Drive 완료 기록이 authoritative completion signal이다. Drive 완료 기록 이후 stop 버튼, streaming, assistant message completion, generation 상태를 다음 제출 조건으로 사용하지 않는다.
 
-| Commit kind | State | 실제 신호 |
-|---|---|---|
-| CONTINUE | TURN_COMMITTED | `[SELF_RUN_NEXT <RUN_ID> ...]` |
-| DONE | RUN_DONE | `[SELF_RUN_DONE <RUN_ID>]` |
-| PAUSE | RUN_PAUSED | `[SELF_RUN_PAUSE <RUN_ID> ...]` |
-| USER_ACTION_REQUIRED | USER_ACTION_REQUIRED | `[SELF_RUN_USER_ACTION_REQUIRED <RUN_ID> <ACTION>]` |
-Drive 전용 유사 신호를 만들지 않는다. 기존 commit을 수정·삭제하지 않고 새 commit을 뒤에 append한다. 마지막 순서는 반드시 다음과 같다.
+## 제출 성공과 중복 방지
 
-```text
-Drive commit 작성
-→ 같은 documentId의 본문 readback
-→ 동일한 SelfRun 신호를 ChatGPT 답변 말미에 출력
-```
+continuation은 클릭 전에 해당 conversation에서 동일한 CONTINUE 사용자 턴 수를 Android 영속 상태와 WebView marker에 baseline으로 저장한다. 제출 성공은 baseline 이후 동일 사용자 턴 수가 실제 증가했는지 확인한다. assistant DOM은 확인하지 않는다.
 
-Drive V1 앱은 답변 DOM의 신호를 진행 기준으로 사용하지 않지만 legacy 호환을 위해 답변 출력은 유지한다.
+결과가 즉시 명확하지 않으면 같은 신호를 바로 다시 보내지 않는다. 5분 대기 상태를 영속하고, 5분 뒤 먼저 기존 제출이 늦게 성공했는지 같은 baseline으로 확인한다. 이미 성공했으면 재전송하지 않고 Drive 대기로 복귀한다. 아직 미제출이면 입력창을 다시 확보하고 동일 신호를 다시 준비·제출한다.
 
-## Android 수락 규칙
+제출 실패·미확인은 terminal error가 아니다. 5분 재시도 횟수에 상한을 두지 않는다. 시도 횟수는 관찰용으로만 기록하며 종료 조건으로 사용하지 않는다.
 
-앱은 시작/종료 marker, 모든 필수 ASCII key, `CLIENT_ID`, Job ID, expected turn, 증가한 event sequence, offset timestamp, 정확히 한 줄의 실제 SelfRun signal, kind/state/signal 의미 일치를 모두 확인한다. 부분 write는 무시한다. 예상보다 작은 턴과 소비한 event는 stale로 무시하고 미래 턴, unknown/duplicate/confusable key, overflow, 복수 unseen commit은 protocol error로 중단한다.
+## WebView 제어권 복구
 
-`CONTINUE`는 event를 먼저 영속 저장하고 최초 감지 시각 기준 120초 guard 후 기존과 동일한 `[SELF_RUN_CONTINUE <RUN_ID>]` 한 줄만 제출한다. Drive commit ID는 앱 내부 중복 방지 표식으로만 사용하며 ChatGPT 입력문에 추가하지 않는다. click 전 `SUBMISSION_STARTED`를 동기 저장하고, 불확실할 때 자동 재클릭하지 않고 사용자 확인 상태로 전환한다. 이 방식은 안전한 at-most-once 정책이며, WebView click에 서버 idempotency가 없으므로 click 직전 크래시에서 무손실과 엄밀한 exactly-once를 동시에 보장한다고 주장하지 않는다.
+Drive V1에서 WebView가 필요한 이유는 assistant completion 감시가 아니라 동일 conversation의 프롬프트 입력·제출 제어권 확보이다. 기존 WebView가 유효하면 그대로 쓰고, 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 입력창을 재획득한다. 네트워크·WebView의 복구 가능한 오류는 Job 종료 사유로 승격하지 않는다.
 
-`DONE`, `PAUSE`, `USER_ACTION_REQUIRED`에서는 continuation을 제출하지 않는다.
+## 일시정지와 재개
 
-## 생성 원자성
+`[SELF_RUN_PAUSE ...]`, `[SELF_RUN_USER_ACTION_REQUIRED ...]`, 사용자 수동 일시정지는 Job 종료가 아닌 일시정지다. 일시정지 동안 45초 continuation 예약과 5분 제출 재시도 timer는 실행하지 않지만 pending Drive event, 제출 baseline, retry 종류·예정 시각·시도 수와 conversation/document 식별자는 보존한다.
 
-Job 폴더는 Drive `files.generateIds`로 ID를 먼저 발급하고 로컬에 동기 영속한 뒤 그 ID와 명시적 `parents=[driveRunsBaseFolderId]`로 생성한다. 재시작은 알려진 ID의 `files.get` 또는 같은 ID 생성만 사용한다.
+재개 시 기존 WebView 또는 저장된 conversation URL로 입력 제어권을 확보한다. pending 제출이 있으면 먼저 기존 성공 여부를 확인하고 필요할 때만 동일 신호를 제출한다. 재개 후 제출 실패도 다시 5분 재시도 상태로 돌아간다.
 
-Google Docs 네이티브 문서는 사전 발급 ID를 지원하지 않는다. Android는 `DOCUMENT_CREATING`을 먼저 영속하고 `files.create` 응답의 ID만 저장한다. timeout, 응답 유실, 해석 불가 등 결과가 불명확하면 `DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN` 보존형 중단으로 전환하고 파일 목록, 이름, Job ID 검색이나 재생성을 하지 않는다.
+## Drive 완료 기록 형식
+
+ChatGPT 실행 측이 최종 답변 직전에 쓰는 완료 기록 형식과 SIGNAL/HANDOFF 문법은 공식 `SELF_RUN_ORCHESTRATION_SKILL`을 따른다. Android 앱은 완전한 새 기록만 수락하고 이미 소비한 event sequence/turn을 다시 소비하지 않는다. `DONE`은 정상 종료이며 `PAUSE`와 `USER_ACTION_REQUIRED`는 자동 continuation을 보내지 않고 일시정지한다.
+
+## 생성 단계
+
+Job 폴더와 작업문서의 생성·Drive 인증·parent 검증·초기 readback은 Android 앱의 기존 Drive setup 책임이다. 이번 dev3 턴 진행 변경은 해당 생성 구조를 재설계하지 않는다.

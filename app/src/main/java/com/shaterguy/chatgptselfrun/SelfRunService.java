@@ -39,7 +39,9 @@ public final class SelfRunService extends Service {
     static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME";
     private static final int NOTIFICATION_ID = 17021;
     private static final long NORMAL_POLL_MS = 60_000L;
-    static final long CONTINUATION_GUARD_MS = 120_000L;
+    static final long CONTINUATION_GUARD_MS = 45_000L;
+    static final long SUBMISSION_RETRY_MS = 5 * 60_000L;
+    static final long SUBMISSION_CONFIRMATION_GRACE_MS = 15_000L;
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -48,6 +50,7 @@ public final class SelfRunService extends Service {
     private final Runnable driveRetryRunnable = this::retryDrive;
     private final Runnable webRunnable = this::runWebStep;
     private final Runnable guardRunnable = this::guardElapsed;
+    private final Runnable submissionRetryRunnable = this::submissionRetryElapsed;
     private SelfRunStore store;
     private SelfRunRunLog runLog;
     private DriveApiClient drive;
@@ -122,6 +125,10 @@ public final class SelfRunService extends Service {
 
     private void resumeStateMachine() {
         if (!canRun()) return;
+        if (store.hasSubmissionRetry()) {
+            scheduleOrResumeSubmissionRetry();
+            return;
+        }
         String phase = store.phase();
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
                 && SelfRunStore.SUBMISSION_CONFIRMED.equals(store.submissionState())) {
@@ -476,7 +483,7 @@ public final class SelfRunService extends Service {
                 store.detectEvent(commit, now, now + CONTINUATION_GUARD_MS);
             }
             if (SelfRunStore.EVENT_DETECTED.equals(store.submissionState())) store.markGuarding();
-            transition(SelfRunStore.PHASE_DRIVE_COMMIT_GUARD, "Drive commit 안전 지연 · 120초", "continue_commit");
+            transition(SelfRunStore.PHASE_DRIVE_COMMIT_GUARD, "Drive commit 안전 지연 · 45초", "continue_commit");
             scheduleGuard();
         } else handleTerminal(commit);
     }
@@ -558,8 +565,7 @@ public final class SelfRunService extends Service {
         long detectedAt = store.commitDetectedAt(), dueAt = store.guardDueAt();
         long delay = Math.max(0L, dueAt - System.currentTimeMillis());
         if (store.pendingEventSeq() < 1 || store.pendingCommitId().isEmpty()
-                || detectedAt <= 0 || dueAt - detectedAt < CONTINUATION_GUARD_MS
-                || dueAt - detectedAt > 180_000L) {
+                || detectedAt <= 0 || dueAt - detectedAt != CONTINUATION_GUARD_MS) {
             pauseError("DRIVE_PENDING_EVENT_INVALID", "guard 복원 정보가 불완전합니다.");
             return;
         }
@@ -625,7 +631,11 @@ public final class SelfRunService extends Service {
                 }
                 @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {
                     h.cancel();
-                    if (launchedRunId.equals(store.runId())) pauseError("WEBVIEW_SSL", "SSL 오류");
+                    if (launchedRunId.equals(store.runId()) && canRun()
+                            && isWebAutomationPhase(store.phase())) {
+                        runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");
+                        postWebCallback(SelfRunService.this::restoreCanonical, SUBMISSION_RETRY_MS);
+                    }
                 }
                 @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {
                     cleanupWebView();
@@ -659,17 +669,30 @@ public final class SelfRunService extends Service {
             case SelfRunStore.PHASE_BOOTSTRAP -> script = SelfRunDom.prepareInitialContext(store.projectUrl(), store.mode(), store.runId());
             case SelfRunStore.PHASE_BOOTSTRAP_MODEL -> script = WorkPreferenceDom.modelForProject(store.projectUrl(), "sol");
             case SelfRunStore.PHASE_BOOTSTRAP_REASONING -> script = WorkPreferenceDom.reasoningForProject(store.projectUrl(), "xhigh");
-            case SelfRunStore.PHASE_BOOTSTRAP_SEND -> script = SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED
-                    .equals(store.bootstrapSubmissionState())
-                    ? SelfRunDom.checkDriveInitialSubmitted(store.projectUrl(), store.runId())
-                    : SelfRunDom.sendDriveInitial(store.projectUrl(), driveBootstrap(), store.runId());
+            case SelfRunStore.PHASE_BOOTSTRAP_SEND -> {
+                if (store.retryForBootstrap() && store.submissionRetryReady()) {
+                    script = SelfRunDom.prepareDriveInitialRetry(store.projectUrl(), driveBootstrap(), store.runId());
+                } else if (SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED.equals(store.bootstrapSubmissionState())
+                        || store.retryForBootstrap()) {
+                    script = SelfRunDom.checkDriveInitialSubmitted(store.projectUrl(), store.runId());
+                } else {
+                    script = SelfRunDom.sendDriveInitial(store.projectUrl(), driveBootstrap(), store.runId());
+                }
+            }
             case SelfRunStore.PHASE_APPLY_PREFS -> script = WorkPreferenceDom.modelForConversation(store.conversationUrl(), store.pendingModel());
             case SelfRunStore.PHASE_APPLY_REASONING -> script = WorkPreferenceDom.reasoningForConversation(store.conversationUrl(), store.pendingReasoning());
             case SelfRunStore.PHASE_SEND_CONTINUE -> {
                 String prompt = continuationPrompt();
-                if (SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())) {
-                    script = SelfRunDom.checkDriveTurnSubmitted(store.conversationUrl(), prompt, store.pendingCommitId());
-                } else script = SelfRunDom.prepareDriveTurn(store.conversationUrl(), prompt, store.pendingCommitId());
+                if (store.retryForContinue() && store.submissionRetryReady()) {
+                    script = SelfRunDom.prepareDriveTurnRetry(store.conversationUrl(), prompt, store.pendingCommitId(),
+                            store.submissionBaselineCount());
+                } else if (SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())
+                        || store.retryForContinue()) {
+                    script = SelfRunDom.checkDriveTurnSubmitted(store.conversationUrl(), prompt,
+                            store.pendingCommitId(), store.submissionBaselineCount());
+                } else {
+                    script = SelfRunDom.prepareDriveTurn(store.conversationUrl(), prompt, store.pendingCommitId());
+                }
             }
             default -> { pauseError("WEB_STATE_INVALID", "Drive V1 WebView 단계 오류: " + phase); return; }
         }
@@ -683,36 +706,62 @@ public final class SelfRunService extends Service {
             domInFlight = false; if (!canRun()) return;
             JSONObject result = parse(raw); String status = result.optString("status", "SCRIPT_ERROR");
             if ("TARGET_ERROR".equals(status)) { restoreCanonical(); return; }
-            if ("AUTH_REQUIRED".equals(status)) { pauseError("CHATGPT_AUTH_REQUIRED", "SelfRun Drive에서 ChatGPT 로그인이 필요합니다."); return; }
-            if ("MARKER_FAILED".equals(status)) { pauseError("SUBMISSION_MARKER_FAILED", result.optString("detail")); return; }
+            if ("AUTH_REQUIRED".equals(status)) {
+                enterPreservedPause("CHATGPT_AUTH_REQUIRED", "ChatGPT 로그인 필요 · 사용자 조치 대기", false);
+                NotificationHelper.notifyUser(this, "확인 필요", store.status());
+                return;
+            }
+            if ("MARKER_FAILED".equals(status) || "SCRIPT_ERROR".equals(status)) {
+                if (isSubmissionPhase(phase)) scheduleSubmissionRetryForPhase(phase, status);
+                else scheduleWeb(2_000L);
+                return;
+            }
             if ("SUBMISSION_AMBIGUOUS".equals(status) || "SUBMISSION_PENDING".equals(status)) {
-                enterPreservedPause("SUBMISSION_AMBIGUOUS", "continuation 제출 결과 확인 필요 · 자동 재전송 차단", false); return;
+                scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, status);
+                return;
             }
             if ("BOOTSTRAP_SUBMISSION_AMBIGUOUS".equals(status)
                     || "BOOTSTRAP_SUBMISSION_PENDING".equals(status)) {
-                enterPreservedPause("BOOTSTRAP_SUBMISSION_RESULT_UNKNOWN",
-                        "첫 요청 제출 결과가 불명확해 자동 재전송을 차단했습니다.", false);
+                scheduleSubmissionRetry(SelfRunStore.RETRY_BOOTSTRAP, status);
                 return;
             }
             if ("BOOTSTRAP_SUBMITTED".equals(status)) {
-                if (SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED.equals(store.bootstrapSubmissionState())
+                if (store.retryForBootstrap() && store.submissionRetryDue()
+                        && !store.submissionRetryReady()) {
+                    store.markSubmissionRetryReady();
+                    store.setStatus("첫 요청 재시도 준비 · 이전 제출 미확인");
+                    scheduleWeb(100L);
+                } else if (!store.hasSubmissionRetry()
+                        && SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED.equals(store.bootstrapSubmissionState())
                         && store.bootstrapSubmittedAt() > 0
-                        && System.currentTimeMillis() - store.bootstrapSubmittedAt() >= 120_000L) {
-                    enterPreservedPause("BOOTSTRAP_SUBMISSION_RESULT_UNKNOWN",
-                            "첫 요청은 클릭됐지만 conversation URL을 확정하지 못해 자동 재전송을 차단했습니다.", false);
-                } else scheduleWeb(1_200L);
+                        && System.currentTimeMillis() - store.bootstrapSubmittedAt()
+                                >= SUBMISSION_CONFIRMATION_GRACE_MS) {
+                    scheduleSubmissionRetry(SelfRunStore.RETRY_BOOTSTRAP, "BOOTSTRAP_SUBMISSION_UNCONFIRMED");
+                } else {
+                    scheduleWeb(1_200L);
+                }
                 return;
             }
             if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "SUBMITTED".equals(status)) {
                 if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
-                        && SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())
-                        && store.submissionStartedAt() > 0
-                        && System.currentTimeMillis() - store.submissionStartedAt() >= 120_000L) {
-                    enterPreservedPause("SUBMISSION_CONFIRMATION_TIMEOUT",
-                            "continuation 사용자 메시지 확인 시간 초과 · 자동 재전송 차단", false);
+                        && store.retryForContinue() && store.submissionRetryDue()
+                        && !store.submissionRetryReady() && "WAIT".equals(status)) {
+                    store.markSubmissionRetryReady();
+                    store.setStatus("continuation 재시도 준비 · 이전 제출 미확인");
+                    scheduleWeb(100L);
                     return;
                 }
-                scheduleWeb("WAIT".equals(status) ? 2_000L : 1_200L); return;
+                if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
+                        && !store.hasSubmissionRetry()
+                        && SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())
+                        && store.submissionStartedAt() > 0
+                        && System.currentTimeMillis() - store.submissionStartedAt()
+                                >= SUBMISSION_CONFIRMATION_GRACE_MS) {
+                    scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, "SUBMISSION_UNCONFIRMED");
+                    return;
+                }
+                scheduleWeb("WAIT".equals(status) ? 2_000L : 1_200L);
+                return;
             }
             handleWebResult(phase, status, result);
         });
@@ -741,7 +790,8 @@ public final class SelfRunService extends Service {
             releaseWakeLock(); scheduleDrivePoll(); return;
         }
         if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase) && "READY_TO_SUBMIT".equals(status)) {
-            store.markBootstrapSubmissionStarted();
+            if (store.retryForBootstrap() && store.submissionRetryReady()) store.markBootstrapRetryStarted();
+            else store.markBootstrapSubmissionStarted();
             evaluate(SelfRunStore.PHASE_BOOTSTRAP_SEND,
                     SelfRunDom.clickPreparedDriveInitial(store.projectUrl(), driveBootstrap(), store.runId()));
             return;
@@ -754,14 +804,19 @@ public final class SelfRunService extends Service {
         }
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) {
             if ("CONFIRMED".equals(status)) { confirmContinuation(); return; }
-            if ("READY_TO_SUBMIT".equals(status)) { startAndClickContinuation(); return; }
+            if ("READY_TO_SUBMIT".equals(status)) {
+                int beforeCount = result.optInt("beforeCount", -1);
+                if (beforeCount < 0) scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, "BASELINE_MISSING");
+                else startAndClickContinuation(beforeCount);
+                return;
+            }
         }
         scheduleWeb(750L);
     }
 
-    private void startAndClickContinuation() {
-        // Must be durable before the click. A crash from this point is resolved by user-message marker only.
-        store.markSubmissionStarted();
+    private void startAndClickContinuation(int beforeCount) {
+        // Baseline and SUBMISSION_STARTED are durable before the click. Recovery checks the user-turn count first.
+        store.markSubmissionStarted(beforeCount);
         String script = SelfRunDom.clickPreparedDriveTurn(store.conversationUrl(), continuationPrompt(), store.pendingCommitId());
         evaluate(SelfRunStore.PHASE_SEND_CONTINUE, script);
     }
@@ -781,12 +836,59 @@ public final class SelfRunService extends Service {
     }
 
     private String driveBootstrap() {
-        return SelfRunProtocol.bootstrapDrive(store.runId(), store.mode(), store.requirement(), store.runBaseFolderId(),
-                store.jobFolderId(), store.turnDocumentId(), store.turnDocumentUrl(), store.expectedTurn());
+        return SelfRunProtocol.bootstrapDrive(store.runId(), store.mode(), store.requirement(), store.turnDocumentId());
     }
 
     private String continuationPrompt() {
         return SelfRunProtocol.continuation(store.runId());
+    }
+
+    private static boolean isSubmissionPhase(String phase) {
+        return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
+                || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);
+    }
+
+    private void scheduleSubmissionRetryForPhase(String phase, String reason) {
+        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) {
+            scheduleSubmissionRetry(SelfRunStore.RETRY_BOOTSTRAP, reason);
+        } else if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) {
+            scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, reason);
+        }
+    }
+
+    private void scheduleSubmissionRetry(String kind, String reason) {
+        if (!canRun()) return;
+        if (store.hasSubmissionRetry()) {
+            scheduleOrResumeSubmissionRetry();
+            return;
+        }
+        long dueAt = System.currentTimeMillis() + SUBMISSION_RETRY_MS;
+        store.scheduleSubmissionRetry(kind, reason, dueAt);
+        runLog.record(store, "SUBMISSION_RETRY_WAIT",
+                "kind=" + kind + ";attempt=" + store.submissionRetryAttempt()
+                        + ";dueAt=" + dueAt + ";reason=" + reason);
+        store.setStatus((SelfRunStore.RETRY_BOOTSTRAP.equals(kind) ? "첫 요청" : "continuation")
+                + " 제출 미확인 · 5분 후 재확인/재시도");
+        startForegroundCompat();
+        scheduleOrResumeSubmissionRetry();
+    }
+
+    private void scheduleOrResumeSubmissionRetry() {
+        if (!canRun() || !store.hasSubmissionRetry()) return;
+        handler.removeCallbacks(webRunnable);
+        handler.removeCallbacks(submissionRetryRunnable);
+        releaseWakeLock();
+        long delay = Math.max(0L, store.submissionRetryDueAt() - System.currentTimeMillis());
+        if (delay == 0L) handler.post(submissionRetryRunnable);
+        else handler.postDelayed(submissionRetryRunnable, delay);
+    }
+
+    private void submissionRetryElapsed() {
+        if (!canRun() || !store.hasSubmissionRetry()) return;
+        store.setStatus("제출 재시도 전 기존 제출 성공 여부 확인");
+        runLog.record(store, "SUBMISSION_RETRY_CHECK",
+                "kind=" + store.submissionRetryKind() + ";attempt=" + store.submissionRetryAttempt());
+        ensureWebView();
     }
 
     private void scheduleDrivePoll() {
@@ -796,6 +898,7 @@ public final class SelfRunService extends Service {
 
     private void scheduleWeb(long delay) {
         handler.removeCallbacks(webRunnable);
+        if (store.hasSubmissionRetry() && !store.submissionRetryDue()) return;
         if (webView != null && canRun() && isWebAutomationPhase(store.phase()))
             handler.postDelayed(webRunnable, delay);
     }
@@ -820,7 +923,8 @@ public final class SelfRunService extends Service {
         if ((error instanceof DriveApiClient.ApiException api && api.retryable())
                 || retryableNetworkError(error)) {
             applyDriveResult(epoch, () -> {
-                int index = Math.min(retryAttempt++, BACKOFF.length - 1);
+                retryAttempt = retryAttempt == Integer.MAX_VALUE ? Integer.MAX_VALUE : retryAttempt + 1;
+                int index = Math.min(Math.max(0, retryAttempt - 1), BACKOFF.length - 1);
                 long base = BACKOFF[index];
                 long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, base / 4L));
                 String kind = error instanceof DriveApiClient.ApiException api ? "http_" + api.status : "network";
@@ -934,6 +1038,7 @@ public final class SelfRunService extends Service {
     private void removeAutomationCallbacks() {
         handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);
         handler.removeCallbacks(guardRunnable); handler.removeCallbacks(driveRetryRunnable);
+        handler.removeCallbacks(submissionRetryRunnable);
     }
 
     private void stopAutomationCallbacks() {

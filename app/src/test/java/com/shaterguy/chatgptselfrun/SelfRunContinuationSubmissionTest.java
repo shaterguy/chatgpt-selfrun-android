@@ -56,4 +56,25 @@ public class SelfRunContinuationSubmissionTest {
         assertTrue(script.contains("conversationUrl:location.href"));
         assertTrue(!script.contains("data-message-author-role=\"user\""));
     }
+    @Test
+    public void retryPreparationRechecksLateSuccessAndReturnsFreshBaseline() {
+        String script = SelfRunDom.prepareDriveTurnRetry(
+                "https://chatgpt.com/g/g-p-demo/c/abc",
+                "[SELF_RUN_CONTINUE SR-1]", "SR-1:2:7", 3);
+        assertTrue(script.contains("countPrompt()>baseline"));
+        assertTrue(script.contains("재시도 전 기존 continuation 사용자 턴 확인"));
+        assertTrue(script.contains("beforeCount:before"));
+        assertTrue(script.contains("retry:true"));
+    }
+
+    @Test
+    public void androidBaselineConfirmsEvenWhenWebMarkerWasLost() {
+        String script = SelfRunDom.checkDriveTurnSubmitted(
+                "https://chatgpt.com/g/g-p-demo/c/abc",
+                "[SELF_RUN_CONTINUE SR-1]", "SR-1:2:7", 3);
+        assertTrue(script.contains("androidBaseline>=0&&count>androidBaseline"));
+        assertTrue(script.contains("Android baseline 이후 continuation 사용자 턴 증가 확인"));
+        assertTrue(!script.contains("assistant"));
+    }
+
 }

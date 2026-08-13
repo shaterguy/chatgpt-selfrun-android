@@ -15,8 +15,8 @@ public class DriveVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         String service = source("SelfRunService.java");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-        assertTrue(gradle.contains("versionCode 1000002"));
-        assertTrue(gradle.contains("versionName '1.0.0-dev2'"));
+        assertTrue(gradle.contains("versionCode 1000003"));
+        assertTrue(gradle.contains("versionName '1.0.0-dev3'"));
         assertTrue(manifest.contains("android:label=\"@string/app_name\""));
         assertFalse(manifest.contains("android:sharedUserId"));
         assertFalse(manifest.matches("(?s).*android:authorities=\"(?!\\$\\{applicationId}).*"));
@@ -35,7 +35,7 @@ public class DriveVariantPolicyTest {
         assertFalse(service.contains("observeAssistant"));
         assertFalse(service.contains("assistant DOM"));
         assertTrue(service.contains("getPollMetadata(accessToken, snapshot.turnDocumentId)"));
-        assertTrue(service.contains("CONTINUATION_GUARD_MS = 120_000L"));
+        assertTrue(service.contains("CONTINUATION_GUARD_MS = 45_000L"));
     }
 
     @Test public void creationUsesReservedFolderIdAndNeverDiscoversOrRecreatesUnknownDocument() throws Exception {
@@ -66,7 +66,8 @@ public class DriveVariantPolicyTest {
         assertTrue(service.contains("boolean restoring = commit.id().equals(store.pendingCommitId())"));
         assertTrue(service.contains("if (!restoring)"));
         assertTrue(service.contains("long detectedAt = store.commitDetectedAt(), dueAt = store.guardDueAt()"));
-        assertTrue(service.contains("SUBMISSION_CONFIRMATION_TIMEOUT"));
+        assertTrue(service.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));
+        assertFalse(service.contains("SUBMISSION_CONFIRMATION_TIMEOUT"));
         String dom = source("SelfRunDom.java");
         String recovery = dom.substring(dom.indexOf("static String checkDriveTurnSubmitted"),
                 dom.indexOf("static String observeAssistant"));
@@ -135,7 +136,8 @@ public class DriveVariantPolicyTest {
         String dom = source("SelfRunDom.java");
         assertTrue(service.contains("store.markBootstrapSubmissionStarted()"));
         assertTrue(service.contains("clickPreparedDriveInitial"));
-        assertTrue(service.contains("BOOTSTRAP_SUBMISSION_RESULT_UNKNOWN"));
+        assertTrue(service.contains("RETRY_BOOTSTRAP"));
+        assertFalse(service.contains("BOOTSTRAP_SUBMISSION_RESULT_UNKNOWN"));
         String check = dom.substring(dom.indexOf("static String checkDriveInitialSubmitted"),
                 dom.indexOf("static String prepareDriveTurn"));
         assertFalse(check.contains("send.click()"));
@@ -149,8 +151,7 @@ public class DriveVariantPolicyTest {
         assertTrue(legacy.startsWith("[SELF_RUN_BOOTSTRAP 0.1.0 SR-1 MODE=CHAT]"));
         assertFalse(legacy.contains("SELF_RUN_CLIENT=DRIVE_V1"));
         String drive = SelfRunProtocol.bootstrapDrive("SR-1", SelfRunStore.MODE_CHAT, "work",
-                "runsFolder_12345678", "jobFolder_12345678", "document_12345678",
-                "https://docs.google.com/document/d/document_12345678/edit", 1);
+                "document_12345678");
         assertTrue(drive.contains("SELF_RUN_CLIENT=DRIVE_V1"));
         assertTrue(drive.contains("DRIVE_TURN_DOCUMENT_ID=document_12345678"));
     }
