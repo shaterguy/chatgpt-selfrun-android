@@ -18,14 +18,19 @@ pull_result() {
   for _ in $(seq 1 90); do
     if adb shell run-as "$PKG" test -f "files/$file" >/dev/null 2>&1; then
       adb shell run-as "$PKG" cat "files/$file" > "$dest"
-      jq -e '.error == null' "$dest" >/dev/null
-      return 0
+      if jq -e '.error == null' "$dest" >/dev/null; then
+        return 0
+      fi
+      echo "Probe returned an error in $file:" >&2
+      cat "$dest" >&2 || true
+      adb logcat -d -t 500 >&2 || true
+      return 1
     fi
     sleep 1
   done
   echo "Timed out waiting for $file" >&2
   adb shell dumpsys activity activities | tail -n 200 >&2 || true
-  adb logcat -d -t 400 >&2 || true
+  adb logcat -d -t 500 >&2 || true
   return 1
 }
 
