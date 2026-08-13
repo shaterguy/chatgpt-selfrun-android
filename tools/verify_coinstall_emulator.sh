@@ -59,7 +59,7 @@ package_version() {
 }
 
 package_uid() {
-  "$ADB" shell dumpsys package "$1" | tr -d '\r' | sed -n 's/^[[:space:]]*userId=//p' | head -1
+  run_as "$1" id -u | tr -d '\r'
 }
 
 run_as() {
