@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   patch-test-commit:
@@ -41,12 +40,11 @@ jobs:
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build debug APK
         run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
-      - name: Commit verified dev3 and dispatch full build
+      - name: Commit verified dev3
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          git restore --source=HEAD -- .github/workflows/build-drive-v1.yml
           rm -f .github/workflows/dev3-patch.yml .github/scripts/dev3_patch.py .github/scripts/dev3_prepatch.py .github/scripts/dev3_postpatch.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -55,4 +53,3 @@ jobs:
           git diff --cached --stat
           git commit -m 'feat: make Drive submissions retryable and authoritative'
           git push origin HEAD:selfrun-drive/v1.0.0-dev3
-          gh workflow run build-drive-v1.yml --ref selfrun-drive/v1.0.0-dev3
