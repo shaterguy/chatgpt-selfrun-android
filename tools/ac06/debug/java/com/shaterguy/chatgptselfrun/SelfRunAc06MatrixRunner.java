@@ -114,7 +114,7 @@ final class SelfRunAc06MatrixRunner {
             });
             created.loadDataWithBaseURL("https://chatgpt.com/",
                     "<html><body><article data-message-author-role='assistant'><span id='t'>start</span></article></body></html>",
-                    "text/html", "UTF-8", null);
+                    "text/html", "UTF-8", "https://chatgpt.com/");
             return created;
         });
         SelfRunAc06Support.require(pageReady.await(10, TimeUnit.SECONDS), "dom_page_timeout");
@@ -186,7 +186,7 @@ final class SelfRunAc06MatrixRunner {
         SelfRunAc06Support.onMain(activity, () -> {
             serviceView.loadDataWithBaseURL(SelfRunAc06Support.CONVERSATION_URL,
                     "<html><body><article data-message-author-role='assistant' data-is-streaming='true'><span id='t'>start</span></article></body></html>",
-                    "text/html", "UTF-8", null);
+                    "text/html", "UTF-8", SelfRunAc06Support.CONVERSATION_URL);
             return null;
         });
         boolean testPageReady = SelfRunAc06Support.waitFor(() -> SelfRunAc06Support.onMain(activity, () ->
