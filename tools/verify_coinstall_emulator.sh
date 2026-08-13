@@ -35,7 +35,7 @@ require_file() {
 }
 
 package_installed() {
-  "$ADB" shell pm list packages | tr -d '\r' | grep -Fxq "package:$1"
+  "$ADB" shell pm list packages | tr -d '\r' | grep -Fx "package:$1" >/dev/null
 }
 
 assert_launcher() {
@@ -97,7 +97,7 @@ start_own_component() {
 assert_service_running() {
   local package="$1"
   "$ADB" shell dumpsys activity services "$package" | tr -d '\r' \
-    | grep -Fq 'com.shaterguy.chatgptselfrun.SelfRunService' \
+    | grep -F 'com.shaterguy.chatgptselfrun.SelfRunService' >/dev/null \
     || fail "$package foreground service not running"
 }
 
