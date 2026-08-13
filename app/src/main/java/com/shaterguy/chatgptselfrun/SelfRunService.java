@@ -62,10 +62,16 @@ public final class SelfRunService extends Service {
     private int generation;
     private volatile int automationEpoch;
     private volatile int driveOperationEpoch;
-    private int retryAttempt;
+    private volatile String driveOperationRunId = "";
+    private volatile String driveOperationAccountId = "";
+    private volatile String driveOperationBaseFolderId = "";
+    private volatile int retryAttempt;
     private volatile String accessToken = "";
-    private String verifiedDriveAccountId = "";
+    private volatile String verifiedDriveAccountId = "";
+    private volatile String runtimeRunId = "";
     private volatile boolean destroyed;
+    /** Serializes pause/stop epoch changes with application of Drive results to durable state. */
+    private final Object automationStateLock = new Object();
 
     @Override public void onCreate() {
         super.onCreate();
@@ -81,6 +87,13 @@ public final class SelfRunService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_RUN : intent.getAction();
+        String currentRunId = store.runId();
+        if (!currentRunId.equals(runtimeRunId)) {
+            stopAutomationCallbacks();
+            runtimeRunId = currentRunId;
+            verifiedDriveAccountId = "";
+            accessToken = "";
+        }
         if (store.terminalSideEffectPending()) {
             replayTerminalSideEffect();
             return store.active() ? START_STICKY : START_NOT_STICKY;
@@ -158,93 +171,146 @@ public final class SelfRunService extends Service {
 
     private void executeDriveStep(int epoch) {
         if (!canRun() || epoch != automationEpoch || !drivePhase(store.phase()) || driveInFlight) return;
-        driveInFlight = true;
-        driveOperationEpoch = epoch;
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                if (!canRun() || epoch != automationEpoch || !drivePhase(store.phase()) || driveInFlight) return;
+                driveInFlight = true;
+                driveOperationEpoch = epoch;
+                driveOperationRunId = store.runId();
+                driveOperationAccountId = store.runDriveAccountId();
+                driveOperationBaseFolderId = store.runBaseFolderId();
+            }
+        }
         acquireWakeLock();
         io.execute(() -> {
             try {
-                if (!store.runDriveAccountId().equals(verifiedDriveAccountId)) {
+                if (!driveOperationAccountId.equals(verifiedDriveAccountId)) {
                     String accountId = drive.getAccountPermissionId(accessToken);
-                    if (!canApplyDriveResult()) return;
-                    if (!accountId.equals(store.runDriveAccountId())) {
-                        pauseError("DRIVE_ACCOUNT_MISMATCH", "바인딩한 Drive 계정과 현재 승인 계정이 다릅니다.");
+                    if (!canApplyDriveResult(epoch)) return;
+                    if (!accountId.equals(driveOperationAccountId)) {
+                        pauseError("DRIVE_ACCOUNT_MISMATCH", "바인딩한 Drive 계정과 현재 승인 계정이 다릅니다.", epoch);
                         return;
                     }
-                    verifiedDriveAccountId = accountId;
+                    if (!applyDriveResult(epoch, () -> verifiedDriveAccountId = accountId)) return;
                 }
                 if (SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())) {
-                    pollDriveNow();
+                    pollDriveNow(epoch);
                     retryAttempt = 0;
                     return;
                 }
                 do {
-                    if (!canApplyDriveResult()) return;
+                    if (!canApplyDriveResult(epoch)) return;
                     String prior = store.phase();
-                    runDriveStep();
+                    runDriveStep(epoch);
                     if (prior.equals(store.phase()) || SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())) break;
-                } while (canApplyDriveResult() && drivePhase(store.phase()));
+                } while (canApplyDriveResult(epoch) && drivePhase(store.phase()));
                 retryAttempt = 0;
             } catch (Throwable error) {
-                handleDriveFailure(error);
+                handleDriveFailure(error, epoch);
             } finally {
                 driveInFlight = false;
                 accessToken = "";
                 releaseWakeLock();
-                if (!destroyed && epoch != automationEpoch) handler.post(this::resumeStateMachine);
+                handler.post(() -> {
+                    if (!destroyed && epoch != automationEpoch && canRun() && !driveInFlight) {
+                        resumeStateMachine();
+                    }
+                });
             }
         });
     }
 
-    private boolean canApplyDriveResult() {
-        return canRun() && driveOperationEpoch == automationEpoch && drivePhase(store.phase());
-    }
-
-    private void runDriveStep() throws Exception {
-        if (!canRun()) return;
-        switch (store.phase()) {
-            case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK -> {
-                transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK, "Drive 기준 폴더 확인 중", "account_authorized");
+    private boolean canApplyDriveResult(int expectedEpoch) {
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                return !destroyed && canRun() && expectedEpoch == automationEpoch
+                        && driveOperationEpoch == expectedEpoch
+                        && driveOperationRunId.equals(store.runId()) && drivePhase(store.phase());
             }
-            case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK -> checkBaseFolder();
-            case SelfRunStore.PHASE_JOB_ID_CREATE -> {
-                // Job ID was issued by the UI and persisted before service start.
-                transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE, "Drive Job 폴더 생성 중", "job_id_persisted");
-            }
-            case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE -> createOrRecoverJobFolder();
-            case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE -> createOrRecoverDocument();
-            case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT -> initializeDocument();
-            case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK -> verifyInitialDocument();
-            case SelfRunStore.PHASE_WAIT_DRIVE_COMMIT -> pollDriveNow();
-            default -> pauseError("DRIVE_STATE_INVALID", "알 수 없는 Drive 단계: " + store.phase());
         }
     }
 
-    private void checkBaseFolder() throws Exception {
-        String base = store.runBaseFolderId();
+    /**
+     * Rechecks the captured automation epoch while holding the same lock used by pause/stop.
+     * Every Drive-result mutation is performed through this gate, closing the check-to-write race.
+     */
+    private boolean applyDriveResult(int expectedEpoch, Runnable mutation) {
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                if (destroyed || expectedEpoch != automationEpoch || !canRun()
+                        || !driveOperationRunId.equals(store.runId())
+                        || !drivePhase(store.phase())) return false;
+                mutation.run();
+                return true;
+            }
+        }
+    }
+
+    private DriveStateSnapshot driveState(int expectedEpoch) {
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                if (destroyed || expectedEpoch != automationEpoch || !canRun()
+                        || !driveOperationRunId.equals(store.runId()) || !drivePhase(store.phase())) return null;
+                return new DriveStateSnapshot(store.phase(), store.runId(), store.runBaseFolderId(),
+                        store.jobFolderId(), store.turnDocumentId(), store.creationStage(),
+                        store.expectedTurn(), store.lastConsumedEventSeq(), store.mode(),
+                        store.sessionBound(), store.lastSeenDriveVersion(), store.lastSeenModifiedTime(),
+                        store.bootstrapSubmittedAt());
+            }
+        }
+    }
+
+    private void runDriveStep(int epoch) throws Exception {
+        if (!canApplyDriveResult(epoch)) return;
+        switch (store.phase()) {
+            case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK -> {
+                applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK,
+                        "Drive 기준 폴더 확인 중", "account_authorized"));
+            }
+            case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK -> checkBaseFolder(epoch);
+            case SelfRunStore.PHASE_JOB_ID_CREATE -> {
+                // Job ID was issued by the UI and persisted before service start.
+                applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE,
+                        "Drive Job 폴더 생성 중", "job_id_persisted"));
+            }
+            case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE -> createOrRecoverJobFolder(epoch);
+            case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE -> createOrRecoverDocument(epoch);
+            case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT -> initializeDocument(epoch);
+            case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK -> verifyInitialDocument(epoch);
+            case SelfRunStore.PHASE_WAIT_DRIVE_COMMIT -> pollDriveNow(epoch);
+            default -> pauseError("DRIVE_STATE_INVALID", "알 수 없는 Drive 단계: " + store.phase(), epoch);
+        }
+    }
+
+    private void checkBaseFolder(int epoch) throws Exception {
+        String base = driveOperationBaseFolderId;
         if (!DriveApiClient.validFileId(base)) {
-            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Runs 기준 폴더 ID가 없습니다.");
+            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Runs 기준 폴더 ID가 없습니다.", epoch);
             return;
         }
         DriveApiClient.Metadata metadata = drive.getMetadata(accessToken, base);
-        if (!canApplyDriveResult()) return;
+        if (!canApplyDriveResult(epoch)) return;
         if (metadata.trashed || !DriveApiClient.MIME_FOLDER.equals(metadata.mimeType)
                 || !metadata.isAppAuthorized || !metadata.canAddChildren || metadata.shared) {
-            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Runs 기준 폴더가 접근 불가능합니다.");
+            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Runs 기준 폴더가 접근 불가능합니다.", epoch);
             return;
         }
-        transition(SelfRunStore.PHASE_JOB_ID_CREATE, "Job ID 확인 완료", "base_folder_verified");
+        applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_JOB_ID_CREATE,
+                "Job ID 확인 완료", "base_folder_verified"));
     }
 
-    private void createOrRecoverJobFolder() throws Exception {
-        String base = store.runBaseFolderId();
-        String folderId = store.jobFolderId();
+    private void createOrRecoverJobFolder(int epoch) throws Exception {
+        DriveStateSnapshot initial = driveState(epoch);
+        if (initial == null) return;
+        String base = driveOperationBaseFolderId;
+        String folderId = initial.jobFolderId;
         if (folderId.isEmpty()) {
-            if (!SelfRunStore.CREATION_NONE.equals(store.creationStage())) {
+            if (!SelfRunStore.CREATION_NONE.equals(initial.creationStage)) {
                 throw new IllegalStateException("folder creation state has no reserved id");
             }
             folderId = drive.generateFolderId(accessToken);
-            if (!canApplyDriveResult()) return;
-            store.reserveJobFolderId(folderId);
+            String reservedId = folderId;
+            if (!applyDriveResult(epoch, () -> store.reserveJobFolderId(reservedId))) return;
         }
 
         DriveApiClient.Metadata metadata = null;
@@ -254,14 +320,18 @@ public final class SelfRunService extends Service {
             if (api.status != 404) throw api;
         }
         if (metadata == null) {
-            String stage = store.creationStage();
+            DriveStateSnapshot current = driveState(epoch);
+            if (current == null) return;
+            String stage = current.creationStage;
             if (!(SelfRunStore.CREATION_FOLDER_ID_RESERVED.equals(stage)
                     || SelfRunStore.CREATION_FOLDER_CREATING.equals(stage))) {
                 throw new IllegalStateException("created job folder disappeared");
             }
-            if (SelfRunStore.CREATION_FOLDER_ID_RESERVED.equals(stage)) store.markJobFolderCreating();
+            if (SelfRunStore.CREATION_FOLDER_ID_RESERVED.equals(stage)
+                    && !applyDriveResult(epoch, store::markJobFolderCreating)) return;
+            if (!canApplyDriveResult(epoch)) return;
             try {
-                metadata = drive.createJobFolder(accessToken, folderId, store.runId(), base);
+                metadata = drive.createJobFolder(accessToken, folderId, driveOperationRunId, base);
             } catch (DriveApiClient.ApiException api) {
                 if (api.status != 409) throw api;
                 metadata = drive.getMetadata(accessToken, folderId);
@@ -270,115 +340,136 @@ public final class SelfRunService extends Service {
         if (!folderId.equals(metadata.id)) {
             throw new IllegalStateException("Drive returned a different reserved folder id");
         }
-        store.saveJobFolder(folderId);
-        if (!canApplyDriveResult()) return;
-        verifyMetadata(drive.getMetadata(accessToken, folderId), store.runId(),
+        verifyMetadata(metadata, driveOperationRunId, DriveApiClient.MIME_FOLDER, base, "job_folder");
+        String persistedFolderId = folderId;
+        if (!applyDriveResult(epoch, () -> store.saveJobFolder(persistedFolderId))) return;
+        DriveApiClient.Metadata readback = drive.getMetadata(accessToken, folderId);
+        verifyMetadata(readback, driveOperationRunId,
                 DriveApiClient.MIME_FOLDER, base, "job_folder");
-        transition(SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE, "실행턴 Google Docs 생성 중", "job_folder_ready");
+        applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE,
+                "실행턴 Google Docs 생성 중", "job_folder_ready"));
     }
 
-    private void createOrRecoverDocument() throws Exception {
-        String parent = store.jobFolderId();
-        if (!store.turnDocumentId().isEmpty()) {
-            verifyMetadata(drive.getMetadata(accessToken, store.turnDocumentId()), store.runId(),
+    private void createOrRecoverDocument(int epoch) throws Exception {
+        DriveStateSnapshot initial = driveState(epoch);
+        if (initial == null) return;
+        String parent = initial.jobFolderId;
+        if (!initial.turnDocumentId.isEmpty()) {
+            verifyMetadata(drive.getMetadata(accessToken, initial.turnDocumentId), driveOperationRunId,
                     DriveApiClient.MIME_DOCUMENT, parent, "turn_document");
-        } else if (SelfRunStore.CREATION_DOCUMENT_CREATING.equals(store.creationStage())) {
-            if (canApplyDriveResult()) pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
-                    "네이티브 Google Docs 생성 결과를 확정할 수 없어 검색·재생성 없이 중단했습니다.");
+        } else if (SelfRunStore.CREATION_DOCUMENT_CREATING.equals(initial.creationStage)) {
+            if (canApplyDriveResult(epoch)) pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
+                    "네이티브 Google Docs 생성 결과를 확정할 수 없어 검색·재생성 없이 중단했습니다.", epoch);
             return;
         } else {
-            store.setCreationStage(SelfRunStore.CREATION_DOCUMENT_CREATING);
+            if (!applyDriveResult(epoch, () -> store.setCreationStage(SelfRunStore.CREATION_DOCUMENT_CREATING))) return;
             DriveApiClient.Metadata created;
             try {
-                created = drive.createTurnDocument(accessToken, store.runId(), parent);
+                if (!canApplyDriveResult(epoch)) return;
+                created = drive.createTurnDocument(accessToken, driveOperationRunId, parent);
             } catch (DriveApiClient.OutcomeUnknownException unknown) {
-                if (canApplyDriveResult()) pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
-                        "네이티브 Google Docs 생성 응답이 유실되어 검색·재생성 없이 중단했습니다.");
+                if (canApplyDriveResult(epoch)) pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
+                        "네이티브 Google Docs 생성 응답이 유실되어 검색·재생성 없이 중단했습니다.", epoch);
                 return;
             } catch (DriveApiClient.ApiException definiteFailure) {
-                store.resetDocumentCreateAfterDefiniteFailure();
+                applyDriveResult(epoch, store::resetDocumentCreateAfterDefiniteFailure);
                 throw definiteFailure;
             }
-            store.saveTurnDocument(created.id, documentUrl(created));
-            if (!canApplyDriveResult()) return;
-            verifyMetadata(drive.getMetadata(accessToken, created.id), store.runId(),
+            if (!DriveApiClient.validFileId(created.id)) {
+                throw new DriveApiClient.OutcomeUnknownException("native document response has no valid id", null);
+            }
+            // The response documentId is durable before any secondary metadata validation/readback.
+            if (!applyDriveResult(epoch, () -> store.saveTurnDocument(created.id, documentUrl(created)))) return;
+            verifyMetadata(created, driveOperationRunId, DriveApiClient.MIME_DOCUMENT, parent, "turn_document");
+            DriveApiClient.Metadata readback = drive.getMetadata(accessToken, created.id);
+            verifyMetadata(readback, driveOperationRunId,
                     DriveApiClient.MIME_DOCUMENT, parent, "turn_document");
         }
-        transition(SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT, "실행턴 문서 초기화 중", "turn_document_ready");
+        applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT,
+                "실행턴 문서 초기화 중", "turn_document_ready"));
     }
 
-    private void initializeDocument() throws Exception {
-        String existing = drive.readDocumentText(accessToken, store.turnDocumentId());
-        if (!canApplyDriveResult()) return;
+    private void initializeDocument(int epoch) throws Exception {
+        DriveStateSnapshot snapshot = driveState(epoch);
+        if (snapshot == null) return;
+        String existing = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
+        if (!canApplyDriveResult(epoch)) return;
         if (existing.trim().isEmpty()) {
-            drive.initializeDocument(accessToken, store.turnDocumentId(), DriveInitialDocument.create(
-                    store.runId(), store.turnDocumentId(), store.jobFolderId(), store.runBaseFolderId()));
-        } else if (!DriveInitialDocument.verifies(existing, store.runId(), store.turnDocumentId(),
-                store.jobFolderId(), store.runBaseFolderId())) {
+            drive.initializeDocument(accessToken, snapshot.turnDocumentId, DriveInitialDocument.create(
+                    snapshot.runId, snapshot.turnDocumentId, snapshot.jobFolderId, snapshot.baseFolderId));
+        } else if (!DriveInitialDocument.verifies(existing, snapshot.runId, snapshot.turnDocumentId,
+                snapshot.jobFolderId, snapshot.baseFolderId)) {
             throw new IllegalStateException("nonempty execution document has invalid initial block");
         }
-        if (!canApplyDriveResult()) return;
-        transition(SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK, "실행턴 문서 readback 검증 중", "document_initialized");
+        applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK,
+                "실행턴 문서 readback 검증 중", "document_initialized"));
     }
 
-    private void verifyInitialDocument() throws Exception {
-        DriveApiClient.Metadata metadata = drive.getMetadata(accessToken, store.turnDocumentId());
-        verifyMetadata(metadata, store.runId(), DriveApiClient.MIME_DOCUMENT, store.jobFolderId(), "turn_document");
-        String body = drive.readDocumentText(accessToken, store.turnDocumentId());
-        if (!DriveInitialDocument.verifies(body, store.runId(), store.turnDocumentId(),
-                store.jobFolderId(), store.runBaseFolderId())) throw new IllegalStateException("Drive document readback mismatch");
-        if (!canApplyDriveResult()) return;
-        store.updateDriveSeen(metadata.version, metadata.modifiedTime);
-        transition(SelfRunStore.PHASE_BOOTSTRAP, "Drive 준비 완료 · ChatGPT 새 대화 준비", "drive_readback_verified");
-        handler.post(this::ensureWebView);
+    private void verifyInitialDocument(int epoch) throws Exception {
+        DriveStateSnapshot snapshot = driveState(epoch);
+        if (snapshot == null) return;
+        DriveApiClient.Metadata metadata = drive.getMetadata(accessToken, snapshot.turnDocumentId);
+        verifyMetadata(metadata, snapshot.runId, DriveApiClient.MIME_DOCUMENT, snapshot.jobFolderId, "turn_document");
+        String body = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
+        if (!DriveInitialDocument.verifies(body, snapshot.runId, snapshot.turnDocumentId,
+                snapshot.jobFolderId, snapshot.baseFolderId)) throw new IllegalStateException("Drive document readback mismatch");
+        applyDriveResult(epoch, () -> {
+            store.updateDriveSeen(metadata.version, metadata.modifiedTime);
+            transition(SelfRunStore.PHASE_BOOTSTRAP, "Drive 준비 완료 · ChatGPT 새 대화 준비", "drive_readback_verified");
+            handler.post(() -> {
+                if (epoch == automationEpoch && canRun()) ensureWebView();
+            });
+        });
     }
 
     private void pollDrive() {
         if (SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase()) && canRun()) authorizeAndRunDrive();
     }
 
-    private void pollDriveNow() throws Exception {
-        DriveApiClient.Metadata metadata = drive.getPollMetadata(accessToken, store.turnDocumentId());
-        if (!canApplyDriveResult()) return;
+    private void pollDriveNow(int epoch) throws Exception {
+        DriveStateSnapshot snapshot = driveState(epoch);
+        if (snapshot == null) return;
+        DriveApiClient.Metadata metadata = drive.getPollMetadata(accessToken, snapshot.turnDocumentId);
+        if (!canApplyDriveResult(epoch)) return;
         if (metadata.trashed || metadata.shared || !DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
-                || !store.jobFolderId().equals(metadata.parentId)) {
-            pauseError("DRIVE_DOCUMENT_INVALID", "실행턴 문서가 삭제되었거나 parent가 변경되었습니다.");
+                || !snapshot.jobFolderId.equals(metadata.parentId)) {
+            pauseError("DRIVE_DOCUMENT_INVALID", "실행턴 문서가 삭제되었거나 parent가 변경되었습니다.", epoch);
             return;
         }
-        boolean changed = !metadata.version.equals(store.lastSeenDriveVersion())
-                || !metadata.modifiedTime.equals(store.lastSeenModifiedTime());
+        boolean changed = !metadata.version.equals(snapshot.lastSeenVersion)
+                || !metadata.modifiedTime.equals(snapshot.lastSeenModifiedTime);
         if (!changed) {
-            if (sessionBindTimedOut()) {
-                pauseError("DRIVE_SESSION_BIND_TIMEOUT", "5분 안에 SESSION_BOUND를 확인하지 못했습니다.");
-            } else scheduleDrivePoll();
+            if (sessionBindTimedOut(snapshot)) {
+                pauseError("DRIVE_SESSION_BIND_TIMEOUT", "5분 안에 SESSION_BOUND를 확인하지 못했습니다.", epoch);
+            } else applyDriveResult(epoch, this::scheduleDrivePoll);
             return;
         }
-        String text = drive.readDocumentText(accessToken, store.turnDocumentId());
-        if (!canApplyDriveResult()) return;
-        if (!store.sessionBound() && DriveCommitParser.hasSessionBound(text, store.runId(), store.expectedTurn())) {
-            store.setSessionBound(true);
-            runLog.record(store, "DRIVE_SESSION_BOUND", "turn=" + store.expectedTurn());
-        }
-        DriveCommitParser.Result result = DriveCommitParser.latest(text, store.runId(),
-                store.expectedTurn(), store.lastConsumedEventSeq(), store.mode());
+        String text = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
+        if (!canApplyDriveResult(epoch)) return;
+        boolean newlyBound = !snapshot.sessionBound
+                && DriveCommitParser.hasSessionBound(text, snapshot.runId, snapshot.expectedTurn);
+        DriveCommitParser.Result result = DriveCommitParser.latest(text, snapshot.runId,
+                snapshot.expectedTurn, snapshot.lastConsumedEventSeq, snapshot.mode);
         if (result.status == DriveCommitParser.Status.FUTURE_TURN) {
-            pauseError("DRIVE_PROTOCOL_TURN_MISMATCH", result.reason); return;
+            pauseError("DRIVE_PROTOCOL_TURN_MISMATCH", result.reason, epoch); return;
         }
         if (result.status == DriveCommitParser.Status.MALFORMED) {
-            pauseError("DRIVE_COMMIT_MALFORMED", result.reason); return;
+            pauseError("DRIVE_COMMIT_MALFORMED", result.reason, epoch); return;
         }
-        // For commits, pending/terminal state must be durable before advancing the Drive cursor.
-        if (result.status == DriveCommitParser.Status.ACCEPTED) {
-            acceptCommit(result.commit);
+        boolean timedOut = !newlyBound && result.status != DriveCommitParser.Status.ACCEPTED
+                && sessionBindTimedOut(snapshot);
+        if (!applyDriveResult(epoch, () -> {
+            if (newlyBound) {
+                store.setSessionBound(true);
+                runLog.record(store, "DRIVE_SESSION_BOUND", "turn=" + store.expectedTurn());
+            }
+            // Pending/terminal state is durable before the validated metadata cursor advances.
+            if (result.status == DriveCommitParser.Status.ACCEPTED) acceptCommit(result.commit);
             store.updateDriveSeen(metadata.version, metadata.modifiedTime);
-            return;
-        }
-        // Non-commit body changes advance only after every parser guard succeeded.
-        store.updateDriveSeen(metadata.version, metadata.modifiedTime);
-        if (sessionBindTimedOut()) {
-            pauseError("DRIVE_SESSION_BIND_TIMEOUT", "5분 안에 SESSION_BOUND를 확인하지 못했습니다."); return;
-        }
-        scheduleDrivePoll();
+            if (result.status != DriveCommitParser.Status.ACCEPTED && !timedOut) scheduleDrivePoll();
+        })) return;
+        if (timedOut) pauseError("DRIVE_SESSION_BIND_TIMEOUT",
+                "5분 안에 SESSION_BOUND를 확인하지 못했습니다.", epoch);
     }
 
     private void acceptCommit(DriveCommitParser.Commit commit) {
@@ -492,11 +583,18 @@ public final class SelfRunService extends Service {
     private void launchWebView(String target) {
         cleanupWebView();
         try {
+            String launchedRunId = store.runId();
             host = HeadlessWebViewHost.create(this); webView = host.webView(); WebViewConfig.applyAutomation(webView);
             webView.setWebViewClient(new WebViewClient() {
-                @Override public void onPageStarted(WebView view, String url, Bitmap favicon) { generation++; domInFlight = false; }
-                @Override public void onPageFinished(WebView view, String url) { scheduleWeb(800L); }
+                @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                    if (!launchedRunId.equals(store.runId())) return;
+                    generation++; domInFlight = false;
+                }
+                @Override public void onPageFinished(WebView view, String url) {
+                    if (launchedRunId.equals(store.runId())) scheduleWeb(800L);
+                }
                 @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                    if (!launchedRunId.equals(store.runId())) return true;
                     if (!request.isForMainFrame()) return false;
                     String requested = String.valueOf(request.getUrl());
                     boolean allowed = store.conversationUrl().isEmpty()
@@ -505,16 +603,22 @@ public final class SelfRunService extends Service {
                     return !allowed;
                 }
                 @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse s) {
-                    if (r.isForMainFrame() && s.getStatusCode() == 429) scheduleWeb(30_000L);
+                    if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && s.getStatusCode() == 429)
+                        scheduleWeb(30_000L);
                 }
                 @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                    if (r.isForMainFrame() && canRun() && isWebAutomationPhase(store.phase()))
+                    if (launchedRunId.equals(store.runId()) && r.isForMainFrame()
+                            && canRun() && isWebAutomationPhase(store.phase()))
                         postWebCallback(() -> { if (v == webView) v.loadUrl(canonicalUrl()); }, 3_000L);
                 }
-                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) { h.cancel(); pauseError("WEBVIEW_SSL", "SSL 오류"); }
+                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {
+                    h.cancel();
+                    if (launchedRunId.equals(store.runId())) pauseError("WEBVIEW_SSL", "SSL 오류");
+                }
                 @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {
                     cleanupWebView();
-                    if (!store.paused() && isWebAutomationPhase(store.phase()))
+                    if (launchedRunId.equals(store.runId()) && !store.paused()
+                            && isWebAutomationPhase(store.phase()))
                         postWebCallback(SelfRunService.this::ensureWebView, 2_000L);
                     return true;
                 }
@@ -527,8 +631,10 @@ public final class SelfRunService extends Service {
 
     private void postWebCallback(Runnable callback, long delay) {
         int epoch = automationEpoch;
+        String runId = store.runId();
         handler.postDelayed(() -> {
-            if (epoch == automationEpoch && canRun() && isWebAutomationPhase(store.phase())) callback.run();
+            if (epoch == automationEpoch && runId.equals(store.runId()) && canRun()
+                    && isWebAutomationPhase(store.phase())) callback.run();
         }, delay);
     }
 
@@ -559,9 +665,9 @@ public final class SelfRunService extends Service {
     }
 
     private void evaluate(String phase, String script) {
-        WebView active = webView; int epoch = generation; domInFlight = true;
+        WebView active = webView; int epoch = generation; String runId = store.runId(); domInFlight = true;
         active.evaluateJavascript(script, raw -> {
-            if (active != webView || epoch != generation) return;
+            if (active != webView || epoch != generation || !runId.equals(store.runId())) return;
             domInFlight = false; if (!canRun()) return;
             JSONObject result = parse(raw); String status = result.optString("status", "SCRIPT_ERROR");
             if ("TARGET_ERROR".equals(status)) { restoreCanonical(); return; }
@@ -694,30 +800,34 @@ public final class SelfRunService extends Service {
                 || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);
     }
 
-    private void handleDriveFailure(Throwable error) {
-        if (!canApplyDriveResult()) return;
+    private void handleDriveFailure(Throwable error, int epoch) {
+        if (!canApplyDriveResult(epoch)) return;
         if (error instanceof DriveApiClient.OutcomeUnknownException) {
             pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
-                    "네이티브 Google Docs 생성 결과가 불명확해 자동 재시도를 차단했습니다.");
+                    "네이티브 Google Docs 생성 결과가 불명확해 자동 재시도를 차단했습니다.", epoch);
             return;
         }
         if ((error instanceof DriveApiClient.ApiException api && api.retryable())
                 || retryableNetworkError(error)) {
-            int index = Math.min(retryAttempt++, BACKOFF.length - 1);
-            long base = BACKOFF[index], jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, base / 4L));
-            String kind = error instanceof DriveApiClient.ApiException api ? "http_" + api.status : "network";
-            runLog.record(store, "DRIVE_BACKOFF", "kind=" + kind + ";attempt=" + retryAttempt);
-            handler.removeCallbacks(driveRetryRunnable);
-            handler.postDelayed(driveRetryRunnable, base + jitter); return;
+            applyDriveResult(epoch, () -> {
+                int index = Math.min(retryAttempt++, BACKOFF.length - 1);
+                long base = BACKOFF[index];
+                long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, base / 4L));
+                String kind = error instanceof DriveApiClient.ApiException api ? "http_" + api.status : "network";
+                runLog.record(store, "DRIVE_BACKOFF", "kind=" + kind + ";attempt=" + retryAttempt);
+                handler.removeCallbacks(driveRetryRunnable);
+                handler.postDelayed(driveRetryRunnable, base + jitter);
+            });
+            return;
         }
         if (error instanceof DriveApiClient.ApiException api && api.status == 401) {
-            pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "Drive 계정 승인이 만료되었습니다.");
+            pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "Drive 계정 승인이 만료되었습니다.", epoch);
         } else if (error instanceof DriveApiClient.ApiException api && (api.status == 403 || api.status == 404)) {
-            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Drive 항목 접근 권한 또는 바인딩을 확인하세요.");
+            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Drive 항목 접근 권한 또는 바인딩을 확인하세요.", epoch);
         } else if (error instanceof IllegalArgumentException || error instanceof IllegalStateException) {
-            pauseError("DRIVE_VALIDATION_FAILED", "Drive 응답 또는 영속 상태 검증에 실패했습니다.");
+            pauseError("DRIVE_VALIDATION_FAILED", "Drive 응답 또는 영속 상태 검증에 실패했습니다.", epoch);
         } else {
-            pauseError("DRIVE_OPERATION_FAILED", "Drive 요청에 실패했습니다. 네트워크 상태를 확인하세요.");
+            pauseError("DRIVE_OPERATION_FAILED", "Drive 요청에 실패했습니다. 네트워크 상태를 확인하세요.", epoch);
         }
     }
 
@@ -787,15 +897,29 @@ public final class SelfRunService extends Service {
     }
 
     private void enterPreservedPause(String cause, String status, boolean needsContinuation) {
-        String prior = store.phase(); store.enterPause(prior, needsContinuation); store.setStatus(status);
-        stopAutomationCallbacks(); releaseWakeLock(); pauseWebView();
+        String prior;
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                prior = store.phase();
+                // Advance the epoch under the same lock before making PAUSED durable.
+                automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;
+                store.enterPause(prior, needsContinuation); store.setStatus(status);
+            }
+        }
+        removeAutomationCallbacks(); releaseWakeLock(); pauseWebView();
         runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved"); startForegroundCompat();
     }
 
-    private void stopAutomationCallbacks() {
+    private void removeAutomationCallbacks() {
         handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);
         handler.removeCallbacks(guardRunnable); handler.removeCallbacks(driveRetryRunnable);
-        automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;
+    }
+
+    private void stopAutomationCallbacks() {
+        removeAutomationCallbacks();
+        synchronized (automationStateLock) {
+            automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;
+        }
     }
 
     private void pauseWebView() { if (webView != null) try { webView.onPause(); } catch (Throwable ignored) {} }
@@ -832,8 +956,14 @@ public final class SelfRunService extends Service {
     }
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    private boolean sessionBindTimedOut() {
-        return !store.sessionBound() && store.bootstrapSubmittedAt() > 0
-                && System.currentTimeMillis() - store.bootstrapSubmittedAt() >= SESSION_BIND_TIMEOUT_MS;
+    private static boolean sessionBindTimedOut(DriveStateSnapshot snapshot) {
+        return !snapshot.sessionBound && snapshot.bootstrapSubmittedAt > 0
+                && System.currentTimeMillis() - snapshot.bootstrapSubmittedAt >= SESSION_BIND_TIMEOUT_MS;
     }
+
+    private record DriveStateSnapshot(String phase, String runId, String baseFolderId,
+                                      String jobFolderId, String turnDocumentId, String creationStage,
+                                      int expectedTurn, long lastConsumedEventSeq, String mode,
+                                      boolean sessionBound, String lastSeenVersion,
+                                      String lastSeenModifiedTime, long bootstrapSubmittedAt) {}
 }

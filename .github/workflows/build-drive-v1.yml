@@ -63,9 +63,18 @@ jobs:
               for component in ('service', 'receiver'):
                   for node in app.findall(component):
                       if node.attrib.get(android + 'exported') == 'true':
-                          raise SystemExit(f'exported {component} forbidden: {node.attrib}')
+                          name = node.attrib.get(android + 'name', '')
+                          permission = node.attrib.get(android + 'permission', '')
+                          allowed_gms = (component == 'service'
+                              and name == 'com.google.android.gms.auth.api.signin.RevocationBoundService'
+                              and permission == 'com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION')
+                          if not allowed_gms:
+                              raise SystemExit(f'unprotected or unapproved exported {component}: {node.attrib}')
               for permission in root.findall('permission'):
-                  if not permission.attrib.get(android + 'name', '').startswith(package + '.'):
+                  name = permission.attrib.get(android + 'name', '')
+                  allowed_gms = (name == 'com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION'
+                      and permission.attrib.get(android + 'protectionLevel', '') == 'signature')
+                  if not name.startswith(package + '.') and not allowed_gms:
                       raise SystemExit('fixed custom permission is forbidden')
           PY
       - name: Verify package, version, label and installation identity

@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 final class SelfRunStore {
+    /** Shared by Activity run replacement and Service result application. */
+    static final Object RUN_STATE_LOCK = new Object();
     static final String MODE_CHAT = "CHAT";
     static final String MODE_WORK = "WORK";
 
@@ -53,10 +55,16 @@ final class SelfRunStore {
     }
 
     void start(String runId, String mode, String projectUrl, String requirement) {
-        if (!DriveApiClient.validOpaqueAccountId(driveAccountId())
-                || !DriveApiClient.validFileId(driveRunsBaseFolderId())) {
-            throw new IllegalStateException("Drive base binding required before a run starts");
+        synchronized (RUN_STATE_LOCK) {
+            if (!DriveApiClient.validOpaqueAccountId(driveAccountId())
+                    || !DriveApiClient.validFileId(driveRunsBaseFolderId())) {
+                throw new IllegalStateException("Drive base binding required before a run starts");
+            }
+            startLocked(runId, mode, projectUrl, requirement);
         }
+    }
+
+    private void startLocked(String runId, String mode, String projectUrl, String requirement) {
         long now = System.currentTimeMillis();
         commitOrThrow(prefs.edit()
                 .putString("runId", safe(runId)).putLong("createdAt", now).putLong("phaseStartedAt", now)
@@ -83,6 +91,15 @@ final class SelfRunStore {
                 .putBoolean("resumeNeedsContinuation", false).putBoolean("active", true)
                 .putBoolean("paused", false).putBoolean("userStopped", false));
         syncHistory();
+    }
+
+    void stopByUser() {
+        synchronized (RUN_STATE_LOCK) {
+            commitOrThrow(prefs.edit().putBoolean("active", false).putBoolean("paused", false)
+                    .putBoolean("userStopped", true).putString("phase", PHASE_IDLE)
+                    .putString("status", "사용자 중지").putLong("phaseStartedAt", System.currentTimeMillis()));
+            syncHistory();
+        }
     }
 
     void clear() {

@@ -160,13 +160,8 @@ public final class MainActivity extends Activity {
 
     private void stopSelfRun() {
         if (store.runId().isEmpty()) return;
-        store.setActive(false);
-        store.setPaused(false);
-        store.setUserStopped(true);
-        store.setPhase(SelfRunStore.PHASE_IDLE);
-        store.setStatus("사용자 중지");
+        store.stopByUser();
         runLog.record(store, "UI_STOP", "user_stop");
-        history.sync(store);
         stopService(new Intent(this, SelfRunService.class));
         refreshCurrent();
     }

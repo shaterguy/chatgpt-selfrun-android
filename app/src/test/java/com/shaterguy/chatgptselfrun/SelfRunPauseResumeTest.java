@@ -13,14 +13,16 @@ public class SelfRunPauseResumeTest {
     @Test
     public void preservedPauseStopsDriveGuardWebAndWakeLock() throws Exception {
         String source = source("SelfRunService.java");
-        String stop = method(source, "private void stopAutomationCallbacks()", "private void pauseWebView()");
+        String stop = method(source, "private void removeAutomationCallbacks()", "private void stopAutomationCallbacks()");
         assertTrue(stop.contains("removeCallbacks(driveRunnable)"));
         assertTrue(stop.contains("removeCallbacks(webRunnable)"));
         assertTrue(stop.contains("removeCallbacks(guardRunnable)"));
         assertTrue(stop.contains("removeCallbacks(driveRetryRunnable)"));
 
-        String pause = method(source, "private void enterPreservedPause", "private void stopAutomationCallbacks()");
-        assertTrue(pause.contains("stopAutomationCallbacks()"));
+        String pause = method(source, "private void enterPreservedPause", "private void removeAutomationCallbacks()");
+        assertTrue(pause.contains("removeAutomationCallbacks()"));
+        assertTrue(pause.contains("synchronized (automationStateLock)"));
+        assertTrue(pause.contains("synchronized (SelfRunStore.RUN_STATE_LOCK)"));
         assertTrue(pause.contains("releaseWakeLock()"));
         assertTrue(pause.contains("pauseWebView()"));
         assertFalse(pause.contains("cleanupWebView()"));

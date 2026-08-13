@@ -31,15 +31,15 @@ public class DriveVariantPolicyTest {
         assertFalse(service.contains("WAIT_ASSISTANT"));
         assertFalse(service.contains("observeAssistant"));
         assertFalse(service.contains("assistant DOM"));
-        assertTrue(service.contains("getPollMetadata(accessToken, store.turnDocumentId())"));
+        assertTrue(service.contains("getPollMetadata(accessToken, snapshot.turnDocumentId)"));
         assertTrue(service.contains("CONTINUATION_GUARD_MS = 120_000L"));
     }
 
     @Test public void creationUsesReservedFolderIdAndNeverDiscoversOrRecreatesUnknownDocument() throws Exception {
         String service = source("SelfRunService.java");
         assertTrue(service.contains("drive.generateFolderId(accessToken)"));
-        assertTrue(service.contains("store.reserveJobFolderId(folderId)"));
-        assertTrue(service.contains("drive.createJobFolder(accessToken, folderId, store.runId(), base)"));
+        assertTrue(service.contains("store.reserveJobFolderId(reservedId)"));
+        assertTrue(service.contains("drive.createJobFolder(accessToken, folderId, driveOperationRunId, base)"));
         assertTrue(service.contains("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN"));
         assertFalse(service.contains("recoverAmbiguousCreate"));
         String api = source("DriveApiClient.java");
@@ -102,6 +102,9 @@ public class DriveVariantPolicyTest {
         assertTrue(service.contains("epoch != automationEpoch"));
         assertTrue(service.contains("private volatile int automationEpoch"));
         assertTrue(service.contains("private volatile boolean driveInFlight"));
+        assertTrue(service.contains("private boolean applyDriveResult"));
+        assertTrue(service.contains("synchronized (SelfRunStore.RUN_STATE_LOCK)"));
+        assertTrue(service.contains("driveOperationRunId.equals(store.runId())"));
         String phases = service.substring(service.indexOf("private static boolean isWebAutomationPhase"));
         assertFalse(phases.substring(0, phases.indexOf("private void handleDriveFailure"))
                 .contains("PHASE_WAIT_DRIVE_COMMIT"));

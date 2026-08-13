@@ -38,6 +38,28 @@ public class DriveCommitParserTest {
                 DriveCommitParser.latest(partial, JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
     }
 
+    @Test public void partialOpenBeforeCompleteCommitIsIgnored() {
+        String partial = "[SELF_RUN_DRIVE_COMMIT_V1]\nPROTOCOL_VERSION=1\n";
+        DriveCommitParser.Result result = DriveCommitParser.latest(partial + commit(1, 1,
+                        "CONTINUE", "TURN_COMMITTED", "[SELF_RUN_NEXT " + JOB + " ROLE=BUILDER]"),
+                JOB, 1, 0, SelfRunStore.MODE_CHAT);
+        assertEquals(DriveCommitParser.Status.ACCEPTED, result.status);
+        assertEquals(1L, result.commit.eventSeq);
+    }
+
+    @Test public void partialBoundBeforeCompleteBoundIsIgnored() {
+        String partial = "[SELF_RUN_DRIVE_BOUND_V1]\nPROTOCOL_VERSION=1\n";
+        assertTrue(DriveCommitParser.hasSessionBound(partial + bound(1), JOB, 1));
+    }
+
+    @Test public void repeatedUnclosedMarkersAreBoundedAndRejected() {
+        String commits = "[SELF_RUN_DRIVE_COMMIT_V1]\n".repeat(129);
+        assertEquals(DriveCommitParser.Status.MALFORMED,
+                DriveCommitParser.latest(commits, JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
+        String bounds = "[SELF_RUN_DRIVE_BOUND_V1]\n".repeat(129);
+        assertFalse(DriveCommitParser.hasSessionBound(bounds, JOB, 1));
+    }
+
     @Test public void rejectsWrongClientJobTurnAndSequence() {
         String good = commit(1, 1, "DONE", "RUN_DONE", "[SELF_RUN_DONE " + JOB + "]");
         assertEquals(DriveCommitParser.Status.MALFORMED,

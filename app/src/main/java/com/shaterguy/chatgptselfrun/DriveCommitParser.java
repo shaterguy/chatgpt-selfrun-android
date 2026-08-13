@@ -76,9 +76,16 @@ final class DriveCommitParser {
         while (true) {
             int open = text.indexOf(BOUND_OPEN, cursor);
             if (open < 0) break;
+            if (++blocks > MAX_BLOCKS) return false;
+            int nextOpen = text.indexOf(BOUND_OPEN, open + BOUND_OPEN.length());
             int close = text.indexOf(BOUND_CLOSE, open + BOUND_OPEN.length());
+            // A later opening marker before a close means the earlier append was partial.
+            if (nextOpen >= 0 && (close < 0 || nextOpen < close)) {
+                cursor = nextOpen;
+                continue;
+            }
             if (close < 0) break;
-            if (++blocks > MAX_BLOCKS || close - open > MAX_BLOCK_CHARS) return false;
+            if (close - open > MAX_BLOCK_CHARS) return false;
             ParsedFields parsed = fields(text.substring(open + BOUND_OPEN.length(), close), BOUND_KEYS);
             cursor = close + BOUND_CLOSE.length();
             if (!parsed.valid) continue;
@@ -105,9 +112,15 @@ final class DriveCommitParser {
         while (true) {
             int open = text.indexOf(COMMIT_OPEN, cursor);
             if (open < 0) break;
+            if (++blocks > MAX_BLOCKS) return new Result(Status.MALFORMED, null, "too many commit markers");
+            int nextOpen = text.indexOf(COMMIT_OPEN, open + COMMIT_OPEN.length());
             int close = text.indexOf(COMMIT_CLOSE, open + COMMIT_OPEN.length());
+            // Ignore an earlier unclosed append when a later complete commit exists.
+            if (nextOpen >= 0 && (close < 0 || nextOpen < close)) {
+                cursor = nextOpen;
+                continue;
+            }
             if (close < 0) break;
-            if (++blocks > MAX_BLOCKS) return new Result(Status.MALFORMED, null, "too many commit blocks");
             String body = text.substring(open + COMMIT_OPEN.length(), close);
             cursor = close + COMMIT_CLOSE.length();
             if (body.length() > MAX_BLOCK_CHARS) return new Result(Status.MALFORMED, null, "commit block too large");
