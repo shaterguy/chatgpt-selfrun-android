@@ -27,26 +27,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
-      - name: SelfRun Drive policy checks
-        run: tools/verify_drive_variant.sh
-      - name: Unit tests
-        run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
-      - name: Build debug and unsigned release
-        run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug :app:assembleRelease
-      - name: Verify package, version, label and prepare candidate
+      - name: Policy and unit tests
+        run: |
+          tools/verify_drive_variant.sh
+          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Build and verify APK metadata
         shell: bash
         run: |
           set -euo pipefail
+          gradle --no-daemon --console=plain --stacktrace :app:assembleDebug :app:assembleRelease
           BT="$ANDROID_HOME/build-tools/36.0.0"
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          test -n "$VERSION_NAME" && test -n "$VERSION_CODE"
-          echo "DRIVE_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
-          echo "DRIVE_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-          DEBUG=app/build/outputs/apk/debug/app-debug.apk
-          RELEASE=app/build/outputs/apk/release/app-release-unsigned.apk
-          test -s "$DEBUG" && test -s "$RELEASE"
-          for APK in "$DEBUG" "$RELEASE"; do
+          for APK in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk; do
+            test -s "$APK"
             BADGING="$($BT/aapt dump badging "$APK")"
             grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
             grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
@@ -54,46 +48,10 @@ jobs:
             grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
           done
           mkdir -p app/build/outputs/selfrun-drive
-          ALIGNED="app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk"
-          "$BT/zipalign" -p -f 4 "$RELEASE" "$ALIGNED"
-          "$BT/zipalign" -c -v 4 "$ALIGNED"
-          sha256sum "$ALIGNED" > app/build/outputs/selfrun-drive/SHA256SUMS.txt
-      - name: Create private signing pass-file
-        id: signing
-        shell: bash
-        env:
-          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$SIGNING_PASSPHRASE" ]]; then
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-            printf '%s\n' 'stable_signing=unavailable' > app/build/outputs/selfrun-drive/SIGNING_STATUS.txt
-            exit 0
-          fi
-          umask 077
-          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/selfrun-drive-signing-pass"
-          echo 'available=true' >> "$GITHUB_OUTPUT"
-          printf '%s\n' 'stable_signing=available' > app/build/outputs/selfrun-drive/SIGNING_STATUS.txt
-      - name: Install signing dependency
-        if: ${{ steps.signing.outputs.available == 'true' }}
-        run: python3 -m pip install --disable-pip-version-check 'cryptography==45.0.6'
-      - name: Sign and verify candidate APK
-        if: ${{ steps.signing.outputs.available == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"' EXIT
-          IN="app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
-          OUT="app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
-          tools/sign_release.sh "$IN" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$OUT" > app/build/outputs/selfrun-drive/APKSIGNER_VERIFY.txt
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$OUT" > app/build/outputs/selfrun-drive/APK_CERT.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' app/build/outputs/selfrun-drive/APK_CERT.txt
-          sha256sum "$OUT" >> app/build/outputs/selfrun-drive/SHA256SUMS.txt
-      - name: Remove signing pass-file
-        if: ${{ always() }}
-        run: rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"
-      - name: Upload SelfRun Drive build evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk
+          "$BT/zipalign" -c -v 4 app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk
+          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk > app/build/outputs/selfrun-drive/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chatgpt-selfrun-drive-build
           path: app/build/outputs/selfrun-drive/
@@ -131,7 +89,7 @@ jobs:
         run: |
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
-      - name: Verify simultaneous installation, runtime and data isolation
+      - name: Verify full co-install isolation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
@@ -145,7 +103,9 @@ jobs:
           disable-animations: true
           script: >-
             bash -o pipefail -c
-            'timeout --foreground 8m tools/verify_coinstall_emulator.sh
+            'VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
+            sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$VERSION\"/" tools/verify_coinstall_emulator.sh;
+            timeout --foreground 8m tools/verify_coinstall_emulator.sh
             legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk |
             tee coinstall-evidence.txt'

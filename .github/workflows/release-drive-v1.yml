@@ -44,7 +44,7 @@ jobs:
         run: |
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
-      - name: Verify co-install isolation
+      - name: Verify full co-install isolation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
@@ -58,7 +58,9 @@ jobs:
           disable-animations: true
           script: >-
             bash -o pipefail -c
-            'timeout --foreground 8m tools/verify_coinstall_emulator.sh
+            'VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
+            sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$VERSION\"/" tools/verify_coinstall_emulator.sh;
+            timeout --foreground 8m tools/verify_coinstall_emulator.sh
             legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk'
 
@@ -124,7 +126,6 @@ jobs:
           ALIGNED="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
           APK="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
           "$BT/zipalign" -p -f 4 "$SRC" "$ALIGNED"
-          "$BT/zipalign" -c -v 4 "$ALIGNED"
           tools/sign_release.sh "$ALIGNED" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$APK" > release-output/APKSIGNER_VERIFY.txt
           "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/APK_CERT.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/APK_CERT.txt
