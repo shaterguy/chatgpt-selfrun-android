@@ -76,7 +76,7 @@ jobs:
         with:
           gradle-version: '9.5.0'
       - name: Run Android runtime regressions
-        run: gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
+        run: gradle --no-daemon --console=plain --stacktrace -Pandroid.useAndroidX=true :app:connectedDebugAndroidTest
       - name: Emulator diagnostics
         if: always()
         shell: bash
