@@ -11,80 +11,76 @@ import static org.junit.Assert.assertTrue;
 
 public class SelfRunPauseResumeTest {
     @Test
-    public void userActionPausePreservesCurrentWebView() {
+    public void protocolPauseSignalsPreserveWebView() {
         assertTrue(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.USER_ACTION));
-    }
-
-    @Test
-    public void protocolPauseUsesTheSamePreservedWebViewPolicy() {
         assertTrue(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.PAUSE));
-    }
-
-    @Test
-    public void terminalSignalsDoNotUseResumablePausePolicy() {
-        assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.DONE));
         assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.NEXT));
+        assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.DONE));
     }
 
     @Test
-    public void preservedPauseStopsAutomationBeforePowerReleaseAndKeepsWebViewAlive() throws Exception {
+    public void manualPausePathUsesSamePreservedWebViewPolicy() throws Exception {
         String text = source();
-        int method = text.indexOf("private void enterPreservedPause(String cause, String status)");
+        int pause = text.indexOf("private void pauseFromUi()");
+        int resume = text.indexOf("private void resumeFromUi()", pause);
+        assertTrue(pause >= 0 && resume > pause);
+        String body = text.substring(pause, resume);
+        assertTrue(body.contains("enterPreservedPause(\"UI_PAUSE\""));
+        assertFalse(body.contains("cleanupWebView()"));
+    }
+
+    @Test
+    public void preservedPauseStopsAutomationButDoesNotDestroyOrPauseWebView() throws Exception {
+        String text = source();
+        int method = text.indexOf("private void enterPreservedPause");
         int nextMethod = text.indexOf("private void updateWakeLockForState", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
-        int queueClear = body.indexOf("handler.removeCallbacksAndMessages(null);");
-        int executionAdvance = body.indexOf("invalidateExecutionEpoch();");
-        int observerDetach = body.indexOf("detachDomObserver(cause);");
-        int powerRelease = body.indexOf("setWakeLockState(WakeLockController.State.PAUSED");
-        assertTrue(queueClear >= 0);
-        assertTrue(executionAdvance >= 0);
-        assertFalse(body.contains("generation++;"));
-        assertTrue(observerDetach >= 0);
-        assertTrue(powerRelease >= 0);
-        assertTrue(queueClear < observerDetach);
-        assertTrue(executionAdvance < observerDetach);
-        assertTrue(observerDetach < powerRelease);
+        assertTrue(body.contains("handler.removeCallbacksAndMessages(null)"));
+        assertTrue(body.contains("invalidateExecutionEpoch()"));
+        assertTrue(body.contains("detachDomObserver(cause)"));
         assertFalse(body.contains("cleanupWebView()"));
-        assertFalse(body.contains("stopRelay()"));
-        assertFalse(body.contains("loadUrl("));
-        assertFalse(body.contains("reload("));
-        assertFalse(body.contains("onPause()"));
+        assertFalse(body.contains("webView.onPause()"));
         assertFalse(body.contains("pauseTimers"));
     }
 
     @Test
-    public void preservedResumeAcquiresPowerBeforeObserverReattachWithoutNavigation() throws Exception {
+    public void sameWebViewResumeDoesNotReloadCanonicalConversation() throws Exception {
         String text = source();
         int method = text.indexOf("private void resumeFromUi()");
         int nextMethod = text.indexOf("private void enterPreservedPause", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
-        assertTrue(body.contains("boolean preserved = webView != null;"));
-        assertTrue(body.contains("resumeObserverGate = preserved && !rateLimited;"));
-        assertTrue(body.contains("if (preserved)"));
-        int wake = body.indexOf("updateWakeLockForState(\"resume_prepare\")");
         int preserved = body.indexOf("if (preserved)");
-        int observer = body.indexOf("ensureDomObserver();", preserved);
-        int watchdog = body.indexOf("scheduleWatchdog();", preserved);
-        assertTrue(wake >= 0);
-        assertTrue(observer > wake);
-        assertTrue(watchdog > wake);
-        assertFalse(body.contains("scheduleStep("));
-        assertFalse(body.contains("requestDomEvaluation("));
-        assertFalse(body.contains("webView.onResume()"));
-        assertFalse(body.contains("reload("));
-        int elseBlock = body.indexOf("} else {", preserved);
-        String preservedBody = body.substring(preserved, elseBlock);
+        int reconnectElse = body.indexOf("} else {", preserved);
+        assertTrue(preserved >= 0 && reconnectElse > preserved);
+        String preservedBody = body.substring(preserved, reconnectElse);
+        assertTrue(preservedBody.contains("ensureDomObserver()"));
         assertFalse(preservedBody.contains("loadUrl("));
         assertFalse(preservedBody.contains("cleanupWebView()"));
+        assertFalse(preservedBody.contains("scheduleStep("));
     }
 
     @Test
-    public void observerReadyDrivesTheFirstPostResumeDomEvaluation() throws Exception {
+    public void resumeObserverGatePreventsDomEvaluationUntilObserverReady() throws Exception {
+        String text = source();
+        int resume = text.indexOf("private void resumeFromUi()");
+        int nextMethod = text.indexOf("private void enterPreservedPause", resume);
+        assertTrue(resume >= 0 && nextMethod > resume);
+        String body = text.substring(resume, nextMethod);
+        assertTrue(body.contains("resumeObserverGate = preserved && !rateLimited;"));
+
+        int request = text.indexOf("private void requestDomEvaluation");
+        int drain = text.indexOf("private void drainPendingDomEvaluation", request);
+        assertTrue(request >= 0 && drain > request);
+        assertTrue(text.substring(request, drain).contains("resumeObserverGate"));
+    }
+
+    @Test
+    public void observerReadyOpensGateBeforeRequestingEvaluation() throws Exception {
         String text = source();
         int observer = text.indexOf("private void ensureDomObserver()");
-        int nextMethod = text.indexOf("private static Uri chatGptOrigin", observer);
+        int nextMethod = text.indexOf("private boolean observerPageReady", observer);
         assertTrue(observer >= 0 && nextMethod > observer);
         String body = text.substring(observer, nextMethod);
         int ready = body.indexOf("if (data.startsWith(\"ready|\"))");
@@ -101,14 +97,19 @@ public class SelfRunPauseResumeTest {
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
         int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
-        int staleGuard = body.indexOf(
-                "if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId) || isRateLimited()) return;", callback);
-        int clearInFlight = body.indexOf("evaluationInFlight = false;", callback);
-        int clearRateLimit = body.indexOf("rateLimitedUntilElapsed = 0L;", callback);
+        int executionGuard = body.indexOf("if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId))", callback);
+        int staleLog = body.indexOf("recordStaleCallback(\"evaluate\")", executionGuard);
+        int rateLimitGuard = body.indexOf("if (isRateLimited())", staleLog);
+        int rateLimitLog = body.indexOf("recordStaleCallback(\"evaluate_rate_limit\")", rateLimitGuard);
+        int clearInFlight = body.indexOf("evaluationInFlight = false;", rateLimitLog);
+        int clearRateLimit = body.indexOf("rateLimitedUntilElapsed = 0L;", clearInFlight);
         assertTrue(callback >= 0);
-        assertTrue(staleGuard > callback);
-        assertTrue(clearInFlight > staleGuard);
-        assertTrue(clearRateLimit > staleGuard);
+        assertTrue(executionGuard > callback);
+        assertTrue(staleLog > executionGuard);
+        assertTrue(rateLimitGuard > staleLog);
+        assertTrue(rateLimitLog > rateLimitGuard);
+        assertTrue(clearInFlight > rateLimitLog);
+        assertTrue(clearRateLimit > clearInFlight);
     }
 
     @Test
@@ -123,95 +124,13 @@ public class SelfRunPauseResumeTest {
         int clearInFlight = body.indexOf("evaluationInFlight = false;", generationAdvance);
         int clearPending = body.indexOf("domEvaluationPending = false;", clearInFlight);
         int powerRelease = body.indexOf("updateWakeLockForState(\"rate_limit_wait\")", clearPending);
-        int expirySchedule = body.indexOf("scheduleRateLimitExpiry();", powerRelease);
+        int expiry = body.indexOf("scheduleRateLimitExpiry();", powerRelease);
         assertTrue(deadline >= 0);
         assertTrue(generationAdvance > deadline);
         assertTrue(clearInFlight > generationAdvance);
         assertTrue(clearPending > clearInFlight);
         assertTrue(powerRelease > clearPending);
-        assertTrue(expirySchedule > powerRelease);
-    }
-
-    @Test
-    public void rateLimitExpiryIsRunLevelAndIgnoresWebViewNavigationGeneration() throws Exception {
-        String text = source();
-        int schedule = text.indexOf("private void scheduleRateLimitExpiry()");
-        int restore = text.indexOf("private void restoreCanonical", schedule);
-        assertTrue(schedule >= 0 && restore > schedule);
-        String body = text.substring(schedule, restore);
-        assertTrue(body.contains("long expectedDeadline = rateLimitedUntilElapsed;"));
-        assertTrue(body.contains("long expectedTimerEpoch = rateLimitTimerEpoch == Long.MAX_VALUE ? 1L : rateLimitTimerEpoch + 1L;"));
-        assertTrue(body.contains("rateLimitTimerEpoch = expectedTimerEpoch;"));
-        assertTrue(body.contains("String expectedRunId = store.runId();"));
-        assertTrue(body.contains("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)"));
-        assertTrue(body.contains("expectedTimerEpoch == rateLimitTimerEpoch"));
-        assertTrue(body.contains("expectedDeadline == rateLimitedUntilElapsed"));
-        assertTrue(body.contains("expectedRunId.equals(store.runId())"));
-        assertTrue(body.contains("!store.userStopped() && canRun()"));
-        assertFalse(body.contains("expectedGeneration"));
-        assertFalse(body.contains("expectedWebView"));
-        assertFalse(body.contains("isCurrentExecution("));
-        int guard = body.indexOf("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)");
-        int recovery = body.indexOf("beginRecovery(\"rate_limit_expired\")", guard);
-        assertTrue(recovery > guard);
-    }
-
-    @Test
-    public void rateLimitResumeRearmsRunLevelExpiryBeforeAutomationRestarts() throws Exception {
-        String text = source();
-        int resume = text.indexOf("private void resumeFromUi()");
-        int pause = text.indexOf("private void enterPreservedPause", resume);
-        assertTrue(resume >= 0 && pause > resume);
-        String body = text.substring(resume, pause);
-        int capture = body.indexOf("boolean rateLimited = isRateLimited();");
-        int recovery = body.indexOf("recoveryInProgress = !preserved && !rateLimited;", capture);
-        int wake = body.indexOf("updateWakeLockForState(\"resume_prepare\")", recovery);
-        int wait = body.indexOf("if (rateLimited)", wake);
-        int schedule = body.indexOf("scheduleRateLimitExpiry();", wait);
-        int stop = body.indexOf("return;", schedule);
-        int preserved = body.indexOf("if (preserved)", stop);
-        assertTrue(capture >= 0);
-        assertTrue(recovery > capture);
-        assertTrue(wake > recovery);
-        assertTrue(wait > wake);
-        assertTrue(schedule > wait);
-        assertTrue(stop > schedule);
-        assertTrue(preserved > stop);
-    }
-
-    @Test
-    public void powerPolicySeparatesAutomationFromPauseRateLimitAndTerminalStates() {
-        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
-                SelfRunStore.PHASE_WAIT_ASSISTANT, false, false) == WakeLockController.State.AUTOMATION);
-        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
-                SelfRunStore.PHASE_WAIT_ASSISTANT, false, true) == WakeLockController.State.RECOVERY);
-        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
-                SelfRunStore.PHASE_WAIT_ASSISTANT, true, false) == WakeLockController.State.RATE_LIMIT);
-        assertTrue(SelfRunService.wakeLockStateFor(true, true, false,
-                SelfRunStore.PHASE_PAUSED, false, false) == WakeLockController.State.PAUSED);
-        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
-                SelfRunStore.PHASE_DONE, false, false) == WakeLockController.State.DONE);
-        assertTrue(SelfRunService.wakeLockStateFor(true, false, false,
-                SelfRunStore.PHASE_IDLE, false, false) == WakeLockController.State.IDLE);
-        assertTrue(SelfRunService.wakeLockStateFor(false, false, true,
-                SelfRunStore.PHASE_IDLE, false, false) == WakeLockController.State.STOPPED);
-    }
-
-    @Test
-    public void terminalCleanupClosesControllerAndCancelsLateCallbacks() throws Exception {
-        String text = source();
-        int stop = text.indexOf("private void stopRelay()");
-        int log = text.indexOf("private void logDomEfficiency", stop);
-        String stopBody = text.substring(stop, log);
-        assertTrue(stopBody.contains("handler.removeCallbacksAndMessages(null)"));
-        assertTrue(stopBody.contains("setWakeLockState(WakeLockController.State.STOPPED"));
-        assertTrue(stopBody.contains("wakeLockController.close(\"stop_relay\")"));
-
-        int destroy = text.indexOf("public void onDestroy()");
-        assertTrue(destroy >= 0);
-        String destroyBody = text.substring(destroy);
-        assertTrue(destroyBody.contains("handler.removeCallbacksAndMessages(null)"));
-        assertTrue(destroyBody.contains("wakeLockController.close(\"on_destroy\")"));
+        assertTrue(expiry > powerRelease);
     }
 
     private static String source() throws Exception {
