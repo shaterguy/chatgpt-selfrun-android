@@ -189,9 +189,29 @@ final class SelfRunAc06MatrixRunner {
                     "text/html", "UTF-8", null);
             return null;
         });
-        SelfRunAc06Support.require(SelfRunAc06Support.waitFor(
-                () -> SelfRunAc06Bridge.generation() > generationBefore && SelfRunAc06Bridge.observerPort() != null,
-                12_000L), "service_dom_observer_timeout");
+        boolean testPageReady = SelfRunAc06Support.waitFor(() -> SelfRunAc06Support.onMain(activity, () ->
+                SelfRunAc06Bridge.generation() > generationBefore
+                        && serviceView.getProgress() >= 100
+                        && SelfRunAc06Support.CONVERSATION_URL.equals(serviceView.getUrl())), 12_000L);
+        if (testPageReady) {
+            SelfRunAc06Support.onMain(activity, () -> {
+                SelfRunAc06Bridge.ensureObserverNow();
+                return null;
+            });
+        }
+        boolean observerReady = testPageReady && SelfRunAc06Support.waitFor(
+                () -> SelfRunAc06Bridge.observerPort() != null, 12_000L);
+        if (!observerReady) {
+            String pageState = SelfRunAc06Support.onMain(activity, () ->
+                    "url=" + serviceView.getUrl()
+                            + ";progress=" + serviceView.getProgress()
+                            + ";generation=" + SelfRunAc06Bridge.generation()
+                            + ";recovery=" + SelfRunAc06Bridge.recoveryInProgress()
+                            + ";install=" + SelfRunAc06Bridge.observerInstallInFlight()
+                            + ";lease=" + SelfRunAc06Bridge.observerLease()
+                            + ";testPageReady=" + testPageReady);
+            throw new IllegalStateException("service_dom_observer_timeout:" + pageState);
+        }
         long beforeEvents = Math.max(0L, SelfRunAc06Bridge.observerEventCount());
         SelfRunAc06Counter.reset();
         SelfRunAc06Support.evaluate(activity, serviceView, """
