@@ -1,0 +1,55 @@
+name: Patch SelfRun Drive dev3
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.0.0-dev3
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply dev3 state-machine patch
+        run: python3 .github/scripts/dev3_patch.py
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Static policy checks
+        run: tools/verify_drive_variant.sh
+      - name: Unit tests
+        run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Build debug APK
+        run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
+      - name: Commit verified dev3 and dispatch full build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/dev3-patch.yml .github/scripts/dev3_patch.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m 'feat: make Drive submissions retryable and authoritative'
+          git push origin HEAD:selfrun-drive/v1.0.0-dev3
+          gh workflow run build-drive-v1.yml --ref selfrun-drive/v1.0.0-dev3
