@@ -284,6 +284,21 @@ final class SelfRunStore {
 
     void markGuarding() { commitOrThrow(prefs.edit().putString("submissionState", EVENT_GUARDING)); }
 
+    void resetPendingForDriveReplay(String recoveryStatus) {
+        commitOrThrow(prefs.edit()
+                .putLong("pendingEventSeq", 0L).putInt("pendingTurn", 0).putString("pendingSignalRaw", "")
+                .putString("pendingCommitId", "").putLong("commitDetectedAt", 0L).putLong("guardDueAt", 0L)
+                .putString("submissionState", EVENT_CONSUMED).putLong("submissionStartedAt", 0L)
+                .putInt("submissionBaselineCount", -1)
+                .putString("submissionRetryKind", "").putString("submissionRetryReason", "")
+                .putLong("submissionRetryDueAt", 0L).putBoolean("submissionRetryReady", false)
+                .putInt("submissionRetryAttempt", 0)
+                .putString("lastSeenDriveVersion", "").putString("lastSeenModifiedTime", "")
+                .putString("phase", PHASE_WAIT_DRIVE_COMMIT).putString("status", safe(recoveryStatus))
+                .putLong("phaseStartedAt", System.currentTimeMillis()));
+        syncHistory();
+    }
+
     void markSubmissionStarted(int beforeCount) {
         if (beforeCount < 0) throw new IllegalArgumentException("submission baseline is required");
         commitOrThrow(prefs.edit().putString("submissionState", SUBMISSION_STARTED)

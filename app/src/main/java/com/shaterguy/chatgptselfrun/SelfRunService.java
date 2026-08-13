@@ -162,8 +162,8 @@ public final class SelfRunService extends Service {
                         || !requestedPhase.equals(store.phase()) || !drivePhase(store.phase())) return;
                 accessToken = DriveAuthorization.accessToken(result);
                 if (accessToken.isEmpty()) {
-                    pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "Drive 액세스 토큰을 얻지 못했습니다.",
-                            epoch, requestedRunId, requestedPhase);
+                    scheduleAuthorizationRetry("DRIVE_ACCESS_TOKEN_EMPTY",
+                            "Drive 액세스 토큰을 얻지 못했습니다.", epoch, requestedRunId, requestedPhase);
                     return;
                 }
                 executeDriveStep(epoch);
@@ -177,8 +177,8 @@ public final class SelfRunService extends Service {
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
                 if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())) return;
-                pauseError("DRIVE_ACCOUNT_CHECK_FAILED", "Drive 계정 확인에 실패했습니다.",
-                        epoch, requestedRunId, requestedPhase);
+                scheduleAuthorizationRetry("DRIVE_ACCOUNT_CHECK_RETRY",
+                        "Drive 계정 확인에 실패했습니다.", epoch, requestedRunId, requestedPhase);
             }
         });
     }
@@ -371,9 +371,17 @@ public final class SelfRunService extends Service {
             verifyMetadata(drive.getMetadata(accessToken, initial.turnDocumentId), driveOperationRunId,
                     DriveApiClient.MIME_DOCUMENT, parent, "turn_document");
         } else if (SelfRunStore.CREATION_DOCUMENT_CREATING.equals(initial.creationStage)) {
-            if (canApplyDriveResult(epoch)) pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
-                    "네이티브 Google Docs 생성 결과를 확정할 수 없어 검색·재생성 없이 중단했습니다.", epoch);
-            return;
+            DriveApiClient.Metadata recovered = drive.findSingleTurnDocument(accessToken, driveOperationRunId, parent);
+            if (!canApplyDriveResult(epoch)) return;
+            if (recovered == null) {
+                scheduleDriveRecovery("DRIVE_DOCUMENT_CREATE_RESULT_PENDING",
+                        "네이티브 Google Docs 생성 결과를 동일 Job 폴더에서 재확인 중입니다.", epoch);
+                return;
+            }
+            verifyMetadata(recovered, driveOperationRunId, DriveApiClient.MIME_DOCUMENT, parent, "turn_document");
+            if (!applyDriveResult(epoch, () -> store.saveTurnDocument(recovered.id, documentUrl(recovered)))) return;
+            DriveApiClient.Metadata readback = drive.getMetadata(accessToken, recovered.id);
+            verifyMetadata(readback, driveOperationRunId, DriveApiClient.MIME_DOCUMENT, parent, "turn_document");
         } else {
             if (!applyDriveResult(epoch, () -> store.setCreationStage(SelfRunStore.CREATION_DOCUMENT_CREATING))) return;
             DriveApiClient.Metadata created;
@@ -381,8 +389,8 @@ public final class SelfRunService extends Service {
                 if (!canApplyDriveResult(epoch)) return;
                 created = drive.createTurnDocument(accessToken, driveOperationRunId, parent);
             } catch (DriveApiClient.OutcomeUnknownException unknown) {
-                if (canApplyDriveResult(epoch)) pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
-                        "네이티브 Google Docs 생성 응답이 유실되어 검색·재생성 없이 중단했습니다.", epoch);
+                if (canApplyDriveResult(epoch)) scheduleDriveRecovery("DRIVE_DOCUMENT_CREATE_RESULT_PENDING",
+                        "네이티브 Google Docs 생성 응답이 유실되어 동일 Job 폴더를 재확인합니다.", epoch);
                 return;
             } catch (DriveApiClient.ApiException definiteFailure) {
                 applyDriveResult(epoch, store::resetDocumentCreateAfterDefiniteFailure);
@@ -446,7 +454,8 @@ public final class SelfRunService extends Service {
         if (!canApplyDriveResult(epoch)) return;
         if (metadata.trashed || metadata.shared || !DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
                 || !snapshot.jobFolderId.equals(metadata.parentId)) {
-            pauseError("DRIVE_DOCUMENT_INVALID", "실행턴 문서가 삭제되었거나 parent가 변경되었습니다.", epoch);
+            scheduleDriveRecovery("DRIVE_DOCUMENT_RECHECK",
+                    "실행턴 문서 상태가 기대값과 달라 동일 문서를 다시 확인합니다.", epoch);
             return;
         }
         boolean changed = !metadata.version.equals(snapshot.lastSeenVersion)
@@ -460,10 +469,12 @@ public final class SelfRunService extends Service {
         DriveCommitParser.Result result = DriveCommitParser.latest(text, snapshot.runId,
                 snapshot.expectedTurn, snapshot.lastConsumedEventSeq, snapshot.mode);
         if (result.status == DriveCommitParser.Status.FUTURE_TURN) {
-            pauseError("DRIVE_PROTOCOL_TURN_MISMATCH", result.reason, epoch); return;
+            scheduleDriveRecovery("DRIVE_PROTOCOL_TURN_RECHECK", result.reason, epoch);
+            return;
         }
         if (result.status == DriveCommitParser.Status.MALFORMED) {
-            pauseError("DRIVE_COMMIT_MALFORMED", result.reason, epoch); return;
+            scheduleDriveRecovery("DRIVE_COMMIT_RECHECK", result.reason, epoch);
+            return;
         }
         if (!applyDriveResult(epoch, () -> {
             // Pending/terminal state is durable before the validated metadata cursor advances.
@@ -566,7 +577,10 @@ public final class SelfRunService extends Service {
         long delay = Math.max(0L, dueAt - System.currentTimeMillis());
         if (store.pendingEventSeq() < 1 || store.pendingCommitId().isEmpty()
                 || detectedAt <= 0 || dueAt - detectedAt != CONTINUATION_GUARD_MS) {
-            pauseError("DRIVE_PENDING_EVENT_INVALID", "guard 복원 정보가 불완전합니다.");
+            runLog.record(store, "DRIVE_PENDING_EVENT_REPLAY", "guard_state_invalid;replay_drive_commit");
+            store.resetPendingForDriveReplay("Drive commit 복구 재조회");
+            startForegroundCompat();
+            scheduleDrivePoll();
             return;
         }
         handler.postDelayed(guardRunnable, delay);
@@ -915,34 +929,65 @@ public final class SelfRunService extends Service {
 
     private void handleDriveFailure(Throwable error, int epoch) {
         if (!canApplyDriveResult(epoch)) return;
+        String code;
+        String message;
         if (error instanceof DriveApiClient.OutcomeUnknownException) {
-            pauseError("DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN",
-                    "네이티브 Google Docs 생성 결과가 불명확해 자동 재시도를 차단했습니다.", epoch);
-            return;
-        }
-        if ((error instanceof DriveApiClient.ApiException api && api.retryable())
-                || retryableNetworkError(error)) {
-            applyDriveResult(epoch, () -> {
-                retryAttempt = retryAttempt == Integer.MAX_VALUE ? Integer.MAX_VALUE : retryAttempt + 1;
-                int index = Math.min(Math.max(0, retryAttempt - 1), BACKOFF.length - 1);
-                long base = BACKOFF[index];
-                long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, base / 4L));
-                String kind = error instanceof DriveApiClient.ApiException api ? "http_" + api.status : "network";
-                runLog.record(store, "DRIVE_BACKOFF", "kind=" + kind + ";attempt=" + retryAttempt);
-                handler.removeCallbacks(driveRetryRunnable);
-                handler.postDelayed(driveRetryRunnable, base + jitter);
-            });
-            return;
-        }
-        if (error instanceof DriveApiClient.ApiException api && api.status == 401) {
-            pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "Drive 계정 승인이 만료되었습니다.", epoch);
-        } else if (error instanceof DriveApiClient.ApiException api && (api.status == 403 || api.status == 404)) {
-            pauseError("DRIVE_BASE_FOLDER_REBIND_REQUIRED", "Drive 항목 접근 권한 또는 바인딩을 확인하세요.", epoch);
+            code = "DRIVE_DOCUMENT_CREATE_RESULT_PENDING";
+            message = "네이티브 Google Docs 생성 결과를 재확인합니다.";
+        } else if (error instanceof DriveApiClient.ApiException api) {
+            code = "DRIVE_HTTP_RETRY_" + api.status;
+            message = "Drive API HTTP " + api.status + " 응답을 자동 재시도합니다.";
+        } else if (retryableNetworkError(error)) {
+            code = "DRIVE_NETWORK_RETRY";
+            message = "Drive 네트워크 오류를 자동 재시도합니다.";
         } else if (error instanceof IllegalArgumentException || error instanceof IllegalStateException) {
-            pauseError("DRIVE_VALIDATION_FAILED", "Drive 응답 또는 영속 상태 검증에 실패했습니다.", epoch);
+            code = "DRIVE_STATE_RECHECK";
+            message = "Drive 상태 검증을 다시 수행합니다.";
         } else {
-            pauseError("DRIVE_OPERATION_FAILED", "Drive 요청에 실패했습니다. 네트워크 상태를 확인하세요.", epoch);
+            code = "DRIVE_OPERATION_RETRY";
+            message = "Drive 요청을 자동 재시도합니다.";
         }
+        scheduleDriveRecovery(code, message, epoch);
+    }
+
+    private void scheduleDriveRecovery(String code, String message, int expectedEpoch) {
+        if (!canApplyDriveResult(expectedEpoch)) return;
+        applyDriveResult(expectedEpoch, () -> {
+            long delay = nextDriveRetryDelay();
+            store.setLastError(code, message);
+            store.setStatus(message + " · 자동 재시도 대기");
+            runLog.record(store, "DRIVE_BACKOFF", "kind=" + code + ";attempt=" + retryAttempt + ";delayMs=" + delay);
+            handler.removeCallbacks(driveRetryRunnable);
+            handler.postDelayed(driveRetryRunnable, delay);
+        });
+    }
+
+    private void scheduleAuthorizationRetry(String code, String message, int expectedEpoch,
+                                            String expectedRunId, String expectedPhase) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> scheduleAuthorizationRetry(code, message, expectedEpoch, expectedRunId, expectedPhase));
+            return;
+        }
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                if (expectedEpoch != automationEpoch || !expectedRunId.equals(store.runId())
+                        || !expectedPhase.equals(store.phase()) || !canRun() || !drivePhase(store.phase())) return;
+                long delay = nextDriveRetryDelay();
+                store.setLastError(code, message);
+                store.setStatus(message + " · 자동 재시도 대기");
+                runLog.record(store, "DRIVE_AUTH_RETRY", "kind=" + code + ";attempt=" + retryAttempt + ";delayMs=" + delay);
+                handler.removeCallbacks(driveRetryRunnable);
+                handler.postDelayed(driveRetryRunnable, delay);
+            }
+        }
+    }
+
+    private long nextDriveRetryDelay() {
+        retryAttempt = retryAttempt == Integer.MAX_VALUE ? Integer.MAX_VALUE : retryAttempt + 1;
+        int index = Math.min(Math.max(0, retryAttempt - 1), BACKOFF.length - 1);
+        long base = BACKOFF[index];
+        long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, base / 4L));
+        return base + jitter;
     }
 
     private void retryDrive() {
@@ -950,9 +995,7 @@ public final class SelfRunService extends Service {
     }
 
     private static boolean retryableNetworkError(Throwable error) {
-        return error instanceof IOException
-                && !(error instanceof SSLException)
-                && !(error instanceof ProtocolException);
+        return error instanceof IOException;
     }
 
     private static void verifyMetadata(DriveApiClient.Metadata m, String job, String mime, String parent, String kind) {

@@ -154,4 +154,42 @@ public class SelfRunDriveDev3PolicyTest {
         assertFalse(e.contains("SUBMISSION_CONFIRMATION_TIMEOUT"));
         assertTrue(e.contains("scheduleSubmissionRetry"));
     }
+    @Test public void recoverableDriveFailuresNeverAutoPause() throws Exception {
+        String src = source("SelfRunService.java");
+        String part = src.substring(src.indexOf("private void handleDriveFailure"), src.indexOf("private static void verifyMetadata"));
+        assertTrue(part.contains("scheduleDriveRecovery"));
+        assertFalse(part.contains("pauseError("));
+        assertTrue(src.contains("return error instanceof IOException;"));
+    }
+
+    @Test public void transientAuthorizationAndDriveParserFailuresRetry() throws Exception {
+        String src = source("SelfRunService.java");
+        assertTrue(src.contains("DRIVE_ACCOUNT_CHECK_RETRY"));
+        assertTrue(src.contains("DRIVE_ACCESS_TOKEN_EMPTY"));
+        String poll = src.substring(src.indexOf("private void pollDriveNow"), src.indexOf("private void acceptCommit"));
+        assertTrue(poll.contains("DRIVE_PROTOCOL_TURN_RECHECK"));
+        assertTrue(poll.contains("DRIVE_COMMIT_RECHECK"));
+        assertFalse(poll.contains("pauseError("));
+    }
+
+    @Test public void invalidGuardReplaysCommitAndOutcomeUnknownReconciles() throws Exception {
+        String src = source("SelfRunService.java");
+        String st = source("SelfRunStore.java");
+        String client = source("DriveApiClient.java");
+        String guard = src.substring(src.indexOf("private void scheduleGuard"), src.indexOf("private void guardElapsed"));
+        assertTrue(guard.contains("resetPendingForDriveReplay"));
+        assertFalse(guard.contains("pauseError("));
+        assertTrue(st.contains("lastSeenDriveVersion"));
+        assertTrue(src.contains("drive.findSingleTurnDocument"));
+        assertTrue(client.contains("Metadata findSingleTurnDocument"));
+    }
+
+    @Test public void coinstallVerifierTargetsDev3() throws Exception {
+        Path p = Paths.get("tools/verify_coinstall_emulator.sh");
+        if (!Files.exists(p)) p = Paths.get("../tools/verify_coinstall_emulator.sh");
+        String text = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
+        assertTrue(text.contains("DRIVE_EXPECTED_VERSION=\"1.0.0-dev3\""));
+        assertFalse(text.contains("DRIVE_EXPECTED_VERSION=\"1.0.0-dev2\""));
+    }
+
 }

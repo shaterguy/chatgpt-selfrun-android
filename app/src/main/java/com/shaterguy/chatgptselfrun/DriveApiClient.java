@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
@@ -96,6 +97,32 @@ final class DriveApiClient {
         String endpoint = "https://www.googleapis.com/drive/v3/files/" + fileId
                 + "?supportsAllDrives=true&fields=" + POLL_FIELDS;
         return new Metadata(request("GET", endpoint, accessToken, null));
+    }
+
+    /** Reconciles an outcome-unknown native Docs create without issuing another create. */
+    Metadata findSingleTurnDocument(String accessToken, String jobId, String parentId) throws Exception {
+        requireParent(parentId);
+        String q = "'" + parentId + "' in parents and trashed = false and mimeType = '" + MIME_DOCUMENT + "'";
+        String fields = "files(" + FILE_FIELDS + ")";
+        String endpoint = "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true"
+                + "&q=" + URLEncoder.encode(q, StandardCharsets.UTF_8.name())
+                + "&fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8.name()) + "&pageSize=10";
+        JSONArray files = request("GET", endpoint, accessToken, null, false).optJSONArray("files");
+        Metadata match = null;
+        if (files == null) return null;
+        for (int i = 0; i < files.length(); i++) {
+            JSONObject raw = files.optJSONObject(i);
+            if (raw == null) continue;
+            Metadata candidate = new Metadata(raw);
+            if (!jobId.equals(candidate.name) || !MIME_DOCUMENT.equals(candidate.mimeType)
+                    || !parentId.equals(candidate.parentId) || candidate.trashed
+                    || !jobId.equals(candidate.appProperties.optString("job_id"))
+                    || !"turn_document".equals(candidate.appProperties.optString("selfrun_kind"))
+                    || !"selfrun_drive_android".equals(candidate.appProperties.optString("client_id"))) continue;
+            if (match != null) throw new IllegalStateException("multiple turn documents found for one SelfRun job");
+            match = candidate;
+        }
+        return match;
     }
 
     /**
