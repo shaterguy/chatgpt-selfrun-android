@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 import org.junit.Test;import java.nio.file.*;import static org.junit.Assert.*;
 public class SelfRunDriveDev3PolicyTest {
+ // Guard recovery regression coverage for Drive completion evidence.
  @Test public void modifiedTimeIsOnlyReadOptimization() throws Exception {String s=src("SelfRunService.java"),p=between(s,"private void pollDriveNow","private void replayTerminalSideEffect");assertTrue(p.contains("DriveSignalParser.scan"));assertTrue(p.contains("scan.unseen"));assertTrue(p.contains("cursorRebased"));assertFalse(p.contains("FUTURE_TURN"));assertFalse(p.contains("MALFORMED"));}
  @Test public void laterProgressImplicitlyAcksMissedCommandReceived() throws Exception {String st=src("SelfRunStore.java"),a=between(st,"void applyDriveSignals","void repairGuard");assertTrue(a.contains("if(awaiting)"));assertTrue(a.contains("clearCommandWait"));assertTrue(a.contains("case TURN_COMPLETED"));}
  @Test public void commandRetryIsUnlimitedAndNeverTerminal() throws Exception {String s=src("SelfRunService.java"),st=src("SelfRunStore.java"),r=between(st,"void prepareCommandRetry","void applyDriveSignals");assertTrue(s.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));assertFalse(s.contains("maxRetryCount"));assertFalse(s.contains("SUBMISSION_CONFIRMATION_TIMEOUT"));assertTrue(st.contains("Integer.MAX_VALUE"));assertFalse(r.contains("PHASE_PAUSED"));assertFalse(r.contains("PHASE_DONE"));}
