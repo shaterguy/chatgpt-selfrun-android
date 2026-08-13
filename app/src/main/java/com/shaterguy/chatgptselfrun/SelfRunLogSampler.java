@@ -26,7 +26,6 @@ final class SelfRunLogSampler {
             "STALE_CALLBACK",
             "WEBVIEW_EVENT_IGNORED",
             "WEBVIEW_NAVIGATION",
-            "WEBVIEW_ERROR",
             "SERVICE_PAUSED"
     );
 
