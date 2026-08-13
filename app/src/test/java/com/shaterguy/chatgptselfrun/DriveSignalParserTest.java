@@ -38,4 +38,14 @@ public class DriveSignalParserTest {
                 + "[2026.08.13 | 22:10:05] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
         assertEquals(2, DriveSignalParser.scan(text, JOB, 0).totalCount);
     }
+
+    @Test public void impossibleRecoveryCursorRebaselinesWithoutReplayingHistory() {
+        String text = "[2026.08.13 | 22:03:19] [SELF_RUN_COMMAND_RECEIVED " + JOB + "]\n"
+                + "[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, Integer.MAX_VALUE);
+        assertTrue(scan.cursorRebased);
+        assertTrue(scan.unseen.isEmpty());
+        assertEquals(2, scan.totalCount);
+        assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.latest.type);
+    }
 }
