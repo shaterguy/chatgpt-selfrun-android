@@ -7,11 +7,11 @@ android {
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.shaterguy.chatgptselfrun'
+        applicationId 'com.shaterguy.chatgptselfrun.drive'
         minSdk 26
         targetSdk 36
-        versionCode 13
-        versionName '0.2.3'
+        versionCode 1000001
+        versionName '1.0.0-dev1'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
@@ -29,5 +29,40 @@ android {
 }
 
 dependencies {
+    implementation 'com.google.android.gms:play-services-auth:21.6.0'
     testImplementation 'junit:junit:4.13.2'
 }
+
+def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
+    group = 'verification'
+    doLast {
+        def expectedId = 'com.shaterguy.chatgptselfrun.drive'
+        if (android.defaultConfig.applicationId != expectedId) {
+            throw new GradleException("SelfRun Drive applicationId must be ${expectedId}")
+        }
+        if (android.defaultConfig.versionCode != 1000001
+                || android.defaultConfig.versionName != '1.0.0-dev1') {
+            throw new GradleException('SelfRun Drive version identity mismatch')
+        }
+        def manifest = file('src/main/AndroidManifest.xml').getText('UTF-8')
+        if (manifest.contains('android:sharedUserId')) {
+            throw new GradleException('sharedUserId is forbidden')
+        }
+        def authorities = (manifest =~ /android:authorities="([^"]+)"/).collect { it[1] }
+        if (authorities.any { it != '${applicationId}.fileprovider' && !it.startsWith('${applicationId}.') }) {
+            throw new GradleException('every provider authority must derive from applicationId')
+        }
+        def service = file('src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java').getText('UTF-8')
+        ['RUN', 'PAUSE', 'RESUME'].each { action ->
+            if (!service.contains('BuildConfig.APPLICATION_ID + ".' + action + '"')) {
+                throw new GradleException("${action} action must derive from applicationId")
+            }
+        }
+        if (service.contains('com.shaterguy.chatgptselfrun.RUN')
+                || service.contains('WAIT_ASSISTANT') || service.contains('SelfRunDom.observeAssistant')) {
+            throw new GradleException('legacy assistant runtime must not be reachable in Drive V1')
+        }
+    }
+}
+
+tasks.named('preBuild').configure { dependsOn verifyDriveVariantIdentity }

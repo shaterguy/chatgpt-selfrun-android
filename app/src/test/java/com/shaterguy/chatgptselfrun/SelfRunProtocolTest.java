@@ -68,5 +68,25 @@ public class SelfRunProtocolTest {
                 "[SELF_RUN_USER_ACTION_REQUIRED SR-1 LOGIN]", "SR-1", SelfRunStore.MODE_WORK);
         assertEquals(SelfRunProtocol.Type.USER_ACTION, action.type);
         assertEquals("LOGIN", action.actionId);
+        SelfRunProtocol.Signal error = SelfRunProtocol.parseLatest(
+                "[SELF_RUN_ERROR SR-1 REASON=DRIVE_READBACK]", "SR-1", SelfRunStore.MODE_WORK);
+        assertEquals(SelfRunProtocol.Type.ERROR, error.type);
+        assertEquals("DRIVE_READBACK", error.actionId);
+    }
+
+    @Test
+    public void driveBootstrapCarriesExactPrecreatedIdsAndContract() {
+        String text = SelfRunProtocol.bootstrapDrive("SR-1", SelfRunStore.MODE_CHAT, "do work",
+                "runsFolder_12345678", "jobFolder_12345678", "document_12345678",
+                "https://docs.google.com/document/d/document_12345678/edit", 1);
+        assertTrue(text.contains("SELF_RUN_CLIENT=DRIVE_V1"));
+        assertTrue(text.contains("ANDROID_APPLICATION_ID=com.shaterguy.chatgptselfrun.drive"));
+        assertTrue(text.contains("DRIVE_PROTOCOL_VERSION=1"));
+        assertTrue(text.contains("DRIVE_JOB_ID=SR-1"));
+        assertTrue(text.contains("DRIVE_RUNS_BASE_FOLDER_ID=runsFolder_12345678"));
+        assertTrue(text.contains("DRIVE_JOB_FOLDER_ID=jobFolder_12345678"));
+        assertTrue(text.contains("DRIVE_TURN_DOCUMENT_ID=document_12345678"));
+        assertTrue(text.contains("DRIVE_EXPECTED_TURN=1"));
+        assertTrue(text.contains("commit 작성, 동일 문서 readback"));
     }
 }

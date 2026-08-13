@@ -5,7 +5,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class SelfRunProtocol {
-    enum Type { NEXT, DONE, USER_ACTION, PAUSE, NONE }
+    enum Type { NEXT, DONE, USER_ACTION, PAUSE, ERROR, NONE }
 
     static final class Signal {
         final Type type;
@@ -28,7 +28,7 @@ final class SelfRunProtocol {
         }
     }
 
-    private static final Pattern BRACKET = Pattern.compile("\\[SELF_RUN_(NEXT|DONE|USER_ACTION_REQUIRED|PAUSE)\\s+([^\\]]+)]");
+    private static final Pattern BRACKET = Pattern.compile("\\[SELF_RUN_(NEXT|DONE|USER_ACTION_REQUIRED|PAUSE|ERROR)\\s+([^\\]]+)]");
     private SelfRunProtocol() {}
 
     static Signal parseLatest(String assistantText, String expectedRunId, String mode) {
@@ -45,9 +45,14 @@ final class SelfRunProtocol {
                 last = new Signal(Type.DONE, raw, parts[0], "", "", "", "");
             } else if ("USER_ACTION_REQUIRED".equals(kind)) {
                 String action = parts.length > 1 ? parts[1] : "ACTION";
+                if (!safeCode(action)) continue;
                 last = new Signal(Type.USER_ACTION, raw, parts[0], "", "", "", action);
             } else if ("PAUSE".equals(kind)) {
                 last = new Signal(Type.PAUSE, raw, parts[0], value(payload, "ROLE"), "", "", "");
+            } else if ("ERROR".equals(kind)) {
+                String reason = value(payload, "REASON");
+                if (!safeCode(reason)) continue;
+                last = new Signal(Type.ERROR, raw, parts[0], "", "", "", reason);
             } else {
                 String role = value(payload, "ROLE").toUpperCase(Locale.ROOT);
                 String model = value(payload, "MODEL").toLowerCase(Locale.ROOT);
@@ -59,6 +64,7 @@ final class SelfRunProtocol {
                     continue;
                 }
                 if (role.isEmpty()) role = "BUILDER";
+                if (!safeCode(role)) continue;
                 last = new Signal(Type.NEXT, raw, parts[0], role, model, reasoning, "");
             }
         }
@@ -76,6 +82,28 @@ final class SelfRunProtocol {
         return "[SELF_RUN_BOOTSTRAP 0.1.0 " + runId + " MODE=" + mode + "]\n\n" + requirement.trim();
     }
 
+    static String bootstrapDrive(String runId, String mode, String requirement, String baseFolderId,
+                                 String jobFolderId, String documentId, String documentUrl,
+                                 int expectedTurn) {
+        return "[SELF_RUN_BOOTSTRAP 0.1.0 " + runId + " MODE=" + mode + "]\n"
+                + "SELF_RUN_CLIENT=DRIVE_V1\n"
+                + "ANDROID_APPLICATION_ID=" + BuildConfig.APPLICATION_ID + "\n"
+                + "DRIVE_PROTOCOL_VERSION=1\n"
+                + "DRIVE_JOB_ID=" + runId + "\n"
+                + "DRIVE_RUNS_BASE_FOLDER_ID=" + baseFolderId + "\n"
+                + "DRIVE_JOB_FOLDER_ID=" + jobFolderId + "\n"
+                + "DRIVE_TURN_DOCUMENT_ID=" + documentId + "\n"
+                + "DRIVE_TURN_DOCUMENT_URL=" + documentUrl + "\n"
+                + "DRIVE_EXPECTED_TURN=" + expectedTurn + "\n\n"
+                + "Drive V1 실행 계약:\n"
+                + "- 전달된 정확한 DRIVE_TURN_DOCUMENT_ID 또는 URL만 사용한다.\n"
+                + "- Job 폴더나 실행턴 문서를 생성하거나 이름/Job ID로 Drive를 검색하지 않는다.\n"
+                + "- 초기 블록 JOB_ID를 DRIVE_JOB_ID와 대조하고 접근 직후 SESSION_BOUND를 기록한다.\n"
+                + "- 실제 주요 단계 전이만 갱신한다.\n"
+                + "- 턴 마지막에 commit 작성, 동일 문서 readback, 동일 SelfRun 신호 답변 출력 순서로 종료한다.\n\n"
+                + requirement.trim();
+    }
+
     static String continuation(String runId) {
         return "[SELF_RUN_CONTINUE " + runId + "]";
     }
@@ -91,5 +119,9 @@ final class SelfRunProtocol {
 
     private static Signal none() {
         return new Signal(Type.NONE, "", "", "", "", "", "");
+    }
+
+    private static boolean safeCode(String value) {
+        return value != null && value.matches("[A-Za-z0-9._:-]{1,80}");
     }
 }

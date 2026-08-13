@@ -51,6 +51,92 @@ final class SelfRunDom {
                 + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'첫 요청 입력 대기');})()";
     }
 
+    /** Stages Drive V1 bootstrap without clicking. */
+    static String sendDriveInitial(String projectUrl, String prompt, String runId) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:bootstrap:" + runId);
+        return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
+                + projectGuard(project) + authGuard() + textHelpers(expected)
+                + "const p2=location.pathname.split('/').filter(Boolean),ci=p2.indexOf('c'),conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';"
+                + "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const present=users.some(t=>t===canonical(expected));"
+                + durableMarkerRead(marker)
+                + "if(conv&&present)return result('CONFIRMED','첫 요청과 conversation 확인',{conversationUrl:location.href});"
+                + "if(conv)return result('EXISTING_CONVERSATION','제출 전 기존 conversation으로 이동했습니다.');"
+                + "if(prior)return result('BOOTSTRAP_SUBMISSION_PENDING','기존 bootstrap 준비 표식 존재');"
+                + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
+                + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
+                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),runId:" + q(runId) + "});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}"
+                + "if(!persisted)return result('MARKER_FAILED','중복 방지 표식을 저장하지 못했습니다.');return result('READY_TO_SUBMIT','첫 요청 제출 준비 완료');}"
+                + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'첫 요청 입력 대기');})()";
+    }
+
+    /** Clicks Drive V1 bootstrap once, after Android durably marks submission started. */
+    static String clickPreparedDriveInitial(String projectUrl, String prompt, String runId) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:bootstrap:" + runId);
+        return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
+                + projectGuard(project) + authGuard() + textHelpers(expected) + durableMarkerRead(marker)
+                + "if(!prior)return result('MARKER_FAILED','bootstrap 제출 준비 표식 없음');"
+                + composer() + "if(!composer)return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','제출 시작 후 입력창 소실');" + composerOps()
+                + "if(!same())return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','제출 시작 후 입력 내용 변경');const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','제출 시작 후 전송 버튼 사용 불가');"
+                + "const markerKey2=" + marker + ";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('BOOTSTRAP_SUBMITTED','첫 요청 1회 클릭');})()";
+    }
+
+    /** Recovery checks only the bootstrap user turn/conversation, never assistant state. */
+    static String checkDriveInitialSubmitted(String projectUrl, String prompt, String runId) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:bootstrap:" + runId);
+        return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
+                + projectGuard(project) + authGuard() + textHelpers(expected)
+                + "const p2=location.pathname.split('/').filter(Boolean),ci=p2.indexOf('c'),conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const present=users.some(t=>t===canonical(expected));"
+                + durableMarkerRead(marker)
+                + "if(conv&&present)return result('CONFIRMED','첫 요청과 conversation 확인',{conversationUrl:location.href});"
+                + "if(conv)return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','정확한 bootstrap 사용자 턴이 없는 conversation');"
+                + "return result('BOOTSTRAP_SUBMITTED',prior?'첫 요청 conversation 확인 대기':'bootstrap marker 소실');})()";
+    }
+
+    /**
+     * Stage a continuation without clicking. The deterministic commit ID is in the actual prompt,
+     * allowing crash recovery to inspect only user messages in the canonical conversation.
+     */
+    static String prepareDriveTurn(String conversationUrl, String prompt, String commitId) {
+        String expected = q(prompt);
+        String markerText = q("SELF_RUN_DRIVE_COMMIT_ID=" + commitId);
+        String marker = q("selfrun-drive:commit:" + commitId);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
+                + "const markerText=" + markerText + ";const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));if(users.some(t=>t.includes(markerText)))return result('CONFIRMED','commit 사용자 턴 확인');"
+                + durableMarkerRead(marker) + "if(prior)return result('SUBMISSION_PENDING','기존 제출 준비 표식 존재');"
+                + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
+                + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
+                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),commitId:" + q(commitId) + "});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','commit 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"
+                + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";
+    }
+
+    /** Clicks at most once, and only after Android has durably stored SUBMISSION_STARTED. */
+    static String clickPreparedDriveTurn(String conversationUrl, String prompt, String commitId) {
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:commit:" + commitId);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
+                + durableMarkerRead(marker)
+                + "if(!prior)return result('MARKER_FAILED','제출 준비 표식 없음');"
+                + composer() + "if(!composer)return result('SUBMISSION_AMBIGUOUS','제출 시작 후 입력창 소실');" + composerOps()
+                + "if(!same())return result('SUBMISSION_AMBIGUOUS','제출 시작 후 입력 내용 변경');const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('SUBMISSION_AMBIGUOUS','제출 시작 후 전송 버튼 사용 불가');"
+                + "const markerKey2=" + marker + ";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('SUBMITTED','continuation 1회 클릭');})()";
+    }
+
+    /** Crash recovery deliberately checks only canonical-conversation user messages. */
+    static String checkDriveTurnSubmitted(String conversationUrl, String commitId) {
+        String markerText = q("SELF_RUN_DRIVE_COMMIT_ID=" + commitId);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard()
+                + "const canonical=s=>String(s??'').replace(/[\\u200B-\\u200D\\uFEFF]/g,'').replace(/\\s+/g,' ').trim();const markerText=" + markerText + ";const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));return users.some(t=>t.includes(markerText))?result('CONFIRMED','commit 사용자 턴 확인'):result('WAIT','commit 사용자 턴 미확인');})()";
+    }
+
     /**
      * Observe only an assistant turn that follows the latest user turn. This mirrors the scheduler's
      * proven turn-order guard and prevents a completed previous assistant message from being reused.

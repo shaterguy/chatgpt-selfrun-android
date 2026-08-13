@@ -11,12 +11,13 @@
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="ChatGPT SelfRun"
+        android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 
+        <activity android:name=".DriveSetupActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunLogsActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunLogMenuActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunDetailActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
@@ -40,7 +41,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Runs a user-started multi-turn ChatGPT SelfRun session in an app-private desktop WebView while the visible app UI remains mobile." />
+                android:value="Runs a user-started Drive-committed ChatGPT SelfRun Drive session while preserving its app-private WebView conversation." />
         </service>
     </application>
 </manifest>

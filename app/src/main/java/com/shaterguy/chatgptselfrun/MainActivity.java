@@ -74,8 +74,8 @@ public final class MainActivity extends Activity {
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         scroll.addView(root);
 
-        root.addView(Ui.title(this, "ChatGPT SelfRun"));
-        root.addView(Ui.body(this, "v0.2.3 · 첫 화면은 작업 대시보드입니다. 입력은 ‘새 작업’을 눌렀을 때만 열립니다."));
+        root.addView(Ui.title(this, "SelfRun Drive"));
+        root.addView(Ui.body(this, "v1.0.0-dev1 · Google Drive 실행턴 문서 commit을 기준으로 다음 턴을 진행합니다."));
 
         root.addView(Ui.section(this, "메뉴"));
         root.addView(Ui.row(this,
@@ -84,8 +84,10 @@ public final class MainActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "로그", v -> startActivity(new Intent(this, SelfRunLogMenuActivity.class))),
                 Ui.button(this, "로그인/세션", v -> startActivity(new Intent(this, LoginActivity.class)))));
+        root.addView(Ui.button(this, "Drive 실행문서 저장 위치", v ->
+                startActivity(new Intent(this, DriveSetupActivity.class))));
 
-        root.addView(Ui.section(this, "현재 SelfRun"));
+        root.addView(Ui.section(this, "현재 SelfRun Drive"));
         currentStatus = Ui.body(this, "");
         root.addView(currentStatus);
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
@@ -101,7 +103,7 @@ public final class MainActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "알림 권한", v -> requestNotificationPermission()),
                 Ui.button(this, "배터리 최적화 제외", v -> requestBatteryExemption())));
-        root.addView(Ui.body(this, "실행 중에는 Foreground Service와 partial WakeLock을 사용합니다. 예약 알람이나 부팅 자동실행은 사용하지 않습니다."));
+        root.addView(Ui.body(this, "Drive 대기와 120초 guard 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
 
         Ui.setContent(this, scroll);
         root.requestFocus();
@@ -128,6 +130,8 @@ public final class MainActivity extends Activity {
                 + "\n모델/추론: " + prefs
                 + "\n턴: " + store.turn()
                 + "\nconversation: " + dash(store.conversationUrl())
+                + "\nDrive 문서: " + dash(store.turnDocumentUrl())
+                + "\n예상 턴 / event seq: " + store.expectedTurn() + " / " + store.lastConsumedEventSeq()
                 + "\n마지막 오류: " + errorSummary());
         boolean paused = store.paused() && !store.userStopped();
         boolean running = store.active() && !store.paused() && !store.userStopped()

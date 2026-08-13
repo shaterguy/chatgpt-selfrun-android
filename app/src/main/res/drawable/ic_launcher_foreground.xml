@@ -17,4 +17,14 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:pathData="M46,40 L71,54 L46,68 Z" />
+    <!-- Distinguishes SelfRun Drive from the legacy SelfRun launcher icon. -->
+    <path
+        android:fillColor="#FF34A853"
+        android:pathData="M70,18 L88,18 L88,36 L70,36 Z" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M75,22 L79,22 C84,22 86,25 86,27 C86,31 83,33 79,33 L75,33 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.5" />
 </vector>

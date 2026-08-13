@@ -7,7 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class SelfRunHistoryStore {
-    private static final String PREFS = "selfrun_history";
+    private static final String PREFS = "selfrun_drive_history";
     private static final String KEY_PRIMARY = "runs";
     private static final String KEY_BACKUP = "runsBackup";
     private static final int MAX_RUNS = 100;
@@ -62,6 +62,24 @@ final class SelfRunHistoryStore {
             item.put("projectUrl", store.projectUrl());
             item.put("requirement", bounded(store.requirement(), 4_000));
             item.put("conversationUrl", store.conversationUrl());
+            item.put("driveProtocolVersion", store.driveProtocolVersion());
+            item.put("driveAccountId", store.runDriveAccountId());
+            item.put("driveRunsBaseFolderId", store.driveRunsBaseFolderId());
+            item.put("runBaseFolderId", store.runBaseFolderId());
+            item.put("jobFolderId", store.jobFolderId());
+            item.put("turnDocumentId", store.turnDocumentId());
+            item.put("turnDocumentUrl", store.turnDocumentUrl());
+            item.put("expectedTurn", store.expectedTurn());
+            item.put("lastConsumedEventSeq", store.lastConsumedEventSeq());
+            item.put("lastSeenDriveVersion", store.lastSeenDriveVersion());
+            item.put("lastSeenModifiedTime", store.lastSeenModifiedTime());
+            item.put("pendingEventSeq", store.pendingEventSeq());
+            item.put("pendingTurn", store.pendingTurn());
+            item.put("pendingCommitId", store.pendingCommitId());
+            item.put("commitDetectedAt", store.commitDetectedAt());
+            item.put("guardDueAt", store.guardDueAt());
+            item.put("submissionState", store.submissionState());
+            item.put("lastSubmittedCommitId", store.lastSubmittedCommitId());
             item.put("phase", store.phase());
             item.put("status", bounded(store.status(), 1_000));
             item.put("role", store.role());

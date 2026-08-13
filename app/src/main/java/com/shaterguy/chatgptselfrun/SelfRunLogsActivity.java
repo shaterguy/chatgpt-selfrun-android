@@ -47,7 +47,7 @@ public final class SelfRunLogsActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         boolean debug = KIND_DEBUG.equals(kind);
-        root.addView(Ui.title(this, debug ? "SelfRun 디버그 로그" : "SelfRun 실행 로그"));
+        root.addView(Ui.title(this, debug ? "SelfRun Drive 디버그 로그" : "SelfRun Drive 실행 로그"));
         root.addView(Ui.body(this, "Run ID: " + (runId.isEmpty() ? "-" : runId)
                 + (debug
                 ? "\n진단용 redacted JSONL입니다. 프롬프트 원문·URL·쿠키·토큰·비밀번호는 기록하지 않습니다."
@@ -84,7 +84,7 @@ public final class SelfRunLogsActivity extends Activity {
         pendingExportText = String.join("\n", lines) + "\n";
         boolean debug = KIND_DEBUG.equals(kind);
         String extension = debug ? ".jsonl" : ".txt";
-        String name = "chatgpt-selfrun-" + (debug ? "debug" : "execution") + "-" + runId + "-"
+        String name = "chatgpt-selfrun-drive-" + (debug ? "debug" : "execution") + "-" + runId + "-"
                 + fileFormatter.format(ZonedDateTime.now(ZoneId.of("Asia/Seoul"))) + extension;
         try {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
@@ -112,9 +112,9 @@ public final class SelfRunLogsActivity extends Activity {
             if (output == null) throw new IllegalStateException("output unavailable");
             output.write(text.getBytes(StandardCharsets.UTF_8));
             output.flush();
-            toast("SelfRun 로그를 저장했습니다.");
+            toast("SelfRun Drive 로그를 저장했습니다.");
         } catch (Exception error) {
-            toast("SelfRun 로그 저장 실패");
+            toast("SelfRun Drive 로그 저장 실패");
         }
     }
 

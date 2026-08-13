@@ -11,54 +11,64 @@ import static org.junit.Assert.assertTrue;
 
 public class SelfRunPauseResumeTest {
     @Test
-    public void userActionPausePreservesCurrentWebView() {
-        assertTrue(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.USER_ACTION));
+    public void preservedPauseStopsDriveGuardWebAndWakeLock() throws Exception {
+        String source = source("SelfRunService.java");
+        String stop = method(source, "private void stopAutomationCallbacks()", "private void pauseWebView()");
+        assertTrue(stop.contains("removeCallbacks(driveRunnable)"));
+        assertTrue(stop.contains("removeCallbacks(webRunnable)"));
+        assertTrue(stop.contains("removeCallbacks(guardRunnable)"));
+        assertTrue(stop.contains("removeCallbacks(driveRetryRunnable)"));
+
+        String pause = method(source, "private void enterPreservedPause", "private void stopAutomationCallbacks()");
+        assertTrue(pause.contains("stopAutomationCallbacks()"));
+        assertTrue(pause.contains("releaseWakeLock()"));
+        assertTrue(pause.contains("pauseWebView()"));
+        assertFalse(pause.contains("cleanupWebView()"));
     }
 
     @Test
-    public void protocolPauseUsesTheSamePreservedWebViewPolicy() {
-        assertTrue(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.PAUSE));
+    public void driveWaitAndGuardDoNotEvaluateAssistantDomOrHoldWakeLock() throws Exception {
+        String source = source("SelfRunService.java");
+        String poll = method(source, "private void scheduleDrivePoll()", "private void scheduleWeb");
+        String guard = method(source, "private void scheduleGuard()", "private void guardElapsed()");
+        assertTrue(poll.contains("releaseWakeLock()"));
+        assertTrue(guard.contains("releaseWakeLock()"));
+        assertFalse(poll.contains("evaluateJavascript"));
+        assertFalse(guard.contains("evaluateJavascript"));
+        assertFalse(source.contains("SelfRunDom.observeAssistant"));
+        assertFalse(source.contains("WAIT_ASSISTANT"));
+        String gate = method(source, "private static boolean isWebAutomationPhase", "private void handleDriveFailure");
+        assertFalse(gate.contains("PHASE_WAIT_DRIVE_COMMIT"));
+        assertFalse(gate.contains("PHASE_DRIVE_COMMIT_GUARD"));
+    }
+
+    @Test public void continuationRecoveryChecksMarkerBeforeTimeoutPause() throws Exception {
+        String source = source("SelfRunService.java");
+        int checkScript = source.indexOf("SelfRunDom.checkDriveTurnSubmitted");
+        int timeout = source.indexOf("SUBMISSION_CONFIRMATION_TIMEOUT");
+        assertTrue(checkScript >= 0);
+        assertTrue(timeout > checkScript);
     }
 
     @Test
-    public void terminalSignalsDoNotUseResumablePausePolicy() {
-        assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.DONE));
-        assertFalse(SelfRunService.preservesWebViewOnPause(SelfRunProtocol.Type.NEXT));
+    public void continuationCrashRecoveryChecksOnlyUserMessageMarker() {
+        String script = SelfRunDom.checkDriveTurnSubmitted(
+                "https://chatgpt.com/g/g-p-demo/c/abc", "SR-1:1:1");
+        assertTrue(script.contains("data-message-author-role=\"user\""));
+        assertTrue(script.contains("SELF_RUN_DRIVE_COMMIT_ID=SR-1:1:1"));
+        assertFalse(script.contains("assistant"));
+        assertFalse(script.contains("send.click"));
     }
 
-    @Test
-    public void preservedPauseInvalidatesPrePauseAutomationBeforeWebViewPause() throws Exception {
-        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
-        int method = text.indexOf("private void enterPreservedPause(String cause, String status)");
-        int nextMethod = text.indexOf("private void pauseCurrentWebView", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
-        int queueClear = body.indexOf("handler.removeCallbacksAndMessages(null);");
-        int generationAdvance = body.indexOf("generation++;");
-        int webViewPause = body.indexOf("pauseCurrentWebView(cause);");
-        assertTrue(queueClear >= 0);
-        assertTrue(generationAdvance >= 0);
-        assertTrue(webViewPause >= 0);
-        assertTrue(queueClear < webViewPause);
-        assertTrue(generationAdvance < webViewPause);
+    private static String source(String file) throws Exception {
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun", file);
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun", file);
+        return Files.readString(path, StandardCharsets.UTF_8);
     }
 
-    @Test
-    public void staleEvaluateGuardRunsBeforeSharedInFlightMutation() throws Exception {
-        Path source = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
-        int method = text.indexOf("private void evaluate(String phase, String script)");
-        int nextMethod = text.indexOf("private void handleResult", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
-        int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
-        int staleGuard = body.indexOf("if (active != webView || activeGeneration != generation) return;", callback);
-        int clearInFlight = body.indexOf("evaluationInFlight = false;", callback);
-        int canRunGuard = body.indexOf("if (!canRun()) return;", callback);
-        assertTrue(callback >= 0);
-        assertTrue(staleGuard > callback);
-        assertTrue(clearInFlight > staleGuard);
-        assertTrue(canRunGuard > clearInFlight);
+    private static String method(String source, String start, String next) {
+        int a = source.indexOf(start), b = source.indexOf(next, a + start.length());
+        assertTrue(a >= 0 && b > a);
+        return source.substring(a, b);
     }
 }

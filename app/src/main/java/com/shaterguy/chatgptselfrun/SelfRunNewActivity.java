@@ -49,7 +49,7 @@ public final class SelfRunNewActivity extends Activity {
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         scroll.addView(root);
 
-        root.addView(Ui.title(this, "새 SelfRun 작업"));
+        root.addView(Ui.title(this, "새 SelfRun Drive 작업"));
         root.addView(Ui.button(this, "작업 목록", v -> finish()));
         root.addView(Ui.body(this, "새 작업은 빈 요구사항에서 시작합니다. 이전 Run의 입력 내용·신호·오류는 이 화면에 불러오지 않습니다."));
 
@@ -82,7 +82,7 @@ public final class SelfRunNewActivity extends Activity {
         root.addView(requirement);
 
         root.addView(Ui.section(this, "시작"));
-        root.addView(Ui.button(this, "SelfRun 시작", v -> startSelfRun()));
+        root.addView(Ui.button(this, "SelfRun Drive 시작", v -> startSelfRun()));
 
         Ui.setContent(this, scroll);
         projectUrl.clearFocus();
@@ -119,8 +119,10 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void startSelfRun() {
-        if (store.active() && !store.paused()) {
-            Toast.makeText(this, "현재 SelfRun이 실행 중입니다. 현재 작업을 먼저 중지하세요.", Toast.LENGTH_LONG).show();
+        if (store.active() && !store.userStopped()
+                && !SelfRunStore.PHASE_DONE.equals(store.phase())
+                && !SelfRunStore.PHASE_IDLE.equals(store.phase())) {
+            Toast.makeText(this, "현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.", Toast.LENGTH_LONG).show();
             return;
         }
         String project = projectUrl.getText().toString().trim();
@@ -133,6 +135,11 @@ public final class SelfRunNewActivity extends Activity {
             Toast.makeText(this, "셀프런 명령을 입력하세요.", Toast.LENGTH_LONG).show();
             return;
         }
+        if (!DriveApiClient.validFileId(store.driveRunsBaseFolderId())
+                || !DriveApiClient.validOpaqueAccountId(store.driveAccountId())) {
+            Toast.makeText(this, "먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
         store.setDefaultProjectUrl(project);
         if (!store.runId().isEmpty()) history.sync(store);
         stopService(new Intent(this, SelfRunService.class));
@@ -141,7 +148,7 @@ public final class SelfRunNewActivity extends Activity {
         store.start(runId, selectedMode, project, request);
         runLog.record(store, "UI_START", "mode=" + selectedMode);
         startRunner();
-        Toast.makeText(this, "SelfRun을 시작했습니다: " + runId, Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "SelfRun Drive를 시작했습니다: " + runId, Toast.LENGTH_LONG).show();
         finish();
     }
 
@@ -153,7 +160,7 @@ public final class SelfRunNewActivity extends Activity {
 
     private static String newRunId() {
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.US);
+        String suffix = UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.US);
         return "SR-" + stamp + "-" + suffix;
     }
 }

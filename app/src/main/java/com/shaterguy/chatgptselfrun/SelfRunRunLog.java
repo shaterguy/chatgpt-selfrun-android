@@ -22,8 +22,8 @@ import java.util.List;
 import java.util.Locale;
 
 final class SelfRunRunLog {
-    private static final String DIR = "selfrun-logs";
-    private static final String PREFIX = "run-";
+    private static final String DIR = "selfrun-drive-logs";
+    private static final String PREFIX = "selfrun-drive-run-";
     private static final String SUFFIX = ".jsonl";
     private static final long MAX_BYTES = 1024L * 1024L;
     private static final int MAX_FILES = 100;
@@ -50,6 +50,7 @@ final class SelfRunRunLog {
             if (suppressNoisyDuplicate(store, safeEvent, safeDetail)) return;
             JSONObject item = new JSONObject();
             item.put("timestamp_kst", OffsetDateTime.now(KST).format(TIME));
+            item.put("client", "selfrun-drive");
             item.put("run_id", safeToken(store.runId()));
             item.put("event", safeEvent);
             item.put("phase", safeToken(store.phase()));
@@ -167,7 +168,8 @@ final class SelfRunRunLog {
     private static boolean isExecutionEvent(String event) {
         return event.startsWith("UI_") || event.startsWith("SERVICE_") || event.startsWith("SIGNAL_")
                 || event.startsWith("RATE_LIMIT") || event.startsWith("WEBVIEW_")
-                || event.startsWith("BOOTSTRAP_") || event.equals("PAUSED") || event.equals("DONE")
+                || event.startsWith("BOOTSTRAP_") || event.startsWith("DRIVE_")
+                || event.equals("PAUSED") || event.equals("DONE")
                 || event.equals("STATE_TRANSITION") || event.equals("PREFERENCE_VERIFIED")
                 || event.equals("TARGET_DRIFT") || event.equals("TARGET_RESTORE")
                 || event.equals("RENDERER_GONE") || event.equals("WEBVIEW_INIT_FAILED");
@@ -204,7 +206,11 @@ final class SelfRunRunLog {
         String value = detail.replace('\n', ' ').replace('\r', ' ').trim();
         String lower = value.toLowerCase(Locale.ROOT);
         if (lower.contains("cookie") || lower.contains("authorization") || lower.contains("password")
-                || lower.contains("token") || lower.contains("prompt") || lower.contains("chatgpt.com")) {
+                || lower.contains("token") || lower.contains("prompt") || lower.contains("chatgpt.com")
+                || lower.contains("drive.google.com") || lower.contains("docs.google.com")
+                || lower.contains("access_token") || lower.contains("refresh_token")
+                || lower.contains("serverauthcode") || lower.contains("bearer ")
+                || lower.contains("oauth")) {
             return "redacted";
         }
         return bounded(value, 240);

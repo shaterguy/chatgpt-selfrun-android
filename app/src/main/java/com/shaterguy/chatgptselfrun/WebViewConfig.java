@@ -13,8 +13,8 @@ final class WebViewConfig {
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         String current = settings.getUserAgentString();
-        if (current != null && !current.contains("ChatGPTSelfRun/0.2.3")) {
-            settings.setUserAgentString(current + " ChatGPTSelfRun/0.2.3");
+        if (current != null && !current.contains("SelfRunDrive/1.0.0-dev1")) {
+            settings.setUserAgentString(current + " SelfRunDrive/1.0.0-dev1");
         }
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);

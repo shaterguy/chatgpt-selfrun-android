@@ -24,7 +24,7 @@ public final class SelfRunDetailActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         scroll.addView(root);
-        root.addView(Ui.title(this, "SelfRun 작업 상세"));
+        root.addView(Ui.title(this, "SelfRun Drive 작업 상세"));
         root.addView(Ui.button(this, "뒤로", v -> finish()));
         if (item == null) {
             root.addView(Ui.body(this, "저장된 작업을 찾을 수 없습니다."));

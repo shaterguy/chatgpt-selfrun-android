@@ -42,7 +42,7 @@ final class HeadlessWebViewHost {
             texture.setDefaultBufferSize(WIDTH, HEIGHT);
             surface = new Surface(texture);
             DisplayManager manager = context.getSystemService(DisplayManager.class);
-            display = manager.createVirtualDisplay("ChatGPTSelfRun", WIDTH, HEIGHT, DENSITY_DPI,
+            display = manager.createVirtualDisplay("SelfRunDrive", WIDTH, HEIGHT, DENSITY_DPI,
                     surface, DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                             | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION);
             if (display == null || display.getDisplay() == null) {

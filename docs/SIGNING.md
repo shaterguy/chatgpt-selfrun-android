@@ -1,5 +1,7 @@
 # SelfRun APK signing identity
 
+> 이 문서의 기존 application ID/update lineage 규칙은 legacy SelfRun 0.2.x에 적용됩니다. SelfRun Drive는 `com.shaterguy.chatgptselfrun.drive`, `1.0.0-dev1`/`1000001`의 독립 계보이며 같은 인증서를 사용해도 legacy 앱의 업데이트가 아닙니다. Drive용 Android OAuth client에는 최종 Drive APK를 실제 서명한 이 인증서의 SHA-1을 별도로 등록해야 합니다.
+
 From `v0.1.0-dev2` onward, sideloaded SelfRun APKs must preserve the following update identity.
 
 - Application ID: `com.shaterguy.chatgptselfrun`

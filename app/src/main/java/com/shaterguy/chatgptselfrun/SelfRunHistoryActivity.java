@@ -36,7 +36,7 @@ public final class SelfRunHistoryActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         scroll.addView(root);
-        root.addView(Ui.title(this, "SelfRun 작업 이력"));
+        root.addView(Ui.title(this, "SelfRun Drive 작업 이력"));
         root.addView(Ui.row(this,
                 Ui.button(this, "뒤로", v -> finish()),
                 Ui.button(this, "새로고침", v -> render())));
@@ -45,7 +45,7 @@ public final class SelfRunHistoryActivity extends Activity {
         JSONArray runs = history.read();
         if (runs.length() == 0) {
             root.addView(Ui.section(this, "작업 없음"));
-            root.addView(Ui.body(this, "아직 저장된 SelfRun 작업이 없습니다."));
+            root.addView(Ui.body(this, "아직 저장된 SelfRun Drive 작업이 없습니다."));
         }
         for (int i = 0; i < runs.length(); i++) {
             JSONObject item = runs.optJSONObject(i);
