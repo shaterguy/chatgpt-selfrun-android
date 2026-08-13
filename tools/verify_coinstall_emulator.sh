@@ -22,6 +22,7 @@ LEGACY_MAIN="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
 DRIVE_MAIN="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
 LEGACY_SERVICE="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunService"
 DRIVE_SERVICE="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunService"
+DRIVE_EXPECTED_VERSION="1.0.0-dev2"
 
 fail() {
   echo "COINSTALL_VERIFY_FAILED: $*" >&2
@@ -188,8 +189,8 @@ assert_launcher "$DRIVE_PACKAGE" "$DRIVE_MAIN"
   || fail "legacy version changed after Drive install"
 [[ "$(package_uid "$LEGACY_PACKAGE")" == "$legacy_uid_before" ]] \
   || fail "legacy UID changed after Drive install"
-[[ "$(package_version "$DRIVE_PACKAGE")" == "1.0.0-dev1" ]] \
-  || fail "unexpected Drive version"
+[[ "$(package_version "$DRIVE_PACKAGE")" == "$DRIVE_EXPECTED_VERSION" ]] \
+  || fail "unexpected Drive version: $(package_version "$DRIVE_PACKAGE")"
 drive_uid="$(package_uid "$DRIVE_PACKAGE")"
 [[ -n "$legacy_uid_before" && -n "$drive_uid" && "$legacy_uid_before" != "$drive_uid" ]] \
   || fail "packages do not have distinct UIDs"
@@ -250,7 +251,7 @@ legacy_version=$legacy_version_before
 legacy_uid=$legacy_uid_before
 legacy_data_dir=$legacy_data_dir
 drive_package=$DRIVE_PACKAGE
-drive_version=1.0.0-dev1
+drive_version=$DRIVE_EXPECTED_VERSION
 drive_uid=$drive_uid
 drive_data_dir=$drive_data_dir
 legacy_webview_hash_preserved=$legacy_webview_hash_after
