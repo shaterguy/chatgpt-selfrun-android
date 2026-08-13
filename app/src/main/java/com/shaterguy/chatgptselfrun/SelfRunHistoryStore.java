@@ -46,6 +46,7 @@ final class SelfRunHistoryStore {
         thread.setDaemon(true);
         return thread;
     });
+    // pendingSnapshots are shared process-wide through this single static map.
     private static final Map<String, JSONObject> PENDING_SNAPSHOTS = new LinkedHashMap<>();
     private static ScheduledFuture<?> scheduledDrain;
     private static long syncRequests;
