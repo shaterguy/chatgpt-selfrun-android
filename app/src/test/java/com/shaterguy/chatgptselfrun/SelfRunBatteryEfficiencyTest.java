@@ -246,13 +246,20 @@ public class SelfRunBatteryEfficiencyTest {
     public void repeatedPersistenceWritesAreGuardedAndPhaseClockResetDoesNotSyncHistory() throws Exception {
         String store = source("SelfRunStore.java");
         String history = source("SelfRunHistoryStore.java");
-        assertTrue(store.contains("if (next.equals(prefs.getString(key, \"\"))) return;"));
-        assertTrue(store.contains("if (value == prefs.getBoolean(key, false)) return;"));
+        assertTrue(store.contains("markNoop()"));
+        assertTrue(store.contains("setPhaseAndStatus"));
+        assertTrue(store.contains("enterPausedState"));
+        assertTrue(store.contains("resumeState"));
+        assertTrue(store.contains("stopByUser"));
         int clock = store.indexOf("void restartPhaseClock()");
         int status = store.indexOf("void setStatus", clock);
         assertTrue(clock >= 0 && status > clock);
         assertFalse(store.substring(clock, status).contains("syncHistory"));
-        assertTrue(history.contains("if (sameSnapshot(previousSnapshot, nextSnapshot)) return true;"));
+        assertTrue(history.contains("sameSnapshot(previousSnapshot, nextSnapshot)"));
+        assertTrue(history.contains("SYNC_DEBOUNCE_MS = 250L"));
+        assertTrue(history.contains("pendingSnapshots"));
+        assertFalse(history.contains(".commit()"));
+        assertTrue(history.contains(".apply()"));
     }
 
     private static String source(String name) throws Exception {
