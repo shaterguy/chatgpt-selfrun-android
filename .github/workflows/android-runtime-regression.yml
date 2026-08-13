@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .ci/dev7-proposal.b64.part* | base64 -d > "$RUNNER_TEMP/dev7-proposal.tar.gz"
+          { head -c 16000 .ci/dev7-proposal.b64.part1; cat .ci/dev7-proposal.b64.part2 .ci/dev7-proposal.b64.part3 .ci/dev7-proposal.b64.part4; } | base64 -d > "$RUNNER_TEMP/dev7-proposal.tar.gz"
           printf '%s  %s\n' '3943d6144f51faab58bfcb269a6c99ca2d7f1a324c2060485dcbae5f63bd5b2f' "$RUNNER_TEMP/dev7-proposal.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/dev7-proposal.tar.gz"
           sha256sum -c .ci/dev7-proposal-sha256.txt
