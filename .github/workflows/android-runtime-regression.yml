@@ -49,14 +49,20 @@ jobs:
             -wipe-data \
             -gpu swiftshader_indirect \
             > "$RUNNER_TEMP/selfrun-emulator.log" 2>&1 &
-          adb wait-for-device
+          boot_completed=""
           for attempt in $(seq 1 120); do
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
-              break
+            if timeout 2 adb get-state >/dev/null 2>&1; then
+              boot_completed="$(timeout 2 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+              if [ "$boot_completed" = "1" ]; then
+                break
+              fi
             fi
             sleep 2
           done
-          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          if [ "$boot_completed" != "1" ]; then
+            tail -n 200 "$RUNNER_TEMP/selfrun-emulator.log" || true
+            exit 1
+          fi
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
@@ -70,5 +76,5 @@ jobs:
         shell: bash
         run: |
           adb devices || true
-          adb shell getprop ro.build.version.sdk || true
+          timeout 2 adb shell getprop ro.build.version.sdk || true
           tail -n 200 "$RUNNER_TEMP/selfrun-emulator.log" || true
