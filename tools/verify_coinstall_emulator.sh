@@ -20,8 +20,6 @@ LEGACY_PACKAGE="com.shaterguy.chatgptselfrun"
 DRIVE_PACKAGE="com.shaterguy.chatgptselfrun.drive"
 LEGACY_MAIN="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
 DRIVE_MAIN="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
-LEGACY_LOGIN="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.LoginActivity"
-DRIVE_LOGIN="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.LoginActivity"
 LEGACY_SERVICE="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunService"
 DRIVE_SERVICE="$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunService"
 
@@ -70,6 +68,43 @@ run_as() {
   "$ADB" shell run-as "$package" "$@"
 }
 
+tap_text() {
+  local wanted="$1" xml coords attempt
+  for attempt in {1..10}; do
+    "$ADB" shell uiautomator dump /sdcard/selfrun-window.xml >/dev/null 2>&1 || true
+    xml="$("$ADB" exec-out cat /sdcard/selfrun-window.xml 2>/dev/null || true)"
+    coords="$(python3 -c '
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+wanted = sys.argv[1]
+root = ET.fromstring(sys.stdin.read())
+for node in root.iter("node"):
+    if node.attrib.get("text") != wanted:
+        continue
+    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.attrib.get("bounds", ""))
+    if match:
+        left, top, right, bottom = map(int, match.groups())
+        print((left + right) // 2, (top + bottom) // 2)
+        break
+' "$wanted" <<<"$xml" 2>/dev/null || true)"
+    if [[ -n "$coords" ]]; then
+      "$ADB" shell input tap $coords
+      sleep 1
+      return
+    fi
+    sleep 1
+  done
+  fail "UI text not found: $wanted"
+}
+
+launch_and_tap() {
+  local main="$1" text="$2"
+  "$ADB" shell am start -W -n "$main" >/dev/null
+  tap_text "$text"
+}
+
 write_sentinel() {
   local package="$1" value="$2"
   printf '%s' "$value" | "$ADB" shell "run-as $package sh -c 'umask 077; mkdir -p files; cat > files/coinstall-sentinel'"
@@ -89,9 +124,8 @@ write_paused_state() {
 }
 
 start_own_component() {
-  local package="$1" main="$2" service="$3" action="$4"
-  run_as "$package" am start -W -n "$main" >/dev/null
-  run_as "$package" am start-foreground-service -n "$service" -a "$action" >/dev/null
+  local main="$1"
+  launch_and_tap "$main" "재개"
 }
 
 assert_service_running() {
@@ -103,7 +137,7 @@ assert_service_running() {
 
 assert_cross_start_blocked() {
   local caller="$1" target_service="$2" action="$3" output
-  output="$(run_as "$caller" am startservice -n "$target_service" -a "$action" 2>&1 || true)"
+  output="$("$ADB" shell am startservice -n "$target_service" -a "$action" 2>&1 || true)"
   if ! grep -Eqi 'permission denial|not exported|not allowed|error' <<<"$output"; then
     fail "$caller unexpectedly started $target_service: $output"
   fi
@@ -121,7 +155,7 @@ legacy_version_before="$(package_version "$LEGACY_PACKAGE")"
 legacy_uid_before="$(package_uid "$LEGACY_PACKAGE")"
 write_sentinel "$LEGACY_PACKAGE" "legacy-private-data"
 
-run_as "$LEGACY_PACKAGE" am start -W -n "$LEGACY_LOGIN" >/dev/null
+launch_and_tap "$LEGACY_MAIN" "로그인/세션"
 sleep 4
 "$ADB" shell am force-stop "$LEGACY_PACKAGE"
 run_as "$LEGACY_PACKAGE" test -d app_webview || fail "legacy WebView store not created"
@@ -144,7 +178,7 @@ drive_uid="$(package_uid "$DRIVE_PACKAGE")"
   || fail "packages do not have distinct UIDs"
 assert_sentinel "$LEGACY_PACKAGE" "legacy-private-data"
 
-run_as "$DRIVE_PACKAGE" am start -W -n "$DRIVE_LOGIN" >/dev/null
+launch_and_tap "$DRIVE_MAIN" "로그인/세션"
 sleep 4
 "$ADB" shell am force-stop "$DRIVE_PACKAGE"
 run_as "$DRIVE_PACKAGE" test -d app_webview || fail "Drive WebView store not created"
@@ -162,8 +196,8 @@ write_sentinel "$DRIVE_PACKAGE" "drive-private-data"
 "$ADB" shell am force-stop "$DRIVE_PACKAGE"
 write_paused_state "$LEGACY_PACKAGE" selfrun CI-LEGACY-PAUSED "SelfRun co-install check"
 write_paused_state "$DRIVE_PACKAGE" selfrun_drive CI-DRIVE-PAUSED "SelfRun Drive co-install check"
-start_own_component "$LEGACY_PACKAGE" "$LEGACY_MAIN" "$LEGACY_SERVICE" "$LEGACY_PACKAGE.RUN"
-start_own_component "$DRIVE_PACKAGE" "$DRIVE_MAIN" "$DRIVE_SERVICE" "$DRIVE_PACKAGE.RUN"
+start_own_component "$LEGACY_MAIN"
+start_own_component "$DRIVE_MAIN"
 sleep 3
 assert_service_running "$LEGACY_PACKAGE"
 assert_service_running "$DRIVE_PACKAGE"
