@@ -48,12 +48,61 @@ def harden(root: Path) -> None:
         "long response pass condition",
     )
 
-    # Make process recovery exercise a critical snapshot immediately before the external ADB kill.
+    # Keep the process-boundary probe source-compatible with exact dev5 and dev6.
+    # Persist a resumable PAUSED snapshot through public/common store methods, then allow
+    # the normal dev6 debounce window to drain before the host issues the external force-stop.
     replace_once(
         activity,
         'JSONObject result = baseResult("process_prepare");',
-        'store.enterPausedState("AC06 critical process snapshot");\n            JSONObject result = baseResult("process_prepare");',
-        "process critical snapshot",
+        '''store.setPaused(true);
+            store.setPhase(SelfRunStore.PHASE_PAUSED);
+            store.setStatus("AC06 process recovery snapshot");
+            store.syncHistory();
+            handler.postDelayed(() -> writeProcessPrepareResult(), 500L);
+            return;''',
+        "process recovery snapshot",
+    )
+
+    replace_once(
+        activity,
+        '''            put(result, "expectedRunId", store.runId());
+            put(result, "expectedMode", store.mode());
+            put(result, "expectedConversation", store.conversationUrl());
+            put(result, "expectedPhase", store.phase());
+            put(result, "expectedRole", store.role());
+            put(result, "expectedPendingModel", store.pendingModel());
+            put(result, "expectedPendingReasoning", store.pendingReasoning());
+            put(result, "expectedLastSignal", store.lastSignal());
+            put(result, "expectedAssistantBaseline", store.assistantBaselineKey());
+            put(result, "expectedLastAssistant", store.lastAssistantKey());
+            put(result, "expectedTurn", store.turn());
+            put(result, "expectedActive", store.active());
+            put(result, "expectedPaused", store.paused());
+            writeResult("process_prepare", result);
+        }, 3_000L);''',
+        '''        }, 3_000L);
+    }
+
+    private void writeProcessPrepareResult() {
+        JSONObject result = baseResult("process_prepare");
+        put(result, "pass", hasObserverAttached(readLogs()) && store.paused()
+                && SelfRunStore.PHASE_PAUSED.equals(store.phase()));
+        put(result, "expectedRunId", store.runId());
+        put(result, "expectedMode", store.mode());
+        put(result, "expectedConversation", store.conversationUrl());
+        put(result, "expectedPhase", store.phase());
+        put(result, "expectedRole", store.role());
+        put(result, "expectedPendingModel", store.pendingModel());
+        put(result, "expectedPendingReasoning", store.pendingReasoning());
+        put(result, "expectedLastSignal", store.lastSignal());
+        put(result, "expectedAssistantBaseline", store.assistantBaselineKey());
+        put(result, "expectedLastAssistant", store.lastAssistantKey());
+        put(result, "expectedTurn", store.turn());
+        put(result, "expectedActive", store.active());
+        put(result, "expectedPaused", store.paused());
+        writeResult("process_prepare", result);
+    }''',
+        "process prepare result extraction",
     )
 
 
