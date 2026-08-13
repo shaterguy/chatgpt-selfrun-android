@@ -26,31 +26,35 @@ final class SelfRunHistoryStore {
         final long syncRequests;
         final long coalescedRequests;
         final long equivalentSnapshotsSkipped;
+        final long staleSnapshotsSkipped;
         final long physicalWrites;
 
-        Metrics(long syncRequests, long coalescedRequests, long equivalentSnapshotsSkipped, long physicalWrites) {
+        Metrics(long syncRequests, long coalescedRequests, long equivalentSnapshotsSkipped,
+                long staleSnapshotsSkipped, long physicalWrites) {
             this.syncRequests = syncRequests;
             this.coalescedRequests = coalescedRequests;
             this.equivalentSnapshotsSkipped = equivalentSnapshotsSkipped;
+            this.staleSnapshotsSkipped = staleSnapshotsSkipped;
             this.physicalWrites = physicalWrites;
         }
     }
 
+    private static final Object PENDING_LOCK = new Object();
     private static final Object WRITE_LOCK = new Object();
     private static final ScheduledExecutorService WRITER = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "SelfRunHistoryWriter");
         thread.setDaemon(true);
         return thread;
     });
+    private static final Map<String, JSONObject> PENDING_SNAPSHOTS = new LinkedHashMap<>();
+    private static ScheduledFuture<?> scheduledDrain;
+    private static long syncRequests;
+    private static long coalescedRequests;
+    private static long equivalentSnapshotsSkipped;
+    private static long staleSnapshotsSkipped;
+    private static long physicalWrites;
 
     private final SharedPreferences prefs;
-    private final Object pendingLock = new Object();
-    private final Map<String, JSONObject> pendingSnapshots = new LinkedHashMap<>();
-    private ScheduledFuture<?> scheduledDrain;
-    private long syncRequests;
-    private long coalescedRequests;
-    private long equivalentSnapshotsSkipped;
-    private long physicalWrites;
 
     SelfRunHistoryStore(Context context) {
         prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -65,8 +69,9 @@ final class SelfRunHistoryStore {
     }
 
     Metrics metrics() {
-        synchronized (pendingLock) {
-            return new Metrics(syncRequests, coalescedRequests, equivalentSnapshotsSkipped, physicalWrites);
+        synchronized (PENDING_LOCK) {
+            return new Metrics(syncRequests, coalescedRequests, equivalentSnapshotsSkipped,
+                    staleSnapshotsSkipped, physicalWrites);
         }
     }
 
@@ -74,14 +79,14 @@ final class SelfRunHistoryStore {
         if (store == null || store.runId().isEmpty()) return true;
         JSONObject nextSnapshot = snapshot(store);
         String runId = store.runId();
-        synchronized (pendingLock) {
+        synchronized (PENDING_LOCK) {
             syncRequests = increment(syncRequests);
-            JSONObject pending = pendingSnapshots.get(runId);
+            JSONObject pending = PENDING_SNAPSHOTS.get(runId);
             if (sameSnapshot(pending, nextSnapshot)) {
                 equivalentSnapshotsSkipped = increment(equivalentSnapshotsSkipped);
                 return true;
             }
-            pendingSnapshots.put(runId, nextSnapshot);
+            PENDING_SNAPSHOTS.put(runId, nextSnapshot);
             if (scheduledDrain != null && !scheduledDrain.isDone()) {
                 coalescedRequests = increment(coalescedRequests);
                 if (!critical) return true;
@@ -96,9 +101,9 @@ final class SelfRunHistoryStore {
 
     private void drainPending() {
         List<JSONObject> batch = new ArrayList<>();
-        synchronized (pendingLock) {
-            batch.addAll(pendingSnapshots.values());
-            pendingSnapshots.clear();
+        synchronized (PENDING_LOCK) {
+            batch.addAll(PENDING_SNAPSHOTS.values());
+            PENDING_SNAPSHOTS.clear();
             scheduledDrain = null;
         }
         for (JSONObject snapshot : batch) writeSnapshot(snapshot);
@@ -111,8 +116,14 @@ final class SelfRunHistoryStore {
             String runId = nextSnapshot.optString("runId");
             JSONObject previousSnapshot = find(current, runId);
             if (sameSnapshot(previousSnapshot, nextSnapshot)) {
-                synchronized (pendingLock) {
+                synchronized (PENDING_LOCK) {
                     equivalentSnapshotsSkipped = increment(equivalentSnapshotsSkipped);
+                }
+                return;
+            }
+            if (isOlderSnapshot(previousSnapshot, nextSnapshot)) {
+                synchronized (PENDING_LOCK) {
+                    staleSnapshotsSkipped = increment(staleSnapshotsSkipped);
                 }
                 return;
             }
@@ -126,7 +137,7 @@ final class SelfRunHistoryStore {
             }
             String previous = prefs.getString(KEY_PRIMARY, "[]");
             prefs.edit().putString(KEY_BACKUP, previous).putString(KEY_PRIMARY, next.toString()).apply();
-            synchronized (pendingLock) {
+            synchronized (PENDING_LOCK) {
                 physicalWrites = increment(physicalWrites);
             }
         }
@@ -168,6 +179,11 @@ final class SelfRunHistoryStore {
         if (previous.optBoolean("paused") != next.optBoolean("paused")) return false;
         if (previous.optBoolean("userStopped") != next.optBoolean("userStopped")) return false;
         return previous.optBoolean("terminal") == next.optBoolean("terminal");
+    }
+
+    static boolean isOlderSnapshot(JSONObject previous, JSONObject next) {
+        if (previous == null || next == null) return false;
+        return previous.optLong("updatedAt", 0L) > next.optLong("updatedAt", 0L);
     }
 
     private static JSONObject snapshot(SelfRunStore store) {
