@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import static org.junit.Assert.*;
 
@@ -118,7 +119,12 @@ public class DriveVariantPolicyTest {
         assertTrue(store.contains("void resumeTerminalWithContinuation()"));
         assertTrue(store.contains(".putString(\"phase\", PHASE_SEND_CONTINUE)"));
         assertTrue(store.contains("terminalSideEffectPending"));
+        assertTrue(store.contains("terminalSideEffectRunId"));
+        assertTrue(store.contains("terminalSideEffectCommitId"));
+        assertTrue(store.contains("terminalSideEffectOwnedBy"));
         assertTrue(service.contains("replayTerminalSideEffect()"));
+        assertTrue(service.contains("expectedRunId.equals(store.runId())"));
+        assertTrue(service.contains("expectedPhase.equals(store.phase())"));
         assertTrue(service.contains("webView.onResume()"));
     }
 
@@ -151,9 +157,9 @@ public class DriveVariantPolicyTest {
     }
 
     private static String read(String rootPath, String modulePath) throws Exception {
-        Path path = Path.of(rootPath);
-        if (!Files.exists(path)) path = Path.of(modulePath);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        Path path = Paths.get(rootPath);
+        if (!Files.exists(path)) path = Paths.get(modulePath);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
     private static int occurrences(String value, String needle) {

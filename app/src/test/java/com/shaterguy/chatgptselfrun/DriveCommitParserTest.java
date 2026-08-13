@@ -53,10 +53,10 @@ public class DriveCommitParserTest {
     }
 
     @Test public void repeatedUnclosedMarkersAreBoundedAndRejected() {
-        String commits = "[SELF_RUN_DRIVE_COMMIT_V1]\n".repeat(129);
+        String commits = repeat("[SELF_RUN_DRIVE_COMMIT_V1]\n", 129);
         assertEquals(DriveCommitParser.Status.MALFORMED,
                 DriveCommitParser.latest(commits, JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
-        String bounds = "[SELF_RUN_DRIVE_BOUND_V1]\n".repeat(129);
+        String bounds = repeat("[SELF_RUN_DRIVE_BOUND_V1]\n", 129);
         assertFalse(DriveCommitParser.hasSessionBound(bounds, JOB, 1));
     }
 
@@ -133,6 +133,12 @@ public class DriveCommitParserTest {
     private static void assertMalformed(String value) {
         assertEquals(DriveCommitParser.Status.MALFORMED,
                 DriveCommitParser.latest(value, JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder output = new StringBuilder(value.length() * count);
+        for (int i = 0; i < count; i++) output.append(value);
+        return output.toString();
     }
 
     private static String bound(int turn) {

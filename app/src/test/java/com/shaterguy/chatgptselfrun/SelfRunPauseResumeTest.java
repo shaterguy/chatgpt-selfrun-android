@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -63,9 +64,9 @@ public class SelfRunPauseResumeTest {
     }
 
     private static String source(String file) throws Exception {
-        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun", file);
-        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun", file);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun", file);
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun", file);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
     private static String method(String source, String start, String next) {

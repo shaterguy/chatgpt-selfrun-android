@@ -202,7 +202,7 @@ final class SelfRunRunLog {
     }
 
     private static String sanitize(String detail) {
-        if (detail == null || detail.isBlank()) return "";
+        if (detail == null || detail.trim().isEmpty()) return "";
         String value = detail.replace('\n', ' ').replace('\r', ' ').trim();
         String lower = value.toLowerCase(Locale.ROOT);
         if (lower.contains("cookie") || lower.contains("authorization") || lower.contains("password")

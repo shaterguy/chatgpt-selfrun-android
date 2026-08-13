@@ -90,7 +90,7 @@ public final class SelfRunHistoryActivity extends Activity {
     }
 
     private static String preview(String text) {
-        if (text == null || text.isBlank()) return "-";
+        if (text == null || text.trim().isEmpty()) return "-";
         String oneLine = text.replace('\n', ' ').replace('\r', ' ').trim();
         return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 120) + "…";
     }

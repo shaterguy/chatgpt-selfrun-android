@@ -88,6 +88,7 @@ final class SelfRunStore {
                 .putString("bootstrapSubmissionState", BOOTSTRAP_NOT_STARTED)
                 .putBoolean("sessionBound", false).putString("pausedFromPhase", "")
                 .putBoolean("terminalSideEffectPending", false).putString("terminalSideEffectType", "")
+                .putString("terminalSideEffectRunId", "").putString("terminalSideEffectCommitId", "")
                 .putBoolean("resumeNeedsContinuation", false).putBoolean("active", true)
                 .putBoolean("paused", false).putBoolean("userStopped", false));
         syncHistory();
@@ -181,6 +182,8 @@ final class SelfRunStore {
     boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }
     boolean terminalSideEffectPending() { return prefs.getBoolean("terminalSideEffectPending", false); }
     String terminalSideEffectType() { return get("terminalSideEffectType"); }
+    String terminalSideEffectRunId() { return get("terminalSideEffectRunId"); }
+    String terminalSideEffectCommitId() { return get("terminalSideEffectCommitId"); }
 
     void setDefaultProjectUrl(String value) { put("defaultProjectUrl", value); }
     void setPhase(String value) { commitOrThrow(prefs.edit().putString("phase", safe(value)).putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory(); }
@@ -298,7 +301,9 @@ final class SelfRunStore {
             default -> throw new IllegalArgumentException("terminal signal required");
         }
         editor.putBoolean("terminalSideEffectPending", true)
-                .putString("terminalSideEffectType", commit.signal.type.name());
+                .putString("terminalSideEffectType", commit.signal.type.name())
+                .putString("terminalSideEffectRunId", runId())
+                .putString("terminalSideEffectCommitId", commit.id());
         commitOrThrow(editor);
         syncHistory();
     }
@@ -318,8 +323,24 @@ final class SelfRunStore {
         syncHistory();
     }
 
-    void acknowledgeTerminalSideEffect() {
-        commitOrThrow(prefs.edit().putBoolean("terminalSideEffectPending", false));
+    boolean terminalSideEffectOwnedBy(String ownerRunId, String commitId, String type) {
+        synchronized (RUN_STATE_LOCK) {
+            return terminalSideEffectPending() && runId().equals(safe(ownerRunId))
+                    && terminalSideEffectRunId().equals(safe(ownerRunId))
+                    && terminalSideEffectCommitId().equals(safe(commitId))
+                    && terminalSideEffectType().equals(safe(type));
+        }
+    }
+
+    boolean acknowledgeTerminalSideEffect(String ownerRunId, String commitId, String type) {
+        synchronized (RUN_STATE_LOCK) {
+            if (!terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return false;
+            commitOrThrow(prefs.edit().putBoolean("terminalSideEffectPending", false)
+                    .putString("terminalSideEffectType", "")
+                    .putString("terminalSideEffectRunId", "")
+                    .putString("terminalSideEffectCommitId", ""));
+            return true;
+        }
     }
 
     void enterPause(String priorPhase, boolean needsContinuation) {

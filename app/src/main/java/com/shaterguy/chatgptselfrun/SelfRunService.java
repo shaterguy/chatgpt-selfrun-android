@@ -147,24 +147,33 @@ public final class SelfRunService extends Service {
     private void authorizeAndRunDrive() {
         if (!canRun() || !drivePhase(store.phase()) || driveInFlight || authorizationInFlight) return;
         final int epoch = automationEpoch;
+        final String requestedRunId = store.runId();
+        final String requestedPhase = store.phase();
         authorizationInFlight = true;
         DriveAuthorization.requestSilently(this, new DriveAuthorization.Callback() {
             @Override public void onAuthorized(AuthorizationResult result) {
                 authorizationInFlight = false;
-                if (!canRun() || epoch != automationEpoch || !drivePhase(store.phase())) return;
+                if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())
+                        || !requestedPhase.equals(store.phase()) || !drivePhase(store.phase())) return;
                 accessToken = DriveAuthorization.accessToken(result);
-                if (accessToken.isEmpty()) { pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "Drive 액세스 토큰을 얻지 못했습니다."); return; }
+                if (accessToken.isEmpty()) {
+                    pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "Drive 액세스 토큰을 얻지 못했습니다.",
+                            epoch, requestedRunId, requestedPhase);
+                    return;
+                }
                 executeDriveStep(epoch);
             }
             @Override public void onResolutionRequired(PendingIntent ignored) {
                 authorizationInFlight = false;
-                if (!canRun() || epoch != automationEpoch) return;
-                pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "앱 설정에서 Drive 저장 위치를 다시 연결하세요.");
+                if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())) return;
+                pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "앱 설정에서 Drive 저장 위치를 다시 연결하세요.",
+                        epoch, requestedRunId, requestedPhase);
             }
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
-                if (!canRun() || epoch != automationEpoch) return;
-                pauseError("DRIVE_ACCOUNT_CHECK_FAILED", "Drive 계정 확인에 실패했습니다.");
+                if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())) return;
+                pauseError("DRIVE_ACCOUNT_CHECK_FAILED", "Drive 계정 확인에 실패했습니다.",
+                        epoch, requestedRunId, requestedPhase);
             }
         });
     }
@@ -488,55 +497,77 @@ public final class SelfRunService extends Service {
     }
 
     private void handleTerminal(DriveCommitParser.Commit commit) {
+        String ownerRunId = store.runId();
+        String commitId = commit.id();
         store.consumeTerminal(commit);
-        handler.post(() -> applyTerminalSideEffects(commit));
+        handler.post(() -> applyTerminalSideEffects(commit, ownerRunId, commitId));
     }
 
     private void replayTerminalSideEffect() {
         startForegroundCompat();
+        String ownerRunId = store.terminalSideEffectRunId();
+        String commitId = store.terminalSideEffectCommitId();
         String type = store.terminalSideEffectType();
         handler.post(() -> {
-            switch (type) {
-                case "DONE" -> finishDoneSideEffect();
-                case "PAUSE" -> finishPersistedTerminalPause("DRIVE_PAUSE", false);
-                case "USER_ACTION" -> finishPersistedTerminalPause("DRIVE_USER_ACTION", true);
-                case "ERROR" -> finishPersistedTerminalPause("DRIVE_RUN_ERROR", true);
-                default -> {
-                    store.setLastError("TERMINAL_SIDE_EFFECT_INVALID", "terminal 후속 상태가 손상되었습니다.");
-                    store.acknowledgeTerminalSideEffect();
-                    stopRuntime();
+            synchronized (automationStateLock) {
+                synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                    if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
+                    switch (type) {
+                        case "DONE" -> finishDoneSideEffect(ownerRunId, commitId, type);
+                        case "PAUSE" -> finishPersistedTerminalPause(
+                                "DRIVE_PAUSE", false, ownerRunId, commitId, type);
+                        case "USER_ACTION" -> finishPersistedTerminalPause(
+                                "DRIVE_USER_ACTION", true, ownerRunId, commitId, type);
+                        case "ERROR" -> finishPersistedTerminalPause(
+                                "DRIVE_RUN_ERROR", true, ownerRunId, commitId, type);
+                        default -> {
+                            // Corrupt/unowned terminal work never mutates or stops a newer run.
+                            return;
+                        }
+                    }
                 }
             }
         });
     }
 
-    private void applyTerminalSideEffects(DriveCommitParser.Commit commit) {
-        switch (commit.signal.type) {
-            case DONE -> {
-                finishDoneSideEffect();
+    private void applyTerminalSideEffects(DriveCommitParser.Commit commit, String ownerRunId,
+                                          String commitId) {
+        String type = commit.signal.type.name();
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
+                switch (commit.signal.type) {
+                    case DONE -> finishDoneSideEffect(ownerRunId, commitId, type);
+                    case PAUSE -> finishPersistedTerminalPause(
+                            "DRIVE_PAUSE", false, ownerRunId, commitId, type);
+                    case USER_ACTION -> finishPersistedTerminalPause(
+                            "DRIVE_USER_ACTION", true, ownerRunId, commitId, type);
+                    case ERROR -> finishPersistedTerminalPause(
+                            "DRIVE_RUN_ERROR", true, ownerRunId, commitId, type);
+                    default -> { return; }
+                }
             }
-            case PAUSE -> finishPersistedTerminalPause("DRIVE_PAUSE", false);
-            case USER_ACTION -> finishPersistedTerminalPause("DRIVE_USER_ACTION", true);
-            case ERROR -> finishPersistedTerminalPause("DRIVE_RUN_ERROR", true);
-            default -> pauseError("DRIVE_COMMIT_INVALID", "terminal 처리 불가");
         }
     }
 
-    private void finishDoneSideEffect() {
+    private void finishDoneSideEffect(String ownerRunId, String commitId, String type) {
+        if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
         runLog.record(store, "TERMINAL", "done_commit");
-        NotificationHelper.notifyUser(this, "완료", store.runId());
-        store.acknowledgeTerminalSideEffect();
+        NotificationHelper.notifyUser(this, "완료", ownerRunId);
+        if (!store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type)) return;
         stopRuntime();
     }
 
-    private void finishPersistedTerminalPause(String cause, boolean notify) {
+    private void finishPersistedTerminalPause(String cause, boolean notify, String ownerRunId,
+                                              String commitId, String type) {
+        if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
         stopAutomationCallbacks();
         releaseWakeLock();
         pauseWebView();
         runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
         startForegroundCompat();
         if (notify) NotificationHelper.notifyUser(this, "확인 필요", store.status());
-        store.acknowledgeTerminalSideEffect();
+        store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type);
     }
 
     private void scheduleGuard() {
@@ -867,17 +898,28 @@ public final class SelfRunService extends Service {
 
     private void pauseError(String code, String message) {
         int epoch = automationEpoch;
-        pauseError(code, message, epoch);
+        pauseError(code, message, epoch, store.runId(), store.phase());
     }
 
     private void pauseError(String code, String message, int expectedEpoch) {
+        pauseError(code, message, expectedEpoch, driveOperationRunId, store.phase());
+    }
+
+    private void pauseError(String code, String message, int expectedEpoch,
+                            String expectedRunId, String expectedPhase) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post(() -> pauseError(code, message, expectedEpoch));
+            handler.post(() -> pauseError(code, message, expectedEpoch, expectedRunId, expectedPhase));
             return;
         }
-        if (expectedEpoch != automationEpoch || !canRun()) return;
-        store.setLastError(code, message); enterPreservedPause(code, code + " · " + message, false);
-        NotificationHelper.notifyUser(this, "확인 필요", store.status());
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                if (expectedEpoch != automationEpoch || !expectedRunId.equals(store.runId())
+                        || !expectedPhase.equals(store.phase()) || !canRun()) return;
+                store.setLastError(code, message);
+                enterPreservedPause(code, code + " · " + message, false);
+                NotificationHelper.notifyUser(this, "확인 필요", store.status());
+            }
+        }
     }
 
     private void pauseFromUi() {
@@ -961,9 +1003,39 @@ public final class SelfRunService extends Service {
                 && System.currentTimeMillis() - snapshot.bootstrapSubmittedAt >= SESSION_BIND_TIMEOUT_MS;
     }
 
-    private record DriveStateSnapshot(String phase, String runId, String baseFolderId,
-                                      String jobFolderId, String turnDocumentId, String creationStage,
-                                      int expectedTurn, long lastConsumedEventSeq, String mode,
-                                      boolean sessionBound, String lastSeenVersion,
-                                      String lastSeenModifiedTime, long bootstrapSubmittedAt) {}
+    private static final class DriveStateSnapshot {
+        final String phase;
+        final String runId;
+        final String baseFolderId;
+        final String jobFolderId;
+        final String turnDocumentId;
+        final String creationStage;
+        final int expectedTurn;
+        final long lastConsumedEventSeq;
+        final String mode;
+        final boolean sessionBound;
+        final String lastSeenVersion;
+        final String lastSeenModifiedTime;
+        final long bootstrapSubmittedAt;
+
+        DriveStateSnapshot(String phase, String runId, String baseFolderId, String jobFolderId,
+                           String turnDocumentId, String creationStage, int expectedTurn,
+                           long lastConsumedEventSeq, String mode, boolean sessionBound,
+                           String lastSeenVersion, String lastSeenModifiedTime,
+                           long bootstrapSubmittedAt) {
+            this.phase = phase;
+            this.runId = runId;
+            this.baseFolderId = baseFolderId;
+            this.jobFolderId = jobFolderId;
+            this.turnDocumentId = turnDocumentId;
+            this.creationStage = creationStage;
+            this.expectedTurn = expectedTurn;
+            this.lastConsumedEventSeq = lastConsumedEventSeq;
+            this.mode = mode;
+            this.sessionBound = sessionBound;
+            this.lastSeenVersion = lastSeenVersion;
+            this.lastSeenModifiedTime = lastSeenModifiedTime;
+            this.bootstrapSubmittedAt = bootstrapSubmittedAt;
+        }
+    }
 }

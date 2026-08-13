@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
 
 import static org.junit.Assert.*;
 
@@ -44,12 +45,13 @@ public class DriveInitializationPolicyTest {
     }
 
     @Test public void pickerNormalizationRequiresExactlyOneOpaqueId() {
-        assertEquals(List.of("runsFolder_12345678"),
+        assertEquals(Collections.singletonList("runsFolder_12345678"),
                 DriveAuthorization.normalizePickedIds("runsFolder_12345678"));
-        assertEquals(List.of("runsFolder_12345678"),
+        assertEquals(Collections.singletonList("runsFolder_12345678"),
                 DriveAuthorization.normalizePickedIds(new String[]{"runsFolder_12345678"}));
-        assertEquals(List.of("runsFolder_12345678"),
-                DriveAuthorization.normalizePickedIds(new ArrayList<>(List.of("runsFolder_12345678"))));
+        assertEquals(Collections.singletonList("runsFolder_12345678"),
+                DriveAuthorization.normalizePickedIds(new ArrayList<>(
+                        Collections.singletonList("runsFolder_12345678"))));
         assertTrue(DriveAuthorization.normalizePickedIds("id_one_123456,id_two_123456").isEmpty());
         assertEquals(2, DriveAuthorization.normalizePickedIds(
                 new String[]{"id_one_123456", "id_two_123456"}).size());
