@@ -15,8 +15,8 @@ LOG=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRunLog.java
 PROTOCOL=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
-grep -Fq 'versionCode 1000001' "$BUILD"
-grep -Fq "versionName '1.0.0-dev1'" "$BUILD"
+grep -Fq 'versionCode 1000002' "$BUILD"
+grep -Fq "versionName '1.0.0-dev2'" "$BUILD"
 grep -Fq "implementation 'com.google.android.gms:play-services-auth:21.6.0'" "$BUILD"
 ! grep -Fq "applicationId 'com.shaterguy.chatgptselfrun'" "$BUILD"
 grep -Fq '<string name="app_name">SelfRun Drive</string>' app/src/main/res/values/strings.xml
