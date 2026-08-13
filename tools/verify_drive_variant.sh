@@ -11,8 +11,11 @@ ACTIVITY=$SRC/SelfRunNewActivity.java
 API=$SRC/DriveApiClient.java
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
-grep -Fq 'versionCode 1000003' "$BUILD"
-grep -Fq "versionName '1.0.0-dev3'" "$BUILD"
+grep -Fq 'selfRunDriveVersionCode = 1000004' "$BUILD"
+grep -Fq "selfRunDriveVersionName = '1.0.0'" "$BUILD"
+grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
+grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"
+grep -Fq 'addTextChangedListener' "$ACTIVITY"
 grep -Fq 'RUN_SUFFIX_LENGTH = 6' "$ACTIVITY"
 grep -Fq 'TimeZone.getTimeZone("Asia/Seoul")' "$ACTIVITY"
 ! grep -Fq 'UUID.randomUUID' "$ACTIVITY"
@@ -43,4 +46,4 @@ grep -Fq '.put("selfrun_kind", kind)' "$API"
 ! grep -Fq '.put("protocol_version"' "$API"
 ! grep -Fq '.put("client_id"' "$API"
 ! grep -Fq '.put("created_by"' "$API"
-echo 'SelfRun Drive dev3 simple signal policy checks passed.'
+echo 'SelfRun Drive v1.0.0 policy checks passed.'

@@ -1,73 +1,48 @@
 # SelfRun orchestration: legacy WebView + Drive V1
 
-이 문서는 Drive V1 차이 규격이다. SelfRun의 작업 해석, HANDOFF, NEXT/DONE/PAUSE/USER_ACTION_REQUIRED 의미와 역할 전환은 기존 공통 SelfRun 운영 규칙을 그대로 사용한다. Drive 버전용 SelfRun 규칙 전체를 복제하지 않는다.
+이 문서는 Drive V1의 실행 차이만 규정합니다. 작업 해석, HANDOFF, NEXT/DONE/PAUSE/USER_ACTION_REQUIRED 의미와 역할 전환은 공통 `SELF_RUN_ORCHESTRATION_SKILL`을 따릅니다.
 
 ## Drive V1 판별
 
-ChatGPT에 전달되는 bootstrap에서 다음 두 정보만으로 Drive V1을 판별한다.
+bootstrap에는 아래 두 식별 필드만 추가합니다.
 
 ```text
 SELF_RUN_CLIENT=DRIVE_V1
 DRIVE_TURN_DOCUMENT_ID=<documentId>
 ```
 
-Android application ID, Runs 기준 폴더 ID, Job 폴더 ID, 문서 URL, Drive protocol version, expected turn과 앱 내부 상태관리 값은 ChatGPT bootstrap에 전달하지 않는다. 이 값들은 필요한 경우 Android 앱 내부 Drive API 상태로만 유지한다.
+## 단일행 signal event
 
-실제 첫 프롬프트 형식은 다음과 같다.
-
-```text
-[SELF_RUN_BOOTSTRAP 0.1.0 <RUN_ID> MODE=<MODE>]
-SELF_RUN_CLIENT=DRIVE_V1
-DRIVE_TURN_DOCUMENT_ID=<documentId>
-최종 답변 출력 직전에 위 작업문서에 이 턴의 SelfRun 완료 신호와 완료 시점을 기록한다.
-
-<사용자의 실제 작업 지시>
-```
-
-## Drive V1의 유일한 실행 차이
-
-기존 WebView SelfRun은 assistant 답변 완료 여부를 WebView에서 판정한다. Drive V1은 그 완료 판정만 Google Drive 작업문서의 새 완료 기록으로 대체한다.
-
-현재 턴의 실제 작업과 검증을 마친 뒤 최종 답변을 출력하기 직전에 지정된 `DRIVE_TURN_DOCUMENT_ID` 문서에 해당 턴의 SelfRun 완료 신호와 완료 시점을 기록하고 readback한다. 그 밖의 SelfRun 제어 의미는 공통 운영 규칙을 따른다.
-
-Android 쪽 정상 루프는 다음과 같다.
+Drive 작업문서는 append-only 실행 확인 채널입니다. 이벤트는 다음 형식 한 줄만 사용합니다.
 
 ```text
-프롬프트 제출
-→ 제출 성공만 확인
-→ Drive 작업문서 업데이트 대기
-→ 새 완료 기록 수락
-→ 45초 UI 안정 대기
-→ 같은 conversation 입력창 확보
-→ [SELF_RUN_CONTINUE <RUN_ID>] 강제 입력·제출
-→ 제출 성공만 확인
-→ Drive 작업문서 업데이트 대기
+[yyyy.mm.dd | hh:mm:ss] [<SIGNAL> <RUN_ID>]
 ```
 
-45초 지연은 assistant completion을 재확인하기 위한 시간이 아니다. Drive 완료 기록이 authoritative completion signal이다. Drive 완료 기록 이후 stop 버튼, streaming, assistant message completion, generation 상태를 다음 제출 조건으로 사용하지 않는다.
+허용 signal은 `SELF_RUN_COMMAND_RECEIVED`, `SELF_RUN_TURN_COMPLETED`, `SELF_RUN_USER_ACTION_REQUIRED`, `SELF_RUN_PAUSED`, `SELF_RUN_DONE`입니다. timestamp에는 `KST`, UTC offset 같은 추가 문자열을 넣지 않습니다.
 
-## 제출 성공과 중복 방지
+ChatGPT가 bootstrap 또는 CONTINUE를 실제 수신하면 실질 작업 전에 `SELF_RUN_COMMAND_RECEIVED`를 기록하고 같은 document ID를 readback합니다. 턴을 계속할 때는 최종 답변 직전에 `SELF_RUN_TURN_COMPLETED`를 기록하고 readback합니다. 사용자 조치, 명시적 pause, 전체 완료도 각각 대응 signal을 같은 방식으로 기록합니다.
 
-continuation은 클릭 전에 해당 conversation에서 동일한 CONTINUE 사용자 턴 수를 Android 영속 상태와 WebView marker에 baseline으로 저장한다. 제출 성공은 baseline 이후 동일 사용자 턴 수가 실제 증가했는지 확인한다. assistant DOM은 확인하지 않는다.
+## Android 진행 기준
 
-결과가 즉시 명확하지 않으면 같은 신호를 바로 다시 보내지 않는다. 5분 대기 상태를 영속하고, 5분 뒤 먼저 기존 제출이 늦게 성공했는지 같은 baseline으로 확인한다. 이미 성공했으면 재전송하지 않고 Drive 대기로 복귀한다. 아직 미제출이면 입력창을 다시 확보하고 동일 신호를 다시 준비·제출한다.
+앱은 명령 클릭 직후 user-message DOM, assistant streaming, stop button 또는 completion DOM을 기다리지 않고 Drive polling으로 복귀합니다. 마지막으로 소비한 실제 SelfRun signal의 cursor를 영속하고 이후 추가된 signal만 새 이벤트로 처리합니다. modifiedTime은 읽기 최적화 힌트일 뿐 상태신호가 아닙니다.
 
-제출 실패·미확인은 terminal error가 아니다. 5분 재시도 횟수에 상한을 두지 않는다. 시도 횟수는 관찰용으로만 기록하며 종료 조건으로 사용하지 않는다.
+`SELF_RUN_COMMAND_RECEIVED`를 별도로 보지 못했더라도 같은 polling read에서 TURN_COMPLETED 또는 더 진행된 특수 signal이 새로 확인되면 제출은 정상 수신된 것으로 처리합니다.
 
-## WebView 제어권 복구
+명령 제출 뒤 새 ACK 또는 더 진행된 signal이 없으면 5분 뒤 같은 의미의 bootstrap/CONTINUE를 다시 제출합니다. retry 횟수나 누적 시간을 terminal 조건으로 사용하지 않습니다.
 
-Drive V1에서 WebView가 필요한 이유는 assistant completion 감시가 아니라 동일 conversation의 프롬프트 입력·제출 제어권 확보이다. 기존 WebView가 유효하면 그대로 쓰고, 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 입력창을 재획득한다. 네트워크·WebView의 복구 가능한 오류는 Job 종료 사유로 승격하지 않는다.
+TURN_COMPLETED를 소비하면 30초∼1분의 단순 UI 안전 guard를 거친 뒤 같은 conversation에 CONTINUE를 제출하고 즉시 Drive polling으로 복귀합니다. 현재 구현 기본 guard는 45초입니다.
+
+## WebView 책임
+
+Drive V1의 WebView 책임은 assistant 완료 감시가 아니라 canonical conversation의 composer 제어권 확보와 명령 제출입니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
+
+WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한 번 best-effort로 읽어 role/model/reasoning을 적용할 수 있습니다. 이 read는 completion 판정이 아니며 읽지 못해도 현재 안전한 설정으로 CONTINUE를 진행합니다.
 
 ## 일시정지와 재개
 
-`[SELF_RUN_PAUSE ...]`, `[SELF_RUN_USER_ACTION_REQUIRED ...]`, 사용자 수동 일시정지는 Job 종료가 아닌 일시정지다. 일시정지 동안 45초 continuation 예약과 5분 제출 재시도 timer는 실행하지 않지만 pending Drive event, 제출 baseline, retry 종류·예정 시각·시도 수와 conversation/document 식별자는 보존한다.
+USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. 사용자가 앱에서 재개를 누르면 현재 작업문서의 마지막 실제 signal 위치만 baseline으로 저장한 뒤 최신 signal 종류와 관계없이 CONTINUE를 강제 제출합니다. 이후 ACK가 없으면 동일한 5분 무제한 재제출 규칙을 적용합니다.
 
-재개 시 기존 WebView 또는 저장된 conversation URL로 입력 제어권을 확보한다. pending 제출이 있으면 먼저 기존 성공 여부를 확인하고 필요할 때만 동일 신호를 제출한다. 재개 후 제출 실패도 다시 5분 재시도 상태로 돌아간다.
+## signal write/readback 실패
 
-## Drive 완료 기록 형식
-
-ChatGPT 실행 측이 최종 답변 직전에 쓰는 완료 기록 형식과 SIGNAL/HANDOFF 문법은 공식 `SELF_RUN_ORCHESTRATION_SKILL`을 따른다. Android 앱은 완전한 새 기록만 수락하고 이미 소비한 event sequence/turn을 다시 소비하지 않는다. `DONE`은 정상 종료이며 `PAUSE`와 `USER_ACTION_REQUIRED`는 자동 continuation을 보내지 않고 일시정지한다.
-
-## 생성 단계
-
-Job 폴더와 작업문서의 생성·Drive 인증·parent 검증·초기 readback은 Android 앱의 기존 Drive setup 책임이다. 이번 dev3 턴 진행 변경은 해당 생성 구조를 재설계하지 않는다.
+signal append 결과가 실패·타임아웃·불명확하면 같은 문서를 먼저 재조회합니다. 의도한 행이 이미 있으면 중복 append하지 않고 readback 검증을 계속합니다. 행이 없는 것이 확인된 경우에만 같은 논리 signal을 다시 append합니다. readback만 실패한 경우에는 새 행을 추가하지 않고 readback을 재시도합니다. signal 기록과 readback이 성공한 뒤에만 해당 턴의 최종 답변을 출력합니다.

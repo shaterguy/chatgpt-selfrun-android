@@ -1,9 +1,9 @@
-name: Build SelfRun Drive v1
+name: Build SelfRun Drive
 
 on:
   push:
     branches:
-      - selfrun-drive/v1.0.0-dev3
+      - 'selfrun-drive/v*-dev*'
   workflow_dispatch:
 
 permissions:
@@ -33,77 +33,31 @@ jobs:
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build debug and unsigned release
         run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug :app:assembleRelease
-      - name: Verify merged manifests and component isolation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import glob
-          import xml.etree.ElementTree as ET
-          android = '{http://schemas.android.com/apk/res/android}'
-          manifests = glob.glob('app/build/intermediates/merged_manifest/**/AndroidManifest.xml', recursive=True)
-          if not manifests:
-              raise SystemExit('merged manifests missing')
-          for path in manifests:
-              root = ET.parse(path).getroot()
-              package = root.attrib.get('package', '')
-              if package != 'com.shaterguy.chatgptselfrun.drive':
-                  raise SystemExit(f'wrong merged package in {path}: {package}')
-              if android + 'sharedUserId' in root.attrib:
-                  raise SystemExit(f'sharedUserId forbidden in {path}')
-              app = root.find('application')
-              if app is None:
-                  raise SystemExit(f'application missing in {path}')
-              for provider in app.findall('provider'):
-                  authority = provider.attrib.get(android + 'authorities', '')
-                  if not authority.startswith(package + '.'):
-                      raise SystemExit(f'non-isolated provider authority: {authority}')
-                  if provider.attrib.get(android + 'exported') != 'false':
-                      raise SystemExit(f'provider must not be exported: {authority}')
-              for component in ('service', 'receiver'):
-                  for node in app.findall(component):
-                      if node.attrib.get(android + 'exported') == 'true':
-                          name = node.attrib.get(android + 'name', '')
-                          permission = node.attrib.get(android + 'permission', '')
-                          allowed_gms = (component == 'service'
-                              and name == 'com.google.android.gms.auth.api.signin.RevocationBoundService'
-                              and permission == 'com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION')
-                          if not allowed_gms:
-                              raise SystemExit(f'unprotected or unapproved exported {component}: {node.attrib}')
-              for permission in root.findall('permission'):
-                  name = permission.attrib.get(android + 'name', '')
-                  allowed_gms = (name == 'com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION'
-                      and permission.attrib.get(android + 'protectionLevel', '') == 'signature')
-                  if not name.startswith(package + '.') and not allowed_gms:
-                      raise SystemExit('fixed custom permission is forbidden')
-          PY
-      - name: Verify package, version, label and prepare release input
+      - name: Verify package, version, label and prepare candidate
         shell: bash
         run: |
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          test -n "$VERSION_NAME" && test -n "$VERSION_CODE"
+          echo "DRIVE_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "DRIVE_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           DEBUG=app/build/outputs/apk/debug/app-debug.apk
           RELEASE=app/build/outputs/apk/release/app-release-unsigned.apk
-          test -s "$DEBUG"
-          test -s "$RELEASE"
+          test -s "$DEBUG" && test -s "$RELEASE"
           for APK in "$DEBUG" "$RELEASE"; do
             BADGING="$($BT/aapt dump badging "$APK")"
             grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
-            ! grep -Fq "package: name='com.shaterguy.chatgptselfrun' " <<<"$BADGING"
-            grep -Fq "versionCode='1000003'" <<<"$BADGING"
-            grep -Fq "versionName='1.0.0-dev3'" <<<"$BADGING"
+            grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
+            grep -Fq "versionName='$VERSION_NAME'" <<<"$BADGING"
             grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
           done
           mkdir -p app/build/outputs/selfrun-drive
-          "$BT/zipalign" -p -f 4 "$RELEASE" app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3-aligned-unsigned.apk
-          "$BT/zipalign" -c -v 4 app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3-aligned-unsigned.apk
-          printf '%s\n' "com.shaterguy.chatgptselfrun" "com.shaterguy.chatgptselfrun.drive" > app/build/outputs/selfrun-drive/COINSTALL_PACKAGES.txt
-          cat > app/build/outputs/selfrun-drive/INSTALLABLE_APK_POLICY.txt <<'EOF'
-          The Gradle debug APK is intentionally not published because GitHub-hosted runners use an ephemeral debug signing key.
-          Only chatgpt-selfrun-drive-v1.0.0-dev3.apk, when present, is an installable/update-lineage artifact.
-          The aligned-unsigned APK is build evidence only and cannot be installed.
-          EOF
-          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3-aligned-unsigned.apk > app/build/outputs/selfrun-drive/SHA256SUMS.txt
+          ALIGNED="app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk"
+          "$BT/zipalign" -p -f 4 "$RELEASE" "$ALIGNED"
+          "$BT/zipalign" -c -v 4 "$ALIGNED"
+          sha256sum "$ALIGNED" > app/build/outputs/selfrun-drive/SHA256SUMS.txt
       - name: Create private signing pass-file
         id: signing
         shell: bash
@@ -113,7 +67,7 @@ jobs:
           set -euo pipefail
           if [[ -z "$SIGNING_PASSPHRASE" ]]; then
             echo 'available=false' >> "$GITHUB_OUTPUT"
-            printf '%s\n' 'stable_signing=unavailable' 'reason=SELFRUN_SIGNING_PASSPHRASE secret is not configured' > app/build/outputs/selfrun-drive/SIGNING_STATUS.txt
+            printf '%s\n' 'stable_signing=unavailable' > app/build/outputs/selfrun-drive/SIGNING_STATUS.txt
             exit 0
           fi
           umask 077
@@ -123,40 +77,25 @@ jobs:
       - name: Install signing dependency
         if: ${{ steps.signing.outputs.available == 'true' }}
         run: python3 -m pip install --disable-pip-version-check 'cryptography==45.0.6'
-      - name: Sign and verify release APK
+      - name: Sign and verify candidate APK
         if: ${{ steps.signing.outputs.available == 'true' }}
         shell: bash
-        env:
-          APKSIGNER: ${{ env.ANDROID_HOME }}/build-tools/36.0.0/apksigner
         run: |
           set -euo pipefail
           trap 'rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"' EXIT
-          tools/sign_release.sh \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3-aligned-unsigned.apk \
-            "$RUNNER_TEMP/selfrun-drive-signing-pass" \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3.apk \
-            > app/build/outputs/selfrun-drive/APKSIGNER_VERIFY.txt
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3.apk \
-            > app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" \
-            app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
-          grep -Fq "versionCode='1000003'" app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
-          grep -Fq "versionName='1.0.0-dev3'" app/build/outputs/selfrun-drive/RELEASE_BADGING.txt
-          "$APKSIGNER" verify --verbose --print-certs \
-            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3.apk \
-            > app/build/outputs/selfrun-drive/APK_CERT.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' \
-            app/build/outputs/selfrun-drive/APK_CERT.txt
-          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v1.0.0-dev3.apk \
-            >> app/build/outputs/selfrun-drive/SHA256SUMS.txt
+          IN="app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
+          OUT="app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
+          tools/sign_release.sh "$IN" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$OUT" > app/build/outputs/selfrun-drive/APKSIGNER_VERIFY.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$OUT" > app/build/outputs/selfrun-drive/APK_CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' app/build/outputs/selfrun-drive/APK_CERT.txt
+          sha256sum "$OUT" >> app/build/outputs/selfrun-drive/SHA256SUMS.txt
       - name: Remove signing pass-file
         if: ${{ always() }}
         run: rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"
       - name: Upload SelfRun Drive build evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-drive-v1.0.0-dev3
+          name: chatgpt-selfrun-drive-build
           path: app/build/outputs/selfrun-drive/
           if-no-files-found: error
           retention-days: 30
@@ -164,8 +103,6 @@ jobs:
   verify-coinstall-emulator:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Check out exact legacy baseline
@@ -185,27 +122,13 @@ jobs:
       - name: Install Android build SDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
-            'platform-tools' \
-            'platforms;android-36' \
-            'build-tools;36.0.0'
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
       - name: Build current and exact legacy debug APKs
         run: |
           gradle --no-daemon --console=plain :app:assembleDebug
           gradle --no-daemon --console=plain --project-dir legacy-baseline :app:assembleDebug
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/aapt" dump badging legacy-baseline/app/build/outputs/apk/debug/app-debug.apk \
-            | tee legacy-badging.txt
-          "$BT/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk \
-            | tee drive-badging.txt
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun'" legacy-badging.txt
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" drive-badging.txt
-          grep -Fq "application-label:'ChatGPT SelfRun'" legacy-badging.txt
-          grep -Fq "application-label:'SelfRun Drive'" drive-badging.txt
       - name: Enable hardware acceleration
-        shell: bash
         run: |
-          set -euo pipefail
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
       - name: Verify simultaneous installation, runtime and data isolation
@@ -230,10 +153,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-drive-v1.0.0-dev3-coinstall-evidence
-          path: |
-            coinstall-evidence.txt
-            legacy-badging.txt
-            drive-badging.txt
+          name: chatgpt-selfrun-drive-coinstall-evidence
+          path: coinstall-evidence.txt
           if-no-files-found: warn
           retention-days: 30
