@@ -75,7 +75,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(Ui.title(this, "SelfRun Drive"));
-        root.addView(Ui.body(this, "v1.0.0-dev1 · Google Drive 실행턴 문서 commit을 기준으로 다음 턴을 진행합니다."));
+        root.addView(Ui.body(this, "v1.0.0-dev3 · Drive SelfRun 신호 로그를 기준으로 다음 턴을 진행합니다."));
 
         root.addView(Ui.section(this, "메뉴"));
         root.addView(Ui.row(this,
@@ -103,7 +103,7 @@ public final class MainActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "알림 권한", v -> requestNotificationPermission()),
                 Ui.button(this, "배터리 최적화 제외", v -> requestBatteryExemption())));
-        root.addView(Ui.body(this, "Drive 대기와 120초 guard 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
+        root.addView(Ui.body(this, "Drive 대기와 45초 guard 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
 
         Ui.setContent(this, scroll);
         root.requestFocus();
@@ -131,7 +131,9 @@ public final class MainActivity extends Activity {
                 + "\n턴: " + store.turn()
                 + "\nconversation: " + dash(store.conversationUrl())
                 + "\nDrive 문서: " + dash(store.turnDocumentUrl())
-                + "\n예상 턴 / event seq: " + store.expectedTurn() + " / " + store.lastConsumedEventSeq()
+                + "\nDrive signal cursor: " + store.driveSignalCursor()
+                + "\n마지막 Drive signal: " + dash(store.lastDriveSignalType())
+                + "\nCOMMAND_RECEIVED 대기: " + (store.awaitingCommandAck() ? "예" : "아니오")
                 + "\n마지막 오류: " + errorSummary());
         boolean paused = store.paused() && !store.userStopped();
         boolean running = store.active() && !store.paused() && !store.userStopped()
