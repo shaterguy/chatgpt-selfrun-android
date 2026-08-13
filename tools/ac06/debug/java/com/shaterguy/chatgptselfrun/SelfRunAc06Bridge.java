@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.webkit.WebView;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 final class SelfRunAc06Bridge {
     static volatile SelfRunService service;
@@ -45,6 +46,39 @@ final class SelfRunAc06Bridge {
         }
     }
 
+    static boolean observerInstallInFlight() {
+        return booleanField("observerInstallInFlight");
+    }
+
+    static boolean recoveryInProgress() {
+        return booleanField("recoveryInProgress");
+    }
+
+    static String observerLease() {
+        SelfRunService current = service;
+        if (current == null) return "";
+        try {
+            Field field = SelfRunService.class.getDeclaredField("observerLease");
+            field.setAccessible(true);
+            Object value = field.get(current);
+            return value == null ? "" : String.valueOf(value);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    static void ensureObserverNow() {
+        SelfRunService current = service;
+        if (current == null) return;
+        try {
+            Method method = SelfRunService.class.getDeclaredMethod("ensureDomObserver");
+            method.setAccessible(true);
+            method.invoke(current);
+        } catch (Throwable failure) {
+            throw new IllegalStateException("ensure_observer_failed:" + failure.getClass().getSimpleName(), failure);
+        }
+    }
+
     static long observerEventCount() {
         SelfRunService current = service;
         if (current == null) return -1L;
@@ -66,6 +100,18 @@ final class SelfRunAc06Bridge {
             return (SelfRunStore) field.get(current);
         } catch (Throwable ignored) {
             return null;
+        }
+    }
+
+    private static boolean booleanField(String name) {
+        SelfRunService current = service;
+        if (current == null) return false;
+        try {
+            Field field = SelfRunService.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.getBoolean(current);
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 }
