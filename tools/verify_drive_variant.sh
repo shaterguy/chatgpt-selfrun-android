@@ -43,4 +43,6 @@ grep -Fq '.put("selfrun_kind", kind)' "$API"
 ! grep -Fq '.put("protocol_version"' "$API"
 ! grep -Fq '.put("client_id"' "$API"
 ! grep -Fq '.put("created_by"' "$API"
+mkdir -p app/build/outputs/selfrun-drive
+cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" app/build/outputs/selfrun-drive/apksigner.jar
 echo 'SelfRun Drive dev3 simple signal policy checks passed.'
