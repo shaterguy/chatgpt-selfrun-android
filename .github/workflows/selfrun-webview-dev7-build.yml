@@ -120,8 +120,6 @@ jobs:
           ICON_ROUND_V26=app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
           ICON_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher.xml
           ICON_ROUND_V33=app/src/main/res/mipmap-anydpi-v33/ic_launcher_round.xml
-
-          # Packaging, manifest, signing and desktop/mobile WebView invariants inherited from dev6.
           test "$(grep -c 'android:screenOrientation=' "$MANIFEST" || true)" -eq 0
           grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' "$MANIFEST"
           grep -q 'android:usesCleartextTraffic="false"' "$MANIFEST"
@@ -174,8 +172,6 @@ jobs:
           grep -q 'setHorizontallyScrolling(false)' "$NEW"
           grep -q 'canScrollVertically' "$NEW"
           grep -q 'requestDisallowInterceptTouchEvent' "$NEW"
-
-          # Conversation, durable submission, observer and service safety invariants.
           grep -q 'prepareInitialContext' "$DOM"
           grep -q 'EXISTING_CONVERSATION' "$DOM"
           grep -q 'const chatControl=' "$DOM"
@@ -197,7 +193,7 @@ jobs:
           grep -q 'for(let i=userIndex+1' "$DOM"
           ! grep -q 'assistantDigest' "$DOM"
           grep -q 'new MutationObserver' "$OBSERVER"
-          grep -q "postMessage('state|' + fingerprint)" "$OBSERVER"
+          grep -F -q "state.port?.postMessage(kind + '|' + fingerprint)" "$OBSERVER"
           grep -q 'fingerprint === state.lastFingerprint' "$OBSERVER"
           grep -q 'state.suppressed++' "$OBSERVER"
           grep -q "status:'ALIVE'" "$OBSERVER"
@@ -264,8 +260,6 @@ jobs:
           ! grep -q 'WorkManager' "$SERVICE"
           ! grep -q 'AlarmManager' "$SERVICE"
           ! grep -q 'setRendererPriorityPolicy' "$SERVICE"
-
-          # Persistence, I/O sampling and protocol policy inherited from dev6.
           grep -q 'restartPhaseClock' "$STORE"
           grep -q 'setPhaseAndStatus' "$STORE"
           grep -q 'enterPausedState' "$STORE"
@@ -300,7 +294,6 @@ jobs:
           grep -q '작업 이력' "$HISTORY"
           grep -q '현재 실행 중인 작업과 과거 작업' "$LOGMENU"
           grep -q 'ACTION_CREATE_DOCUMENT' "$LOGS"
-
       - name: Unit tests
         run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build debug APK
