@@ -2,6 +2,8 @@ package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,19 +54,25 @@ public class SelfRunIoEfficiencyTest {
     }
 
     @Test
-    public void errorKindAndExecutionContextChangesAreNeverMergedTogether() {
+    public void webViewErrorsAreImmediateWhileRepeatableContextsStaySeparated() {
         SelfRunLogSampler sampler = new SelfRunLogSampler();
         SelfRunLogSampler.Context first = new SelfRunLogSampler.Context(1, 2, "wv-a", "AUTOMATION");
         SelfRunLogSampler.Context nextGeneration = new SelfRunLogSampler.Context(2, 3, "wv-b", "RECOVERY");
 
+        assertFalse(SelfRunLogSampler.isRepeatable("WEBVIEW_ERROR"));
         assertEquals(1, sampler.accept("WEBVIEW_ERROR", "type=network;code=-2",
                 "BOOTSTRAP", first, 0L).size());
-        assertEquals(0, sampler.accept("WEBVIEW_ERROR", "type=network;code=-2",
+        assertEquals(1, sampler.accept("WEBVIEW_ERROR", "type=network;code=-2",
                 "BOOTSTRAP", first, 100L).size());
         assertEquals(1, sampler.accept("WEBVIEW_ERROR", "type=ssl",
                 "BOOTSTRAP", first, 200L).size());
-        assertEquals(1, sampler.accept("WEBVIEW_ERROR", "type=network;code=-2",
-                "BOOTSTRAP", nextGeneration, 300L).size());
+
+        assertEquals(1, sampler.accept("STALE_CALLBACK", "source=observer_message",
+                "BOOTSTRAP", first, 300L).size());
+        assertEquals(0, sampler.accept("STALE_CALLBACK", "source=observer_message",
+                "BOOTSTRAP", first, 400L).size());
+        assertEquals(1, sampler.accept("STALE_CALLBACK", "source=observer_message",
+                "BOOTSTRAP", nextGeneration, 500L).size());
     }
 
     @Test
@@ -76,11 +84,24 @@ public class SelfRunIoEfficiencyTest {
     }
 
     @Test
+    public void historyCoalescingCoordinatorIsProcessWide() throws Exception {
+        Field pending = SelfRunHistoryStore.class.getDeclaredField("PENDING_SNAPSHOTS");
+        Field scheduled = SelfRunHistoryStore.class.getDeclaredField("scheduledDrain");
+        Field syncRequests = SelfRunHistoryStore.class.getDeclaredField("syncRequests");
+        Field physicalWrites = SelfRunHistoryStore.class.getDeclaredField("physicalWrites");
+        assertTrue(Modifier.isStatic(pending.getModifiers()));
+        assertTrue(Modifier.isStatic(scheduled.getModifiers()));
+        assertTrue(Modifier.isStatic(syncRequests.getModifiers()));
+        assertTrue(Modifier.isStatic(physicalWrites.getModifiers()));
+    }
+
+    @Test
     public void runtimeLoggingAndHistoryPersistenceAvoidHighFrequencySynchronousIo() throws Exception {
         String runLog = source("SelfRunRunLog.java");
         String history = source("SelfRunHistoryStore.java");
         String store = source("SelfRunStore.java");
         String service = source("SelfRunService.java");
+        String sampler = source("SelfRunLogSampler.java");
 
         assertTrue(runLog.contains("ScheduledExecutorService"));
         assertTrue(runLog.contains("WRITE_BATCH_MS = 250L"));
@@ -94,8 +115,11 @@ public class SelfRunIoEfficiencyTest {
         assertFalse(runLog.contains("output.flush()"));
 
         assertTrue(history.contains("SYNC_DEBOUNCE_MS = 250L"));
-        assertTrue(history.contains("pendingSnapshots"));
+        assertTrue(history.contains("private static final Map<String, JSONObject> PENDING_SNAPSHOTS"));
+        assertTrue(history.contains("private static ScheduledFuture<?> scheduledDrain"));
         assertTrue(history.contains("syncCritical"));
+        assertTrue(history.contains("isOlderSnapshot"));
+        assertTrue(history.contains("staleSnapshotsSkipped"));
         assertTrue(history.contains("physicalWrites"));
         assertFalse(history.contains(".commit()"));
         assertTrue(history.contains(".apply()"));
@@ -113,6 +137,7 @@ public class SelfRunIoEfficiencyTest {
         assertTrue(service.contains("DOM_WATCHDOG_SKIPPED"));
         assertTrue(service.contains("IO_EFFICIENCY"));
         assertTrue(service.contains("updateLogExecutionContext"));
+        assertFalse(sampler.contains("\"WEBVIEW_ERROR\","));
     }
 
     private static String source(String name) throws Exception {
