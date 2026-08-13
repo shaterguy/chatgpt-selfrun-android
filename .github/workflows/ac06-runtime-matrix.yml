@@ -1,0 +1,163 @@
+name: AC06 runtime before-after matrix
+
+on:
+  push:
+    branches:
+      - v0.2.3-dev6
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ac06-runtime-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+
+      - name: Install emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_AVD_HOME="$RUNNER_TEMP/selfrun-ac06-avd"
+          export ANDROID_AVD_HOME
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'emulator' \
+            'system-images;android-35;google_apis;x86_64'
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd \
+            --force \
+            --name selfrun-ac06 \
+            --package 'system-images;android-35;google_apis;x86_64'
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx 'selfrun-ac06'
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Prepare exact dev5 and dev6 worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE=c3d7d800405608fa7bdee34b1f4a7d4a14795291
+          git fetch --no-tags origin v0.2.3-dev5
+          git cat-file -e "$BASELINE^{commit}"
+          git worktree add --detach "$RUNNER_TEMP/ac06-dev5" "$BASELINE"
+          git worktree add --detach "$RUNNER_TEMP/ac06-dev6" "$GITHUB_SHA"
+          python3 tools/ac06_runtime_probe.py "$RUNNER_TEMP/ac06-dev5"
+          python3 tools/ac06_runtime_probe.py "$RUNNER_TEMP/ac06-dev6"
+          git -C "$RUNNER_TEMP/ac06-dev5" diff --check
+          git -C "$RUNNER_TEMP/ac06-dev6" diff --check
+
+      - name: Build debug probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd "$RUNNER_TEMP/ac06-dev5"
+            gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
+          )
+          (
+            cd "$RUNNER_TEMP/ac06-dev6"
+            gradle --no-daemon --console=plain --stacktrace -Pandroid.useAndroidX=true :app:assembleDebug
+          )
+          test -s "$RUNNER_TEMP/ac06-dev5/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$RUNNER_TEMP/ac06-dev6/app/build/outputs/apk/debug/app-debug.apk"
+
+      - name: Start emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm || true
+          nohup "$ANDROID_HOME/emulator/emulator" \
+            -avd selfrun-ac06 \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -no-snapshot \
+            -wipe-data \
+            -gpu swiftshader_indirect \
+            > "$RUNNER_TEMP/selfrun-ac06-emulator.log" 2>&1 &
+          boot_completed=""
+          for attempt in $(seq 1 120); do
+            if timeout 2 adb get-state >/dev/null 2>&1; then
+              boot_completed="$(timeout 2 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+              if [ "$boot_completed" = "1" ]; then
+                break
+              fi
+            fi
+            sleep 2
+          done
+          if [ "$boot_completed" != "1" ]; then
+            tail -n 200 "$RUNNER_TEMP/selfrun-ac06-emulator.log" || true
+            exit 1
+          fi
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+
+      - name: Run exact dev5 baseline scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$RUNNER_TEMP/ac06-dev5/app/build/outputs/apk/debug/app-debug.apk"
+          OUT="$RUNNER_TEMP/ac06-results/dev5"
+          mkdir -p "$OUT"
+          adb install -r -t "$APK" >/dev/null
+          bash tools/run_ac06_device_matrix.sh "$OUT"
+
+      - name: Run exact dev6 candidate scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          adb uninstall com.shaterguy.chatgptselfrun >/dev/null || true
+          APK="$RUNNER_TEMP/ac06-dev6/app/build/outputs/apk/debug/app-debug.apk"
+          OUT="$RUNNER_TEMP/ac06-results/dev6"
+          mkdir -p "$OUT"
+          adb install -r -t "$APK" >/dev/null
+          bash tools/run_ac06_device_matrix.sh "$OUT"
+
+      - name: Compare AC06 runtime matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/ac06_compare_results.py \
+            --baseline "$RUNNER_TEMP/ac06-results/dev5" \
+            --candidate "$RUNNER_TEMP/ac06-results/dev6" \
+            --out "$RUNNER_TEMP/ac06-results/matrix"
+          cat "$RUNNER_TEMP/ac06-results/matrix/ac06-matrix.md"
+
+      - name: Upload AC06 matrix evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ac06-runtime-matrix-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ac06-results/dev5
+            ${{ runner.temp }}/ac06-results/dev6
+            ${{ runner.temp }}/ac06-results/matrix
+          retention-days: 14
+
+      - name: Emulator diagnostics
+        if: always()
+        shell: bash
+        run: |
+          adb devices || true
+          timeout 2 adb shell getprop ro.build.version.sdk || true
+          "$ANDROID_HOME/emulator/emulator" -list-avds || true
+          tail -n 200 "$RUNNER_TEMP/selfrun-ac06-emulator.log" || true
