@@ -62,6 +62,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/ac06-dev6" "$GITHUB_SHA"
           python3 tools/ac06_runtime_probe.py "$RUNNER_TEMP/ac06-dev5"
           python3 tools/ac06_runtime_probe.py "$RUNNER_TEMP/ac06-dev6"
+          python3 tools/ac06_probe_finalize.py "$RUNNER_TEMP/ac06-dev5" "$RUNNER_TEMP/ac06-dev6"
           git -C "$RUNNER_TEMP/ac06-dev5" diff --check
           git -C "$RUNNER_TEMP/ac06-dev6" diff --check
 
