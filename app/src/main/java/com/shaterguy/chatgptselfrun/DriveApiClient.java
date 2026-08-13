@@ -117,8 +117,7 @@ final class DriveApiClient {
             if (!jobId.equals(candidate.name) || !MIME_DOCUMENT.equals(candidate.mimeType)
                     || !parentId.equals(candidate.parentId) || candidate.trashed
                     || !jobId.equals(candidate.appProperties.optString("job_id"))
-                    || !"turn_document".equals(candidate.appProperties.optString("selfrun_kind"))
-                    || !"selfrun_drive_android".equals(candidate.appProperties.optString("client_id"))) continue;
+                    || !"turn_document".equals(candidate.appProperties.optString("selfrun_kind"))) continue;
             if (match != null) throw new IllegalStateException("multiple turn documents found for one SelfRun job");
             match = candidate;
         }
@@ -149,8 +148,8 @@ final class DriveApiClient {
     Metadata createTurnDocument(String accessToken, String jobId, String parentId) throws Exception {
         requireParent(parentId);
         JSONObject body = baseMetadata(jobId, MIME_DOCUMENT, parentId, "turn_document");
-        // Native Google Docs do not support Drive pre-generated IDs. Any lost response is terminally
-        // ambiguous and must never be followed by files.list, name search, or another create call.
+        // Native Google Docs do not support Drive pre-generated IDs. A lost create response is reconciled
+        // inside the exact Job folder before any further create attempt.
         try {
             Metadata created = create(accessToken, body, true);
             if (!validFileId(created.id)) {
@@ -215,10 +214,7 @@ final class DriveApiClient {
                 .put("parents", new JSONArray().put(parentId))
                 .put("appProperties", new JSONObject()
                         .put("job_id", name)
-                        .put("selfrun_kind", kind)
-                        .put("protocol_version", "1")
-                        .put("client_id", "selfrun_drive_android")
-                        .put("created_by", "selfrun_drive_android"));
+                        .put("selfrun_kind", kind));
     }
 
     private static JSONObject request(String method, String endpoint, String accessToken, JSONObject body)

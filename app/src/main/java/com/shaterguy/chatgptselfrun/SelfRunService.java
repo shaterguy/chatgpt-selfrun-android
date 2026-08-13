@@ -26,8 +26,6 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.io.IOException;
-import java.net.ProtocolException;
-import javax.net.ssl.SSLException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
@@ -41,7 +39,6 @@ public final class SelfRunService extends Service {
     private static final long NORMAL_POLL_MS = 60_000L;
     static final long CONTINUATION_GUARD_MS = 45_000L;
     static final long SUBMISSION_RETRY_MS = 5 * 60_000L;
-    static final long SUBMISSION_CONFIRMATION_GRACE_MS = 15_000L;
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -50,7 +47,6 @@ public final class SelfRunService extends Service {
     private final Runnable driveRetryRunnable = this::retryDrive;
     private final Runnable webRunnable = this::runWebStep;
     private final Runnable guardRunnable = this::guardElapsed;
-    private final Runnable submissionRetryRunnable = this::submissionRetryElapsed;
     private SelfRunStore store;
     private SelfRunRunLog runLog;
     private DriveApiClient drive;
@@ -95,12 +91,12 @@ public final class SelfRunService extends Service {
             verifiedDriveAccountId = "";
             accessToken = "";
         }
+        if (ACTION_PAUSE.equals(action)) { pauseFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY; }
+        if (ACTION_RESUME.equals(action)) { resumeFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY; }
         if (store.terminalSideEffectPending()) {
             replayTerminalSideEffect();
             return store.active() ? START_STICKY : START_NOT_STICKY;
         }
-        if (ACTION_PAUSE.equals(action)) { pauseFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY; }
-        if (ACTION_RESUME.equals(action)) { resumeFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY; }
         if (intent != null && !ACTION_RUN.equals(action)) { stopSelf(startId); return START_NOT_STICKY; }
         if (!store.active()) { stopRuntime(); return START_NOT_STICKY; }
         startForegroundCompat();
@@ -123,31 +119,9 @@ public final class SelfRunService extends Service {
                 && !SelfRunStore.PHASE_IDLE.equals(store.phase());
     }
 
-    private void resumeStateMachine() {
-        if (!canRun()) return;
-        if (store.hasSubmissionRetry()) {
-            scheduleOrResumeSubmissionRetry();
-            return;
-        }
-        String phase = store.phase();
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
-                && SelfRunStore.SUBMISSION_CONFIRMED.equals(store.submissionState())) {
-            finalizeConfirmedContinuation();
-        } else if (drivePhase(phase)) authorizeAndRunDrive();
-        else if (SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(phase)) scheduleGuard();
-        else ensureWebView();
-    }
+private void resumeStateMachine(){if(!canRun())return;String phase=store.phase();if(drivePhase(phase))authorizeAndRunDrive();else if(SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(phase))scheduleGuard();else ensureWebView();}
 
-    private static boolean drivePhase(String phase) {
-        return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)
-                || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)
-                || SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(phase);
-    }
+private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)||SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)||SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)||SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(phase)||SelfRunStore.PHASE_RESUME_BASELINE.equals(phase);}
 
     private void authorizeAndRunDrive() {
         if (!canRun() || !drivePhase(store.phase()) || driveInFlight || authorizationInFlight) return;
@@ -171,8 +145,8 @@ public final class SelfRunService extends Service {
             @Override public void onResolutionRequired(PendingIntent ignored) {
                 authorizationInFlight = false;
                 if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())) return;
-                pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "앱 설정에서 Drive 저장 위치를 다시 연결하세요.",
-                        epoch, requestedRunId, requestedPhase);
+                if (SelfRunStore.PHASE_RESUME_BASELINE.equals(requestedPhase)) scheduleAuthorizationRetry("DRIVE_RESUME_BASELINE_AUTH_RETRY", "사용자 재개 baseline의 Drive 승인을 자동 재시도합니다.", epoch, requestedRunId, requestedPhase);
+                else pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "앱 설정에서 Drive 저장 위치를 다시 연결하세요.", epoch, requestedRunId, requestedPhase);
             }
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
@@ -202,12 +176,13 @@ public final class SelfRunService extends Service {
                     String accountId = drive.getAccountPermissionId(accessToken);
                     if (!canApplyDriveResult(epoch)) return;
                     if (!accountId.equals(driveOperationAccountId)) {
-                        pauseError("DRIVE_ACCOUNT_MISMATCH", "바인딩한 Drive 계정과 현재 승인 계정이 다릅니다.", epoch);
+                        if (SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) scheduleDriveRecovery("DRIVE_RESUME_ACCOUNT_RECHECK", "사용자 재개 baseline의 Drive 계정을 자동 재확인합니다.", epoch);
+                        else pauseError("DRIVE_ACCOUNT_MISMATCH", "바인딩한 Drive 계정과 현재 승인 계정이 다릅니다.", epoch);
                         return;
                     }
                     if (!applyDriveResult(epoch, () -> verifiedDriveAccountId = accountId)) return;
                 }
-                if (SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())) {
+                if (SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase()) || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) {
                     pollDriveNow(epoch);
                     retryAttempt = 0;
                     return;
@@ -216,7 +191,7 @@ public final class SelfRunService extends Service {
                     if (!canApplyDriveResult(epoch)) return;
                     String prior = store.phase();
                     runDriveStep(epoch);
-                    if (prior.equals(store.phase()) || SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())) break;
+                    if (prior.equals(store.phase()) || SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase()) || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) break;
                 } while (canApplyDriveResult(epoch) && drivePhase(store.phase()));
                 retryAttempt = 0;
             } catch (Throwable error) {
@@ -260,40 +235,9 @@ public final class SelfRunService extends Service {
         }
     }
 
-    private DriveStateSnapshot driveState(int expectedEpoch) {
-        synchronized (automationStateLock) {
-            synchronized (SelfRunStore.RUN_STATE_LOCK) {
-                if (destroyed || expectedEpoch != automationEpoch || !canRun()
-                        || !driveOperationRunId.equals(store.runId()) || !drivePhase(store.phase())) return null;
-                return new DriveStateSnapshot(store.phase(), store.runId(), store.runBaseFolderId(),
-                        store.jobFolderId(), store.turnDocumentId(), store.creationStage(),
-                        store.expectedTurn(), store.lastConsumedEventSeq(), store.mode(),
-                        store.lastSeenDriveVersion(), store.lastSeenModifiedTime());
-            }
-        }
-    }
+private DriveStateSnapshot driveState(int expectedEpoch){synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(destroyed||expectedEpoch!=automationEpoch||!canRun()||!driveOperationRunId.equals(store.runId())||!drivePhase(store.phase()))return null;return new DriveStateSnapshot(store.phase(),store.runId(),store.runBaseFolderId(),store.jobFolderId(),store.turnDocumentId(),store.creationStage(),store.driveSignalCursor(),store.mode(),store.lastSeenDriveVersion(),store.lastSeenModifiedTime());}}}
 
-    private void runDriveStep(int epoch) throws Exception {
-        if (!canApplyDriveResult(epoch)) return;
-        switch (store.phase()) {
-            case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK -> {
-                applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK,
-                        "Drive 기준 폴더 확인 중", "account_authorized"));
-            }
-            case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK -> checkBaseFolder(epoch);
-            case SelfRunStore.PHASE_JOB_ID_CREATE -> {
-                // Job ID was issued by the UI and persisted before service start.
-                applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE,
-                        "Drive Job 폴더 생성 중", "job_id_persisted"));
-            }
-            case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE -> createOrRecoverJobFolder(epoch);
-            case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE -> createOrRecoverDocument(epoch);
-            case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT -> initializeDocument(epoch);
-            case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK -> verifyInitialDocument(epoch);
-            case SelfRunStore.PHASE_WAIT_DRIVE_COMMIT -> pollDriveNow(epoch);
-            default -> pauseError("DRIVE_STATE_INVALID", "알 수 없는 Drive 단계: " + store.phase(), epoch);
-        }
-    }
+private void runDriveStep(int epoch)throws Exception{if(!canApplyDriveResult(epoch))return;switch(store.phase()){case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK,"Drive 기준 폴더 확인 중","account_authorized"));case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK->checkBaseFolder(epoch);case SelfRunStore.PHASE_JOB_ID_CREATE->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE,"Drive Job 폴더 생성 중","job_id_persisted"));case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE->createOrRecoverJobFolder(epoch);case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT->initializeDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK->verifyInitialDocument(epoch);case SelfRunStore.PHASE_WAIT_DRIVE_COMMIT,SelfRunStore.PHASE_RESUME_BASELINE->pollDriveNow(epoch);default->scheduleDriveRecovery("DRIVE_STATE_RECHECK","알 수 없는 Drive 단계를 자동 재확인합니다: "+store.phase(),epoch);}}
 
     private void checkBaseFolder(int epoch) throws Exception {
         String base = driveOperationBaseFolderId;
@@ -410,148 +354,22 @@ public final class SelfRunService extends Service {
                 "실행턴 문서 초기화 중", "turn_document_ready"));
     }
 
-    private void initializeDocument(int epoch) throws Exception {
-        DriveStateSnapshot snapshot = driveState(epoch);
-        if (snapshot == null) return;
-        String existing = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
-        if (!canApplyDriveResult(epoch)) return;
-        if (existing.trim().isEmpty()) {
-            drive.initializeDocument(accessToken, snapshot.turnDocumentId, DriveInitialDocument.create(
-                    snapshot.runId, snapshot.turnDocumentId, snapshot.jobFolderId, snapshot.baseFolderId));
-        } else if (!DriveInitialDocument.verifies(existing, snapshot.runId, snapshot.turnDocumentId,
-                snapshot.jobFolderId, snapshot.baseFolderId)) {
-            throw new IllegalStateException("nonempty execution document has invalid initial block");
-        }
-        applyDriveResult(epoch, () -> transition(SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK,
-                "실행턴 문서 readback 검증 중", "document_initialized"));
-    }
+private void initializeDocument(int epoch)throws Exception{DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;drive.readDocumentText(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK,"실행턴 signal log readback 검증 중","signal_log_ready"));}
 
-    private void verifyInitialDocument(int epoch) throws Exception {
-        DriveStateSnapshot snapshot = driveState(epoch);
-        if (snapshot == null) return;
-        DriveApiClient.Metadata metadata = drive.getMetadata(accessToken, snapshot.turnDocumentId);
-        verifyMetadata(metadata, snapshot.runId, DriveApiClient.MIME_DOCUMENT, snapshot.jobFolderId, "turn_document");
-        String body = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
-        if (!DriveInitialDocument.verifies(body, snapshot.runId, snapshot.turnDocumentId,
-                snapshot.jobFolderId, snapshot.baseFolderId)) throw new IllegalStateException("Drive document readback mismatch");
-        applyDriveResult(epoch, () -> {
-            store.updateDriveSeen(metadata.version, metadata.modifiedTime);
-            transition(SelfRunStore.PHASE_BOOTSTRAP, "Drive 준비 완료 · ChatGPT 새 대화 준비", "drive_readback_verified");
-            handler.post(() -> {
-                if (epoch == automationEpoch && canRun()) ensureWebView();
-            });
-        });
-    }
+private void verifyInitialDocument(int epoch)throws Exception{DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;DriveApiClient.Metadata metadata=drive.getMetadata(accessToken,snapshot.turnDocumentId);verifyMetadata(metadata,snapshot.runId,DriveApiClient.MIME_DOCUMENT,snapshot.jobFolderId,"turn_document");String body=drive.readDocumentText(accessToken,snapshot.turnDocumentId);DriveSignalParser.Scan scan=DriveSignalParser.scan(body,snapshot.runId,0);applyDriveResult(epoch,()->{store.baselineDriveSignals(scan.totalCount,scan.latest);store.updateDriveSeen(metadata.version,metadata.modifiedTime);transition(SelfRunStore.PHASE_BOOTSTRAP,"Drive 준비 완료 · ChatGPT 새 대화 준비","signal_log_readback_verified");handler.post(()->{if(epoch==automationEpoch&&canRun())ensureWebView();});});}
 
-    private void pollDrive() {
-        if (SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase()) && canRun()) authorizeAndRunDrive();
-    }
+private void pollDrive(){if((SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())||SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase()))&&canRun())authorizeAndRunDrive();}
 
-    private void pollDriveNow(int epoch) throws Exception {
-        DriveStateSnapshot snapshot = driveState(epoch);
-        if (snapshot == null) return;
-        DriveApiClient.Metadata metadata = drive.getPollMetadata(accessToken, snapshot.turnDocumentId);
-        if (!canApplyDriveResult(epoch)) return;
-        if (metadata.trashed || metadata.shared || !DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
-                || !snapshot.jobFolderId.equals(metadata.parentId)) {
-            scheduleDriveRecovery("DRIVE_DOCUMENT_RECHECK",
-                    "실행턴 문서 상태가 기대값과 달라 동일 문서를 다시 확인합니다.", epoch);
-            return;
-        }
-        boolean changed = !metadata.version.equals(snapshot.lastSeenVersion)
-                || !metadata.modifiedTime.equals(snapshot.lastSeenModifiedTime);
-        if (!changed) {
-            applyDriveResult(epoch, this::scheduleDrivePoll);
-            return;
-        }
-        String text = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
-        if (!canApplyDriveResult(epoch)) return;
-        DriveCommitParser.Result result = DriveCommitParser.latest(text, snapshot.runId,
-                snapshot.expectedTurn, snapshot.lastConsumedEventSeq, snapshot.mode);
-        if (result.status == DriveCommitParser.Status.FUTURE_TURN) {
-            scheduleDriveRecovery("DRIVE_PROTOCOL_TURN_RECHECK", result.reason, epoch);
-            return;
-        }
-        if (result.status == DriveCommitParser.Status.MALFORMED) {
-            scheduleDriveRecovery("DRIVE_COMMIT_RECHECK", result.reason, epoch);
-            return;
-        }
-        if (!applyDriveResult(epoch, () -> {
-            // Pending/terminal state is durable before the validated metadata cursor advances.
-            if (result.status == DriveCommitParser.Status.ACCEPTED) acceptCommit(result.commit);
-            store.updateDriveSeen(metadata.version, metadata.modifiedTime);
-            if (result.status != DriveCommitParser.Status.ACCEPTED) scheduleDrivePoll();
-        })) return;
-    }
+private void pollDriveNow(int epoch)throws Exception{DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;DriveApiClient.Metadata metadata=drive.getPollMetadata(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;if(metadata.trashed||metadata.shared||!DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)||!snapshot.jobFolderId.equals(metadata.parentId)){scheduleDriveRecovery("DRIVE_DOCUMENT_RECHECK","실행턴 문서 상태가 기대값과 달라 동일 문서를 다시 확인합니다.",epoch);return;}boolean changed=!metadata.version.equals(snapshot.lastSeenVersion)||!metadata.modifiedTime.equals(snapshot.lastSeenModifiedTime);boolean resume=SelfRunStore.PHASE_RESUME_BASELINE.equals(snapshot.phase),retry=SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(snapshot.phase)&&store.awaitingCommandAck()&&store.submissionRetryDue();if(!changed&&!resume&&!retry){applyDriveResult(epoch,this::scheduleDrivePoll);return;}String text=drive.readDocumentText(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;DriveSignalParser.Scan scan=DriveSignalParser.scan(text,snapshot.runId,snapshot.driveSignalCursor);if(resume){if(applyDriveResult(epoch,()->{store.baselineManualResume(scan.totalCount,scan.latest);store.updateDriveSeen(metadata.version,metadata.modifiedTime);}))handler.post(this::ensureWebView);return;}if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else if(!scan.unseen.isEmpty())store.applyDriveSignals(scan.unseen,System.currentTimeMillis(),CONTINUATION_GUARD_MS);store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;handler.post(()->{if(SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(store.phase()))scheduleGuard();else if(SelfRunStore.PHASE_PAUSED.equals(store.phase())||SelfRunStore.PHASE_DONE.equals(store.phase())){if(store.terminalSideEffectPending())replayTerminalSideEffect();}else if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())){if(store.awaitingCommandAck()&&store.submissionRetryDue()){store.prepareCommandRetry();ensureWebView();}else scheduleDrivePoll();}});}
 
-    private void acceptCommit(DriveCommitParser.Commit commit) {
-        runLog.record(store, "DRIVE_COMMIT_ACCEPTED", "turn=" + commit.turn + ";seq=" + commit.eventSeq + ";kind=" + commit.kind);
-        if (commit.signal.type == SelfRunProtocol.Type.NEXT) {
-            boolean restoring = commit.id().equals(store.pendingCommitId())
-                    && commit.eventSeq == store.pendingEventSeq() && commit.turn == store.pendingTurn();
-            if (!restoring) {
-                long now = System.currentTimeMillis();
-                store.detectEvent(commit, now, now + CONTINUATION_GUARD_MS);
-            }
-            if (SelfRunStore.EVENT_DETECTED.equals(store.submissionState())) store.markGuarding();
-            transition(SelfRunStore.PHASE_DRIVE_COMMIT_GUARD, "Drive commit 안전 지연 · 45초", "continue_commit");
-            scheduleGuard();
-        } else handleTerminal(commit);
-    }
 
-    private void handleTerminal(DriveCommitParser.Commit commit) {
-        String ownerRunId = store.runId();
-        String commitId = commit.id();
-        store.consumeTerminal(commit);
-        handler.post(() -> applyTerminalSideEffects(commit, ownerRunId, commitId));
-    }
 
-    private void replayTerminalSideEffect() {
-        startForegroundCompat();
-        String ownerRunId = store.terminalSideEffectRunId();
-        String commitId = store.terminalSideEffectCommitId();
-        String type = store.terminalSideEffectType();
-        handler.post(() -> {
-            synchronized (automationStateLock) {
-                synchronized (SelfRunStore.RUN_STATE_LOCK) {
-                    if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
-                    switch (type) {
-                        case "DONE" -> finishDoneSideEffect(ownerRunId, commitId, type);
-                        case "PAUSE" -> finishPersistedTerminalPause(
-                                "DRIVE_PAUSE", false, ownerRunId, commitId, type);
-                        case "USER_ACTION" -> finishPersistedTerminalPause(
-                                "DRIVE_USER_ACTION", true, ownerRunId, commitId, type);
-                        default -> {
-                            // Corrupt/unowned terminal work never mutates or stops a newer run.
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-    }
+private void replayTerminalSideEffect(){startForegroundCompat();String owner=store.terminalSideEffectRunId(),raw=store.terminalSideEffectCommitId(),type=store.terminalSideEffectType();handler.post(()->{synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(!store.terminalSideEffectOwnedBy(owner,raw,type))return;switch(type){case "DONE"->finishDoneSideEffect(owner,raw,type);case "PAUSED"->finishPersistedTerminalPause("DRIVE_PAUSED",false,owner,raw,type);case "USER_ACTION_REQUIRED"->finishPersistedTerminalPause("DRIVE_USER_ACTION_REQUIRED",true,owner,raw,type);default->{return;}}}}});}
 
-    private void applyTerminalSideEffects(DriveCommitParser.Commit commit, String ownerRunId,
-                                          String commitId) {
-        String type = commit.signal.type.name();
-        synchronized (automationStateLock) {
-            synchronized (SelfRunStore.RUN_STATE_LOCK) {
-                if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
-                switch (commit.signal.type) {
-                    case DONE -> finishDoneSideEffect(ownerRunId, commitId, type);
-                    case PAUSE -> finishPersistedTerminalPause(
-                            "DRIVE_PAUSE", false, ownerRunId, commitId, type);
-                    case USER_ACTION -> finishPersistedTerminalPause(
-                            "DRIVE_USER_ACTION", true, ownerRunId, commitId, type);
-                    default -> { return; }
-                }
-            }
-        }
-    }
 
     private void finishDoneSideEffect(String ownerRunId, String commitId, String type) {
         if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
-        runLog.record(store, "TERMINAL", "done_commit");
+        runLog.record(store, "TERMINAL", "done_signal");
         NotificationHelper.notifyUser(this, "완료", ownerRunId);
         if (!store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type)) return;
         stopRuntime();
@@ -569,48 +387,12 @@ public final class SelfRunService extends Service {
         store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type);
     }
 
-    private void scheduleGuard() {
-        releaseWakeLock();
-        handler.removeCallbacks(webRunnable);
-        handler.removeCallbacks(guardRunnable);
-        long detectedAt = store.commitDetectedAt(), dueAt = store.guardDueAt();
-        long delay = Math.max(0L, dueAt - System.currentTimeMillis());
-        if (store.pendingEventSeq() < 1 || store.pendingCommitId().isEmpty()
-                || detectedAt <= 0 || dueAt - detectedAt != CONTINUATION_GUARD_MS) {
-            runLog.record(store, "DRIVE_PENDING_EVENT_REPLAY", "guard_state_invalid;replay_drive_commit");
-            store.resetPendingForDriveReplay("Drive commit 복구 재조회");
-            startForegroundCompat();
-            scheduleDrivePoll();
-            return;
-        }
-        handler.postDelayed(guardRunnable, delay);
-    }
+private void scheduleGuard(){releaseWakeLock();handler.removeCallbacks(webRunnable);handler.removeCallbacks(guardRunnable);long detected=store.commitDetectedAt(),due=store.guardDueAt();boolean valid=DriveSignalParser.Type.TURN_COMPLETED.name().equals(store.pendingDriveSignalType())&&!store.pendingDriveSignalRaw().isEmpty()&&detected>0&&due-detected==CONTINUATION_GUARD_MS;if(!valid){runLog.record(store,"DRIVE_GUARD_RECOVERY","invalid_guard_state");store.repairGuard(System.currentTimeMillis(),CONTINUATION_GUARD_MS);if(SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(store.phase())){ensureWebView();return;}due=store.guardDueAt();}handler.postDelayed(guardRunnable,Math.max(0,due-System.currentTimeMillis()));}
 
-    private void guardElapsed() {
-        if (canRun() && SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(store.phase())) {
-            transition(nextAfterGuard(), "continuation 설정 준비", "guard_elapsed");
-            ensureWebView();
-        }
-    }
+private void guardElapsed(){if(canRun()&&SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(store.phase())){transition(SelfRunStore.PHASE_READ_NEXT_CONTROL,"Drive TURN_COMPLETED 확인 · conversation 제어신호 1회 확인","guard_elapsed");ensureWebView();}}
 
-    private String nextAfterGuard() {
-        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest(store.pendingSignalRaw(), store.runId(), store.mode());
-        if (SelfRunStore.MODE_WORK.equals(store.mode()) && signal.type == SelfRunProtocol.Type.NEXT) {
-            store.setRole(signal.role); store.setPendingModel(signal.model); store.setPendingReasoning(signal.reasoning);
-            return SelfRunStore.PHASE_APPLY_PREFS;
-        }
-        if (signal.type == SelfRunProtocol.Type.NEXT) store.setRole(signal.role);
-        return SelfRunStore.PHASE_SEND_CONTINUE;
-    }
 
-    private void ensureWebView() {
-        if (!canRun() || !isWebAutomationPhase(store.phase())) return;
-        String target = store.conversationUrl().isEmpty() ? store.projectUrl() : store.conversationUrl();
-        if (target.isEmpty()) { pauseError("TARGET_MISSING", "ChatGPT 대상 URL이 없습니다."); return; }
-        acquireWakeLock();
-        if (webView != null) { scheduleWeb(250L); return; }
-        launchWebView(target);
-    }
+private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 자동 재확인합니다.");handler.postDelayed(this::ensureWebView,SUBMISSION_RETRY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}launchWebView(target);}
 
     private void launchWebView(String target) {
         cleanupWebView();
@@ -620,10 +402,12 @@ public final class SelfRunService extends Service {
             webView.setWebViewClient(new WebViewClient() {
                 @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {
                     if (!launchedRunId.equals(store.runId())) return;
-                    generation++; domInFlight = false;
+                    generation++; domInFlight = false; maybeCaptureConversationUrl(url);
                 }
                 @Override public void onPageFinished(WebView view, String url) {
-                    if (launchedRunId.equals(store.runId())) scheduleWeb(800L);
+                    if (!launchedRunId.equals(store.runId())) return;
+                    maybeCaptureConversationUrl(url);
+                    if (isWebAutomationPhase(store.phase())) scheduleWeb(800L);
                 }
                 @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     if (!launchedRunId.equals(store.runId())) return true;
@@ -665,6 +449,8 @@ public final class SelfRunService extends Service {
         }
     }
 
+private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.conversationId(url));}}
+
     private void postWebCallback(Runnable callback, long delay) {
         int epoch = automationEpoch;
         String runId = store.runId();
@@ -674,258 +460,40 @@ public final class SelfRunService extends Service {
         }, delay);
     }
 
-    private void runWebStep() {
-        if (!canRun() || !isWebAutomationPhase(store.phase()) || webView == null || domInFlight) return;
-        if (!routeAcceptable(webView.getUrl())) { restoreCanonical(); return; }
-        String phase = store.phase();
-        String script;
-        switch (phase) {
-            case SelfRunStore.PHASE_BOOTSTRAP -> script = SelfRunDom.prepareInitialContext(store.projectUrl(), store.mode(), store.runId());
-            case SelfRunStore.PHASE_BOOTSTRAP_MODEL -> script = WorkPreferenceDom.modelForProject(store.projectUrl(), "sol");
-            case SelfRunStore.PHASE_BOOTSTRAP_REASONING -> script = WorkPreferenceDom.reasoningForProject(store.projectUrl(), "xhigh");
-            case SelfRunStore.PHASE_BOOTSTRAP_SEND -> {
-                if (store.retryForBootstrap() && store.submissionRetryReady()) {
-                    script = SelfRunDom.prepareDriveInitialRetry(store.projectUrl(), driveBootstrap(), store.runId());
-                } else if (SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED.equals(store.bootstrapSubmissionState())
-                        || store.retryForBootstrap()) {
-                    script = SelfRunDom.checkDriveInitialSubmitted(store.projectUrl(), store.runId());
-                } else {
-                    script = SelfRunDom.sendDriveInitial(store.projectUrl(), driveBootstrap(), store.runId());
-                }
-            }
-            case SelfRunStore.PHASE_APPLY_PREFS -> script = WorkPreferenceDom.modelForConversation(store.conversationUrl(), store.pendingModel());
-            case SelfRunStore.PHASE_APPLY_REASONING -> script = WorkPreferenceDom.reasoningForConversation(store.conversationUrl(), store.pendingReasoning());
-            case SelfRunStore.PHASE_SEND_CONTINUE -> {
-                String prompt = continuationPrompt();
-                if (store.retryForContinue() && store.submissionRetryReady()) {
-                    script = SelfRunDom.prepareDriveTurnRetry(store.conversationUrl(), prompt, store.pendingCommitId(),
-                            store.submissionBaselineCount());
-                } else if (SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())
-                        || store.retryForContinue()) {
-                    script = SelfRunDom.checkDriveTurnSubmitted(store.conversationUrl(), prompt,
-                            store.pendingCommitId(), store.submissionBaselineCount());
-                } else {
-                    script = SelfRunDom.prepareDriveTurn(store.conversationUrl(), prompt, store.pendingCommitId());
-                }
-            }
-            default -> { pauseError("WEB_STATE_INVALID", "Drive V1 WebView 단계 오류: " + phase); return; }
-        }
-        evaluate(phase, script);
-    }
+private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;maybeCaptureConversationUrl(webView.getUrl());String phase=store.phase();if((SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))&&store.conversationUrl().isEmpty()){scheduleWeb(2000L);return;}if(!routeAcceptable(webView.getUrl())){restoreCanonical();return;}String script;switch(phase){case SelfRunStore.PHASE_BOOTSTRAP->script=SelfRunDom.prepareInitialContext(store.projectUrl(),store.mode(),store.runId());case SelfRunStore.PHASE_BOOTSTRAP_MODEL->script=WorkPreferenceDom.modelForProject(store.projectUrl(),"sol");case SelfRunStore.PHASE_BOOTSTRAP_REASONING->script=WorkPreferenceDom.reasoningForProject(store.projectUrl(),"xhigh");case SelfRunStore.PHASE_BOOTSTRAP_SEND->{String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);script=SelfRunDom.sendDriveInitial(store.projectUrl(),prompt,store.commandMarkerId());}case SelfRunStore.PHASE_READ_NEXT_CONTROL->script=SelfRunDom.readLatestSelfRunControl(store.conversationUrl(),store.runId());case SelfRunStore.PHASE_APPLY_PREFS->script=WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel());case SelfRunStore.PHASE_APPLY_REASONING->script=WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning());case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=commandPrompt(SelfRunStore.RETRY_CONTINUE);script=SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId());}default->{store.setLastError("WEB_STATE_RETRY","Drive V1 WebView 단계를 자동 재확인합니다: "+phase);scheduleWeb(2000L);return;}}evaluate(phase,script);}
 
-    private void evaluate(String phase, String script) {
-        WebView active = webView; int epoch = generation; String runId = store.runId(); domInFlight = true;
-        active.evaluateJavascript(script, raw -> {
-            if (active != webView || epoch != generation || !runId.equals(store.runId())) return;
-            domInFlight = false; if (!canRun()) return;
-            JSONObject result = parse(raw); String status = result.optString("status", "SCRIPT_ERROR");
-            if ("TARGET_ERROR".equals(status)) { restoreCanonical(); return; }
-            if ("AUTH_REQUIRED".equals(status)) {
-                enterPreservedPause("CHATGPT_AUTH_REQUIRED", "ChatGPT 로그인 필요 · 사용자 조치 대기", false);
-                NotificationHelper.notifyUser(this, "확인 필요", store.status());
-                return;
-            }
-            if ("MARKER_FAILED".equals(status) || "SCRIPT_ERROR".equals(status)) {
-                if (isSubmissionPhase(phase)) scheduleSubmissionRetryForPhase(phase, status);
-                else scheduleWeb(2_000L);
-                return;
-            }
-            if ("SUBMISSION_AMBIGUOUS".equals(status) || "SUBMISSION_PENDING".equals(status)) {
-                scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, status);
-                return;
-            }
-            if ("BOOTSTRAP_SUBMISSION_AMBIGUOUS".equals(status)
-                    || "BOOTSTRAP_SUBMISSION_PENDING".equals(status)) {
-                scheduleSubmissionRetry(SelfRunStore.RETRY_BOOTSTRAP, status);
-                return;
-            }
-            if ("BOOTSTRAP_SUBMITTED".equals(status)) {
-                if (store.retryForBootstrap() && store.submissionRetryDue()
-                        && !store.submissionRetryReady()) {
-                    store.markSubmissionRetryReady();
-                    store.setStatus("첫 요청 재시도 준비 · 이전 제출 미확인");
-                    scheduleWeb(100L);
-                } else if (!store.hasSubmissionRetry()
-                        && SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED.equals(store.bootstrapSubmissionState())
-                        && store.bootstrapSubmittedAt() > 0
-                        && System.currentTimeMillis() - store.bootstrapSubmittedAt()
-                                >= SUBMISSION_CONFIRMATION_GRACE_MS) {
-                    scheduleSubmissionRetry(SelfRunStore.RETRY_BOOTSTRAP, "BOOTSTRAP_SUBMISSION_UNCONFIRMED");
-                } else {
-                    scheduleWeb(1_200L);
-                }
-                return;
-            }
-            if ("UI_WAIT".equals(status) || "WAIT".equals(status) || "SUBMITTED".equals(status)) {
-                if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
-                        && store.retryForContinue() && store.submissionRetryDue()
-                        && !store.submissionRetryReady() && "WAIT".equals(status)) {
-                    store.markSubmissionRetryReady();
-                    store.setStatus("continuation 재시도 준비 · 이전 제출 미확인");
-                    scheduleWeb(100L);
-                    return;
-                }
-                if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
-                        && !store.hasSubmissionRetry()
-                        && SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())
-                        && store.submissionStartedAt() > 0
-                        && System.currentTimeMillis() - store.submissionStartedAt()
-                                >= SUBMISSION_CONFIRMATION_GRACE_MS) {
-                    scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, "SUBMISSION_UNCONFIRMED");
-                    return;
-                }
-                scheduleWeb("WAIT".equals(status) ? 2_000L : 1_200L);
-                return;
-            }
-            handleWebResult(phase, status, result);
-        });
-    }
+private void evaluate(String phase,String script){WebView active=webView;int epoch=generation;String runId=store.runId();domInFlight=true;active.evaluateJavascript(script,raw->{if(active!=webView||epoch!=generation||!runId.equals(store.runId()))return;domInFlight=false;if(!canRun())return;JSONObject result=parse(raw);String status=result.optString("status","SCRIPT_ERROR");if("TARGET_ERROR".equals(status)){restoreCanonical();return;}if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}if(SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(phase)&&("CONTROL_FOUND".equals(status)||"CONTROL_MISSING".equals(status)||"SCRIPT_ERROR".equals(status))){applyNextControl("CONTROL_FOUND".equals(status)?result.optString("signal",""):"");return;}if(isSubmissionPhase(phase)&&("MARKER_FAILED".equals(status)||"SCRIPT_ERROR".equals(status)||"SUBMISSION_AMBIGUOUS".equals(status)||"SUBMISSION_PENDING".equals(status)||"BOOTSTRAP_SUBMISSION_AMBIGUOUS".equals(status)||"BOOTSTRAP_SUBMISSION_PENDING".equals(status))){commandSubmitted(kindForPhase(phase),status);return;}if("BOOTSTRAP_SUBMITTED".equals(status)){commandSubmitted(SelfRunStore.RETRY_BOOTSTRAP,status);return;}if("SUBMITTED".equals(status)&&SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){commandSubmitted(SelfRunStore.RETRY_CONTINUE,status);return;}if("UI_WAIT".equals(status)||"WAIT".equals(status)){scheduleWeb("WAIT".equals(status)?2000L:1200L);return;}handleWebResult(phase,status,result);});}
 
-    private void handleWebResult(String phase, String status, JSONObject result) {
-        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase) && "READY".equals(status)) {
-            transition(SelfRunStore.MODE_WORK.equals(store.mode()) ? SelfRunStore.PHASE_BOOTSTRAP_MODEL : SelfRunStore.PHASE_BOOTSTRAP_SEND,
-                    "ChatGPT bootstrap 설정 준비", "context_ready"); scheduleWeb(250L); return;
-        }
-        if (SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase) && "READY".equals(status)) {
-            transition(SelfRunStore.PHASE_BOOTSTRAP_REASONING, "첫 턴 Work 추론 적용", "model_ready"); scheduleWeb(250L); return;
-        }
-        if (SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase) && "READY".equals(status)) {
-            transition(SelfRunStore.PHASE_BOOTSTRAP_SEND, "첫 프롬프트 전송 준비", "reasoning_ready"); scheduleWeb(250L); return;
-        }
-        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase) && "CONFIRMED".equals(status)) {
-            String url = result.optString("conversationUrl", result.optString("url", ""));
-            if (SelfRunScript.conversationId(url).isEmpty()) { scheduleWeb(1_000L); return; }
-            if (SelfRunStore.BOOTSTRAP_NOT_STARTED.equals(store.bootstrapSubmissionState())) {
-                store.markBootstrapSubmissionStarted();
-            }
-            store.confirmBootstrap(url);
-            runLog.record(store, "STATE_TRANSITION", "to=WAIT_DRIVE_COMMIT;reason=bootstrap_confirmed");
-            startForegroundCompat();
-            releaseWakeLock(); scheduleDrivePoll(); return;
-        }
-        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase) && "READY_TO_SUBMIT".equals(status)) {
-            if (store.retryForBootstrap() && store.submissionRetryReady()) store.markBootstrapRetryStarted();
-            else store.markBootstrapSubmissionStarted();
-            evaluate(SelfRunStore.PHASE_BOOTSTRAP_SEND,
-                    SelfRunDom.clickPreparedDriveInitial(store.projectUrl(), driveBootstrap(), store.runId()));
-            return;
-        }
-        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase) && "READY".equals(status)) {
-            transition(SelfRunStore.PHASE_APPLY_REASONING, "다음 턴 추론 적용", "model_ready"); scheduleWeb(250L); return;
-        }
-        if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase) && "READY".equals(status)) {
-            transition(SelfRunStore.PHASE_SEND_CONTINUE, "continuation 준비", "reasoning_ready"); scheduleWeb(250L); return;
-        }
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) {
-            if ("CONFIRMED".equals(status)) { confirmContinuation(); return; }
-            if ("READY_TO_SUBMIT".equals(status)) {
-                int beforeCount = result.optInt("beforeCount", -1);
-                if (beforeCount < 0) scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, "BASELINE_MISSING");
-                else startAndClickContinuation(beforeCount);
-                return;
-            }
-        }
-        scheduleWeb(750L);
-    }
+private void handleWebResult(String phase,String status,JSONObject result){if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND,"ChatGPT bootstrap 설정 준비","context_ready");scheduleWeb(250L);return;}if(SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_BOOTSTRAP_REASONING,"첫 턴 Work 추론 적용","model_ready");scheduleWeb(250L);return;}if(SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_BOOTSTRAP_SEND,"첫 프롬프트 전송 준비","reasoning_ready");scheduleWeb(250L);return;}if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);evaluate(phase,SelfRunDom.clickPreparedDriveInitial(store.projectUrl(),prompt,store.commandMarkerId()));return;}if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_APPLY_REASONING,"다음 턴 추론 적용","model_ready");scheduleWeb(250L);return;}if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_SEND_CONTINUE,"continuation 준비","reasoning_ready");scheduleWeb(250L);return;}if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_CONTINUE);evaluate(phase,SelfRunDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId()));return;}scheduleWeb(750L);}
 
-    private void startAndClickContinuation(int beforeCount) {
-        // Baseline and SUBMISSION_STARTED are durable before the click. Recovery checks the user-turn count first.
-        store.markSubmissionStarted(beforeCount);
-        String script = SelfRunDom.clickPreparedDriveTurn(store.conversationUrl(), continuationPrompt(), store.pendingCommitId());
-        evaluate(SelfRunStore.PHASE_SEND_CONTINUE, script);
-    }
 
-    private void confirmContinuation() {
-        String commitId = store.pendingCommitId();
-        store.markSubmissionConfirmed(commitId);
-        finalizeConfirmedContinuation();
-    }
 
-    private void finalizeConfirmedContinuation() {
-        String commitId = store.pendingCommitId();
-        store.consumeContinuation(commitId);
-        runLog.record(store, "STATE_TRANSITION", "to=WAIT_DRIVE_COMMIT;reason=continuation_confirmed");
-        startForegroundCompat();
-        releaseWakeLock(); scheduleDrivePoll();
-    }
 
-    private String driveBootstrap() {
-        return SelfRunProtocol.bootstrapDrive(store.runId(), store.mode(), store.requirement(), store.turnDocumentId());
-    }
+private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);}
 
-    private String continuationPrompt() {
-        return SelfRunProtocol.continuation(store.runId());
-    }
+private String continuationPrompt(){return commandPrompt(SelfRunStore.RETRY_CONTINUE);}
+
+private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?SelfRunProtocol.bootstrapDrive(store.runId(),store.mode(),store.requirement(),store.turnDocumentId()):SelfRunProtocol.driveContinuation(store.runId());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
+private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}
+private void commandSubmitted(String kind,String detail){if(!canRun())return;long due=System.currentTimeMillis()+SUBMISSION_RETRY_MS;store.markCommandSubmitted(kind,due);runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);startForegroundCompat();releaseWakeLock();scheduleDrivePoll(0L);}
+private void applyNextControl(String raw){SelfRunProtocol.Signal signal=SelfRunProtocol.parseLatest(raw,store.runId(),store.mode());if(signal.type==SelfRunProtocol.Type.NEXT){store.setRole(signal.role);if(SelfRunStore.MODE_WORK.equals(store.mode())){store.setPendingModel(signal.model);store.setPendingReasoning(signal.reasoning);}}String next=SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE;transition(next,raw.isEmpty()?"제어신호 미확인 · Drive 완료 기준으로 CONTINUE 강제 진행":"conversation 제어신호 확인 · continuation 준비",raw.isEmpty()?"control_best_effort_miss":"control_readback");scheduleWeb(100L);}
 
     private static boolean isSubmissionPhase(String phase) {
         return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
                 || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);
     }
 
-    private void scheduleSubmissionRetryForPhase(String phase, String reason) {
-        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) {
-            scheduleSubmissionRetry(SelfRunStore.RETRY_BOOTSTRAP, reason);
-        } else if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) {
-            scheduleSubmissionRetry(SelfRunStore.RETRY_CONTINUE, reason);
-        }
-    }
 
-    private void scheduleSubmissionRetry(String kind, String reason) {
-        if (!canRun()) return;
-        if (store.hasSubmissionRetry()) {
-            scheduleOrResumeSubmissionRetry();
-            return;
-        }
-        long dueAt = System.currentTimeMillis() + SUBMISSION_RETRY_MS;
-        store.scheduleSubmissionRetry(kind, reason, dueAt);
-        runLog.record(store, "SUBMISSION_RETRY_WAIT",
-                "kind=" + kind + ";attempt=" + store.submissionRetryAttempt()
-                        + ";dueAt=" + dueAt + ";reason=" + reason);
-        store.setStatus((SelfRunStore.RETRY_BOOTSTRAP.equals(kind) ? "첫 요청" : "continuation")
-                + " 제출 미확인 · 5분 후 재확인/재시도");
-        startForegroundCompat();
-        scheduleOrResumeSubmissionRetry();
-    }
 
-    private void scheduleOrResumeSubmissionRetry() {
-        if (!canRun() || !store.hasSubmissionRetry()) return;
-        handler.removeCallbacks(webRunnable);
-        handler.removeCallbacks(submissionRetryRunnable);
-        releaseWakeLock();
-        long delay = Math.max(0L, store.submissionRetryDueAt() - System.currentTimeMillis());
-        if (delay == 0L) handler.post(submissionRetryRunnable);
-        else handler.postDelayed(submissionRetryRunnable, delay);
-    }
 
-    private void submissionRetryElapsed() {
-        if (!canRun() || !store.hasSubmissionRetry()) return;
-        store.setStatus("제출 재시도 전 기존 제출 성공 여부 확인");
-        runLog.record(store, "SUBMISSION_RETRY_CHECK",
-                "kind=" + store.submissionRetryKind() + ";attempt=" + store.submissionRetryAttempt());
-        ensureWebView();
-    }
 
-    private void scheduleDrivePoll() {
-        handler.removeCallbacks(driveRunnable); releaseWakeLock();
-        if (canRun()) handler.postDelayed(driveRunnable, NORMAL_POLL_MS);
-    }
+private void scheduleDrivePoll(){scheduleDrivePoll(NORMAL_POLL_MS);}
 
-    private void scheduleWeb(long delay) {
-        handler.removeCallbacks(webRunnable);
-        if (store.hasSubmissionRetry() && !store.submissionRetryDue()) return;
-        if (webView != null && canRun() && isWebAutomationPhase(store.phase()))
-            handler.postDelayed(webRunnable, delay);
-    }
+private void scheduleDrivePoll(long requestedDelay){handler.removeCallbacks(driveRunnable);releaseWakeLock();if(!canRun())return;long delay=Math.max(0L,requestedDelay);if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())&&store.awaitingCommandAck()&&store.hasSubmissionRetry()){long until=Math.max(0L,store.submissionRetryDueAt()-System.currentTimeMillis());delay=Math.min(delay,until);}handler.postDelayed(driveRunnable,delay);}
 
-    private static boolean isWebAutomationPhase(String phase) {
-        return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)
-                || SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)
-                || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)
-                || SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
-                || SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
-                || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)
-                || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);
-    }
+private void scheduleWeb(long delay){handler.removeCallbacks(webRunnable);if(webView!=null&&canRun()&&isWebAutomationPhase(store.phase()))handler.postDelayed(webRunnable,delay);}
+
+private static boolean isWebAutomationPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 
     private void handleDriveFailure(Throwable error, int epoch) {
         if (!canApplyDriveResult(epoch)) return;
@@ -998,17 +566,7 @@ public final class SelfRunService extends Service {
         return error instanceof IOException;
     }
 
-    private static void verifyMetadata(DriveApiClient.Metadata m, String job, String mime, String parent, String kind) {
-        if (m.trashed || m.shared || !job.equals(m.name) || !mime.equals(m.mimeType) || !parent.equals(m.parentId)
-                || !m.isAppAuthorized
-                || (DriveApiClient.MIME_FOLDER.equals(mime) && !m.canAddChildren)
-                || !job.equals(m.appProperties.optString("job_id"))
-                || !kind.equals(m.appProperties.optString("selfrun_kind"))
-                || !"1".equals(m.appProperties.optString("protocol_version"))
-                || !"selfrun_drive_android".equals(m.appProperties.optString("client_id"))
-                || !"selfrun_drive_android".equals(m.appProperties.optString("created_by")))
-            throw new IllegalStateException("Drive metadata readback mismatch: " + kind);
-    }
+private static void verifyMetadata(DriveApiClient.Metadata m,String job,String mime,String parent,String kind){if(m.trashed||m.shared||!job.equals(m.name)||!mime.equals(m.mimeType)||!parent.equals(m.parentId)||!m.isAppAuthorized||(DriveApiClient.MIME_FOLDER.equals(mime)&&!m.canAddChildren)||!job.equals(m.appProperties.optString("job_id"))||!kind.equals(m.appProperties.optString("selfrun_kind")))throw new IllegalStateException("Drive metadata readback mismatch: "+kind);}
 
     private static String documentUrl(DriveApiClient.Metadata metadata) {
         return new Uri.Builder().scheme("https").authority("docs.google.com")
@@ -1052,17 +610,7 @@ public final class SelfRunService extends Service {
         if (canRun()) enterPreservedPause("UI_PAUSE", "사용자 일시정지", false);
     }
 
-    private void resumeFromUi() {
-        if (!store.paused() || store.userStopped() || store.runId().isEmpty()) return;
-        String next = store.pausedFromPhase();
-        if (store.resumeNeedsContinuation()) {
-            store.resumeTerminalWithContinuation();
-        } else {
-            if (next.isEmpty() || SelfRunStore.PHASE_PAUSED.equals(next)) next = SelfRunStore.PHASE_WAIT_DRIVE_COMMIT;
-            store.leavePause(next);
-        }
-        store.clearLastError(); resumeWebView(); startForegroundCompat(); resumeStateMachine();
-    }
+private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId().isEmpty())return;stopAutomationCallbacks();store.beginManualResumeOverride();store.clearLastError();resumeWebView();startForegroundCompat();resumeStateMachine();}
 
     private void enterPreservedPause(String cause, String status, boolean needsContinuation) {
         String prior;
@@ -1081,7 +629,6 @@ public final class SelfRunService extends Service {
     private void removeAutomationCallbacks() {
         handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);
         handler.removeCallbacks(guardRunnable); handler.removeCallbacks(driveRetryRunnable);
-        handler.removeCallbacks(submissionRetryRunnable);
     }
 
     private void stopAutomationCallbacks() {
@@ -1125,34 +672,5 @@ public final class SelfRunService extends Service {
     }
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    private static final class DriveStateSnapshot {
-        final String phase;
-        final String runId;
-        final String baseFolderId;
-        final String jobFolderId;
-        final String turnDocumentId;
-        final String creationStage;
-        final int expectedTurn;
-        final long lastConsumedEventSeq;
-        final String mode;
-        final String lastSeenVersion;
-        final String lastSeenModifiedTime;
-
-        DriveStateSnapshot(String phase, String runId, String baseFolderId, String jobFolderId,
-                           String turnDocumentId, String creationStage, int expectedTurn,
-                           long lastConsumedEventSeq, String mode,
-                           String lastSeenVersion, String lastSeenModifiedTime) {
-            this.phase = phase;
-            this.runId = runId;
-            this.baseFolderId = baseFolderId;
-            this.jobFolderId = jobFolderId;
-            this.turnDocumentId = turnDocumentId;
-            this.creationStage = creationStage;
-            this.expectedTurn = expectedTurn;
-            this.lastConsumedEventSeq = lastConsumedEventSeq;
-            this.mode = mode;
-            this.lastSeenVersion = lastSeenVersion;
-            this.lastSeenModifiedTime = lastSeenModifiedTime;
-        }
-    }
+private static final class DriveStateSnapshot{final String phase,runId,baseFolderId,jobFolderId,turnDocumentId,creationStage,mode,lastSeenVersion,lastSeenModifiedTime;final int driveSignalCursor;DriveStateSnapshot(String phase,String runId,String baseFolderId,String jobFolderId,String turnDocumentId,String creationStage,int cursor,String mode,String lastSeenVersion,String lastSeenModifiedTime){this.phase=phase;this.runId=runId;this.baseFolderId=baseFolderId;this.jobFolderId=jobFolderId;this.turnDocumentId=turnDocumentId;this.creationStage=creationStage;this.driveSignalCursor=cursor;this.mode=mode;this.lastSeenVersion=lastSeenVersion;this.lastSeenModifiedTime=lastSeenModifiedTime;}}
 }

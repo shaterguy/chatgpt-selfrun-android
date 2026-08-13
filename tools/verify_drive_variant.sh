@@ -6,7 +6,7 @@ SRC=app/src/main/java/com/shaterguy/chatgptselfrun
 SERVICE=$SRC/SelfRunService.java
 STORE=$SRC/SelfRunStore.java
 PROTOCOL=$SRC/SelfRunProtocol.java
-PARSER=$SRC/DriveSignalParser.java
+PARSER=$SRC/DriveCommitParser.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
 API=$SRC/DriveApiClient.java
 
