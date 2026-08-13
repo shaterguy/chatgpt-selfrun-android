@@ -44,11 +44,16 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Verify patch
+      - name: Static policy
         run: |
           chmod +x tools/verify_drive_variant.sh
           tools/verify_drive_variant.sh
-          gradle --no-daemon --console=plain :app:testDebugUnitTest :app:assembleDebug
+      - name: Compile main
+        run: gradle --no-daemon --console=plain :app:compileDebugJavaWithJavac
+      - name: Unit tests
+        run: gradle --no-daemon --console=plain :app:testDebugUnitTest
+      - name: Assemble debug APK
+        run: gradle --no-daemon --console=plain :app:assembleDebug
       - name: Commit verified source
         run: |
           git config user.name 'github-actions[bot]'
