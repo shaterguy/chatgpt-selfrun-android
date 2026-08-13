@@ -193,6 +193,12 @@ jobs:
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" drive-badging.txt
           grep -Fq "application-label:'ChatGPT SelfRun'" legacy-badging.txt
           grep -Fq "application-label:'SelfRun Drive'" drive-badging.txt
+      - name: Enable hardware acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
       - name: Verify simultaneous installation, runtime and data isolation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
@@ -202,15 +208,15 @@ jobs:
           profile: pixel_6
           emulator-boot-timeout: 600
           emulator-options: >-
-            -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
-          script: |
-            set -o pipefail
-            timeout --foreground 8m tools/verify_coinstall_emulator.sh \
-              legacy-baseline/app/build/outputs/apk/debug/app-debug.apk \
-              app/build/outputs/apk/debug/app-debug.apk \
-              | tee coinstall-evidence.txt
+          script: >-
+            bash -o pipefail -c
+            'timeout --foreground 8m tools/verify_coinstall_emulator.sh
+            legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk |
+            tee coinstall-evidence.txt'
       - name: Upload co-install evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
