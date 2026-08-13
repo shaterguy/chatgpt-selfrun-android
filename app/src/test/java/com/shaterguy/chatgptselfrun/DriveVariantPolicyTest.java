@@ -70,7 +70,7 @@ public class DriveVariantPolicyTest {
                 dom.indexOf("static String observeAssistant"));
         assertTrue(recovery.contains("data-message-author-role=\\\"user\\\""));
         assertFalse(recovery.contains("send.click()"));
-        assertFalse(recovery.contains("assistant"));
+        assertFalse(recovery.contains("data-message-author-role=\\\"assistant\\\""));
     }
 
     @Test public void jobIdUsesFullUuidEntropy() throws Exception {

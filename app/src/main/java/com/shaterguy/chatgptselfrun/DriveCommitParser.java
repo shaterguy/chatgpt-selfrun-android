@@ -144,9 +144,13 @@ final class DriveCommitParser {
             Map<String, String> values = parsed.values;
             int turn = positiveInt(values.get("TURN"));
             long sequence = positiveLong(values.get("EVENT_SEQ"));
+            if (turn < 1 || sequence < 1L) {
+                malformedForExpected = true;
+                continue;
+            }
             if (turn > expectedTurn) return new Result(Status.FUTURE_TURN, null, "future turn " + turn);
             if (turn < expectedTurn || sequence <= lastConsumedEventSeq) continue;
-            if (turn != expectedTurn || sequence < 1L
+            if (turn != expectedTurn
                     || !"1".equals(values.get("PROTOCOL_VERSION"))
                     || !"SELFRUN_DRIVE_ANDROID".equals(values.get("CLIENT_ID"))
                     || !jobId.equals(values.get("JOB_ID"))
