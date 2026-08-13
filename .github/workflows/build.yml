@@ -10,6 +10,7 @@ on:
       - v0.2.3-dev3
       - v0.2.3-dev4
       - v0.2.3-dev5
+      - v0.2.3-dev6
     tags:
       - 'v*'
   workflow_dispatch:
@@ -53,6 +54,7 @@ jobs:
           STORE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
           HISTORY_STORE=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryStore.java
           RUNLOG=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRunLog.java
+          SAMPLER=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogSampler.java
           PROTOCOL=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java
           HISTORY=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryActivity.java
           LOGMENU=app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunLogMenuActivity.java
@@ -70,8 +72,8 @@ jobs:
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST"
           grep -q 'android:roundIcon="@mipmap/ic_launcher_round"' "$MANIFEST"
           grep -q "applicationId 'com.shaterguy.chatgptselfrun'" "$BUILD"
-          grep -q 'versionCode 17' "$BUILD"
-          grep -q "versionName '0.2.3-dev5'" "$BUILD"
+          grep -q 'versionCode 18' "$BUILD"
+          grep -q "versionName '0.2.3-dev6'" "$BUILD"
           test -s "$ICON_FOREGROUND"
           test -s "$ICON_MONOCHROME"
           test -s "$ICON_V26"
@@ -104,8 +106,8 @@ jobs:
           grep -q 'setUseWideViewPort(false)' "$WEB"
           grep -q 'getUserAgentString' "$WEB"
           ! grep -q 'Windows NT 10.0' "$WEB"
-          grep -q 'v0.2.3-dev5' "$MAIN"
-          grep -q 'ChatGPTSelfRun/0.2.3-dev5' "$WEB"
+          grep -q 'v0.2.3-dev6' "$MAIN"
+          grep -q 'ChatGPTSelfRun/0.2.3-dev6' "$WEB"
           grep -q '새 작업' "$MAIN"
           ! grep -q 'new EditText' "$MAIN"
           grep -q '일시정지' "$MAIN"
@@ -191,6 +193,12 @@ jobs:
           grep -q 'static final String ACTION_RESUME' "$SERVICE"
           grep -q 'enterPreservedPause' "$SERVICE"
           grep -q 'WEBVIEW_RECOVERY_RECONNECT' "$SERVICE"
+          grep -q 'STALE_CALLBACK' "$SERVICE"
+          grep -q 'DOM_OBSERVER_DUPLICATE' "$SERVICE"
+          grep -q 'DOM_EVALUATION_COALESCED' "$SERVICE"
+          grep -q 'DOM_WATCHDOG_SKIPPED' "$SERVICE"
+          grep -q 'IO_EFFICIENCY' "$SERVICE"
+          grep -q 'updateLogExecutionContext' "$SERVICE"
           ! grep -q 'webView.onPause()' "$SERVICE"
           ! grep -q 'webView.onResume()' "$SERVICE"
           ! grep -q 'pauseTimers' "$SERVICE"
@@ -199,9 +207,33 @@ jobs:
           ! grep -q 'AlarmManager' "$SERVICE"
           ! grep -q 'setRendererPriorityPolicy' "$SERVICE"
           grep -q 'restartPhaseClock' "$STORE"
-          grep -q 'if (next.equals(prefs.getString(key, ""))) return;' "$STORE"
-          grep -q 'sameSnapshot(previousSnapshot, nextSnapshot)' "$HISTORY_STORE"
-          grep -q 'NOISY_HEARTBEAT_MS = 60_000L' "$RUNLOG"
+          grep -q 'setPhaseAndStatus' "$STORE"
+          grep -q 'enterPausedState' "$STORE"
+          grep -q 'enterErrorPausedState' "$STORE"
+          grep -q 'resumeState' "$STORE"
+          grep -q 'stopByUser' "$STORE"
+          grep -q 'markNoop' "$STORE"
+          grep -q 'SYNC_DEBOUNCE_MS = 250L' "$HISTORY_STORE"
+          grep -q 'pendingSnapshots' "$HISTORY_STORE"
+          grep -q 'syncCritical' "$HISTORY_STORE"
+          grep -q 'physicalWrites' "$HISTORY_STORE"
+          ! grep -q '\.commit()' "$HISTORY_STORE"
+          grep -q '\.apply()' "$HISTORY_STORE"
+          test -s "$SAMPLER"
+          grep -q 'SUMMARY_INTERVAL_MS = 60_000L' "$SAMPLER"
+          grep -q 'BURST_WINDOW_MS = 10_000L' "$SAMPLER"
+          grep -q 'BURST_THRESHOLD = 25L' "$SAMPLER"
+          grep -q 'REPEAT_SUMMARY' "$SAMPLER"
+          grep -q 'STALE_CALLBACK' "$SAMPLER"
+          grep -q 'ScheduledExecutorService' "$RUNLOG"
+          grep -q 'WRITE_BATCH_MS = 250L' "$RUNLOG"
+          grep -q 'REPEAT_SUMMARY' "$RUNLOG"
+          grep -q 'first_occurrence_kst' "$RUNLOG"
+          grep -q 'last_occurrence_kst' "$RUNLOG"
+          grep -q 'repeat_count' "$RUNLOG"
+          grep -q 'observer_epoch' "$RUNLOG"
+          grep -q 'wakelock_state' "$RUNLOG"
+          ! grep -q 'output.flush()' "$RUNLOG"
           grep -q '"luna".equals(model)' "$PROTOCOL"
           grep -q '"max".equals(reasoning)' "$PROTOCOL"
           grep -q '"ultra".equals(reasoning)' "$PROTOCOL"
@@ -218,14 +250,14 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
-          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev5-aligned-unsigned.apk
+          APK=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev6-aligned-unsigned.apk
           test -s "$SRC"
           "$BT/zipalign" -p -f 4 "$SRC" "$APK"
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/BADGING.txt
           grep -q "package: name='com.shaterguy.chatgptselfrun'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionCode='17'" app/build/outputs/apk/release/BADGING.txt
-          grep -q "versionName='0.2.3-dev5'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionCode='18'" app/build/outputs/apk/release/BADGING.txt
+          grep -q "versionName='0.2.3-dev6'" app/build/outputs/apk/release/BADGING.txt
           unzip -t "$APK" >/dev/null
           cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner-36.0.0.jar
           test -s app/build/outputs/apk/release/apksigner-36.0.0.jar
@@ -233,9 +265,9 @@ jobs:
       - name: Upload unsigned release APK and signing tool
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-selfrun-android-v0.2.3-dev5-unsigned
+          name: chatgpt-selfrun-android-v0.2.3-dev6-unsigned
           path: |
-            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev5-aligned-unsigned.apk
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev6-aligned-unsigned.apk
             app/build/outputs/apk/release/apksigner-36.0.0.jar
             app/build/outputs/apk/release/BADGING.txt
             app/build/outputs/apk/release/SHA256SUMS.txt
