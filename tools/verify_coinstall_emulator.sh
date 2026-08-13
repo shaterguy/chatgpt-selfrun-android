@@ -8,7 +8,14 @@ fi
 
 LEGACY_APK="$1"
 DRIVE_APK="$2"
-ADB="${ADB:-adb}"
+ADB_BINARY="${ADB:-adb}"
+ADB_COMMAND_TIMEOUT_SECONDS="${ADB_COMMAND_TIMEOUT_SECONDS:-60}"
+
+adb_checked() {
+  timeout --foreground "${ADB_COMMAND_TIMEOUT_SECONDS}s" "$ADB_BINARY" "$@"
+}
+
+ADB=adb_checked
 LEGACY_PACKAGE="com.shaterguy.chatgptselfrun"
 DRIVE_PACKAGE="com.shaterguy.chatgptselfrun.drive"
 LEGACY_MAIN="$LEGACY_PACKAGE/com.shaterguy.chatgptselfrun.MainActivity"
