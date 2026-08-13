@@ -143,10 +143,12 @@ jobs:
           cat "$EVIDENCE/AC06_SUMMARY.md"
 
       - name: Upload AC06 evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: selfrun-v0.2.3-dev6-ac06-runtime-evidence
           path: ${{ runner.temp }}/ac06-evidence
+          if-no-files-found: warn
 
       - name: Emulator diagnostics
         if: always()
