@@ -39,10 +39,21 @@ package_installed() {
 }
 
 assert_launcher() {
-  local package="$1" expected="$2" resolved
+  local package="$1" expected="$2" resolved actual_package actual_class expected_package expected_class
   resolved="$("$ADB" shell cmd package resolve-activity --brief \
-    -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$package" | tr -d '\r')"
-  [[ "$resolved" == "$expected" ]] || fail "launcher resolution mismatch for $package: $resolved"
+    -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$package" | tr -d '\r' | tail -1)"
+  actual_package="${resolved%%/*}"
+  actual_class="${resolved#*/}"
+  expected_package="${expected%%/*}"
+  expected_class="${expected#*/}"
+  if [[ "$actual_class" == .* ]]; then
+    actual_class="${actual_package}${actual_class}"
+  fi
+  if [[ "$expected_class" == .* ]]; then
+    expected_class="${expected_package}${expected_class}"
+  fi
+  [[ "$actual_package" == "$expected_package" && "$actual_class" == "$expected_class" ]] \
+    || fail "launcher resolution mismatch for $package: $resolved"
 }
 
 package_version() {
