@@ -15,8 +15,8 @@ public class DriveVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         String service = source("SelfRunService.java");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-        assertTrue(gradle.contains("versionCode 1000001"));
-        assertTrue(gradle.contains("versionName '1.0.0-dev1'"));
+        assertTrue(gradle.contains("versionCode 1000002"));
+        assertTrue(gradle.contains("versionName '1.0.0-dev2'"));
         assertTrue(manifest.contains("android:label=\"@string/app_name\""));
         assertFalse(manifest.contains("android:sharedUserId"));
         assertFalse(manifest.matches("(?s).*android:authorities=\"(?!\\$\\{applicationId}).*"));
