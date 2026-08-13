@@ -95,8 +95,10 @@ final class SelfRunAc06MatrixRunner {
         List<String> lines = log.readDebug(runId, 2_000);
         SelfRunAc06Support.settle();
         JSONObject row = SelfRunAc06Support.row("pause_" + name, lines.size());
+        String expectedPhase = "manual_pause".equals(name)
+                ? SelfRunStore.PHASE_WAIT_ASSISTANT : SelfRunStore.PHASE_SEND_CONTINUE;
         row.put("state_valid", !store.paused()
-                && SelfRunStore.PHASE_SEND_CONTINUE.equals(store.phase())
+                && expectedPhase.equals(store.phase())
                 && SelfRunAc06Support.CONVERSATION_URL.equals(store.conversationUrl()));
         return row;
     }
