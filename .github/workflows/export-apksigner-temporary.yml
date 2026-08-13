@@ -1,0 +1,32 @@
+name: Temporary export Android apksigner
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.0.0-dev2
+
+permissions:
+  contents: read
+
+jobs:
+  export-apksigner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Build Tools 36
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Stage apksigner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" out/apksigner.jar
+          sha256sum out/apksigner.jar > out/SHA256SUMS.txt
+      - name: Upload temporary apksigner
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-temporary-apksigner
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
