@@ -26,6 +26,15 @@ jobs:
           open('/tmp/dev3_signal_patch.py','w').write(text)
           PY
           python3 /tmp/dev3_signal_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('app/src/test/java/com/shaterguy/chatgptselfrun')
+          for path in root.glob('*.java'):
+              text=path.read_text(encoding='utf-8')
+              updated=text.replace('Files.readString(p)', 'new String(Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8)')
+              if updated != text:
+                  path.write_text(updated, encoding='utf-8')
+          PY
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
