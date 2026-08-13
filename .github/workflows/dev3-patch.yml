@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 .github/scripts/dev3_prepatch.py
           python3 .github/scripts/dev3_patch.py
+          python3 .github/scripts/dev3_postpatch.py
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -46,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -f .github/workflows/dev3-patch.yml .github/scripts/dev3_patch.py .github/scripts/dev3_prepatch.py
+          rm -f .github/workflows/dev3-patch.yml .github/scripts/dev3_patch.py .github/scripts/dev3_prepatch.py .github/scripts/dev3_postpatch.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
