@@ -60,6 +60,31 @@ public class SelfRunObserverPauseLifecycleTest {
     }
 
     @Test
+    public void navigationDuringPreservedResumeKeepsGateUntilCurrentObserverReady() throws Exception {
+        String text = source();
+        int pageStart = text.indexOf("public void onPageStarted");
+        int pageFinish = text.indexOf("public void onPageFinished", pageStart);
+        assertTrue(pageStart >= 0 && pageFinish > pageStart);
+        String pageStartBody = text.substring(pageStart, pageFinish);
+
+        assertTrue(pageStartBody.contains("invalidateDomObserverForNavigation();"));
+        assertTrue(pageStartBody.contains("generation++;"));
+        assertTrue(pageStartBody.contains("invalidateExecutionEpoch();"));
+        assertFalse(pageStartBody.contains("resumeObserverGate = false;"));
+
+        int openGate = text.indexOf("private boolean openResumeObserverGate");
+        int nextMethod = text.indexOf("private static Uri chatGptOrigin", openGate);
+        assertTrue(openGate >= 0 && nextMethod > openGate);
+        String gateBody = text.substring(openGate, nextMethod);
+        int clearGate = gateBody.indexOf("resumeObserverGate = false;");
+        int wake = gateBody.indexOf("updateWakeLockForState(\"resume_observer_ready\")");
+        int evaluate = gateBody.indexOf("requestDomEvaluation(0L, \"resume_observer_ready\")");
+        assertTrue(clearGate >= 0);
+        assertTrue(wake > clearGate);
+        assertTrue(evaluate > wake);
+    }
+
+    @Test
     public void lowFrequencyWatchdogRemainsRecoveryPath() throws Exception {
         String text = source();
         assertTrue(text.contains("DOM_WATCHDOG_MS = 15_000L"));
