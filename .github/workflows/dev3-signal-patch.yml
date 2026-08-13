@@ -26,7 +26,9 @@ jobs:
           url='https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/git/blobs/ad281c75401236b80e81c828fdc24091d5339744'
           req=urllib.request.Request(url, headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
           with urllib.request.urlopen(req) as r: data=json.load(r)
-          open('/tmp/dev3_signal_patch.py','wb').write(base64.b64decode(data['content']))
+          text=base64.b64decode(data['content']).decode('utf-8')
+          text=text.replace("R=Path(__file__).resolve().parents[1]","R=Path.cwd()",1)
+          open('/tmp/dev3_signal_patch.py','w',encoding='utf-8').write(text)
           PY
           python3 /tmp/dev3_signal_patch.py
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
