@@ -44,4 +44,16 @@ public class SelfRunContinuationSubmissionTest {
         assertTrue(script.contains("새 conversation URL과 제출 표식 확인"));
         assertTrue(script.contains("conversationUrl:location.href"));
     }
+
+    @Test
+    public void driveBootstrapConfirmsFromConversationUrlAndDurableClickMarker() {
+        String script = SelfRunDom.checkDriveInitialSubmitted(
+                "https://chatgpt.com/g/g-p-demo/project",
+                "SR-drive-boot");
+
+        assertTrue(script.contains("if(conv&&prior)return result('CONFIRMED'"));
+        assertTrue(script.contains("새 conversation URL과 제출 표식 확인"));
+        assertTrue(script.contains("conversationUrl:location.href"));
+        assertTrue(!script.contains("data-message-author-role=\"user\""));
+    }
 }

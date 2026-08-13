@@ -86,7 +86,7 @@ final class SelfRunStore {
                 .putString("lastSubmittedCommitId", "")
                 .putString("creationStage", CREATION_NONE).putLong("bootstrapSubmittedAt", 0L)
                 .putString("bootstrapSubmissionState", BOOTSTRAP_NOT_STARTED)
-                .putBoolean("sessionBound", false).putString("pausedFromPhase", "")
+                .putString("pausedFromPhase", "")
                 .putBoolean("terminalSideEffectPending", false).putString("terminalSideEffectType", "")
                 .putString("terminalSideEffectRunId", "").putString("terminalSideEffectCommitId", "")
                 .putBoolean("resumeNeedsContinuation", false).putBoolean("active", true)
@@ -177,7 +177,6 @@ final class SelfRunStore {
     String creationStage() { return getOr("creationStage", CREATION_NONE); }
     long bootstrapSubmittedAt() { return prefs.getLong("bootstrapSubmittedAt", 0L); }
     String bootstrapSubmissionState() { return getOr("bootstrapSubmissionState", BOOTSTRAP_NOT_STARTED); }
-    boolean sessionBound() { return prefs.getBoolean("sessionBound", false); }
     String pausedFromPhase() { return get("pausedFromPhase"); }
     boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }
     boolean terminalSideEffectPending() { return prefs.getBoolean("terminalSideEffectPending", false); }
@@ -199,7 +198,6 @@ final class SelfRunStore {
     void setActive(boolean value) { commitOrThrow(prefs.edit().putBoolean("active", value)); syncHistory(); }
     void setUserStopped(boolean value) { commitOrThrow(prefs.edit().putBoolean("userStopped", value)); syncHistory(); }
     void setCreationStage(String value) { commitOrThrow(prefs.edit().putString("creationStage", value)); }
-    void setSessionBound(boolean value) { commitOrThrow(prefs.edit().putBoolean("sessionBound", value)); }
 
     void markBootstrapSubmissionStarted() {
         if (!BOOTSTRAP_NOT_STARTED.equals(bootstrapSubmissionState())) {
@@ -217,7 +215,7 @@ final class SelfRunStore {
         commitOrThrow(prefs.edit().putString("conversationUrl", safe(conversationUrl))
                 .putString("bootstrapSubmissionState", BOOTSTRAP_SUBMISSION_CONFIRMED)
                 .putString("phase", PHASE_WAIT_DRIVE_COMMIT)
-                .putString("status", "Drive SESSION_BOUND/commit 대기")
+                .putString("status", "Drive 턴 완료 기록 대기")
                 .putLong("phaseStartedAt", System.currentTimeMillis()));
         syncHistory();
     }
@@ -293,11 +291,6 @@ final class SelfRunStore {
                     .putBoolean("resumeNeedsContinuation", true).putBoolean("paused", true)
                     .putString("phase", PHASE_PAUSED)
                     .putString("status", "사용자 조치 필요 · " + safe(commit.signal.actionId));
-            case ERROR -> editor.putString("pausedFromPhase", PHASE_WAIT_DRIVE_COMMIT)
-                    .putBoolean("resumeNeedsContinuation", false).putBoolean("paused", true)
-                    .putString("phase", PHASE_PAUSED).putString("status", "DRIVE_RUN_ERROR")
-                    .putString("lastErrorCode", "DRIVE_RUN_ERROR")
-                    .putString("lastErrorMessage", safe(commit.signal.actionId));
             default -> throw new IllegalArgumentException("terminal signal required");
         }
         editor.putBoolean("terminalSideEffectPending", true)

@@ -5,7 +5,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class SelfRunProtocol {
-    enum Type { NEXT, DONE, USER_ACTION, PAUSE, ERROR, NONE }
+    enum Type { NEXT, DONE, USER_ACTION, PAUSE, NONE }
 
     static final class Signal {
         final Type type;
@@ -28,7 +28,7 @@ final class SelfRunProtocol {
         }
     }
 
-    private static final Pattern BRACKET = Pattern.compile("\\[SELF_RUN_(NEXT|DONE|USER_ACTION_REQUIRED|PAUSE|ERROR)\\s+([^\\]]+)]");
+    private static final Pattern BRACKET = Pattern.compile("\\[SELF_RUN_(NEXT|DONE|USER_ACTION_REQUIRED|PAUSE)\\s+([^\\]]+)]");
     private SelfRunProtocol() {}
 
     static Signal parseLatest(String assistantText, String expectedRunId, String mode) {
@@ -49,10 +49,6 @@ final class SelfRunProtocol {
                 last = new Signal(Type.USER_ACTION, raw, parts[0], "", "", "", action);
             } else if ("PAUSE".equals(kind)) {
                 last = new Signal(Type.PAUSE, raw, parts[0], value(payload, "ROLE"), "", "", "");
-            } else if ("ERROR".equals(kind)) {
-                String reason = value(payload, "REASON");
-                if (!safeCode(reason)) continue;
-                last = new Signal(Type.ERROR, raw, parts[0], "", "", "", reason);
             } else {
                 String role = value(payload, "ROLE").toUpperCase(Locale.ROOT);
                 String model = value(payload, "MODEL").toLowerCase(Locale.ROOT);
@@ -95,12 +91,6 @@ final class SelfRunProtocol {
                 + "DRIVE_TURN_DOCUMENT_ID=" + documentId + "\n"
                 + "DRIVE_TURN_DOCUMENT_URL=" + documentUrl + "\n"
                 + "DRIVE_EXPECTED_TURN=" + expectedTurn + "\n\n"
-                + "Drive V1 실행 계약:\n"
-                + "- 전달된 정확한 DRIVE_TURN_DOCUMENT_ID 또는 URL만 사용한다.\n"
-                + "- Job 폴더나 실행턴 문서를 생성하거나 이름/Job ID로 Drive를 검색하지 않는다.\n"
-                + "- 초기 블록 JOB_ID를 DRIVE_JOB_ID와 대조하고 접근 직후 SESSION_BOUND를 기록한다.\n"
-                + "- 실제 주요 단계 전이만 갱신한다.\n"
-                + "- 턴 마지막에 commit 작성, 동일 문서 readback, 동일 SelfRun 신호 답변 출력 순서로 종료한다.\n\n"
                 + requirement.trim();
     }
 

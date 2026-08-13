@@ -30,6 +30,8 @@ public class DriveVariantPolicyTest {
         String service = source("SelfRunService.java");
         assertFalse(service.contains("WAIT_DRIVE_DISCOVERY"));
         assertFalse(service.contains("WAIT_ASSISTANT"));
+        assertFalse(service.contains("SESSION_BOUND"));
+        assertFalse(service.contains("sessionBindTimedOut"));
         assertFalse(service.contains("observeAssistant"));
         assertFalse(service.contains("assistant DOM"));
         assertTrue(service.contains("getPollMetadata(accessToken, snapshot.turnDocumentId)"));
@@ -138,6 +140,8 @@ public class DriveVariantPolicyTest {
                 dom.indexOf("static String prepareDriveTurn"));
         assertFalse(check.contains("send.click()"));
         assertFalse(check.contains("assistant"));
+        assertTrue(check.contains("if(conv&&prior)return result('CONFIRMED'"));
+        assertFalse(check.contains("data-message-author-role=\"user\""));
     }
 
     @Test public void legacyBootstrapStillRoutesWithoutDriveContract() {

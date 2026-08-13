@@ -38,9 +38,7 @@ public final class SelfRunService extends Service {
     static final String ACTION_PAUSE = BuildConfig.APPLICATION_ID + ".PAUSE";
     static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME";
     private static final int NOTIFICATION_ID = 17021;
-    private static final long SESSION_BOUND_POLL_MS = 15_000L;
     private static final long NORMAL_POLL_MS = 60_000L;
-    private static final long SESSION_BIND_TIMEOUT_MS = 5 * 60_000L;
     static final long CONTINUATION_GUARD_MS = 120_000L;
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
 
@@ -263,8 +261,7 @@ public final class SelfRunService extends Service {
                 return new DriveStateSnapshot(store.phase(), store.runId(), store.runBaseFolderId(),
                         store.jobFolderId(), store.turnDocumentId(), store.creationStage(),
                         store.expectedTurn(), store.lastConsumedEventSeq(), store.mode(),
-                        store.sessionBound(), store.lastSeenDriveVersion(), store.lastSeenModifiedTime(),
-                        store.bootstrapSubmittedAt());
+                        store.lastSeenDriveVersion(), store.lastSeenModifiedTime());
             }
         }
     }
@@ -448,15 +445,11 @@ public final class SelfRunService extends Service {
         boolean changed = !metadata.version.equals(snapshot.lastSeenVersion)
                 || !metadata.modifiedTime.equals(snapshot.lastSeenModifiedTime);
         if (!changed) {
-            if (sessionBindTimedOut(snapshot)) {
-                pauseError("DRIVE_SESSION_BIND_TIMEOUT", "5분 안에 SESSION_BOUND를 확인하지 못했습니다.", epoch);
-            } else applyDriveResult(epoch, this::scheduleDrivePoll);
+            applyDriveResult(epoch, this::scheduleDrivePoll);
             return;
         }
         String text = drive.readDocumentText(accessToken, snapshot.turnDocumentId);
         if (!canApplyDriveResult(epoch)) return;
-        boolean newlyBound = !snapshot.sessionBound
-                && DriveCommitParser.hasSessionBound(text, snapshot.runId, snapshot.expectedTurn);
         DriveCommitParser.Result result = DriveCommitParser.latest(text, snapshot.runId,
                 snapshot.expectedTurn, snapshot.lastConsumedEventSeq, snapshot.mode);
         if (result.status == DriveCommitParser.Status.FUTURE_TURN) {
@@ -465,20 +458,12 @@ public final class SelfRunService extends Service {
         if (result.status == DriveCommitParser.Status.MALFORMED) {
             pauseError("DRIVE_COMMIT_MALFORMED", result.reason, epoch); return;
         }
-        boolean timedOut = !newlyBound && result.status != DriveCommitParser.Status.ACCEPTED
-                && sessionBindTimedOut(snapshot);
         if (!applyDriveResult(epoch, () -> {
-            if (newlyBound) {
-                store.setSessionBound(true);
-                runLog.record(store, "DRIVE_SESSION_BOUND", "turn=" + store.expectedTurn());
-            }
             // Pending/terminal state is durable before the validated metadata cursor advances.
             if (result.status == DriveCommitParser.Status.ACCEPTED) acceptCommit(result.commit);
             store.updateDriveSeen(metadata.version, metadata.modifiedTime);
-            if (result.status != DriveCommitParser.Status.ACCEPTED && !timedOut) scheduleDrivePoll();
+            if (result.status != DriveCommitParser.Status.ACCEPTED) scheduleDrivePoll();
         })) return;
-        if (timedOut) pauseError("DRIVE_SESSION_BIND_TIMEOUT",
-                "5분 안에 SESSION_BOUND를 확인하지 못했습니다.", epoch);
     }
 
     private void acceptCommit(DriveCommitParser.Commit commit) {
@@ -518,8 +503,6 @@ public final class SelfRunService extends Service {
                                 "DRIVE_PAUSE", false, ownerRunId, commitId, type);
                         case "USER_ACTION" -> finishPersistedTerminalPause(
                                 "DRIVE_USER_ACTION", true, ownerRunId, commitId, type);
-                        case "ERROR" -> finishPersistedTerminalPause(
-                                "DRIVE_RUN_ERROR", true, ownerRunId, commitId, type);
                         default -> {
                             // Corrupt/unowned terminal work never mutates or stops a newer run.
                             return;
@@ -542,8 +525,6 @@ public final class SelfRunService extends Service {
                             "DRIVE_PAUSE", false, ownerRunId, commitId, type);
                     case USER_ACTION -> finishPersistedTerminalPause(
                             "DRIVE_USER_ACTION", true, ownerRunId, commitId, type);
-                    case ERROR -> finishPersistedTerminalPause(
-                            "DRIVE_RUN_ERROR", true, ownerRunId, commitId, type);
                     default -> { return; }
                 }
             }
@@ -680,14 +661,14 @@ public final class SelfRunService extends Service {
             case SelfRunStore.PHASE_BOOTSTRAP_REASONING -> script = WorkPreferenceDom.reasoningForProject(store.projectUrl(), "xhigh");
             case SelfRunStore.PHASE_BOOTSTRAP_SEND -> script = SelfRunStore.BOOTSTRAP_SUBMISSION_STARTED
                     .equals(store.bootstrapSubmissionState())
-                    ? SelfRunDom.checkDriveInitialSubmitted(store.projectUrl(), driveBootstrap(), store.runId())
+                    ? SelfRunDom.checkDriveInitialSubmitted(store.projectUrl(), store.runId())
                     : SelfRunDom.sendDriveInitial(store.projectUrl(), driveBootstrap(), store.runId());
             case SelfRunStore.PHASE_APPLY_PREFS -> script = WorkPreferenceDom.modelForConversation(store.conversationUrl(), store.pendingModel());
             case SelfRunStore.PHASE_APPLY_REASONING -> script = WorkPreferenceDom.reasoningForConversation(store.conversationUrl(), store.pendingReasoning());
             case SelfRunStore.PHASE_SEND_CONTINUE -> {
                 String prompt = continuationPrompt();
                 if (SelfRunStore.SUBMISSION_STARTED.equals(store.submissionState())) {
-                    script = SelfRunDom.checkDriveTurnSubmitted(store.conversationUrl(), store.pendingCommitId());
+                    script = SelfRunDom.checkDriveTurnSubmitted(store.conversationUrl(), prompt, store.pendingCommitId());
                 } else script = SelfRunDom.prepareDriveTurn(store.conversationUrl(), prompt, store.pendingCommitId());
             }
             default -> { pauseError("WEB_STATE_INVALID", "Drive V1 WebView 단계 오류: " + phase); return; }
@@ -805,14 +786,12 @@ public final class SelfRunService extends Service {
     }
 
     private String continuationPrompt() {
-        return SelfRunProtocol.continuation(store.runId()) + "\nSELF_RUN_DRIVE_COMMIT_ID=" + store.pendingCommitId()
-                + "\nDRIVE_EXPECTED_TURN=" + (store.pendingTurn() + 1);
+        return SelfRunProtocol.continuation(store.runId());
     }
 
     private void scheduleDrivePoll() {
         handler.removeCallbacks(driveRunnable); releaseWakeLock();
-        long delay = store.sessionBound() ? NORMAL_POLL_MS : SESSION_BOUND_POLL_MS;
-        if (canRun()) handler.postDelayed(driveRunnable, delay);
+        if (canRun()) handler.postDelayed(driveRunnable, NORMAL_POLL_MS);
     }
 
     private void scheduleWeb(long delay) {
@@ -998,11 +977,6 @@ public final class SelfRunService extends Service {
     }
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    private static boolean sessionBindTimedOut(DriveStateSnapshot snapshot) {
-        return !snapshot.sessionBound && snapshot.bootstrapSubmittedAt > 0
-                && System.currentTimeMillis() - snapshot.bootstrapSubmittedAt >= SESSION_BIND_TIMEOUT_MS;
-    }
-
     private static final class DriveStateSnapshot {
         final String phase;
         final String runId;
@@ -1013,16 +987,13 @@ public final class SelfRunService extends Service {
         final int expectedTurn;
         final long lastConsumedEventSeq;
         final String mode;
-        final boolean sessionBound;
         final String lastSeenVersion;
         final String lastSeenModifiedTime;
-        final long bootstrapSubmittedAt;
 
         DriveStateSnapshot(String phase, String runId, String baseFolderId, String jobFolderId,
                            String turnDocumentId, String creationStage, int expectedTurn,
-                           long lastConsumedEventSeq, String mode, boolean sessionBound,
-                           String lastSeenVersion, String lastSeenModifiedTime,
-                           long bootstrapSubmittedAt) {
+                           long lastConsumedEventSeq, String mode,
+                           String lastSeenVersion, String lastSeenModifiedTime) {
             this.phase = phase;
             this.runId = runId;
             this.baseFolderId = baseFolderId;
@@ -1032,10 +1003,8 @@ public final class SelfRunService extends Service {
             this.expectedTurn = expectedTurn;
             this.lastConsumedEventSeq = lastConsumedEventSeq;
             this.mode = mode;
-            this.sessionBound = sessionBound;
             this.lastSeenVersion = lastSeenVersion;
             this.lastSeenModifiedTime = lastSeenModifiedTime;
-            this.bootstrapSubmittedAt = bootstrapSubmittedAt;
         }
     }
 }

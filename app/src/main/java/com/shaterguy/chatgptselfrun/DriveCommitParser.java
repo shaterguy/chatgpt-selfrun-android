@@ -20,12 +20,8 @@ final class DriveCommitParser {
     private static final int MAX_BLOCKS = 128;
     private static final String COMMIT_OPEN = "[SELF_RUN_DRIVE_COMMIT_V1]";
     private static final String COMMIT_CLOSE = "[/SELF_RUN_DRIVE_COMMIT_V1]";
-    private static final String BOUND_OPEN = "[SELF_RUN_DRIVE_BOUND_V1]";
-    private static final String BOUND_CLOSE = "[/SELF_RUN_DRIVE_BOUND_V1]";
     private static final Set<String> COMMIT_KEYS = keys("PROTOCOL_VERSION", "CLIENT_ID", "JOB_ID",
             "TURN", "EVENT_SEQ", "COMMIT_KIND", "STATE", "COMMITTED_AT");
-    private static final Set<String> BOUND_KEYS = keys("PROTOCOL_VERSION", "CLIENT_ID", "JOB_ID",
-            "TURN", "STATE", "BOUND_AT");
     private static final DateTimeFormatter STRICT_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME
             .withResolverStyle(ResolverStyle.STRICT);
 
@@ -68,37 +64,6 @@ final class DriveCommitParser {
     }
 
     private DriveCommitParser() {}
-
-    static boolean hasSessionBound(String text, String jobId, int turn) {
-        if (!validDocument(text) || !safeJobId(jobId) || turn < 1) return false;
-        int blocks = 0;
-        int cursor = 0;
-        while (true) {
-            int open = text.indexOf(BOUND_OPEN, cursor);
-            if (open < 0) break;
-            if (++blocks > MAX_BLOCKS) return false;
-            int nextOpen = text.indexOf(BOUND_OPEN, open + BOUND_OPEN.length());
-            int close = text.indexOf(BOUND_CLOSE, open + BOUND_OPEN.length());
-            // A later opening marker before a close means the earlier append was partial.
-            if (nextOpen >= 0 && (close < 0 || nextOpen < close)) {
-                cursor = nextOpen;
-                continue;
-            }
-            if (close < 0) break;
-            if (close - open > MAX_BLOCK_CHARS) return false;
-            ParsedFields parsed = fields(text.substring(open + BOUND_OPEN.length(), close), BOUND_KEYS);
-            cursor = close + BOUND_CLOSE.length();
-            if (!parsed.valid) continue;
-            Map<String, String> values = parsed.values;
-            if ("1".equals(values.get("PROTOCOL_VERSION"))
-                    && "SELFRUN_DRIVE_ANDROID".equals(values.get("CLIENT_ID"))
-                    && jobId.equals(values.get("JOB_ID"))
-                    && String.valueOf(turn).equals(values.get("TURN"))
-                    && "SESSION_BOUND".equals(values.get("STATE"))
-                    && validTime(values.get("BOUND_AT"))) return true;
-        }
-        return false;
-    }
 
     static Result latest(String text, String jobId, int expectedTurn, long lastConsumedEventSeq,
                          String mode) {
@@ -198,7 +163,6 @@ final class DriveCommitParser {
             case PAUSE -> "PAUSE".equals(kind) && "RUN_PAUSED".equals(state);
             case USER_ACTION -> "USER_ACTION_REQUIRED".equals(kind)
                     && "USER_ACTION_REQUIRED".equals(state);
-            case ERROR -> "ERROR".equals(kind) && "RUN_ERROR".equals(state);
             case NONE -> false;
         };
     }

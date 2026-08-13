@@ -68,14 +68,12 @@ public class SelfRunProtocolTest {
                 "[SELF_RUN_USER_ACTION_REQUIRED SR-1 LOGIN]", "SR-1", SelfRunStore.MODE_WORK);
         assertEquals(SelfRunProtocol.Type.USER_ACTION, action.type);
         assertEquals("LOGIN", action.actionId);
-        SelfRunProtocol.Signal error = SelfRunProtocol.parseLatest(
-                "[SELF_RUN_ERROR SR-1 REASON=DRIVE_READBACK]", "SR-1", SelfRunStore.MODE_WORK);
-        assertEquals(SelfRunProtocol.Type.ERROR, error.type);
-        assertEquals("DRIVE_READBACK", error.actionId);
+        assertEquals(SelfRunProtocol.Type.NONE, SelfRunProtocol.parseLatest(
+                "[SELF_RUN_ERROR SR-1 REASON=DRIVE_READBACK]", "SR-1", SelfRunStore.MODE_WORK).type);
     }
 
     @Test
-    public void driveBootstrapCarriesExactPrecreatedIdsAndContract() {
+    public void driveBootstrapCarriesOnlyExactRunMetadataAndRequirement() {
         String text = SelfRunProtocol.bootstrapDrive("SR-1", SelfRunStore.MODE_CHAT, "do work",
                 "runsFolder_12345678", "jobFolder_12345678", "document_12345678",
                 "https://docs.google.com/document/d/document_12345678/edit", 1);
@@ -87,6 +85,8 @@ public class SelfRunProtocolTest {
         assertTrue(text.contains("DRIVE_JOB_FOLDER_ID=jobFolder_12345678"));
         assertTrue(text.contains("DRIVE_TURN_DOCUMENT_ID=document_12345678"));
         assertTrue(text.contains("DRIVE_EXPECTED_TURN=1"));
-        assertTrue(text.contains("commit 작성, 동일 문서 readback"));
+        assertTrue(text.endsWith("\n\ndo work"));
+        assertFalse(text.contains("Drive V1 실행 계약:"));
+        assertFalse(text.contains("commit 작성, 동일 문서 readback"));
     }
 }

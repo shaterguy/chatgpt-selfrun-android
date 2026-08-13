@@ -17,12 +17,14 @@ SelfRun Drive는 Google Docs 네이티브 실행턴 문서를 다음 턴 진행�
 1. 사용자가 Google Picker로 기존 `/GPT/Project/Vibe Coding/00_System/SelfRun/Runs/` 폴더를 한 번 연결합니다.
 2. 앱은 `drive.file`만 승인받고 Drive `about.user.permissionId`와 선택한 폴더 ID를 저장합니다.
 3. 새 Job마다 Job 폴더 ID를 먼저 발급·영속하고 선택한 폴더 ID를 명시적 parent로 폴더를 만든 뒤, 그 ID를 명시적 parent로 Google Docs 문서를 만듭니다. 네이티브 문서 생성 응답이 불명확하면 검색·재생성하지 않고 보존형 중단합니다.
-4. 초기 블록을 한 번 쓰고 metadata와 본문을 readback한 뒤에만 ChatGPT 새 대화를 만들고 bootstrap을 제출합니다.
+4. 초기 블록을 한 번 쓰고 metadata와 본문을 readback한 뒤에만 ChatGPT 새 대화를 만들고, 실행별 Drive metadata와 사용자의 작업 지시로 구성된 간결한 bootstrap을 제출합니다. 문서 기록 규격은 공식 운영문서가 담당하며 bootstrap에 반복 삽입하지 않습니다.
 5. 이후 앱은 저장한 `documentId`의 `version`과 `modifiedTime`만 polling하며, 변경 시에만 본문을 읽습니다.
-6. 유효한 `CONTINUE` commit을 영속 저장하고 120초 guard 후 같은 conversation의 입력창에 deterministic commit marker가 든 continuation을 정확히 한 번 제출합니다.
-7. `DONE`, `PAUSE`, `USER_ACTION_REQUIRED`, `ERROR`는 continuation을 제출하지 않습니다.
+6. 유효한 `CONTINUE` commit을 영속 저장하고 120초 guard 후 같은 conversation의 입력창에 기존과 동일한 `[SELF_RUN_CONTINUE <RUN_ID>]` 한 줄을 제출합니다. Drive commit ID는 앱 내부 중복 방지에만 사용합니다.
+7. `DONE`, `PAUSE`, `USER_ACTION_REQUIRED`는 continuation을 제출하지 않습니다.
 
 Drive 대기와 guard에서는 WakeLock 및 assistant DOM 평가를 실행하지 않습니다. WebView는 최초 bootstrap과 정확한 conversation의 입력창을 통한 continuation 제출에만 사용됩니다.
+
+새 conversation URL이 사용자 턴 DOM보다 먼저 확정되는 정상 전환에서는 URL을 영속 저장하고 최대 120초 동안 정확한 bootstrap 사용자 턴을 기다립니다. 이때 최초 prompt를 재전송하거나 assistant DOM을 검사하지 않습니다.
 
 상세 문서 규격은 [SelfRun Drive V1 protocol](docs/SELF_RUN_DRIVE_V1_PROTOCOL.md)에 있습니다.
 

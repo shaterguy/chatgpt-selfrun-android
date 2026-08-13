@@ -57,7 +57,8 @@ grep -Fq 'getPollMetadata(accessToken, snapshot.turnDocumentId)' "$SERVICE"
 grep -Fq 'CONTINUATION_GUARD_MS = 120_000L' "$SERVICE"
 grep -Fq 'store.markSubmissionStarted()' "$SERVICE"
 grep -Fq 'checkDriveTurnSubmitted' "$SERVICE"
-grep -Fq 'SELF_RUN_DRIVE_COMMIT_ID=' "$SERVICE"
+grep -Fq 'return SelfRunProtocol.continuation(store.runId());' "$SERVICE"
+if grep -Fq 'SELF_RUN_DRIVE_COMMIT_ID=' "$SERVICE"; then exit 1; fi
 grep -Fq 'releaseWakeLock();' "$SERVICE"
 grep -Fq 'DRIVE_DOCUMENT_CREATE_RESULT_UNKNOWN' "$SERVICE"
 grep -Fq 'private static boolean isWebAutomationPhase' "$SERVICE"
@@ -70,6 +71,7 @@ grep -Fq 'selfrun_drive' "$STORE"
 grep -Fq 'selfrun-drive' "$LOG"
 grep -Fq 'sendDriveInitial' "$DOM"
 grep -Fq 'SELF_RUN_CLIENT=DRIVE_V1' "$PROTOCOL"
-grep -Fq 'PAUSE|ERROR' "$PROTOCOL"
+grep -Fq 'NEXT|DONE|USER_ACTION_REQUIRED|PAUSE' "$PROTOCOL"
+if grep -Fq 'SELF_RUN_ERROR' "$PROTOCOL"; then exit 1; fi
 
 echo 'SelfRun Drive static policy checks passed.'

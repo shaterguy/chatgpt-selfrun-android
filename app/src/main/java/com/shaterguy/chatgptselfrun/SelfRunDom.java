@@ -84,35 +84,30 @@ final class SelfRunDom {
                 + "const markerKey2=" + marker + ";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('BOOTSTRAP_SUBMITTED','첫 요청 1회 클릭');})()";
     }
 
-    /** Recovery checks only the bootstrap user turn/conversation, never assistant state. */
-    static String checkDriveInitialSubmitted(String projectUrl, String prompt, String runId) {
+    /** Recovery mirrors legacy: a new conversation URL plus the durable click marker confirms submission. */
+    static String checkDriveInitialSubmitted(String projectUrl, String runId) {
         String project = q(SelfRunScript.projectId(projectUrl));
-        String expected = q(prompt);
         String marker = q("selfrun-drive:bootstrap:" + runId);
         return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"
-                + projectGuard(project) + authGuard() + textHelpers(expected)
-                + "const p2=location.pathname.split('/').filter(Boolean),ci=p2.indexOf('c'),conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));const present=users.some(t=>t===canonical(expected));"
+                + projectGuard(project) + authGuard()
+                + "const p2=location.pathname.split('/').filter(Boolean),ci=p2.indexOf('c'),conv=ci>=0&&ci+1<p2.length?p2[ci+1]:'';"
                 + durableMarkerRead(marker)
-                + "if(conv&&present)return result('CONFIRMED','첫 요청과 conversation 확인',{conversationUrl:location.href});"
-                + "if(conv)return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','정확한 bootstrap 사용자 턴이 없는 conversation');"
+                + "if(conv&&prior)return result('CONFIRMED','새 conversation URL과 제출 표식 확인',{conversationUrl:location.href});"
+                + "if(conv)return result('BOOTSTRAP_SUBMISSION_AMBIGUOUS','conversation은 생성됐지만 제출 표식 소실',{conversationUrl:location.href});"
                 + "return result('BOOTSTRAP_SUBMITTED',prior?'첫 요청 conversation 확인 대기':'bootstrap marker 소실');})()";
     }
 
-    /**
-     * Stage a continuation without clicking. The deterministic commit ID is in the actual prompt,
-     * allowing crash recovery to inspect only user messages in the canonical conversation.
-     */
+    /** Stage the unchanged legacy continuation line while keeping the Drive commit ID internal. */
     static String prepareDriveTurn(String conversationUrl, String prompt, String commitId) {
         String expected = q(prompt);
-        String markerText = q("SELF_RUN_DRIVE_COMMIT_ID=" + commitId);
         String marker = q("selfrun-drive:commit:" + commitId);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard() + textHelpers(expected)
-                + "const markerText=" + markerText + ";const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));if(users.some(t=>t.includes(markerText)))return result('CONFIRMED','commit 사용자 턴 확인');"
-                + durableMarkerRead(marker) + "if(prior)return result('SUBMISSION_PENDING','기존 제출 준비 표식 존재');"
+                + "const countPrompt=()=>[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||'')).filter(t=>t===expected).length;"
+                + durableMarkerRead(marker) + "if(prior){try{const data=JSON.parse(prior);if(data.state==='clicked'&&countPrompt()>Number(data.beforeCount||0))return result('CONFIRMED','continuation 사용자 턴 증가 확인');}catch(_){}return result('SUBMISSION_PENDING','기존 제출 준비 표식 존재');}"
                 + composer() + "if(!composer)return result('UI_WAIT','입력창 대기');" + composerOps()
                 + "if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','전송 버튼 대기');"
-                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),commitId:" + q(commitId) + "});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','commit 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"
+                + "const markerKey2=" + marker + ",v=JSON.stringify({state:'prepared',at:Date.now(),commitId:" + q(commitId) + ",beforeCount:countPrompt()});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','commit 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"
                 + input() + "return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";
     }
 
@@ -129,12 +124,14 @@ final class SelfRunDom {
                 + "const markerKey2=" + marker + ";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('SUBMITTED','continuation 1회 클릭');})()";
     }
 
-    /** Crash recovery deliberately checks only canonical-conversation user messages. */
-    static String checkDriveTurnSubmitted(String conversationUrl, String commitId) {
-        String markerText = q("SELF_RUN_DRIVE_COMMIT_ID=" + commitId);
+    /** Crash recovery checks an increase in the unchanged continuation user line. */
+    static String checkDriveTurnSubmitted(String conversationUrl, String prompt, String commitId) {
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:commit:" + commitId);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(q(SelfRunScript.conversationId(conversationUrl))) + authGuard()
-                + "const canonical=s=>String(s??'').replace(/[\\u200B-\\u200D\\uFEFF]/g,'').replace(/\\s+/g,' ').trim();const markerText=" + markerText + ";const users=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||''));return users.some(t=>t.includes(markerText))?result('CONFIRMED','commit 사용자 턴 확인'):result('WAIT','commit 사용자 턴 미확인');})()";
+                + textHelpers(expected) + durableMarkerRead(marker)
+                + "if(!prior)return result('WAIT','commit 제출 표식 미확인');let data;try{data=JSON.parse(prior);}catch(_){return result('WAIT','commit 제출 표식 해석 실패');}const count=[...document.querySelectorAll('[data-message-author-role=\"user\"],article[data-turn=\"user\"]')].map(e=>canonical(e.innerText||e.textContent||'')).filter(t=>t===expected).length;return data.state==='clicked'&&count>Number(data.beforeCount||0)?result('CONFIRMED','continuation 사용자 턴 증가 확인'):result('WAIT','continuation 사용자 턴 미확인');})()";
     }
 
     /**

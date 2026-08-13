@@ -56,9 +56,11 @@ public class SelfRunPauseResumeTest {
     @Test
     public void continuationCrashRecoveryChecksOnlyUserMessageMarker() {
         String script = SelfRunDom.checkDriveTurnSubmitted(
-                "https://chatgpt.com/g/g-p-demo/c/abc", "SR-1:1:1");
+                "https://chatgpt.com/g/g-p-demo/c/abc", "[SELF_RUN_CONTINUE SR-1]", "SR-1:1:1");
         assertTrue(script.contains("data-message-author-role=\"user\""));
-        assertTrue(script.contains("SELF_RUN_DRIVE_COMMIT_ID=SR-1:1:1"));
+        assertTrue(script.contains("[SELF_RUN_CONTINUE SR-1]"));
+        assertTrue(script.contains("beforeCount"));
+        assertFalse(script.contains("SELF_RUN_DRIVE_COMMIT_ID="));
         assertFalse(script.contains("assistant"));
         assertFalse(script.contains("send.click"));
     }

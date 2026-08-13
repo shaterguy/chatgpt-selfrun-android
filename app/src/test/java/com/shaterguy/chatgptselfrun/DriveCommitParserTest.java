@@ -10,13 +10,6 @@ import static org.junit.Assert.*;
 public class DriveCommitParserTest {
     private static final String JOB = "SR-20260813-ABC123";
 
-    @Test public void sessionBoundIsConnectionOnlyNotACommit() {
-        String body = bound(1) + "\nSTATE=ANALYZING\n";
-        assertTrue(DriveCommitParser.hasSessionBound(body, JOB, 1));
-        assertEquals(DriveCommitParser.Status.NONE,
-                DriveCommitParser.latest(body, JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
-    }
-
     @Test public void progressDoesNotProduceContinuation() {
         assertEquals(DriveCommitParser.Status.NONE,
                 DriveCommitParser.latest("STATE=IMPLEMENTING\n", JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
@@ -47,17 +40,10 @@ public class DriveCommitParserTest {
         assertEquals(1L, result.commit.eventSeq);
     }
 
-    @Test public void partialBoundBeforeCompleteBoundIsIgnored() {
-        String partial = "[SELF_RUN_DRIVE_BOUND_V1]\nPROTOCOL_VERSION=1\n";
-        assertTrue(DriveCommitParser.hasSessionBound(partial + bound(1), JOB, 1));
-    }
-
     @Test public void repeatedUnclosedMarkersAreBoundedAndRejected() {
         String commits = repeat("[SELF_RUN_DRIVE_COMMIT_V1]\n", 129);
         assertEquals(DriveCommitParser.Status.MALFORMED,
                 DriveCommitParser.latest(commits, JOB, 1, 0, SelfRunStore.MODE_CHAT).status);
-        String bounds = repeat("[SELF_RUN_DRIVE_BOUND_V1]\n", 129);
-        assertFalse(DriveCommitParser.hasSessionBound(bounds, JOB, 1));
     }
 
     @Test public void rejectsWrongClientJobTurnAndSequence() {
@@ -108,8 +94,6 @@ public class DriveCommitParserTest {
         assertTerminal("PAUSE", "RUN_PAUSED", "[SELF_RUN_PAUSE " + JOB + "]", SelfRunProtocol.Type.PAUSE);
         assertTerminal("USER_ACTION_REQUIRED", "USER_ACTION_REQUIRED",
                 "[SELF_RUN_USER_ACTION_REQUIRED " + JOB + " LOGIN]", SelfRunProtocol.Type.USER_ACTION);
-        assertTerminal("ERROR", "RUN_ERROR", "[SELF_RUN_ERROR " + JOB + " REASON=DRIVE_WRITE]",
-                SelfRunProtocol.Type.ERROR);
     }
 
     @Test public void commitKindAndStateMustMatchSignal() {
@@ -139,13 +123,6 @@ public class DriveCommitParserTest {
         StringBuilder output = new StringBuilder(value.length() * count);
         for (int i = 0; i < count; i++) output.append(value);
         return output.toString();
-    }
-
-    private static String bound(int turn) {
-        return "[SELF_RUN_DRIVE_BOUND_V1]\n"
-                + "PROTOCOL_VERSION=1\nCLIENT_ID=SELFRUN_DRIVE_ANDROID\nJOB_ID=" + JOB + "\n"
-                + "TURN=" + turn + "\nSTATE=SESSION_BOUND\nBOUND_AT=2026-08-13T14:00:00+09:00\n"
-                + "[/SELF_RUN_DRIVE_BOUND_V1]";
     }
 
     private static String commit(int turn, long seq, String kind, String state, String signal) {
