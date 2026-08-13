@@ -180,7 +180,8 @@ final class DriveApiClient {
         return new Metadata(json);
     }
 
-    private static JSONObject baseMetadata(String name, String mimeType, String parentId, String kind) {
+    private static JSONObject baseMetadata(String name, String mimeType, String parentId, String kind)
+            throws Exception {
         return new JSONObject()
                 .put("name", name)
                 .put("mimeType", mimeType)
