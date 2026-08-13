@@ -79,12 +79,15 @@ public final class SelfRunService extends Service {
         super.onCreate();
         store = new SelfRunStore(this);
         runLog = new SelfRunRunLog(this);
+        updateLogExecutionContext();
         NotificationHelper.ensureChannel(this);
         try {
             wakeLockController = WakeLockController.create(this, getPackageName() + ":selfrun");
+            updateLogExecutionContext();
         } catch (Throwable error) {
             runLog.record(store, "WAKELOCK_INIT_FAILED", error.getClass().getSimpleName());
             wakeLockController = null;
+            updateLogExecutionContext();
         }
     }
 
@@ -175,6 +178,7 @@ public final class SelfRunService extends Service {
         try {
             host = HeadlessWebViewHost.create(this);
             webView = host.webView();
+            updateLogExecutionContext();
             WebViewConfig.applyAutomation(webView);
             runLog.record(store, "WEBVIEW_LAUNCH", store.conversationUrl().isEmpty() ? "target=project" : "target=conversation");
             WebView active = webView;
@@ -183,6 +187,7 @@ public final class SelfRunService extends Service {
                 public void onPageStarted(WebView view, String url, Bitmap favicon) {
                     invalidateDomObserverForNavigation();
                     generation++;
+                    updateLogExecutionContext();
                     invalidateExecutionEpoch();
                     evaluationInFlight = false;
                     domEvaluationPending = false;
@@ -306,6 +311,7 @@ public final class SelfRunService extends Service {
         if (!canRun() || resumeObserverGate || webView == null) return;
         if (evaluationInFlight) {
             domEvaluationPending = true;
+            runLog.record(store, "DOM_EVALUATION_COALESCED", "source=run_step;trigger=" + pendingEvaluationTrigger);
             return;
         }
         if (isRateLimited()) {
@@ -382,7 +388,14 @@ public final class SelfRunService extends Service {
         evaluationCount = saturatingIncrement(evaluationCount);
         runLog.record(store, "DOM_EVALUATE", "count=" + evaluationCount + ";phase=" + phase + ";trigger=" + trigger);
         active.evaluateJavascript(script, raw -> {
-            if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId) || isRateLimited()) return;
+            if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId)) {
+                recordStaleCallback("evaluate");
+                return;
+            }
+            if (isRateLimited()) {
+                recordStaleCallback("evaluate_rate_limit");
+                return;
+            }
             evaluationInFlight = false;
             try {
                 JSONObject result = parse(raw);
@@ -524,9 +537,12 @@ public final class SelfRunService extends Service {
         runLog.record(store, "SIGNAL_ACCEPTED", signal.type.name());
         if (signal.type == SelfRunProtocol.Type.DONE) {
             recoveryInProgress = false;
-            store.clearLastError();
-            transition(SelfRunStore.PHASE_DONE, "SelfRun 완료", "terminal_signal");
-            store.setActive(false);
+            String previous = store.phase();
+            store.complete("SelfRun 완료");
+            runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=" + SelfRunStore.PHASE_DONE
+                    + ";reason=terminal_signal");
+            startForegroundCompat();
+            updateWakeLockForState("phase_terminal_signal");
             runLog.record(store, "DONE", "terminal");
             NotificationHelper.notifyUser(this, "SelfRun 완료", store.runId());
             stopRelay();
@@ -571,8 +587,7 @@ public final class SelfRunService extends Service {
 
     private void transition(String next, String status, String reason) {
         String previous = store.phase();
-        store.setPhase(next);
-        store.setStatus(status);
+        store.setPhaseAndStatus(next, status);
         runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=" + next + ";reason=" + reason);
         startForegroundCompat();
         updateWakeLockForState("phase_" + reason);
@@ -615,6 +630,7 @@ public final class SelfRunService extends Service {
             return;
         }
         if (observerHealthInFlight) {
+            runLog.record(store, "DOM_WATCHDOG_SKIPPED", "reason=health_inflight");
             scheduleWatchdog();
             return;
         }
@@ -632,9 +648,15 @@ public final class SelfRunService extends Service {
         active.evaluateJavascript(SelfRunDomObserver.health(activeLease), raw -> {
             if (active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch
                     || activeEpoch != observerEpoch || !activeRunId.equals(store.runId())
-                    || !activeLease.equals(observerLease)) return;
+                    || !activeLease.equals(observerLease)) {
+                recordStaleCallback("watchdog_health");
+                return;
+            }
             observerHealthInFlight = false;
-            if (!canRun() || isRateLimited()) return;
+            if (!canRun() || isRateLimited()) {
+                recordStaleCallback("watchdog_health_inactive");
+                return;
+            }
             JSONObject health = parse(raw);
             String status = health.optString("status", "SCRIPT_ERROR");
             boolean alive = "ALIVE".equals(status)
@@ -691,6 +713,7 @@ public final class SelfRunService extends Service {
         int activeGeneration = generation;
         long activeExecutionEpoch = executionEpoch;
         int activeEpoch = ++observerEpoch;
+        updateLogExecutionContext();
         String activeRunId = store.runId();
         String token = UUID.randomUUID().toString();
         String lease = activeRunId + ":" + activeGeneration + ":" + activeEpoch + ":" + UUID.randomUUID();
@@ -702,9 +725,15 @@ public final class SelfRunService extends Service {
                 "count=" + observerMaintenanceEvaluationCount + ";generation=" + activeGeneration + ";epoch=" + activeEpoch);
         active.evaluateJavascript(SelfRunDomObserver.install(token, lease, activeRunId, activeGeneration, activeEpoch), raw -> {
             if (active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch
-                    || activeEpoch != observerEpoch || !lease.equals(observerLease)) return;
+                    || activeEpoch != observerEpoch || !lease.equals(observerLease)) {
+                recordStaleCallback("observer_install");
+                return;
+            }
             observerInstallInFlight = false;
-            if (!canRun() || isRateLimited() || !activeRunId.equals(store.runId())) return;
+            if (!canRun() || isRateLimited() || !activeRunId.equals(store.runId())) {
+                recordStaleCallback("observer_install_inactive");
+                return;
+            }
             try {
                 WebMessagePort[] channel = active.createWebMessageChannel();
                 if (channel == null || channel.length < 2) throw new IllegalStateException("web message channel unavailable");
@@ -715,7 +744,10 @@ public final class SelfRunService extends Service {
                     public void onMessage(WebMessagePort port, WebMessage message) {
                         if (active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch
                                 || activeEpoch != observerEpoch || observerPort != port || !canRun() || isRateLimited()
-                                || !activeRunId.equals(store.runId()) || !lease.equals(observerLease)) return;
+                                || !activeRunId.equals(store.runId()) || !lease.equals(observerLease)) {
+                            recordStaleCallback("observer_message");
+                            return;
+                        }
                         String data = message == null ? "" : message.getData();
                         if (data.startsWith("ready|")) {
                             lastObserverState = data.substring("ready|".length());
@@ -729,6 +761,7 @@ public final class SelfRunService extends Service {
                             String nextState = data.substring("state|".length());
                             if (nextState.equals(lastObserverState)) {
                                 observerDuplicateEventCount = saturatingIncrement(observerDuplicateEventCount);
+                                runLog.record(store, "DOM_OBSERVER_DUPLICATE", "source=native_state");
                                 return;
                             }
                             lastObserverState = nextState;
@@ -790,6 +823,7 @@ public final class SelfRunService extends Service {
         boolean hadObserver = observerPort != null || observerInstallInFlight || !detachedLease.isEmpty();
         handler.removeCallbacks(watchdogRunnable);
         observerEpoch++;
+        updateLogExecutionContext();
         observerInstallInFlight = false;
         observerHealthInFlight = false;
         observerLease = "";
@@ -807,6 +841,7 @@ public final class SelfRunService extends Service {
     private void invalidateDomObserverForNavigation() {
         handler.removeCallbacks(watchdogRunnable);
         observerEpoch++;
+        updateLogExecutionContext();
         observerInstallInFlight = false;
         observerHealthInFlight = false;
         observerLease = "";
@@ -834,6 +869,7 @@ public final class SelfRunService extends Service {
         long delay = RATE_LIMIT_DELAYS[rateLimitAttempt - 1];
         rateLimitedUntilElapsed = now + delay;
         generation++;
+        updateLogExecutionContext();
         invalidateExecutionEpoch();
         resumeObserverGate = false;
         evaluationInFlight = false;
@@ -856,7 +892,10 @@ public final class SelfRunService extends Service {
         String expectedRunId = store.runId();
         long delay = Math.max(0L, expectedDeadline - SystemClock.elapsedRealtime());
         handler.postDelayed(() -> {
-            if (!isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)) return;
+            if (!isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)) {
+                recordStaleCallback("rate_limit_timer");
+                return;
+            }
             if (isRateLimited()) {
                 scheduleRateLimitExpiry();
                 return;
@@ -909,7 +948,14 @@ public final class SelfRunService extends Service {
         long expectedExecutionEpoch = executionEpoch;
         String expectedRunId = store.runId();
         handler.postDelayed(() -> {
-            if (!isCurrentExecution(expectedWebView, expectedGeneration, expectedExecutionEpoch, expectedRunId) || isRateLimited()) return;
+            if (!isCurrentExecution(expectedWebView, expectedGeneration, expectedExecutionEpoch, expectedRunId)) {
+                recordStaleCallback("recovery_timer");
+                return;
+            }
+            if (isRateLimited()) {
+                recordStaleCallback("recovery_rate_limit");
+                return;
+            }
             beginRecovery(reason);
             action.run();
         }, Math.max(0L, delay));
@@ -968,7 +1014,10 @@ public final class SelfRunService extends Service {
         if (webView == null || !canRun() || resumeObserverGate || isRateLimited()) return;
         pendingEvaluationTrigger = trigger;
         domEvaluationPending = true;
-        if (evaluationInFlight) return;
+        if (evaluationInFlight) {
+            runLog.record(store, "DOM_EVALUATION_COALESCED", "source=request;trigger=" + trigger);
+            return;
+        }
         handler.removeCallbacks(stepRunnable);
         handler.postDelayed(stepRunnable, Math.max(0L, delay));
     }
@@ -994,11 +1043,8 @@ public final class SelfRunService extends Service {
 
     private void pause(String code, String message) {
         recoveryInProgress = false;
-        store.setLastError(code, message);
-        store.setPaused(true);
         String previous = store.phase();
-        store.setPhase(SelfRunStore.PHASE_PAUSED);
-        store.setStatus(code + " · " + message);
+        store.enterErrorPausedState(code, message, code + " · " + message);
         setWakeLockState(WakeLockController.State.ERROR, "error_" + code);
         runLog.record(store, "STATE_TRANSITION", "from=" + previous + ";to=PAUSED;reason=" + code);
         runLog.record(store, "PAUSED", code);
@@ -1016,23 +1062,18 @@ public final class SelfRunService extends Service {
         if (!store.paused() || store.userStopped() || store.runId().isEmpty()) return;
         boolean preserved = webView != null;
         invalidateExecutionEpoch();
-        store.setPaused(false);
-        store.setActive(true);
-        store.setUserStopped(false);
-        store.clearLastError();
-        store.setLastSignal("USER_RESUME");
-        if (store.conversationUrl().isEmpty()) store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);
-        else store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
         boolean rateLimited = isRateLimited();
         resumeObserverGate = preserved && !rateLimited;
         recoveryInProgress = !preserved && !rateLimited;
-        store.setStatus(rateLimited
+        String resumeStatus = rateLimited
                 ? "사용자 재개 · rate-limit 만료 대기"
                 : store.conversationUrl().isEmpty()
                         ? "사용자 재개 · 새 대화 bootstrap 복구 중"
                         : preserved
                                 ? "사용자 재개 · 동일 WebView observer 복구 후 continuation 준비"
-                                : "사용자 재개 · WebView 소실 복구 후 continuation 준비");
+                                : "사용자 재개 · WebView 소실 복구 후 continuation 준비";
+        store.resumeState(store.conversationUrl().isEmpty()
+                ? SelfRunStore.PHASE_BOOTSTRAP : SelfRunStore.PHASE_SEND_CONTINUE, resumeStatus);
         runLog.record(store, "UI_RESUME", rateLimited ? "rate_limit_wait" : preserved ? "same_webview" : "webview_recovery");
         startForegroundCompat();
         updateWakeLockForState("resume_prepare");
@@ -1059,9 +1100,7 @@ public final class SelfRunService extends Service {
 
     private void enterPreservedPause(String cause, String status) {
         String previous = store.phase();
-        store.setPaused(true);
-        store.setPhase(SelfRunStore.PHASE_PAUSED);
-        store.setStatus(status);
+        store.enterPausedState(status);
         handler.removeCallbacksAndMessages(null);
         invalidateExecutionEpoch();
         resumeObserverGate = false;
@@ -1076,6 +1115,7 @@ public final class SelfRunService extends Service {
         runLog.record(store, "PAUSED", cause + ";webview=preserved;automation=stopped;low_power=1");
         logDomEfficiency("pause");
         logWakeLockEfficiency("pause");
+        logIoEfficiency("pause");
     }
 
     private void updateWakeLockForState(String reason) {
@@ -1092,6 +1132,7 @@ public final class SelfRunService extends Service {
     private void setWakeLockState(WakeLockController.State desired, String reason) {
         if (wakeLockController == null) return;
         WakeLockController.Transition transition = wakeLockController.apply(desired, reason);
+        updateLogExecutionContext();
         if (transition.materiallyChanged() && runLog != null && store != null) {
             runLog.record(store, "WAKELOCK_STATE",
                     "from=" + transition.previousState
@@ -1123,6 +1164,7 @@ public final class SelfRunService extends Service {
             host = null;
         }
         webView = null;
+        updateLogExecutionContext();
     }
 
     private void stopRelay() {
@@ -1131,6 +1173,7 @@ public final class SelfRunService extends Service {
         setWakeLockState(WakeLockController.State.STOPPED, "stop_relay");
         logDomEfficiency("stop");
         logWakeLockEfficiency("stop");
+        logIoEfficiency("stop");
         cleanupWebView();
         if (wakeLockController != null) wakeLockController.close("stop_relay");
         stopForeground(STOP_FOREGROUND_REMOVE);
@@ -1163,6 +1206,40 @@ public final class SelfRunService extends Service {
                         + ";releases=" + metrics.releaseCount);
     }
 
+    private void logIoEfficiency(String cause) {
+        if (runLog == null || store == null) return;
+        SelfRunRunLog.Metrics logs = runLog.metrics();
+        SelfRunStore.PersistenceMetrics persistence = store.persistenceMetrics();
+        SelfRunHistoryStore.Metrics history = persistence.history;
+        runLog.record(store, "IO_EFFICIENCY",
+                "cause=" + cause
+                        + ";logCalls=" + logs.recordCalls
+                        + ";logRepeatableCalls=" + logs.repeatableCalls
+                        + ";logAggregated=" + logs.aggregatedRepeats
+                        + ";logLines=" + logs.emittedLines
+                        + ";logWriteBatches=" + logs.writeBatches
+                        + ";stateWrites=" + persistence.stateWriteTransactions
+                        + ";stateNoops=" + persistence.duplicateStateWritesSkipped
+                        + ";historyRequests=" + history.syncRequests
+                        + ";historyCoalesced=" + history.coalescedRequests
+                        + ";historyEquivalentSkipped=" + history.equivalentSnapshotsSkipped
+                        + ";historyWrites=" + history.physicalWrites);
+    }
+
+    private void updateLogExecutionContext() {
+        if (runLog == null) return;
+        String webViewId = webView == null ? "none"
+                : "wv-" + Integer.toHexString(System.identityHashCode(webView));
+        String wakeLockState = wakeLockController == null ? "UNAVAILABLE" : wakeLockController.state().name();
+        runLog.updateExecutionContext(generation, observerEpoch, webViewId, wakeLockState);
+    }
+
+    private void recordStaleCallback(String source) {
+        if (runLog == null || store == null) return;
+        updateLogExecutionContext();
+        runLog.record(store, "STALE_CALLBACK", "source=" + source);
+    }
+
     private static long saturatingIncrement(long value) {
         return value == Long.MAX_VALUE ? Long.MAX_VALUE : value + 1L;
     }
@@ -1173,6 +1250,7 @@ public final class SelfRunService extends Service {
         recoveryInProgress = false;
         setWakeLockState(WakeLockController.State.STOPPED, "on_destroy");
         logWakeLockEfficiency("destroy");
+        logIoEfficiency("destroy");
         cleanupWebView();
         if (wakeLockController != null) wakeLockController.close("on_destroy");
         super.onDestroy();
