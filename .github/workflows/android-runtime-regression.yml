@@ -3,7 +3,7 @@ name: Android runtime regression
 on:
   push:
     branches:
-      - v0.2.3-dev6
+      - 'selfrun-webview/v0.2.3-dev7'
   workflow_dispatch:
 
 permissions:
@@ -12,14 +12,28 @@ permissions:
 jobs:
   android-runtime-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Materialize exact dev7 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/dev7-proposal.b64.part* | base64 -d > "$RUNNER_TEMP/dev7-proposal.tar.gz"
+          printf '%s  %s\n' '3943d6144f51faab58bfcb269a6c99ca2d7f1a324c2060485dcbae5f63bd5b2f' "$RUNNER_TEMP/dev7-proposal.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/dev7-proposal.tar.gz"
+          sha256sum -c .ci/dev7-proposal-sha256.txt
+
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+
       - name: Install emulator image
         shell: bash
         run: |
@@ -40,6 +54,7 @@ jobs:
             --name selfrun-ci \
             --package 'system-images;android-35;google_apis;x86_64'
           "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx 'selfrun-ci'
+
       - name: Start emulator
         shell: bash
         run: |
@@ -58,25 +73,54 @@ jobs:
           for attempt in $(seq 1 120); do
             if timeout 2 adb get-state >/dev/null 2>&1; then
               boot_completed="$(timeout 2 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-              if [ "$boot_completed" = "1" ]; then
-                break
-              fi
+              if [ "$boot_completed" = "1" ]; then break; fi
             fi
             sleep 2
           done
           if [ "$boot_completed" != "1" ]; then
-            "$ANDROID_HOME/emulator/emulator" -list-avds || true
             tail -n 200 "$RUNNER_TEMP/selfrun-emulator.log" || true
             exit 1
           fi
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
+
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
+
+      - name: Run full JVM unit tests
+        run: gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+
       - name: Run Android runtime regressions
         run: gradle --no-daemon --console=plain --stacktrace -Pandroid.useAndroidX=true :app:connectedDebugAndroidTest
+
+      - name: Build debug APK
+        run: gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
+
+      - name: Verify debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          test -s "$APK"
+          "$BT/aapt" dump badging "$APK" | tee app/build/outputs/apk/debug/BADGING.txt
+          grep -q "package: name='com.shaterguy.chatgptselfrun' versionCode='19' versionName='0.2.3-dev7'" app/build/outputs/apk/debug/BADGING.txt
+          unzip -t "$APK" >/dev/null
+          sha256sum "$APK" | tee app/build/outputs/apk/debug/SHA256SUMS.txt
+
+      - name: Upload verified debug APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chatgpt-selfrun-android-selfrun-webview-v0.2.3-dev7-debug
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/BADGING.txt
+            app/build/outputs/apk/debug/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Emulator diagnostics
         if: always()
         shell: bash
