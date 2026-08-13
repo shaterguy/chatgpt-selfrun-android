@@ -1,4 +1,4 @@
-# SelfRun Drive 1.0.0-dev1
+# SelfRun Drive 1.0.0-dev2
 
 SelfRun Drive는 Google Docs 네이티브 실행턴 문서를 다음 턴 진행의 기준 원본으로 사용하는 별도 Android 앱입니다. 기존 SelfRun 0.2.x를 업데이트하거나 데이터를 이전하지 않습니다.
 
@@ -8,7 +8,7 @@ SelfRun Drive는 Google Docs 네이티브 실행턴 문서를 다음 턴 진행�
 | 앱 이름 | SelfRun | SelfRun Drive |
 | 완료 기준 | assistant WebView DOM | 저장된 `documentId`의 Drive commit |
 | 데이터·쿠키 | 기존 앱 전용 | 신규 앱 전용 |
-| 버전 | 0.2.x 계보 | `1.0.0-dev1` / `1000001` |
+| 버전 | 0.2.x 계보 | `1.0.0-dev2` / `1000002` |
 
 두 application ID가 다르며 shared UID, provider authority, 앱 간 마이그레이션이나 쿠키 공유를 사용하지 않습니다. 같은 서명 인증서를 사용해도 Android에서 별도 앱으로 설치됩니다.
 
@@ -57,13 +57,15 @@ gradle --no-daemon :app:testDebugUnitTest
 gradle --no-daemon :app:assembleDebug :app:assembleRelease
 ```
 
-`verifyDriveVariantIdentity`가 모든 build의 `preBuild` 전에 application ID, 버전, action, authority 및 Drive-only runtime 정책을 검사합니다. `.github/workflows/build-drive-v1.yml`은 `v1.0.0-dev1` 브랜치에서 debug와 unsigned release를 빌드하고 APK 실제 package/version/label을 `aapt dump badging`으로 검증합니다.
+`verifyDriveVariantIdentity`가 모든 build의 `preBuild` 전에 application ID, 버전, action, authority 및 Drive-only runtime 정책을 검사합니다. `.github/workflows/build-drive-v1.yml`은 `selfrun-drive/v1.0.0-dev2` 브랜치에서 debug와 unsigned release를 빌드하고 APK 실제 package/version/label을 `aapt dump badging`으로 검증합니다.
 
-`SELFRUN_SIGNING_PASSPHRASE` Actions secret이 구성된 경우에만 임시 `0600` pass-file을 만들고 기존 비공개 signing identity로 release를 서명합니다. 최종 파일명은 다음과 같습니다.
+Gradle debug APK는 GitHub-hosted runner마다 debug signing key가 달라질 수 있으므로 사용자 설치용 artifact로 배포하지 않습니다. `SELFRUN_SIGNING_PASSPHRASE` Actions secret이 구성된 경우에만 임시 `0600` pass-file을 만들고 고정 SelfRun signing identity로 release를 서명합니다. 설치 및 이후 업데이트에 사용할 최종 파일명은 다음과 같습니다.
 
 ```text
-chatgpt-selfrun-drive-v1.0.0-dev1.apk
+chatgpt-selfrun-drive-v1.0.0-dev2.apk
 ```
+
+Actions secret이 없으면 workflow artifact에는 aligned unsigned APK와 검증 자료만 남기며 installable APK가 생성된 것처럼 취급하지 않습니다. `1.0.0-dev1`에서 CI debug APK를 설치한 기기는 해당 ephemeral signing key의 private key를 복구할 수 없으므로 `1.0.0-dev2` 고정 서명 계보로 전환할 때 한 번 삭제 후 설치가 필요할 수 있습니다. 이후 동일 고정 인증서와 증가하는 versionCode를 사용하는 빌드는 인플레이스 업데이트를 전제로 합니다.
 
 workflow는 태그나 GitHub Release를 만들지 않고 30일 보존 artifact만 업로드합니다. 기존 `.github/workflows/build.yml`, `release-v0.2.2.yml`, 0.2.x 태그/릴리스에는 영향을 주지 않습니다.
 
