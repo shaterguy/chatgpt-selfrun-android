@@ -11,125 +11,70 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SelfRunPauseResumeStateTest {
-    private static final String RUN_ID = "SR-20260813-072304-DCF136";
-
     @Test
-    public void manualUiPauseRestoresExactAssistantAndPreferencePhases() {
-        assertEquals(SelfRunStore.PHASE_WAIT_ASSISTANT,
-                SelfRunStore.resolvePausedResumePhase(SelfRunStore.PHASE_WAIT_ASSISTANT, true));
-        assertEquals(SelfRunStore.PHASE_APPLY_PREFS,
-                SelfRunStore.resolvePausedResumePhase(SelfRunStore.PHASE_APPLY_PREFS, true));
-        assertEquals("APPLY_REASONING",
-                SelfRunStore.resolvePausedResumePhase("APPLY_REASONING", true));
+    public void protocolPauseAlwaysResumesAtContinueWhenConversationExists() {
+        String runId = "SR-test";
+        assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
+                SelfRunStore.capturePauseResumePhase(SelfRunStore.PHASE_WAIT_ASSISTANT,
+                        "[SELF_RUN_USER_ACTION_REQUIRED " + runId + " AUTH]", runId, ""));
+        assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
+                SelfRunStore.capturePauseResumePhase("APPLY_REASONING",
+                        "[SELF_RUN_PAUSE " + runId + " REASON=WAIT]", runId, ""));
         assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
                 SelfRunStore.resolvePausedResumePhase(SelfRunStore.PHASE_SEND_CONTINUE, true));
     }
 
     @Test
-    public void manualUiPauseRestoresExactBootstrapPhaseBeforeConversationCapture() {
-        assertEquals(SelfRunStore.PHASE_BOOTSTRAP,
-                SelfRunStore.resolvePausedResumePhase(SelfRunStore.PHASE_BOOTSTRAP, false));
-        assertEquals("BOOTSTRAP_MODEL",
-                SelfRunStore.resolvePausedResumePhase("BOOTSTRAP_MODEL", false));
-        assertEquals("BOOTSTRAP_REASONING",
-                SelfRunStore.resolvePausedResumePhase("BOOTSTRAP_REASONING", false));
-        assertEquals("BOOTSTRAP_SEND",
-                SelfRunStore.resolvePausedResumePhase("BOOTSTRAP_SEND", false));
+    public void manualPausePreservesCurrentResumablePhase() {
+        String runId = "SR-test";
+        assertEquals(SelfRunStore.PHASE_WAIT_ASSISTANT,
+                SelfRunStore.capturePauseResumePhase(SelfRunStore.PHASE_WAIT_ASSISTANT,
+                        "NEXT", runId, ""));
+        assertEquals("APPLY_REASONING",
+                SelfRunStore.capturePauseResumePhase("APPLY_REASONING", "NEXT", runId, ""));
+        assertEquals("APPLY_REASONING",
+                SelfRunStore.resolvePausedResumePhase("APPLY_REASONING", true));
     }
 
     @Test
-    public void invalidOrMissingResumeTargetFallsBackByConversationContext() {
-        assertEquals(SelfRunStore.PHASE_BOOTSTRAP,
-                SelfRunStore.resolvePausedResumePhase("", false));
-        assertEquals(SelfRunStore.PHASE_BOOTSTRAP,
-                SelfRunStore.resolvePausedResumePhase("WAIT_ASSISTANT", false));
+    public void recoverySignalIsRetainedAcrossManualResume() {
+        assertEquals("RECOVERY", SelfRunStore.signalValueAfterResume(
+                "RECOVERY", "USER_RESUME", SelfRunStore.PHASE_PAUSED, SelfRunStore.PAUSE_CAUSE_UI));
+        assertEquals("USER_RESUME", SelfRunStore.signalValueAfterResume(
+                "RECOVERY", "USER_RESUME", SelfRunStore.PHASE_PAUSED, SelfRunStore.PAUSE_CAUSE_PROTOCOL));
+    }
+
+    @Test
+    public void errorPauseDoesNotPretendToHaveResumableTarget() {
+        assertEquals("", SelfRunStore.capturePauseResumePhase(SelfRunStore.PHASE_WAIT_ASSISTANT,
+                "NEXT", "SR-test", "TARGET_MISSING"));
+    }
+
+    @Test
+    public void conversationResumeFallbackNeverReturnsBootstrap() {
         assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
                 SelfRunStore.resolvePausedResumePhase("", true));
         assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
-                SelfRunStore.resolvePausedResumePhase("BOOTSTRAP_SEND", true));
+                SelfRunStore.resolvePausedResumePhase(SelfRunStore.PHASE_BOOTSTRAP, true));
+        assertEquals(SelfRunStore.PHASE_BOOTSTRAP,
+                SelfRunStore.resolvePausedResumePhase("", false));
     }
 
     @Test
-    public void protocolPauseConsumesAssistantSignalThenTargetsContinuation() {
-        String userAction = "[SELF_RUN_USER_ACTION_REQUIRED " + RUN_ID + " AUTH0_ALLOWED_SUB_UPDATE]";
-        String protocolPause = "[SELF_RUN_PAUSE " + RUN_ID + " REASON=EXTERNAL_WAIT]";
-
-        assertTrue(SelfRunStore.isProtocolPauseSignal(userAction, RUN_ID));
-        assertTrue(SelfRunStore.isProtocolPauseSignal(protocolPause, RUN_ID));
-        assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
-                SelfRunStore.capturePauseResumePhase(
-                        SelfRunStore.PHASE_WAIT_ASSISTANT, userAction, RUN_ID, ""));
-        assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
-                SelfRunStore.capturePauseResumePhase(
-                        SelfRunStore.PHASE_WAIT_ASSISTANT, protocolPause, RUN_ID, ""));
-    }
-
-    @Test
-    public void manualPauseCapturesCurrentRunningPhaseInsteadOfForcingContinuation() {
-        String next = "[SELF_RUN_NEXT " + RUN_ID + " ROLE=VERIFIER]";
-
-        assertFalse(SelfRunStore.isProtocolPauseSignal(next, RUN_ID));
-        assertEquals(SelfRunStore.PHASE_WAIT_ASSISTANT,
-                SelfRunStore.capturePauseResumePhase(
-                        SelfRunStore.PHASE_WAIT_ASSISTANT, next, RUN_ID, ""));
-        assertEquals(SelfRunStore.PHASE_APPLY_PREFS,
-                SelfRunStore.capturePauseResumePhase(
-                        SelfRunStore.PHASE_APPLY_PREFS, next, RUN_ID, ""));
-        assertEquals("APPLY_REASONING",
-                SelfRunStore.capturePauseResumePhase(
-                        "APPLY_REASONING", next, RUN_ID, ""));
-        assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
-                SelfRunStore.capturePauseResumePhase(
-                        SelfRunStore.PHASE_SEND_CONTINUE, "RECOVERY", RUN_ID, ""));
-    }
-
-    @Test
-    public void nonPreservedErrorPauseDoesNotCaptureAnExecutionPhase() {
-        assertEquals("",
-                SelfRunStore.capturePauseResumePhase(
-                        SelfRunStore.PHASE_WAIT_ASSISTANT,
-                        "[SELF_RUN_NEXT " + RUN_ID + " ROLE=VERIFIER]",
-                        RUN_ID,
-                        "AUTH_REQUIRED"));
-    }
-
-    @Test
-    public void manualPauseDuringSignalRecoveryKeepsRecoverySubmissionKind() {
-        assertEquals("RECOVERY",
-                SelfRunStore.signalValueAfterResume(
-                        "RECOVERY",
-                        "USER_RESUME",
-                        SelfRunStore.PHASE_PAUSED,
-                        SelfRunStore.PAUSE_CAUSE_UI));
-        assertEquals("USER_RESUME",
-                SelfRunStore.signalValueAfterResume(
-                        "[SELF_RUN_PAUSE " + RUN_ID + " REASON=EXTERNAL_WAIT]",
-                        "USER_RESUME",
-                        SelfRunStore.PHASE_PAUSED,
-                        SelfRunStore.PAUSE_CAUSE_PROTOCOL));
-    }
-
-    @Test
-    public void storePersistsResumeTargetBeforePausedPhaseCanOverwriteIt() throws Exception {
+    public void storeDurablyPersistsPauseResumeMetadata() throws Exception {
         String text = storeSource();
-        int method = text.indexOf("void setPaused(boolean value)");
-        int nextMethod = text.indexOf("void setActive(boolean value)", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
-
-        int capture = body.indexOf("capturePauseResumePhase(phase(), lastSignal(), runId(), lastErrorCode())");
-        int persistTarget = body.indexOf(".putString(\"pauseResumePhase\", resumePhase)");
-        int persistCause = body.indexOf(".putString(\"pauseCause\", cause)");
-        assertTrue(capture >= 0);
-        assertTrue(persistTarget > capture);
-        assertTrue(persistCause > persistTarget);
+        assertTrue(text.contains("putString(\"pauseResumePhase\", resumePhase)"));
+        assertTrue(text.contains("putString(\"pauseCause\", cause)"));
+        assertTrue(text.contains("String pauseResumePhase()"));
+        assertTrue(text.contains("String pauseCause()"));
+        assertTrue(text.contains("resolvePausedResumePhase(pauseResumePhase(), !conversationUrl().isEmpty())"));
     }
 
     @Test
-    public void storeConsumesDurableResumeTargetWhenServiceLeavesPausedFallbackPhase() throws Exception {
+    public void setPhaseInterceptsLegacyResumeFallback() throws Exception {
         String text = storeSource();
         int method = text.indexOf("void setPhase(String value)");
-        int nextMethod = text.indexOf("void restartPhaseClock()", method);
+        int nextMethod = text.indexOf("void setPhaseAndStatus", method);
         assertTrue(method >= 0 && nextMethod > method);
         String body = text.substring(method, nextMethod);
 
@@ -154,18 +99,35 @@ public class SelfRunPauseResumeStateTest {
     }
 
     @Test
-    public void existingServiceResumeFallbackIsInterceptedOnlyAfterPausedFlagClears() throws Exception {
-        String text = serviceSource();
-        int resume = text.indexOf("private void resumeFromUi()");
-        int nextMethod = text.indexOf("private void enterPreservedPause", resume);
+    public void resumeClearsPauseAndSelectsResumePhaseInOneStoreTransaction() throws Exception {
+        String service = serviceSource();
+        int resume = service.indexOf("private void resumeFromUi()");
+        int nextMethod = service.indexOf("private void enterPreservedPause", resume);
         assertTrue(resume >= 0 && nextMethod > resume);
-        String body = text.substring(resume, nextMethod);
+        String body = service.substring(resume, nextMethod);
+        assertTrue(body.contains("store.resumeState("));
+        assertFalse(body.contains("store.setPaused(false)"));
+        assertFalse(body.contains("store.setPhase(SelfRunStore.PHASE_BOOTSTRAP)"));
+        assertFalse(body.contains("store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE)"));
 
-        int unpause = body.indexOf("store.setPaused(false);");
-        int phaseFallback = body.indexOf("store.setPhase(SelfRunStore.PHASE_BOOTSTRAP);");
-        assertTrue(unpause >= 0);
-        assertTrue(phaseFallback > unpause);
-        assertTrue(body.contains("store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);"));
+        String store = storeSource();
+        int atomic = store.indexOf("void resumeState(String requestedPhase, String statusValue)");
+        int complete = store.indexOf("void complete(String statusValue)", atomic);
+        assertTrue(atomic >= 0 && complete > atomic);
+        String atomicBody = store.substring(atomic, complete);
+        assertTrue(atomicBody.contains("resolvePausedResumePhase(pauseResumePhase(), !conversationUrl().isEmpty())"));
+        assertTrue(atomicBody.contains("putBoolean(\"paused\", false)"));
+        assertTrue(atomicBody.contains("putString(\"phase\", nextPhase)"));
+        assertTrue(atomicBody.contains("putString(\"pauseResumePhase\", \"\")"));
+        assertTrue(atomicBody.contains("putString(\"pauseCause\", \"\")"));
+        assertEquals(1, count(atomicBody, "applyEditor("));
+        assertEquals(1, count(atomicBody, "syncHistoryCritical()"));
+    }
+
+    private static int count(String text, String needle) {
+        int count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) count++;
+        return count;
     }
 
     private static String storeSource() throws Exception {
