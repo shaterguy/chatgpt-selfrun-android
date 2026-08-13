@@ -56,16 +56,16 @@ public final class SelfRunService extends Service {
     private HeadlessWebViewHost host;
     private WebView webView;
     private PowerManager.WakeLock wakeLock;
-    private boolean driveInFlight;
-    private boolean authorizationInFlight;
+    private volatile boolean driveInFlight;
+    private volatile boolean authorizationInFlight;
     private boolean domInFlight;
     private int generation;
-    private int automationEpoch;
-    private int driveOperationEpoch;
+    private volatile int automationEpoch;
+    private volatile int driveOperationEpoch;
     private int retryAttempt;
-    private String accessToken = "";
+    private volatile String accessToken = "";
     private String verifiedDriveAccountId = "";
-    private boolean destroyed;
+    private volatile boolean destroyed;
 
     @Override public void onCreate() {
         super.onCreate();

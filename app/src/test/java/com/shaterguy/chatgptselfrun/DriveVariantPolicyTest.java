@@ -100,6 +100,8 @@ public class DriveVariantPolicyTest {
         assertTrue(service.contains("!isWebAutomationPhase(store.phase())"));
         assertTrue(service.contains("handler.removeCallbacks(driveRetryRunnable)"));
         assertTrue(service.contains("epoch != automationEpoch"));
+        assertTrue(service.contains("private volatile int automationEpoch"));
+        assertTrue(service.contains("private volatile boolean driveInFlight"));
         String phases = service.substring(service.indexOf("private static boolean isWebAutomationPhase"));
         assertFalse(phases.substring(0, phases.indexOf("private void handleDriveFailure"))
                 .contains("PHASE_WAIT_DRIVE_COMMIT"));
