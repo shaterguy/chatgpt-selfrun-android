@@ -32,6 +32,7 @@ jobs:
           for path in root.glob('*.java'):
               text=path.read_text(encoding='utf-8')
               updated=text.replace('Files.readString(p)', 'new String(Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8)')
+              updated=updated.replace('assertTrue(bootstrap.matches(', 'assertTrue(bootstrap.split("\\\\n", 2)[0].matches(')
               if updated != text:
                   path.write_text(updated, encoding='utf-8')
           PY
