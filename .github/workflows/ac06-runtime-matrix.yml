@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - v0.2.3-dev6
+      - tmp-ac06-check
   workflow_dispatch:
 
 permissions:
