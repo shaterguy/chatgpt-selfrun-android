@@ -80,20 +80,29 @@ import xml.etree.ElementTree as ET
 
 wanted = sys.argv[1]
 root = ET.fromstring(sys.stdin.read())
+fallback = None
 for node in root.iter("node"):
     candidate = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
-    if candidate != wanted:
-        continue
     match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.attrib.get("bounds", ""))
-    if match:
-        left, top, right, bottom = map(int, match.groups())
-        print((left + right) // 2, (top + bottom) // 2)
+    if not match:
+        continue
+    left, top, right, bottom = map(int, match.groups())
+    center = f"{(left + right) // 2} {(top + bottom) // 2}"
+    if candidate == wanted:
+        print("MATCH", center)
         break
+    if candidate == "Wait":
+        fallback = center
+else:
+    if fallback:
+        print("DISMISS", fallback)
 ' "$wanted" <<<"$xml" 2>/dev/null || true)"
     if [[ -n "$coords" ]]; then
-      "$ADB" shell input tap $coords
+      read -r result x y <<<"$coords"
+      "$ADB" shell input tap "$x" "$y"
       sleep 1
-      return
+      [[ "$result" == "MATCH" ]] && return
+      continue
     fi
     sleep 1
   done
