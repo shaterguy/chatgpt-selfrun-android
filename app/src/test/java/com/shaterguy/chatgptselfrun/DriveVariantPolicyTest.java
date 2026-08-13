@@ -1,6 +1,11 @@
 package com.shaterguy.chatgptselfrun;
-import org.junit.Test;import java.nio.file.*;import static org.junit.Assert.*;
+import org.junit.Test;
+import java.nio.file.*;
+import static org.junit.Assert.*;
 public class DriveVariantPolicyTest {
  @Test public void stableIdentityDefaultChatAndKeyboardVisibility() throws Exception {String g=read("app/build.gradle","build.gradle"),a=src("SelfRunNewActivity.java");assertTrue(g.contains("selfRunDriveVersionCode = 1000004"));assertTrue(g.contains("selfRunDriveVersionName = '1.0.0'"));assertTrue(g.contains("com.shaterguy.chatgptselfrun.drive"));assertTrue(a.contains("MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}"));assertTrue(a.contains("requestRectangleOnScreen"));assertTrue(a.contains("addTextChangedListener"));assertTrue(a.contains("RUN_SUFFIX_LENGTH = 6"));assertTrue(a.contains("Asia/Seoul"));assertFalse(a.contains("UUID.randomUUID"));}
- static String src(String f)throws Exception{return read("app/src/main/java/com/shaterguy/chatgptselfrun/"+f,"src/main/java/com/shaterguy/chatgptselfrun/"+f);}static String read(String a,String b)throws Exception{Path p=Paths.get(a);if(!Files.exists(p))p=Paths.get(b);return new String(Files.readAllBytes(p),java.nio.charset.StandardCharsets.UTF_8);}
+ @Test public void signalCursorReplacesCommitMetadata() throws Exception {String s=src("SelfRunService.java"),st=src("SelfRunStore.java"),p=src("DriveCommitParser.java");assertTrue(s.contains("DriveSignalParser.scan"));assertTrue(st.contains("driveSignalCursor"));assertTrue(p.contains("SELF_RUN_COMMAND_RECEIVED"));assertTrue(p.contains("SELF_RUN_TURN_COMPLETED"));assertFalse(s.contains("DriveCommitParser"));assertFalse(p.contains("EVENT_SEQ"));assertFalse(p.contains("PROTOCOL_VERSION"));}
+ @Test public void noCompletionDomGate() throws Exception {String s=src("SelfRunService.java");assertFalse(s.contains("checkDriveTurnSubmitted"));assertFalse(s.contains("observeAssistant"));assertTrue(s.contains("CONTINUATION_GUARD_MS = 45_000L"));assertTrue(s.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));}
+ @Test public void workDocIdentityMetadataIsMinimal() throws Exception {String a=src("DriveApiClient.java");assertTrue(a.contains(".put(\"job_id\", name)"));assertTrue(a.contains(".put(\"selfrun_kind\", kind)"));assertFalse(a.contains(".put(\"protocol_version\""));assertFalse(a.contains(".put(\"client_id\""));}
+ static String src(String f)throws Exception{return read("app/src/main/java/com/shaterguy/chatgptselfrun/"+f,"src/main/java/com/shaterguy/chatgptselfrun/"+f);} static String read(String a,String b)throws Exception{Path p=Paths.get(a);if(!Files.exists(p))p=Paths.get(b);return new String(Files.readAllBytes(p),java.nio.charset.StandardCharsets.UTF_8);}
 }
