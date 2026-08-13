@@ -104,6 +104,7 @@ else:
       [[ "$result" == "MATCH" ]] && return
       continue
     fi
+    "$ADB" shell input swipe 540 1750 540 550 250 >/dev/null 2>&1 || true
     sleep 1
   done
   echo "UI_DIAGNOSTIC_BEGIN" >&2

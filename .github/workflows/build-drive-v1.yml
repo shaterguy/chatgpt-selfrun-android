@@ -152,7 +152,6 @@ jobs:
           retention-days: 30
 
   verify-coinstall-emulator:
-    needs: build-drive-v1
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
