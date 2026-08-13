@@ -17,6 +17,7 @@ final class SelfRunLogSampler {
             "DOM_RESULT",
             "DOM_WAIT",
             "ASSISTANT_BASELINE_WAIT",
+            "ASSISTANT_EVALUATION",
             "DOM_OBSERVER_HEALTH_EVALUATE",
             "DOM_WATCHDOG_HEALTH",
             "DOM_OBSERVER_STATE",
@@ -31,7 +32,8 @@ final class SelfRunLogSampler {
 
     private static final Pattern VOLATILE_COUNTERS = Pattern.compile(
             "(?i)(count|watchdog|suppressed|fullChecks|maintenanceEvaluations|stateEvents|"
-                    + "nativeDuplicates|watchdogs|watchdogRecoveries|totalHeldMs|acquires|releases)=\\d+");
+                    + "nativeDuplicates|watchdogs|watchdogRecoveries|totalHeldMs|acquires|releases|"
+                    + "phase_age_ms|activity_age_ms)=\\d+");
 
     static final class Context {
         final int generation;

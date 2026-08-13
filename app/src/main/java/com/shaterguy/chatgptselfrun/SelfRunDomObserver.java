@@ -2,6 +2,9 @@ package com.shaterguy.chatgptselfrun;
 
 /** SelfRun-owned page observer. It never pauses ChatGPT page timers. */
 final class SelfRunDomObserver {
+    private static final int DEBOUNCE_MS = 180;
+    private static final int QUIET_COMPLETION_MS = 650;
+
     private SelfRunDomObserver() {}
 
     static String install(String token, String lease) {
@@ -24,6 +27,7 @@ final class SelfRunDomObserver {
                     try { state.observer?.takeRecords?.(); } catch (_) {}
                     try { state.observer?.disconnect(); } catch (_) {}
                     if (state.timer) { try { clearTimeout(state.timer); } catch (_) {} }
+                    if (state.quietTimer) { try { clearTimeout(state.quietTimer); } catch (_) {} }
                     if (state.bridgeListener) {
                       try { window.removeEventListener('message', state.bridgeListener); } catch (_) {}
                     }
@@ -44,9 +48,11 @@ final class SelfRunDomObserver {
                     cleanup(previous);
                   }
                   const state = {
-                    lease, runId, generation, epoch, active:true, observer:null, timer:0, bridgeListener:null, eventListener:null, port:null, root:null,
+                    lease, runId, generation, epoch, active:true, observer:null, timer:0, quietTimer:0,
+                    bridgeListener:null, eventListener:null, port:null, root:null,
                     probe:null, probeSent:0, probeAck:0, lastObserverCallbackAt:Date.now(),
-                    lastFingerprint:'', lastMutationAt:Date.now(), lastDispatchAt:0, suppressed:0,
+                    lastFingerprint:'', lastMutationAt:Date.now(), lastAssistantActivityAt:0,
+                    lastDispatchAt:0, suppressed:0, quietProbeCount:0,
                     lastStreaming:false, lastAssistantNode:null
                   };
                   window[key] = state;
@@ -113,9 +119,10 @@ final class SelfRunDomObserver {
                     const assistantIdentity = assistant
                       ? (assistant.getAttribute('data-message-id') || assistant.dataset?.messageId || assistant.id || 'index') + ':' + assistantIndex
                       : '';
-                    const streaming = !!assistant && (stop || assistant.getAttribute('aria-busy') === 'true'
+                    const explicitStreaming = !!assistant && (assistant.getAttribute('aria-busy') === 'true'
                       || assistant.getAttribute('data-is-streaming') === 'true'
-                      || !!assistant.querySelector('[aria-busy="true"],[data-is-streaming="true"],[class*="spinner" i],[class*="loading" i]'));
+                      || !!assistant.querySelector('[aria-busy="true"],[data-is-streaming="true"]'));
+                    const streaming = !!assistant && (stop || explicitStreaming);
                     state.lastStreaming = streaming;
                     state.lastAssistantNode = assistant;
                     let completedDigest = '';
@@ -135,6 +142,14 @@ final class SelfRunDomObserver {
                       stop, userCount, assistantIdentity, streaming, completedDigest, controlDigest, selected, overlays
                     });
                   };
+                  const dispatch = (kind, force) => {
+                    if (!current() || !state.port) return;
+                    const fingerprint = snapshot();
+                    if (!force && fingerprint === state.lastFingerprint) { state.suppressed++; return; }
+                    state.lastFingerprint = fingerprint;
+                    state.lastDispatchAt = Date.now();
+                    try { state.port?.postMessage(kind + '|' + fingerprint); } catch (_) {}
+                  };
                   const notify = () => {
                     if (!current()) return;
                     state.lastMutationAt = Date.now();
@@ -143,12 +158,39 @@ final class SelfRunDomObserver {
                     state.timer = setTimeout(() => {
                       if (!current()) return;
                       state.timer = 0;
-                      const fingerprint = snapshot();
-                      if (fingerprint === state.lastFingerprint) { state.suppressed++; return; }
-                      state.lastFingerprint = fingerprint;
-                      state.lastDispatchAt = Date.now();
-                      try { state.port?.postMessage('state|' + fingerprint); } catch (_) {}
-                    }, 180);
+                      dispatch('state', false);
+                    }, %d);
+                  };
+                  const scheduleQuietProbe = () => {
+                    if (!current()) return;
+                    state.lastMutationAt = Date.now();
+                    state.lastAssistantActivityAt = state.lastMutationAt;
+                    if (state.quietTimer) clearTimeout(state.quietTimer);
+                    state.quietTimer = setTimeout(() => {
+                      if (!current()) return;
+                      state.quietTimer = 0;
+                      state.quietProbeCount = Number(state.quietProbeCount || 0) + 1;
+                      dispatch('quiet', true);
+                    }, %d);
+                  };
+                  const assistantRelated = mutation => {
+                    const assistant = state.lastAssistantNode;
+                    if (!assistant) return false;
+                    let target = mutation?.target || null;
+                    if (target?.nodeType === 3) target = target.parentElement;
+                    try {
+                      if (target && (target === assistant || assistant.contains(target))) return true;
+                      if (mutation?.type === 'childList') {
+                        const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+                        return nodes.some(node => {
+                          if (!node) return false;
+                          if (node === assistant) return true;
+                          if (node.nodeType === 1) return assistant.contains(node) || node.contains?.(assistant);
+                          return !!node.parentElement && assistant.contains(node.parentElement);
+                        });
+                      }
+                    } catch (_) {}
+                    return false;
                   };
                   const onMutations = mutations => {
                     if (!current()) return;
@@ -159,10 +201,14 @@ final class SelfRunDomObserver {
                         if (ack > state.probeAck) state.probeAck = ack;
                         continue;
                       }
+                      const inAssistant = assistantRelated(mutation);
+                      if (inAssistant && (mutation.type === 'characterData' || mutation.type === 'childList'
+                          || (mutation.type === 'attributes' && ['class','aria-busy','data-is-streaming'].includes(mutation.attributeName)))) {
+                        scheduleQuietProbe();
+                      }
                       if (mutation.type === 'characterData') {
                         state.lastMutationAt = Date.now();
-                        if (state.lastAssistantNode?.contains(mutation.target)
-                            && !state.lastStreaming && !state.timer) {
+                        if (inAssistant && !state.lastStreaming && !state.timer) {
                           notify();
                           return;
                         }
@@ -170,8 +216,7 @@ final class SelfRunDomObserver {
                       }
                       if (mutation.type === 'attributes') { notify(); return; }
                       if (mutation.type === 'childList') {
-                        if (state.lastAssistantNode?.contains(mutation.target)
-                            && !state.lastStreaming && !state.timer) {
+                        if (inAssistant && !state.lastStreaming && !state.timer) {
                           notify();
                           return;
                         }
@@ -195,7 +240,7 @@ final class SelfRunDomObserver {
                         childList:true,
                         characterData:true,
                         attributes:true,
-                        attributeFilter:['aria-busy','aria-disabled','aria-checked','aria-selected','aria-pressed','data-is-streaming','data-state','disabled']
+                        attributeFilter:['class','aria-busy','aria-disabled','aria-checked','aria-selected','aria-pressed','data-is-streaming','data-state','disabled']
                       });
                     }
                     state.probe = document.createElement('span');
@@ -214,7 +259,7 @@ final class SelfRunDomObserver {
                   window.addEventListener('message', state.bridgeListener);
                   return 'WAIT_PORT';
                 })()
-                """.formatted(q(token), q(lease), q(runId), generation, epoch);
+                """.formatted(q(token), q(lease), q(runId), generation, epoch, DEBOUNCE_MS, QUIET_COMPLETION_MS);
     }
 
     static String health(String lease) {
@@ -232,8 +277,9 @@ final class SelfRunDomObserver {
                       rootConnected:!!state.root && state.root.isConnected,
                       probeSent:previousProbe, probeAck:previousAck,
                       lastObserverCallbackAt:Number(state.lastObserverCallbackAt || 0),
+                      lastAssistantActivityAt:Number(state.lastAssistantActivityAt || 0),
                       fingerprint:String(state.lastFingerprint || ''),
-                      suppressed:Number(state.suppressed || 0)
+                      suppressed:Number(state.suppressed || 0), quietProbeCount:Number(state.quietProbeCount || 0)
                     });
                   }
                   const nextProbe = previousProbe + 1;
@@ -247,8 +293,9 @@ final class SelfRunDomObserver {
                       rootConnected:!!state.root && state.root.isConnected,
                       probeSent:nextProbe, probeAck:previousAck,
                       lastObserverCallbackAt:Number(state.lastObserverCallbackAt || 0),
+                      lastAssistantActivityAt:Number(state.lastAssistantActivityAt || 0),
                       fingerprint:String(state.lastFingerprint || ''),
-                      suppressed:Number(state.suppressed || 0)
+                      suppressed:Number(state.suppressed || 0), quietProbeCount:Number(state.quietProbeCount || 0)
                     });
                   }
                   return JSON.stringify({
@@ -257,9 +304,10 @@ final class SelfRunDomObserver {
                     probeSent:nextProbe, probeAck:previousAck,
                     lastObserverCallbackAt:Number(state.lastObserverCallbackAt || 0),
                     lastMutationAt:Number(state.lastMutationAt || 0),
+                    lastAssistantActivityAt:Number(state.lastAssistantActivityAt || 0),
                     lastDispatchAt:Number(state.lastDispatchAt || 0),
                     fingerprint:String(state.lastFingerprint || ''),
-                    suppressed:Number(state.suppressed || 0)
+                    suppressed:Number(state.suppressed || 0), quietProbeCount:Number(state.quietProbeCount || 0)
                   });
                 })()
                 """.formatted(q(lease));
@@ -277,6 +325,7 @@ final class SelfRunDomObserver {
                   try { state.observer?.takeRecords?.(); } catch (_) {}
                   try { state.observer?.disconnect(); } catch (_) {}
                   if (state.timer) { try { clearTimeout(state.timer); } catch (_) {} }
+                  if (state.quietTimer) { try { clearTimeout(state.quietTimer); } catch (_) {} }
                   if (state.bridgeListener) {
                     try { window.removeEventListener('message', state.bridgeListener); } catch (_) {}
                   }

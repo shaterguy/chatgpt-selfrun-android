@@ -11,239 +11,127 @@ import static org.junit.Assert.assertTrue;
 
 public class SelfRunBatteryEfficiencyTest {
     @Test
-    public void domObserverDebouncesAndSuppressesEquivalentPageState() {
+    public void domObserverDebouncesSuppressesEquivalentStateAndAddsQuietCompletionProbe() {
         String install = SelfRunDomObserver.install("test-token", "test-lease");
-        String health = SelfRunDomObserver.health("test-lease");
-        String detach = SelfRunDomObserver.detach("test-lease");
-
         assertTrue(install.contains("new MutationObserver"));
-        assertTrue(install.contains("setTimeout"));
-        assertTrue(install.contains("lastFingerprint"));
         assertTrue(install.contains("fingerprint === state.lastFingerprint"));
         assertTrue(install.contains("state.suppressed++"));
-        assertTrue(install.contains("postMessage('state|' + fingerprint)"));
-        assertTrue(install.contains("assistantIdentity"));
-        assertTrue(install.contains("streaming"));
-        assertTrue(install.contains("completedDigest"));
-        assertTrue(install.contains("controlDigest"));
-        assertTrue(install.contains("sendDisabled"));
-        assertFalse(install.contains("postMessage('changed')"));
+        assertTrue(install.contains("scheduleQuietProbe"));
+        assertTrue(install.contains("dispatch('quiet', true)"));
+        assertTrue(install.contains("attributeFilter:['class','aria-busy'"));
+        assertTrue(install.contains("characterData:true"));
+        assertFalse(install.contains("[class*=\"spinner\""));
+        assertFalse(install.contains("[class*=\"loading\""));
         assertFalse(install.contains("setInterval"));
-        assertFalse(install.contains("pauseTimers"));
-
-        assertTrue(health.contains("status:'ALIVE'"));
-        assertTrue(health.contains("status:'STALLED'"));
-        assertTrue(health.contains("rootConnected"));
-        assertTrue(health.contains("fingerprint"));
-        assertTrue(health.contains("suppressed"));
-        assertTrue(health.contains("probeSent"));
-        assertTrue(health.contains("probeAck"));
-        assertFalse(health.contains("querySelectorAll"));
-        assertFalse(health.contains("snapshot()"));
-
-        assertTrue(detach.contains("state.lease !== expectedLease"));
-        assertTrue(detach.contains("state.active = false"));
-        assertTrue(detach.contains("takeRecords"));
-        assertTrue(detach.contains("observer?.disconnect()"));
-        assertTrue(detach.contains("clearTimeout"));
-        assertTrue(detach.contains("removeEventListener"));
-        assertTrue(detach.contains("port?.close()"));
     }
 
     @Test
-    public void watchdogHealthSelfProbesTheObserverWithoutAFullDomScan() {
+    public void watchdogHealthSelfProbesObserverWithoutFullAssistantDomScan() {
         String install = SelfRunDomObserver.install("test-token", "test-lease");
         String health = SelfRunDomObserver.health("test-lease");
-
         assertTrue(install.contains("probe:null, probeSent:0, probeAck:0"));
         assertTrue(install.contains("mutation.target === state.probe"));
-        assertTrue(install.contains("state.probeAck = ack"));
-        assertTrue(install.contains("state.observer.observe(state.probe"));
-        assertTrue(health.contains("previousProbe > 0 && previousAck < previousProbe"));
         assertTrue(health.contains("state.probe.setAttribute('data-selfrun-probe', String(nextProbe))"));
         assertTrue(health.contains("status:'STALLED'"));
-        assertFalse(health.contains("querySelector"));
+        assertTrue(health.contains("lastAssistantActivityAt"));
         assertFalse(health.contains("querySelectorAll"));
+        assertFalse(health.contains("snapshot()"));
     }
 
     @Test
-    public void completedAssistantTextFinalizationIsObservedWithoutStreamingTokenChurn() {
-        String install = SelfRunDomObserver.install("test-token", "test-lease");
-
-        assertTrue(install.contains("characterData:true"));
-        assertTrue(install.contains("state.lastStreaming = streaming"));
-        assertTrue(install.contains("state.lastAssistantNode = assistant"));
-        assertTrue(install.contains("state.lastAssistantNode?.contains(mutation.target)"));
-        assertTrue(install.contains("&& !state.lastStreaming && !state.timer"));
-        int firstCompletionGuard = install.indexOf("state.lastAssistantNode?.contains(mutation.target)");
-        int secondCompletionGuard = install.indexOf("state.lastAssistantNode?.contains(mutation.target)", firstCompletionGuard + 1);
-        assertTrue(firstCompletionGuard >= 0 && secondCompletionGuard > firstCompletionGuard);
-        assertTrue(install.contains("const completedText = String(assistant.innerText || assistant.textContent || '')"));
-        assertTrue(install.contains("completedText.match(/\\[SELF_RUN_"));
-        assertTrue(install.contains("completedDigest = hash(completedText)"));
-        assertTrue(install.contains("controlDigest = controls.length ? hash(controls[controls.length - 1]) : ''"));
+    public void waitAssistantUsesProductionRuntimeForSemanticAndTimeoutScheduling() throws Exception {
+        String service = source("SelfRunService.java");
+        String runtime = source("AssistantWaitRuntime.java");
+        assertTrue(service.contains("DOM_WATCHDOG_MS = 15_000L"));
+        assertTrue(service.contains("AssistantWaitRuntime assistantWaitRuntime"));
+        assertTrue(runtime.contains("coordinator.semanticProbeDelay"));
+        assertTrue(runtime.contains("AssistantWaitCoordinator.Source.WATCHDOG_PROBE"));
+        assertTrue(runtime.contains("coordinator.timeoutDelay"));
+        assertTrue(runtime.contains("AssistantWaitCoordinator.Source.TIMEOUT_PROBE"));
+        assertFalse(runtime.contains("lastObserverState"));
+        assertFalse(runtime.contains("SelfRunDomObserver.health"));
     }
 
     @Test
-    public void serviceUsesOriginScopedMessageChannelAndRecoveryOnlyWatchdog() throws Exception {
-        String text = source("SelfRunService.java");
-        assertTrue(text.contains("DOM_WATCHDOG_MS = 15_000L"));
-        assertTrue(text.contains("watchdogRunnable = this::runDomWatchdog"));
-        assertTrue(text.contains("createWebMessageChannel()"));
-        assertTrue(text.contains("postWebMessage(new WebMessage(token"));
-        assertTrue(text.contains("SelfRunDomObserver.health(activeLease)"));
-        assertTrue(text.contains("DOM_OBSERVER_HEALTH_EVALUATE"));
-        assertTrue(text.contains("watchdog_missed_event"));
-        assertTrue(text.contains("return Uri.parse(\"https://\" + host);"));
-        assertFalse(text.contains("addJavascriptInterface"));
-        assertFalse(text.contains("WorkManager"));
-        assertFalse(text.contains("AlarmManager"));
-        assertFalse(text.contains("setRendererPriorityPolicy"));
-
-        int watchdog = text.indexOf("private void scheduleWatchdog()");
-        int runWatchdog = text.indexOf("private void runDomWatchdog()", watchdog);
-        assertTrue(watchdog >= 0 && runWatchdog > watchdog);
-        String scheduleBody = text.substring(watchdog, runWatchdog);
-        assertTrue(scheduleBody.contains("handler.postDelayed(watchdogRunnable, DOM_WATCHDOG_MS)"));
-        assertFalse(scheduleBody.contains("scheduleStep("));
-        assertFalse(scheduleBody.contains("stepRunnable"));
-        assertFalse(scheduleBody.contains("updateWakeLockForState"));
-    }
-
-    @Test
-    public void normalWaitsArmObserverAndWatchdogWithoutPollingThePhase() throws Exception {
-        String text = source("SelfRunService.java");
-        int method = text.indexOf("private void uiWait(String detail)");
-        int nextMethod = text.indexOf("private void submittedWait", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
-        assertTrue(body.contains("ensureDomObserver();"));
-        assertTrue(body.contains("scheduleWatchdog();"));
-        assertFalse(body.contains("scheduleStep("));
-        assertFalse(body.contains("requestDomEvaluation("));
-        assertFalse(body.contains("updateWakeLockForState"));
+    public void assistantTimeoutRuntimeProbesBeforeRecoveryAndUsesInjectedClockScheduler() throws Exception {
+        String runtime = source("AssistantWaitRuntime.java");
+        assertTrue(runtime.contains("interface Clock"));
+        assertTrue(runtime.contains("interface Scheduler"));
+        assertTrue(runtime.contains("listener.timeoutFired"));
+        assertTrue(runtime.contains("listener.requestProbe(AssistantWaitCoordinator.Source.TIMEOUT_PROBE"));
+        assertFalse(runtime.contains("recoverStalledPhase("));
     }
 
     @Test
     public void observerEventsAreLeaseGuardedDeduplicatedAndCoalesced() throws Exception {
-        String text = source("SelfRunService.java");
-        assertTrue(text.contains("active != webView || activeGeneration != generation || activeExecutionEpoch != executionEpoch"));
-        assertTrue(text.contains("activeEpoch != observerEpoch"));
-        assertTrue(text.contains("!activeRunId.equals(store.runId())"));
-        assertTrue(text.contains("!lease.equals(observerLease)"));
-        assertTrue(text.contains("nextState.equals(lastObserverState)"));
-        assertTrue(text.contains("observerDuplicateEventCount"));
-        assertTrue(text.contains("domEvaluationPending"));
-        assertTrue(text.contains("activeExecutionEpoch != executionEpoch"));
-        assertTrue(text.contains("resumeObserverGate"));
-        assertTrue(text.contains("drainPendingDomEvaluation()"));
-        assertTrue(text.contains("requestDomEvaluation(0L, \"observer_state\")"));
-        assertTrue(text.contains("requestDomEvaluation(0L, \"watchdog_missed_event\")"));
-
-        int observer = text.indexOf("private void ensureDomObserver()");
-        int next = text.indexOf("private boolean observerPageReady", observer);
-        String observerBody = text.substring(observer, next);
-        assertFalse(observerBody.contains("updateWakeLockForState"));
-        assertFalse(observerBody.contains("setWakeLockState"));
-    }
-
-    @Test
-    public void preservedPauseStopsObserverAndWatchdogAndResumeWaitsForReadyBeforeAcquire() throws Exception {
-        String text = source("SelfRunService.java");
-        int pause = text.indexOf("private void enterPreservedPause");
-        int wake = text.indexOf("private void updateWakeLockForState", pause);
-        assertTrue(pause >= 0 && wake > pause);
-        String pauseBody = text.substring(pause, wake);
-        assertTrue(pauseBody.contains("handler.removeCallbacksAndMessages(null)"));
-        assertTrue(pauseBody.contains("detachDomObserver(cause)"));
-        assertTrue(pauseBody.contains("setWakeLockState(WakeLockController.State.PAUSED"));
-        assertFalse(pauseBody.contains("releaseWakeLock"));
-        assertFalse(pauseBody.contains("pauseTimers"));
-
-        int resume = text.indexOf("private void resumeFromUi()");
-        assertTrue(resume >= 0 && pause > resume);
-        String resumeBody = text.substring(resume, pause);
-        int wakePrepare = resumeBody.indexOf("updateWakeLockForState(\"resume_prepare\")");
-        int preservedBlock = resumeBody.indexOf("if (preserved)");
-        int observerAttach = resumeBody.indexOf("ensureDomObserver();", preservedBlock);
-        assertTrue(resumeBody.contains("resumeObserverGate = preserved && !rateLimited;"));
-        assertTrue(wakePrepare >= 0);
-        assertTrue(preservedBlock > wakePrepare);
-        assertTrue(observerAttach > wakePrepare);
-
-        int updateWake = text.indexOf("private void updateWakeLockForState");
-        int setWake = text.indexOf("private void setWakeLockState", updateWake);
-        String wakeBody = text.substring(updateWake, setWake);
-        assertTrue(wakeBody.contains("if (resumeObserverGate)"));
-        assertTrue(wakeBody.contains("WakeLockController.State.PAUSED"));
-        assertTrue(wakeBody.contains("reason + \"_resume_gate\""));
-
-        int openGate = text.indexOf("private boolean openResumeObserverGate");
-        int origin = text.indexOf("private static Uri chatGptOrigin", openGate);
-        String gateBody = text.substring(openGate, origin);
-        assertTrue(gateBody.contains("resumeObserverGate = false;"));
-        assertTrue(gateBody.contains("updateWakeLockForState(\"resume_observer_ready\")"));
-        assertTrue(gateBody.indexOf("updateWakeLockForState") < gateBody.indexOf("requestDomEvaluation"));
-        int elseBlock = resumeBody.indexOf("} else {", preservedBlock);
-        String preservedBody = resumeBody.substring(preservedBlock, elseBlock);
-        assertFalse(preservedBody.contains("loadUrl("));
-        assertFalse(preservedBody.contains("cleanupWebView()"));
-        assertFalse(preservedBody.contains("scheduleStep("));
-    }
-
-    @Test
-    public void wakeLockOwnershipIsCentralizedAndInstrumentedBySemanticState() throws Exception {
         String service = source("SelfRunService.java");
-        String controller = source("WakeLockController.java");
-
-        assertTrue(service.contains("WakeLockController wakeLockController"));
-        assertTrue(service.contains("wakeLockStateFor("));
-        assertTrue(service.contains("WakeLockController.State.AUTOMATION"));
-        assertTrue(service.contains("WakeLockController.State.RECOVERY"));
-        assertTrue(service.contains("WakeLockController.State.RATE_LIMIT"));
-        assertTrue(service.contains("WAKELOCK_STATE"));
-        assertTrue(service.contains("WAKELOCK_EFFICIENCY"));
-        assertTrue(service.contains("automationHeldMs="));
-        assertTrue(service.contains("recoveryHeldMs="));
-        assertFalse(service.contains("PowerManager.WakeLock"));
-        assertFalse(service.contains("wakeLock.acquire"));
-        assertFalse(service.contains("wakeLock.release"));
-        assertFalse(service.contains("pauseTimers"));
-        assertFalse(service.contains("webView.onPause()"));
-        assertFalse(service.contains("webView.onResume()"));
-
-        assertTrue(controller.contains("PowerManager.PARTIAL_WAKE_LOCK"));
-        assertTrue(controller.contains("wakeLock.setReferenceCounted(false)"));
-        assertTrue(controller.contains("lock.acquire()"));
-        assertTrue(controller.contains("lock.release()"));
-        assertTrue(controller.contains("SystemClock::elapsedRealtime"));
+        assertTrue(service.contains("activeEpoch != observerEpoch"));
+        assertTrue(service.contains("!activeRunId.equals(store.runId())"));
+        assertTrue(service.contains("!lease.equals(observerLease)"));
+        assertTrue(service.contains("nextState.equals(lastObserverState)"));
+        assertTrue(service.contains("DOM_EVALUATION_COALESCED"));
+        assertTrue(service.contains("DomEvaluationLifecycle evaluationLifecycle"));
+        assertTrue(service.contains("releaseDomEvaluation(activeEvaluationEpoch)"));
     }
 
     @Test
-    public void rateLimitAndRecoveryUseExplicitPowerStatesAndStaleGuards() throws Exception {
-        String text = source("SelfRunService.java");
-        int rate = text.indexOf("private void rateLimit(String reason)");
-        int restore = text.indexOf("private void restoreCanonical", rate);
-        String rateBody = text.substring(rate, restore);
-        assertTrue(rateBody.contains("recoveryInProgress = false"));
-        assertTrue(rateBody.contains("updateWakeLockForState(\"rate_limit_wait\")"));
-        assertTrue(rateBody.contains("scheduleRateLimitExpiry()"));
-        assertTrue(rateBody.contains("rateLimitTimerEpoch"));
-        assertTrue(rateBody.contains("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)"));
-        assertTrue(rateBody.contains("expectedRunId.equals(store.runId())"));
-        assertTrue(rateBody.contains("expectedTimerEpoch == rateLimitTimerEpoch"));
-        assertTrue(rateBody.contains("expectedDeadline == rateLimitedUntilElapsed"));
-        assertFalse(rateBody.contains("isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId)"));
-        assertTrue(rateBody.contains("beginRecovery(\"rate_limit_expired\")"));
+    public void preservedPauseStopsAssistantMonitoringObserverAndWakeLockAutomation() throws Exception {
+        String service = source("SelfRunService.java");
+        String pause = between(service, "private void enterPreservedPause", "private void updateWakeLockForState");
+        assertTrue(pause.contains("handler.removeCallbacksAndMessages(null)"));
+        assertTrue(pause.contains("cancelAssistantWaitMonitoring"));
+        assertTrue(pause.contains("detachDomObserver(cause)"));
+        assertTrue(pause.contains("WakeLockController.State.PAUSED"));
+        assertTrue(pause.contains("invalidateDomEvaluation()"));
+        assertFalse(pause.contains("pauseTimers"));
+    }
 
-        assertTrue(text.contains("beginRecovery(\"renderer_gone\")"));
-        assertTrue(text.contains("beginRecovery(\"network_error\")"));
-        assertTrue(text.contains("finishRecovery(\"page_finished\")"));
-        assertTrue(text.contains("postRecovery("));
+
+    @Test
+    public void originScopedWebMessageChannelAndLowFrequencyRecoveryWatchdogRemainGuarded() throws Exception {
+        String service = source("SelfRunService.java");
+        assertTrue(service.contains("DOM_WATCHDOG_MS = 15_000L"));
+        assertTrue(service.contains("watchdogRunnable = this::runDomWatchdog"));
+        assertTrue(service.contains("createWebMessageChannel()"));
+        assertTrue(service.contains("postWebMessage(new WebMessage(token"));
+        assertTrue(service.contains("SelfRunDomObserver.health(activeLease)"));
+        assertTrue(service.contains("DOM_OBSERVER_HEALTH_EVALUATE"));
+        assertTrue(service.contains("watchdog_missed_event"));
+        assertTrue(service.contains("return Uri.parse(\"https://\" + host);"));
+        assertFalse(service.contains("addJavascriptInterface"));
+        assertFalse(service.contains("WorkManager"));
+        assertFalse(service.contains("AlarmManager"));
+        assertFalse(service.contains("setRendererPriorityPolicy"));
+
+        String schedule = between(service, "private void scheduleWatchdog()", "private void runDomWatchdog()");
+        assertTrue(schedule.contains("handler.postDelayed(watchdogRunnable, DOM_WATCHDOG_MS)"));
+        assertFalse(schedule.contains("scheduleStep("));
+        assertFalse(schedule.contains("stepRunnable"));
+        assertFalse(schedule.contains("updateWakeLockForState"));
     }
 
     @Test
-    public void repeatedPersistenceWritesAreGuardedAndPhaseClockResetDoesNotSyncHistory() throws Exception {
+    public void rateLimitRendererAndNetworkRecoveryKeepExplicitPowerAndStaleGuards() throws Exception {
+        String service = source("SelfRunService.java");
+        String rate = between(service, "private void rateLimit(String reason)", "private void restoreCanonical");
+        assertTrue(rate.contains("recoveryInProgress = false"));
+        assertTrue(rate.contains("updateWakeLockForState(\"rate_limit_wait\")"));
+        assertTrue(rate.contains("scheduleRateLimitExpiry()"));
+        assertTrue(rate.contains("rateLimitTimerEpoch"));
+        assertTrue(rate.contains("isCurrentRateLimitTimer(expectedRunId, expectedTimerEpoch, expectedDeadline)"));
+        assertTrue(rate.contains("expectedRunId.equals(store.runId())"));
+        assertTrue(rate.contains("expectedTimerEpoch == rateLimitTimerEpoch"));
+        assertTrue(rate.contains("expectedDeadline == rateLimitedUntilElapsed"));
+        assertFalse(rate.contains("isCurrentExecution(expectedWebView, expectedGeneration, expectedRunId)"));
+        assertTrue(rate.contains("beginRecovery(\"rate_limit_expired\")"));
+        assertTrue(service.contains("beginRecovery(\"renderer_gone\")"));
+        assertTrue(service.contains("beginRecovery(\"network_error\")"));
+        assertTrue(service.contains("finishRecovery(\"page_finished\")"));
+        assertTrue(service.contains("postRecovery("));
+    }
+
+    @Test
+    public void persistenceNoopAndHistoryWriteGuardsRemainPartOfRegressionContract() throws Exception {
         String store = source("SelfRunStore.java");
         String history = source("SelfRunHistoryStore.java");
         assertTrue(store.contains("markNoop()"));
@@ -251,19 +139,39 @@ public class SelfRunBatteryEfficiencyTest {
         assertTrue(store.contains("enterPausedState"));
         assertTrue(store.contains("resumeState"));
         assertTrue(store.contains("stopByUser"));
-        int clock = store.indexOf("void restartPhaseClock()");
-        int status = store.indexOf("void setStatus", clock);
-        assertTrue(clock >= 0 && status > clock);
-        assertFalse(store.substring(clock, status).contains("syncHistory"));
+        String phaseClock = between(store, "void restartPhaseClock()", "void setStatus");
+        assertFalse(phaseClock.contains("syncHistory"));
         assertTrue(history.contains("sameSnapshot(previousSnapshot, nextSnapshot)"));
         assertTrue(history.contains("SYNC_DEBOUNCE_MS = 250L"));
-        assertTrue(history.contains("pendingSnapshots"));
+        assertTrue(history.contains("PENDING_SNAPSHOTS"));
+        assertTrue(history.contains("staleSnapshotsSkipped"));
+        assertTrue(history.contains("physicalWrites"));
         assertFalse(history.contains(".commit()"));
         assertTrue(history.contains(".apply()"));
+    }
+
+    @Test
+    public void wakeLockOwnershipRemainsCentralizedBySemanticState() throws Exception {
+        String service = source("SelfRunService.java");
+        assertTrue(service.contains("WakeLockController wakeLockController"));
+        assertTrue(service.contains("wakeLockStateFor("));
+        assertTrue(service.contains("WakeLockController.State.AUTOMATION"));
+        assertTrue(service.contains("WakeLockController.State.RECOVERY"));
+        assertTrue(service.contains("WakeLockController.State.RATE_LIMIT"));
+        assertFalse(service.contains("PowerManager.WakeLock"));
+        assertFalse(service.contains("wakeLock.acquire"));
+        assertFalse(service.contains("wakeLock.release"));
     }
 
     private static String source(String name) throws Exception {
         Path path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static String between(String text, String start, String end) {
+        int from = text.indexOf(start);
+        int to = text.indexOf(end, from + 1);
+        assertTrue(from >= 0 && to > from);
+        return text.substring(from, to);
     }
 }

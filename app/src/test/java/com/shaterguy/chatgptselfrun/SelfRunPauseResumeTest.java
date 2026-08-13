@@ -21,23 +21,19 @@ public class SelfRunPauseResumeTest {
     @Test
     public void manualPausePathUsesSamePreservedWebViewPolicy() throws Exception {
         String text = source();
-        int pause = text.indexOf("private void pauseFromUi()");
-        int resume = text.indexOf("private void resumeFromUi()", pause);
-        assertTrue(pause >= 0 && resume > pause);
-        String body = text.substring(pause, resume);
+        String body = between(text, "private void pauseFromUi()", "private void resumeFromUi()");
         assertTrue(body.contains("enterPreservedPause(\"UI_PAUSE\""));
         assertFalse(body.contains("cleanupWebView()"));
     }
 
     @Test
-    public void preservedPauseStopsAutomationButDoesNotDestroyOrPauseWebView() throws Exception {
+    public void preservedPauseStopsAutomationTimersAndDoesNotDestroyWebView() throws Exception {
         String text = source();
-        int method = text.indexOf("private void enterPreservedPause");
-        int nextMethod = text.indexOf("private void updateWakeLockForState", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
+        String body = between(text, "private void enterPreservedPause", "private void updateWakeLockForState");
         assertTrue(body.contains("handler.removeCallbacksAndMessages(null)"));
+        assertTrue(body.contains("cancelAssistantWaitMonitoring"));
         assertTrue(body.contains("invalidateExecutionEpoch()"));
+        assertTrue(body.contains("invalidateDomEvaluation()"));
         assertTrue(body.contains("detachDomObserver(cause)"));
         assertFalse(body.contains("cleanupWebView()"));
         assertFalse(body.contains("webView.onPause()"));
@@ -45,12 +41,9 @@ public class SelfRunPauseResumeTest {
     }
 
     @Test
-    public void sameWebViewResumeDoesNotReloadCanonicalConversation() throws Exception {
+    public void sameWebViewResumeDoesNotReloadOrSendContinuation() throws Exception {
         String text = source();
-        int method = text.indexOf("private void resumeFromUi()");
-        int nextMethod = text.indexOf("private void enterPreservedPause", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
+        String body = between(text, "private void resumeFromUi()", "private void enterPreservedPause");
         int preserved = body.indexOf("if (preserved)");
         int reconnectElse = body.indexOf("} else {", preserved);
         assertTrue(preserved >= 0 && reconnectElse > preserved);
@@ -59,78 +52,72 @@ public class SelfRunPauseResumeTest {
         assertFalse(preservedBody.contains("loadUrl("));
         assertFalse(preservedBody.contains("cleanupWebView()"));
         assertFalse(preservedBody.contains("scheduleStep("));
+        assertFalse(preservedBody.contains("SelfRunDom.sendTurn"));
     }
 
     @Test
-    public void resumeObserverGatePreventsDomEvaluationUntilObserverReady() throws Exception {
+    public void resumeObserverGateCoversRestoredWaitAssistantUntilCurrentObserverReady() throws Exception {
         String text = source();
-        int resume = text.indexOf("private void resumeFromUi()");
-        int nextMethod = text.indexOf("private void enterPreservedPause", resume);
-        assertTrue(resume >= 0 && nextMethod > resume);
-        String body = text.substring(resume, nextMethod);
-        assertTrue(body.contains("resumeObserverGate = preserved && !rateLimited;"));
+        String body = between(text, "private void resumeFromUi()", "private void enterPreservedPause");
+        assertTrue(body.contains("boolean resumedAssistantWait = inAssistantWait();"));
+        assertTrue(body.contains("resumeObserverGate = !rateLimited && (preserved || resumedAssistantWait);"));
 
-        int request = text.indexOf("private void requestDomEvaluation");
-        int drain = text.indexOf("private void drainPendingDomEvaluation", request);
-        assertTrue(request >= 0 && drain > request);
-        assertTrue(text.substring(request, drain).contains("resumeObserverGate"));
+        String request = between(text, "private void requestDomEvaluation", "private static int evaluationPriority");
+        assertTrue(request.contains("resumeObserverGate"));
     }
 
     @Test
-    public void observerReadyOpensGateBeforeRequestingEvaluation() throws Exception {
+    public void observerReadyOpensGateBeforeExactlyOneResumeSemanticProbe() throws Exception {
         String text = source();
-        int observer = text.indexOf("private void ensureDomObserver()");
-        int nextMethod = text.indexOf("private boolean observerPageReady", observer);
-        assertTrue(observer >= 0 && nextMethod > observer);
-        String body = text.substring(observer, nextMethod);
-        int ready = body.indexOf("if (data.startsWith(\"ready|\"))");
-        int evaluation = body.indexOf("requestDomEvaluation(0L, \"observer_ready\");", ready);
-        assertTrue(ready >= 0);
-        assertTrue(evaluation > ready);
+        String gate = between(text, "private boolean openResumeObserverGate", "private static Uri chatGptOrigin");
+        int clear = gate.indexOf("resumeObserverGate = false;");
+        int wake = gate.indexOf("updateWakeLockForState(\"resume_observer_ready\")");
+        int probe = gate.indexOf("assistantWaitRuntime.requestImmediate(AssistantWaitCoordinator.Source.RESUME_PROBE)");
+        assertTrue(clear >= 0 && wake > clear && probe > wake);
+        assertTrue(count(gate, "assistantWaitRuntime.requestImmediate(AssistantWaitCoordinator.Source.RESUME_PROBE)") == 1);
     }
 
     @Test
-    public void staleEvaluateGuardIncludesRunGenerationWebViewAndRateLimitBeforeSharedMutation() throws Exception {
+    public void staleEvaluateGuardReleasesOwnedEvaluationBeforePendingDrain() throws Exception {
         String text = source();
-        int method = text.indexOf("private void evaluate(String phase, String script)");
-        int nextMethod = text.indexOf("private static boolean isWaitingStatus", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
-        int callback = body.indexOf("active.evaluateJavascript(script, raw -> {");
-        int executionGuard = body.indexOf("if (!isCurrentExecution(active, activeGeneration, activeExecutionEpoch, activeRunId))", callback);
-        int staleLog = body.indexOf("recordStaleCallback(\"evaluate\")", executionGuard);
-        int rateLimitGuard = body.indexOf("if (isRateLimited())", staleLog);
-        int rateLimitLog = body.indexOf("recordStaleCallback(\"evaluate_rate_limit\")", rateLimitGuard);
-        int clearInFlight = body.indexOf("evaluationInFlight = false;", rateLimitLog);
-        int clearRateLimit = body.indexOf("rateLimitedUntilElapsed = 0L;", clearInFlight);
-        assertTrue(callback >= 0);
-        assertTrue(executionGuard > callback);
-        assertTrue(staleLog > executionGuard);
-        assertTrue(rateLimitGuard > staleLog);
-        assertTrue(rateLimitLog > rateLimitGuard);
-        assertTrue(clearInFlight > rateLimitLog);
-        assertTrue(clearRateLimit > clearInFlight);
+        String body = between(text, "private void evaluate(String phase, String script)",
+                "private static boolean isWaitingStatus");
+        assertTrue(body.contains("recordStaleCallback(\"evaluate\", \"execution_changed\")"));
+        assertTrue(body.contains("recordStaleCallback(\"evaluate\", \"assistant_epoch_changed\")"));
+        assertTrue(count(body, "releaseDomEvaluation(activeEvaluationEpoch);") >= 3);
+        assertFalse(body.contains("evaluationInFlight = false;"));
+        assertTrue(text.contains("if (evaluationLifecycle.release(expectedEvaluationEpoch)) drainPendingDomEvaluation();"));
     }
 
     @Test
-    public void rateLimitInvalidatesInFlightEvaluationBeforePowerReleaseAndExpiryScheduling() throws Exception {
+    public void rateLimitInvalidatesEvaluationBeforePowerReleaseAndExpiryScheduling() throws Exception {
         String text = source();
-        int method = text.indexOf("private void rateLimit(String reason)");
-        int nextMethod = text.indexOf("private void scheduleRateLimitExpiry()", method);
-        assertTrue(method >= 0 && nextMethod > method);
-        String body = text.substring(method, nextMethod);
+        String body = between(text, "private void rateLimit(String reason)", "private void scheduleRateLimitExpiry()");
         int deadline = body.indexOf("rateLimitedUntilElapsed = now + delay;");
         int generationAdvance = body.indexOf("generation++;", deadline);
-        int clearInFlight = body.indexOf("evaluationInFlight = false;", generationAdvance);
-        int clearPending = body.indexOf("domEvaluationPending = false;", clearInFlight);
+        int invalidate = body.indexOf("invalidateDomEvaluation();", generationAdvance);
+        int clearPending = body.indexOf("domEvaluationPending = false;", invalidate);
         int powerRelease = body.indexOf("updateWakeLockForState(\"rate_limit_wait\")", clearPending);
         int expiry = body.indexOf("scheduleRateLimitExpiry();", powerRelease);
         assertTrue(deadline >= 0);
         assertTrue(generationAdvance > deadline);
-        assertTrue(clearInFlight > generationAdvance);
-        assertTrue(clearPending > clearInFlight);
+        assertTrue(invalidate > generationAdvance);
+        assertTrue(clearPending > invalidate);
         assertTrue(powerRelease > clearPending);
         assertTrue(expiry > powerRelease);
+    }
+
+    private static int count(String text, String needle) {
+        int count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) count++;
+        return count;
+    }
+
+    private static String between(String text, String start, String end) {
+        int from = text.indexOf(start);
+        int to = text.indexOf(end, from + 1);
+        assertTrue(from >= 0 && to > from);
+        return text.substring(from, to);
     }
 
     private static String source() throws Exception {
