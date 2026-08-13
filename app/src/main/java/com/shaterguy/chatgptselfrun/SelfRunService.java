@@ -184,7 +184,6 @@ public final class SelfRunService extends Service {
                     invalidateDomObserverForNavigation();
                     generation++;
                     invalidateExecutionEpoch();
-                    resumeObserverGate = false;
                     evaluationInFlight = false;
                     domEvaluationPending = false;
                     handler.removeCallbacks(stepRunnable);
