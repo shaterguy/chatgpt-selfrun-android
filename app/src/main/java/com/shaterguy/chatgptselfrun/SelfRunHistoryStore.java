@@ -6,44 +6,140 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
 final class SelfRunHistoryStore {
     private static final String PREFS = "selfrun_history";
     private static final String KEY_PRIMARY = "runs";
     private static final String KEY_BACKUP = "runsBackup";
     private static final int MAX_RUNS = 100;
+    static final long SYNC_DEBOUNCE_MS = 250L;
+
+    static final class Metrics {
+        final long syncRequests;
+        final long coalescedRequests;
+        final long equivalentSnapshotsSkipped;
+        final long physicalWrites;
+
+        Metrics(long syncRequests, long coalescedRequests, long equivalentSnapshotsSkipped, long physicalWrites) {
+            this.syncRequests = syncRequests;
+            this.coalescedRequests = coalescedRequests;
+            this.equivalentSnapshotsSkipped = equivalentSnapshotsSkipped;
+            this.physicalWrites = physicalWrites;
+        }
+    }
+
+    private static final Object WRITE_LOCK = new Object();
+    private static final ScheduledExecutorService WRITER = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "SelfRunHistoryWriter");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final SharedPreferences prefs;
+    private final Object pendingLock = new Object();
+    private final Map<String, JSONObject> pendingSnapshots = new LinkedHashMap<>();
+    private ScheduledFuture<?> scheduledDrain;
+    private long syncRequests;
+    private long coalescedRequests;
+    private long equivalentSnapshotsSkipped;
+    private long physicalWrites;
 
     SelfRunHistoryStore(Context context) {
         prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    synchronized boolean sync(SelfRunStore store) {
-        if (store == null || store.runId().isEmpty()) return true;
-        JSONArray current = read();
-        JSONObject nextSnapshot = snapshot(store);
-        JSONObject previousSnapshot = find(current, store.runId());
-        if (sameSnapshot(previousSnapshot, nextSnapshot)) return true;
-
-        JSONArray next = new JSONArray();
-        next.put(nextSnapshot);
-        for (int i = 0; i < current.length() && next.length() < MAX_RUNS; i++) {
-            JSONObject item = current.optJSONObject(i);
-            if (item == null || store.runId().equals(item.optString("runId"))) continue;
-            next.put(item);
-        }
-        String previous = prefs.getString(KEY_PRIMARY, "[]");
-        return prefs.edit().putString(KEY_BACKUP, previous).putString(KEY_PRIMARY, next.toString()).commit();
+    boolean sync(SelfRunStore store) {
+        return schedule(store, false);
     }
 
-    synchronized JSONArray read() {
+    boolean syncCritical(SelfRunStore store) {
+        return schedule(store, true);
+    }
+
+    Metrics metrics() {
+        synchronized (pendingLock) {
+            return new Metrics(syncRequests, coalescedRequests, equivalentSnapshotsSkipped, physicalWrites);
+        }
+    }
+
+    private boolean schedule(SelfRunStore store, boolean critical) {
+        if (store == null || store.runId().isEmpty()) return true;
+        JSONObject nextSnapshot = snapshot(store);
+        String runId = store.runId();
+        synchronized (pendingLock) {
+            syncRequests = increment(syncRequests);
+            JSONObject pending = pendingSnapshots.get(runId);
+            if (sameSnapshot(pending, nextSnapshot)) {
+                equivalentSnapshotsSkipped = increment(equivalentSnapshotsSkipped);
+                return true;
+            }
+            pendingSnapshots.put(runId, nextSnapshot);
+            if (scheduledDrain != null && !scheduledDrain.isDone()) {
+                coalescedRequests = increment(coalescedRequests);
+                if (!critical) return true;
+                scheduledDrain.cancel(false);
+                scheduledDrain = null;
+            }
+            scheduledDrain = WRITER.schedule(this::drainPending, critical ? 0L : SYNC_DEBOUNCE_MS,
+                    TimeUnit.MILLISECONDS);
+        }
+        return true;
+    }
+
+    private void drainPending() {
+        List<JSONObject> batch = new ArrayList<>();
+        synchronized (pendingLock) {
+            batch.addAll(pendingSnapshots.values());
+            pendingSnapshots.clear();
+            scheduledDrain = null;
+        }
+        for (JSONObject snapshot : batch) writeSnapshot(snapshot);
+    }
+
+    private void writeSnapshot(JSONObject nextSnapshot) {
+        if (nextSnapshot == null) return;
+        synchronized (WRITE_LOCK) {
+            JSONArray current = read();
+            String runId = nextSnapshot.optString("runId");
+            JSONObject previousSnapshot = find(current, runId);
+            if (sameSnapshot(previousSnapshot, nextSnapshot)) {
+                synchronized (pendingLock) {
+                    equivalentSnapshotsSkipped = increment(equivalentSnapshotsSkipped);
+                }
+                return;
+            }
+
+            JSONArray next = new JSONArray();
+            next.put(nextSnapshot);
+            for (int i = 0; i < current.length() && next.length() < MAX_RUNS; i++) {
+                JSONObject item = current.optJSONObject(i);
+                if (item == null || runId.equals(item.optString("runId"))) continue;
+                next.put(item);
+            }
+            String previous = prefs.getString(KEY_PRIMARY, "[]");
+            prefs.edit().putString(KEY_BACKUP, previous).putString(KEY_PRIMARY, next.toString()).apply();
+            synchronized (pendingLock) {
+                physicalWrites = increment(physicalWrites);
+            }
+        }
+    }
+
+    JSONArray read() {
         JSONArray primary = parse(prefs.getString(KEY_PRIMARY, "[]"));
         if (primary != null) return primary;
         JSONArray backup = parse(prefs.getString(KEY_BACKUP, "[]"));
         return backup == null ? new JSONArray() : backup;
     }
 
-    synchronized JSONObject get(String runId) {
+    JSONObject get(String runId) {
         if (runId == null || runId.isEmpty()) return null;
         JSONObject item = find(read(), runId);
         if (item == null) return null;
@@ -59,7 +155,7 @@ final class SelfRunHistoryStore {
         return null;
     }
 
-    private static boolean sameSnapshot(JSONObject previous, JSONObject next) {
+    static boolean sameSnapshot(JSONObject previous, JSONObject next) {
         if (previous == null || next == null) return false;
         String[] strings = {"runId", "mode", "projectUrl", "requirement", "conversationUrl", "phase", "status",
                 "role", "pendingModel", "pendingReasoning", "lastSignal", "lastErrorCode", "lastErrorMessage"};
@@ -110,5 +206,9 @@ final class SelfRunHistoryStore {
     private static String bounded(String value, int max) {
         String safe = value == null ? "" : value;
         return safe.length() <= max ? safe : safe.substring(0, max);
+    }
+
+    private static long increment(long value) {
+        return value == Long.MAX_VALUE ? Long.MAX_VALUE : value + 1L;
     }
 }
