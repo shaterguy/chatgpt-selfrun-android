@@ -36,7 +36,7 @@ final class SelfRunAc06RecoveryRunner {
                 && SelfRunStore.MODE_CHAT.equals(store.mode())
                 && SelfRunAc06Support.CONVERSATION_URL.equals(store.conversationUrl())
                 && SelfRunStore.PHASE_PAUSED.equals(store.phase())
-                && SelfRunStore.PHASE_WAIT_ASSISTANT.equals(store.pauseResumePhase())
+                && SelfRunStore.PHASE_SEND_CONTINUE.equals(store.pauseResumePhase())
                 && store.paused()
                 && "VERIFIER".equals(store.role())
                 && "terra".equals(store.pendingModel())
