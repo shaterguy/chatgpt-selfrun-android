@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   android-runtime-regression:
@@ -120,6 +120,22 @@ jobs:
             app/build/outputs/apk/debug/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Commit exact dev7 source after green gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci
+          git checkout 1feb083d1143a122e797979a71088b4a8dcf8a3b -- .github/workflows/android-runtime-regression.yml
+          git config user.name 'SHatergUY'
+          git config user.email '108107617+shaterguy@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Expected exact dev7 source diff is empty' >&2
+            exit 1
+          fi
+          git commit -m 'Implement WebView assistant completion recovery for v0.2.3-dev7'
+          git push origin HEAD:selfrun-webview/v0.2.3-dev7
 
       - name: Emulator diagnostics
         if: always()
