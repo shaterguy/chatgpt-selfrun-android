@@ -1,11 +1,11 @@
 # SelfRun Drive
 
-SelfRun Drive는 Google Docs 실행턴 문서의 단일행 signal event를 다음 턴 진행 기준으로 사용하는 별도 Android 앱입니다. 기존 WebView SelfRun 0.2.x를 업데이트하거나 대체하지 않으며 두 앱은 동시에 설치할 수 있습니다.
+SelfRun Drive는 Google Docs 실행턴 문서의 단일행 signal event를 다음 턴 진행 기준으로 사용하는 Android 앱입니다. 저장소의 기본 브랜치 `main`은 SelfRun Drive 정식 계보를 가리킵니다. 기존 WebView SelfRun 0.2.x의 소스와 릴리스 이력은 `selfrun-webview/main` 및 기존 `v0.2.x` 태그에 분리 보존하며 Drive 코드와 병합하지 않습니다. 두 앱은 서로 다른 Android application ID를 사용하므로 동시에 설치할 수 있습니다.
 
 | 항목 | WebView SelfRun | SelfRun Drive |
 |---|---|---|
 | application ID | `com.shaterguy.chatgptselfrun` | `com.shaterguy.chatgptselfrun.drive` |
-| canonical branch | `main` | `selfrun-drive/main` |
+| canonical branch | `selfrun-webview/main` | `main` |
 | 정식 태그 | `v0.2.x` 등 | `drive-v1.x.x` |
 | 완료 기준 | assistant WebView 상태 | Drive 작업문서 signal event |
 | 버전 계보 | 0.2.x | 1.x |
@@ -51,13 +51,13 @@ gradle --no-daemon :app:testDebugUnitTest
 gradle --no-daemon :app:assembleDebug :app:assembleRelease
 ```
 
-개발 CI는 `selfrun-drive/v*-dev*` 브랜치를 대상으로 단위 테스트·Drive variant 정책·debug/release 빌드를 수행하고 aligned unsigned APK를 `chatgpt-selfrun-drive-unsigned` artifact로 항상 보존합니다. 저장소에 `SELFRUN_SIGNING_PASSPHRASE` secret이 구성된 환경에서는 기존 SelfRun Drive 고정 인증서로 candidate APK까지 서명하고 packageName, versionName, versionCode, signing certificate와 SHA-256을 검증해 `chatgpt-selfrun-drive-build` artifact로 추가 제공합니다. secret이 없는 환경의 unsigned artifact는 최종 사용자 산출물이 아니며, 배포·사용자 전달 전에 `tools/sign_release.sh`와 기존 signing lineage를 사용해 별도 고정서명·검증해야 합니다.
+개발 CI는 `selfrun-drive/v*-dev*` 및 `selfrun-drive/v*-rc*` 브랜치를 대상으로 단위 테스트·Drive variant 정책·debug/release 빌드를 수행하고 aligned unsigned APK를 `chatgpt-selfrun-drive-unsigned` artifact로 보존합니다. 저장소에 `SELFRUN_SIGNING_PASSPHRASE` secret이 구성된 환경에서는 기존 SelfRun Drive 고정 인증서로 candidate APK까지 서명하고 packageName, versionName, versionCode, signing certificate와 SHA-256을 검증해 `chatgpt-selfrun-drive-build` artifact로 추가 제공합니다. secret이 없는 환경의 unsigned artifact는 최종 사용자 산출물이 아니며, 배포·사용자 전달 전에 `tools/sign_release.sh`와 기존 signing lineage를 사용해 별도 고정서명·검증해야 합니다.
 
 ## 정식 릴리스
 
-검증된 Drive 최종 커밋을 `selfrun-drive/main`에 승격하면 전용 `release-drive-v1.yml`이 다시 단위 테스트·동시 설치 격리·release 빌드·고정 서명을 검증합니다. 성공한 동일 커밋에 `drive-v<version>` lightweight tag를 만들고 APK와 SHA256SUMS를 GitHub Release에 첨부합니다.
+검증된 Drive 개발·RC 최종 커밋을 저장소 기본 브랜치 `main`에 승격하면 `release-drive-v1.yml`이 다시 단위 테스트·동시 설치 격리·release 빌드·고정 서명을 검증합니다. 성공한 동일 커밋에 `drive-v<version>` lightweight tag를 만들고 APK와 SHA256SUMS를 GitHub Release에 첨부합니다.
 
-Drive Release는 `--latest=false`로 생성하여 WebView 계보의 저장소 Latest 상태를 임의로 바꾸지 않습니다. 기존 WebView `v0.2.x` 태그와 `main`의 WebView 정식 계보는 수정하지 않습니다.
+`main`은 Drive 정식 계보의 기준 브랜치입니다. 기존 WebView SelfRun은 `selfrun-webview/main`에 보존하며 WebView 유지보수 또는 후속 릴리스가 필요한 경우 해당 계보에서만 진행하고 Drive `main`과 병합하지 않습니다. 기존 `v0.2.x` 태그와 GitHub Release는 변경하지 않습니다.
 
 ## Google Cloud 설정
 
