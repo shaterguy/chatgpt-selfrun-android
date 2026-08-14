@@ -35,13 +35,12 @@ public final class SelfRunNewActivityImeTest {
                 editor.setText(longCommand());
                 editor.requestFocus();
                 editor.setSelection(editor.length());
-                editor.bringPointIntoView(editor.length());
             });
             waitForWindowFocus(scenario);
             requestIme(scenario);
             waitForIme(scenario);
             assertCaretVisible(scenario, 2, true);
-            assertCaretVisible(scenario, 1, false);
+            assertCaretVisible(scenario, 1, true);
             assertCaretVisible(scenario, 0, false);
         }
     }
@@ -85,12 +84,11 @@ public final class SelfRunNewActivityImeTest {
         throw new AssertionError("IME did not become visible on the emulator");
     }
 
-    private static void assertCaretVisible(ActivityScenario<SelfRunNewActivity> scenario, int position, boolean requireInternalScroll) {
+    private static void assertCaretVisible(ActivityScenario<SelfRunNewActivity> scenario, int position, boolean requireOuterScroll) {
         scenario.onActivity(activity -> {
             EditText editor = requirement(activity);
             int offset = position == 0 ? 0 : (position == 1 ? editor.length() / 2 : editor.length());
             editor.setSelection(offset);
-            editor.bringPointIntoView(offset);
             outerScroll(editor).scrollTo(0, 0);
             invokeKeepCommandCursorVisible(activity);
         });
@@ -111,7 +109,7 @@ public final class SelfRunNewActivityImeTest {
             decor.getLocationOnScreen(decorLocation);
             int caretBottom = editorLocation[1] + editor.getTotalPaddingTop() + layout.getLineBottom(line) - editor.getScrollY();
             int imeTop = decorLocation[1] + decor.getHeight() - imeBottom;
-            if (requireInternalScroll) assertTrue("long input must exercise internal scrolling", editor.getScrollY() > 0);
+            if (requireOuterScroll) assertTrue("long input must be repositioned by the outer ScrollView", outerScroll(editor).getScrollY() > 0);
             assertTrue("caret must remain above IME: " + caretBottom + " > " + imeTop, caretBottom <= imeTop);
         });
     }

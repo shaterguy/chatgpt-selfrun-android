@@ -14,14 +14,24 @@ grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq 'selfRunDriveVersionCode = 1000004' "$BUILD"
 grep -Fq "selfRunDriveVersionName = '1.0.0'" "$BUILD"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
-grep -Fq 'bringPointIntoView(selection)' "$ACTIVITY"
-grep -Fq 'scrollCommandWindowToCaret' "$ACTIVITY"
-grep -Fq 'getWindowVisibleDisplayFrame' "$ACTIVITY"
-grep -Fq 'WindowInsets.Type.ime()' "$ACTIVITY"
-grep -Fq 'outer.scrollBy(0,delta)' "$ACTIVITY"
+grep -Fq 'setMinLines(8)' "$ACTIVITY"
+grep -Fq 'setVerticalScrollBarEnabled(false)' "$ACTIVITY"
+grep -Fq 'requestRectangleOnScreen(new Rect(left,top,right,bottom),true)' "$ACTIVITY"
 grep -Fq 'addTextChangedListener' "$ACTIVITY"
-if grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"; then
-  echo 'legacy requestRectangleOnScreen caret workaround is forbidden' >&2
+if grep -Fq 'setMaxLines(24)' "$ACTIVITY"; then
+  echo 'command editor must grow with content instead of owning a bounded nested vertical scroll' >&2
+  exit 1
+fi
+if grep -Fq 'configureNestedCommandScrolling' "$ACTIVITY"; then
+  echo 'nested command scrolling is forbidden; outer ScrollView owns vertical scrolling' >&2
+  exit 1
+fi
+if grep -Fq 'scrollCommandWindowToCaret' "$ACTIVITY"; then
+  echo 'manual screen-coordinate outer scrolling is forbidden' >&2
+  exit 1
+fi
+if grep -Fq -- '-editor.getScrollY()' "$ACTIVITY"; then
+  echo 'requestRectangleOnScreen caret rectangle must remain in editor content coordinates' >&2
   exit 1
 fi
 if grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"; then
