@@ -13,6 +13,8 @@ public class ProjectCatalogTest {
                 ProjectCatalog.canonicalProjectUrl("https://www.chatgpt.com/g/g-p-ABC_123-project?x=1#y"));
         assertEquals("https://chatgpt.com/g/g-p-ABC_123-project/project",
                 ProjectCatalog.canonicalProjectUrl("https://chatgpt.com/g/g-p-ABC_123-project/project/"));
+        assertEquals("https://chatgpt.com/g/g-p-legacy/project",
+                ProjectCatalog.canonicalProjectUrl("https://chatgpt.com/g/g-p-legacy/c/conversation123?x=1"));
         assertEquals("",ProjectCatalog.canonicalProjectUrl("http://chatgpt.com/g/g-p-ABC/project"));
         assertEquals("",ProjectCatalog.canonicalProjectUrl("https://chatgpt.com.evil.example/g/g-p-ABC/project"));
         assertEquals("",ProjectCatalog.canonicalProjectUrl("https://chatgpt.com@evil.example/g/g-p-ABC/project"));

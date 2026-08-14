@@ -60,10 +60,14 @@ final class ProjectCatalog {
         if (segments.length < 3 || !segments[0].isEmpty() || !"g".equals(segments[1])) return "";
         String id = segments[2];
         if (!validProjectId(id)) return "";
-        boolean validTail = segments.length == 3
+        boolean rootTail = segments.length == 3
                 || (segments.length == 4 && (segments[3].isEmpty() || "project".equals(segments[3])))
                 || (segments.length == 5 && "project".equals(segments[3]) && segments[4].isEmpty());
-        if (!validTail) return "";
+        boolean conversationTail = (segments.length == 5
+                && "c".equals(segments[3]) && !segments[4].isEmpty())
+                || (segments.length == 6 && "c".equals(segments[3])
+                && !segments[4].isEmpty() && segments[5].isEmpty());
+        if (!(rootTail || conversationTail)) return "";
         return "https://chatgpt.com/g/" + id + "/project";
     }
 
