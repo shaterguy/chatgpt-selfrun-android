@@ -38,11 +38,11 @@ final class SelfRunProtocol {
                 +"이 실행은 SelfRun이다.\n\n"
                 +"실질 작업을 시작하기 전에 위 SelfRun 운영문서 ID가 가리키는 Google Drive 문서의 현재 최신 메타데이터와 전체 내용을 읽고 SelfRun 실행 규범으로 적용한다.\n\n"
                 +"현재 conversation이 ChatGPT Project 내부의 대화라면 해당 Project의 프로젝트 지침과 그 지침이 지정하는 SKILL·운영문서도 함께 적용한다. 프로젝트의 업무·도메인·데이터·산출물·프로젝트 고유 운영 규칙은 해당 Project 규범을 따른다.\n\n"
-                +"SelfRun의 역할 전환, HANDOFF, continuation, SelfRun 제어신호, Drive 실행턴 signal, pause/resume의 AI 측 의미, SelfRun 완료 판정은 위 canonical SelfRun 운영문서를 따른다.\n\n"
+                +"[요구사항]\n"
                 +originalRequirement;
     }
     static String continuation(String runId){return "[SELF_RUN_CONTINUE "+runId+"]";}
-    static String driveContinuation(String runId){return "["+kstTimestamp(new Date())+"] "+continuation(runId);}
+    static String driveContinuation(String runId){return "["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";}
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}
     static String kstTimestamp(Date date){SimpleDateFormat f=new SimpleDateFormat("yyyy.MM.dd | HH:mm:ss",Locale.US);f.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));return f.format(date);}
     private static String value(String payload,String key){Matcher m=Pattern.compile("(?:^|\\s)"+key+"=([^\\s]+)",Pattern.CASE_INSENSITIVE).matcher(payload);return m.find()?m.group(1).trim():"";}
