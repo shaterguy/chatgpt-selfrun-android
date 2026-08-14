@@ -1,0 +1,58 @@
+name: SelfRun dev7 signing bootstrap
+
+on:
+  push:
+    branches:
+      - selfrun-signing-bootstrap/SR-20260813-164534-2D5995
+
+permissions:
+  contents: read
+
+jobs:
+  signing-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Build aligned unsigned release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          SRC=app/build/outputs/apk/release/app-release-unsigned.apk
+          OUT=app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev7-aligned-unsigned.apk
+          test -s "$SRC"
+          "$BT/zipalign" -f -p 4 "$SRC" "$OUT"
+          "$BT/zipalign" -c -v 4 "$OUT"
+          "$BT/aapt" dump badging "$OUT" | tee app/build/outputs/apk/release/BADGING.txt
+          grep -q "package: name='com.shaterguy.chatgptselfrun' versionCode='19' versionName='0.2.3-dev7'" app/build/outputs/apk/release/BADGING.txt
+          unzip -t "$OUT" >/dev/null
+          sha256sum "$OUT" | tee app/build/outputs/apk/release/SHA256SUMS.txt
+          test -s "$BT/lib/apksigner.jar"
+          cp "$BT/lib/apksigner.jar" app/build/outputs/apk/release/apksigner.jar
+      - name: Upload signing bootstrap artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-dev7-signing-bootstrap
+          path: |
+            app/build/outputs/apk/release/chatgpt-selfrun-android-v0.2.3-dev7-aligned-unsigned.apk
+            app/build/outputs/apk/release/apksigner.jar
+            app/build/outputs/apk/release/BADGING.txt
+            app/build/outputs/apk/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1
