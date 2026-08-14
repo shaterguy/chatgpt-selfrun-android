@@ -10,6 +10,9 @@ import android.text.InputType;
 import android.text.Layout;
 import android.text.TextWatcher;
 import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewParent;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -65,14 +68,41 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void keepCommandCursorVisible() {
-        EditText editor=requirement; if(editor==null||!editor.hasFocus())return;
-        Layout layout=editor.getLayout(); if(layout==null)return;
+        EditText editor=requirement; if(editor==null||!editor.hasFocus()||editor.getLayout()==null)return;
         int selection=Math.max(0,Math.min(editor.getSelectionStart(),editor.length()));
         editor.bringPointIntoView(selection);
+        editor.post(() -> scrollCommandWindowToCaret(editor));
+    }
+
+    private void scrollCommandWindowToCaret(EditText editor) {
+        if(editor==null||!editor.hasFocus())return;
+        Layout layout=editor.getLayout(); if(layout==null)return;
+        ScrollView outer=findOuterScrollView(editor); if(outer==null)return;
+        int selection=Math.max(0,Math.min(editor.getSelectionStart(),editor.length()));
         int line=layout.getLineForOffset(selection); int margin=Ui.dp(this,12);
-        int top=Math.max(0,editor.getTotalPaddingTop()+layout.getLineTop(line)-margin);
-        int bottom=Math.max(top+1,editor.getTotalPaddingTop()+layout.getLineBottom(line)+margin);
-        editor.requestRectangleOnScreen(new Rect(0,top,Math.max(1,editor.getWidth()),bottom),false);
+        int[] editorLocation=new int[2]; editor.getLocationOnScreen(editorLocation);
+        int caretTop=editorLocation[1]+editor.getTotalPaddingTop()+layout.getLineTop(line)-editor.getScrollY();
+        int caretBottom=editorLocation[1]+editor.getTotalPaddingTop()+layout.getLineBottom(line)-editor.getScrollY();
+        Rect visibleFrame=new Rect(); editor.getWindowVisibleDisplayFrame(visibleFrame);
+        int visibleTop=visibleFrame.top+margin; int visibleBottom=visibleFrame.bottom-margin;
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R){
+            WindowInsets insets=editor.getRootWindowInsets();
+            if(insets!=null&&insets.isVisible(WindowInsets.Type.ime())){
+                View root=editor.getRootView(); int[] rootLocation=new int[2]; root.getLocationOnScreen(rootLocation);
+                int imeTop=rootLocation[1]+root.getHeight()-insets.getInsets(WindowInsets.Type.ime()).bottom;
+                visibleBottom=Math.min(visibleBottom,imeTop-margin);
+            }
+        }
+        int delta=0;
+        if(caretBottom>visibleBottom)delta=caretBottom-visibleBottom;
+        else if(caretTop<visibleTop)delta=caretTop-visibleTop;
+        if(delta!=0)outer.scrollBy(0,delta);
+    }
+
+    private static ScrollView findOuterScrollView(View child) {
+        ViewParent parent=child.getParent();
+        while(parent instanceof View){if(parent instanceof ScrollView)return (ScrollView)parent; parent=((View)parent).getParent();}
+        return null;
     }
 
     private void startSelfRun() {
