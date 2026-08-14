@@ -1,0 +1,36 @@
+name: Export Android apksigner
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.1.0-dev1'
+
+permissions:
+  contents: read
+
+jobs:
+  export-apksigner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android Build Tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'build-tools;36.0.0'
+      - name: Collect apksigner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apksigner-tool/lib
+          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" apksigner-tool/apksigner
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" apksigner-tool/lib/apksigner.jar
+          chmod +x apksigner-tool/apksigner
+          sha256sum apksigner-tool/apksigner apksigner-tool/lib/apksigner.jar > apksigner-tool/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-build-tools-36-apksigner
+          path: apksigner-tool/
+          if-no-files-found: error
+          retention-days: 1
