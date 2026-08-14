@@ -12,7 +12,7 @@ final class ProjectCatalogStore {
     private static final String KEY_SCHEMA = "schemaVersion";
     private static final String KEY_ENTRIES = "entries";
     private static final String KEY_REFRESHED_AT = "refreshedAt";
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
 
     private final SharedPreferences prefs;
 

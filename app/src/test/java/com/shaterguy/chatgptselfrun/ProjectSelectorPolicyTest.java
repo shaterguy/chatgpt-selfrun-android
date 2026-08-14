@@ -32,7 +32,8 @@ public class ProjectSelectorPolicyTest {
         assertTrue(loader.contains("desktopFallbackAttempted"));
         assertTrue(loader.contains("data-href"));
         assertTrue(loader.contains("data-url"));
-        assertTrue(loader.contains("tail[0]==='c'"));
+        assertTrue(loader.contains("const valid=tail.length===0||(tail.length===1&&tail[0]==='project');"));
+        assertFalse(loader.contains("tail[0]==='c'"));
         assertTrue(loader.contains("aria-controls"));
         assertTrue(loader.contains("aria-owns"));
         assertTrue(loader.contains("collectControlled"));
@@ -57,9 +58,9 @@ public class ProjectSelectorPolicyTest {
         assertTrue(web.contains("setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW)"));
     }
 
-    @Test public void staleDev3CatalogCacheIsInvalidatedBySchemaVersion() throws Exception {
+    @Test public void staleConversationPollutedCatalogCacheIsInvalidatedBySchemaVersion() throws Exception {
         String store=src("ProjectCatalogStore.java");
-        assertTrue(store.contains("SCHEMA_VERSION = 2"));
+        assertTrue(store.contains("SCHEMA_VERSION = 3"));
         assertTrue(store.contains("prefs.getInt(KEY_SCHEMA, 0) != SCHEMA_VERSION"));
         assertTrue(store.contains("putInt(KEY_SCHEMA, SCHEMA_VERSION)"));
     }

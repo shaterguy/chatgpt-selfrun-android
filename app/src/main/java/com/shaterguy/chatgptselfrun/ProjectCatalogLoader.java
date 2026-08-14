@@ -29,7 +29,7 @@ final class ProjectCatalogLoader {
     private static final int REQUIRED_STABLE_PROBES = 3;
     private static final String DESKTOP_USER_AGENT =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 SelfRunDrive/1.2.1-dev1";
+                    + "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 SelfRunDrive/1.2.1-dev2";
 
     private static final String PROBE_JS = """
             (function(){try{
@@ -45,7 +45,7 @@ final class ProjectCatalogLoader {
                 const parts=u.pathname.split('/').filter(Boolean);
                 if(parts.length<2||parts[0]!=='g'||!/^g-p-[A-Za-z0-9_-]+$/.test(parts[1]))return '';
                 const tail=parts.slice(2);
-                const valid=tail.length===0||(tail.length===1&&tail[0]==='project')||(tail.length===2&&tail[0]==='c'&&!!tail[1]);
+                const valid=tail.length===0||(tail.length===1&&tail[0]==='project');
                 return valid?'https://chatgpt.com/g/'+parts[1]+'/project':'';
               }catch(_){return '';}};
               const candidateValues=e=>{const values=[];if(!e?.getAttribute)return values;

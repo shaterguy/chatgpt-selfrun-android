@@ -260,7 +260,7 @@ public final class ProjectCatalogProbeInstrumentedTest {
         }
     }
 
-    @Test public void projectConversationLinksAreCanonicalizedToProjectHome() throws Exception {
+    @Test public void projectConversationLinksAreNotCatalogEntries() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><head>%s</head><body>
                 <div id="sidebar">
@@ -273,22 +273,27 @@ public final class ProjectCatalogProbeInstrumentedTest {
                 """.formatted(BLOCK_STYLE));
         try {
             ProjectCatalog.Probe result = eval(page.webView);
-            assertEquals("FOUND", result.state);
-            assertEquals(1, result.entries.size());
-            assertEquals("https://chatgpt.com/g/g-p-one/project", result.entries.get(0).url);
+            assertEquals("OPENING", result.state);
+            assertTrue(result.markerSeen);
+            assertTrue(result.entries.isEmpty());
+            ProjectCatalog.Probe settled = eval(page.webView);
+            assertEquals("EMPTY", settled.state);
+            assertTrue(settled.markerSeen);
+            assertTrue(settled.entries.isEmpty());
         } finally {
             close(page);
         }
     }
 
-    @Test public void routerStyleDataUrlProjectEntriesAreCollectedFromControlledScope() throws Exception {
+    @Test public void routerStyleProjectRootsWinOverConversationDecoys() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><head>%s</head><body>
                 <div id="sidebar">
                   <button aria-expanded="true" aria-controls="project-list">Projects</button>
                   <div id="project-list" role="list">
                     <div role="link" data-url="/g/g-p-one/project">One</div>
-                    <div role="link" data-to="/g/g-p-two/c/conversation-456">Two</div>
+                    <div role="link" data-to="/g/g-p-two/c/conversation-456">Daily Briefing</div>
+                    <div role="link" data-to="/g/g-p-two/project">Two</div>
                   </div>
                 </div>
                 </body></html>
@@ -301,6 +306,7 @@ public final class ProjectCatalogProbeInstrumentedTest {
             assertEquals("https://chatgpt.com/g/g-p-one/project", result.entries.get(0).url);
             assertEquals("Two", result.entries.get(1).name);
             assertEquals("https://chatgpt.com/g/g-p-two/project", result.entries.get(1).url);
+            assertFalse(result.entries.stream().anyMatch(e -> "Daily Briefing".equals(e.name)));
         } finally {
             close(page);
         }
