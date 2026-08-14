@@ -7,16 +7,12 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.os.SystemClock;
 
 final class NotificationHelper {
     private static final String GROUP = "selfrun-drive";
     private static final String RUNNING_CHANNEL = "selfrun-drive-running-v2";
     private static final String ALERT_CHANNEL = "selfrun-drive-alerts-v2";
     private static final int ALERT_ID = 17022;
-    private static final long PAUSE_ALERT_DEDUP_MS = 10_000L;
-    private static String lastPauseAlertText = "";
-    private static long lastPauseAlertAt;
 
     private NotificationHelper() {}
 
@@ -43,9 +39,8 @@ final class NotificationHelper {
         manager.createNotificationChannel(alerts);
     }
 
-    static Notification active(Context context, String runtimeStatus) {
+    static Notification active(Context context) {
         ensureChannel(context);
-        maybeNotifyPause(context, runtimeStatus);
         PendingIntent pending = activityIntent(context, 17030);
         PendingIntent pause = serviceAction(context, SelfRunService.ACTION_PAUSE, 17031);
         PendingIntent resume = serviceAction(context, SelfRunService.ACTION_RESUME, 17032);
@@ -81,22 +76,6 @@ final class NotificationHelper {
                 .setPriority(Notification.PRIORITY_HIGH)
                 .setContentIntent(activityIntent(context, 17033))
                 .build());
-    }
-
-    static boolean shouldAlertForPause(String runtimeStatus) {
-        return runtimeStatus != null && runtimeStatus.contains("일시정지");
-    }
-
-    private static void maybeNotifyPause(Context context, String runtimeStatus) {
-        if (!shouldAlertForPause(runtimeStatus)) return;
-        long now = SystemClock.elapsedRealtime();
-        synchronized (NotificationHelper.class) {
-            if (runtimeStatus.equals(lastPauseAlertText)
-                    && now - lastPauseAlertAt < PAUSE_ALERT_DEDUP_MS) return;
-            lastPauseAlertText = runtimeStatus;
-            lastPauseAlertAt = now;
-        }
-        notifyUser(context, "일시정지", runtimeStatus);
     }
 
     private static PendingIntent activityIntent(Context context, int requestCode) {

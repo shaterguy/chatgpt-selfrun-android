@@ -12,8 +12,8 @@ API=$SRC/DriveApiClient.java
 NOTIFICATION=$SRC/NotificationHelper.java
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
-grep -Fq 'selfRunDriveVersionCode = 1000005' "$BUILD"
-grep -Fq "selfRunDriveVersionName = '1.1.0-dev1'" "$BUILD"
+grep -Fq 'selfRunDriveVersionCode = 1000006' "$BUILD"
+grep -Fq "selfRunDriveVersionName = '1.1.0-dev2'" "$BUILD"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
 grep -Fq 'setMinLines(8)' "$ACTIVITY"
 grep -Fq 'setVerticalScrollBarEnabled(false)' "$ACTIVITY"
@@ -82,5 +82,23 @@ grep -Fq 'running.setSound(null, null)' "$NOTIFICATION"
 grep -Fq 'running.enableVibration(false)' "$NOTIFICATION"
 grep -Fq '.setContentText("SelfRun 작업 중")' "$NOTIFICATION"
 grep -Fq 'NotificationManager.IMPORTANCE_HIGH' "$NOTIFICATION"
-grep -Fq 'runtimeStatus.contains("일시정지")' "$NOTIFICATION"
-echo 'SelfRun Drive v1.1.0-dev1 policy checks passed.'
+grep -Fq 'static Notification active(Context context)' "$NOTIFICATION"
+! grep -Fq 'runtimeStatus' "$NOTIFICATION"
+! grep -Fq 'maybeNotifyPause' "$NOTIFICATION"
+! grep -Fq 'SystemClock' "$NOTIFICATION"
+grep -Fq 'NotificationHelper.notifyUser(this, "일시정지", store.status())' "$SERVICE"
+grep -Fq 'case "PAUSED"->finishPersistedTerminalPause("DRIVE_PAUSED","일시정지"' "$SERVICE"
+grep -Fq 'case "USER_ACTION_REQUIRED"->finishPersistedTerminalPause("DRIVE_USER_ACTION_REQUIRED","확인 필요"' "$SERVICE"
+TRANSITION_BLOCK="$(sed -n '/private void transition/,/private void pauseError/p' "$SERVICE")"
+if grep -Fq 'startForegroundCompat();' <<<"$TRANSITION_BLOCK"; then
+  echo 'routine transitions must not repost the foreground notification' >&2
+  exit 1
+fi
+COMMAND_BLOCK="$(grep -F 'private void commandSubmitted' "$SERVICE")"
+if grep -Fq 'startForegroundCompat();' <<<"$COMMAND_BLOCK"; then
+  echo 'command submission must not repost the foreground notification' >&2
+  exit 1
+fi
+FG_POST_COUNT="$(grep -o 'startForegroundCompat();' "$SERVICE" | wc -l | tr -d ' ')"
+[[ "$FG_POST_COUNT" == '4' ]]
+echo 'SelfRun Drive v1.1.0-dev2 policy checks passed.'

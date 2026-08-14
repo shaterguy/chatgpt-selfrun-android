@@ -108,9 +108,9 @@ public final class SelfRunService extends Service {
 
     private void startForegroundCompat() {
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, NotificationHelper.active(this, store.status()),
+            startForeground(NOTIFICATION_ID, NotificationHelper.active(this),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        } else startForeground(NOTIFICATION_ID, NotificationHelper.active(this, store.status()));
+        } else startForeground(NOTIFICATION_ID, NotificationHelper.active(this));
     }
 
     private boolean canRun() {
@@ -364,7 +364,7 @@ private void pollDriveNow(int epoch)throws Exception{DriveStateSnapshot snapshot
 
 
 
-private void replayTerminalSideEffect(){startForegroundCompat();String owner=store.terminalSideEffectRunId(),raw=store.terminalSideEffectCommitId(),type=store.terminalSideEffectType();handler.post(()->{synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(!store.terminalSideEffectOwnedBy(owner,raw,type))return;switch(type){case "DONE"->finishDoneSideEffect(owner,raw,type);case "PAUSED"->finishPersistedTerminalPause("DRIVE_PAUSED",false,owner,raw,type);case "USER_ACTION_REQUIRED"->finishPersistedTerminalPause("DRIVE_USER_ACTION_REQUIRED",true,owner,raw,type);default->{return;}}}}});}
+private void replayTerminalSideEffect(){startForegroundCompat();String owner=store.terminalSideEffectRunId(),raw=store.terminalSideEffectCommitId(),type=store.terminalSideEffectType();handler.post(()->{synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(!store.terminalSideEffectOwnedBy(owner,raw,type))return;switch(type){case "DONE"->finishDoneSideEffect(owner,raw,type);case "PAUSED"->finishPersistedTerminalPause("DRIVE_PAUSED","일시정지",owner,raw,type);case "USER_ACTION_REQUIRED"->finishPersistedTerminalPause("DRIVE_USER_ACTION_REQUIRED","확인 필요",owner,raw,type);default->{return;}}}}});}
 
 
     private void finishDoneSideEffect(String ownerRunId, String commitId, String type) {
@@ -375,17 +375,16 @@ private void replayTerminalSideEffect(){startForegroundCompat();String owner=sto
         stopRuntime();
     }
 
-    private void finishPersistedTerminalPause(String cause, boolean notify, String ownerRunId,
-                                              String commitId, String type) {
-        if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
-        stopAutomationCallbacks();
-        releaseWakeLock();
-        pauseWebView();
-        runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
-        startForegroundCompat();
-        if (notify) NotificationHelper.notifyUser(this, "확인 필요", store.status());
-        store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type);
-    }
+private void finishPersistedTerminalPause(String cause, String alertTitle, String ownerRunId,
+                                          String commitId, String type) {
+    if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
+    stopAutomationCallbacks();
+    releaseWakeLock();
+    pauseWebView();
+    runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
+    NotificationHelper.notifyUser(this, alertTitle, store.status());
+    store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type);
+}
 
 private void scheduleGuard(){releaseWakeLock();handler.removeCallbacks(webRunnable);handler.removeCallbacks(guardRunnable);long detected=store.commitDetectedAt(),due=store.guardDueAt();boolean valid=DriveSignalParser.Type.TURN_COMPLETED.name().equals(store.pendingDriveSignalType())&&!store.pendingDriveSignalRaw().isEmpty()&&detected>0&&due-detected==CONTINUATION_GUARD_MS;if(!valid){runLog.record(store,"DRIVE_GUARD_RECOVERY","invalid_guard_state");store.repairGuard(System.currentTimeMillis(),CONTINUATION_GUARD_MS);if(SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(store.phase())){ensureWebView();return;}due=store.guardDueAt();}handler.postDelayed(guardRunnable,Math.max(0,due-System.currentTimeMillis()));}
 
@@ -475,7 +474,7 @@ private String continuationPrompt(){return commandPrompt(SelfRunStore.RETRY_CONT
 
 private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?SelfRunProtocol.bootstrapDrive(store.runId(),store.mode(),store.requirement(),store.turnDocumentId()):SelfRunProtocol.driveContinuation(store.runId());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
 private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}
-private void commandSubmitted(String kind,String detail){if(!canRun())return;long due=System.currentTimeMillis()+SUBMISSION_RETRY_MS;store.markCommandSubmitted(kind,due);runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);startForegroundCompat();releaseWakeLock();scheduleDrivePoll(0L);}
+private void commandSubmitted(String kind,String detail){if(!canRun())return;long due=System.currentTimeMillis()+SUBMISSION_RETRY_MS;store.markCommandSubmitted(kind,due);runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);releaseWakeLock();scheduleDrivePoll(0L);}
 private void applyNextControl(String raw){SelfRunProtocol.Signal signal=SelfRunProtocol.parseLatest(raw,store.runId(),store.mode());if(signal.type==SelfRunProtocol.Type.NEXT){store.setRole(signal.role);if(SelfRunStore.MODE_WORK.equals(store.mode())){store.setPendingModel(signal.model);store.setPendingReasoning(signal.reasoning);}}String next=SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE;transition(next,raw.isEmpty()?"제어신호 미확인 · Drive 완료 기준으로 CONTINUE 강제 진행":"conversation 제어신호 확인 · continuation 준비",raw.isEmpty()?"control_best_effort_miss":"control_readback");scheduleWeb(100L);}
 
     private static boolean isSubmissionPhase(String phase) {
@@ -574,11 +573,10 @@ private static void verifyMetadata(DriveApiClient.Metadata m,String job,String m
                 .build().toString();
     }
 
-    private void transition(String next, String status, String reason) {
-        String prior = store.phase(); store.setPhase(next); store.setStatus(status);
-        runLog.record(store, "STATE_TRANSITION", "from=" + prior + ";to=" + next + ";reason=" + reason);
-        startForegroundCompat();
-    }
+private void transition(String next, String status, String reason) {
+    String prior = store.phase(); store.setPhase(next); store.setStatus(status);
+    runLog.record(store, "STATE_TRANSITION", "from=" + prior + ";to=" + next + ";reason=" + reason);
+}
 
     private void pauseError(String code, String message) {
         int epoch = automationEpoch;
@@ -606,9 +604,12 @@ private static void verifyMetadata(DriveApiClient.Metadata m,String job,String m
         }
     }
 
-    private void pauseFromUi() {
-        if (canRun()) enterPreservedPause("UI_PAUSE", "사용자 일시정지", false);
-    }
+private void pauseFromUi() {
+    if (!canRun()) return;
+    startForegroundCompat();
+    enterPreservedPause("UI_PAUSE", "사용자 일시정지", false);
+    NotificationHelper.notifyUser(this, "일시정지", store.status());
+}
 
 private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId().isEmpty())return;stopAutomationCallbacks();store.beginManualResumeOverride();store.clearLastError();resumeWebView();startForegroundCompat();resumeStateMachine();}
 
@@ -623,7 +624,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
             }
         }
         removeAutomationCallbacks(); releaseWakeLock(); pauseWebView();
-        runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved"); startForegroundCompat();
+        runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
     }
 
     private void removeAutomationCallbacks() {
