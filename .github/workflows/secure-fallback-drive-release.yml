@@ -103,7 +103,7 @@ jobs:
           ALIGNED="$RUNNER_TEMP/release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
           APK="$RUNNER_TEMP/release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
           "$BT/zipalign" -p -f 4 "$SRC" "$ALIGNED"
-          APKSIGNER="$BT/apksigner" tools/sign_release.sh "$ALIGNED" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$APK" > "$RUNNER_TEMP/release-output/APKSIGNER_VERIFY.txt"
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$ALIGNED" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$APK" > "$RUNNER_TEMP/release-output/APKSIGNER_VERIFY.txt"
           "$BT/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/release-output/APK_CERT.txt"
           grep -Fqi "$EXPECTED_CERT_SHA256" "$RUNNER_TEMP/release-output/APK_CERT.txt"
           BADGING="$($BT/aapt dump badging "$APK")"
