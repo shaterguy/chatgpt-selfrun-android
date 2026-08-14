@@ -19,11 +19,13 @@ public class SelfRunGeneralChatPolicyTest {
         assertFalse(SelfRunScript.isGeneralChatUrl("https://example.com/c/conversation123"));
     }
 
-    @Test public void blankProjectIsAcceptedAndMappedInternallyToGeneralChatRoot() throws Exception {
+    @Test public void generalChatIsAlwaysFirstAndMapsInternallyToGeneralChatRoot() throws Exception {
         String activity = src("SelfRunNewActivity.java");
-        assertTrue(activity.contains("if(!project.isEmpty()&&SelfRunScript.projectId(project).isEmpty())"));
-        assertTrue(activity.contains("project.isEmpty()?SelfRunScript.GENERAL_CHAT_URL:project"));
-        assertTrue(activity.contains("store.setDefaultProjectUrl(project)"));
+        assertTrue(activity.contains("GENERAL_CHAT_LABEL = \"일반채팅\""));
+        assertTrue(activity.contains("choices.add(new ProjectCatalog.Entry(GENERAL_CHAT_LABEL,\"\"))"));
+        assertTrue(activity.contains("projectCanonical.isEmpty()?SelfRunScript.GENERAL_CHAT_URL:projectCanonical"));
+        assertTrue(activity.contains("store.setDefaultProjectUrl(projectCanonical)"));
+        assertFalse(activity.contains("private EditText projectUrl;"));
     }
 
     private static String src(String file) throws Exception {
