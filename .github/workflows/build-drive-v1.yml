@@ -50,18 +50,36 @@ jobs:
           mkdir -p app/build/outputs/selfrun-drive
           "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk"
           "$BT/zipalign" -c -v 4 "app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk"
-      - name: Require stable signing secret
+          sha256sum "app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk" > app/build/outputs/selfrun-drive/UNSIGNED_SHA256SUMS.txt
+      - name: Upload aligned unsigned APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chatgpt-selfrun-drive-unsigned
+          path: |
+            app/build/outputs/selfrun-drive/*-aligned-unsigned.apk
+            app/build/outputs/selfrun-drive/UNSIGNED_SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Prepare optional stable signing secret
+        id: signing_secret
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
-          test -n "$SIGNING_PASSPHRASE"
-          umask 077
-          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/selfrun-drive-signing-pass"
+          if [[ -n "$SIGNING_PASSPHRASE" ]]; then
+            umask 077
+            printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/selfrun-drive-signing-pass"
+            echo 'has_secret=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_secret=false' >> "$GITHUB_OUTPUT"
+            echo 'SELFRUN_SIGNING_PASSPHRASE is not configured; keeping the validated unsigned artifact for external stable signing.'
+          fi
       - name: Install signing dependency
+        if: ${{ steps.signing_secret.outputs.has_secret == 'true' }}
         run: python3 -m pip install --disable-pip-version-check 'cryptography==45.0.6'
       - name: Sign and verify update-installable candidate APK
+        if: ${{ steps.signing_secret.outputs.has_secret == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -81,10 +99,16 @@ jobs:
           grep -Fq "versionName='$VERSION_NAME'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
           sha256sum "$APK" > "$DIR/SHA256SUMS.txt"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Upload stable-signed candidate
+        if: ${{ steps.signing_secret.outputs.has_secret == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chatgpt-selfrun-drive-build
-          path: app/build/outputs/selfrun-drive/
+          path: |
+            app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v*.apk
+            app/build/outputs/selfrun-drive/SHA256SUMS.txt
+            app/build/outputs/selfrun-drive/APKSIGNER_VERIFY.txt
+            app/build/outputs/selfrun-drive/APK_CERT.txt
           if-no-files-found: error
           retention-days: 30
 

@@ -51,7 +51,7 @@ gradle --no-daemon :app:testDebugUnitTest
 gradle --no-daemon :app:assembleDebug :app:assembleRelease
 ```
 
-개발 CI는 `selfrun-drive/v*-dev*` 브랜치를 대상으로 단위 테스트·Drive variant 정책·debug/release 빌드를 수행합니다. 최종 사용자 테스트용 candidate APK는 GitHub-hosted runner의 임시 debug 인증서를 사용하지 않고 `SELFRUN_SIGNING_PASSPHRASE` secret으로 기존 SelfRun Drive 고정 인증서를 파생해 서명합니다. CI는 packageName, versionName, versionCode, signing certificate와 SHA-256을 검증한 뒤 `chatgpt-selfrun-drive-build` artifact로 제공합니다.
+개발 CI는 `selfrun-drive/v*-dev*` 브랜치를 대상으로 단위 테스트·Drive variant 정책·debug/release 빌드를 수행하고 aligned unsigned APK를 `chatgpt-selfrun-drive-unsigned` artifact로 항상 보존합니다. 저장소에 `SELFRUN_SIGNING_PASSPHRASE` secret이 구성된 환경에서는 기존 SelfRun Drive 고정 인증서로 candidate APK까지 서명하고 packageName, versionName, versionCode, signing certificate와 SHA-256을 검증해 `chatgpt-selfrun-drive-build` artifact로 추가 제공합니다. secret이 없는 환경의 unsigned artifact는 최종 사용자 산출물이 아니며, 배포·사용자 전달 전에 `tools/sign_release.sh`와 기존 signing lineage를 사용해 별도 고정서명·검증해야 합니다.
 
 ## 정식 릴리스
 
