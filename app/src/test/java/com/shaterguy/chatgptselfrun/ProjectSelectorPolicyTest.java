@@ -17,12 +17,17 @@ public class ProjectSelectorPolicyTest {
         assertFalse(activity.contains("TYPE_TEXT_VARIATION_URI"));
     }
 
-    @Test public void discoveryIsOneWayOriginValidatedAndDoesNotExposeNativeBridge() throws Exception {
+    @Test public void discoveryIsResponsiveNavigationAwareAndOriginValidated() throws Exception {
         String loader=src("ProjectCatalogLoader.java"),catalog=src("ProjectCatalog.java"),web=src("WebViewConfig.java");
         assertTrue(loader.contains("evaluateJavascript(PROBE_JS"));
         assertTrue(loader.contains("ProjectCatalog.isTrustedChatgptPage"));
         assertTrue(loader.contains("EMPTY_SETTLE_MS"));
-        assertTrue(loader.contains("!isProjectHref(e)"));
+        assertTrue(loader.contains("CONTROL_DISCOVERY_MS"));
+        assertTrue(loader.contains("getClientRects"));
+        assertTrue(loader.contains("open-sidebar-button"));
+        assertTrue(loader.contains("__selfrunSidebarOpenAttempted"));
+        assertTrue(loader.contains("PROJECTS_CONTROL_NOT_FOUND"));
+        assertTrue(loader.contains("probeScriptForTesting()"));
         assertFalse(loader.contains("addJavascriptInterface"));
         assertFalse(loader.contains("getCookie("));
         assertTrue(catalog.contains("canonicalProjectUrl"));
@@ -35,7 +40,8 @@ public class ProjectSelectorPolicyTest {
     @Test public void refreshFailureAndStaleCallbacksCannotDestroyValidSelection() throws Exception {
         String activity=src("SelfRunNewActivity.java");
         assertTrue(activity.contains("generation != refreshGeneration"));
-        assertTrue(activity.contains("새로고침 실패 · 기존 목록을 유지합니다"));
+        assertTrue(activity.contains("safeCode"));
+        assertTrue(activity.contains("새로고침 실패 · \" + safeCode + \" · 기존 목록을 유지합니다"));
         assertTrue(activity.contains("ProjectCatalog.indexOfUrl(entries,defaultUrl) < 0"));
         assertTrue(activity.contains("refreshGeneration++"));
     }

@@ -25,23 +25,28 @@ final class ProjectCatalogLoader {
     private static final long TIMEOUT_MS = 25_000L;
     private static final long PROBE_MS = 700L;
     private static final long EMPTY_SETTLE_MS = 7_000L;
+    private static final long CONTROL_DISCOVERY_MS = 12_000L;
     private static final int REQUIRED_STABLE_PROBES = 3;
 
     private static final String PROBE_JS = "(function(){try{"
-            + "const t=e=>((e.innerText||e.textContent||e.getAttribute('aria-label')||'')+'').trim().replace(/\\s+/g,' ');"
+            + "const clean=s=>String(s??'').trim().replace(/\\s+/g,' ');const text=e=>clean(e?.innerText||e?.textContent||'');const aria=e=>clean(e?.getAttribute?.('aria-label')||'');const desc=e=>clean((aria(e)+' '+text(e)).trim());"
+            + "const visible=e=>!!e&&e.isConnected&&e.getClientRects&&e.getClientRects().length>0;"
             + "const isProjectHref=e=>{try{if(!e||!e.getAttribute)return false;const h=e.getAttribute('href');if(!h)return false;const u=new URL(h,location.href);return /^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname);}catch(x){return false;}};"
-            + "const controls=[...document.querySelectorAll('button,[role=button],a')];"
-            + "const isProjectsControl=e=>/^(projects?|프로젝트)(?:\\s|$)/i.test(t(e))&&!isProjectHref(e);"
-            + "const marker=controls.some(isProjectsControl);"
-            + "if(!window.__selfrunProjectsOpenAttempted){const open=controls.find(isProjectsControl);"
-            + "if(open){window.__selfrunProjectsOpenAttempted=true;open.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}}"
-            + "const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)(?:\\s|$)/i.test(t(e)));if(more)more.click();"
-            + "const out=[];const seen=new Set();for(const a of document.querySelectorAll('a[href]')){try{"
-            + "const u=new URL(a.getAttribute('href'),location.href);if(u.protocol!=='https:'||!/^(www\\.)?chatgpt\\.com$/i.test(u.hostname))continue;"
-            + "if(!/^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname))continue;"
-            + "const key=u.pathname;if(seen.has(key))continue;seen.add(key);let name=t(a);if(!name)name='프로젝트';out.push({name:name,url:u.href});}catch(x){}}"
+            + "const controls=[...document.querySelectorAll('button,[role=button],[role=menuitem],[role=treeitem],a')].filter(visible);"
+            + "const isProjectsControl=e=>/^(projects?|프로젝트)(?:\\s|$)/i.test(desc(e))&&!isProjectHref(e);"
+            + "const projectControl=controls.find(isProjectsControl)||null;const marker=!!projectControl;"
+            + "const collect=()=>{const out=[],seen=new Set();for(const a of document.querySelectorAll('a[href]')){try{const u=new URL(a.getAttribute('href'),location.href);if(u.protocol!=='https:'||!/^(www\\.)?chatgpt\\.com$/i.test(u.hostname))continue;if(!/^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname))continue;const key=u.pathname.replace(/\\/$/,'');if(seen.has(key))continue;seen.add(key);let name=text(a)||aria(a);if(!name)name='프로젝트';out.push({name:name,url:u.href});}catch(x){}}return out;};"
+            + "let out=collect();if(out.length)return JSON.stringify({state:'FOUND',marker:marker,entries:out});"
+            + "if(projectControl&&!window.__selfrunProjectsOpenAttempted){window.__selfrunProjectsOpenAttempted=true;projectControl.focus?.();projectControl.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}"
+            + "const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)(?:\\s|$)/i.test(desc(e)));"
+            + "if(projectControl&&more&&!window.__selfrunProjectsMoreAttempted){window.__selfrunProjectsMoreAttempted=true;more.focus?.();more.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}"
             + "for(const e of document.querySelectorAll('*')){try{const s=getComputedStyle(e);if((s.overflowY==='auto'||s.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+8)e.scrollTop=e.scrollHeight;}catch(x){}}"
-            + "return JSON.stringify({state:out.length?'FOUND':'EMPTY',marker:marker,entries:out});"
+            + "out=collect();if(out.length)return JSON.stringify({state:'FOUND',marker:marker,entries:out});"
+            + "if(!projectControl){const candidates=[];const add=e=>{if(e&&visible(e)&&!candidates.includes(e))candidates.push(e);};"
+            + "for(const sel of ['[data-testid=\"open-sidebar-button\"]','button[aria-label*=\"sidebar\" i]','[role=button][aria-label*=\"sidebar\" i]','button[aria-label*=\"navigation\" i]','[role=button][aria-label*=\"navigation\" i]']){try{document.querySelectorAll(sel).forEach(add);}catch(x){}}"
+            + "controls.forEach(add);const isNavOpener=e=>{const v=desc(e).toLowerCase(),id=String(e?.dataset?.testid||'').toLowerCase(),expanded=e?.getAttribute?.('aria-expanded');if(id==='open-sidebar-button')return true;if(expanded==='true'&&!/(open|show|expand|열기|펼치)/i.test(v))return false;return /(?:open|show|expand).*(?:sidebar|navigation)|(?:sidebar|navigation).*(?:open|show|expand)|사이드바.*(?:열기|펼치기)|(?:열기|펼치기).*사이드바|(?:메뉴|탐색).*(?:열기|펼치기)|(?:열기|펼치기).*(?:메뉴|탐색)/i.test(v);};"
+            + "const nav=candidates.find(isNavOpener)||null;if(nav&&!window.__selfrunSidebarOpenAttempted){window.__selfrunSidebarOpenAttempted=true;nav.focus?.();nav.click();return JSON.stringify({state:'OPENING',marker:false,entries:[]});}}"
+            + "return JSON.stringify({state:'EMPTY',marker:marker,entries:[]});"
             + "}catch(e){return JSON.stringify({state:'ERROR',marker:false,entries:[]});}})();";
 
     private final Context context;
@@ -53,6 +58,8 @@ final class ProjectCatalogLoader {
     private long startedAt;
     private int stableProbes;
     private String lastFingerprint = "";
+    private boolean projectsControlSeen;
+    private boolean navigationOpenAttempted;
     private boolean finished;
 
     ProjectCatalogLoader(Context context) { this.context = context; }
@@ -100,6 +107,8 @@ final class ProjectCatalogLoader {
 
     void cancel() { finish(null, "CANCELLED"); }
 
+    static String probeScriptForTesting() { return PROBE_JS; }
+
     private void scheduleProbe(long delay) {
         if (finished) return;
         handler.removeCallbacks(probeRunnable);
@@ -109,7 +118,10 @@ final class ProjectCatalogLoader {
     private void probe() {
         if (finished || webView == null) return;
         long elapsed = System.currentTimeMillis() - startedAt;
-        if (elapsed > TIMEOUT_MS) { fail("REFRESH_TIMEOUT"); return; }
+        if (elapsed > TIMEOUT_MS) {
+            fail(projectsControlSeen ? "REFRESH_TIMEOUT" : "PROJECTS_CONTROL_NOT_FOUND");
+            return;
+        }
         String current = webView.getUrl();
         if (!ProjectCatalog.isTrustedChatgptPage(current)) { fail("UNTRUSTED_NAVIGATION"); return; }
         webView.evaluateJavascript(PROBE_JS, raw -> {
@@ -118,8 +130,13 @@ final class ProjectCatalogLoader {
             try { result = ProjectCatalog.parseProbe(raw); }
             catch (Throwable error) { fail("PROJECT_RESULT_INVALID"); return; }
             if ("ERROR".equals(result.state)) { fail("DOM_PROBE_FAILED"); return; }
+            projectsControlSeen |= result.markerSeen;
             if ("OPENING".equals(result.state)) {
-                stableProbes = 0; lastFingerprint = ""; scheduleProbe(PROBE_MS); return;
+                if (!result.markerSeen) navigationOpenAttempted = true;
+                stableProbes = 0;
+                lastFingerprint = "";
+                scheduleProbe(PROBE_MS);
+                return;
             }
             StringBuilder fingerprint = new StringBuilder();
             for (ProjectCatalog.Entry entry : result.entries) fingerprint.append(entry.url).append('\n');
@@ -132,6 +149,12 @@ final class ProjectCatalogLoader {
             if (result.entries.isEmpty() && result.markerSeen
                     && nowElapsed >= EMPTY_SETTLE_MS && stableProbes >= REQUIRED_STABLE_PROBES) {
                 succeed(result.entries); return;
+            }
+            if (result.entries.isEmpty() && !result.markerSeen && nowElapsed >= CONTROL_DISCOVERY_MS) {
+                fail(navigationOpenAttempted
+                        ? "PROJECTS_CONTROL_NOT_FOUND_AFTER_NAVIGATION"
+                        : "PROJECTS_CONTROL_NOT_FOUND");
+                return;
             }
             scheduleProbe(PROBE_MS);
         });

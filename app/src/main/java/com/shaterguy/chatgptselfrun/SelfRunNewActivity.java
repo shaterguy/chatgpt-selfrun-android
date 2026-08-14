@@ -157,7 +157,7 @@ public final class SelfRunNewActivity extends Activity {
                 try {
                     catalogStore.save(entries,System.currentTimeMillis());
                 } catch (Throwable error) {
-                    finishRefresh(generation,"새로고침 실패 · 기존 목록을 유지합니다");
+                    finishRefresh(generation,"새로고침 실패 · CACHE_WRITE_FAILED · 기존 목록을 유지합니다");
                     return;
                 }
                 String defaultUrl = ProjectCatalog.canonicalProjectUrl(store.defaultProjectUrl());
@@ -175,7 +175,8 @@ public final class SelfRunNewActivity extends Activity {
             }
             @Override public void onFailure(String code) {
                 if (generation != refreshGeneration || isFinishing() || isDestroyed()) return;
-                finishRefresh(generation,"새로고침 실패 · 기존 목록을 유지합니다");
+                String safeCode = code == null || code.trim().isEmpty() ? "UNKNOWN" : code.trim();
+                finishRefresh(generation,"새로고침 실패 · " + safeCode + " · 기존 목록을 유지합니다");
             }
         });
     }
