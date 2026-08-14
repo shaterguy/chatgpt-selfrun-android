@@ -24,15 +24,18 @@ final class ProjectCatalogLoader {
     private static final String HOME_URL = "https://chatgpt.com/";
     private static final long TIMEOUT_MS = 25_000L;
     private static final long PROBE_MS = 700L;
+    private static final long EMPTY_SETTLE_MS = 7_000L;
     private static final int REQUIRED_STABLE_PROBES = 3;
 
     private static final String PROBE_JS = "(function(){try{"
             + "const t=e=>((e.innerText||e.textContent||e.getAttribute('aria-label')||'')+'').trim().replace(/\\s+/g,' ');"
+            + "const isProjectHref=e=>{try{if(!e||!e.getAttribute)return false;const h=e.getAttribute('href');if(!h)return false;const u=new URL(h,location.href);return /^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname);}catch(x){return false;}};"
             + "const controls=[...document.querySelectorAll('button,[role=button],a')];"
-            + "const marker=controls.some(e=>/^(projects?|프로젝트)$/i.test(t(e)));"
-            + "if(!window.__selfrunProjectsOpenAttempted){const open=controls.find(e=>/^(projects?|프로젝트)$/i.test(t(e)));"
+            + "const isProjectsControl=e=>/^(projects?|프로젝트)(?:\\s|$)/i.test(t(e))&&!isProjectHref(e);"
+            + "const marker=controls.some(isProjectsControl);"
+            + "if(!window.__selfrunProjectsOpenAttempted){const open=controls.find(isProjectsControl);"
             + "if(open){window.__selfrunProjectsOpenAttempted=true;open.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}}"
-            + "const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)$/i.test(t(e)));if(more)more.click();"
+            + "const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)(?:\\s|$)/i.test(t(e)));if(more)more.click();"
             + "const out=[];const seen=new Set();for(const a of document.querySelectorAll('a[href]')){try{"
             + "const u=new URL(a.getAttribute('href'),location.href);if(u.protocol!=='https:'||!/^(www\\.)?chatgpt\\.com$/i.test(u.hostname))continue;"
             + "if(!/^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname))continue;"
@@ -105,7 +108,8 @@ final class ProjectCatalogLoader {
 
     private void probe() {
         if (finished || webView == null) return;
-        if (System.currentTimeMillis() - startedAt > TIMEOUT_MS) { fail("REFRESH_TIMEOUT"); return; }
+        long elapsed = System.currentTimeMillis() - startedAt;
+        if (elapsed > TIMEOUT_MS) { fail("REFRESH_TIMEOUT"); return; }
         String current = webView.getUrl();
         if (!ProjectCatalog.isTrustedChatgptPage(current)) { fail("UNTRUSTED_NAVIGATION"); return; }
         webView.evaluateJavascript(PROBE_JS, raw -> {
@@ -124,7 +128,9 @@ final class ProjectCatalogLoader {
             if (!result.entries.isEmpty() && stableProbes >= REQUIRED_STABLE_PROBES) {
                 succeed(result.entries); return;
             }
-            if (result.entries.isEmpty() && result.markerSeen && stableProbes >= REQUIRED_STABLE_PROBES) {
+            long nowElapsed = System.currentTimeMillis() - startedAt;
+            if (result.entries.isEmpty() && result.markerSeen
+                    && nowElapsed >= EMPTY_SETTLE_MS && stableProbes >= REQUIRED_STABLE_PROBES) {
                 succeed(result.entries); return;
             }
             scheduleProbe(PROBE_MS);

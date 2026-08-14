@@ -21,6 +21,8 @@ public class ProjectSelectorPolicyTest {
         String loader=src("ProjectCatalogLoader.java"),catalog=src("ProjectCatalog.java"),web=src("WebViewConfig.java");
         assertTrue(loader.contains("evaluateJavascript(PROBE_JS"));
         assertTrue(loader.contains("ProjectCatalog.isTrustedChatgptPage"));
+        assertTrue(loader.contains("EMPTY_SETTLE_MS"));
+        assertTrue(loader.contains("!isProjectHref(e)"));
         assertFalse(loader.contains("addJavascriptInterface"));
         assertFalse(loader.contains("getCookie("));
         assertTrue(catalog.contains("canonicalProjectUrl"));
