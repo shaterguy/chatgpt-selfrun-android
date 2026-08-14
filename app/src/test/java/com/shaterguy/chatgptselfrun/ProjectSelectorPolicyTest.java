@@ -32,7 +32,7 @@ public class ProjectSelectorPolicyTest {
         assertTrue(loader.contains("desktopFallbackAttempted"));
         assertTrue(loader.contains("data-href"));
         assertTrue(loader.contains("data-url"));
-        assertTrue(loader.contains("/c/"));
+        assertTrue(loader.contains("tail[0]==='c'"));
         assertTrue(loader.contains("fallbackOrFail(\"PROJECT_LIST_UNRESOLVED\")"));
         assertFalse(loader.contains("result.entries.isEmpty() && result.markerSeen\n                    && nowElapsed >= EMPTY_SETTLE_MS && stableProbes >= REQUIRED_STABLE_PROBES) {\n                succeed(result.entries)"));
         assertTrue(loader.contains("probeScriptForTesting()"));
