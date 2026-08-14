@@ -82,7 +82,7 @@ public final class ProjectCatalogProbeInstrumentedTest {
         }
     }
 
-    @Test public void visibleProjectsControlWithNoEntriesRemainsAnEmptyCatalogState() throws Exception {
+    @Test public void visibleProjectsControlWithNoEntriesIsOnlyAnAmbiguousProbeState() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><body>
                 <button id="projects">Projects</button>
@@ -97,6 +97,44 @@ public final class ProjectCatalogProbeInstrumentedTest {
             assertEquals("EMPTY", second.state);
             assertTrue(second.markerSeen);
             assertTrue(second.entries.isEmpty());
+        } finally {
+            close(page);
+        }
+    }
+
+    @Test public void projectConversationLinksAreCanonicalizedToProjectHome() throws Exception {
+        HostPage page = open("""
+                <!doctype html><html><body>
+                <button>Projects</button>
+                <a href="/g/g-p-one/c/conversation-123">One current conversation</a>
+                </body></html>
+                """);
+        try {
+            ProjectCatalog.Probe result = eval(page.webView);
+            assertEquals("FOUND", result.state);
+            assertEquals(1, result.entries.size());
+            assertEquals("https://chatgpt.com/g/g-p-one/project", result.entries.get(0).url);
+        } finally {
+            close(page);
+        }
+    }
+
+    @Test public void routerStyleDataUrlProjectEntriesAreCollectedWithoutAnchorHref() throws Exception {
+        HostPage page = open("""
+                <!doctype html><html><body>
+                <button>Projects</button>
+                <div role="link" data-url="/g/g-p-one/project">One</div>
+                <div role="link" data-to="/g/g-p-two/c/conversation-456">Two</div>
+                </body></html>
+                """);
+        try {
+            ProjectCatalog.Probe result = eval(page.webView);
+            assertEquals("FOUND", result.state);
+            assertEquals(2, result.entries.size());
+            assertEquals("One", result.entries.get(0).name);
+            assertEquals("https://chatgpt.com/g/g-p-one/project", result.entries.get(0).url);
+            assertEquals("Two", result.entries.get(1).name);
+            assertEquals("https://chatgpt.com/g/g-p-two/project", result.entries.get(1).url);
         } finally {
             close(page);
         }

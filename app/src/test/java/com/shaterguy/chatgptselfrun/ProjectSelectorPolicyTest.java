@@ -17,7 +17,7 @@ public class ProjectSelectorPolicyTest {
         assertFalse(activity.contains("TYPE_TEXT_VARIATION_URI"));
     }
 
-    @Test public void discoveryIsResponsiveNavigationAwareAndOriginValidated() throws Exception {
+    @Test public void discoveryIsFailClosedNavigationAwareAndOriginValidated() throws Exception {
         String loader=src("ProjectCatalogLoader.java"),catalog=src("ProjectCatalog.java"),web=src("WebViewConfig.java");
         assertTrue(loader.contains("evaluateJavascript(PROBE_JS"));
         assertTrue(loader.contains("ProjectCatalog.isTrustedChatgptPage"));
@@ -27,6 +27,14 @@ public class ProjectSelectorPolicyTest {
         assertTrue(loader.contains("open-sidebar-button"));
         assertTrue(loader.contains("__selfrunSidebarOpenAttempted"));
         assertTrue(loader.contains("PROJECTS_CONTROL_NOT_FOUND"));
+        assertTrue(loader.contains("PROJECT_LIST_UNRESOLVED"));
+        assertTrue(loader.contains("DESKTOP_USER_AGENT"));
+        assertTrue(loader.contains("desktopFallbackAttempted"));
+        assertTrue(loader.contains("data-href"));
+        assertTrue(loader.contains("data-url"));
+        assertTrue(loader.contains("/c/"));
+        assertTrue(loader.contains("fallbackOrFail(\"PROJECT_LIST_UNRESOLVED\")"));
+        assertFalse(loader.contains("result.entries.isEmpty() && result.markerSeen\n                    && nowElapsed >= EMPTY_SETTLE_MS && stableProbes >= REQUIRED_STABLE_PROBES) {\n                succeed(result.entries)"));
         assertTrue(loader.contains("probeScriptForTesting()"));
         assertFalse(loader.contains("addJavascriptInterface"));
         assertFalse(loader.contains("getCookie("));

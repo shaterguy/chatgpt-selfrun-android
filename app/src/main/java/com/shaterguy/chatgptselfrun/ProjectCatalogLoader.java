@@ -27,27 +27,57 @@ final class ProjectCatalogLoader {
     private static final long EMPTY_SETTLE_MS = 7_000L;
     private static final long CONTROL_DISCOVERY_MS = 12_000L;
     private static final int REQUIRED_STABLE_PROBES = 3;
+    private static final String DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 SelfRunDrive/1.2.0-dev3";
 
-    private static final String PROBE_JS = "(function(){try{"
-            + "const clean=s=>String(s??'').trim().replace(/\\s+/g,' ');const text=e=>clean(e?.innerText||e?.textContent||'');const aria=e=>clean(e?.getAttribute?.('aria-label')||'');const desc=e=>clean((aria(e)+' '+text(e)).trim());"
-            + "const visible=e=>!!e&&e.isConnected&&e.getClientRects&&e.getClientRects().length>0;"
-            + "const isProjectHref=e=>{try{if(!e||!e.getAttribute)return false;const h=e.getAttribute('href');if(!h)return false;const u=new URL(h,location.href);return /^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname);}catch(x){return false;}};"
-            + "const controls=[...document.querySelectorAll('button,[role=button],[role=menuitem],[role=treeitem],a')].filter(visible);"
-            + "const isProjectsControl=e=>/^(projects?|프로젝트)(?:\\s|$)/i.test(desc(e))&&!isProjectHref(e);"
-            + "const projectControl=controls.find(isProjectsControl)||null;const marker=!!projectControl;"
-            + "const collect=()=>{const out=[],seen=new Set();for(const a of document.querySelectorAll('a[href]')){try{const u=new URL(a.getAttribute('href'),location.href);if(u.protocol!=='https:'||!/^(www\\.)?chatgpt\\.com$/i.test(u.hostname))continue;if(!/^\\/g\\/g-p-[A-Za-z0-9_-]+(?:\\/project)?\\/?$/.test(u.pathname))continue;const key=u.pathname.replace(/\\/$/,'');if(seen.has(key))continue;seen.add(key);let name=text(a)||aria(a);if(!name)name='프로젝트';out.push({name:name,url:u.href});}catch(x){}}return out;};"
-            + "let out=collect();if(out.length)return JSON.stringify({state:'FOUND',marker:marker,entries:out});"
-            + "if(projectControl&&!window.__selfrunProjectsOpenAttempted){window.__selfrunProjectsOpenAttempted=true;projectControl.focus?.();projectControl.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}"
-            + "const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)(?:\\s|$)/i.test(desc(e)));"
-            + "if(projectControl&&more&&!window.__selfrunProjectsMoreAttempted){window.__selfrunProjectsMoreAttempted=true;more.focus?.();more.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}"
-            + "for(const e of document.querySelectorAll('*')){try{const s=getComputedStyle(e);if((s.overflowY==='auto'||s.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+8)e.scrollTop=e.scrollHeight;}catch(x){}}"
-            + "out=collect();if(out.length)return JSON.stringify({state:'FOUND',marker:marker,entries:out});"
-            + "if(!projectControl){const candidates=[];const add=e=>{if(e&&visible(e)&&!candidates.includes(e))candidates.push(e);};"
-            + "for(const sel of ['[data-testid=\"open-sidebar-button\"]','button[aria-label*=\"sidebar\" i]','[role=button][aria-label*=\"sidebar\" i]','button[aria-label*=\"navigation\" i]','[role=button][aria-label*=\"navigation\" i]']){try{document.querySelectorAll(sel).forEach(add);}catch(x){}}"
-            + "controls.forEach(add);const isNavOpener=e=>{const v=desc(e).toLowerCase(),id=String(e?.dataset?.testid||'').toLowerCase(),expanded=e?.getAttribute?.('aria-expanded');if(id==='open-sidebar-button')return true;if(expanded==='true'&&!/(open|show|expand|열기|펼치)/i.test(v))return false;return /(?:open|show|expand).*(?:sidebar|navigation)|(?:sidebar|navigation).*(?:open|show|expand)|사이드바.*(?:열기|펼치기)|(?:열기|펼치기).*사이드바|(?:메뉴|탐색).*(?:열기|펼치기)|(?:열기|펼치기).*(?:메뉴|탐색)/i.test(v);};"
-            + "const nav=candidates.find(isNavOpener)||null;if(nav&&!window.__selfrunSidebarOpenAttempted){window.__selfrunSidebarOpenAttempted=true;nav.focus?.();nav.click();return JSON.stringify({state:'OPENING',marker:false,entries:[]});}}"
-            + "return JSON.stringify({state:'EMPTY',marker:marker,entries:[]});"
-            + "}catch(e){return JSON.stringify({state:'ERROR',marker:false,entries:[]});}})();";
+    private static final String PROBE_JS = """
+            (function(){try{
+              const clean=s=>String(s??'').trim().replace(/\\s+/g,' ');
+              const text=e=>clean(e?.innerText||e?.textContent||'');
+              const aria=e=>clean(e?.getAttribute?.('aria-label')||'');
+              const desc=e=>clean((aria(e)+' '+text(e)).trim());
+              const visible=e=>!!e&&e.isConnected&&e.getClientRects&&e.getClientRects().length>0;
+              const projectUrl=raw=>{try{
+                if(!raw)return '';
+                const u=new URL(String(raw),location.href);
+                if(u.protocol!=='https:'||!/^(www\\.)?chatgpt\\.com$/i.test(u.hostname))return '';
+                const parts=u.pathname.split('/').filter(Boolean);
+                if(parts.length<2||parts[0]!=='g'||!/^g-p-[A-Za-z0-9_-]+$/.test(parts[1]))return '';
+                const tail=parts.slice(2);
+                const valid=tail.length===0||(tail.length===1&&tail[0]==='project')||(tail.length===2&&tail[0]==='c'&&!!tail[1]);
+                return valid?'https://chatgpt.com/g/'+parts[1]+'/project':'';
+              }catch(_){return '';}};
+              const candidateValues=e=>{const values=[];if(!e?.getAttribute)return values;
+                for(const key of ['href','data-href','data-url','data-path','data-to']){const value=e.getAttribute(key);if(value)values.push(value);}
+                for(const attr of Array.from(e.attributes||[])){const value=String(attr.value||'');if(value.includes('g-p-')&&!values.includes(value))values.push(value);}
+                return values;
+              };
+              const isProjectLink=e=>candidateValues(e).some(v=>!!projectUrl(v));
+              const controls=[...document.querySelectorAll('button,[role=button],[role=menuitem],[role=treeitem],[role=link],a')].filter(visible);
+              const isProjectsControl=e=>/^(projects?|프로젝트)(?:\\s|$)/i.test(desc(e))&&!isProjectLink(e);
+              const projectControl=controls.find(isProjectsControl)||null;
+              const marker=!!projectControl;
+              const labelFor=e=>{const own=clean(text(e)||aria(e));if(own&&own.length<=300)return own;
+                const parent=e?.closest?.('li,[role=listitem],[role=menuitem],[role=treeitem]');const outer=clean(text(parent)||aria(parent));
+                return outer&&outer.length<=300?outer:'프로젝트';};
+              const collect=()=>{const out=[],seen=new Set();const add=(e,raw)=>{const url=projectUrl(raw);if(!url||seen.has(url))return;seen.add(url);out.push({name:labelFor(e),url});};
+                for(const e of document.querySelectorAll('a[href],[role=link],[data-href],[data-url],[data-path],[data-to]'))for(const raw of candidateValues(e))add(e,raw);
+                const nodes=document.querySelectorAll('*');const limit=Math.min(nodes.length,12000);for(let i=0;i<limit;i++){const e=nodes[i];for(const attr of Array.from(e.attributes||[])){const value=String(attr.value||'');if(value.includes('g-p-'))add(e,value);}}
+                return out;};
+              let out=collect();if(out.length)return JSON.stringify({state:'FOUND',marker,entries:out});
+              if(projectControl&&!window.__selfrunProjectsOpenAttempted){window.__selfrunProjectsOpenAttempted=true;projectControl.focus?.();projectControl.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}
+              const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)(?:\\s|$)/i.test(desc(e)));
+              if(projectControl&&more&&!window.__selfrunProjectsMoreAttempted){window.__selfrunProjectsMoreAttempted=true;more.focus?.();more.click();return JSON.stringify({state:'OPENING',marker:true,entries:[]});}
+              for(const e of document.querySelectorAll('*')){try{const s=getComputedStyle(e);if((s.overflowY==='auto'||s.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+8)e.scrollTop=e.scrollHeight;}catch(_){}}
+              out=collect();if(out.length)return JSON.stringify({state:'FOUND',marker,entries:out});
+              if(!projectControl){const candidates=[];const add=e=>{if(e&&visible(e)&&!candidates.includes(e))candidates.push(e);};
+                for(const sel of ['[data-testid="open-sidebar-button"]','button[aria-label*="sidebar" i]','[role=button][aria-label*="sidebar" i]','button[aria-label*="navigation" i]','[role=button][aria-label*="navigation" i]']){try{document.querySelectorAll(sel).forEach(add);}catch(_){}}
+                controls.forEach(add);const isNavOpener=e=>{const v=desc(e).toLowerCase(),id=String(e?.dataset?.testid||'').toLowerCase(),expanded=e?.getAttribute?.('aria-expanded');if(id==='open-sidebar-button')return true;if(expanded==='true'&&!/(open|show|expand|열기|펼치)/i.test(v))return false;return /(?:open|show|expand).*(?:sidebar|navigation)|(?:sidebar|navigation).*(?:open|show|expand)|사이드바.*(?:열기|펼치기)|(?:열기|펼치기).*사이드바|(?:메뉴|탐색).*(?:열기|펼치기)|(?:열기|펼치기).*(?:메뉴|탐색)/i.test(v);};
+                const nav=candidates.find(isNavOpener)||null;if(nav&&!window.__selfrunSidebarOpenAttempted){window.__selfrunSidebarOpenAttempted=true;nav.focus?.();nav.click();return JSON.stringify({state:'OPENING',marker:false,entries:[]});}}
+              return JSON.stringify({state:'EMPTY',marker,entries:[]});
+            }catch(e){return JSON.stringify({state:'ERROR',marker:false,entries:[]});}})();
+            """;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -55,11 +85,12 @@ final class ProjectCatalogLoader {
     private HeadlessWebViewHost host;
     private WebView webView;
     private Callback callback;
-    private long startedAt;
+    private long passStartedAt;
     private int stableProbes;
     private String lastFingerprint = "";
     private boolean projectsControlSeen;
     private boolean navigationOpenAttempted;
+    private boolean desktopFallbackAttempted;
     private boolean finished;
 
     ProjectCatalogLoader(Context context) { this.context = context; }
@@ -67,7 +98,7 @@ final class ProjectCatalogLoader {
     void start(Callback callback) {
         if (this.callback != null) throw new IllegalStateException("project loader already started");
         this.callback = callback;
-        this.startedAt = System.currentTimeMillis();
+        this.passStartedAt = System.currentTimeMillis();
         try {
             host = HeadlessWebViewHost.create(context);
             webView = host.webView();
@@ -117,9 +148,9 @@ final class ProjectCatalogLoader {
 
     private void probe() {
         if (finished || webView == null) return;
-        long elapsed = System.currentTimeMillis() - startedAt;
+        long elapsed = System.currentTimeMillis() - passStartedAt;
         if (elapsed > TIMEOUT_MS) {
-            fail(projectsControlSeen ? "REFRESH_TIMEOUT" : "PROJECTS_CONTROL_NOT_FOUND");
+            fallbackOrFail(projectsControlSeen ? "PROJECT_LIST_UNRESOLVED" : "PROJECTS_CONTROL_NOT_FOUND");
             return;
         }
         String current = webView.getUrl();
@@ -145,19 +176,46 @@ final class ProjectCatalogLoader {
             if (!result.entries.isEmpty() && stableProbes >= REQUIRED_STABLE_PROBES) {
                 succeed(result.entries); return;
             }
-            long nowElapsed = System.currentTimeMillis() - startedAt;
+            long nowElapsed = System.currentTimeMillis() - passStartedAt;
             if (result.entries.isEmpty() && result.markerSeen
                     && nowElapsed >= EMPTY_SETTLE_MS && stableProbes >= REQUIRED_STABLE_PROBES) {
-                succeed(result.entries); return;
+                fallbackOrFail("PROJECT_LIST_UNRESOLVED");
+                return;
             }
             if (result.entries.isEmpty() && !result.markerSeen && nowElapsed >= CONTROL_DISCOVERY_MS) {
-                fail(navigationOpenAttempted
+                fallbackOrFail(navigationOpenAttempted
                         ? "PROJECTS_CONTROL_NOT_FOUND_AFTER_NAVIGATION"
                         : "PROJECTS_CONTROL_NOT_FOUND");
                 return;
             }
             scheduleProbe(PROBE_MS);
         });
+    }
+
+    private void fallbackOrFail(String code) {
+        if (finished) return;
+        if (!desktopFallbackAttempted && webView != null) {
+            desktopFallbackAttempted = true;
+            resetDiscoveryPass();
+            try {
+                webView.getSettings().setUserAgentString(DESKTOP_USER_AGENT);
+                webView.stopLoading();
+                webView.loadUrl(HOME_URL);
+            } catch (Throwable error) {
+                fail("DESKTOP_FALLBACK_FAILED");
+            }
+            return;
+        }
+        fail(code + "_AFTER_DESKTOP_FALLBACK");
+    }
+
+    private void resetDiscoveryPass() {
+        handler.removeCallbacks(probeRunnable);
+        passStartedAt = System.currentTimeMillis();
+        stableProbes = 0;
+        lastFingerprint = "";
+        projectsControlSeen = false;
+        navigationOpenAttempted = false;
     }
 
     private void succeed(List<ProjectCatalog.Entry> entries) { finish(entries, null); }
