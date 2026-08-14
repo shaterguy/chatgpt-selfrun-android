@@ -15,9 +15,19 @@ grep -Fq 'selfRunDriveVersionCode = 1000004' "$BUILD"
 grep -Fq "selfRunDriveVersionName = '1.0.0'" "$BUILD"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
 grep -Fq 'bringPointIntoView(selection)' "$ACTIVITY"
+grep -Fq 'scrollCommandWindowToCaret' "$ACTIVITY"
+grep -Fq 'getWindowVisibleDisplayFrame' "$ACTIVITY"
+grep -Fq 'WindowInsets.Type.ime()' "$ACTIVITY"
+grep -Fq 'outer.scrollBy(0,delta)' "$ACTIVITY"
 grep -Fq 'addTextChangedListener' "$ACTIVITY"
-! grep -Fq -- '-editor.getScrollY()' "$ACTIVITY"
-! grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"
+if grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"; then
+  echo 'legacy requestRectangleOnScreen caret workaround is forbidden' >&2
+  exit 1
+fi
+if grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"; then
+  echo 'caret coordinates must not be clamped to the editor viewport' >&2
+  exit 1
+fi
 grep -Fq 'RUN_SUFFIX_LENGTH = 6' "$ACTIVITY"
 grep -Fq 'TimeZone.getTimeZone("Asia/Seoul")' "$ACTIVITY"
 ! grep -Fq 'UUID.randomUUID' "$ACTIVITY"
