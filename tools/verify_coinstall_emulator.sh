@@ -165,6 +165,14 @@ require_file "$LEGACY_APK"
 require_file "$DRIVE_APK"
 "$ADB" wait-for-device
 
+echo "Configuring software IME for instrumentation"
+IME_ID="$("$ADB" shell ime list -s | tr -d '\r' | head -1)"
+[[ -n "$IME_ID" ]] || fail "no software IME is installed on the emulator"
+"$ADB" shell ime enable "$IME_ID" >/dev/null || true
+"$ADB" shell ime set "$IME_ID" >/dev/null || fail "unable to select emulator IME: $IME_ID"
+"$ADB" shell settings put secure show_ime_with_hard_keyboard 1
+sleep 1
+
 echo "Running long-command IME instrumentation regression"
 gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
 
