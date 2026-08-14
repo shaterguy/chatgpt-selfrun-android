@@ -71,7 +71,8 @@ public final class SelfRunNewActivity extends Activity {
         EditText editor=requirement; if(editor==null||!editor.hasFocus()||editor.getLayout()==null)return;
         int selection=Math.max(0,Math.min(editor.getSelectionStart(),editor.length()));
         editor.bringPointIntoView(selection);
-        editor.post(() -> scrollCommandWindowToCaret(editor));
+        scrollCommandWindowToCaret(editor);
+        editor.postDelayed(() -> scrollCommandWindowToCaret(editor),50L);
     }
 
     private void scrollCommandWindowToCaret(EditText editor) {
