@@ -3,7 +3,7 @@ name: Release SelfRun Drive
 on:
   push:
     branches:
-      - selfrun-drive/main
+      - main
 
 permissions:
   contents: write
@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == 'refs/heads/selfrun-drive/main' ]]
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -138,10 +138,10 @@ jobs:
           cat > release-output/RELEASE_NOTES.md <<EOF
           SelfRun Drive v${DRIVE_VERSION_NAME} 정식 릴리스입니다.
 
-          - 기존 WebView SelfRun과 별도 application ID 및 별도 정식 릴리스 계보를 사용합니다.
-          - 새 작업의 기본 실행 모드는 일반 Chat입니다.
-          - 긴 셀프런 명령 입력 중 IME가 열린 상태에서도 현재 입력 위치가 가시 영역에 유지되도록 개선했습니다.
-          - Drive signal event 기반 continuation과 기존 동시 설치 격리를 유지합니다.
+          - 저장소 기본 브랜치 main을 SelfRun Drive 정식 계보로 전환했습니다.
+          - 기존 WebView SelfRun 소스 계보는 selfrun-webview/main에 분리 보존하며 Drive와 병합하지 않습니다.
+          - application ID com.shaterguy.chatgptselfrun.drive와 기존 SelfRun Drive 고정 서명 인증서를 유지합니다.
+          - global SelfRun 운영문서 기반 bootstrap, 일반 Chat/Project 라우팅과 Drive signal event continuation을 포함한 최신 검증 상태를 정식 승격했습니다.
           EOF
       - name: Create or verify Drive tag and GitHub Release
         shell: bash
@@ -165,8 +165,7 @@ jobs:
               --verify-tag \
               --target "$GITHUB_SHA" \
               --title "SelfRun Drive v${DRIVE_VERSION_NAME}" \
-              --notes-file release-output/RELEASE_NOTES.md \
-              --latest=false
+              --notes-file release-output/RELEASE_NOTES.md
           fi
           ASSETS="$(gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           grep -Fxq "chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk" <<<"$ASSETS"
