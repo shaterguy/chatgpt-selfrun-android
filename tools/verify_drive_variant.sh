@@ -9,10 +9,12 @@ PROTOCOL=$SRC/SelfRunProtocol.java
 PARSER=$SRC/DriveCommitParser.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
 API=$SRC/DriveApiClient.java
+NOTIFICATION=$SRC/NotificationHelper.java
+BUILD_WORKFLOW=.github/workflows/build-drive-v1.yml
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
-grep -Fq 'selfRunDriveVersionCode = 1000004' "$BUILD"
-grep -Fq "selfRunDriveVersionName = '1.0.0'" "$BUILD"
+grep -Fq 'selfRunDriveVersionCode = 1000005' "$BUILD"
+grep -Fq "selfRunDriveVersionName = '1.1.0-dev1'" "$BUILD"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
 grep -Fq 'setMinLines(8)' "$ACTIVITY"
 grep -Fq 'setVerticalScrollBarEnabled(false)' "$ACTIVITY"
@@ -74,4 +76,16 @@ grep -Fq '.put("selfrun_kind", kind)' "$API"
 ! grep -Fq '.put("protocol_version"' "$API"
 ! grep -Fq '.put("client_id"' "$API"
 ! grep -Fq '.put("created_by"' "$API"
-echo 'SelfRun Drive v1.0.0 policy checks passed.'
+grep -Fq 'RUNNING_CHANNEL = "selfrun-drive-running-v2"' "$NOTIFICATION"
+grep -Fq 'ALERT_CHANNEL = "selfrun-drive-alerts-v2"' "$NOTIFICATION"
+grep -Fq 'NotificationManager.IMPORTANCE_LOW' "$NOTIFICATION"
+grep -Fq 'running.setSound(null, null)' "$NOTIFICATION"
+grep -Fq 'running.enableVibration(false)' "$NOTIFICATION"
+grep -Fq '.setContentText("SelfRun 작업 중")' "$NOTIFICATION"
+grep -Fq 'NotificationManager.IMPORTANCE_HIGH' "$NOTIFICATION"
+grep -Fq 'runtimeStatus.contains("일시정지")' "$NOTIFICATION"
+grep -Fq 'SELFRUN_SIGNING_PASSPHRASE' "$BUILD_WORKFLOW"
+grep -Fq 'tools/sign_release.sh' "$BUILD_WORKFLOW"
+grep -Fq 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' "$BUILD_WORKFLOW"
+grep -Fq 'chatgpt-selfrun-drive-v${VERSION_NAME}.apk' "$BUILD_WORKFLOW"
+echo 'SelfRun Drive v1.1.0-dev1 policy checks passed.'
