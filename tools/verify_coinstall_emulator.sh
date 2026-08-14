@@ -165,6 +165,9 @@ require_file "$LEGACY_APK"
 require_file "$DRIVE_APK"
 "$ADB" wait-for-device
 
+echo "Running long-command IME instrumentation regression"
+gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
+
 echo "Installing legacy APK first"
 "$ADB" install -r "$LEGACY_APK" >/dev/null
 package_installed "$LEGACY_PACKAGE" || fail "legacy package not installed"
