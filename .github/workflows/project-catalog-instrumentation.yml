@@ -44,7 +44,10 @@ jobs:
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
-          script: gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
+          script: >-
+            gradle --no-daemon --console=plain --stacktrace
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.ProjectCatalogProbeInstrumentedTest
+            :app:connectedDebugAndroidTest
       - name: Upload instrumentation reports
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
