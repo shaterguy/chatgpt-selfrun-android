@@ -2,10 +2,12 @@ package com.shaterguy.chatgptselfrun;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.Layout;
 import android.text.TextWatcher;
 import android.view.MotionEvent;
 import android.view.WindowManager;
@@ -63,9 +65,14 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void keepCommandCursorVisible() {
-        EditText editor=requirement; if(editor==null||!editor.hasFocus()||editor.getLayout()==null)return;
+        EditText editor=requirement; if(editor==null||!editor.hasFocus())return;
+        Layout layout=editor.getLayout(); if(layout==null)return;
         int selection=Math.max(0,Math.min(editor.getSelectionStart(),editor.length()));
         editor.bringPointIntoView(selection);
+        int line=layout.getLineForOffset(selection); int margin=Ui.dp(this,12);
+        int top=Math.max(0,editor.getTotalPaddingTop()+layout.getLineTop(line)-margin);
+        int bottom=Math.max(top+1,editor.getTotalPaddingTop()+layout.getLineBottom(line)+margin);
+        editor.requestRectangleOnScreen(new Rect(0,top,Math.max(1,editor.getWidth()),bottom),false);
     }
 
     private void startSelfRun() {
