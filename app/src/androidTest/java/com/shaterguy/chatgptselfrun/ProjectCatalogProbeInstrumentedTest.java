@@ -65,13 +65,15 @@ public final class ProjectCatalogProbeInstrumentedTest {
         }
     }
 
-    @Test public void expandedSidebarProjectsAreCollectedWithoutNavigationClick() throws Exception {
+    @Test public void expandedSidebarUsesExplicitControlledProjectList() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><head>%s</head><body>
                 <div id="sidebar">
-                  <button id="projects" aria-expanded="true">Projects</button>
-                  <a href="/g/g-p-one/project">One</a>
-                  <a href="/g/g-p-two">Two</a>
+                  <button id="projects" aria-expanded="true" aria-controls="project-list">Projects</button>
+                  <div id="project-list" role="list">
+                    <a href="/g/g-p-one/project">One</a>
+                    <a href="/g/g-p-two">Two</a>
+                  </div>
                 </div>
                 </body></html>
                 """.formatted(BLOCK_STYLE));
@@ -121,12 +123,45 @@ public final class ProjectCatalogProbeInstrumentedTest {
         }
     }
 
-    @Test public void routerStateOutsideProjectSectionIsIgnored() throws Exception {
+    @Test public void ambientCurrentProjectAfterProjectsControlDoesNotShortCircuitCatalog() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><head>%s</head><body>
-                <div id="router" role="link" data-url="/g/g-p-current/project">Wrong wrapper label</div>
                 <div id="sidebar">
                   <button id="projects" onclick="openProjects()">Projects</button>
+                  <a id="ambient" href="/g/g-p-current/project">Wrong Current Wrapper</a>
+                  <div id="list"></div>
+                </div>
+                <script>
+                function openProjects(){
+                  document.getElementById('list').innerHTML=
+                    '<a href="/g/g-p-alpha/project">Alpha</a>'+
+                    '<a href="/g/g-p-beta/project">Beta</a>';
+                }
+                </script>
+                </body></html>
+                """.formatted(BLOCK_STYLE));
+        try {
+            ProjectCatalog.Probe first = eval(page.webView);
+            assertEquals("OPENING", first.state);
+            assertTrue(first.entries.isEmpty());
+
+            ProjectCatalog.Probe second = eval(page.webView);
+            assertEquals("FOUND", second.state);
+            assertEquals(2, second.entries.size());
+            assertEquals("Alpha", second.entries.get(0).name);
+            assertEquals("Beta", second.entries.get(1).name);
+            assertFalse(second.entries.stream().anyMatch(e -> e.url.contains("g-p-current")));
+        } finally {
+            close(page);
+        }
+    }
+
+    @Test public void routerStateAfterProjectsControlDoesNotShortCircuitCatalog() throws Exception {
+        HostPage page = open("""
+                <!doctype html><html><head>%s</head><body>
+                <div id="sidebar">
+                  <button id="projects" onclick="openProjects()">Projects</button>
+                  <div id="router" role="link" data-url="/g/g-p-current/project">Wrong router label</div>
                   <div id="list"></div>
                 </div>
                 <script>
@@ -144,6 +179,35 @@ public final class ProjectCatalogProbeInstrumentedTest {
             assertEquals(1, second.entries.size());
             assertEquals("Real Project", second.entries.get(0).name);
             assertEquals("https://chatgpt.com/g/g-p-real/project", second.entries.get(0).url);
+        } finally {
+            close(page);
+        }
+    }
+
+    @Test public void existingAmbientUrlDoesNotHideNewListElementWithSameProjectUrl() throws Exception {
+        HostPage page = open("""
+                <!doctype html><html><head>%s</head><body>
+                <a id="ambient" href="/g/g-p-one/project">Ambient One</a>
+                <button id="projects" onclick="openProjects()">Projects</button>
+                <div id="list"></div>
+                <script>
+                function openProjects(){
+                  document.getElementById('list').innerHTML=
+                    '<a href="/g/g-p-one/project">One Actual</a>'+
+                    '<a href="/g/g-p-two/project">Two Actual</a>';
+                }
+                </script>
+                </body></html>
+                """.formatted(BLOCK_STYLE));
+        try {
+            ProjectCatalog.Probe first = eval(page.webView);
+            assertEquals("OPENING", first.state);
+            ProjectCatalog.Probe second = eval(page.webView);
+            assertEquals("FOUND", second.state);
+            assertEquals(2, second.entries.size());
+            assertEquals("One Actual", second.entries.get(0).name);
+            assertEquals("https://chatgpt.com/g/g-p-one/project", second.entries.get(0).url);
+            assertEquals("Two Actual", second.entries.get(1).name);
         } finally {
             close(page);
         }
@@ -200,8 +264,10 @@ public final class ProjectCatalogProbeInstrumentedTest {
         HostPage page = open("""
                 <!doctype html><html><head>%s</head><body>
                 <div id="sidebar">
-                  <button aria-expanded="true">Projects</button>
-                  <a href="/g/g-p-one/c/conversation-123">One current conversation</a>
+                  <button aria-expanded="true" aria-controls="project-list">Projects</button>
+                  <div id="project-list" role="list">
+                    <a href="/g/g-p-one/c/conversation-123">One current conversation</a>
+                  </div>
                 </div>
                 </body></html>
                 """.formatted(BLOCK_STYLE));
@@ -215,13 +281,15 @@ public final class ProjectCatalogProbeInstrumentedTest {
         }
     }
 
-    @Test public void routerStyleDataUrlProjectEntriesAreCollectedWithoutAnchorHref() throws Exception {
+    @Test public void routerStyleDataUrlProjectEntriesAreCollectedFromControlledScope() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><head>%s</head><body>
                 <div id="sidebar">
-                  <button aria-expanded="true">Projects</button>
-                  <div role="link" data-url="/g/g-p-one/project">One</div>
-                  <div role="link" data-to="/g/g-p-two/c/conversation-456">Two</div>
+                  <button aria-expanded="true" aria-controls="project-list">Projects</button>
+                  <div id="project-list" role="list">
+                    <div role="link" data-url="/g/g-p-one/project">One</div>
+                    <div role="link" data-to="/g/g-p-two/c/conversation-456">Two</div>
+                  </div>
                 </div>
                 </body></html>
                 """.formatted(BLOCK_STYLE));
