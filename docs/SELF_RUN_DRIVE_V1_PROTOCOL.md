@@ -11,15 +11,29 @@ SelfRun Drive는 모든 대화에서 같은 bootstrap을 사용합니다. 앱은
 SELF_RUN_CLIENT=DRIVE_V1
 SELF_RUN_SKILL_DOCUMENT_ID=1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs
 DRIVE_TURN_DOCUMENT_ID=<documentId>
+
+이 실행은 SelfRun이다.
+
+실질 작업을 시작하기 전에 위 SelfRun 운영문서 ID가 가리키는 Google Drive 문서의 현재 최신 메타데이터와 전체 내용을 읽고 SelfRun 실행 규범으로 적용한다.
+
+현재 conversation이 ChatGPT Project 내부의 대화라면 해당 Project의 프로젝트 지침과 그 지침이 지정하는 SKILL·운영문서도 함께 적용한다. 프로젝트의 업무·도메인·데이터·산출물·프로젝트 고유 운영 규칙은 해당 Project 규범을 따른다.
+
+[요구사항]
+<사용자가 앱에 입력한 원본 요구사항>
 ```
 
 `SELF_RUN_SKILL_DOCUMENT_ID`는 앱의 단일 상수에서 prompt metadata로만 전달합니다. 앱은 해당 Google Drive 문서의 이름 검색, 다운로드, 캐싱, 버전 판정, 규칙 파싱 또는 Project 규범과의 우선순위 해석을 수행하지 않습니다. 문서 로드와 Project 규범 병행 적용은 ChatGPT가 담당합니다.
 
-사용자가 앱에 입력한 원본 요구사항은 bootstrap 설명 뒤에 trim·요약 없이 그대로 붙습니다. CONTINUE는 기존 계약을 유지하며 global Skill ID나 Project metadata를 반복 삽입하지 않습니다.
+사용자가 앱에 입력한 원본 요구사항은 `[요구사항]` 행 바로 뒤에 trim·요약 없이 그대로 붙습니다. bootstrap에는 canonical SelfRun 운영문서가 소유하는 역할 전환·HANDOFF·continuation·제어신호·완료 판정 의미를 다시 설명하는 중복 문장을 넣지 않습니다.
+
+CONTINUE에는 global Skill ID나 Project metadata를 반복 삽입하지 않으며, ChatGPT가 실행턴 문서에 `SELF_RUN_COMMAND_RECEIVED`를 기록해야 함을 명확히 알리는 고정 문구를 두 번째 행에 붙입니다.
 
 ```text
 [yyyy.mm.dd | hh:mm:ss] [SELF_RUN_CONTINUE <RUN_ID>]
+Command Recevied Record Required
 ```
+
+`Command Recevied Record Required`는 현재 앱 외부 프롬프트 계약의 고정 문자열이며 철자를 임의로 교정하지 않습니다.
 
 ## Drive 실행문서 signal
 
