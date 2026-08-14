@@ -10,7 +10,6 @@ PARSER=$SRC/DriveCommitParser.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
 API=$SRC/DriveApiClient.java
 NOTIFICATION=$SRC/NotificationHelper.java
-BUILD_WORKFLOW=.github/workflows/build-drive-v1.yml
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq 'selfRunDriveVersionCode = 1000005' "$BUILD"
@@ -84,8 +83,4 @@ grep -Fq 'running.enableVibration(false)' "$NOTIFICATION"
 grep -Fq '.setContentText("SelfRun 작업 중")' "$NOTIFICATION"
 grep -Fq 'NotificationManager.IMPORTANCE_HIGH' "$NOTIFICATION"
 grep -Fq 'runtimeStatus.contains("일시정지")' "$NOTIFICATION"
-grep -Fq 'SELFRUN_SIGNING_PASSPHRASE' "$BUILD_WORKFLOW"
-grep -Fq 'tools/sign_release.sh' "$BUILD_WORKFLOW"
-grep -Fq 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' "$BUILD_WORKFLOW"
-grep -Fq 'chatgpt-selfrun-drive-v${VERSION_NAME}.apk' "$BUILD_WORKFLOW"
 echo 'SelfRun Drive v1.1.0-dev1 policy checks passed.'

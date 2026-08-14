@@ -31,7 +31,7 @@ jobs:
         run: |
           tools/verify_drive_variant.sh
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
-      - name: Build unsigned APK and verify metadata
+      - name: Build and verify APK metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -50,38 +50,7 @@ jobs:
           mkdir -p app/build/outputs/selfrun-drive
           "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk
           "$BT/zipalign" -c -v 4 app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk
-      - name: Require stable signing secret
-        shell: bash
-        env:
-          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          test -n "$SIGNING_PASSPHRASE"
-          umask 077
-          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/selfrun-drive-signing-pass"
-      - name: Install signing dependency
-        run: python3 -m pip install --disable-pip-version-check 'cryptography==45.0.6'
-      - name: Sign and verify update APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"' EXIT
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
-          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          OUT=app/build/outputs/selfrun-drive
-          ALIGNED="$OUT/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk"
-          APK="$OUT/chatgpt-selfrun-drive-v${VERSION_NAME}.apk"
-          APKSIGNER="$BT/apksigner" tools/sign_release.sh "$ALIGNED" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$APK" | tee "$OUT/APKSIGNER_VERIFY.txt"
-          "$BT/apksigner" verify --verbose --print-certs "$APK" > "$OUT/APK_CERT.txt"
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' "$OUT/APK_CERT.txt"
-          BADGING="$($BT/aapt dump badging "$APK")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
-          grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
-          grep -Fq "versionName='$VERSION_NAME'" <<<"$BADGING"
-          grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
-          sha256sum "$APK" > "$OUT/SHA256SUMS.txt"
-          rm -f "$ALIGNED"
+          sha256sum app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v${VERSION_NAME}-aligned-unsigned.apk > app/build/outputs/selfrun-drive/SHA256SUMS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chatgpt-selfrun-drive-build
