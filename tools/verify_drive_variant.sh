@@ -14,8 +14,8 @@ API=$SRC/DriveApiClient.java
 NOTIFICATION=$SRC/NotificationHelper.java
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
-grep -Fq 'selfRunDriveVersionCode = 1000007' "$BUILD"
-grep -Fq "selfRunDriveVersionName = '1.1.0-dev3'" "$BUILD"
+grep -Fq 'selfRunDriveVersionCode = 1000008' "$BUILD"
+grep -Fq "selfRunDriveVersionName = '1.1.0-dev4'" "$BUILD"
 grep -Fq 'SELF_RUN_SKILL_DOCUMENT_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs"' "$PROTOCOL"
 grep -Fq '"SELF_RUN_SKILL_DOCUMENT_ID="+SELF_RUN_SKILL_DOCUMENT_ID' "$PROTOCOL"
 ! grep -Fq 'Vibe Coding' "$PROTOCOL"
@@ -86,4 +86,4 @@ COMMAND_BLOCK="$(grep -F 'private void commandSubmitted' "$SERVICE")"
 if grep -Fq 'startForegroundCompat();' <<<"$COMMAND_BLOCK"; then echo 'command submission must not repost the foreground notification' >&2; exit 1; fi
 FG_POST_COUNT="$(grep -o 'startForegroundCompat();' "$SERVICE" | wc -l | tr -d ' ')"
 [[ "$FG_POST_COUNT" == '4' ]]
-echo 'SelfRun Drive v1.1.0-dev3 policy checks passed.'
+echo 'SelfRun Drive v1.1.0-dev4 policy checks passed.'

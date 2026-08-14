@@ -39,8 +39,6 @@ final class SelfRunProtocol {
                 +"실질 작업을 시작하기 전에 위 SelfRun 운영문서 ID가 가리키는 Google Drive 문서의 현재 최신 메타데이터와 전체 내용을 읽고 SelfRun 실행 규범으로 적용한다.\n\n"
                 +"현재 conversation이 ChatGPT Project 내부의 대화라면 해당 Project의 프로젝트 지침과 그 지침이 지정하는 SKILL·운영문서도 함께 적용한다. 프로젝트의 업무·도메인·데이터·산출물·프로젝트 고유 운영 규칙은 해당 Project 규범을 따른다.\n\n"
                 +"SelfRun의 역할 전환, HANDOFF, continuation, SelfRun 제어신호, Drive 실행턴 signal, pause/resume의 AI 측 의미, SelfRun 완료 판정은 위 canonical SelfRun 운영문서를 따른다.\n\n"
-                +"앱은 현재 대화가 Project인지 직접 판정하지 않는다.\n\n"
-                +"위 메타데이터 및 설명 뒤에 사용자가 앱에 입력한 원본 요구사항을 내용 손실이나 요약 없이 그대로 붙인다.\n\n"
                 +originalRequirement;
     }
     static String continuation(String runId){return "[SELF_RUN_CONTINUE "+runId+"]";}

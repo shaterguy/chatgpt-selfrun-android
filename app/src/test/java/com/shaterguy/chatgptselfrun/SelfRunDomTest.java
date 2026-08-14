@@ -22,4 +22,13 @@ public class SelfRunDomTest {
         assertFalse(script.contains("CONFIRMED"));
         assertFalse(script.contains("assistant"));
     }
+    @Test public void generalChatScopeSupportsBootstrapAndWorkPreferences() {
+        String initial = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL, SelfRunStore.MODE_CHAT, "SR-20260814-TEST00");
+        String model = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
+        assertTrue(initial.contains("__GENERAL_CHAT__"));
+        assertTrue(initial.contains("일반 Chat 범위 이탈"));
+        assertTrue(model.contains("__GENERAL_CHAT__"));
+        assertTrue(model.contains("일반 Chat 범위 이탈"));
+    }
+
 }

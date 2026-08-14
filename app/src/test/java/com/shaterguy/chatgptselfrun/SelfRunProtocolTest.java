@@ -20,6 +20,8 @@ public class SelfRunProtocolTest {
         assertTrue(bootstrap.contains("SELF_RUN_SKILL_DOCUMENT_ID=" + SKILL_ID));
         assertTrue(bootstrap.contains("SELF_RUN_CLIENT=DRIVE_V1"));
         assertTrue(bootstrap.contains("DRIVE_TURN_DOCUMENT_ID=" + DOC));
+        assertFalse(bootstrap.contains("앱은 현재 대화가 Project인지 직접 판정하지 않는다."));
+        assertFalse(bootstrap.contains("위 메타데이터 및 설명 뒤에 사용자가 앱에 입력한 원본 요구사항을 내용 손실이나 요약 없이 그대로 붙인다."));
     }
 
     @Test public void originalRequirementIsPreservedWithoutTrimOrSummary() {

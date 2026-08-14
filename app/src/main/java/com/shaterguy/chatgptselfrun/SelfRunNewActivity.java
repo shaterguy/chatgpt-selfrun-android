@@ -99,10 +99,10 @@ public final class SelfRunNewActivity extends Activity {
     private void startSelfRun() {
         if(store.active()&&!store.userStopped()&&!SelfRunStore.PHASE_DONE.equals(store.phase())&&!SelfRunStore.PHASE_IDLE.equals(store.phase())){Toast.makeText(this,"현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.",Toast.LENGTH_LONG).show();return;}
         String project=projectUrl.getText().toString().trim(),request=requirement.getText().toString().trim();
-        if(SelfRunScript.projectId(project).isEmpty()){Toast.makeText(this,"ChatGPT 프로젝트 주소를 확인하세요.",Toast.LENGTH_LONG).show();return;}
+        if(!project.isEmpty()&&SelfRunScript.projectId(project).isEmpty()){Toast.makeText(this,"ChatGPT 프로젝트 주소를 확인하세요.",Toast.LENGTH_LONG).show();return;}
         if(request.isEmpty()){Toast.makeText(this,"셀프런 명령을 입력하세요.",Toast.LENGTH_LONG).show();return;}
         if(!DriveApiClient.validFileId(store.driveRunsBaseFolderId())||!DriveApiClient.validOpaqueAccountId(store.driveAccountId())){Toast.makeText(this,"먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.",Toast.LENGTH_LONG).show();return;}
-        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class)); String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()]; String runId=newRunId(); store.start(runId,selectedMode,project,request); runLog.record(store,"UI_START","mode="+selectedMode); startRunner(); Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show(); finish();
+        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class)); String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()]; String runId=newRunId(); store.start(runId,selectedMode,project.isEmpty()?SelfRunScript.GENERAL_CHAT_URL:project,request); runLog.record(store,"UI_START","mode="+selectedMode); startRunner(); Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show(); finish();
     }
 
     private void startRunner() { Intent intent=new Intent(this,SelfRunService.class); intent.setAction(SelfRunService.ACTION_RUN); if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent); }
