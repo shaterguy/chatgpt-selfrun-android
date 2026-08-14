@@ -76,69 +76,82 @@ final class ProjectCatalogLoader {
                 return '프로젝트';
               };
               const visibleEntries=scope=>{
-                const out=[],seen=new Set();
+                const out=[];
                 if(!scope?.querySelectorAll)return out;
                 for(const e of scope.querySelectorAll('a[href],[role=link],[role=menuitem],[role=treeitem],[data-href],[data-url],[data-path],[data-to]')){
                   if(!visible(e))continue;
                   for(const raw of candidateValues(e)){
-                    const url=projectUrl(raw);if(!url||seen.has(url))continue;
-                    seen.add(url);out.push({name:labelFor(e),url,element:e});
+                    const url=projectUrl(raw);if(!url)continue;
+                    out.push({name:labelFor(e),url,element:e});break;
                   }
                 }
                 return out;
               };
-              const plain=items=>items.map(({name,url})=>({name,url}));
-              const collectScoped=(scope,afterNode)=>{
-                const items=visibleEntries(scope);if(!afterNode)return plain(items);
-                return plain(items.filter(item=>!!(afterNode.compareDocumentPosition(item.element)&Node.DOCUMENT_POSITION_FOLLOWING)));
-              };
-              const collectNearControl=control=>{
-                if(!control)return [];
-                let node=control.parentElement;
-                for(let depth=0;depth<7&&node&&node!==document.body&&node!==document.documentElement;depth++,node=node.parentElement){
-                  const entries=collectScoped(node,control);if(entries.length)return entries;
+              const plain=items=>{const out=[],seen=new Set();for(const item of items){if(seen.has(item.url))continue;seen.add(item.url);out.push({name:item.name,url:item.url});}return out;};
+              const controlledScopes=control=>{
+                const out=[];if(!control?.getAttribute)return out;
+                for(const key of ['aria-controls','aria-owns']){
+                  const raw=clean(control.getAttribute(key)||'');
+                  for(const id of raw.split(/\\s+/).filter(Boolean)){
+                    const scope=document.getElementById(id);if(scope&&visible(scope)&&!out.includes(scope))out.push(scope);
+                  }
                 }
-                const cr=control.getBoundingClientRect();
-                return plain(visibleEntries(document).filter(item=>{
-                  const r=item.element.getBoundingClientRect();
-                  const follows=!!(control.compareDocumentPosition(item.element)&Node.DOCUMENT_POSITION_FOLLOWING);
-                  const horizontal=r.left<cr.right+120&&r.right>cr.left-120;
-                  return follows&&horizontal&&r.top>=cr.bottom-8&&r.top<=cr.bottom+900;
-                }));
+                return out;
               };
+              const collectControlled=control=>{
+                for(const scope of controlledScopes(control)){const entries=plain(visibleEntries(scope));if(entries.length)return entries;}
+                return [];
+              };
+              const markBeforeOpen=()=>{
+                const entries=visibleEntries(document),counts={};
+                window.__selfrunProjectsBeforeElements=new WeakSet(entries.map(item=>item.element));
+                for(const item of entries)counts[item.url]=(counts[item.url]||0)+1;
+                window.__selfrunProjectsBeforeCounts=counts;
+                window.__selfrunProjectsBeforeCount=entries.length;
+              };
+              const collectNewItems=scope=>{
+                const beforeElements=window.__selfrunProjectsBeforeElements;
+                const beforeCounts=window.__selfrunProjectsBeforeCounts&&typeof window.__selfrunProjectsBeforeCounts==='object'?window.__selfrunProjectsBeforeCounts:{};
+                const all=visibleEntries(document),currentCounts={};
+                for(const item of all)currentCounts[item.url]=(currentCounts[item.url]||0)+1;
+                const allowance={};
+                for(const [url,count] of Object.entries(currentCounts))allowance[url]=Math.max(0,count-(Number(beforeCounts[url])||0));
+                const out=[];
+                for(const item of visibleEntries(scope)){
+                  if(beforeElements&&typeof beforeElements.has==='function'&&beforeElements.has(item.element))continue;
+                  if((allowance[item.url]||0)<=0)continue;
+                  allowance[item.url]--;out.push(item);
+                }
+                return plain(out);
+              };
+              const portalScopes=()=>[...document.querySelectorAll('[role=dialog],[role=menu],[role=listbox],[data-radix-popper-content-wrapper]')].filter(visible);
               const collectOpenedPortal=()=>{
-                const scopes=[...document.querySelectorAll('[role=dialog],[role=menu],[role=listbox],[data-radix-popper-content-wrapper]')].filter(visible);
-                for(const scope of scopes){
+                for(const scope of portalScopes()){
                   if(projectControl&&scope.contains(projectControl))continue;
-                  const entries=collectScoped(scope,null);if(entries.length)return entries;
+                  const entries=collectNewItems(scope);if(entries.length)return entries;
                 }
                 return [];
               };
-              const collectNewlyVisible=()=>{
-                const before=new Set(Array.isArray(window.__selfrunProjectsBeforeOpen)?window.__selfrunProjectsBeforeOpen:[]);
-                return plain(visibleEntries(document).filter(item=>!before.has(item.url)));
-              };
-              let out=collectNearControl(projectControl);
+              const collectNewlyVisible=()=>collectNewItems(document);
+              let out=collectControlled(projectControl);
               if(out.length)return JSON.stringify({state:'FOUND',marker,entries:out});
               if(projectControl&&window.__selfrunProjectsOpenAttempted){
                 out=collectOpenedPortal();if(out.length)return JSON.stringify({state:'FOUND',marker:true,entries:out});
                 out=collectNewlyVisible();if(out.length)return JSON.stringify({state:'FOUND',marker:true,entries:out});
+                const beforeCount=Number(window.__selfrunProjectsBeforeCount||0),currentCount=visibleEntries(document).length;
+                if(beforeCount>currentCount&&!window.__selfrunProjectsReopenAttempted){
+                  window.__selfrunProjectsReopenAttempted=true;markBeforeOpen();projectControl.focus?.();projectControl.click();
+                  return JSON.stringify({state:'OPENING',marker:true,entries:[]});
+                }
               }
               if(projectControl&&!window.__selfrunProjectsOpenAttempted){
-                window.__selfrunProjectsBeforeOpen=visibleEntries(document).map(item=>item.url);
-                window.__selfrunProjectsOpenAttempted=true;
-                projectControl.focus?.();projectControl.click();
+                markBeforeOpen();window.__selfrunProjectsOpenAttempted=true;projectControl.focus?.();projectControl.click();
                 return JSON.stringify({state:'OPENING',marker:true,entries:[]});
               }
-              const more=controls.find(e=>/^(show more|view all|see all|더 보기|모두 보기)(?:\\s|$)/i.test(desc(e)));
-              if(projectControl&&more&&!window.__selfrunProjectsMoreAttempted){
-                window.__selfrunProjectsMoreAttempted=true;more.focus?.();more.click();
-                return JSON.stringify({state:'OPENING',marker:true,entries:[]});
-              }
-              for(const e of document.querySelectorAll('*')){try{const s=getComputedStyle(e);if((s.overflowY==='auto'||s.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+8)e.scrollTop=e.scrollHeight;}catch(_){}}
-              out=collectNearControl(projectControl);
-              if(out.length)return JSON.stringify({state:'FOUND',marker,entries:out});
+              const catalogScopes=[...controlledScopes(projectControl),...portalScopes()];
+              for(const scope of catalogScopes){try{const s=getComputedStyle(scope);if((s.overflowY==='auto'||s.overflowY==='scroll')&&scope.scrollHeight>scope.clientHeight+8)scope.scrollTop=scope.scrollHeight;}catch(_){}}
               if(projectControl&&window.__selfrunProjectsOpenAttempted){
+                out=collectControlled(projectControl);if(out.length)return JSON.stringify({state:'FOUND',marker:true,entries:out});
                 out=collectOpenedPortal();if(out.length)return JSON.stringify({state:'FOUND',marker:true,entries:out});
                 out=collectNewlyVisible();if(out.length)return JSON.stringify({state:'FOUND',marker:true,entries:out});
               }
