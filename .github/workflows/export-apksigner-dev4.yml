@@ -1,0 +1,35 @@
+name: Export apksigner for SelfRun Drive dev4
+
+on:
+  push:
+    branches:
+      - 'ops/selfrun-drive-dev4-apksigner-export'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android Build Tools 36.0.0
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'build-tools;36.0.0'
+      - name: Stage apksigner runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p export/lib
+          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" export/apksigner
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" export/lib/apksigner.jar
+          chmod +x export/apksigner
+          sha256sum export/apksigner export/lib/apksigner.jar > export/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-apksigner-36.0.0
+          path: export/
+          if-no-files-found: error
+          retention-days: 1
