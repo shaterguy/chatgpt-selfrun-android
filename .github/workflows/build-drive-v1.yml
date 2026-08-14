@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'selfrun-drive/v*-dev*'
+      - 'selfrun-drive/v*-rc*'
   workflow_dispatch:
 
 permissions:
