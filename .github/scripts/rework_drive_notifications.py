@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 from textwrap import dedent
+import re
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -10,13 +11,20 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def regex_once(text: str, pattern: str, replacement: str, label: str) -> str:
+    result, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"{label}: expected exactly one regex match, got {count}")
+    return result
+
+
 build = Path("app/build.gradle")
 b = build.read_text()
 b = replace_once(b, "def selfRunDriveVersionCode = 1000005", "def selfRunDriveVersionCode = 1000006", "versionCode")
 b = replace_once(b, "def selfRunDriveVersionName = '1.1.0-dev1'", "def selfRunDriveVersionName = '1.1.0-dev2'", "versionName")
 build.write_text(b)
 
-notification = dedent('''\
+Path("app/src/main/java/com/shaterguy/chatgptselfrun/NotificationHelper.java").write_text(dedent('''\
 package com.shaterguy.chatgptselfrun;
 
 import android.app.Notification;
@@ -111,8 +119,7 @@ final class NotificationHelper {
                 : PendingIntent.getService(context, requestCode, intent, flags);
     }
 }
-''')
-Path("app/src/main/java/com/shaterguy/chatgptselfrun/NotificationHelper.java").write_text(notification)
+'''))
 
 service_path = Path("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java")
 s = service_path.read_text()
@@ -125,21 +132,9 @@ s = replace_once(
     'case "PAUSED"->finishPersistedTerminalPause("DRIVE_PAUSED","일시정지",owner,raw,type);case "USER_ACTION_REQUIRED"->finishPersistedTerminalPause("DRIVE_USER_ACTION_REQUIRED","확인 필요",owner,raw,type);',
     "terminal pause mapping",
 )
-s = replace_once(
+s = regex_once(
     s,
-    dedent('''\
-        private void finishPersistedTerminalPause(String cause, boolean notify, String ownerRunId,
-                                                  String commitId, String type) {
-            if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
-            stopAutomationCallbacks();
-            releaseWakeLock();
-            pauseWebView();
-            runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
-            startForegroundCompat();
-            if (notify) NotificationHelper.notifyUser(this, "확인 필요", store.status());
-            store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type);
-        }
-    '''),
+    r'    private void finishPersistedTerminalPause\(String cause, boolean notify, String ownerRunId,\n\s+String commitId, String type\) \{.*?\n    \}\n',
     dedent('''\
         private void finishPersistedTerminalPause(String cause, String alertTitle, String ownerRunId,
                                                   String commitId, String type) {
@@ -154,15 +149,9 @@ s = replace_once(
     '''),
     "persisted pause side effect",
 )
-s = replace_once(
+s = regex_once(
     s,
-    dedent('''\
-        private void transition(String next, String status, String reason) {
-            String prior = store.phase(); store.setPhase(next); store.setStatus(status);
-            runLog.record(store, "STATE_TRANSITION", "from=" + prior + ";to=" + next + ";reason=" + reason);
-            startForegroundCompat();
-        }
-    '''),
+    r'    private void transition\(String next, String status, String reason\) \{.*?\n    \}\n',
     dedent('''\
         private void transition(String next, String status, String reason) {
             String prior = store.phase(); store.setPhase(next); store.setStatus(status);
@@ -171,13 +160,9 @@ s = replace_once(
     '''),
     "routine transition notification repost",
 )
-s = replace_once(
+s = regex_once(
     s,
-    dedent('''\
-        private void pauseFromUi() {
-            if (canRun()) enterPreservedPause("UI_PAUSE", "사용자 일시정지", false);
-        }
-    '''),
+    r'    private void pauseFromUi\(\) \{.*?\n    \}\n',
     dedent('''\
         private void pauseFromUi() {
             if (!canRun()) return;
@@ -204,24 +189,26 @@ if s.count("startForegroundCompat();") != 4:
     raise SystemExit(f"unexpected foreground post call count: {s.count('startForegroundCompat();')}")
 service_path.write_text(s)
 
-test_path = Path("app/src/test/java/com/shaterguy/chatgptselfrun/DriveVariantPolicyTest.java")
-t = test_path.read_text()
-t = replace_once(t, "selfRunDriveVersionCode = 1000005", "selfRunDriveVersionCode = 1000006", "test versionCode")
-t = replace_once(t, "selfRunDriveVersionName = '1.1.0-dev1'", "selfRunDriveVersionName = '1.1.0-dev2'", "test versionName")
-start = t.index(" @Test public void routineNotificationIsSilentAndPauseEscalates()")
-end = t.index("\n static String src", start)
-new_test = ''' @Test public void routineNotificationIsSilentAndAlertsAreEventDriven() throws Exception {String n=src("NotificationHelper.java"),s=src("SelfRunService.java");assertTrue(n.contains("RUNNING_CHANNEL = \\\"selfrun-drive-running-v2\\\""));assertTrue(n.contains("ALERT_CHANNEL = \\\"selfrun-drive-alerts-v2\\\""));assertTrue(n.contains("NotificationManager.IMPORTANCE_LOW"));assertTrue(n.contains("running.setSound(null, null)"));assertTrue(n.contains("running.enableVibration(false)"));assertTrue(n.contains(".setContentText(\\\"SelfRun 작업 중\\\")"));assertTrue(n.contains("NotificationManager.IMPORTANCE_HIGH"));assertTrue(n.contains("static Notification active(Context context)"));assertFalse(n.contains("runtimeStatus"));assertFalse(n.contains("maybeNotifyPause"));assertFalse(n.contains("SystemClock"));assertTrue(s.contains("NotificationHelper.notifyUser(this, \\\"일시정지\\\", store.status())"));assertTrue(s.contains("case \\\"PAUSED\\\"->finishPersistedTerminalPause(\\\"DRIVE_PAUSED\\\",\\\"일시정지\\\""));assertTrue(s.contains("case \\\"USER_ACTION_REQUIRED\\\"->finishPersistedTerminalPause(\\\"DRIVE_USER_ACTION_REQUIRED\\\",\\\"확인 필요\\\""));assertFalse(section(s,"private void transition","private void pauseError").contains("startForegroundCompat();"));assertFalse(section(s,"private void commandSubmitted","private void applyNextControl").contains("startForegroundCompat();"));}'''
-t = t[:start] + new_test + t[end:]
-helper = ' static String src(String f)throws Exception{return read("app/src/main/java/com/shaterguy/chatgptselfrun/"+f,"src/main/java/com/shaterguy/chatgptselfrun/"+f);}'
-t = replace_once(t, helper, ' static String section(String s,String a,String b){int x=s.indexOf(a),y=s.indexOf(b,x);assertTrue(x>=0&&y>x);return s.substring(x,y);}'+helper, "test section helper")
-test_path.write_text(t)
+Path("app/src/test/java/com/shaterguy/chatgptselfrun/DriveVariantPolicyTest.java").write_text(dedent('''\
+package com.shaterguy.chatgptselfrun;
+import org.junit.Test;
+import java.nio.file.*;
+import static org.junit.Assert.*;
+public class DriveVariantPolicyTest {
+ @Test public void developmentIdentityDefaultChatAndKeyboardVisibility() throws Exception {String g=read("app/build.gradle","build.gradle"),a=src("SelfRunNewActivity.java");assertTrue(g.contains("selfRunDriveVersionCode = 1000006"));assertTrue(g.contains("selfRunDriveVersionName = '1.1.0-dev2'"));assertTrue(g.contains("com.shaterguy.chatgptselfrun.drive"));assertTrue(a.contains("MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}"));assertTrue(a.contains("setMinLines(8)"));assertTrue(a.contains("setVerticalScrollBarEnabled(false)"));assertTrue(a.contains("descendantTopWithinScrollContent"));assertTrue(a.contains("outer.getPaddingBottom()"));assertTrue(a.contains("outer.scrollTo("));assertTrue(a.contains("addTextChangedListener"));assertFalse(a.contains("setMaxLines(24)"));assertFalse(a.contains("configureNestedCommandScrolling"));assertFalse(a.contains("requestRectangleOnScreen"));assertFalse(a.contains("getLocationOnScreen"));assertFalse(a.contains("WindowInsets"));assertFalse(a.contains("-editor.getScrollY()"));assertFalse(a.contains("Math.min(editor.getHeight()"));assertTrue(a.contains("RUN_SUFFIX_LENGTH = 6"));assertTrue(a.contains("Asia/Seoul"));assertFalse(a.contains("UUID.randomUUID"));}
+ @Test public void signalCursorReplacesCommitMetadata() throws Exception {String s=src("SelfRunService.java"),st=src("SelfRunStore.java"),p=src("DriveCommitParser.java");assertTrue(s.contains("DriveSignalParser.scan"));assertTrue(st.contains("driveSignalCursor"));assertTrue(p.contains("SELF_RUN_COMMAND_RECEIVED"));assertTrue(p.contains("SELF_RUN_TURN_COMPLETED"));assertFalse(s.contains("DriveCommitParser"));assertFalse(p.contains("EVENT_SEQ"));assertFalse(p.contains("PROTOCOL_VERSION"));}
+ @Test public void noCompletionDomGate() throws Exception {String s=src("SelfRunService.java");assertFalse(s.contains("checkDriveTurnSubmitted"));assertFalse(s.contains("observeAssistant"));assertTrue(s.contains("CONTINUATION_GUARD_MS = 45_000L"));assertTrue(s.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));}
+ @Test public void workDocIdentityMetadataIsMinimal() throws Exception {String a=src("DriveApiClient.java");assertTrue(a.contains(".put(\\\"job_id\\\", name)"));assertTrue(a.contains(".put(\\\"selfrun_kind\\\", kind)"));assertFalse(a.contains(".put(\\\"protocol_version\\\""));assertFalse(a.contains(".put(\\\"client_id\\\""));}
+ @Test public void routineNotificationIsSilentAndAlertsAreEventDriven() throws Exception {String n=src("NotificationHelper.java"),s=src("SelfRunService.java");assertTrue(n.contains("RUNNING_CHANNEL = \\\"selfrun-drive-running-v2\\\""));assertTrue(n.contains("ALERT_CHANNEL = \\\"selfrun-drive-alerts-v2\\\""));assertTrue(n.contains("NotificationManager.IMPORTANCE_LOW"));assertTrue(n.contains("running.setSound(null, null)"));assertTrue(n.contains("running.enableVibration(false)"));assertTrue(n.contains(".setContentText(\\\"SelfRun 작업 중\\\")"));assertTrue(n.contains("NotificationManager.IMPORTANCE_HIGH"));assertTrue(n.contains("static Notification active(Context context)"));assertFalse(n.contains("runtimeStatus"));assertFalse(n.contains("maybeNotifyPause"));assertFalse(n.contains("SystemClock"));assertTrue(s.contains("NotificationHelper.notifyUser(this, \\\"일시정지\\\", store.status())"));assertTrue(s.contains("case \\\"PAUSED\\\"->finishPersistedTerminalPause(\\\"DRIVE_PAUSED\\\",\\\"일시정지\\\""));assertTrue(s.contains("case \\\"USER_ACTION_REQUIRED\\\"->finishPersistedTerminalPause(\\\"DRIVE_USER_ACTION_REQUIRED\\\",\\\"확인 필요\\\""));assertFalse(section(s,"private void transition","private void pauseError").contains("startForegroundCompat();"));assertFalse(section(s,"private void commandSubmitted","private void applyNextControl").contains("startForegroundCompat();"));}
+ static String section(String s,String a,String b){int x=s.indexOf(a),y=s.indexOf(b,x);assertTrue(x>=0&&y>x);return s.substring(x,y);} static String src(String f)throws Exception{return read("app/src/main/java/com/shaterguy/chatgptselfrun/"+f,"src/main/java/com/shaterguy/chatgptselfrun/"+f);} static String read(String a,String b)throws Exception{Path p=Paths.get(a);if(!Files.exists(p))p=Paths.get(b);return new String(Files.readAllBytes(p),java.nio.charset.StandardCharsets.UTF_8);}
+}
+'''))
 
 verify_path = Path("tools/verify_drive_variant.sh")
 v = verify_path.read_text()
 v = replace_once(v, "grep -Fq 'selfRunDriveVersionCode = 1000005' \"$BUILD\"", "grep -Fq 'selfRunDriveVersionCode = 1000006' \"$BUILD\"", "policy versionCode")
 v = replace_once(v, "grep -Fq \"selfRunDriveVersionName = '1.1.0-dev1'\" \"$BUILD\"", "grep -Fq \"selfRunDriveVersionName = '1.1.0-dev2'\" \"$BUILD\"", "policy versionName")
-old_check = "grep -Fq 'runtimeStatus.contains(\"일시정지\")' \"$NOTIFICATION\""
-new_checks = dedent('''\
+v = replace_once(v, "grep -Fq 'runtimeStatus.contains(\"일시정지\")' \"$NOTIFICATION\"", dedent('''\
 grep -Fq 'static Notification active(Context context)' "$NOTIFICATION"
 ! grep -Fq 'runtimeStatus' "$NOTIFICATION"
 ! grep -Fq 'maybeNotifyPause' "$NOTIFICATION"
@@ -241,7 +228,6 @@ if grep -Fq 'startForegroundCompat();' <<<"$COMMAND_BLOCK"; then
 fi
 FG_POST_COUNT="$(grep -o 'startForegroundCompat();' "$SERVICE" | wc -l | tr -d ' ')"
 [[ "$FG_POST_COUNT" == '4' ]]
-''').rstrip()
-v = replace_once(v, old_check, new_checks, "policy event-driven notification checks")
+''').rstrip(), "policy event checks")
 v = replace_once(v, "echo 'SelfRun Drive v1.1.0-dev1 policy checks passed.'", "echo 'SelfRun Drive v1.1.0-dev2 policy checks passed.'", "policy success label")
 verify_path.write_text(v)
