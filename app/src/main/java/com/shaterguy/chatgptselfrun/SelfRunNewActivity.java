@@ -2,13 +2,14 @@ package com.shaterguy.chatgptselfrun;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Layout;
 import android.text.TextWatcher;
+import android.view.View;
+import android.view.ViewParent;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -62,13 +63,37 @@ public final class SelfRunNewActivity extends Activity {
     private void keepCommandCursorVisible() {
         EditText editor=requirement; if(editor==null||!editor.hasFocus())return;
         Layout layout=editor.getLayout(); if(layout==null||editor.getWidth()<=0)return;
+        ScrollView outer=findOuterScrollView(editor); if(outer==null||outer.getHeight()<=0)return;
         int selection=Math.max(0,Math.min(editor.getSelectionStart(),editor.length()));
         int line=layout.getLineForOffset(selection); int margin=Ui.dp(this,12);
-        int left=Math.max(0,editor.getTotalPaddingLeft());
-        int top=Math.max(0,editor.getTotalPaddingTop()+layout.getLineTop(line)-margin);
-        int right=Math.max(left+1,editor.getWidth()-editor.getTotalPaddingRight());
-        int bottom=editor.getTotalPaddingTop()+layout.getLineBottom(line)+margin;
-        editor.requestRectangleOnScreen(new Rect(left,top,right,bottom),true);
+        int editorTop=descendantTopWithinScrollContent(editor,outer);
+        if(editorTop<0)return;
+        int caretTop=editorTop+editor.getTotalPaddingTop()+layout.getLineTop(line)-margin;
+        int caretBottom=editorTop+editor.getTotalPaddingTop()+layout.getLineBottom(line)+margin;
+        int currentScroll=outer.getScrollY();
+        int visibleTop=currentScroll+outer.getPaddingTop();
+        int visibleBottom=currentScroll+outer.getHeight()-outer.getPaddingBottom();
+        int targetScroll=currentScroll;
+        if(caretBottom>visibleBottom)targetScroll+=caretBottom-visibleBottom;
+        else if(caretTop<visibleTop)targetScroll-=visibleTop-caretTop;
+        if(targetScroll!=currentScroll)outer.scrollTo(outer.getScrollX(),Math.max(0,targetScroll));
+    }
+
+    private static int descendantTopWithinScrollContent(View descendant, ScrollView outer) {
+        int top=0; View current=descendant;
+        while(current!=outer){
+            top+=current.getTop();
+            ViewParent parent=current.getParent();
+            if(!(parent instanceof View))return -1;
+            current=(View)parent;
+        }
+        return top;
+    }
+
+    private static ScrollView findOuterScrollView(View child) {
+        ViewParent parent=child.getParent();
+        while(parent instanceof View){if(parent instanceof ScrollView)return (ScrollView)parent; parent=((View)parent).getParent();}
+        return null;
     }
 
     private void startSelfRun() {

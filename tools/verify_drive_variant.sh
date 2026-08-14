@@ -16,7 +16,9 @@ grep -Fq "selfRunDriveVersionName = '1.0.0'" "$BUILD"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
 grep -Fq 'setMinLines(8)' "$ACTIVITY"
 grep -Fq 'setVerticalScrollBarEnabled(false)' "$ACTIVITY"
-grep -Fq 'requestRectangleOnScreen(new Rect(left,top,right,bottom),true)' "$ACTIVITY"
+grep -Fq 'descendantTopWithinScrollContent' "$ACTIVITY"
+grep -Fq 'outer.getPaddingBottom()' "$ACTIVITY"
+grep -Fq 'outer.scrollTo(' "$ACTIVITY"
 grep -Fq 'addTextChangedListener' "$ACTIVITY"
 if grep -Fq 'setMaxLines(24)' "$ACTIVITY"; then
   echo 'command editor must grow with content instead of owning a bounded nested vertical scroll' >&2
@@ -26,12 +28,16 @@ if grep -Fq 'configureNestedCommandScrolling' "$ACTIVITY"; then
   echo 'nested command scrolling is forbidden; outer ScrollView owns vertical scrolling' >&2
   exit 1
 fi
-if grep -Fq 'scrollCommandWindowToCaret' "$ACTIVITY"; then
-  echo 'manual screen-coordinate outer scrolling is forbidden' >&2
+if grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"; then
+  echo 'generic descendant visibility requests are insufficient for the IME-reserved ScrollView viewport' >&2
+  exit 1
+fi
+if grep -Fq 'getLocationOnScreen' "$ACTIVITY" || grep -Fq 'WindowInsets' "$ACTIVITY"; then
+  echo 'command visibility must be computed in ScrollView content coordinates, not mixed screen/inset coordinates' >&2
   exit 1
 fi
 if grep -Fq -- '-editor.getScrollY()' "$ACTIVITY"; then
-  echo 'requestRectangleOnScreen caret rectangle must remain in editor content coordinates' >&2
+  echo 'command caret content coordinates must not pre-subtract editor scroll state' >&2
   exit 1
 fi
 if grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"; then
