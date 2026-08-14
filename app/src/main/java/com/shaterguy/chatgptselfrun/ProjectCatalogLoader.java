@@ -48,11 +48,21 @@ final class ProjectCatalogLoader {
                 const valid=tail.length===0||(tail.length===1&&tail[0]==='project');
                 return valid?'https://chatgpt.com/g/'+parts[1]+'/project':'';
               }catch(_){return '';}};
+              const projectContextUrl=raw=>{try{
+                if(!raw)return '';
+                const u=new URL(String(raw),location.href);
+                if(u.protocol!=='https:'||!/^(www\\.)?chatgpt\\.com$/i.test(u.hostname))return '';
+                const parts=u.pathname.split('/').filter(Boolean);
+                if(parts.length<2||parts[0]!=='g'||!/^g-p-[A-Za-z0-9_-]+$/.test(parts[1]))return '';
+                const tail=parts.slice(2);
+                const valid=tail.length===0||(tail.length===1&&tail[0]==='project')||(tail.length===2&&tail[0]==='c'&&!!tail[1]);
+                return valid?'https://chatgpt.com/g/'+parts[1]+'/project':'';
+              }catch(_){return '';}};
               const candidateValues=e=>{const values=[];if(!e?.getAttribute)return values;
                 for(const key of ['href','data-href','data-url','data-path','data-to']){const value=e.getAttribute(key);if(value)values.push(value);}
                 return values;
               };
-              const isProjectLink=e=>candidateValues(e).some(v=>!!projectUrl(v));
+              const isProjectLink=e=>candidateValues(e).some(v=>!!projectContextUrl(v));
               const controls=[...document.querySelectorAll('button,[role=button],[role=menuitem],[role=treeitem],[role=link],a')].filter(visible);
               const isProjectsControl=e=>/^(projects?|프로젝트)(?:\\s|$)/i.test(desc(e))&&!isProjectLink(e);
               const projectControl=controls.find(isProjectsControl)||null;

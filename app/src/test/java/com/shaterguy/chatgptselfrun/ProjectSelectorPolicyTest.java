@@ -32,8 +32,11 @@ public class ProjectSelectorPolicyTest {
         assertTrue(loader.contains("desktopFallbackAttempted"));
         assertTrue(loader.contains("data-href"));
         assertTrue(loader.contains("data-url"));
+        assertTrue(loader.contains("const projectContextUrl=raw=>"));
         assertTrue(loader.contains("const valid=tail.length===0||(tail.length===1&&tail[0]==='project');"));
-        assertFalse(loader.contains("tail[0]==='c'"));
+        assertTrue(loader.contains("const isProjectLink=e=>candidateValues(e).some(v=>!!projectContextUrl(v));"));
+        assertTrue(loader.contains("const url=projectUrl(raw);if(!url)continue;"));
+        assertTrue(loader.contains("tail[0]==='c'"));
         assertTrue(loader.contains("aria-controls"));
         assertTrue(loader.contains("aria-owns"));
         assertTrue(loader.contains("collectControlled"));
