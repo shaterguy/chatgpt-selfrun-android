@@ -8,6 +8,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class SelfRunProtocol {
+    static final String SELF_RUN_SKILL_DOCUMENT_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
+
     enum Type { NEXT, DONE, USER_ACTION, PAUSE, NONE }
     static final class Signal {
         final Type type; final String raw,runId,role,model,reasoning,actionId;
@@ -27,7 +29,20 @@ final class SelfRunProtocol {
     }
     static boolean validWorkProfile(String model,String reasoning){if(!("sol".equals(model)||"terra".equals(model)||"luna".equals(model)))return false;if(!("high".equals(reasoning)||"xhigh".equals(reasoning)||"max".equals(reasoning)||"ultra".equals(reasoning)))return false;return !"luna".equals(model)||"max".equals(reasoning)||"ultra".equals(reasoning);}
     static String bootstrap(String runId,String mode,String requirement){return "[SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n\n"+requirement.trim();}
-    static String bootstrapDrive(String runId,String mode,String requirement,String documentId){return "["+kstTimestamp(new Date())+"] [SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\nSELF_RUN_CLIENT=DRIVE_V1\nDRIVE_TURN_DOCUMENT_ID="+documentId+"\n이 명령을 실제 수신하면 실질 작업 시작 전에 위 작업문서 끝에 `[현재 KST 시각] [SELF_RUN_COMMAND_RECEIVED "+runId+"]`를 기록하고 readback한다.\n최종 답변 직전에는 HANDOFF를 conversation에만 유지하고 상태에 맞는 Drive SelfRun 단일행 신호를 현재 KST 시각과 Job ID로 기록한 뒤 readback한다.\n\n"+requirement.trim();}
+    static String bootstrapDrive(String runId,String mode,String requirement,String documentId){
+        String originalRequirement=requirement==null?"":requirement;
+        return "["+kstTimestamp(new Date())+"] [SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n"
+                +"SELF_RUN_CLIENT=DRIVE_V1\n"
+                +"SELF_RUN_SKILL_DOCUMENT_ID="+SELF_RUN_SKILL_DOCUMENT_ID+"\n"
+                +"DRIVE_TURN_DOCUMENT_ID="+documentId+"\n\n"
+                +"이 실행은 SelfRun이다.\n\n"
+                +"실질 작업을 시작하기 전에 위 SelfRun 운영문서 ID가 가리키는 Google Drive 문서의 현재 최신 메타데이터와 전체 내용을 읽고 SelfRun 실행 규범으로 적용한다.\n\n"
+                +"현재 conversation이 ChatGPT Project 내부의 대화라면 해당 Project의 프로젝트 지침과 그 지침이 지정하는 SKILL·운영문서도 함께 적용한다. 프로젝트의 업무·도메인·데이터·산출물·프로젝트 고유 운영 규칙은 해당 Project 규범을 따른다.\n\n"
+                +"SelfRun의 역할 전환, HANDOFF, continuation, SelfRun 제어신호, Drive 실행턴 signal, pause/resume의 AI 측 의미, SelfRun 완료 판정은 위 canonical SelfRun 운영문서를 따른다.\n\n"
+                +"앱은 현재 대화가 Project인지 직접 판정하지 않는다.\n\n"
+                +"위 메타데이터 및 설명 뒤에 사용자가 앱에 입력한 원본 요구사항을 내용 손실이나 요약 없이 그대로 붙인다.\n\n"
+                +originalRequirement;
+    }
     static String continuation(String runId){return "[SELF_RUN_CONTINUE "+runId+"]";}
     static String driveContinuation(String runId){return "["+kstTimestamp(new Date())+"] "+continuation(runId);}
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}

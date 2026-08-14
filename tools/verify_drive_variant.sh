@@ -8,12 +8,22 @@ STORE=$SRC/SelfRunStore.java
 PROTOCOL=$SRC/SelfRunProtocol.java
 PARSER=$SRC/DriveCommitParser.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
+SETUP=$SRC/DriveSetupActivity.java
+AUTH=$SRC/DriveAuthorization.java
 API=$SRC/DriveApiClient.java
 NOTIFICATION=$SRC/NotificationHelper.java
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
-grep -Fq 'selfRunDriveVersionCode = 1000006' "$BUILD"
-grep -Fq "selfRunDriveVersionName = '1.1.0-dev2'" "$BUILD"
+grep -Fq 'selfRunDriveVersionCode = 1000007' "$BUILD"
+grep -Fq "selfRunDriveVersionName = '1.1.0-dev3'" "$BUILD"
+grep -Fq 'SELF_RUN_SKILL_DOCUMENT_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs"' "$PROTOCOL"
+grep -Fq '"SELF_RUN_SKILL_DOCUMENT_ID="+SELF_RUN_SKILL_DOCUMENT_ID' "$PROTOCOL"
+! grep -Fq 'Vibe Coding' "$PROTOCOL"
+grep -Fq '/GPT/Self Run/Runs/' "$SETUP"
+! grep -Fq '/GPT/Project/Vibe Coding/00_System/SelfRun/Runs/' "$SETUP"
+grep -Fq 'DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"' "$AUTH"
+! grep -Fq '"https://www.googleapis.com/auth/drive";' "$AUTH"
+! grep -Fq '"https://www.googleapis.com/auth/drive.readonly";' "$AUTH"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
 grep -Fq 'setMinLines(8)' "$ACTIVITY"
 grep -Fq 'setVerticalScrollBarEnabled(false)' "$ACTIVITY"
@@ -21,34 +31,15 @@ grep -Fq 'descendantTopWithinScrollContent' "$ACTIVITY"
 grep -Fq 'outer.getPaddingBottom()' "$ACTIVITY"
 grep -Fq 'outer.scrollTo(' "$ACTIVITY"
 grep -Fq 'addTextChangedListener' "$ACTIVITY"
-if grep -Fq 'setMaxLines(24)' "$ACTIVITY"; then
-  echo 'command editor must grow with content instead of owning a bounded nested vertical scroll' >&2
-  exit 1
-fi
-if grep -Fq 'configureNestedCommandScrolling' "$ACTIVITY"; then
-  echo 'nested command scrolling is forbidden; outer ScrollView owns vertical scrolling' >&2
-  exit 1
-fi
-if grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"; then
-  echo 'generic descendant visibility requests are insufficient for the IME-reserved ScrollView viewport' >&2
-  exit 1
-fi
-if grep -Fq 'getLocationOnScreen' "$ACTIVITY" || grep -Fq 'WindowInsets' "$ACTIVITY"; then
-  echo 'command visibility must be computed in ScrollView content coordinates, not mixed screen/inset coordinates' >&2
-  exit 1
-fi
-if grep -Fq -- '-editor.getScrollY()' "$ACTIVITY"; then
-  echo 'command caret content coordinates must not pre-subtract editor scroll state' >&2
-  exit 1
-fi
-if grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"; then
-  echo 'caret coordinates must not be clamped to the editor viewport' >&2
-  exit 1
-fi
+if grep -Fq 'setMaxLines(24)' "$ACTIVITY"; then echo 'command editor must grow with content instead of owning a bounded nested vertical scroll' >&2; exit 1; fi
+if grep -Fq 'configureNestedCommandScrolling' "$ACTIVITY"; then echo 'nested command scrolling is forbidden; outer ScrollView owns vertical scrolling' >&2; exit 1; fi
+if grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"; then echo 'generic descendant visibility requests are insufficient for the IME-reserved ScrollView viewport' >&2; exit 1; fi
+if grep -Fq 'getLocationOnScreen' "$ACTIVITY" || grep -Fq 'WindowInsets' "$ACTIVITY"; then echo 'command visibility must be computed in ScrollView content coordinates, not mixed screen/inset coordinates' >&2; exit 1; fi
+if grep -Fq -- '-editor.getScrollY()' "$ACTIVITY"; then echo 'command caret content coordinates must not pre-subtract editor scroll state' >&2; exit 1; fi
+if grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"; then echo 'caret coordinates must not be clamped to the editor viewport' >&2; exit 1; fi
 grep -Fq 'RUN_SUFFIX_LENGTH = 6' "$ACTIVITY"
 grep -Fq 'TimeZone.getTimeZone("Asia/Seoul")' "$ACTIVITY"
 ! grep -Fq 'UUID.randomUUID' "$ACTIVITY"
-grep -Fq 'SELF_RUN_COMMAND_RECEIVED' "$PROTOCOL"
 grep -Fq 'driveContinuation' "$PROTOCOL"
 grep -Fq 'kstTimestamp' "$PROTOCOL"
 grep -Fq 'DriveSignalParser.scan' "$SERVICE"
@@ -90,15 +81,9 @@ grep -Fq 'NotificationHelper.notifyUser(this, "일시정지", store.status())' "
 grep -Fq 'case "PAUSED"->finishPersistedTerminalPause("DRIVE_PAUSED","일시정지"' "$SERVICE"
 grep -Fq 'case "USER_ACTION_REQUIRED"->finishPersistedTerminalPause("DRIVE_USER_ACTION_REQUIRED","확인 필요"' "$SERVICE"
 TRANSITION_BLOCK="$(sed -n '/private void transition/,/private void pauseError/p' "$SERVICE")"
-if grep -Fq 'startForegroundCompat();' <<<"$TRANSITION_BLOCK"; then
-  echo 'routine transitions must not repost the foreground notification' >&2
-  exit 1
-fi
+if grep -Fq 'startForegroundCompat();' <<<"$TRANSITION_BLOCK"; then echo 'routine transitions must not repost the foreground notification' >&2; exit 1; fi
 COMMAND_BLOCK="$(grep -F 'private void commandSubmitted' "$SERVICE")"
-if grep -Fq 'startForegroundCompat();' <<<"$COMMAND_BLOCK"; then
-  echo 'command submission must not repost the foreground notification' >&2
-  exit 1
-fi
+if grep -Fq 'startForegroundCompat();' <<<"$COMMAND_BLOCK"; then echo 'command submission must not repost the foreground notification' >&2; exit 1; fi
 FG_POST_COUNT="$(grep -o 'startForegroundCompat();' "$SERVICE" | wc -l | tr -d ' ')"
 [[ "$FG_POST_COUNT" == '4' ]]
-echo 'SelfRun Drive v1.1.0-dev2 policy checks passed.'
+echo 'SelfRun Drive v1.1.0-dev3 policy checks passed.'
