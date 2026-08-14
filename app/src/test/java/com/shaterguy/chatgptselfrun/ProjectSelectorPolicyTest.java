@@ -17,7 +17,7 @@ public class ProjectSelectorPolicyTest {
         assertFalse(activity.contains("TYPE_TEXT_VARIATION_URI"));
     }
 
-    @Test public void discoveryIsScopedFailClosedNavigationAwareAndOriginValidated() throws Exception {
+    @Test public void discoveryIsTransitionScopedFailClosedNavigationAwareAndOriginValidated() throws Exception {
         String loader=src("ProjectCatalogLoader.java"),catalog=src("ProjectCatalog.java"),web=src("WebViewConfig.java");
         assertTrue(loader.contains("evaluateJavascript(PROBE_JS"));
         assertTrue(loader.contains("ProjectCatalog.isTrustedChatgptPage"));
@@ -33,11 +33,16 @@ public class ProjectSelectorPolicyTest {
         assertTrue(loader.contains("data-href"));
         assertTrue(loader.contains("data-url"));
         assertTrue(loader.contains("tail[0]==='c'"));
-        assertTrue(loader.contains("collectScoped"));
-        assertTrue(loader.contains("collectNearControl"));
+        assertTrue(loader.contains("aria-controls"));
+        assertTrue(loader.contains("aria-owns"));
+        assertTrue(loader.contains("collectControlled"));
         assertTrue(loader.contains("collectOpenedPortal"));
         assertTrue(loader.contains("collectNewlyVisible"));
-        assertTrue(loader.contains("__selfrunProjectsBeforeOpen"));
+        assertTrue(loader.contains("__selfrunProjectsBeforeElements=new WeakSet"));
+        assertTrue(loader.contains("__selfrunProjectsBeforeCounts"));
+        assertTrue(loader.contains("collectNewItems"));
+        assertFalse(loader.contains("collectNearControl"));
+        assertFalse(loader.contains("compareDocumentPosition"));
         assertFalse(loader.contains("value.includes('g-p-')"));
         assertFalse(loader.contains("for(const attr of Array.from(e.attributes||[]))"));
         assertTrue(loader.contains("fallbackOrFail(\"PROJECT_LIST_UNRESOLVED\")"));
