@@ -19,6 +19,8 @@ final class SelfRunNetworkGuard {
     static final String ARM_KEY = "selfrun-drive:parent-guard:arm";
     static final String RESULT_KEY = "selfrun-drive:parent-guard:result";
     static final String INSTALLED_FLAG = "__selfRunDriveParentGuardInstalled";
+    static final String LIVENESS_FN = "__selfRunDriveParentGuardAlive";
+    static final String MEMORY_RESULT = "__selfRunDriveParentGuardResult";
 
     private SelfRunNetworkGuard() {}
 
@@ -44,38 +46,60 @@ final class SelfRunNetworkGuard {
                   const nativeOpen = NativeXHR?.prototype?.open;
                   const nativeSend = NativeXHR?.prototype?.send;
                   const nativeSetHeader = NativeXHR?.prototype?.setRequestHeader;
+                  let guardedFetch = null;
+                  let guardedOpen = null;
+                  let guardedSend = null;
+                  let guardedSetHeader = null;
 
                   const now = () => Date.now();
                   const normalize = value => String(value ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-                  const targetPath = value => {
+                  const pathOf = value => {
                     try {
                       const rawPath = new URL(String(value), location.href).pathname;
-                      const path = rawPath.endsWith('/') ? rawPath.slice(0, -1) : rawPath;
-                      return path === '/backend-api/f/conversation' || path === '/backend-api/conversation';
-                    } catch (_) { return false; }
+                      return rawPath.endsWith('/') ? rawPath.slice(0, -1) : rawPath;
+                    } catch (_) { return ''; }
+                  };
+                  const targetPath = value => {
+                    const path = pathOf(value);
+                    return path === '/backend-api/f/conversation' || path === '/backend-api/conversation';
                   };
                   const readArm = () => {
                     try {
                       const raw = sessionStorage.getItem(ARM_KEY) || '';
                       const arm = raw ? JSON.parse(raw) : null;
-                      if (!arm || !arm.markerId || !arm.conversationId || !arm.expected
-                              || Number(arm.expiresAt || 0) <= now()) {
-                        if (raw) sessionStorage.removeItem(ARM_KEY);
-                        return null;
-                      }
+                      if (!arm || !arm.markerId || !arm.conversationId || !arm.expected) return null;
                       return arm;
                     } catch (_) { return null; }
                   };
                   const clearArm = () => { try { sessionStorage.removeItem(ARM_KEY); } catch (_) {} };
                   const writeResult = (arm, state, code) => {
-                    try {
-                      sessionStorage.setItem(RESULT_KEY, JSON.stringify({
-                        markerId: String(arm?.markerId || ''),
-                        state: String(state || ''),
-                        code: String(code || ''),
-                        at: now()
-                      }));
-                    } catch (_) {}
+                    const value = {
+                      markerId: String(arm?.markerId || ''),
+                      state: String(state || ''),
+                      code: String(code || ''),
+                      at: now()
+                    };
+                    try { window.__selfRunDriveParentGuardResult = value; } catch (_) {}
+                    try { sessionStorage.setItem(RESULT_KEY, JSON.stringify(value)); } catch (_) {}
+                  };
+                  const stage = (arm, state, code = '') => writeResult(arm, state, code);
+                  const classify = error => {
+                    const raw = String(error?.message || error || '');
+                    if (raw === 'armed_continue_payload_mismatch') return 'PAYLOAD_MISMATCH';
+                    if (raw === 'parent_message_id_missing') return 'PARENT_ID_MISSING';
+                    if (raw === 'conversation_body_unreadable') return 'BODY_UNREADABLE';
+                    if (raw === 'conversation_endpoint_mismatch') return 'ENDPOINT_MISMATCH';
+                    if (raw === 'canonical_parent_missing') return 'CANONICAL_MISSING';
+                    if (raw === 'canonical_parent_generating') return 'CANONICAL_GENERATING';
+                    if (raw === 'guard_expired_before_forward') return 'HANDSHAKE_TIMEOUT';
+                    if (raw === 'conversation_forward_failed') return 'FORWARD_FAILED';
+                    if (/^canonical_parent_http_\d+$/.test(raw)) return raw.replace('canonical_parent_http_', 'CANONICAL_HTTP_');
+                    return 'GUARD_INTERNAL_FAILURE';
+                  };
+                  const failClosed = (arm, error) => {
+                    const code = classify(error);
+                    stage(arm, 'failed', code);
+                    clearArm();
                   };
                   const outgoingAuth = (request, init, xhrHeaders) => {
                     let value = '';
@@ -87,7 +111,8 @@ final class SelfRunNetworkGuard {
                     if (xhrHeaders?.authorization) value = String(xhrHeaders.authorization);
                     return value;
                   };
-                  const canonicalParent = async (conversationId, auth) => {
+                  const canonicalParent = async (conversationId, auth, arm) => {
+                    stage(arm, 'canonical_fetch_start');
                     const options = { credentials: 'include', cache: 'no-store' };
                     if (auth) options.headers = { Authorization: auth };
                     let response = await nativeFetch(
@@ -117,6 +142,7 @@ final class SelfRunNetworkGuard {
                     if (/in_progress|streaming|pending/i.test(status)) {
                       throw new Error('canonical_parent_generating');
                     }
+                    stage(arm, 'canonical_fetch_ok');
                     return parent;
                   };
                   const matchesArmedContinue = (payload, arm) => {
@@ -128,73 +154,106 @@ final class SelfRunNetworkGuard {
                       return parts.some(part => typeof part === 'string' && normalize(part) === expected);
                     });
                   };
+                  const parseBody = async (request, init) => {
+                    let bodyText = init?.body;
+                    if (bodyText == null && request) bodyText = await request.clone().text();
+                    if (typeof bodyText !== 'string') throw new Error('conversation_body_unreadable');
+                    return JSON.parse(bodyText);
+                  };
                   const rewritePayload = async (payload, arm, auth) => {
                     if (!matchesArmedContinue(payload, arm)) throw new Error('armed_continue_payload_mismatch');
+                    stage(arm, 'payload_matched');
                     if (!Object.prototype.hasOwnProperty.call(payload || {}, 'parent_message_id')) {
                       throw new Error('parent_message_id_missing');
                     }
-                    const parent = await canonicalParent(arm.conversationId, auth);
+                    const parent = await canonicalParent(arm.conversationId, auth, arm);
+                    if (Number(arm.expiresAt || 0) <= now()) throw new Error('guard_expired_before_forward');
                     payload.parent_message_id = parent;
+                    stage(arm, 'parent_rewritten');
                     return payload;
                   };
-                  const failClosed = (arm, error) => {
-                    clearArm();
-                    writeResult(arm, 'failed', String(error?.message || error || 'parent_guard_failed'));
+                  const matchingUnexpectedEndpoint = async (request, init, arm) => {
+                    try {
+                      const payload = await parseBody(request, init);
+                      return matchesArmedContinue(payload, arm);
+                    } catch (_) { return false; }
                   };
 
-                  window.fetch = async function(input, init) {
+                  guardedFetch = async function(input, init) {
                     const request = typeof Request !== 'undefined' && input instanceof Request ? input : null;
                     const method = String(init?.method || request?.method || 'GET').toUpperCase();
                     const url = request?.url || input;
                     const arm = readArm();
-                    if (!arm || method !== 'POST' || !targetPath(url)) return nativeFetch(input, init);
+                    if (!arm || method !== 'POST') return nativeFetch(input, init);
+                    if (!targetPath(url)) {
+                      if (await matchingUnexpectedEndpoint(request, init, arm)) {
+                        failClosed(arm, new Error('conversation_endpoint_mismatch'));
+                        throw new Error('selfrun_parent_guard_blocked');
+                      }
+                      return nativeFetch(input, init);
+                    }
 
+                    stage(arm, 'post_intercepted');
                     try {
-                      let bodyText = init?.body;
-                      if (bodyText == null && request) bodyText = await request.clone().text();
-                      if (typeof bodyText !== 'string') throw new Error('conversation_body_unreadable');
-                      const payload = JSON.parse(bodyText);
+                      const payload = await parseBody(request, init);
                       const rewritten = await rewritePayload(payload, arm, outgoingAuth(request, init, null));
                       const rewrittenText = JSON.stringify(rewritten);
-                      clearArm();
+                      stage(arm, 'forwarding');
                       let response;
-                      if (request) {
-                        response = await nativeFetch(new Request(request, { ...(init || {}), body: rewrittenText }));
-                      } else {
-                        response = await nativeFetch(input, { ...(init || {}), body: rewrittenText });
+                      try {
+                        if (request) {
+                          response = await nativeFetch(new Request(request, { ...(init || {}), body: rewrittenText }));
+                        } else {
+                          response = await nativeFetch(input, { ...(init || {}), body: rewrittenText });
+                        }
+                      } catch (_) {
+                        throw new Error('conversation_forward_failed');
                       }
-                      writeResult(arm, 'forwarded', 'canonical_parent_applied');
+                      stage(arm, 'forwarded', 'CANONICAL_PARENT_APPLIED');
+                      clearArm();
                       return response;
                     } catch (error) {
                       failClosed(arm, error);
                       throw error;
                     }
                   };
+                  window.fetch = guardedFetch;
 
                   if (NativeXHR && nativeOpen && nativeSend && nativeSetHeader) {
-                    NativeXHR.prototype.open = function(method, url, ...rest) {
+                    guardedOpen = function(method, url, ...rest) {
                       this.__srMethod = String(method || 'GET').toUpperCase();
                       this.__srUrl = String(url || '');
                       this.__srHeaders = {};
                       return nativeOpen.call(this, method, url, ...rest);
                     };
-                    NativeXHR.prototype.setRequestHeader = function(name, value) {
+                    guardedSetHeader = function(name, value) {
                       try { this.__srHeaders[String(name || '').toLowerCase()] = String(value || ''); }
                       catch (_) {}
                       return nativeSetHeader.call(this, name, value);
                     };
-                    NativeXHR.prototype.send = function(body) {
+                    guardedSend = function(body) {
                       const xhr = this;
                       const arm = readArm();
-                      if (!arm || xhr.__srMethod !== 'POST' || !targetPath(xhr.__srUrl)) {
+                      if (!arm || xhr.__srMethod !== 'POST') return nativeSend.call(xhr, body);
+
+                      let payload = null;
+                      try {
+                        if (typeof body === 'string') payload = JSON.parse(body);
+                      } catch (_) {}
+                      if (!targetPath(xhr.__srUrl)) {
+                        if (payload && matchesArmedContinue(payload, arm)) {
+                          failClosed(arm, new Error('conversation_endpoint_mismatch'));
+                          try { xhr.abort(); } catch (_) {}
+                          return undefined;
+                        }
                         return nativeSend.call(xhr, body);
                       }
 
-                      let payload;
+                      stage(arm, 'post_intercepted');
                       try {
-                        if (typeof body !== 'string') throw new Error('conversation_body_unreadable');
-                        payload = JSON.parse(body);
+                        if (!payload) throw new Error('conversation_body_unreadable');
                         if (!matchesArmedContinue(payload, arm)) throw new Error('armed_continue_payload_mismatch');
+                        stage(arm, 'payload_matched');
                       } catch (error) {
                         failClosed(arm, error);
                         try { xhr.abort(); } catch (_) {}
@@ -205,9 +264,11 @@ final class SelfRunNetworkGuard {
                         try {
                           const rewritten = await rewritePayload(
                                   payload, arm, outgoingAuth(null, null, xhr.__srHeaders));
+                          stage(arm, 'forwarding');
+                          try { nativeSend.call(xhr, JSON.stringify(rewritten)); }
+                          catch (_) { throw new Error('conversation_forward_failed'); }
+                          stage(arm, 'forwarded', 'CANONICAL_PARENT_APPLIED');
                           clearArm();
-                          nativeSend.call(xhr, JSON.stringify(rewritten));
-                          writeResult(arm, 'forwarded', 'canonical_parent_applied');
                         } catch (error) {
                           failClosed(arm, error);
                           try { xhr.abort(); } catch (_) {}
@@ -215,7 +276,21 @@ final class SelfRunNetworkGuard {
                       });
                       return undefined;
                     };
+                    NativeXHR.prototype.open = guardedOpen;
+                    NativeXHR.prototype.setRequestHeader = guardedSetHeader;
+                    NativeXHR.prototype.send = guardedSend;
                   }
+
+                  window.__selfRunDriveParentGuardAlive = () => {
+                    try {
+                      const fetchAlive = window.fetch === guardedFetch;
+                      const xhrAlive = !NativeXHR || !nativeOpen || !nativeSend || !nativeSetHeader || (
+                              NativeXHR.prototype.open === guardedOpen
+                              && NativeXHR.prototype.send === guardedSend
+                              && NativeXHR.prototype.setRequestHeader === guardedSetHeader);
+                      return fetchAlive && xhrAlive;
+                    } catch (_) { return false; }
+                  };
                 })();
                 """;
     }
