@@ -270,24 +270,32 @@ void beginCommandAttempt(String kind,String prompt){if(!(RETRY_BOOTSTRAP.equals(
 String commandMarkerId(){if(RETRY_BOOTSTRAP.equals(get("activeCommandKind")))return runId()+":bootstrap:"+commandAttempt();String fp=DriveSignalParser.nextInputFingerprint(pendingDriveSignalRaw());String next=fp.isEmpty()?"none":fp.substring(0,Math.min(12,fp.length()));String anchor=pauseAnchorId().isEmpty()?"none":pauseAnchorId();return runId()+":continue:"+(pendingDriveSignalCursor()>0?pendingDriveSignalCursor():0)+":"+anchor+":"+next;}
 void markCommandSubmitted(String kind,long due){if(!kind.equals(activeCommandKind())||activeCommandPrompt().isEmpty()||due<=0)throw new IllegalStateException("prepared command required");int n=submissionRetryAttempt()==Integer.MAX_VALUE?Integer.MAX_VALUE:submissionRetryAttempt()+1;commitOrThrow(prefs.edit().putBoolean("awaitingCommandAck",true).putString("submissionRetryKind",kind).putString("submissionRetryReason","COMMAND_RECEIVED_PENDING").putLong("submissionRetryDueAt",due).putInt("submissionRetryAttempt",n).putBoolean("submissionRetryReady",false).putString("phase",PHASE_WAIT_DRIVE_COMMIT).putString("status","Drive COMMAND_RECEIVED 대기 · 5분 후 미수신 시 재제출").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
 void prepareCommandRetry(){if(!awaitingCommandAck()||!hasSubmissionRetry()||!submissionRetryDue())throw new IllegalStateException("command ACK retry is not due");String k=submissionRetryKind();String ph=RETRY_BOOTSTRAP.equals(k)?PHASE_BOOTSTRAP_SEND:PHASE_SEND_CONTINUE;commitOrThrow(prefs.edit().putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putBoolean("submissionRetryReady",false).putString("phase",ph).putString("status","COMMAND_RECEIVED 미수신 · 동일 명령 재제출 준비").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
+static final class DriveBatchPendingState{
+ private final boolean work;private String priorRaw;private boolean carryNext;
+ DriveBatchPendingState(String mode,boolean pendingCompletion,String pendingRaw){work=MODE_WORK.equals(mode);priorRaw=pendingCompletion&&pendingRaw!=null?pendingRaw:"";carryNext=work&&pendingCompletion&&!priorRaw.isEmpty()&&!DriveSignalParser.workProfile(priorRaw).valid;}
+ void supersede(){priorRaw="";carryNext=false;}
+ String acceptCompletion(String newerRaw){String accepted=work&&carryNext?DriveSignalParser.mergeNextInputIfMissing(newerRaw,priorRaw):newerRaw;priorRaw=accepted==null?"":accepted;carryNext=work&&!priorRaw.isEmpty()&&!DriveSignalParser.workProfile(priorRaw).valid;return accepted;}
+ boolean carryNextForTest(){return carryNext;}
+ String rawForTest(){return priorRaw;}
+}
 void applyDriveSignals(List<DriveSignalParser.Event> events,long detectedAt,long guardMs){
  if(events==null||events.isEmpty())return;
- SharedPreferences.Editor e=prefs.edit();boolean awaiting=awaitingCommandAck();boolean guardArmed=completionGuardArmed();String guardFingerprint=completionGuardFingerprint();int rank=PHASE_DONE.equals(phase())||PHASE_PAUSED.equals(phase())?3:PHASE_DRIVE_COMMIT_GUARD.equals(phase())?2:0;
+ SharedPreferences.Editor e=prefs.edit();boolean awaiting=awaitingCommandAck();boolean guardArmed=completionGuardArmed();String guardFingerprint=completionGuardFingerprint();DriveBatchPendingState batchPending=new DriveBatchPendingState(mode(),hasPendingDriveCompletion(),pendingDriveSignalRaw());int rank=PHASE_DONE.equals(phase())||PHASE_PAUSED.equals(phase())?3:PHASE_DRIVE_COMMIT_GUARD.equals(phase())?2:0;
  for(DriveSignalParser.Event x:events){
   e.putInt("driveSignalCursor",x.cursor);putLatest(e,x);
   if(x.type==DriveSignalParser.Type.TURN_COMPLETED&&guardArmed&&DriveSignalParser.completionFingerprint(x.raw).equals(guardFingerprint)){e.putString("status","Drive TURN_COMPLETED 중복 확인 · 기존 completion 유지");continue;}
   if(x.type==DriveSignalParser.Type.COMMAND_RECEIVED){
-   if(awaiting){String prompt=get("activeCommandPrompt"),kind=get("activeCommandKind");boolean rewrite=prompt.startsWith("[SELF_RUN_TURN_INFO_REWRITE ");awaiting=false;if(RETRY_CONTINUE.equals(kind)&&!rewrite){invalidateSupersededContinuation(e);clearPauseAnchor(e);guardArmed=false;guardFingerprint="";}else clearCommandWait(e);}
+   if(awaiting){String prompt=get("activeCommandPrompt"),kind=get("activeCommandKind");boolean rewrite=prompt.startsWith("[SELF_RUN_TURN_INFO_REWRITE ");awaiting=false;if(RETRY_CONTINUE.equals(kind)&&!rewrite){invalidateSupersededContinuation(e);batchPending.supersede();clearPauseAnchor(e);guardArmed=false;guardFingerprint="";}else clearCommandWait(e);}
    if(rank<2)e.putString("status","Drive COMMAND_RECEIVED 확인 · 작업 진행 중");
    continue;
   }
-  if(awaiting){awaiting=false;protocolPause(e,x,"COMMAND_RECEIVED_REQUIRED");guardArmed=false;guardFingerprint="";rank=3;continue;}
-  if(x.type==DriveSignalParser.Type.INVALID){protocolPause(e,x,x.protocolError.isEmpty()?"DRIVE_PROTOCOL_INVALID":x.protocolError);guardArmed=false;guardFingerprint="";rank=3;continue;}
+  if(awaiting){awaiting=false;protocolPause(e,x,"COMMAND_RECEIVED_REQUIRED");batchPending.supersede();guardArmed=false;guardFingerprint="";rank=3;continue;}
+  if(x.type==DriveSignalParser.Type.INVALID){protocolPause(e,x,x.protocolError.isEmpty()?"DRIVE_PROTOCOL_INVALID":x.protocolError);batchPending.supersede();guardArmed=false;guardFingerprint="";rank=3;continue;}
   switch(x.type){
-   case TURN_COMPLETED->{if(rank<2){rank=2;String raw=x.raw;if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())raw=DriveSignalParser.mergeNextInputIfMissing(raw,pendingDriveSignalRaw());e.putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",x.timestamp).putString("pendingDriveSignalType",x.type.name()).putInt("pendingDriveSignalCursor",x.cursor).putLong("commitDetectedAt",detectedAt).putLong("guardDueAt",detectedAt+guardMs).putString("completionGuardFingerprint",DriveSignalParser.completionFingerprint(x.raw)).putBoolean("completionGuardArmed",true).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED 확인 · 안전 지연");guardFingerprint=DriveSignalParser.completionFingerprint(x.raw);guardArmed=true;}}
-   case USER_ACTION_REQUIRED->{rank=3;pauseEvent(e,x,"사용자 조치 필요");guardArmed=false;guardFingerprint="";}
-   case PAUSED->{rank=3;pauseEvent(e,x,"SelfRun Drive 일시정지");guardArmed=false;guardFingerprint="";}
-   case DONE->{rank=3;invalidateSupersededContinuation(e);guardArmed=false;guardFingerprint="";e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,x);}
+   case TURN_COMPLETED->{if(rank<2){rank=2;String raw=batchPending.acceptCompletion(x.raw);e.putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",x.timestamp).putString("pendingDriveSignalType",x.type.name()).putInt("pendingDriveSignalCursor",x.cursor).putLong("commitDetectedAt",detectedAt).putLong("guardDueAt",detectedAt+guardMs).putString("completionGuardFingerprint",DriveSignalParser.completionFingerprint(x.raw)).putBoolean("completionGuardArmed",true).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED 확인 · 안전 지연");guardFingerprint=DriveSignalParser.completionFingerprint(x.raw);guardArmed=true;}}
+   case USER_ACTION_REQUIRED->{rank=3;pauseEvent(e,x,"사용자 조치 필요");batchPending.supersede();guardArmed=false;guardFingerprint="";}
+   case PAUSED->{rank=3;pauseEvent(e,x,"SelfRun Drive 일시정지");batchPending.supersede();guardArmed=false;guardFingerprint="";}
+   case DONE->{rank=3;invalidateSupersededContinuation(e);batchPending.supersede();guardArmed=false;guardFingerprint="";e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,x);}
    case COMMAND_RECEIVED,INVALID->throw new IllegalStateException("handled above");
   }
  }

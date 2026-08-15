@@ -44,6 +44,15 @@ public class SelfRunContinuationInvalidationTest {
         assertTrue(resume.substring(resume.indexOf("case PROTOCOL_ERROR")).contains("invalidateSupersededContinuation(e)"));
     }
 
+    @Test public void sameBatchAckAndCompletionUseTransactionLocalPendingAuthority() throws Exception {
+        String store = src("SelfRunStore.java");
+        String apply = between(store, "void applyDriveSignals", "void repairGuard");
+        assertTrue(apply.contains("DriveBatchPendingState batchPending=new DriveBatchPendingState(mode(),hasPendingDriveCompletion(),pendingDriveSignalRaw())"));
+        assertTrue(apply.contains("if(RETRY_CONTINUE.equals(kind)&&!rewrite){invalidateSupersededContinuation(e);batchPending.supersede()"));
+        assertTrue(apply.contains("String raw=batchPending.acceptCompletion(x.raw)"));
+        assertFalse(apply.contains("MODE_WORK.equals(mode())&&hasPendingDriveCompletion())raw=DriveSignalParser.mergeNextInputIfMissing(raw,pendingDriveSignalRaw())"));
+    }
+
     private static String src(String f) throws Exception {
         Path p = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + f);
         if (!Files.exists(p)) p = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + f);
