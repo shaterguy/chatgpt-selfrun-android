@@ -39,8 +39,9 @@ final class DriveResumePolicy {
         if (material == null) {
             return switch (origin) {
                 case UI_MANUAL -> new Decision(Action.RESTORE_PHASE, "UI_PAUSE_NO_NEW_MATERIAL_SIGNAL", null);
-                case EXTERNAL_MANUAL, AI_PAUSED, AI_USER_ACTION_REQUIRED ->
-                        new Decision(Action.CONTINUE, "MANUAL_ACTION_NO_NEW_COMPLETION", null);
+                case EXTERNAL_MANUAL -> new Decision(Action.CONTINUE, "EXTERNAL_MANUAL_ACTION_COMPLETE", null);
+                case AI_USER_ACTION_REQUIRED -> new Decision(Action.KEEP_PAUSED, "USER_ACTION_RESUME_PREPARATION_REQUIRED", null);
+                case AI_PAUSED -> new Decision(Action.KEEP_PAUSED, "AI_PAUSE_REMAINS_LATCHED", null);
                 case UNKNOWN -> error("RESUME_ORIGIN_UNKNOWN", null);
             };
         }
