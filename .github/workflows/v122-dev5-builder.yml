@@ -33,47 +33,56 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
-      - name: Reconstruct and validate scoped patch
+      - name: Apply, test, build, and commit
         shell: bash
         run: |
-          set -euo pipefail
-          cat tools/.v122_dev5_patch_b64_1.part \
-              tools/.v122_dev5_patch_b64_2.part \
-              tools/.v122_dev5_patch_b64_3.part \
-              tools/.v122_dev5_patch_b64_4.part > /tmp/v122-dev5-patch.b64
-          base64 -d /tmp/v122-dev5-patch.b64 > tools/apply_v122_dev5_patch.py
-          python3 -m py_compile tools/apply_v122_dev5_patch.py
-          python3 tools/apply_v122_dev5_patch.py
-          rm -f tools/.v122_dev5_patch_*.part
-          test ! -e tools/apply_v122_dev5_patch.py
-          test ! -e .github/workflows/v122-dev5-builder.yml
-          git diff --check
-      - name: Drive policy and unit tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x tools/verify_drive_variant.sh
-          tools/verify_drive_variant.sh
-          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
-      - name: Build and verify dev APK identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
-          APK=app/build/outputs/apk/debug/app-debug.apk
-          test -s "$APK"
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          BADGING="$($BT/aapt dump badging "$APK")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
-          grep -Fq "versionCode='1000025'" <<<"$BADGING"
-          grep -Fq "versionName='1.2.2-dev5'" <<<"$BADGING"
-          grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
-      - name: Commit implementation
-        shell: bash
-        run: |
-          set -euo pipefail
+          set -uo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          LOG=/tmp/v122-dev5-builder.log
+          run_all() {
+            set -euo pipefail
+            cat tools/.v122_dev5_patch_1.part \
+                tools/.v122_dev5_patch_2.part \
+                tools/.v122_dev5_patch_3.part \
+                tools/.v122_dev5_patch_4.part \
+                tools/.v122_dev5_patch_5.part \
+                tools/.v122_dev5_patch_6.part > tools/apply_v122_dev5_patch.py
+            python3 -m py_compile tools/apply_v122_dev5_patch.py
+            python3 tools/apply_v122_dev5_patch.py
+            rm -f tools/.v122_dev5_patch_*.part
+            rm -f tools/.v122_dev5_patch_b64_*.part
+            rm -rf tools/__pycache__
+            test ! -e tools/apply_v122_dev5_patch.py
+            test ! -e .github/workflows/v122-dev5-builder.yml
+            git diff --check
+            chmod +x tools/verify_drive_variant.sh
+            tools/verify_drive_variant.sh
+            gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+            gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
+            APK=app/build/outputs/apk/debug/app-debug.apk
+            test -s "$APK"
+            BT="$ANDROID_HOME/build-tools/36.0.0"
+            BADGING="$($BT/aapt dump badging "$APK")"
+            grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+            grep -Fq "versionCode='1000025'" <<<"$BADGING"
+            grep -Fq "versionName='1.2.2-dev5'" <<<"$BADGING"
+            grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
+          }
+          set +e
+          run_all >"$LOG" 2>&1
+          rc=$?
+          set -e
+          cat "$LOG"
+          if [ "$rc" -ne 0 ]; then
+            git reset --hard HEAD
+            cp "$LOG" tools/.v122_dev5_builder_error.txt
+            git add tools/.v122_dev5_builder_error.txt
+            git commit -m 'ci(dev5): capture builder failure evidence'
+            git push origin HEAD:selfrun-drive/v1.2.2-dev5
+            exit "$rc"
+          fi
+          rm -f tools/.v122_dev5_builder_error.txt
           git add -A
           git diff --cached --check
           git status --short
