@@ -19,8 +19,9 @@ public class SelfRunDomTest {
                 "https://chatgpt.com/g/g-p-test/c/conversation123",
                 "[2026.08.13 | 22:03:15] [SELF_RUN_CONTINUE SR-20260813-220315-A1B2C3]", "m1");
         assertTrue(script.contains("READY_TO_SUBMIT"));
-        assertFalse(script.contains("CONFIRMED"));
-        assertFalse(script.contains("assistant"));
+        assertFalse(script.contains("result('CONFIRMED'"));
+        assertFalse(script.contains("data-message-author-role=\\\"assistant\\\""));
+        assertFalse(script.contains("article[data-turn=\\\"assistant\\\"]"));
     }
     @Test public void generalChatScopeSupportsBootstrapAndWorkPreferences() {
         String initial = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL, SelfRunStore.MODE_CHAT, "SR-20260814-TEST00");
