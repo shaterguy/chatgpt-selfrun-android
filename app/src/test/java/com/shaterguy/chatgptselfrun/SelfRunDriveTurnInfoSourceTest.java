@@ -10,11 +10,14 @@ import static org.junit.Assert.*;
 public class SelfRunDriveTurnInfoSourceTest {
     @Test public void workProfileIsReadFromPendingDriveCompletion() throws Exception {
         String store = src("SelfRunStore.java");
+        String service = src("SelfRunService.java");
         assertTrue(store.contains("DriveSignalParser.workProfile(pendingDriveSignalRaw())"));
         assertTrue(store.contains("return p.valid?p.model:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL"));
         assertTrue(store.contains("return p.valid?p.reasoning:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL"));
         assertTrue(store.contains("if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put(\"pendingModel\", value)"));
         assertTrue(store.contains("if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put(\"pendingReasoning\", value)"));
+        assertTrue(service.contains("DriveSignalParser.scan(body,snapshot.runId,0,snapshot.mode)"));
+        assertTrue(service.contains("DriveSignalParser.scan(text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode)"));
     }
 
     @Test public void invalidDriveProfileUsesRewriteWithoutChangingServiceStateMachine() throws Exception {

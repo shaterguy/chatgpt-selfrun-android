@@ -25,7 +25,7 @@ final class SelfRunProtocol {
             if("DONE".equals(kind))last=new Signal(Type.DONE,raw,parts[0],"","","","");
             else if("USER_ACTION_REQUIRED".equals(kind)){String a=parts.length>1?parts[1]:"ACTION";if(safeCode(a))last=new Signal(Type.USER_ACTION,raw,parts[0],"","","",a);}
             else if("PAUSE".equals(kind))last=new Signal(Type.PAUSE,raw,parts[0],value(payload,"ROLE"),"","","");
-            else{String role=value(payload,"ROLE").toUpperCase(Locale.ROOT);if(role.isEmpty())role="BUILDER";if(safeCode(role))last=new Signal(Type.NEXT,raw,parts[0],role,"","","");}
+            else{String role=value(payload,"ROLE").toUpperCase(Locale.ROOT),model=value(payload,"MODEL").toLowerCase(Locale.ROOT),reason=value(payload,"REASONING").toLowerCase(Locale.ROOT);if(SelfRunStore.MODE_WORK.equals(mode)&&!validWorkProfile(model,reason))continue;if(role.isEmpty())role="BUILDER";if(safeCode(role))last=new Signal(Type.NEXT,raw,parts[0],role,"","","");}
         }return last;
     }
     static boolean validWorkProfile(String model,String reasoning){if(!("sol".equals(model)||"terra".equals(model)||"luna".equals(model)))return false;if(!("high".equals(reasoning)||"xhigh".equals(reasoning)||"max".equals(reasoning)||"ultra".equals(reasoning)))return false;if("luna".equals(model))return "max".equals(reasoning);return !"ultra".equals(reasoning)||"sol".equals(model);}

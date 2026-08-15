@@ -83,12 +83,19 @@ public class SelfRunProtocolTest {
         assertEquals(SelfRunProtocol.Type.NEXT, signal.type); assertTrue(signal.raw.startsWith("[SELF_RUN_NEXT "));
     }
 
-    @Test public void workAssistantControlDoesNotSupplyModelOrReasoning() {
-        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER MODEL=luna REASONING=ultra]", RUN, SelfRunStore.MODE_WORK);
+    @Test public void workAssistantControlValidatesProfileButDoesNotSupplyIt() {
+        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER MODEL=luna REASONING=max]", RUN, SelfRunStore.MODE_WORK);
         assertEquals(SelfRunProtocol.Type.NEXT, signal.type);
         assertEquals("VERIFIER", signal.role);
         assertEquals("", signal.model);
         assertEquals("", signal.reasoning);
+    }
+
+    @Test public void workAssistantControlRejectsMissingOrInvalidProfile() {
+        SelfRunProtocol.Signal missing = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER]", RUN, SelfRunStore.MODE_WORK);
+        SelfRunProtocol.Signal invalid = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER MODEL=luna REASONING=ultra]", RUN, SelfRunStore.MODE_WORK);
+        assertEquals(SelfRunProtocol.Type.NONE, missing.type);
+        assertEquals(SelfRunProtocol.Type.NONE, invalid.type);
     }
 
     @Test public void workProfilePolicyMatchesCanonicalRules() {
