@@ -34,7 +34,9 @@ public class SelfRunNextInputProtocolTest {
     @Test public void queuedNextInputIsConsumedOnce() {
         String input = "원격 push를 진행해";
         SelfRunProtocol.requestNextInput(RUN, input);
-        assertTrue(SelfRunProtocol.driveContinuation(RUN).endsWith("\\n" + input));
-        assertFalse(SelfRunProtocol.driveContinuation(RUN).endsWith("\\n" + input));
+        String first = SelfRunProtocol.driveContinuation(RUN);
+        assertTrue("first=" + first.replace("\n", "\\n"), first.endsWith("\n" + input));
+        String second = SelfRunProtocol.driveContinuation(RUN);
+        assertFalse("second=" + second.replace("\n", "\\n"), second.endsWith("\n" + input));
     }
 }
