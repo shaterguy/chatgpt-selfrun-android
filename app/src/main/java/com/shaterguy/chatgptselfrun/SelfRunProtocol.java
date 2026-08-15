@@ -9,7 +9,10 @@ import java.util.regex.Pattern;
 
 final class SelfRunProtocol {
     static final String SELF_RUN_SKILL_DOCUMENT_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
+    static final String DRIVE_PROTOCOL_VERSION = "0.2.0";
     private static String turnInfoRewriteRunId = "";
+    private static String nextInputRunId = "";
+    private static String nextInputText = "";
 
     enum Type { NEXT, DONE, USER_ACTION, PAUSE, NONE }
     static final class Signal {
@@ -32,7 +35,7 @@ final class SelfRunProtocol {
     static String bootstrap(String runId,String mode,String requirement){return "[SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n\n"+requirement.trim();}
     static String bootstrapDrive(String runId,String mode,String requirement,String documentId){
         String originalRequirement=requirement==null?"":requirement;
-        return "["+kstTimestamp(new Date())+"] [SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n"
+        return "["+kstTimestamp(new Date())+"] [SELF_RUN_BOOTSTRAP "+DRIVE_PROTOCOL_VERSION+" "+runId+" MODE="+mode+"]\n"
                 +"SELF_RUN_CLIENT=DRIVE_V1\n"
                 +"SELF_RUN_SKILL_DOCUMENT_ID="+SELF_RUN_SKILL_DOCUMENT_ID+"\n"
                 +"DRIVE_TURN_DOCUMENT_ID="+documentId+"\n\n"
@@ -47,7 +50,11 @@ final class SelfRunProtocol {
     static String turnInfoRewrite(String runId){return "[SELF_RUN_TURN_INFO_REWRITE "+runId+"]";}
     static synchronized void requestTurnInfoRewrite(String runId){if(safeCode(runId))turnInfoRewriteRunId=runId;}
     private static synchronized boolean consumeTurnInfoRewrite(String runId){if(!safeCode(runId)||!runId.equals(turnInfoRewriteRunId))return false;turnInfoRewriteRunId="";return true;}
-    static String driveContinuation(String runId){if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);return "["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";}
+    static synchronized void requestNextInput(String runId,String nextInput){if(!safeCode(runId))throw new IllegalArgumentException("valid run id required");NextInputCodec.encode(nextInput);nextInputRunId=runId;nextInputText=nextInput;}
+    private static synchronized String consumeNextInput(String runId){if(!safeCode(runId)||!runId.equals(nextInputRunId))return "";String value=nextInputText;nextInputRunId="";nextInputText="";return value;}
+    static String driveContinuation(String runId){if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);String nextInput=consumeNextInput(runId);return nextInput.isEmpty()?driveContinuationBase(runId):driveContinuation(runId,nextInput);}
+    static String driveContinuation(String runId,String nextInput){NextInputCodec.encode(nextInput);return driveContinuationBase(runId)+"\n"+nextInput;}
+    private static String driveContinuationBase(String runId){return "["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";}
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}
     static String kstTimestamp(Date date){SimpleDateFormat f=new SimpleDateFormat("yyyy.MM.dd | HH:mm:ss",Locale.US);f.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));return f.format(date);}
     private static String value(String payload,String key){Matcher m=Pattern.compile("(?:^|\\s)"+key+"=([^\\s]+)",Pattern.CASE_INSENSITIVE).matcher(payload);return m.find()?m.group(1).trim():"";}
