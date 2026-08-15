@@ -39,8 +39,10 @@ public class SelfRunPauseResumeTest {
         assertTrue(begin.contains("putString(\"phase\",restore)"));
         assertTrue(begin.contains("clearPauseAnchor(e)"));
         assertTrue(begin.contains("PHASE_RESUME_BASELINE"));
+        assertTrue(store.contains("if(hasTurnDocument)return false"));
         assertTrue(store.contains("PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation"));
-        assertTrue(store.contains("PAUSE_ORIGIN_UI_MANUAL.equals(origin)&&!hasTurnDocument"));
+        assertTrue(store.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),totalCount,postAnchor)"));
+        assertTrue(store.contains("putBoolean(\"resumeNeedsContinuation\",true).putString(\"phase\",PHASE_PAUSED)"));
     }
 
     @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {

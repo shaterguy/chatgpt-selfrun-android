@@ -94,7 +94,7 @@ USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다.
 - post-anchor `TURN_COMPLETED`가 있으면 그 completion을 처리합니다. `USER_ACTION_REQUIRED`에서 시작된 user-choice resume-preparation completion은 `NEXT_INPUT_B64URL`이 필수이며 없으면 protocol error입니다.
 - post-anchor newer `USER_ACTION_REQUIRED`/`PAUSED`면 계속 일시정지합니다.
 - post-anchor `DONE`이면 continuation을 만들지 않습니다.
-- 외부 수동 행동 origin은 새 completion이 없을 때만 plain continuation을 허용합니다.
+- 외부 수동 행동 origin은 Drive `PAUSED`처럼 `resumeNeedsContinuation=true`이면 새 material signal이 없을 때 plain continuation을 허용합니다. 앱 내부 prerequisite의 `resumeNeedsContinuation=false`는 turn document가 있으면 post-anchor를 먼저 reconcile한 뒤 새 material signal이 없을 때 `pausedFromPhase`를 복구합니다.
 - UI 수동 pause는 새 material signal이 없으면 `pausedFromPhase`를 복구하고 새 continuation을 만들지 않습니다.
 - Drive 요청/anchor 검증에 실패하면 plain continuation fallback을 하지 않습니다.
 

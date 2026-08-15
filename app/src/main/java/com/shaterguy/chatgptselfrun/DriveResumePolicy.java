@@ -22,6 +22,11 @@ final class DriveResumePolicy {
 
     static Decision decide(Origin origin, int anchorCursor, int totalCount,
                            List<DriveSignalParser.Event> postAnchorEvents) {
+        return decide(origin, true, anchorCursor, totalCount, postAnchorEvents);
+    }
+
+    static Decision decide(Origin origin, boolean needsContinuation, int anchorCursor, int totalCount,
+                           List<DriveSignalParser.Event> postAnchorEvents) {
         if (origin == null) origin = Origin.UNKNOWN;
         if (anchorCursor < 0 || totalCount < anchorCursor) return error("RESUME_ANCHOR_CURSOR_INVALID", null);
         List<DriveSignalParser.Event> events = postAnchorEvents == null
@@ -39,7 +44,7 @@ final class DriveResumePolicy {
         if (material == null) {
             return switch (origin) {
                 case UI_MANUAL -> new Decision(Action.RESTORE_PHASE, "UI_PAUSE_NO_NEW_MATERIAL_SIGNAL", null);
-                case EXTERNAL_MANUAL -> new Decision(Action.CONTINUE, "EXTERNAL_MANUAL_ACTION_COMPLETE", null);
+                case EXTERNAL_MANUAL -> needsContinuation ? new Decision(Action.CONTINUE, "EXTERNAL_MANUAL_ACTION_COMPLETE", null) : new Decision(Action.RESTORE_PHASE, "EXTERNAL_MANUAL_NO_CONTINUATION_REQUIRED", null);
                 case AI_USER_ACTION_REQUIRED -> new Decision(Action.KEEP_PAUSED, "USER_ACTION_RESUME_PREPARATION_REQUIRED", null);
                 case AI_PAUSED -> new Decision(Action.KEEP_PAUSED, "AI_PAUSE_REMAINS_LATCHED", null);
                 case UNKNOWN -> error("RESUME_ORIGIN_UNKNOWN", null);

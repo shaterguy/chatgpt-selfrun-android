@@ -37,12 +37,35 @@ public class DriveResumePolicyTest {
                 SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.USER_ACTION_REQUIRED));
     }
 
-    @Test public void localPrerequisitePauseRestoresWithoutDriveButDrivePausedStillReconciles() {
+    @Test public void localPrerequisiteDirectRestoreOnlyBeforeTurnDocumentExists() {
         assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, false));
-        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, true));
+        assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, true));
         assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, true, true));
         assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_UI_MANUAL, false, false));
         assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_UI_MANUAL, false, true));
+    }
+
+    @Test public void existingDocumentExternalNoMaterialUsesNeedsContinuationFallback() {
+        DriveResumePolicy.Decision local = DriveResumePolicy.decide(
+                DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 3, Collections.emptyList());
+        DriveResumePolicy.Decision drivePaused = DriveResumePolicy.decide(
+                DriveResumePolicy.Origin.EXTERNAL_MANUAL, true, 3, 3, Collections.emptyList());
+        assertEquals(DriveResumePolicy.Action.RESTORE_PHASE, local.action);
+        assertEquals("EXTERNAL_MANUAL_NO_CONTINUATION_REQUIRED", local.reason);
+        assertEquals(DriveResumePolicy.Action.CONTINUE, drivePaused.action);
+        assertEquals("EXTERNAL_MANUAL_ACTION_COMPLETE", drivePaused.reason);
+    }
+
+    @Test public void existingDocumentExternalMaterialSignalOverridesFallback() {
+        assertEquals(DriveResumePolicy.Action.APPLY_COMPLETION,
+                DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
+                        Collections.singletonList(event(DriveSignalParser.Type.TURN_COMPLETED, 4, false))).action);
+        assertEquals(DriveResumePolicy.Action.KEEP_PAUSED,
+                DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
+                        Collections.singletonList(event(DriveSignalParser.Type.PAUSED, 4, false))).action);
+        assertEquals(DriveResumePolicy.Action.DONE,
+                DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
+                        Collections.singletonList(event(DriveSignalParser.Type.DONE, 4, false))).action);
     }
 
     @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {

@@ -35,7 +35,7 @@ retry 횟수와 누적 시간을 terminal 조건으로 사용하지 않습니다
 
 NEXT_INPUT 원문은 실행에 필요한 pending Drive signal/active command의 수명 동안만 app-private state에 존재합니다. `SelfRunHistoryStore`에는 `NEXT_INPUT_B64URL` 값을 redaction하여 복사하며 run log/notification/status에는 payload 원문을 기록하지 않습니다. continuation DOM은 completion cursor, pause anchor ID와 NEXT fingerprint에서 만든 stable marker를 사용하며 `clicked` marker가 있으면 retry/restart에서도 composer를 다시 클릭하지 않습니다.
 
-재개는 `PHASE_RESUME_BASELINE`에서 latest signal을 단순 baseline하지 않습니다. Drive signal로 생긴 pause는 pause anchor 이후 event를 수집하고 `DriveResumePolicy`가 completion/blocking/DONE/no-new-signal/UI-manual case를 판정합니다. 반면 ChatGPT 로그인·OAuth·Drive 재연결 같은 앱 내부 prerequisite pause는 `resumeNeedsContinuation=false`를 영속하고 Resume 시 `pauseAnchorPhase`로 직접 복귀하여 bootstrap 전이나 turn document 생성 전에도 빈 document를 polling하지 않습니다. Drive read 실패는 plain CONTINUE fallback을 만들지 않습니다.
+재개는 `PHASE_RESUME_BASELINE`에서 latest signal을 단순 baseline하지 않습니다. Drive signal로 생긴 pause는 pause anchor 이후 event를 수집하고 `DriveResumePolicy`가 completion/blocking/DONE/no-new-signal/UI-manual case를 판정합니다. 반면 ChatGPT 로그인·OAuth·Drive 재연결 같은 앱 내부 prerequisite pause는 `resumeNeedsContinuation=false`를 영속합니다. turn document가 아직 없으면 Resume 시 `pauseAnchorPhase`로 직접 복귀하여 빈 document를 polling하지 않습니다. turn document가 이미 있으면 반드시 pause anchor 이후 Drive signal을 먼저 reconcile하고, 새 material signal이 없을 때만 `pauseAnchorPhase`를 복구합니다. Drive read 실패는 plain CONTINUE fallback을 만들지 않습니다.
 
 ## OAuth와 Drive 객체
 
