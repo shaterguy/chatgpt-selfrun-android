@@ -148,7 +148,7 @@ static String readLatestSelfRunControl(String conversationUrl,String runId){Stri
         String marker = q(markerId);
         String armKey = q(SelfRunNetworkGuard.ARM_KEY);
         String resultKey = q(SelfRunNetworkGuard.RESULT_KEY);
-        return "if(window." + SelfRunNetworkGuard.INSTALLED_FLAG + "!==true)return result('UI_WAIT','document-start parent guard 사용 불가');"
+        return "if(window." + SelfRunNetworkGuard.INSTALLED_FLAG + "!==true)return result('CAPABILITY_UNAVAILABLE','document-start parent guard 사용 불가');"
                 + "try{sessionStorage.removeItem(" + resultKey + ");sessionStorage.setItem(" + armKey + ",JSON.stringify({markerId:" + marker + ",conversationId:" + conversation + ",expected:" + expected + ",armedAt:Date.now(),expiresAt:Date.now()+30000}));}catch(_){return result('UI_WAIT','canonical parent guard 저장 실패');}";
     }
 

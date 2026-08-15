@@ -23,7 +23,8 @@ public class SelfRunResumeFreshnessTest {
     @Test public void documentStartGuardRewritesOnlyParentAndFailsClosed() throws Exception {
         String guard = src("SelfRunNetworkGuard.java");
         String web = src("WebViewConfig.java");
-        assertTrue(web.contains("SelfRunNetworkGuard.install(webView)"));
+        assertTrue(web.contains("static boolean applyAutomation"));
+        assertTrue(web.contains("return SelfRunNetworkGuard.install(webView)"));
         assertTrue(guard.contains("DOCUMENT_START_SCRIPT"));
         assertTrue(guard.contains("addDocumentStartJavaScript"));
         assertTrue(guard.contains("/backend-api/f/conversation"));
@@ -37,6 +38,25 @@ public class SelfRunResumeFreshnessTest {
         assertFalse(guard.contains("location.reload"));
         assertFalse(guard.contains("window.next?.router"));
         assertFalse(guard.contains("visibilitychange"));
+    }
+
+    @Test public void unsupportedDocumentStartPausesWithoutRetryStormOrReconnect() throws Exception {
+        String service = src("SelfRunService.java");
+        String dom = src("SelfRunDom.java");
+        String run = between(service, "private void runWebStep", "private void evaluate");
+        String pause = between(service, "private void pauseUnsupportedParentGuard", "private void pauseFromUi");
+        String evaluate = between(service, "private void evaluate", "private void handleWebResult");
+        assertTrue(service.contains("continuationParentGuardAvailable = WebViewConfig.applyAutomation(webView)"));
+        assertTrue(run.contains("SelfRunContinuationCapability.requiresUserAction"));
+        assertTrue(run.indexOf("pauseUnsupportedParentGuard()") < run.indexOf("SelfRunDom.prepareDriveTurn"));
+        assertTrue(pause.contains("enterPreservedPause"));
+        assertTrue(pause.contains("NotificationHelper.notifyUser"));
+        assertFalse(pause.contains("scheduleWeb"));
+        assertFalse(pause.contains("cleanupWebView"));
+        assertFalse(pause.contains("loadUrl"));
+        assertTrue(dom.contains("CAPABILITY_UNAVAILABLE"));
+        assertTrue(evaluate.contains("CAPABILITY_UNAVAILABLE"));
+        assertTrue(evaluate.contains("pauseUnsupportedParentGuard()"));
     }
 
     @Test public void pauseResumeKeepsExistingWebViewAndUsesCommonContinuePath() throws Exception {

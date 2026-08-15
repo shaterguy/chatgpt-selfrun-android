@@ -8,7 +8,7 @@ final class WebViewConfig {
     private WebViewConfig() {}
 
     @SuppressWarnings("SetJavaScriptEnabled")
-    static void applyAutomation(WebView webView) {
+    static boolean applyAutomation(WebView webView) {
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
@@ -20,7 +20,7 @@ final class WebViewConfig {
         settings.setDisplayZoomControls(false);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
-        SelfRunNetworkGuard.install(webView);
+        return SelfRunNetworkGuard.install(webView);
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")
