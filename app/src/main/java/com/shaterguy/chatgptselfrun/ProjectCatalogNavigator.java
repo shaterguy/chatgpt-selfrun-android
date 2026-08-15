@@ -22,12 +22,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Resolves ChatGPT Project links by entering each visible project and reading WebView.getUrl(). */
+/** Resolves ChatGPT Project links by entering each visible project and reading the page location. */
 final class ProjectCatalogNavigator {
     interface Callback {
         void onSuccess(List<ProjectCatalog.Entry> entries);
         void onFailure(String code);
     }
+
+    private interface UrlCallback { void onUrl(String url); }
 
     private enum Phase { DISCOVER, WAIT_PROJECT, RETURNING }
 
@@ -42,6 +44,12 @@ final class ProjectCatalogNavigator {
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 SelfRunDrive/"
                     + BuildConfig.VERSION_NAME;
+
+    private static final String LOCATION_JS = """
+            (function(){try{
+              return JSON.stringify({url:String(location.href||'')});
+            }catch(_){return JSON.stringify({url:''});}})();
+            """;
 
     private static final String RESET_JS = """
             (function(){try{
@@ -141,7 +149,8 @@ final class ProjectCatalogNavigator {
                   const r=root.getBoundingClientRect(),scroll=scope===document?(document.scrollingElement?.scrollTop||0):(scope.scrollTop||0);
                   const top=Math.round((r.top+scroll)/8)*8;
                   const key=[n,direct,stable,role,String(top),String(occ)].join('|');
-                  out.push({key,name,direct,target:e,root});
+                  const target=direct?e:(root!==e?root:e);
+                  out.push({key,name,direct,target,root});
                 }return out;
               };
 
@@ -193,7 +202,7 @@ final class ProjectCatalogNavigator {
               const e=window.__selfrunCandidateMap?.get?.(key);
               if(!e||!e.isConnected||!e.getClientRects||e.getClientRects().length===0)
                 return JSON.stringify({clicked:false});
-              e.focus?.();e.click();return JSON.stringify({clicked:true});
+              e.focus?.();e.click();return JSON.stringify({clicked:true,url:String(location.href||'')});
             }catch(_){return JSON.stringify({clicked:false});}})(__KEY__);
             """;
 
@@ -264,6 +273,7 @@ final class ProjectCatalogNavigator {
 
     static String scanScriptForTesting(Set<String> visited) { return scanScript(visited == null ? new LinkedHashSet<>() : visited); }
     static String clickScriptForTesting(String key) { return clickScript(key); }
+    static String locationScriptForTesting() { return LOCATION_JS; }
 
     private static String scanScript(Set<String> visited) {
         JSONArray array = new JSONArray();
@@ -288,80 +298,93 @@ final class ProjectCatalogNavigator {
     }
 
     private void discover() {
-        String current = webView.getUrl();
-        if (!ProjectCatalog.isTrustedChatgptPage(current)) { fail("UNTRUSTED_NAVIGATION"); return; }
-        if (!ProjectCatalog.canonicalProjectUrl(current).isEmpty()) { beginReturn(); return; }
-
-        webView.evaluateJavascript(scanScript(visitedKeys), raw -> {
+        readPageUrl("UNTRUSTED_NAVIGATION", current -> {
             if (finished || phase != Phase.DISCOVER) return;
-            final Scan scan;
-            try { scan = parseScan(raw); }
-            catch (Throwable error) { fail("PROJECT_RESULT_INVALID"); return; }
-            switch (scan.state) {
-                case "OPENING":
-                case "SCROLLED":
-                    emptyStartedAt = 0L; schedule(DISCOVERY_POLL_MS); return;
-                case "READY":
-                    emptyStartedAt = 0L; click(scan.candidate); return;
-                case "COMPLETE":
-                    if (collected.isEmpty() && !desktopFallback) recoverOrDesktop("PROJECT_LIST_UNRESOLVED");
-                    else succeed();
-                    return;
-                case "EMPTY":
-                    long now=System.currentTimeMillis();
-                    if(emptyStartedAt==0L)emptyStartedAt=now;
-                    if(now-emptyStartedAt<EMPTY_TIMEOUT_MS){schedule(DISCOVERY_POLL_MS);return;}
-                    recoverOrDesktop(scan.marker ? "PROJECT_LIST_UNRESOLVED" : "PROJECTS_CONTROL_NOT_FOUND");
-                    return;
-                default:
-                    fail("DOM_PROBE_FAILED");
-            }
+            if (!ProjectCatalog.canonicalProjectUrl(current).isEmpty()) { beginReturn(); return; }
+            webView.evaluateJavascript(scanScript(visitedKeys), raw -> {
+                if (finished || phase != Phase.DISCOVER) return;
+                final Scan scan;
+                try { scan = parseScan(raw); }
+                catch (Throwable error) { fail("PROJECT_RESULT_INVALID"); return; }
+                switch (scan.state) {
+                    case "OPENING":
+                    case "SCROLLED":
+                        emptyStartedAt = 0L; schedule(DISCOVERY_POLL_MS); return;
+                    case "READY":
+                        emptyStartedAt = 0L; click(scan.candidate); return;
+                    case "COMPLETE":
+                        if (collected.isEmpty() && !desktopFallback) recoverOrDesktop("PROJECT_LIST_UNRESOLVED");
+                        else succeed();
+                        return;
+                    case "EMPTY":
+                        long now=System.currentTimeMillis();
+                        if(emptyStartedAt==0L)emptyStartedAt=now;
+                        if(now-emptyStartedAt<EMPTY_TIMEOUT_MS){schedule(DISCOVERY_POLL_MS);return;}
+                        recoverOrDesktop(scan.marker ? "PROJECT_LIST_UNRESOLVED" : "PROJECTS_CONTROL_NOT_FOUND");
+                        return;
+                    default:
+                        fail("DOM_PROBE_FAILED");
+                }
+            });
         });
     }
 
     private void click(Candidate next) {
         if (next == null) { fail("PROJECT_RESULT_INVALID"); return; }
-        candidate = next;
-        beforeUrl = webView.getUrl();
-        phase = Phase.WAIT_PROJECT;
-        phaseStartedAt = System.currentTimeMillis();
-        webView.evaluateJavascript(clickScript(next.key), raw -> {
-            if (finished || phase != Phase.WAIT_PROJECT || candidate != next) return;
-            try {
-                if (!decode(raw).optBoolean("clicked", false)) {
-                    candidate=null;phase=Phase.DISCOVER;schedule(DISCOVERY_POLL_MS);return;
+        readPageUrl("UNTRUSTED_NAVIGATION", current -> {
+            if (finished || phase != Phase.DISCOVER) return;
+            candidate = next;
+            beforeUrl = current;
+            phase = Phase.WAIT_PROJECT;
+            phaseStartedAt = System.currentTimeMillis();
+            webView.evaluateJavascript(clickScript(next.key), raw -> {
+                if (finished || phase != Phase.WAIT_PROJECT || candidate != next) return;
+                try {
+                    JSONObject result=decode(raw);
+                    if (!result.optBoolean("clicked", false)) {
+                        candidate=null;phase=Phase.DISCOVER;schedule(DISCOVERY_POLL_MS);return;
+                    }
+                    String immediate=result.optString("url","");
+                    String canonical=ProjectCatalog.canonicalProjectUrl(immediate);
+                    if(!canonical.isEmpty()){
+                        captureProject(canonical);
+                        return;
+                    }
+                } catch (Throwable error) {
+                    fail("PROJECT_CLICK_RESULT_INVALID");return;
                 }
-            } catch (Throwable error) {
-                fail("PROJECT_CLICK_RESULT_INVALID");return;
+                schedule(NAVIGATION_POLL_MS);
+            });
+        });
+    }
+
+    private void waitProject() {
+        readPageUrl("UNTRUSTED_PROJECT_ROW_NAVIGATION", current -> {
+            if(finished||phase!=Phase.WAIT_PROJECT||candidate==null)return;
+            String canonical = ProjectCatalog.canonicalProjectUrl(current);
+            if (!canonical.isEmpty()) { captureProject(canonical); return; }
+            if (System.currentTimeMillis()-phaseStartedAt>=PROJECT_TIMEOUT_MS) {
+                rowRetryCount++;
+                if (rowRetryCount>=MAX_ROW_RETRIES) { fail("PROJECT_ROW_NAVIGATION_TIMEOUT"); return; }
+                if (current.equals(beforeUrl)) {
+                    candidate=null;phase=Phase.DISCOVER;emptyStartedAt=0L;schedule(DISCOVERY_POLL_MS);
+                } else beginReturn();
+                return;
             }
             schedule(NAVIGATION_POLL_MS);
         });
     }
 
-    private void waitProject() {
-        String current = webView.getUrl();
-        if (!ProjectCatalog.isTrustedChatgptPage(current)) { fail("UNTRUSTED_PROJECT_ROW_NAVIGATION"); return; }
-        String canonical = ProjectCatalog.canonicalProjectUrl(current);
-        if (!canonical.isEmpty()) {
-            if (!candidate.directUrl.isEmpty() && !candidate.directUrl.equals(canonical)) {
-                fail("PROJECT_ROW_URL_MISMATCH"); return;
-            }
-            visitedKeys.add(candidate.key);
-            rowRetryCount=0;
-            if (collectedUrls.add(canonical)) collected.add(new ProjectCatalog.Entry(candidate.name,canonical));
-            recoveredHome=false;
-            beginReturn();
-            return;
+    private void captureProject(String canonical) {
+        if(candidate==null)return;
+        if (!candidate.directUrl.isEmpty() && !candidate.directUrl.equals(canonical)) {
+            fail("PROJECT_ROW_URL_MISMATCH"); return;
         }
-        if (System.currentTimeMillis()-phaseStartedAt>=PROJECT_TIMEOUT_MS) {
-            rowRetryCount++;
-            if (rowRetryCount>=MAX_ROW_RETRIES) { fail("PROJECT_ROW_NAVIGATION_TIMEOUT"); return; }
-            if (current != null && current.equals(beforeUrl)) {
-                candidate=null;phase=Phase.DISCOVER;emptyStartedAt=0L;schedule(DISCOVERY_POLL_MS);
-            } else beginReturn();
-            return;
-        }
-        schedule(NAVIGATION_POLL_MS);
+        visitedKeys.add(candidate.key);
+        rowRetryCount=0;
+        if (collectedUrls.add(canonical)) collected.add(new ProjectCatalog.Entry(candidate.name,canonical));
+        recoveredHome=false;
+        beginReturn();
     }
 
     private void beginReturn() {
@@ -375,17 +398,31 @@ final class ProjectCatalogNavigator {
     }
 
     private void waitReturn() {
-        String current=webView.getUrl();
-        if(!ProjectCatalog.isTrustedChatgptPage(current)){fail("UNTRUSTED_NAVIGATION");return;}
-        if(ProjectCatalog.canonicalProjectUrl(current).isEmpty()){resetAndResume();return;}
-        if(System.currentTimeMillis()-phaseStartedAt<RETURN_TIMEOUT_MS){schedule(200L);return;}
-        if(!returningHomeFallback){
-            returningHomeFallback=true;phaseStartedAt=System.currentTimeMillis();
-            try{webView.stopLoading();webView.loadUrl(HOME_URL);schedule(200L);}
-            catch(Throwable error){fail("PROJECT_LIST_RETURN_FAILED");}
-            return;
-        }
-        fail("PROJECT_LIST_RETURN_FAILED");
+        readPageUrl("UNTRUSTED_NAVIGATION", current -> {
+            if(finished||phase!=Phase.RETURNING)return;
+            if(ProjectCatalog.canonicalProjectUrl(current).isEmpty()){resetAndResume();return;}
+            if(System.currentTimeMillis()-phaseStartedAt<RETURN_TIMEOUT_MS){schedule(200L);return;}
+            if(!returningHomeFallback){
+                returningHomeFallback=true;phaseStartedAt=System.currentTimeMillis();
+                try{webView.stopLoading();webView.loadUrl(HOME_URL);schedule(200L);}
+                catch(Throwable error){fail("PROJECT_LIST_RETURN_FAILED");}
+                return;
+            }
+            fail("PROJECT_LIST_RETURN_FAILED");
+        });
+    }
+
+    private void readPageUrl(String untrustedCode, UrlCallback callback) {
+        if(finished||webView==null)return;
+        String nativeUrl=webView.getUrl();
+        webView.evaluateJavascript(LOCATION_JS, raw -> {
+            if(finished||webView==null)return;
+            String pageUrl="";
+            try{pageUrl=decode(raw).optString("url","").trim();}catch(Throwable ignored){}
+            String effective=!pageUrl.isEmpty()?pageUrl:(nativeUrl==null?"":nativeUrl.trim());
+            if(!ProjectCatalog.isTrustedChatgptPage(effective)){fail(untrustedCode);return;}
+            callback.onUrl(effective);
+        });
     }
 
     private void resetAndResume() {
