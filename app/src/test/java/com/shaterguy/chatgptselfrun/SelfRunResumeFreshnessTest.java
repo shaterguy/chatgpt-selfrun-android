@@ -5,30 +5,38 @@ import java.nio.file.*;
 import static org.junit.Assert.*;
 
 public class SelfRunResumeFreshnessTest {
-    @Test public void continuationRequiresCanonicalConversationTipBeforeComposerSubmission() throws Exception {
+    @Test public void continuationArmsCanonicalParentGuardAndWaitsForNetworkReadback() throws Exception {
         String dom = src("SelfRunDom.java");
         String prepare = between(dom, "static String prepareDriveTurn", "/** Retry path");
-        String barrier = between(dom, "private static String conversationFreshnessBarrier", "private static String composer");
-        assertTrue(prepare.contains("conversationFreshnessBarrier"));
-        assertTrue(barrier.contains("/backend-api/conversation/"));
-        assertTrue(barrier.contains("current_node"));
-        assertTrue(barrier.contains("data-message-id"));
-        assertTrue(barrier.contains("conversation 최신 tip 동기화 대기"));
-        assertTrue(barrier.contains("visibilitychange"));
-        assertTrue(barrier.contains("window.next?.router"));
-        assertFalse(barrier.contains("location.reload"));
-        assertFalse(barrier.contains("window.location="));
-        assertFalse(barrier.contains("loadUrl"));
+        String click = between(dom, "static String clickPreparedDriveTurn", "/** Crash recovery");
+        assertTrue(prepare.contains("parentGuardOutcome"));
+        assertTrue(click.contains("parentGuardOutcome"));
+        assertTrue(click.contains("armParentGuard"));
+        assertTrue(click.contains("send.click()"));
+        assertTrue(click.contains("canonical parent guard 제출 확인 대기"));
+        assertFalse(click.contains("conversationFreshnessBarrier"));
+        assertFalse(click.contains("location.reload"));
+        assertFalse(click.contains("loadUrl"));
+        assertFalse(click.contains("retry-button"));
     }
 
-    @Test public void clickPathRechecksFreshnessAndNeverEditsExistingUserTurn() throws Exception {
-        String dom = src("SelfRunDom.java");
-        String click = between(dom, "static String clickPreparedDriveTurn", "/** Crash recovery");
-        assertTrue(click.contains("conversationFreshnessBarrier"));
-        assertTrue(click.contains("750L"));
-        assertTrue(click.contains("send.click()"));
-        assertFalse(click.contains("edit"));
-        assertFalse(click.contains("retry-button"));
+    @Test public void documentStartGuardRewritesOnlyParentAndFailsClosed() throws Exception {
+        String guard = src("SelfRunNetworkGuard.java");
+        String web = src("WebViewConfig.java");
+        assertTrue(web.contains("SelfRunNetworkGuard.install(webView)"));
+        assertTrue(guard.contains("DOCUMENT_START_SCRIPT"));
+        assertTrue(guard.contains("addDocumentStartJavaScript"));
+        assertTrue(guard.contains("/backend-api/f/conversation"));
+        assertTrue(guard.contains("/backend-api/conversation"));
+        assertTrue(guard.contains("current_node"));
+        assertTrue(guard.contains("parent_message_id"));
+        assertTrue(guard.contains("payload.parent_message_id = parent"));
+        assertTrue(guard.contains("window.fetch = async function"));
+        assertTrue(guard.contains("NativeXHR.prototype.send"));
+        assertTrue(guard.contains("failClosed"));
+        assertFalse(guard.contains("location.reload"));
+        assertFalse(guard.contains("window.next?.router"));
+        assertFalse(guard.contains("visibilitychange"));
     }
 
     @Test public void pauseResumeKeepsExistingWebViewAndUsesCommonContinuePath() throws Exception {
