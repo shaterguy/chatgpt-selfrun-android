@@ -61,13 +61,13 @@ static String clickPreparedDriveInitial(String projectUrl,String prompt,String m
 
     /** Retry bootstrap only after the previous click has remained unconfirmed for the retry interval. */
 
-    /** Stage the unchanged legacy continuation line while keeping the Drive commit ID internal. */
-static String prepareDriveTurn(String conversationUrl,String prompt,String markerId){String conversation=q(SelfRunScript.conversationId(conversationUrl)),expected=q(prompt),marker=q("selfrun-drive:command:"+markerId);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(conversation)+authGuard()+textHelpers(expected)+conversationFreshnessBarrier(conversation,2500L)+composer()+"if(!composer)return result('UI_WAIT','continuation 입력창 대기');"+composerOps()+"if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','continuation 전송 버튼 대기');const markerKey2="+marker+",v=JSON.stringify({state:'prepared',at:Date.now()});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','continuation 제출 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"+input()+"return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";}
+    /** Stage the continuation in the current live composer; the network guard decides the canonical parent. */
+static String prepareDriveTurn(String conversationUrl,String prompt,String markerId){String conversation=q(SelfRunScript.conversationId(conversationUrl)),expected=q(prompt),marker=q("selfrun-drive:command:"+markerId);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(conversation)+authGuard()+textHelpers(expected)+parentGuardOutcome(markerId)+composer()+"if(!composer)return result('UI_WAIT','continuation 입력창 대기');"+composerOps()+"if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','continuation 전송 버튼 대기');const markerKey2="+marker+",v=JSON.stringify({state:'prepared',at:Date.now()});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','continuation 제출 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"+input()+"return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";}
 
-    /** Retry path: re-check late success first, then establish a fresh baseline before another click. */
+    /** Retry path: re-check the one-shot parent guard result before staging another click. */
 
-    /** Clicks at most once per attempt, only after Android durably stores the baseline and SUBMISSION_STARTED. */
-static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId){String conversation=q(SelfRunScript.conversationId(conversationUrl)),expected=q(prompt),marker=q("selfrun-drive:command:"+markerId);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(conversation)+authGuard()+textHelpers(expected)+conversationFreshnessBarrier(conversation,750L)+durableMarkerRead(marker)+"if(!prior)return result('MARKER_FAILED','continuation 제출 준비 표식 없음');"+composer()+"if(!composer)return result('SUBMISSION_AMBIGUOUS','제출 시점 입력창 소실');"+composerOps()+"if(!same())return result('SUBMISSION_AMBIGUOUS','제출 시점 입력 내용 변경');const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('SUBMISSION_AMBIGUOUS','전송 버튼 사용 불가');const markerKey2="+marker+";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('SUBMITTED','continuation 클릭 완료');})()";}
+    /** Arms a document-start request guard, then lets ChatGPT's own send path perform the POST. */
+static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId){String conversationId=SelfRunScript.conversationId(conversationUrl),conversation=q(conversationId),expected=q(prompt),marker=q("selfrun-drive:command:"+markerId);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(conversation)+authGuard()+textHelpers(expected)+parentGuardOutcome(markerId)+durableMarkerRead(marker)+"if(!prior)return result('MARKER_FAILED','continuation 제출 준비 표식 없음');"+composer()+"if(!composer)return result('SUBMISSION_AMBIGUOUS','제출 시점 입력창 소실');"+composerOps()+"if(!same())return result('SUBMISSION_AMBIGUOUS','제출 시점 입력 내용 변경');const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('SUBMISSION_AMBIGUOUS','전송 버튼 사용 불가');const markerKey2="+marker+";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}"+armParentGuard(conversationId,prompt,markerId)+"send.click();return result('UI_WAIT','canonical parent guard 제출 확인 대기');})()";}
 
     /** Crash recovery checks an increase in the unchanged continuation user line. */
 
@@ -130,25 +130,26 @@ static String readLatestSelfRunControl(String conversationUrl,String runId){Stri
         return "const norm=s=>String(s??'').replace(/[\\u200B-\\u200D\\uFEFF]/g,'').replace(/\\u00a0/g,' ').replace(/\\r\\n?/g,'\\n').trim();const canonical=s=>norm(s).replace(/[ \\t]+/g,' ').replace(/ *\\n+ */g,'\\n');const expected=norm(" + expected + ");";
     }
 
-    /**
-     * Prevents a preserved WebView from submitting against an obsolete conversation branch.
-     * The same WebView/session is retained: this only reads the canonical server tip and asks the
-     * already-running ChatGPT SPA to revalidate through soft focus/router signals when its DOM tip
-     * is stale. No WebView load/reload/recreation is performed here.
-     */
-    private static String conversationFreshnessBarrier(String conversation, long maxAgeMs) {
-        return "const srConversation=" + conversation + ",srFreshKey='selfrun-drive:freshness:'+srConversation,srMaxAge=" + maxAgeMs + ";"
-                + "const srVisible=e=>!!e&&e.isConnected&&e.offsetParent!==null;"
-                + "const srTurns=[...document.querySelectorAll('article[data-turn],[data-message-author-role]')].filter(srVisible).filter((e,i,a)=>!a.some((p,j)=>j<i&&p.contains(e)));"
-                + "const srLast=srTurns[srTurns.length-1]||null;const srDomTip=srLast?(srLast.getAttribute('data-message-id')||srLast.dataset?.messageId||srLast.id||srLast.querySelector?.('[data-message-id]')?.getAttribute('data-message-id')||''):'';"
-                + "let srSnap=null;try{const raw=sessionStorage.getItem(srFreshKey)||'';srSnap=raw?JSON.parse(raw):null;}catch(_){}"
-                + "const srSoftSync=()=>{try{window.focus();}catch(_){}try{window.dispatchEvent(new Event('focus'));}catch(_){}try{document.dispatchEvent(new Event('visibilitychange'));}catch(_){}try{window.dispatchEvent(new Event('online'));}catch(_){}try{const r=window.next?.router;if(r&&typeof r.replace==='function'){const k=srFreshKey+':router',last=Number(sessionStorage.getItem(k)||0);if(Date.now()-last>2000){sessionStorage.setItem(k,String(Date.now()));r.replace(r.asPath||location.pathname+location.search,undefined,{scroll:false});}}}catch(_){}};"
-                + "if(srSnap&&srSnap.state==='ready'&&Date.now()-Number(srSnap.at||0)<=srMaxAge){if(srDomTip&&srDomTip===String(srSnap.tip||'')){}else{srSoftSync();return result('UI_WAIT','conversation 최신 tip 동기화 대기');}}else{"
-                + "if(srSnap&&srSnap.state==='loading'&&Date.now()-Number(srSnap.at||0)<5000)return result('UI_WAIT','conversation 최신 tip 조회 대기');"
-                + "try{sessionStorage.setItem(srFreshKey,JSON.stringify({state:'loading',at:Date.now()}));}catch(_){}"
-                + "Promise.resolve().then(async()=>{try{let response=await fetch('/backend-api/conversation/'+encodeURIComponent(srConversation),{credentials:'include',cache:'no-store'});if(response.status===401||response.status===403){const session=await fetch('/api/auth/session',{credentials:'include',cache:'no-store'});const sessionJson=await session.json();const token=String(sessionJson?.accessToken||sessionJson?.access_token||'');if(token)response=await fetch('/backend-api/conversation/'+encodeURIComponent(srConversation),{credentials:'include',cache:'no-store',headers:{Authorization:'Bearer '+token}});}if(!response.ok)throw new Error('conversation_http_'+response.status);const data=await response.json();let node=String(data?.current_node||''),tip='';for(let i=0;i<24&&node;i++){const entry=data?.mapping?.[node]||null;const role=String(entry?.message?.author?.role||entry?.message?.role||'');if((role==='user'||role===('ass'+'istant'))&&entry?.message){tip=node;break;}node=String(entry?.parent||'');}if(!tip)throw new Error('conversation_tip_missing');sessionStorage.setItem(srFreshKey,JSON.stringify({state:'ready',at:Date.now(),tip}));}catch(error){try{sessionStorage.setItem(srFreshKey,JSON.stringify({state:'error',at:Date.now(),detail:String(error?.message||error)}));}catch(_){}}});"
-                + "srSoftSync();return result('UI_WAIT','conversation 최신 tip 확인 중');}"
-                + "if(!srDomTip)return result('UI_WAIT','conversation 현재 tip DOM 식별 대기');";
+    /** Reads the asynchronous document-start request guard result before another continuation attempt. */
+    private static String parentGuardOutcome(String markerId) {
+        String marker = q(markerId);
+        String armKey = q(SelfRunNetworkGuard.ARM_KEY);
+        String resultKey = q(SelfRunNetworkGuard.RESULT_KEY);
+        return "const srMarkerId=" + marker + ",srArmKey=" + armKey + ",srResultKey=" + resultKey + ";"
+                + "let srGuardResult=null,srGuardArm=null;try{const raw=sessionStorage.getItem(srResultKey)||'';srGuardResult=raw?JSON.parse(raw):null;}catch(_){}try{const raw=sessionStorage.getItem(srArmKey)||'';srGuardArm=raw?JSON.parse(raw):null;}catch(_){}"
+                + "if(srGuardResult&&String(srGuardResult.markerId||'')===srMarkerId){if(srGuardResult.state==='forwarded'){try{sessionStorage.removeItem(srResultKey);sessionStorage.removeItem(srArmKey);}catch(_){}return result('SUBMITTED','canonical parent guard 제출 확인');}if(srGuardResult.state==='failed'){try{sessionStorage.removeItem(srResultKey);sessionStorage.removeItem(srArmKey);}catch(_){}return result('UI_WAIT','canonical parent guard 재시도 준비');}}"
+                + "if(srGuardArm&&String(srGuardArm.markerId||'')===srMarkerId){if(Number(srGuardArm.expiresAt||0)>Date.now())return result('UI_WAIT','canonical parent guard 네트워크 제출 대기');try{sessionStorage.removeItem(srArmKey);}catch(_){}}";
+    }
+
+    /** Arms exactly one CONTINUE submission; normal pause-time user messages are never affected. */
+    private static String armParentGuard(String conversationId, String prompt, String markerId) {
+        String conversation = q(conversationId);
+        String expected = q(prompt);
+        String marker = q(markerId);
+        String armKey = q(SelfRunNetworkGuard.ARM_KEY);
+        String resultKey = q(SelfRunNetworkGuard.RESULT_KEY);
+        return "if(window." + SelfRunNetworkGuard.INSTALLED_FLAG + "!==true)return result('UI_WAIT','document-start parent guard 사용 불가');"
+                + "try{sessionStorage.removeItem(" + resultKey + ");sessionStorage.setItem(" + armKey + ",JSON.stringify({markerId:" + marker + ",conversationId:" + conversation + ",expected:" + expected + ",armedAt:Date.now(),expiresAt:Date.now()+30000}));}catch(_){return result('UI_WAIT','canonical parent guard 저장 실패');}";
     }
 
     private static String composer() {
