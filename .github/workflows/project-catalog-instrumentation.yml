@@ -46,7 +46,7 @@ jobs:
           disable-animations: true
           script: >-
             gradle --no-daemon --console=plain --stacktrace
-            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.ProjectCatalogProbeInstrumentedTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.ProjectCatalogProbeInstrumentedTest,com.shaterguy.chatgptselfrun.ProjectCatalogControlDisambiguationInstrumentedTest,com.shaterguy.chatgptselfrun.ProjectCatalogNavigatorInstrumentedTest
             :app:connectedDebugAndroidTest
       - name: Upload instrumentation reports
         if: ${{ always() }}
