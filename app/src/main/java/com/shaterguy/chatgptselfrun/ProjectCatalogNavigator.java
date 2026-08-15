@@ -146,7 +146,7 @@ final class ProjectCatalogNavigator {
               };
 
               let scope=controlled(),items=scope?rows(scope,false):[];
-              if(!items){
+              if(!items.length){
                 const expanded=pc.getAttribute?.('aria-expanded')==='true';
                 if(!window.__selfrunProjectOpenTried&&!expanded){
                   window.__selfrunBeforeProjectItems=new WeakSet([...document.querySelectorAll(selector)].filter(visible));
