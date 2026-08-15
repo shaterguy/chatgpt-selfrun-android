@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: selfrun-drive-release
@@ -68,6 +68,8 @@ jobs:
     needs: verify-coinstall-emulator
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -104,29 +106,43 @@ jobs:
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
       - name: Build unsigned release
         run: gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
-      - name: Require stable signing secret
+      - name: Install hash-locked signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == 'Linux' ]]
+          [[ "$(uname -m)" == 'x86_64' ]]
+          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          [[ "$PYTHON_VERSION" == '3.12' ]]
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+          python3 - <<'PY'
+          import cffi
+          import cryptography
+          import pycparser
+          assert cryptography.__version__ == '45.0.6'
+          assert cffi.__version__ == '1.17.1'
+          assert pycparser.__version__ == '2.22'
+          PY
+      - name: Sign and verify formal APK
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
+          PASS_FILE="$RUNNER_TEMP/selfrun-drive-signing-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
           test -n "$SIGNING_PASSPHRASE"
           umask 077
-          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/selfrun-drive-signing-pass"
-      - name: Install signing dependency
-        run: python3 -m pip install --disable-pip-version-check 'cryptography==45.0.6'
-      - name: Sign and verify formal APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'rm -f "$RUNNER_TEMP/selfrun-drive-signing-pass"' EXIT
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
           BT="$ANDROID_HOME/build-tools/36.0.0"
           SRC=app/build/outputs/apk/release/app-release-unsigned.apk
           mkdir -p release-output
           ALIGNED="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
           APK="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
           "$BT/zipalign" -p -f 4 "$SRC" "$ALIGNED"
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$ALIGNED" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$APK" > release-output/APKSIGNER_VERIFY.txt
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$ALIGNED" "$PASS_FILE" "$APK" > release-output/APKSIGNER_VERIFY.txt
           "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/APK_CERT.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/APK_CERT.txt
           BADGING="$($BT/aapt dump badging "$APK")"
