@@ -26,6 +26,17 @@ public class DriveResumePolicyTest {
         assertEquals("EXTERNAL_MANUAL_ACTION_COMPLETE", decision.reason);
     }
 
+    @Test public void drivePausedSignalMapsToExternalManualAndResumesPlainContinue() {
+        String origin = SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.PAUSED);
+        assertEquals(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, origin);
+        DriveResumePolicy.Decision decision = DriveResumePolicy.decide(
+                DriveResumePolicy.parseOrigin(origin), 3, 3, Collections.emptyList());
+        assertEquals(DriveResumePolicy.Action.CONTINUE, decision.action);
+        assertEquals("EXTERNAL_MANUAL_ACTION_COMPLETE", decision.reason);
+        assertEquals(SelfRunStore.PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED,
+                SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.USER_ACTION_REQUIRED));
+    }
+
     @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {
         DriveResumePolicy.Decision userAction = DriveResumePolicy.decide(
                 DriveResumePolicy.Origin.AI_USER_ACTION_REQUIRED, 3, 3, Collections.emptyList());

@@ -20,6 +20,17 @@ public class SelfRunPauseResumeTest {
         assertFalse(baseline.contains("CONTINUE 강제 제출 준비"));
     }
 
+    @Test public void drivePauseSignalUsesExternalManualOriginAcrossInitialAndReanchorPaths() throws Exception {
+        String store = src("SelfRunStore.java");
+        String pause = between(store, "private void pauseEvent", "private void terminal");
+        String resume = between(store, "void baselineManualResume", "void captureConversationUrl");
+        assertTrue(pause.contains("pauseOriginForDriveSignal(x.type)"));
+        assertTrue(resume.contains("pauseOriginForDriveSignal(blocking.type)"));
+        assertTrue(store.contains("if(type==DriveSignalParser.Type.PAUSED)return PAUSE_ORIGIN_EXTERNAL_MANUAL"));
+        assertTrue(store.contains("if(st.contains(\"SelfRun Drive 일시정지\"))return PAUSE_ORIGIN_EXTERNAL_MANUAL"));
+        assertTrue(store.contains("recordPauseAnchor(e,PAUSE_ORIGIN_AI_PAUSED,code"));
+    }
+
     @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {
         String store = src("SelfRunStore.java");
         assertTrue(store.contains("pauseAnchorRunId"));
