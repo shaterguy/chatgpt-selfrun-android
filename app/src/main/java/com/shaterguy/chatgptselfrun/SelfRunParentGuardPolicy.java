@@ -11,7 +11,8 @@ final class SelfRunParentGuardPolicy {
             case "HOOK_UNAVAILABLE", "HOOK_LOST", "ARM_STORAGE_FAILED", "NO_POST_AFTER_CLICK",
                     "ENDPOINT_MISMATCH", "PAYLOAD_MISMATCH", "PARENT_ID_MISSING",
                     "BODY_UNREADABLE", "CANONICAL_MISSING", "CANONICAL_GENERATING",
-                    "HANDSHAKE_TIMEOUT", "FORWARD_FAILED", "GUARD_INTERNAL_FAILURE" -> code;
+                    "HANDSHAKE_TIMEOUT", "FORWARD_FAILED", "COMPOSER_TIMEOUT",
+                    "GUARD_INTERNAL_FAILURE" -> code;
             default -> "GUARD_INTERNAL_FAILURE";
         };
     }
@@ -28,6 +29,7 @@ final class SelfRunParentGuardPolicy {
             case "CANONICAL_MISSING", "CANONICAL_GENERATING" -> "PARENT_GUARD_CANONICAL_INVALID";
             case "HANDSHAKE_TIMEOUT" -> "PARENT_GUARD_TIMEOUT";
             case "FORWARD_FAILED" -> "PARENT_GUARD_FORWARD_FAILED";
+            case "COMPOSER_TIMEOUT" -> "CONTINUE_COMPOSER_TIMEOUT";
             default -> code.startsWith("CANONICAL_HTTP_")
                     ? "PARENT_GUARD_CANONICAL_LOOKUP_FAILED" : "PARENT_GUARD_INTERNAL_FAILURE";
         };
@@ -45,6 +47,7 @@ final class SelfRunParentGuardPolicy {
             case "CANONICAL_MISSING", "CANONICAL_GENERATING" -> "최신 canonical parent를 안전하게 확정하지 못해 CONTINUE를 전송하지 않았습니다.";
             case "HANDSHAKE_TIMEOUT" -> "canonical parent 확인이 제출 제한시간 안에 끝나지 않아 CONTINUE를 전송하지 않았습니다.";
             case "FORWARD_FAILED" -> "canonical parent 적용 후 CONTINUE forwarding을 확인하지 못했습니다.";
+            case "COMPOSER_TIMEOUT" -> "CONTINUE 입력창 또는 전송 준비가 제한시간 안에 완료되지 않아 안전하게 중단했습니다.";
             default -> code.startsWith("CANONICAL_HTTP_")
                     ? "canonical parent 조회에 실패하여 CONTINUE를 전송하지 않았습니다."
                     : "CONTINUE parent guard 내부 상태를 안전하게 확인하지 못해 제출을 중단했습니다.";
@@ -54,8 +57,8 @@ final class SelfRunParentGuardPolicy {
     static String safeStage(String value) {
         String stage = value == null ? "" : value.trim();
         return switch (stage) {
-            case "COMPOSER_WAIT", "COMPOSER_INPUT_WAIT", "SEND_BUTTON_WAIT", "GUARD_ARMED",
-                    "POST_INTERCEPTION_WAIT", "POST_INTERCEPTED", "PAYLOAD_MATCHED",
+            case "COMPOSER_WAIT", "COMPOSER_INPUT_WAIT", "SEND_BUTTON_WAIT", "READY_TO_SUBMIT",
+                    "GUARD_ARMED", "POST_INTERCEPTION_WAIT", "POST_INTERCEPTED", "PAYLOAD_MATCHED",
                     "CANONICAL_FETCH_START", "CANONICAL_FETCH_OK", "PARENT_REWRITTEN",
                     "FORWARDING", "SUBMISSION_CONFIRMED" -> stage;
             default -> "HANDSHAKE_WAIT";
@@ -67,6 +70,7 @@ final class SelfRunParentGuardPolicy {
             case "COMPOSER_WAIT" -> "CONTINUE 입력창 대기";
             case "COMPOSER_INPUT_WAIT" -> "CONTINUE 입력 반영 대기";
             case "SEND_BUTTON_WAIT" -> "CONTINUE 전송 버튼 대기";
+            case "READY_TO_SUBMIT" -> "CONTINUE 제출 준비 완료";
             case "GUARD_ARMED" -> "parent guard arm 완료 · POST 관찰 대기";
             case "POST_INTERCEPTION_WAIT" -> "CONTINUE conversation POST 관찰 대기";
             case "POST_INTERCEPTED" -> "CONTINUE conversation POST 관찰 완료";
