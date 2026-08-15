@@ -49,7 +49,8 @@ final class SelfRunNetworkGuard {
                   const normalize = value => String(value ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
                   const targetPath = value => {
                     try {
-                      const path = new URL(String(value), location.href).pathname.replace(/\/$/, '');
+                      const rawPath = new URL(String(value), location.href).pathname;
+                      const path = rawPath.endsWith('/') ? rawPath.slice(0, -1) : rawPath;
                       return path === '/backend-api/f/conversation' || path === '/backend-api/conversation';
                     } catch (_) { return false; }
                   };
