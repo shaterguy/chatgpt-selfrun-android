@@ -47,7 +47,7 @@ public final class SelfRunNewActivity extends Activity {
     private Button startButton;
     private TextView projectStatus;
     private List<ProjectCatalog.Entry> projectEntries = new ArrayList<>();
-    private ProjectCatalogLoader projectLoader;
+    private ProjectCatalogNavigator projectLoader;
     private int refreshGeneration;
     private boolean refreshing;
 
@@ -149,9 +149,9 @@ public final class SelfRunNewActivity extends Activity {
         refreshing = true;
         setProjectControlsEnabled(false);
         projectStatus.setText("프로젝트 목록 새로고침 중…");
-        ProjectCatalogLoader loader = new ProjectCatalogLoader(this);
+        ProjectCatalogNavigator loader = new ProjectCatalogNavigator(this);
         projectLoader = loader;
-        loader.start(new ProjectCatalogLoader.Callback() {
+        loader.start(new ProjectCatalogNavigator.Callback() {
             @Override public void onSuccess(List<ProjectCatalog.Entry> entries) {
                 if (generation != refreshGeneration || isFinishing() || isDestroyed()) return;
                 try {
@@ -263,7 +263,7 @@ public final class SelfRunNewActivity extends Activity {
     @Override protected void onDestroy() {
         refreshGeneration++;
         refreshing=false;
-        ProjectCatalogLoader loader=projectLoader;
+        ProjectCatalogNavigator loader=projectLoader;
         projectLoader=null;
         if(loader!=null)loader.cancel();
         super.onDestroy();
