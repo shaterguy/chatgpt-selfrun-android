@@ -93,7 +93,7 @@ final class SelfRunNetworkGuard {
                     if (raw === 'canonical_parent_generating') return 'CANONICAL_GENERATING';
                     if (raw === 'guard_expired_before_forward') return 'HANDSHAKE_TIMEOUT';
                     if (raw === 'conversation_forward_failed') return 'FORWARD_FAILED';
-                    if (/^canonical_parent_http_\d+$/.test(raw)) return raw.replace('canonical_parent_http_', 'CANONICAL_HTTP_');
+                    if (/^canonical_parent_http_\\d+$/.test(raw)) return raw.replace('canonical_parent_http_', 'CANONICAL_HTTP_');
                     return 'GUARD_INTERNAL_FAILURE';
                   };
                   const failClosed = (arm, error) => {
