@@ -20,6 +20,7 @@ final class WebViewConfig {
         settings.setDisplayZoomControls(false);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        SelfRunNetworkGuard.install(webView);
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")
