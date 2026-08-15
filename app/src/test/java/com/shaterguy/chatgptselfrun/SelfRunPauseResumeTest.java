@@ -42,7 +42,7 @@ public class SelfRunPauseResumeTest {
         assertTrue(store.contains("if(hasTurnDocument)return false"));
         assertTrue(store.contains("PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation"));
         assertTrue(store.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),totalCount,postAnchor)"));
-        assertTrue(store.contains("else{e.putBoolean(\"resumeNeedsContinuation\",true).putString(\"status\",\"재개 보류 · 더 최신 blocking signal 확인\")"));
+        assertTrue(store.contains("else{invalidateSupersededContinuation(e);e.putBoolean(\"resumeNeedsContinuation\",true).putString(\"status\",\"재개 보류 · 더 최신 blocking signal 확인\")"));
     }
 
     @Test public void noMaterialAiLatchKeepsExistingAnchorWithoutTerminalReanchor() throws Exception {
@@ -59,7 +59,9 @@ public class SelfRunPauseResumeTest {
         assertFalse(nullBranch.contains("recordPauseAnchor"));
         assertFalse(nullBranch.contains("terminal(e,blocking)"));
         assertFalse(nullBranch.contains("resumeNeedsContinuation"));
+        assertFalse(nullBranch.contains("invalidateSupersededContinuation"));
         String blockingBranch = resume.substring(elseStart, resume.indexOf("case DONE", elseStart));
+        assertTrue(blockingBranch.contains("invalidateSupersededContinuation"));
         assertTrue(blockingBranch.contains("resumeNeedsContinuation"));
         assertTrue(blockingBranch.contains("recordPauseAnchor"));
         assertTrue(blockingBranch.contains("terminal(e,blocking)"));
