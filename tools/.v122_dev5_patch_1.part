@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import base64
+import re
+
+ROOT = Path(__file__).resolve().parents[1]
+
+def read(path):
+    return (ROOT / path).read_text(encoding='utf-8')
+
+def write(path, text):
+    target = ROOT / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding='utf-8')
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f'{label}: expected one exact match, got {count}')
+    return text.replace(old, new, 1)
+
+def regex_once(text, pattern, replacement, label):
+    out, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)
+    if count != 1:
+        raise RuntimeError(f'{label}: expected one regex match, got {count}')
+    return out
+
+# Version identity.
+p = 'app/build.gradle'
+s = read(p)
+s = replace_once(s,
+    "def selfRunDriveVersionCode = 1000021\ndef selfRunDriveVersionName = '1.2.1'",
+    "def selfRunDriveVersionCode = 1000025\ndef selfRunDriveVersionName = '1.2.2-dev5'",
+    'drive version')
+write(p, s)
+
+# SelfRunStore.
+p = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java'
+s = read(p)
+s = replace_once(s,
+'''    static final String RETRY_BOOTSTRAP = "BOOTSTRAP";
+    static final String RETRY_CONTINUE = "CONTINUE";
+''',
+'''    static final String RETRY_BOOTSTRAP = "BOOTSTRAP";
+    static final String RETRY_CONTINUE = "CONTINUE";
+    static final String PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED = "AI_USER_ACTION_REQUIRED";
+    static final String PAUSE_ORIGIN_AI_PAUSED = "AI_PAUSED";
+    static final String PAUSE_ORIGIN_UI_MANUAL = "UI_MANUAL";
+    static final String PAUSE_ORIGIN_EXTERNAL_MANUAL = "EXTERNAL_MANUAL";
+    static final String PAUSE_ORIGIN_UNKNOWN = "UNKNOWN";
+''', 'pause origin constants')
+s = replace_once(s,
+'.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L)',
+'.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putInt("pendingDriveSignalCursor",0).putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putString("completionGuardFingerprint","").putBoolean("completionGuardArmed",false)',
+'pending completion initialization')
+s = replace_once(s,
+'.putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)',
+'''.putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)
+  .putString("pauseAnchorRunId","").putString("pauseAnchorOrigin","").putString("pauseAnchorCause","").putString("pauseAnchorPhase","").putInt("pauseAnchorCursor",0).putString("pauseAnchorDriveVersion","").putString("pauseAnchorModifiedTime","").putString("pauseAnchorSignalRaw","").putString("pauseAnchorSignalType","").putString("pauseAnchorId","")''',
+'pause anchor initialization')
+s = replace_once(s,
+'''    String pendingDriveSignalType() { return get("pendingDriveSignalType"); }
+    long commitDetectedAt() { return prefs.getLong("commitDetectedAt", 0L); }
+''',
+'''    String pendingDriveSignalType() { return get("pendingDriveSignalType"); }
+    int pendingDriveSignalCursor() { return prefs.getInt("pendingDriveSignalCursor", 0); }
+    long commitDetectedAt() { return prefs.getLong("commitDetectedAt", 0L); }
+    String completionGuardFingerprint() { return get("completionGuardFingerprint"); }
+    boolean completionGuardArmed() { return prefs.getBoolean("completionGuardArmed", false); }
+''', 'pending completion getters')
+s = replace_once(s,
+'''    String pausedFromPhase() { return get("pausedFromPhase"); }
+    boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }
+''',
+'''    String pausedFromPhase() { return get("pausedFromPhase"); }
+    boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }
+    String pauseAnchorRunId() { return get("pauseAnchorRunId"); }
+    String pauseAnchorOrigin() { return getOr("pauseAnchorOrigin", PAUSE_ORIGIN_UNKNOWN); }
+    String pauseAnchorCause() { return get("pauseAnchorCause"); }
+    String pauseAnchorPhase() { return get("pauseAnchorPhase"); }
+    int pauseAnchorCursor() { return prefs.getInt("pauseAnchorCursor", 0); }
+    String pauseAnchorDriveVersion() { return get("pauseAnchorDriveVersion"); }
+    String pauseAnchorModifiedTime() { return get("pauseAnchorModifiedTime"); }
+    String pauseAnchorSignalRaw() { return get("pauseAnchorSignalRaw"); }
+    String pauseAnchorSignalType() { return get("pauseAnchorSignalType"); }
+    String pauseAnchorId() { return get("pauseAnchorId"); }
+''', 'pause anchor getters')
+s = replace_once(s,
+'    String activeCommandKind() { if(turnInfoRewriteRequired()&&PHASE_SEND_CONTINUE.equals(phase())&&get("activeCommandPrompt").isEmpty())SelfRunProtocol.requestTurnInfoRewrite(runId());return get("activeCommandKind"); }\n',
+'    String activeCommandKind() { if(PHASE_SEND_CONTINUE.equals(phase())&&get("activeCommandPrompt").isEmpty()){if(turnInfoRewriteRequired())SelfRunProtocol.requestTurnInfoRewrite(runId());else{NextInputCodec.Decoded next=DriveSignalParser.nextInput(pendingDriveSignalRaw());if(next.present&&next.valid)SelfRunProtocol.requestNextInput(runId(),next.text);}}return get("activeCommandKind"); }\n',
+'command payload selection')
+s = replace_once(s,
+'    void updateDriveSeen(String version, String modifiedTime) { commitOrThrow(prefs.edit().putString("lastSeenDriveVersion", safe(version)).putString("lastSeenModifiedTime", safe(modifiedTime))); }\n',
+'    void updateDriveSeen(String version, String modifiedTime) { SharedPreferences.Editor e=prefs.edit().putString("lastSeenDriveVersion",safe(version)).putString("lastSeenModifiedTime",safe(modifiedTime));if(paused()&&runId().equals(pauseAnchorRunId()))e.putString("pauseAnchorDriveVersion",safe(version)).putString("pauseAnchorModifiedTime",safe(modifiedTime));commitOrThrow(e); }\n',
+'drive identity anchor update')
+s = replace_once(s,
+'String commandMarkerId(){return runId()+":"+commandAttempt();}\n',
+'''String commandMarkerId(){if(RETRY_BOOTSTRAP.equals(get("activeCommandKind")))return runId()+":bootstrap:"+commandAttempt();String fp=DriveSignalParser.nextInputFingerprint(pendingDriveSignalRaw());String next=fp.isEmpty()?"none":fp.substring(0,Math.min(12,fp.length()));String anchor=pauseAnchorId().isEmpty()?"none":pauseAnchorId();return 
