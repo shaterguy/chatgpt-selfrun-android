@@ -5,60 +5,98 @@ PKG='com.shaterguy.chatgptselfrun.drive'
 RC1='apks/rc1/chatgpt-selfrun-drive-v1.2.1.apk'
 PERM='android.permission.POST_NOTIFICATIONS'
 
-field() {
-  local key="$1"
-  adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n "s/^[[:space:]]*${key}=//p" | head -1
+adb_ready() {
+  adb wait-for-device >/dev/null
+  local i
+  for i in $(seq 1 20); do
+    if adb shell true >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
-uid_value() {
-  adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*userId=//p' | head -1
+stable_package_dump() {
+  adb_ready
+  local i dump
+  for i in $(seq 1 15); do
+    if dump="$(adb shell dumpsys package "$PKG" 2>/dev/null | tr -d '\r')" \
+        && grep -Fq "Package [$PKG]" <<<"$dump"; then
+      printf '%s\n' "$dump"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
-version_name() {
-  adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1
-}
-
-version_code() {
-  adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -1
+snapshot_package() {
+  local dump line
+  dump="$(stable_package_dump)"
+  SNAP_VERSION_NAME="$(awk -F= '/^[[:space:]]*versionName=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
+  line="$(awk '/^[[:space:]]*versionCode=/{print; exit}' <<<"$dump")"
+  SNAP_VERSION_CODE="$(awk -F'[ =]' '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/){print $i; exit}}' <<<"$line")"
+  SNAP_UID="$(awk -F= '/^[[:space:]]*userId=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
+  SNAP_DATA_DIR="$(awk -F= '/^[[:space:]]*dataDir=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
+  SNAP_FIRST_INSTALL="$(awk -F= '/^[[:space:]]*firstInstallTime=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
+  [[ -n "$SNAP_VERSION_NAME" && -n "$SNAP_VERSION_CODE" && -n "$SNAP_UID" && -n "$SNAP_DATA_DIR" && -n "$SNAP_FIRST_INSTALL" ]]
+  printf 'SNAPSHOT versionName=%s versionCode=%s uid=%s dataDir=%s firstInstallTime=%s\n' \
+    "$SNAP_VERSION_NAME" "$SNAP_VERSION_CODE" "$SNAP_UID" "$SNAP_DATA_DIR" "$SNAP_FIRST_INSTALL" | tee -a update-evidence.txt
 }
 
 notification_granted() {
-  adb shell dumpsys package "$PKG" | tr -d '\r' | grep -F "${PERM}: granted=true" >/dev/null
+  local dump
+  dump="$(stable_package_dump)"
+  grep -F "${PERM}: granted=true" <<<"$dump" >/dev/null
 }
 
 launch_app() {
-  local label="$1"
-  local component
-  component="$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" | tr -d '\r' | tail -1)"
+  local label="$1" component
+  adb_ready
+  component="$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" 2>/dev/null | tr -d '\r' | tail -1)"
   [[ "$component" == "$PKG/"* ]]
   adb shell am start -W -n "$component" > "launch-${label}.txt"
   grep -Eq 'Status: (ok|OK)' "launch-${label}.txt"
 }
 
+install_apk() {
+  local apk="$1" label="$2" i output
+  adb_ready
+  for i in $(seq 1 5); do
+    if output="$(adb install -r "$apk" 2>&1)" && grep -Fq 'Success' <<<"$output"; then
+      printf '%s\n' "$output" | tee -a update-evidence.txt
+      adb_ready
+      return 0
+    fi
+    printf '%s install_attempt=%s output=%s\n' "$label" "$i" "$output" | tee -a update-evidence.txt
+    sleep 2
+    adb_ready || true
+  done
+  return 1
+}
+
 scenario() {
-  local base="$1"
-  local expected_base="$2"
-  local label="$3"
-
+  local base="$1" expected_base="$2" expected_code="$3" label="$4"
   adb uninstall "$PKG" >/dev/null 2>&1 || true
-  adb install -r "$base" | tee -a update-evidence.txt
-  [[ "$(version_name)" == "$expected_base" ]]
+  adb_ready
 
-  local before_uid before_dir before_first
-  before_uid="$(uid_value)"
-  before_dir="$(field dataDir)"
-  before_first="$(field firstInstallTime)"
-  [[ -n "$before_uid" && -n "$before_dir" && -n "$before_first" ]]
+  install_apk "$base" "$label-base"
+  snapshot_package
+  [[ "$SNAP_VERSION_NAME" == "$expected_base" ]]
+  [[ "$SNAP_VERSION_CODE" == "$expected_code" ]]
+  local before_uid="$SNAP_UID" before_dir="$SNAP_DATA_DIR" before_first="$SNAP_FIRST_INSTALL"
 
   adb shell pm grant "$PKG" "$PERM"
   notification_granted
 
-  adb install -r "$RC1" | tee -a update-evidence.txt
-  [[ "$(version_name)" == '1.2.1' ]]
-  [[ "$(version_code)" == '1000021' ]]
-  [[ "$(uid_value)" == "$before_uid" ]]
-  [[ "$(field dataDir)" == "$before_dir" ]]
-  [[ "$(field firstInstallTime)" == "$before_first" ]]
+  install_apk "$RC1" "$label-target"
+  snapshot_package
+  [[ "$SNAP_VERSION_NAME" == '1.2.1' ]]
+  [[ "$SNAP_VERSION_CODE" == '1000021' ]]
+  [[ "$SNAP_UID" == "$before_uid" ]]
+  [[ "$SNAP_DATA_DIR" == "$before_dir" ]]
+  [[ "$SNAP_FIRST_INSTALL" == "$before_first" ]]
   notification_granted
   launch_app "$label"
 
@@ -66,8 +104,8 @@ scenario() {
     "$label" "$expected_base" "$before_uid" "$before_dir" "$before_first" | tee -a update-evidence.txt
 }
 
-scenario 'apks/chatgpt-selfrun-drive-v1.1.0.apk' '1.1.0' 'v1.1.0-to-v1.2.1'
-scenario 'apks/dev6/chatgpt-selfrun-drive-v1.2.1-dev6.apk' '1.2.1-dev6' 'dev6-to-v1.2.1'
+scenario 'apks/chatgpt-selfrun-drive-v1.1.0.apk' '1.1.0' '1000009' 'v1.1.0-to-v1.2.1'
+scenario 'apks/dev6/chatgpt-selfrun-drive-v1.2.1-dev6.apk' '1.2.1-dev6' '1000020' 'dev6-to-v1.2.1'
 
 grep -Fq 'v1.1.0-to-v1.2.1 UPDATE_PASS' update-evidence.txt
 grep -Fq 'dev6-to-v1.2.1 UPDATE_PASS' update-evidence.txt
