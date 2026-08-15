@@ -13,17 +13,17 @@ public class SelfRunGeneralChatPolicyTest {
         assertEquals(SelfRunScript.GENERAL_CHAT_SCOPE, SelfRunScript.projectId("https://chatgpt.com/c/conversation123"));
         assertEquals("g-p-test", SelfRunScript.projectId("https://chatgpt.com/g/g-p-test/c/conversation123"));
         assertTrue(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/"));
-        assertTrue(SelfRunScript.isGeneralChatUrl("https://www.chatgpt.com/c/conversation123"));
+        assertFalse(SelfRunScript.isGeneralChatUrl("https://www.chatgpt.com/c/conversation123"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/g/g-p-test"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/settings"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://example.com/c/conversation123"));
     }
 
-    @Test public void blankProjectIsAcceptedAndMappedInternallyToGeneralChatRoot() throws Exception {
+    @Test public void generalChatIsSelectedFromTheFixedSafeOption() throws Exception {
         String activity = src("SelfRunNewActivity.java");
-        assertTrue(activity.contains("if(!project.isEmpty()&&SelfRunScript.projectId(project).isEmpty())"));
-        assertTrue(activity.contains("project.isEmpty()?SelfRunScript.GENERAL_CHAT_URL:project"));
-        assertTrue(activity.contains("store.setDefaultProjectUrl(project)"));
+        assertTrue(activity.contains("position<=0?SelfRunScript.GENERAL_CHAT_URL"));
+        assertTrue(activity.contains("store.setDefaultProjectUrl(project);"));
+        assertFalse(activity.contains("EditText project"));
     }
 
     private static String src(String file) throws Exception {
