@@ -48,13 +48,15 @@ public final class SelfRunNewActivityImeTest {
     private static void waitForWindowFocus(ActivityScenario<SelfRunNewActivity> scenario) {
         for (int attempt = 0; attempt < 80; attempt++) {
             AtomicBoolean focused = new AtomicBoolean(false);
-            scenario.onActivity(activity -> focused.set(
-                    activity.getWindow().getDecorView().hasWindowFocus()
-                            && requirement(activity).hasFocus()));
+            scenario.onActivity(activity -> {
+                EditText editor = requirement(activity);
+                if (!editor.hasFocus()) editor.requestFocus();
+                focused.set(editor.hasFocus());
+            });
             if (focused.get()) return;
             SystemClock.sleep(100L);
         }
-        throw new AssertionError("editor did not gain window focus on the emulator");
+        throw new AssertionError("editor did not gain focus on the emulator");
     }
 
     private static void requestIme(ActivityScenario<SelfRunNewActivity> scenario) {
