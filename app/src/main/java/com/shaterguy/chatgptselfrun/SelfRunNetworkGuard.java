@@ -128,6 +128,7 @@ final class SelfRunNetworkGuard {
                     });
                   };
                   const rewritePayload = async (payload, arm, auth) => {
+                    if (!matchesArmedContinue(payload, arm)) throw new Error('armed_continue_payload_mismatch');
                     if (!Object.prototype.hasOwnProperty.call(payload || {}, 'parent_message_id')) {
                       throw new Error('parent_message_id_missing');
                     }
@@ -150,9 +151,8 @@ final class SelfRunNetworkGuard {
                     try {
                       let bodyText = init?.body;
                       if (bodyText == null && request) bodyText = await request.clone().text();
-                      if (typeof bodyText !== 'string') return nativeFetch(input, init);
+                      if (typeof bodyText !== 'string') throw new Error('conversation_body_unreadable');
                       const payload = JSON.parse(bodyText);
-                      if (!matchesArmedContinue(payload, arm)) return nativeFetch(input, init);
                       const rewritten = await rewritePayload(payload, arm, outgoingAuth(request, init, null));
                       const rewrittenText = JSON.stringify(rewritten);
                       clearArm();
@@ -188,11 +188,17 @@ final class SelfRunNetworkGuard {
                       if (!arm || xhr.__srMethod !== 'POST' || !targetPath(xhr.__srUrl)) {
                         return nativeSend.call(xhr, body);
                       }
-                      if (typeof body !== 'string') return nativeSend.call(xhr, body);
+
                       let payload;
-                      try { payload = JSON.parse(body); }
-                      catch (_) { return nativeSend.call(xhr, body); }
-                      if (!matchesArmedContinue(payload, arm)) return nativeSend.call(xhr, body);
+                      try {
+                        if (typeof body !== 'string') throw new Error('conversation_body_unreadable');
+                        payload = JSON.parse(body);
+                        if (!matchesArmedContinue(payload, arm)) throw new Error('armed_continue_payload_mismatch');
+                      } catch (error) {
+                        failClosed(arm, error);
+                        try { xhr.abort(); } catch (_) {}
+                        return undefined;
+                      }
 
                       Promise.resolve().then(async () => {
                         try {
