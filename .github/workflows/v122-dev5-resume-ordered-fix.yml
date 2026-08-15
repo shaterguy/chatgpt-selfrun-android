@@ -6,6 +6,7 @@ on:
       - selfrun-drive/v1.2.2-dev5
     paths:
       - tools/tmp_v122_dev5_resume_ordered_fix.py
+      - tools/tmp_v122_dev5_resume_harness_fix.py
       - .github/workflows/v122-dev5-resume-ordered-fix.yml
 
 permissions:
@@ -40,6 +41,7 @@ jobs:
           test "$(git branch --show-current)" = 'selfrun-drive/v1.2.2-dev5'
           test "$(git merge-base HEAD d4ee904ac99747beaa49421e901a92e4f4f49a05)" = 'd4ee904ac99747beaa49421e901a92e4f4f49a05'
           python3 tools/tmp_v122_dev5_resume_ordered_fix.py
+          python3 tools/tmp_v122_dev5_resume_harness_fix.py
           git diff --check
           grep -Fq 'static final class ResumeDriveTransaction' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
           grep -Fq 'tx.observe(postAnchor,pauseAnchorCursor(),totalCount)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
@@ -69,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/workflows/v122-dev5-resume-ordered-fix.yml tools/tmp_v122_dev5_resume_ordered_fix.py
+          rm -f .github/workflows/v122-dev5-resume-ordered-fix.yml tools/tmp_v122_dev5_resume_ordered_fix.py tools/tmp_v122_dev5_resume_harness_fix.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
