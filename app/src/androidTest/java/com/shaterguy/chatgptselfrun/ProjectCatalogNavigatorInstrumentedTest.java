@@ -108,6 +108,31 @@ public final class ProjectCatalogNavigatorInstrumentedTest {
         }
     }
 
+    @Test public void childMoreButtonUsesProjectRowAsClickTarget() throws Exception {
+        HostPage page = open("""
+                <!doctype html><html><head>%s</head><body>
+                <button id="projects" aria-expanded="true" aria-controls="project-list">Projects</button>
+                <div id="project-list" role="list">
+                  <div role="menuitem" onclick="history.pushState({},'', '/g/g-p-row/project')">
+                    <span>Row Project</span><button aria-label="More">...</button>
+                  </div>
+                </div>
+                </body></html>
+                """.formatted(STYLE));
+        try {
+            JSONObject result = scan(page.webView, new LinkedHashSet<>());
+            assertEquals("READY", result.getString("state"));
+            JSONObject candidate = result.getJSONObject("candidate");
+            assertEquals("Row Project ...", candidate.getString("name"));
+            JSONObject clicked = evalObject(page.webView,
+                    ProjectCatalogNavigator.clickScriptForTesting(candidate.getString("key")));
+            assertTrue(clicked.getBoolean("clicked"));
+            assertEquals("https://chatgpt.com/g/g-p-row/project", waitForCanonical(page.webView));
+        } finally {
+            close(page);
+        }
+    }
+
     @Test public void exhaustedVisibleRowsScrollAndDiscoverVirtualizedNextProject() throws Exception {
         HostPage page = open("""
                 <!doctype html><html><head>
@@ -175,9 +200,8 @@ public final class ProjectCatalogNavigatorInstrumentedTest {
     private static String waitForCanonical(WebView webView) throws Exception {
         long deadline = System.currentTimeMillis() + 2_500L;
         while (System.currentTimeMillis() < deadline) {
-            String[] current = new String[1];
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> current[0] = webView.getUrl());
-            String canonical = ProjectCatalog.canonicalProjectUrl(current[0]);
+            JSONObject location = evalObject(webView, ProjectCatalogNavigator.locationScriptForTesting());
+            String canonical = ProjectCatalog.canonicalProjectUrl(location.optString("url", ""));
             if (!canonical.isEmpty()) return canonical;
             Thread.sleep(50L);
         }
