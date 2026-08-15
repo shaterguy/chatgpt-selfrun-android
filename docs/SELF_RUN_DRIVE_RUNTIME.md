@@ -53,3 +53,9 @@ Drive 계보의 Android application ID는 `com.shaterguy.chatgptselfrun.drive`�
 ### Superseded continuation state invalidation
 
 Drive의 post-anchor material signal이 기존 continuation의 authority를 대체하면 이전 `pendingDriveSignalRaw`/completion guard, prepared `activeCommandPrompt`/kind/retry 상태와 메모리 내 NEXT_INPUT·TURN_INFO_REWRITE 예약을 함께 폐기합니다. `USER_ACTION_REQUIRED`, `PAUSED`, protocol error, `DONE`, 새 completion 적용과 plain CONTINUE 결정은 이전 NEXT_INPUT을 재사용하지 않습니다. 반대로 UI 수동 pause 또는 앱 내부 prerequisite에서 새 material signal이 전혀 없어 `pausedFromPhase`를 복구하는 경우에는 동일 in-flight 작업을 계속하기 위해 기존 상태를 보존합니다.
+
+
+### Cursor rebase integrity (1.2.2-dev5)
+- Normal Drive polling treats a signal-count shrink below the durable cursor as a structural integrity failure and pauses without lowering the cursor.
+- Only guard recovery may mint a durable one-shot rebaseline authorization; it is bound to the Integer.MAX_VALUE recovery sentinel and consumed immediately after a successful baseline.
+- Unauthorized rebase invalidates prepared/pending continuation, completion guard, rewrite carry, and in-memory NEXT reservations before entering AI_PAUSED.

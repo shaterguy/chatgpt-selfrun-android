@@ -107,3 +107,8 @@ post-anchor `TURN_COMPLETED`, newer blocking signal, protocol error, `DONE` 또�
 signal append 결과가 실패·타임아웃·불명확하면 같은 문서를 먼저 재조회합니다. 의도한 행이 이미 있으면 중복 append하지 않고 readback 검증을 계속합니다. 행이 없는 것이 확인된 경우에만 같은 논리 signal을 다시 append합니다. readback만 실패한 경우에는 새 행을 추가하지 않고 readback을 재시도합니다. signal 기록과 readback이 성공한 뒤에만 해당 턴의 최종 답변을 출력합니다.
 
 앱 내부 WebView host, Foreground Service, WakeLock, polling timer, backoff, 로컬 상태와 서명 구현은 [SELF_RUN_DRIVE_RUNTIME](SELF_RUN_DRIVE_RUNTIME.md)에 분리합니다.
+
+
+### Append-only cursor integrity (1.2.2-dev5)
+- The execution-turn signal log is append-only from the client cursor perspective. `totalCount < durableCursor` MUST fail closed during normal polling.
+- A rebaseline is permitted only when app-internal guard recovery has durably authorized one recovery attempt; the authorization MUST be consumed on use and MUST NOT survive superseding authority.
