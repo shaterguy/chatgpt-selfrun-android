@@ -16,6 +16,25 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
 public final class LoginActivity extends Activity {
+    private static final String OBSERVE_PROJECT_SCRIPT =
+            "(()=>{" +
+            "if(location.protocol!=='https:'||location.hostname!=='chatgpt.com'||location.port!=='')return '';" +
+            "const p=location.pathname.split('/');" +
+            "const id=p.length>2&&p[1]==='g'?p[2]:'';" +
+            "if(!/^g-p-[A-Za-z0-9_-]+$/.test(id))return JSON.stringify({href:location.href,name:''});" +
+            "const canonical='/g/'+id+'/project';" +
+            "const clean=v=>String(v||'').replace(/\\s+/g,' ').trim().slice(0,120);" +
+            "let name='';" +
+            "for(const a of document.querySelectorAll('a[href]')){try{" +
+            "const u=new URL(a.getAttribute('href'),location.origin);" +
+            "if(u.origin===location.origin&&u.pathname===canonical){const t=clean(a.innerText||a.textContent);if(t){name=t;break;}}" +
+            "}catch(e){}}" +
+            "const atRoot=location.pathname===canonical||location.pathname===canonical+'/';" +
+            "if(!name&&atRoot){const h=document.querySelector('main h1,[role=\"main\"] h1,h1');name=clean(h&&(h.innerText||h.textContent));}" +
+            "if(!name&&atRoot){let t=clean(document.title);for(const s of [' | ChatGPT',' - ChatGPT',' · ChatGPT',' — ChatGPT',' – ChatGPT'])if(t.endsWith(s)){t=clean(t.slice(0,-s.length));break;}if(t&&t.toLowerCase()!=='chatgpt')name=t;}" +
+            "return JSON.stringify({href:location.href,name:name});" +
+            "})()";
+
     private WebView webView;
     private OnBackInvokedCallback backCallback;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -36,13 +55,15 @@ public final class LoginActivity extends Activity {
                 Ui.button(this, "새로고침", v -> webView.reload()),
                 Ui.button(this, "ChatGPT 홈", v -> webView.loadUrl("https://chatgpt.com/")),
                 Ui.button(this, "닫기", v -> finish())));
-        root.addView(Ui.body(this, "등록할 프로젝트를 직접 한 번씩 여세요. 앱은 도착한 프로젝트 주소만 등록하며 웹 화면의 항목을 자동으로 누르지 않습니다."));
+        root.addView(Ui.body(this, "등록할 프로젝트를 직접 한 번씩 여세요. 앱은 도착한 프로젝트 주소와 화면에서 확인된 프로젝트 이름만 등록하며 웹 화면의 항목을 자동으로 누르지 않습니다."));
         status = Ui.body(this, "프로젝트 방문 대기"); root.addView(status);
 
         webView = new WebView(this);
         catalog = new ProjectCatalog(this);
         WebViewConfig.applyLogin(webView);
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override public void onReceivedTitle(WebView view, String title) { scheduleObservation(80L); }
+        });
         webView.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) { scheduleObservation(100L); }
             @Override public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) { scheduleObservation(100L); }
@@ -85,22 +106,31 @@ public final class LoginActivity extends Activity {
         String current = webView.getUrl();
         if (!ProjectUrlPolicy.isTrustedChatgptPage(current)) return;
         final int epoch = observerGeneration; final WebView observed = webView;
-        observed.evaluateJavascript("(()=>{if(location.protocol!=='https:'||location.hostname!=='chatgpt.com'||location.port!=='')return '';return JSON.stringify({href:location.href});})()", raw -> {
+        observed.evaluateJavascript(OBSERVE_PROJECT_SCRIPT, raw -> {
             if (!resumed || epoch != observerGeneration || observed != webView || isFinishing()
                     || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) return;
-            String href = jsonHref(raw);
-            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(href);
-            if (ref != null && catalog.addVisitedProject(ref.canonicalUrl)) status.setText(ProjectCatalog.displayName(ref) + " 등록됨");
+            ProjectVisit visit = jsonProjectVisit(raw);
+            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(visit.href);
+            if (ref != null && catalog.addVisitedProject(ref.canonicalUrl, visit.name)) {
+                String suffix = visit.name.isEmpty() ? " 등록됨 · 이름 확인 중" : " 등록/업데이트됨";
+                status.setText(catalog.displayName(ref) + suffix);
+            }
             if (resumed) scheduleObservation(500L);
         });
     }
 
-    private static String jsonHref(String raw) {
+    private static ProjectVisit jsonProjectVisit(String raw) {
         try {
             Object outer = new org.json.JSONTokener(raw == null ? "" : raw).nextValue();
             org.json.JSONObject result = new org.json.JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer));
-            return result.optString("href", "");
-        } catch (Throwable ignored) { return ""; }
+            return new ProjectVisit(result.optString("href", ""), result.optString("name", ""));
+        } catch (Throwable ignored) { return new ProjectVisit("", ""); }
+    }
+
+    private static final class ProjectVisit {
+        final String href;
+        final String name;
+        ProjectVisit(String href, String name) { this.href = href == null ? "" : href; this.name = ProjectCatalog.normalizeDisplayName(name); }
     }
 
     @Override
