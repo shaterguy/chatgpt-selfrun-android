@@ -18,11 +18,15 @@ DRIVE_TURN_DOCUMENT_ID=<documentId>
 
 현재 conversation이 ChatGPT Project 내부의 대화라면 해당 Project의 프로젝트 지침과 그 지침이 지정하는 SKILL·운영문서도 함께 적용한다. 프로젝트의 업무·도메인·데이터·산출물·프로젝트 고유 운영 규칙은 해당 Project 규범을 따른다.
 
+DRIVE_TURN_DOCUMENT_ID 문서에 Command Received 신호 입력 후 아래 요구사항을 수행할 것.
+
 [요구사항]
 <사용자가 앱에 입력한 원본 요구사항>
 ```
 
 `SELF_RUN_SKILL_DOCUMENT_ID`는 앱의 단일 상수에서 prompt metadata로만 전달합니다. 앱은 해당 Google Drive 문서의 이름 검색, 다운로드, 캐싱, 버전 판정, 규칙 파싱 또는 Project 규범과의 우선순위 해석을 수행하지 않습니다. 문서 로드와 Project 규범 병행 적용은 ChatGPT가 담당합니다.
+
+bootstrap은 `[요구사항]` 직전에 `DRIVE_TURN_DOCUMENT_ID 문서에 Command Received 신호 입력 후 아래 요구사항을 수행할 것.`을 정확히 한 번 넣어, 요구사항 실행보다 실행턴 문서의 Command Received 기록을 먼저 수행하도록 명시합니다.
 
 사용자가 앱에 입력한 원본 요구사항은 `[요구사항]` 행 바로 뒤에 trim·요약 없이 그대로 붙습니다. bootstrap에는 canonical SelfRun 운영문서가 소유하는 역할 전환·HANDOFF·continuation·제어신호·완료 판정 의미를 다시 설명하는 중복 문장을 넣지 않습니다.
 
