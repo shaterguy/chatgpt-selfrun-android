@@ -35,7 +35,12 @@ final class ProjectCatalog {
         ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(rawUrl);
         if (ref == null) return false;
         LinkedHashSet<String> urls = new LinkedHashSet<>();
-        for (ProjectUrlPolicy.ProjectRef prior : entries()) if (!prior.projectId.equals(ref.projectId)) urls.add(prior.canonicalUrl);
+        boolean alreadyPresent = false;
+        for (ProjectUrlPolicy.ProjectRef prior : entries()) {
+            if (prior.projectId.equals(ref.projectId)) alreadyPresent = true;
+            else urls.add(prior.canonicalUrl);
+        }
+        if (alreadyPresent) return false;
         urls.add(ref.canonicalUrl);
         while (urls.size() > MAX_ENTRIES) urls.remove(urls.iterator().next());
         return prefs.edit().putInt(KEY_SCHEMA, SCHEMA).putStringSet(KEY_URLS, urls).commit();

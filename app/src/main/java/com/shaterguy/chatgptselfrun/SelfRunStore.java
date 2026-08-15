@@ -53,9 +53,10 @@ final class SelfRunStore {
 
     private final SharedPreferences prefs;
     private final SelfRunHistoryStore history;
+    private final Context app;
 
     SelfRunStore(Context context) {
-        Context app = context.getApplicationContext();
+        app = context.getApplicationContext();
         prefs = app.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE);
         history = new SelfRunHistoryStore(app);
     }
@@ -106,10 +107,11 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     }
 
     void clear() {
-        String defaultProject = defaultProjectUrl(), account = driveAccountId();
+        String account = driveAccountId();
         String id = driveRunsBaseFolderId(), name = driveRunsBaseFolderName(), url = driveRunsBaseFolderUrl();
         long boundAt = driveRunsBaseFolderBoundAt();
-        commitOrThrow(prefs.edit().clear().putString("defaultProjectUrl", defaultProject).putString("driveAccountId", account)
+        new ProjectCatalog(app).clear();
+        commitOrThrow(prefs.edit().clear().putString("driveAccountId", account)
                 .putString("driveRunsBaseFolderId", id).putString("driveRunsBaseFolderName", name)
                 .putString("driveRunsBaseFolderUrl", url).putLong("driveRunsBaseFolderBoundAt", boundAt));
     }
