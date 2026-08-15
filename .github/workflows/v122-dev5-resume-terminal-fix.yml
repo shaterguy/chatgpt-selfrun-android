@@ -5,8 +5,6 @@ on:
     branches:
       - selfrun-drive/v1.2.2-dev5
     paths:
-      - tools/tmp_v122_dev5_resume_terminal_fix.py
-      - tools/tmp_v122_dev5_resume_terminal_test_align.py
       - tools/tmp_v122_dev5_resume_cursor_fix.py
       - .github/workflows/v122-dev5-resume-terminal-fix.yml
 
@@ -35,20 +33,18 @@ jobs:
         with:
           gradle-version: '9.5.0'
           cache-read-only: true
-      - name: Apply resume authority fix and verify
+      - name: Apply durable cursor fix and verify
         shell: bash
         run: |
           set -euo pipefail
           test "$(git branch --show-current)" = 'selfrun-drive/v1.2.2-dev5'
           test "$(git merge-base HEAD d4ee904ac99747beaa49421e901a92e4f4f49a05)" = 'd4ee904ac99747beaa49421e901a92e4f4f49a05'
-          python3 tools/tmp_v122_dev5_resume_terminal_fix.py
-          python3 tools/tmp_v122_dev5_resume_terminal_test_align.py
-          python3 tools/tmp_v122_dev5_resume_cursor_fix.py
-          git diff --check
           grep -Fq 'rewriteCarryAuthorized' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
-          grep -Fq 'resumeCursor=tx.committedCursor(driveSignalCursor())' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
           grep -Fq 'missingAckErrorThenDonePreservesNewestDoneAuthority' app/src/test/java/com/shaterguy/chatgptselfrun/ResumeDriveTransactionTest.java
           grep -Fq 'invalidPriorWithoutRewriteAckDoesNotCarry' app/src/test/java/com/shaterguy/chatgptselfrun/ResumeDriveTransactionTest.java
+          python3 tools/tmp_v122_dev5_resume_cursor_fix.py
+          git diff --check
+          grep -Fq 'resumeCursor=tx.committedCursor(driveSignalCursor())' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
           grep -Fq 'noPostAnchorNeverRegressesAlreadyConsumedDurableCursor' app/src/test/java/com/shaterguy/chatgptselfrun/ResumeDriveTransactionTest.java
           chmod +x tools/verify_drive_variant.sh
           tools/verify_drive_variant.sh
@@ -71,14 +67,14 @@ jobs:
           grep -Fq "versionName='1.2.2-dev5'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
           test -z "$(git diff d4ee904ac99747beaa49421e901a92e4f4f49a05 -- app/src/main/AndroidManifest.xml)"
-      - name: Commit verified product tree and remove temporary files
+      - name: Commit verified cursor fix and remove temporary files
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/workflows/v122-dev5-resume-terminal-fix.yml tools/tmp_v122_dev5_resume_terminal_fix.py tools/tmp_v122_dev5_resume_terminal_test_align.py tools/tmp_v122_dev5_resume_cursor_fix.py
+          rm -f .github/workflows/v122-dev5-resume-terminal-fix.yml tools/tmp_v122_dev5_resume_cursor_fix.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'fix(drive): preserve ordered resume terminal authority'
+          git commit -m 'fix(drive): preserve durable resume cursor'
           git push origin HEAD:selfrun-drive/v1.2.2-dev5
