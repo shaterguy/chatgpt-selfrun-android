@@ -56,6 +56,6 @@ public class SelfRunParentGuardPolicyTest {
     private static String source(String file) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
