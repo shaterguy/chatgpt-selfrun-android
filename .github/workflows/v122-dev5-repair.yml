@@ -100,7 +100,14 @@ jobs:
           grep -Fq 'pause anchor' docs/SELF_RUN_DRIVE_RUNTIME.md
           chmod +x tools/verify_drive_variant.sh
           tools/verify_drive_variant.sh
+          set +e
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest --tests com.shaterguy.chatgptselfrun.SelfRunNextInputProtocolTest --tests com.shaterguy.chatgptselfrun.SelfRunDriveDev3PolicyTest
+          TARGET_RC=$?
+          set -e
+          if [ "$TARGET_RC" -ne 0 ]; then
+            find app/build/test-results/testDebugUnitTest -type f -name 'TEST-*.xml' -print -exec cat {} \; || true
+            exit "$TARGET_RC"
+          fi
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
           gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
           APK=app/build/outputs/apk/debug/app-debug.apk
