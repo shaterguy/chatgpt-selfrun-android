@@ -100,6 +100,8 @@ USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다.
 
 Drive 문서의 현재 전체 line을 resume baseline으로 덮고 무조건 continuation을 만드는 1.2.1 방식은 사용하지 않습니다.
 
+post-anchor `TURN_COMPLETED`, newer blocking signal, protocol error, `DONE` 또는 plain CONTINUE 결정이 기존 continuation을 supersede하면 앱은 이전 pending completion/guard와 prepared command/NEXT_INPUT 예약을 폐기한 뒤 새 authoritative 상태에서만 continuation을 다시 구성합니다. 새 material signal이 없는 `RESTORE_PHASE`는 이 invalidation을 수행하지 않습니다.
+
 ## signal write/readback 실패
 
 signal append 결과가 실패·타임아웃·불명확하면 같은 문서를 먼저 재조회합니다. 의도한 행이 이미 있으면 중복 append하지 않고 readback 검증을 계속합니다. 행이 없는 것이 확인된 경우에만 같은 논리 signal을 다시 append합니다. readback만 실패한 경우에는 새 행을 추가하지 않고 readback을 재시도합니다. signal 기록과 readback이 성공한 뒤에만 해당 턴의 최종 답변을 출력합니다.

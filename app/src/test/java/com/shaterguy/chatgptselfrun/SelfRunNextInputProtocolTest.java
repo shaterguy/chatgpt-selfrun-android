@@ -39,4 +39,19 @@ public class SelfRunNextInputProtocolTest {
         String second = SelfRunProtocol.driveContinuation(RUN);
         assertFalse("second=" + second.replace("\n", "\\n"), second.endsWith("\n" + input));
     }
+    @Test public void clearingSupersededContinuationDropsQueuedReservations() {
+        String oldInput = "원격 push를 진행해";
+        SelfRunProtocol.requestNextInput(RUN, oldInput);
+        SelfRunProtocol.clearPendingContinuation(RUN);
+        String plain = SelfRunProtocol.driveContinuation(RUN);
+        assertEquals(2, plain.split("\\n", -1).length);
+        assertFalse(plain.endsWith("\n" + oldInput));
+
+        SelfRunProtocol.requestTurnInfoRewrite(RUN);
+        SelfRunProtocol.clearPendingContinuation(RUN);
+        String afterRewriteClear = SelfRunProtocol.driveContinuation(RUN);
+        assertFalse(afterRewriteClear.startsWith("[SELF_RUN_TURN_INFO_REWRITE "));
+        assertEquals(2, afterRewriteClear.split("\\n", -1).length);
+    }
+
 }

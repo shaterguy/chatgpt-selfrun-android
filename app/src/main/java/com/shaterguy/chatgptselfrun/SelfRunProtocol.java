@@ -51,6 +51,7 @@ final class SelfRunProtocol {
     static synchronized void requestTurnInfoRewrite(String runId){if(safeCode(runId))turnInfoRewriteRunId=runId;}
     private static synchronized boolean consumeTurnInfoRewrite(String runId){if(!safeCode(runId)||!runId.equals(turnInfoRewriteRunId))return false;turnInfoRewriteRunId="";return true;}
     static synchronized void requestNextInput(String runId,String nextInput){if(!safeCode(runId))throw new IllegalArgumentException("valid run id required");NextInputCodec.encode(nextInput);if(runId.equals(turnInfoRewriteRunId))turnInfoRewriteRunId="";nextInputRunId=runId;nextInputText=nextInput;}
+    static synchronized void clearPendingContinuation(String runId){if(!safeCode(runId))return;if(runId.equals(turnInfoRewriteRunId))turnInfoRewriteRunId="";if(runId.equals(nextInputRunId)){nextInputRunId="";nextInputText="";}}
     private static synchronized String consumeNextInput(String runId){if(!safeCode(runId)||!runId.equals(nextInputRunId))return "";String value=nextInputText;nextInputRunId="";nextInputText="";return value;}
     static String driveContinuation(String runId){if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);String nextInput=consumeNextInput(runId);return nextInput.isEmpty()?driveContinuationBase(runId):driveContinuation(runId,nextInput);}
     static String driveContinuation(String runId,String nextInput){NextInputCodec.encode(nextInput);return driveContinuationBase(runId)+"\n"+nextInput;}

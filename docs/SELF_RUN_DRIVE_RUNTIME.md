@@ -48,3 +48,8 @@ canonical 안내 경로는 `/GPT/Self Run/Runs/`이며, 기존 Runs 객체 ID `1
 Drive 계보의 Android application ID는 `com.shaterguy.chatgptselfrun.drive`입니다. WebView SelfRun 0.2.x 계보와 별도 설치·버전·릴리스 채널을 유지합니다. 개발 branch의 최종 사용자 테스트 APK도 CI debug key가 아니라 `tools/sign_release.sh`가 검증하는 고정 SelfRun 인증서로 서명해야 업데이트 설치 계보를 유지할 수 있습니다.
 
 서명 인증서 기대 SHA-256, 파생 방식과 정식 릴리스 절차의 세부사항은 [SIGNING](SIGNING.md), `tools/sign_release.sh`, `release-drive-v1.yml`을 권위 원본으로 사용합니다.
+
+
+### Superseded continuation state invalidation
+
+Drive의 post-anchor material signal이 기존 continuation의 authority를 대체하면 이전 `pendingDriveSignalRaw`/completion guard, prepared `activeCommandPrompt`/kind/retry 상태와 메모리 내 NEXT_INPUT·TURN_INFO_REWRITE 예약을 함께 폐기합니다. `USER_ACTION_REQUIRED`, `PAUSED`, protocol error, `DONE`, 새 completion 적용과 plain CONTINUE 결정은 이전 NEXT_INPUT을 재사용하지 않습니다. 반대로 UI 수동 pause 또는 앱 내부 prerequisite에서 새 material signal이 전혀 없어 `pausedFromPhase`를 복구하는 경우에는 동일 in-flight 작업을 계속하기 위해 기존 상태를 보존합니다.
