@@ -31,6 +31,18 @@ public class SelfRunPauseResumeTest {
         assertTrue(store.contains("recordPauseAnchor(e,PAUSE_ORIGIN_AI_PAUSED,code"));
     }
 
+    @Test public void localPrerequisiteResumeRestoresAnchorPhaseBeforeDriveBaseline() throws Exception {
+        String store = src("SelfRunStore.java");
+        String begin = between(store, "void beginManualResumeOverride", "void baselineManualResume");
+        assertTrue(begin.contains("restorePauseWithoutDrive(pauseAnchorOrigin(),resumeNeedsContinuation(),!turnDocumentId().isEmpty())"));
+        assertTrue(begin.contains("String restore=pauseAnchorPhase()"));
+        assertTrue(begin.contains("putString(\"phase\",restore)"));
+        assertTrue(begin.contains("clearPauseAnchor(e)"));
+        assertTrue(begin.contains("PHASE_RESUME_BASELINE"));
+        assertTrue(store.contains("PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation"));
+        assertTrue(store.contains("PAUSE_ORIGIN_UI_MANUAL.equals(origin)&&!hasTurnDocument"));
+    }
+
     @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {
         String store = src("SelfRunStore.java");
         assertTrue(store.contains("pauseAnchorRunId"));

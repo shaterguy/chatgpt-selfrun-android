@@ -37,6 +37,14 @@ public class DriveResumePolicyTest {
                 SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.USER_ACTION_REQUIRED));
     }
 
+    @Test public void localPrerequisitePauseRestoresWithoutDriveButDrivePausedStillReconciles() {
+        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, false));
+        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, true));
+        assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, true, true));
+        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_UI_MANUAL, false, false));
+        assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_UI_MANUAL, false, true));
+    }
+
     @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {
         DriveResumePolicy.Decision userAction = DriveResumePolicy.decide(
                 DriveResumePolicy.Origin.AI_USER_ACTION_REQUIRED, 3, 3, Collections.emptyList());

@@ -85,7 +85,7 @@ OAuth scope는 `https://www.googleapis.com/auth/drive.file` 하나를 유지합�
 
 Drive V1의 WebView 책임은 assistant 완료 감시가 아니라 canonical conversation의 composer 제어권 확보와 명령 제출입니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
 
-WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한 번 best-effort로 읽어 role/model/reasoning을 적용할 수 있습니다. 이 read는 completion 판정이 아니며 읽지 못해도 현재 안전한 설정으로 CONTINUE를 진행합니다.
+WORK 모드의 MODEL/REASONING authority는 Drive TURN_COMPLETED 필드이며 assistant DOM을 profile fallback으로 사용하지 않습니다. 최신 assistant의 SELF_RUN_NEXT는 role/control을 한 번 best-effort로 읽는 용도로만 사용할 수 있으며 completion 판정이나 MODEL/REASONING 대체 근거가 아닙니다.
 
 ## 일시정지와 재개
 
