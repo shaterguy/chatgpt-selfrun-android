@@ -143,8 +143,8 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String phase() { return getOr("phase", PHASE_IDLE); }
     String status() { return getOr("status", "대기"); }
     String role() { return get("role"); }
-    String pendingModel() { return get("pendingModel"); }
-    String pendingReasoning() { return get("pendingReasoning"); }
+    String pendingModel() { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion()){DriveSignalParser.WorkProfile p=pendingDriveWorkProfile();return p.valid?p.model:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL;}return get("pendingModel"); }
+    String pendingReasoning() { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion()){DriveSignalParser.WorkProfile p=pendingDriveWorkProfile();return p.valid?p.reasoning:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL;}return get("pendingReasoning"); }
     String lastSignal() { return get("lastSignal"); }
     String lastErrorCode() { return get("lastErrorCode"); }
     String lastErrorMessage() { return get("lastErrorMessage"); }
@@ -175,7 +175,7 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     long commitDetectedAt() { return prefs.getLong("commitDetectedAt", 0L); }
     long guardDueAt() { return prefs.getLong("guardDueAt", 0L); }
     String activeCommandPrompt() { return get("activeCommandPrompt"); }
-    String activeCommandKind() { return get("activeCommandKind"); }
+    String activeCommandKind() { if(turnInfoRewriteRequired()&&PHASE_SEND_CONTINUE.equals(phase())&&get("activeCommandPrompt").isEmpty())SelfRunProtocol.requestTurnInfoRewrite(runId());return get("activeCommandKind"); }
     int commandAttempt() { return prefs.getInt("commandAttempt", 0); }
     boolean awaitingCommandAck() { return prefs.getBoolean("awaitingCommandAck", false); }
     String submissionRetryKind() { return get("submissionRetryKind"); }
@@ -202,6 +202,10 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String terminalSideEffectRunId() { return get("terminalSideEffectRunId"); }
     String terminalSideEffectCommitId() { return get("terminalSideEffectCommitId"); }
 
+    private boolean hasPendingDriveCompletion() { return DriveSignalParser.Type.TURN_COMPLETED.name().equals(pendingDriveSignalType())&&!pendingDriveSignalRaw().isEmpty(); }
+    private DriveSignalParser.WorkProfile pendingDriveWorkProfile() { return DriveSignalParser.workProfile(pendingDriveSignalRaw()); }
+    private boolean turnInfoRewriteRequired() { return MODE_WORK.equals(mode())&&hasPendingDriveCompletion()&&!pendingDriveWorkProfile().valid; }
+
     void setDefaultProjectUrl(String value) {
         if (value == null || value.trim().isEmpty() || SelfRunScript.isGeneralChatUrl(value)) { put("defaultProjectUrl", ""); return; }
         ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(value);
@@ -211,8 +215,8 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     void setPhase(String value) { commitOrThrow(prefs.edit().putString("phase", safe(value)).putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory(); }
     void setStatus(String value) { put("status", value); }
     void setRole(String value) { put("role", value); }
-    void setPendingModel(String value) { put("pendingModel", value); }
-    void setPendingReasoning(String value) { put("pendingReasoning", value); }
+    void setPendingModel(String value) { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put("pendingModel", value); }
+    void setPendingReasoning(String value) { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put("pendingReasoning", value); }
     void setLastSignal(String value) { put("lastSignal", value); }
     void setLastError(String code, String message) { commitOrThrow(prefs.edit().putString("lastErrorCode", safe(code)).putString("lastErrorMessage", safe(message))); syncHistory(); }
     void clearLastError() { setLastError("", ""); }

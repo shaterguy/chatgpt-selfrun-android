@@ -15,9 +15,39 @@ public class DriveSignalParserTest {
         assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.unseen.get(1).type);
     }
 
-    @Test public void ignoresLegacyMetadataWrongJobAndMalformedLines() {
+    @Test public void workCompletionCarriesNextTurnProfile() {
+        String raw = "[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB + " MODEL=Sol REASONING=ULTRA]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(raw, JOB, 0);
+        assertEquals(1, scan.totalCount);
+        DriveSignalParser.WorkProfile profile = DriveSignalParser.workProfile(scan.latest.raw);
+        assertTrue(profile.valid);
+        assertEquals("sol", profile.model);
+        assertEquals("ultra", profile.reasoning);
+    }
+
+    @Test public void missingOrMalformedWorkProfileStillCountsCompletionForRewrite() {
+        String bare = "[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
+        String malformed = "[2026.08.13 | 22:10:42] [SELF_RUN_TURN_COMPLETED " + JOB + " MODEL=sol]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(bare + "\n" + malformed, JOB, 0);
+        assertEquals(2, scan.totalCount);
+        assertFalse(DriveSignalParser.workProfile(scan.unseen.get(0).raw).valid);
+        assertFalse(DriveSignalParser.workProfile(scan.unseen.get(1).raw).valid);
+    }
+
+    @Test public void canonicalWorkProfileRestrictionsAreEnforced() {
+        assertTrue(profile("sol", "high").valid);
+        assertTrue(profile("sol", "ultra").valid);
+        assertTrue(profile("terra", "max").valid);
+        assertTrue(profile("luna", "max").valid);
+        assertFalse(profile("terra", "ultra").valid);
+        assertFalse(profile("luna", "high").valid);
+        assertFalse(profile("luna", "ultra").valid);
+    }
+
+    @Test public void ignoresLegacyMetadataWrongJobAndMalformedNonCompletionLines() {
         String text = "[SELF_RUN_DRIVE_COMMIT_V1]\nEVENT_SEQ=9\n[/SELF_RUN_DRIVE_COMMIT_V1]\n"
                 + "[2026.08.13 | 22:10:00] [SELF_RUN_DONE SR-OTHER]\n"
+                + "[2026.08.13 | 22:19:05] [SELF_RUN_COMMAND_RECEIVED " + JOB + " EXTRA=x]\n"
                 + "[2026.08.13 | 22:20:05] [SELF_RUN_PAUSED " + JOB + "]";
         DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 0);
         assertEquals(1, scan.totalCount);
@@ -47,5 +77,10 @@ public class DriveSignalParserTest {
         assertTrue(scan.unseen.isEmpty());
         assertEquals(2, scan.totalCount);
         assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.latest.type);
+    }
+
+    private static DriveSignalParser.WorkProfile profile(String model, String reasoning) {
+        return DriveSignalParser.workProfile("[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB
+                + " MODEL=" + model + " REASONING=" + reasoning + "]");
     }
 }

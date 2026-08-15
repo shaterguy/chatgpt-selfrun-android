@@ -66,6 +66,12 @@ public class SelfRunProtocolTest {
         assertFalse(driveContinue.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
     }
 
+    @Test public void turnInfoRewriteIsOneShotAndUntimestamped() {
+        SelfRunProtocol.requestTurnInfoRewrite(RUN);
+        assertEquals("[SELF_RUN_TURN_INFO_REWRITE " + RUN + "]", SelfRunProtocol.driveContinuation(RUN));
+        assertTrue(SelfRunProtocol.driveContinuation(RUN).contains("[SELF_RUN_CONTINUE " + RUN + "]"));
+    }
+
     @Test public void canonicalSkillIdHasOneJavaSourceOfTruth() throws Exception {
         Path root = Paths.get("app/src/main/java"); if (!Files.exists(root)) root = Paths.get("src/main/java");
         long filesWithId; try (Stream<Path> stream = Files.walk(root)) { filesWithId = stream.filter(path -> path.toString().endsWith(".java")).filter(path -> read(path).contains(SKILL_ID)).count(); }
@@ -75,6 +81,25 @@ public class SelfRunProtocolTest {
     @Test public void assistantControlSignalRemainsUntimestamped() {
         SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest("x\n[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER]", RUN, SelfRunStore.MODE_CHAT);
         assertEquals(SelfRunProtocol.Type.NEXT, signal.type); assertTrue(signal.raw.startsWith("[SELF_RUN_NEXT "));
+    }
+
+    @Test public void workAssistantControlDoesNotSupplyModelOrReasoning() {
+        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER MODEL=luna REASONING=ultra]", RUN, SelfRunStore.MODE_WORK);
+        assertEquals(SelfRunProtocol.Type.NEXT, signal.type);
+        assertEquals("VERIFIER", signal.role);
+        assertEquals("", signal.model);
+        assertEquals("", signal.reasoning);
+    }
+
+    @Test public void workProfilePolicyMatchesCanonicalRules() {
+        assertTrue(SelfRunProtocol.validWorkProfile("sol", "high"));
+        assertTrue(SelfRunProtocol.validWorkProfile("sol", "ultra"));
+        assertTrue(SelfRunProtocol.validWorkProfile("terra", "xhigh"));
+        assertTrue(SelfRunProtocol.validWorkProfile("terra", "max"));
+        assertTrue(SelfRunProtocol.validWorkProfile("luna", "max"));
+        assertFalse(SelfRunProtocol.validWorkProfile("terra", "ultra"));
+        assertFalse(SelfRunProtocol.validWorkProfile("luna", "high"));
+        assertFalse(SelfRunProtocol.validWorkProfile("luna", "ultra"));
     }
 
     private static int occurrences(String text, String token) { int count = 0; for (int at = 0; (at = text.indexOf(token, at)) >= 0; at += token.length()) count++; return count; }

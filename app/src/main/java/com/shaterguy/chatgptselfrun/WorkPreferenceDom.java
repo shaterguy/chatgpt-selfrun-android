@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 /** Work model/reasoning selector aligned with the scheduler's composer-local structural readback flow. */
 final class WorkPreferenceDom {
+    static final String TURN_INFO_REWRITE_SENTINEL = "__SELF_RUN_TURN_INFO_REWRITE__";
     private WorkPreferenceDom() {}
 
     static String modelForProject(String projectUrl, String model) {
@@ -13,11 +14,22 @@ final class WorkPreferenceDom {
     }
 
     static String modelForConversation(String conversationUrl, String model) {
-        return model(conversationGuard(SelfRunScript.conversationId(conversationUrl)), model);
+        String guard = conversationGuard(SelfRunScript.conversationId(conversationUrl));
+        return TURN_INFO_REWRITE_SENTINEL.equals(model)
+                ? preferenceBypass(guard, "차기 WORK 모델 정보 재작성 요청 준비")
+                : model(guard, model);
     }
 
     static String reasoningForConversation(String conversationUrl, String reasoning) {
-        return reasoning(conversationGuard(SelfRunScript.conversationId(conversationUrl)), reasoning);
+        String guard = conversationGuard(SelfRunScript.conversationId(conversationUrl));
+        return TURN_INFO_REWRITE_SENTINEL.equals(reasoning)
+                ? preferenceBypass(guard, "차기 WORK 추론 정보 재작성 요청 준비")
+                : reasoning(guard, reasoning);
+    }
+
+    private static String preferenceBypass(String guard, String detail) {
+        return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,diagnostics,url:location.href});"
+                + guard + "return result('READY'," + q(detail) + ",{bypassed:true});})()";
     }
 
     private static String model(String guard, String wanted) {

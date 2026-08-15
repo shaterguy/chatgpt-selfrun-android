@@ -9,6 +9,7 @@ import java.util.regex.Pattern;
 
 final class SelfRunProtocol {
     static final String SELF_RUN_SKILL_DOCUMENT_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
+    private static String turnInfoRewriteRunId = "";
 
     enum Type { NEXT, DONE, USER_ACTION, PAUSE, NONE }
     static final class Signal {
@@ -24,10 +25,10 @@ final class SelfRunProtocol {
             if("DONE".equals(kind))last=new Signal(Type.DONE,raw,parts[0],"","","","");
             else if("USER_ACTION_REQUIRED".equals(kind)){String a=parts.length>1?parts[1]:"ACTION";if(safeCode(a))last=new Signal(Type.USER_ACTION,raw,parts[0],"","","",a);}
             else if("PAUSE".equals(kind))last=new Signal(Type.PAUSE,raw,parts[0],value(payload,"ROLE"),"","","");
-            else{String role=value(payload,"ROLE").toUpperCase(Locale.ROOT),model=value(payload,"MODEL").toLowerCase(Locale.ROOT),reason=value(payload,"REASONING").toLowerCase(Locale.ROOT);if(SelfRunStore.MODE_CHAT.equals(mode)){model="";reason="";}else if(!validWorkProfile(model,reason))continue;if(role.isEmpty())role="BUILDER";if(safeCode(role))last=new Signal(Type.NEXT,raw,parts[0],role,model,reason,"");}
+            else{String role=value(payload,"ROLE").toUpperCase(Locale.ROOT);if(role.isEmpty())role="BUILDER";if(safeCode(role))last=new Signal(Type.NEXT,raw,parts[0],role,"","","");}
         }return last;
     }
-    static boolean validWorkProfile(String model,String reasoning){if(!("sol".equals(model)||"terra".equals(model)||"luna".equals(model)))return false;if(!("high".equals(reasoning)||"xhigh".equals(reasoning)||"max".equals(reasoning)||"ultra".equals(reasoning)))return false;return !"luna".equals(model)||"max".equals(reasoning)||"ultra".equals(reasoning);}
+    static boolean validWorkProfile(String model,String reasoning){if(!("sol".equals(model)||"terra".equals(model)||"luna".equals(model)))return false;if(!("high".equals(reasoning)||"xhigh".equals(reasoning)||"max".equals(reasoning)||"ultra".equals(reasoning)))return false;if("luna".equals(model))return "max".equals(reasoning);return !"ultra".equals(reasoning)||"sol".equals(model);}
     static String bootstrap(String runId,String mode,String requirement){return "[SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n\n"+requirement.trim();}
     static String bootstrapDrive(String runId,String mode,String requirement,String documentId){
         String originalRequirement=requirement==null?"":requirement;
@@ -43,7 +44,10 @@ final class SelfRunProtocol {
                 +originalRequirement;
     }
     static String continuation(String runId){return "[SELF_RUN_CONTINUE "+runId+"]";}
-    static String driveContinuation(String runId){return "["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";}
+    static String turnInfoRewrite(String runId){return "[SELF_RUN_TURN_INFO_REWRITE "+runId+"]";}
+    static synchronized void requestTurnInfoRewrite(String runId){if(safeCode(runId))turnInfoRewriteRunId=runId;}
+    private static synchronized boolean consumeTurnInfoRewrite(String runId){if(!safeCode(runId)||!runId.equals(turnInfoRewriteRunId))return false;turnInfoRewriteRunId="";return true;}
+    static String driveContinuation(String runId){if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);return "["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";}
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}
     static String kstTimestamp(Date date){SimpleDateFormat f=new SimpleDateFormat("yyyy.MM.dd | HH:mm:ss",Locale.US);f.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));return f.format(date);}
     private static String value(String payload,String key){Matcher m=Pattern.compile("(?:^|\\s)"+key+"=([^\\s]+)",Pattern.CASE_INSENSITIVE).matcher(payload);return m.find()?m.group(1).trim():"";}
