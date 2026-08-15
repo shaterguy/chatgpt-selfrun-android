@@ -9,9 +9,7 @@ adb_ready() {
   adb wait-for-device >/dev/null
   local i
   for i in $(seq 1 20); do
-    if adb shell true >/dev/null 2>&1; then
-      return 0
-    fi
+    if adb shell true >/dev/null 2>&1; then return 0; fi
     sleep 1
   done
   return 1
@@ -21,28 +19,35 @@ stable_package_dump() {
   adb_ready
   local i dump
   for i in $(seq 1 15); do
-    if dump="$(adb shell dumpsys package "$PKG" 2>/dev/null | tr -d '\r')" \
-        && grep -Fq "Package [$PKG]" <<<"$dump"; then
-      printf '%s\n' "$dump"
-      return 0
+    if dump="$(adb shell dumpsys package "$PKG" 2>/dev/null | tr -d '\r')"; then
+      if grep -Fq "Package [$PKG]" <<<"$dump"; then
+        printf '%s\n' "$dump"
+        return 0
+      fi
     fi
     sleep 1
   done
   return 1
 }
 
+value_after_equals() {
+  local pattern="$1" text="$2"
+  awk -v p="$pattern" '$0 ~ p { sub(/^[^=]*=/, ""); print; exit }' <<<"$text"
+}
+
 snapshot_package() {
   local dump line
   dump="$(stable_package_dump)"
-  SNAP_VERSION_NAME="$(awk -F= '/^[[:space:]]*versionName=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
+  SNAP_VERSION_NAME="$(value_after_equals '^[[:space:]]*versionName=' "$dump")"
   line="$(awk '/^[[:space:]]*versionCode=/{print; exit}' <<<"$dump")"
-  SNAP_VERSION_CODE="$(awk -F'[ =]' '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/){print $i; exit}}' <<<"$line")"
-  SNAP_UID="$(awk -F= '/^[[:space:]]*userId=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
-  SNAP_DATA_DIR="$(awk -F= '/^[[:space:]]*dataDir=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
-  SNAP_FIRST_INSTALL="$(awk -F= '/^[[:space:]]*firstInstallTime=/{print substr($0,index($0,"=")+1); exit}' <<<"$dump")"
-  [[ -n "$SNAP_VERSION_NAME" && -n "$SNAP_VERSION_CODE" && -n "$SNAP_UID" && -n "$SNAP_DATA_DIR" && -n "$SNAP_FIRST_INSTALL" ]]
-  printf 'SNAPSHOT versionName=%s versionCode=%s uid=%s dataDir=%s firstInstallTime=%s\n' \
+  SNAP_VERSION_CODE="${line#*=}"
+  SNAP_VERSION_CODE="${SNAP_VERSION_CODE%% *}"
+  SNAP_UID="$(value_after_equals '^[[:space:]]*userId=' "$dump")"
+  SNAP_DATA_DIR="$(value_after_equals '^[[:space:]]*dataDir=' "$dump")"
+  SNAP_FIRST_INSTALL="$(value_after_equals '^[[:space:]]*firstInstallTime=' "$dump")"
+  printf 'SNAPSHOT_RAW versionName=<%s> versionCode=<%s> uid=<%s> dataDir=<%s> firstInstallTime=<%s>\n' \
     "$SNAP_VERSION_NAME" "$SNAP_VERSION_CODE" "$SNAP_UID" "$SNAP_DATA_DIR" "$SNAP_FIRST_INSTALL" | tee -a update-evidence.txt
+  [[ -n "$SNAP_VERSION_NAME" && -n "$SNAP_VERSION_CODE" && -n "$SNAP_UID" && -n "$SNAP_DATA_DIR" && -n "$SNAP_FIRST_INSTALL" ]]
 }
 
 notification_granted() {
@@ -55,8 +60,10 @@ launch_app() {
   local label="$1" component
   adb_ready
   component="$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" 2>/dev/null | tr -d '\r' | tail -1)"
+  printf '%s resolved_component=<%s>\n' "$label" "$component" | tee -a update-evidence.txt
   [[ "$component" == "$PKG/"* ]]
   adb shell am start -W -n "$component" > "launch-${label}.txt"
+  cat "launch-${label}.txt" | tee -a update-evidence.txt
   grep -Eq 'Status: (ok|OK)' "launch-${label}.txt"
 }
 
@@ -65,7 +72,7 @@ install_apk() {
   adb_ready
   for i in $(seq 1 5); do
     if output="$(adb install -r "$apk" 2>&1)" && grep -Fq 'Success' <<<"$output"; then
-      printf '%s\n' "$output" | tee -a update-evidence.txt
+      printf '%s install_attempt=%s output=%s\n' "$label" "$i" "$output" | tee -a update-evidence.txt
       adb_ready
       return 0
     fi
