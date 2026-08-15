@@ -32,8 +32,10 @@ public class SelfRunResumeFreshnessTest {
         assertTrue(guard.contains("current_node"));
         assertTrue(guard.contains("parent_message_id"));
         assertTrue(guard.contains("payload.parent_message_id = parent"));
-        assertTrue(guard.contains("window.fetch = async function"));
-        assertTrue(guard.contains("NativeXHR.prototype.send"));
+        assertTrue(guard.contains("guardedFetch = async function"));
+        assertTrue(guard.contains("window.fetch = guardedFetch"));
+        assertTrue(guard.contains("NativeXHR.prototype.send = guardedSend"));
+        assertTrue(guard.contains("__selfRunDriveParentGuardAlive"));
         assertTrue(guard.contains("failClosed"));
         assertFalse(guard.contains("location.reload"));
         assertFalse(guard.contains("window.next?.router"));
@@ -54,7 +56,10 @@ public class SelfRunResumeFreshnessTest {
         assertFalse(pause.contains("scheduleWeb"));
         assertFalse(pause.contains("cleanupWebView"));
         assertFalse(pause.contains("loadUrl"));
-        assertTrue(dom.contains("CAPABILITY_UNAVAILABLE"));
+        assertTrue(dom.contains("PARENT_GUARD_FAILED"));
+        assertTrue(dom.contains("HOOK_UNAVAILABLE"));
+        assertTrue(evaluate.contains("PARENT_GUARD_FAILED"));
+        assertTrue(evaluate.contains("pauseParentGuardFailure"));
         assertTrue(evaluate.contains("CAPABILITY_UNAVAILABLE"));
         assertTrue(evaluate.contains("pauseUnsupportedParentGuard()"));
     }
