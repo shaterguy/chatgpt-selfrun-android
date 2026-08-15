@@ -28,6 +28,13 @@ public class DriveBatchPendingStateTest {
         assertFalse(DriveSignalParser.nextInput(state.acceptCompletion(completion("MODEL=sol REASONING=xhigh"))).present);
     }
 
+    @Test public void validWorkProfileCannotReceiveRewriteCarryAuthorization() {
+        String prior = completion("MODEL=sol REASONING=xhigh NEXT_INPUT_B64URL=" + NextInputCodec.encode("old"));
+        SelfRunStore.DriveBatchPendingState state = new SelfRunStore.DriveBatchPendingState(SelfRunStore.MODE_WORK, true, prior);
+        state.authorizeCarry();
+        assertFalse(state.carryNextForTest());
+    }
+
     @Test public void normalContinueAckDropsPriorNextBeforeSameBatchWorkCompletion() {
         String prior = completion("NEXT_INPUT_B64URL=" + NextInputCodec.encode("원격 push를 진행해"));
         SelfRunStore.DriveBatchPendingState state = new SelfRunStore.DriveBatchPendingState(SelfRunStore.MODE_WORK, true, prior, true);

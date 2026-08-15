@@ -51,7 +51,7 @@ public class SelfRunContinuationInvalidationTest {
         assertTrue(apply.contains("DriveBatchPendingState batchPending=new DriveBatchPendingState(mode(),hasPendingDriveCompletion(),pendingDriveSignalRaw(),rewriteCarryAuthorized())"));
         assertTrue(apply.contains("if(RETRY_CONTINUE.equals(kind)&&!rewrite){invalidateSupersededContinuation(e);batchPending.supersede()"));
         assertTrue(apply.contains("String raw=batchPending.acceptCompletion(x.raw)"));
-        assertTrue(apply.contains("putBoolean(\"rewriteCarryAuthorized\",true);batchPending.authorizeCarry()"));
+        assertTrue(apply.contains("batchPending.authorizeCarry();e.putBoolean(\"rewriteCarryAuthorized\",batchPending.carryNextForTest())"));
         assertTrue(apply.contains("putBoolean(\"rewriteCarryAuthorized\",false)"));
         assertFalse(apply.contains("MODE_WORK.equals(mode())&&hasPendingDriveCompletion())raw=DriveSignalParser.mergeNextInputIfMissing(raw,pendingDriveSignalRaw())"));
     }

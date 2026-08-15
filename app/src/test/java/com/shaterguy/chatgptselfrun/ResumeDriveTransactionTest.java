@@ -141,6 +141,24 @@ public class ResumeDriveTransactionTest {
         assertEquals(9, tx.committedCursor(9));
     }
 
+    @Test public void documentShrinkBelowDurableCursorFailsClosedWithoutCursorRegression() {
+        SelfRunStore.ResumeDriveTransaction tx = tx(false, "", "", false, false, "");
+        tx.validateBounds(7, 9, 8);
+        tx.observe(Collections.emptyList(), 7, 8);
+        assertTrue(tx.structuralErrorForTest());
+        assertEquals("RESUME_ANCHOR_CURSOR_INVALID", tx.error());
+        assertEquals(9, tx.consumedCursor());
+        assertEquals(9, tx.committedCursor(9));
+        assertNull(tx.lastProcessed());
+    }
+
+    @Test public void documentShrinkBelowAnchorFailsClosed() {
+        SelfRunStore.ResumeDriveTransaction tx = tx(false, "", "", false, false, "");
+        tx.validateBounds(9, 9, 8);
+        assertTrue(tx.structuralErrorForTest());
+        assertEquals("RESUME_ANCHOR_CURSOR_INVALID", tx.error());
+    }
+
     @Test public void structuralFailureDoesNotAdvancePastLastActuallyProcessedCursor() {
         SelfRunStore.ResumeDriveTransaction tx = tx(false, "", "", false, false, "");
         DriveSignalParser.Event first = event(DriveSignalParser.Type.COMMAND_RECEIVED, 8, "ack");

@@ -93,9 +93,12 @@ public class SelfRunPauseResumeTest {
         String baseline = between(store, "void baselineManualResume", "void captureConversationUrl");
         assertTrue(baseline.contains("ResumeDriveTransaction tx=new ResumeDriveTransaction"));
         assertTrue(baseline.contains("tx.observe(postAnchor,pauseAnchorCursor(),totalCount)"));
-        assertTrue(baseline.contains("int resumeCursor=tx.committedCursor(driveSignalCursor())"));
+        assertTrue(baseline.contains("int priorCursor=driveSignalCursor()"));
+        assertTrue(baseline.contains("tx.validateBounds(pauseAnchorCursor(),priorCursor,totalCount)"));
+        assertTrue(baseline.contains("int resumeCursor=tx.committedCursor(priorCursor)"));
         assertTrue(baseline.contains("putInt(\"driveSignalCursor\",resumeCursor)"));
         assertTrue(baseline.contains("if(tx.lastProcessed()!=null)putLatest(e,tx.lastProcessed())"));
+        assertTrue(baseline.contains("recordPauseAnchor(e,PAUSE_ORIGIN_AI_PAUSED,tx.error()"));
         assertTrue(baseline.contains("if(tx.acked())"));
         assertTrue(baseline.contains("tx.normalContinueAck()"));
         assertTrue(baseline.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),resumeCursor,tx.policyEvents())"));
