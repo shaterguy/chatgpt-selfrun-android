@@ -134,6 +134,13 @@ public class ResumeDriveTransactionTest {
         assertTrue(tx.policyEvents().isEmpty());
     }
 
+    @Test public void noPostAnchorNeverRegressesAlreadyConsumedDurableCursor() {
+        SelfRunStore.ResumeDriveTransaction tx = tx(false, "", "", false, false, "");
+        tx.observe(Collections.emptyList(), 7, 9);
+        assertEquals(7, tx.consumedCursor());
+        assertEquals(9, tx.committedCursor(9));
+    }
+
     @Test public void structuralFailureDoesNotAdvancePastLastActuallyProcessedCursor() {
         SelfRunStore.ResumeDriveTransaction tx = tx(false, "", "", false, false, "");
         DriveSignalParser.Event first = event(DriveSignalParser.Type.COMMAND_RECEIVED, 8, "ack");
