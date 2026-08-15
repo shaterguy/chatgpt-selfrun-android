@@ -79,50 +79,13 @@ jobs:
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
-          script: >-
-            bash -o pipefail -c '
-            set -euo pipefail;
-            PKG=com.shaterguy.chatgptselfrun.drive;
-            RC1=apks/rc1/chatgpt-selfrun-drive-v1.2.1.apk;
-            field() { adb shell dumpsys package "$PKG" | tr -d "\r" | sed -n "s/^[[:space:]]*$1=//p" | head -1; };
-            uid() { adb shell dumpsys package "$PKG" | tr -d "\r" | sed -n "s/^[[:space:]]*userId=//p" | head -1; };
-            vname() { adb shell dumpsys package "$PKG" | tr -d "\r" | sed -n "s/^[[:space:]]*versionName=//p" | head -1; };
-            vcode() { adb shell dumpsys package "$PKG" | tr -d "\r" | sed -n "s/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p" | head -1; };
-            scenario() {
-              local base="$1" expected_base="$2" marker="$3" label="$4";
-              adb uninstall "$PKG" >/dev/null 2>&1 || true;
-              adb install -r "$base" | tee -a update-evidence.txt;
-              [[ "$(vname)" == "$expected_base" ]];
-              local before_uid before_dir before_first ext;
-              before_uid="$(uid)";
-              before_dir="$(field dataDir)";
-              before_first="$(field firstInstallTime)";
-              ext="/sdcard/Android/data/$PKG/files";
-              adb shell mkdir -p "$ext";
-              printf "%s" "$marker" | adb shell "cat > $ext/update-sentinel.txt";
-              [[ "$(adb shell cat "$ext/update-sentinel.txt" | tr -d "\r")" == "$marker" ]];
-              adb install -r "$RC1" | tee -a update-evidence.txt;
-              [[ "$(vname)" == "1.2.1" ]];
-              [[ "$(vcode)" == "1000021" ]];
-              [[ "$(uid)" == "$before_uid" ]];
-              [[ "$(field dataDir)" == "$before_dir" ]];
-              [[ "$(field firstInstallTime)" == "$before_first" ]];
-              [[ "$(adb shell cat "$ext/update-sentinel.txt" | tr -d "\r")" == "$marker" ]];
-              adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 > "monkey-$label.txt";
-              grep -Fq "Events injected: 1" "monkey-$label.txt";
-              printf "%s UPDATE_PASS base=%s target=1.2.1 uid=%s dataDir=%s firstInstallTime=%s sentinel=PASS launch=PASS\n" "$label" "$expected_base" "$before_uid" "$before_dir" "$before_first" | tee -a update-evidence.txt;
-            };
-            scenario apks/chatgpt-selfrun-drive-v1.1.0.apk 1.1.0 state-from-1.1.0 v1.1.0-to-v1.2.1;
-            scenario apks/dev6/chatgpt-selfrun-drive-v1.2.1-dev6.apk 1.2.1-dev6 state-from-dev6 dev6-to-v1.2.1;
-            grep -Fq "v1.1.0-to-v1.2.1 UPDATE_PASS" update-evidence.txt;
-            grep -Fq "dev6-to-v1.2.1 UPDATE_PASS" update-evidence.txt;
-            cat update-evidence.txt'
+          script: bash tools/verify_update_paths_ci.sh
       - name: Upload update verification evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: selfrun-drive-v1.2.1-update-verification
           path: |
             update-evidence.txt
-            monkey-*.txt
+            launch-*.txt
           if-no-files-found: error
           retention-days: 30
