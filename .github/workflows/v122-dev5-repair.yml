@@ -41,6 +41,7 @@ jobs:
           test "$(git branch --show-current)" = 'selfrun-drive/v1.2.2-dev5'
           grep -Fq "def selfRunDriveVersionName = '1.2.1'" app/build.gradle
           grep -Fq 'void baselineManualResume(int cursor,DriveSignalParser.Event latest)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
+          sed -i '1d' tools/.v122_dev5_patch_5.part
           cat tools/.v122_dev5_patch_1.part \
               tools/.v122_dev5_patch_2.part \
               tools/.v122_dev5_patch_3.part \
@@ -81,7 +82,7 @@ jobs:
           grep -Fq "versionCode='1000025'" <<<"$BADGING"
           grep -Fq "versionName='1.2.2-dev5'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
-          git diff d4ee904ac99747beaa49421e901a92e4f4f49a05 -- app/src/main/AndroidManifest.xml | grep -q '^$' || { echo 'Manifest changed unexpectedly'; exit 1; }
+          test -z "$(git diff d4ee904ac99747beaa49421e901a92e4f4f49a05 -- app/src/main/AndroidManifest.xml)"
       - name: Upload repair diagnostic
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
