@@ -1,0 +1,139 @@
+name: SelfRun Drive dev5 local prerequisite resume fix
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.2.2-dev5'
+    paths:
+      - '.github/workflows/v122-dev5-local-prereq-resume-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.2.2-dev5
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Apply local prerequisite resume fix and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = 'selfrun-drive/v1.2.2-dev5'
+          test "$(git merge-base HEAD d4ee904ac99747beaa49421e901a92e4f4f49a05)" = 'd4ee904ac99747beaa49421e901a92e4f4f49a05'
+          python3 - <<'PY'
+          from pathlib import Path
+
+          store_path=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java')
+          store=store_path.read_text(encoding='utf-8')
+          start=store.index('void beginManualResumeOverride(){')
+          end=store.index('void baselineManualResume(', start)
+          replacement=(
+          'void beginManualResumeOverride(){\n'
+          ' if(!ensurePauseAnchor()){commitOrThrow(prefs.edit().putBoolean("paused",true).putBoolean("active",true).putString("phase",PHASE_PAUSED).putString("lastErrorCode","DRIVE_RESUME_ANCHOR_INVALID").putString("lastErrorMessage","pause anchor를 안전하게 복원할 수 없습니다.").putString("status","재개 차단 · pause anchor 확인 필요").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}\n'
+          ' if(restorePauseWithoutDrive(pauseAnchorOrigin(),resumeNeedsContinuation(),!turnDocumentId().isEmpty())){String restore=pauseAnchorPhase();if(!validRestoredPhase(restore)){commitOrThrow(prefs.edit().putBoolean("paused",true).putBoolean("active",true).putString("phase",PHASE_PAUSED).putString("lastErrorCode","DRIVE_RESUME_PHASE_INVALID").putString("lastErrorMessage","pausedFromPhase가 유효하지 않습니다.").putString("status","재개 차단 · 복귀 phase 확인 필요").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}SharedPreferences.Editor e=prefs.edit().putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",restore).putString("status","외부 수동조치 완료 · 기존 phase 복귀").putLong("phaseStartedAt",System.currentTimeMillis());clearPauseAnchor(e);commitOrThrow(e);syncHistory();return;}\n'
+          ' commitOrThrow(prefs.edit().putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 · Drive post-anchor signal 조정 중").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();\n'
+          '}\n')
+          store=store[:start]+replacement+store[end:]
+          helper_anchor='    static String pauseOriginForDriveSignal(DriveSignalParser.Type type){if(type==DriveSignalParser.Type.USER_ACTION_REQUIRED)return PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED;if(type==DriveSignalParser.Type.PAUSED)return PAUSE_ORIGIN_EXTERNAL_MANUAL;return PAUSE_ORIGIN_AI_PAUSED;}\n'
+          helper='    static boolean restorePauseWithoutDrive(String origin,boolean needsContinuation,boolean hasTurnDocument){if(PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation)return true;return PAUSE_ORIGIN_UI_MANUAL.equals(origin)&&!hasTurnDocument;}\n'
+          if store.count(helper_anchor)!=1: raise SystemExit('pause helper anchor mismatch')
+          if 'static boolean restorePauseWithoutDrive(' in store: raise SystemExit('restorePauseWithoutDrive already exists')
+          store=store.replace(helper_anchor,helper_anchor+helper,1)
+          store_path.write_text(store,encoding='utf-8')
+
+          policy_path=Path('app/src/test/java/com/shaterguy/chatgptselfrun/DriveResumePolicyTest.java')
+          policy=policy_path.read_text(encoding='utf-8')
+          marker='    @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {\n'
+          test=('    @Test public void localPrerequisitePauseRestoresWithoutDriveButDrivePausedStillReconciles() {\n'
+                '        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, false));\n'
+                '        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, false, true));\n'
+                '        assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, true, true));\n'
+                '        assertTrue(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_UI_MANUAL, false, false));\n'
+                '        assertFalse(SelfRunStore.restorePauseWithoutDrive(SelfRunStore.PAUSE_ORIGIN_UI_MANUAL, false, true));\n'
+                '    }\n\n')
+          if policy.count(marker)!=1: raise SystemExit('DriveResumePolicyTest anchor mismatch')
+          if 'localPrerequisitePauseRestoresWithoutDriveButDrivePausedStillReconciles' in policy: raise SystemExit('policy regression already exists')
+          policy_path.write_text(policy.replace(marker,test+marker,1),encoding='utf-8')
+
+          source_path=Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java')
+          source=source_path.read_text(encoding='utf-8')
+          marker2='    @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {\n'
+          test2=('    @Test public void localPrerequisiteResumeRestoresAnchorPhaseBeforeDriveBaseline() throws Exception {\n'
+                 '        String store = src("SelfRunStore.java");\n'
+                 '        String begin = between(store, "void beginManualResumeOverride", "void baselineManualResume");\n'
+                 '        assertTrue(begin.contains("restorePauseWithoutDrive(pauseAnchorOrigin(),resumeNeedsContinuation(),!turnDocumentId().isEmpty())"));\n'
+                 '        assertTrue(begin.contains("String restore=pauseAnchorPhase()"));\n'
+                 '        assertTrue(begin.contains("putString(\\\"phase\\\",restore)"));\n'
+                 '        assertTrue(begin.contains("clearPauseAnchor(e)"));\n'
+                 '        assertTrue(begin.contains("PHASE_RESUME_BASELINE"));\n'
+                 '        assertTrue(store.contains("PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation"));\n'
+                 '        assertTrue(store.contains("PAUSE_ORIGIN_UI_MANUAL.equals(origin)&&!hasTurnDocument"));\n'
+                 '    }\n\n')
+          if source.count(marker2)!=1: raise SystemExit('SelfRunPauseResumeTest anchor mismatch')
+          if 'localPrerequisiteResumeRestoresAnchorPhaseBeforeDriveBaseline' in source: raise SystemExit('source regression already exists')
+          source_path.write_text(source.replace(marker2,test2+marker2,1),encoding='utf-8')
+
+          protocol_path=Path('docs/SELF_RUN_DRIVE_V1_PROTOCOL.md')
+          protocol=protocol_path.read_text(encoding='utf-8')
+          old='WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한 번 best-effort로 읽어 role/model/reasoning을 적용할 수 있습니다. 이 read는 completion 판정이 아니며 읽지 못해도 현재 안전한 설정으로 CONTINUE를 진행합니다.'
+          new='WORK 모드의 MODEL/REASONING authority는 Drive TURN_COMPLETED 필드이며 assistant DOM을 profile fallback으로 사용하지 않습니다. 최신 assistant의 SELF_RUN_NEXT는 role/control을 한 번 best-effort로 읽는 용도로만 사용할 수 있으며 completion 판정이나 MODEL/REASONING 대체 근거가 아닙니다.'
+          if protocol.count(old)!=1: raise SystemExit('protocol WORK authority sentence mismatch')
+          protocol_path.write_text(protocol.replace(old,new,1),encoding='utf-8')
+
+          runtime_path=Path('docs/SELF_RUN_DRIVE_RUNTIME.md')
+          runtime=runtime_path.read_text(encoding='utf-8')
+          old2='재개는 `PHASE_RESUME_BASELINE`에서 latest signal을 단순 baseline하지 않습니다. pause anchor 이후 event를 Drive에서 수집하고 `DriveResumePolicy`가 completion/blocking/DONE/no-new-signal/UI-manual case를 판정한 뒤 기존 state machine phase로 복귀하거나 continuation을 준비합니다. Drive read 실패는 plain CONTINUE fallback을 만들지 않습니다.'
+          new2='재개는 `PHASE_RESUME_BASELINE`에서 latest signal을 단순 baseline하지 않습니다. Drive signal로 생긴 pause는 pause anchor 이후 event를 수집하고 `DriveResumePolicy`가 completion/blocking/DONE/no-new-signal/UI-manual case를 판정합니다. 반면 ChatGPT 로그인·OAuth·Drive 재연결 같은 앱 내부 prerequisite pause는 `resumeNeedsContinuation=false`를 영속하고 Resume 시 `pauseAnchorPhase`로 직접 복귀하여 bootstrap 전이나 turn document 생성 전에도 빈 document를 polling하지 않습니다. Drive read 실패는 plain CONTINUE fallback을 만들지 않습니다.'
+          if runtime.count(old2)!=1: raise SystemExit('runtime resume paragraph mismatch')
+          runtime_path.write_text(runtime.replace(old2,new2,1),encoding='utf-8')
+          PY
+          git diff --check
+          grep -Fq "def selfRunDriveVersionCode = 1000025" app/build.gradle
+          grep -Fq "def selfRunDriveVersionName = '1.2.2-dev5'" app/build.gradle
+          grep -Fq 'restorePauseWithoutDrive(pauseAnchorOrigin(),resumeNeedsContinuation(),!turnDocumentId().isEmpty())' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
+          grep -Fq 'PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
+          grep -Fq 'PAUSE_ORIGIN_UI_MANUAL.equals(origin)&&!hasTurnDocument' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
+          grep -Fq 'MODEL/REASONING authority는 Drive TURN_COMPLETED' docs/SELF_RUN_DRIVE_V1_PROTOCOL.md
+          chmod +x tools/verify_drive_variant.sh
+          tools/verify_drive_variant.sh
+          gradle --no-daemon --console=plain :app:testDebugUnitTest --tests com.shaterguy.chatgptselfrun.DriveResumePolicyTest --tests com.shaterguy.chatgptselfrun.SelfRunPauseResumeTest
+          gradle --no-daemon --console=plain :app:testDebugUnitTest
+          gradle --no-daemon --console=plain :app:assembleDebug
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          BADGING="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+          grep -Fq "versionCode='1000025'" <<<"$BADGING"
+          grep -Fq "versionName='1.2.2-dev5'" <<<"$BADGING"
+          grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
+          test -z "$(git diff d4ee904ac99747beaa49421e901a92e4f4f49a05 -- app/src/main/AndroidManifest.xml)"
+      - name: Commit verified product tree and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/v122-dev5-local-prereq-resume-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(drive): restore local prerequisite pause phase'
+          git push origin HEAD:selfrun-drive/v1.2.2-dev5
