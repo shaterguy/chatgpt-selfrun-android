@@ -41,7 +41,7 @@ public class SelfRunPauseResumeTest {
         assertTrue(begin.contains("PHASE_RESUME_BASELINE"));
         assertTrue(store.contains("if(hasTurnDocument)return false"));
         assertTrue(store.contains("PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation"));
-        assertTrue(store.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),totalCount,tx.policyEvents())"));
+        assertTrue(store.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),tx.consumedCursor(),tx.policyEvents())"));
         assertTrue(store.contains("else{invalidateSupersededContinuation(e);e.putBoolean(\"resumeNeedsContinuation\",true).putString(\"status\",\"재개 보류 · 더 최신 blocking signal 확인\")"));
     }
 
@@ -93,9 +93,11 @@ public class SelfRunPauseResumeTest {
         String baseline = between(store, "void baselineManualResume", "void captureConversationUrl");
         assertTrue(baseline.contains("ResumeDriveTransaction tx=new ResumeDriveTransaction"));
         assertTrue(baseline.contains("tx.observe(postAnchor,pauseAnchorCursor(),totalCount)"));
+        assertTrue(baseline.contains("putInt(\"driveSignalCursor\",tx.consumedCursor())"));
+        assertTrue(baseline.contains("if(tx.lastProcessed()!=null)putLatest(e,tx.lastProcessed())"));
         assertTrue(baseline.contains("if(tx.acked())"));
         assertTrue(baseline.contains("tx.normalContinueAck()"));
-        assertTrue(baseline.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),totalCount,tx.policyEvents())"));
+        assertTrue(baseline.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),tx.consumedCursor(),tx.policyEvents())"));
         assertTrue(baseline.contains("String raw=tx.acceptCompletion(completion.raw)"));
         assertFalse(baseline.contains("hasPendingDriveCompletion())raw=DriveSignalParser.mergeNextInputIfMissing"));
     }
