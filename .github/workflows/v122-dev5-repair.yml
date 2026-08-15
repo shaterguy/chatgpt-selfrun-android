@@ -60,18 +60,47 @@ jobs:
           PY
           python3 -m py_compile tools/apply_v122_dev5_patch.py
           python3 tools/apply_v122_dev5_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          store=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java')
+          s=store.read_text(encoding='utf-8')
+          if 'post-anchor TURN_COMPLETED 적용' not in s:
+              raise SystemExit('resume status anchor missing')
+          store.write_text(s.replace('post-anchor TURN_COMPLETED 적용','POST_ANCHOR TURN_COMPLETED 적용',1),encoding='utf-8')
+
+          proto=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java')
+          s=proto.read_text(encoding='utf-8')
+          old='static synchronized void requestNextInput(String runId,String nextInput){if(!safeCode(runId))throw new IllegalArgumentException("valid run id required");NextInputCodec.encode(nextInput);nextInputRunId=runId;nextInputText=nextInput;}'
+          new='static synchronized void requestNextInput(String runId,String nextInput){if(!safeCode(runId))throw new IllegalArgumentException("valid run id required");NextInputCodec.encode(nextInput);if(runId.equals(turnInfoRewriteRunId))turnInfoRewriteRunId="";nextInputRunId=runId;nextInputText=nextInput;}'
+          if old not in s:
+              raise SystemExit('requestNextInput anchor missing')
+          proto.write_text(s.replace(old,new,1),encoding='utf-8')
+
+          doc=Path('docs/SELF_RUN_DRIVE_V1_PROTOCOL.md')
+          s=doc.read_text(encoding='utf-8')
+          replacement='''## 일시정지와 재개\n\nUSER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. pause 시 앱은 RUN_ID, origin/cause, `pausedFromPhase`, Drive signal cursor, Drive version/modifiedTime과 blocking signal identity를 durable하게 기록합니다. Resume 버튼은 현재 Drive 문서를 다시 읽고 **pause anchor 이후의 signal만** 조정합니다.\n\n- post-anchor `TURN_COMPLETED`가 있으면 그 completion을 처리합니다. `USER_ACTION_REQUIRED`에서 시작된 user-choice resume-preparation completion은 `NEXT_INPUT_B64URL`이 필수이며 없으면 protocol error입니다.\n- post-anchor newer `USER_ACTION_REQUIRED`/`PAUSED`면 계속 일시정지합니다.\n- post-anchor `DONE`이면 continuation을 만들지 않습니다.\n- 외부 수동 행동 origin은 새 completion이 없을 때만 plain continuation을 허용합니다.\n- UI 수동 pause는 새 material signal이 없으면 `pausedFromPhase`를 복구하고 새 continuation을 만들지 않습니다.\n- Drive 요청/anchor 검증에 실패하면 plain continuation fallback을 하지 않습니다.\n\nDrive 문서의 현재 전체 line을 resume baseline으로 덮고 무조건 continuation을 만드는 1.2.1 방식은 사용하지 않습니다.\n\n'''
+          s,n=re.subn(r'## 일시정지와 재개\n\n.*?(?=## signal write/readback 실패)',replacement,s,flags=re.S)
+          if n != 1:
+              raise SystemExit(f'protocol pause section replacement count={n}')
+          doc.write_text(s,encoding='utf-8')
+          PY
           git diff --check
           grep -Fq "def selfRunDriveVersionCode = 1000025" app/build.gradle
           grep -Fq "def selfRunDriveVersionName = '1.2.2-dev5'" app/build.gradle
           grep -Fq 'DriveResumePolicy.decide' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
+          grep -Fq 'POST_ANCHOR TURN_COMPLETED' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java
           grep -Fq 'baselineManualResume(scan.unseen,scan.totalCount,scan.latest)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
           grep -Fq 'handler.post(this::resumeAfterDriveReconciliation)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
           grep -Fq 'historySafeRaw(store.pendingDriveSignalRaw())' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunHistoryStore.java
           grep -Fq "state==='clicked'" app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java
           grep -Fq 'NEXT_INPUT_B64URL' docs/SELF_RUN_DRIVE_V1_PROTOCOL.md
+          grep -Fq 'pause anchor 이후의 signal만' docs/SELF_RUN_DRIVE_V1_PROTOCOL.md
           grep -Fq 'pause anchor' docs/SELF_RUN_DRIVE_RUNTIME.md
           chmod +x tools/verify_drive_variant.sh
           tools/verify_drive_variant.sh
+          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest --tests com.shaterguy.chatgptselfrun.SelfRunNextInputProtocolTest --tests com.shaterguy.chatgptselfrun.SelfRunDriveDev3PolicyTest
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
           gradle --no-daemon --console=plain --stacktrace :app:assembleDebug
           APK=app/build/outputs/apk/debug/app-debug.apk
