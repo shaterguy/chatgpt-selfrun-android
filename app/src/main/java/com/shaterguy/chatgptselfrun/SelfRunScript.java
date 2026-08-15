@@ -8,22 +8,15 @@ final class SelfRunScript {
     private SelfRunScript() {}
 
     static String projectId(String url) {
-        if (url == null) return "";
-        String normalized = url.trim();
-        if (normalized.isEmpty()) return "";
-        String[] parts = normalized.split("/");
-        for (int i = 0; i + 1 < parts.length; i++) {
-            if ("g".equals(parts[i])) return parts[i + 1];
-        }
-        return isGeneralChatUrl(normalized) ? GENERAL_CHAT_SCOPE : "";
+        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(url);
+        return ref == null ? (isGeneralChatUrl(url) ? GENERAL_CHAT_SCOPE : "") : ref.projectId;
     }
 
     static boolean isGeneralChatUrl(String url) {
-        if (url == null) return false;
+        if (!ProjectUrlPolicy.isTrustedChatgptPage(url)) return false;
         try {
             java.net.URI uri = java.net.URI.create(url.trim());
-            String host = uri.getHost();
-            if (!("chatgpt.com".equalsIgnoreCase(host) || "www.chatgpt.com".equalsIgnoreCase(host))) return false;
+            if (uri.getRawQuery() != null || uri.getRawFragment() != null) return false;
             String path = uri.getPath();
             if (path == null || path.isEmpty() || "/".equals(path)) return true;
             String[] segments = path.split("/");
@@ -34,12 +27,8 @@ final class SelfRunScript {
     }
 
     static String conversationId(String url) {
-        if (url == null) return "";
-        String[] parts = url.split("/");
-        for (int i = 0; i + 1 < parts.length; i++) {
-            if ("c".equals(parts[i])) return parts[i + 1];
-        }
-        return "";
+        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(url);
+        return ref == null ? "" : ref.conversationId;
     }
 
     static String quote(String value) {

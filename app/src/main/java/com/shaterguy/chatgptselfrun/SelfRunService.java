@@ -391,7 +391,7 @@ private void scheduleGuard(){releaseWakeLock();handler.removeCallbacks(webRunnab
 private void guardElapsed(){if(canRun()&&SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(store.phase())){transition(SelfRunStore.PHASE_READ_NEXT_CONTROL,"Drive TURN_COMPLETED 확인 · conversation 제어신호 1회 확인","guard_elapsed");ensureWebView();}}
 
 
-private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 자동 재확인합니다.");handler.postDelayed(this::ensureWebView,SUBMISSION_RETRY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}launchWebView(target);}
+private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,SUBMISSION_RETRY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}launchWebView(target);}
 
     private void launchWebView(String target) {
         cleanupWebView();
@@ -448,7 +448,7 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
         }
     }
 
-private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.conversationId(url));}}
+private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED","trusted_project_route");}}
 
     private void postWebCallback(Runnable callback, long delay) {
         int epoch = automationEpoch;
@@ -642,11 +642,12 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private void pauseWebView() { if (webView != null) try { webView.onPause(); } catch (Throwable ignored) {} }
     private void resumeWebView() { if (webView != null) try { webView.onResume(); } catch (Throwable ignored) {} }
 
-    private void restoreCanonical() { if (canRun() && webView != null) webView.loadUrl(canonicalUrl()); }
+    private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target)) webView.loadUrl(target); }
     private String canonicalUrl() { return store.conversationUrl().isEmpty() ? store.projectUrl() : store.conversationUrl(); }
     private boolean routeAcceptable(String actual) { return store.conversationUrl().isEmpty() ? sameProject(store.projectUrl(), actual) : sameConversation(store.conversationUrl(), actual); }
-    private static boolean sameProject(String a, String b) { return !SelfRunScript.projectId(a).isEmpty() && SelfRunScript.projectId(a).equals(SelfRunScript.projectId(b)); }
-    private static boolean sameConversation(String a, String b) { return !SelfRunScript.conversationId(a).isEmpty() && SelfRunScript.conversationId(a).equals(SelfRunScript.conversationId(b)); }
+    private static boolean sameProject(String a, String b) { return SelfRunScript.isGeneralChatUrl(a) ? SelfRunScript.isGeneralChatUrl(b) : ProjectUrlPolicy.sameProject(a,b); }
+    private static boolean sameConversation(String a, String b) { return ProjectUrlPolicy.sameConversation(a,b); }
+    private static boolean validAutomationTarget(String value) { return SelfRunScript.isGeneralChatUrl(value) || ProjectUrlPolicy.parseProject(value)!=null; }
 
     private JSONObject parse(String raw) {
         try { Object outer = new JSONTokener(raw == null ? "" : raw).nextValue(); return new JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer)); }

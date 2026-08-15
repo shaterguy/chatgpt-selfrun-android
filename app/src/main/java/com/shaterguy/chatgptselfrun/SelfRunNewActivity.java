@@ -34,24 +34,26 @@ public final class SelfRunNewActivity extends Activity {
     private SelfRunStore store;
     private SelfRunHistoryStore history;
     private SelfRunRunLog runLog;
-    private EditText projectUrl;
+    private Spinner project;
+    private ProjectCatalog catalog;
+    private java.util.List<ProjectUrlPolicy.ProjectRef> projectEntries;
     private EditText requirement;
     private Spinner mode;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        store = new SelfRunStore(this); history = new SelfRunHistoryStore(this); runLog = new SelfRunRunLog(this); createViews();
+        store = new SelfRunStore(this); history = new SelfRunHistoryStore(this); runLog = new SelfRunRunLog(this); catalog = new ProjectCatalog(this); createViews();
     }
 
     private void createViews() {
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL); root.setFocusableInTouchMode(true); root.setPadding(Ui.dp(this,18),Ui.dp(this,14),Ui.dp(this,18),Ui.dp(this,24)); scroll.addView(root);
         root.addView(Ui.title(this,"새 SelfRun Drive 작업")); root.addView(Ui.button(this,"작업 목록",v->finish())); root.addView(Ui.body(this,"새 작업은 빈 요구사항에서 시작합니다. 이전 Run의 입력 내용·신호·오류는 이 화면에 불러오지 않습니다."));
-        root.addView(Ui.section(this,"프로젝트 주소")); projectUrl=new EditText(this); projectUrl.setSingleLine(true); projectUrl.setHint("https://chatgpt.com/g/<project-id>"); projectUrl.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); projectUrl.setText(store.defaultProjectUrl()); root.addView(projectUrl);
+        root.addView(Ui.section(this,"프로젝트 선택")); project=new Spinner(this); root.addView(project); root.addView(Ui.body(this,"등록할 프로젝트를 직접 열면 목록에 추가됩니다. 전체 목록을 자동 탐색하거나 메뉴를 자동 클릭하지 않습니다.")); root.addView(Ui.row(this,Ui.button(this,"프로젝트 등록/업데이트",v->startActivity(new Intent(this,LoginActivity.class))),Ui.button(this,"등록 목록 지우기",v->{catalog.clear();store.setDefaultProjectUrl("");reloadProjects();Toast.makeText(this,"등록 프로젝트 목록을 지웠습니다.",Toast.LENGTH_SHORT).show();}))); reloadProjects();
         root.addView(Ui.section(this,"실행 모드")); mode=new Spinner(this); mode.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,MODE_LABELS)); root.addView(mode);
         root.addView(Ui.section(this,"셀프런 명령")); requirement=new EditText(this); requirement.setHint("작업 요구사항"); requirement.setSingleLine(false); requirement.setMinLines(8); requirement.setGravity(android.view.Gravity.TOP|android.view.Gravity.START); requirement.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); requirement.setVerticalScrollBarEnabled(false); requirement.setHorizontalScrollBarEnabled(false); requirement.setHorizontallyScrolling(false); installCommandVisibilityTracking(requirement); root.addView(requirement);
-        root.addView(Ui.section(this,"시작")); root.addView(Ui.button(this,"SelfRun Drive 시작",v->startSelfRun())); Ui.setContent(this,scroll); projectUrl.clearFocus(); requirement.clearFocus(); root.requestFocus();
+        root.addView(Ui.section(this,"시작")); root.addView(Ui.button(this,"SelfRun Drive 시작",v->startSelfRun())); Ui.setContent(this,scroll); project.clearFocus(); requirement.clearFocus(); root.requestFocus();
     }
 
     private void installCommandVisibilityTracking(EditText editor) {
@@ -98,14 +100,23 @@ public final class SelfRunNewActivity extends Activity {
 
     private void startSelfRun() {
         if(store.active()&&!store.userStopped()&&!SelfRunStore.PHASE_DONE.equals(store.phase())&&!SelfRunStore.PHASE_IDLE.equals(store.phase())){Toast.makeText(this,"현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.",Toast.LENGTH_LONG).show();return;}
-        String project=projectUrl.getText().toString().trim(),request=requirement.getText().toString().trim();
-        if(!project.isEmpty()&&SelfRunScript.projectId(project).isEmpty()){Toast.makeText(this,"ChatGPT 프로젝트 주소를 확인하세요.",Toast.LENGTH_LONG).show();return;}
+        String project=selectedProjectUrl(),request=requirement.getText().toString().trim();
         if(request.isEmpty()){Toast.makeText(this,"셀프런 명령을 입력하세요.",Toast.LENGTH_LONG).show();return;}
         if(!DriveApiClient.validFileId(store.driveRunsBaseFolderId())||!DriveApiClient.validOpaqueAccountId(store.driveAccountId())){Toast.makeText(this,"먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.",Toast.LENGTH_LONG).show();return;}
-        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class)); String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()]; String runId=newRunId(); store.start(runId,selectedMode,project.isEmpty()?SelfRunScript.GENERAL_CHAT_URL:project,request); runLog.record(store,"UI_START","mode="+selectedMode); startRunner(); Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show(); finish();
+        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class)); String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()]; String runId=newRunId(); store.start(runId,selectedMode,project,request); runLog.record(store,"UI_START","mode="+selectedMode); startRunner(); Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show(); finish();
     }
 
     private void startRunner() { Intent intent=new Intent(this,SelfRunService.class); intent.setAction(SelfRunService.ACTION_RUN); if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent); }
+
+    @Override protected void onResume() { super.onResume(); if(project!=null) reloadProjects(); }
+
+    private void reloadProjects() {
+        String previous=store.defaultProjectUrl(); projectEntries=catalog.entries(); java.util.ArrayList<String> labels=new java.util.ArrayList<>(); labels.add("일반채팅"); int selected=0;
+        for(int i=0;i<projectEntries.size();i++){ProjectUrlPolicy.ProjectRef entry=projectEntries.get(i);labels.add(ProjectCatalog.displayName(entry));if(entry.canonicalUrl.equals(previous))selected=i+1;}
+        project.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels)); project.setSelection(selected);
+    }
+
+    private String selectedProjectUrl() { int position=project.getSelectedItemPosition(); return position<=0?SelfRunScript.GENERAL_CHAT_URL:projectEntries.get(position-1).canonicalUrl; }
 
     private static String newRunId() {
         SimpleDateFormat format=new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US); format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));

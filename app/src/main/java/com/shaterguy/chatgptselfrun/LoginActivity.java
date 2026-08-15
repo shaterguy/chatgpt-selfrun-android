@@ -4,17 +4,26 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
 public final class LoginActivity extends Activity {
     private WebView webView;
     private OnBackInvokedCallback backCallback;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private ProjectCatalog catalog;
+    private TextView status;
+    private boolean resumed;
+    private int observerGeneration;
+    private final Runnable observeRunnable = this::observeVisitedProject;
 
     @Override
     @SuppressWarnings("SetJavaScriptEnabled")
@@ -27,11 +36,20 @@ public final class LoginActivity extends Activity {
                 Ui.button(this, "새로고침", v -> webView.reload()),
                 Ui.button(this, "ChatGPT 홈", v -> webView.loadUrl("https://chatgpt.com/")),
                 Ui.button(this, "닫기", v -> finish())));
+        root.addView(Ui.body(this, "등록할 프로젝트를 직접 한 번씩 여세요. 앱은 도착한 프로젝트 주소만 등록하며 웹 화면의 항목을 자동으로 누르지 않습니다."));
+        status = Ui.body(this, "프로젝트 방문 대기"); root.addView(status);
 
         webView = new WebView(this);
+        catalog = new ProjectCatalog(this);
         WebViewConfig.applyLogin(webView);
         webView.setWebChromeClient(new WebChromeClient());
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) { scheduleObservation(100L); }
+            @Override public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) { scheduleObservation(100L); }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+                scheduleObservation(350L); return false;
+            }
+        });
         root.addView(webView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         Ui.setContent(this, root);
@@ -54,8 +72,40 @@ public final class LoginActivity extends Activity {
         if (webView != null && webView.canGoBack()) webView.goBack(); else finish();
     }
 
+    @Override protected void onResume() { super.onResume(); resumed = true; observerGeneration++; scheduleObservation(150L); }
+    @Override protected void onPause() { resumed = false; observerGeneration++; handler.removeCallbacks(observeRunnable); super.onPause(); }
+
+    private void scheduleObservation(long delayMs) {
+        if (!resumed || webView == null) return;
+        handler.removeCallbacks(observeRunnable); handler.postDelayed(observeRunnable, delayMs);
+    }
+
+    private void observeVisitedProject() {
+        if (!resumed || isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed()) || webView == null) return;
+        String current = webView.getUrl();
+        if (!ProjectUrlPolicy.isTrustedChatgptPage(current)) return;
+        final int epoch = observerGeneration; final WebView observed = webView;
+        observed.evaluateJavascript("(()=>{if(location.protocol!=='https:'||location.hostname!=='chatgpt.com'||location.port!=='')return '';return JSON.stringify({href:location.href});})()", raw -> {
+            if (!resumed || epoch != observerGeneration || observed != webView || isFinishing()
+                    || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) return;
+            String href = jsonHref(raw);
+            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(href);
+            if (ref != null && catalog.addVisitedProject(ref.canonicalUrl)) status.setText(ProjectCatalog.displayName(ref) + " 등록됨");
+            if (resumed) scheduleObservation(500L);
+        });
+    }
+
+    private static String jsonHref(String raw) {
+        try {
+            Object outer = new org.json.JSONTokener(raw == null ? "" : raw).nextValue();
+            org.json.JSONObject result = new org.json.JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer));
+            return result.optString("href", "");
+        } catch (Throwable ignored) { return ""; }
+    }
+
     @Override
     protected void onDestroy() {
+        resumed = false; observerGeneration++; handler.removeCallbacks(observeRunnable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
             backCallback = null;
