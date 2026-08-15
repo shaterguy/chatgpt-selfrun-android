@@ -36,8 +36,8 @@ Drive Runs의 canonical 안내 경로는 `/GPT/Self Run/Runs/`입니다. 이미 
 2. bootstrap에는 Drive V1 식별자, global SelfRun Skill document ID와 turn document ID가 들어가며 사용자의 원본 요구사항이 뒤에 그대로 유지됩니다.
 3. ChatGPT는 global SelfRun 운영문서를 읽고 명령 수신 전·턴 종료 전 Drive signal 계약을 수행합니다.
 4. 앱은 마지막으로 소비한 실제 signal cursor 이후의 새 이벤트만 처리합니다. `modifiedTime` 자체나 assistant DOM 완료 상태는 진행 근거가 아닙니다.
-5. TURN_COMPLETED 뒤 45초 UI guard를 거쳐 같은 conversation에 CONTINUE를 제출합니다. 새 ACK가 없으면 5분 뒤 같은 명령을 횟수 제한 없이 재시도합니다.
-6. USER_ACTION_REQUIRED와 PAUSED는 보존형 일시정지이며 DONE만 정상 종료입니다.
+5. TURN_COMPLETED 뒤 45초 UI guard를 거쳐 같은 conversation에 CONTINUE를 제출합니다. protocol 0.2.0 completion에 `NEXT_INPUT_B64URL`이 있으면 기존 CONTINUE 두 줄 뒤에 decoded 원문을 붙입니다. 동일 durable command marker가 이미 click된 경우에는 5분 retry나 process restart에서도 composer를 다시 클릭하지 않습니다.
+6. USER_ACTION_REQUIRED와 PAUSED는 보존형 일시정지이며 DONE만 정상 종료입니다. 재개 버튼은 pause anchor 이후 Drive signal을 먼저 reconcile하고, UI 수동 pause에 새 signal이 없으면 기존 phase로 복귀합니다.
 
 외부 계약은 [SelfRun Drive V1 protocol](docs/SELF_RUN_DRIVE_V1_PROTOCOL.md), Android 내부 구현은 [SelfRun Drive runtime](docs/SELF_RUN_DRIVE_RUNTIME.md)에 있습니다.
 

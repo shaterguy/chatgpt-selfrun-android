@@ -31,7 +31,11 @@ retry 횟수와 누적 시간을 terminal 조건으로 사용하지 않습니다
 
 ## 로컬 영속 상태
 
-`SelfRunStore`는 Run ID, CHAT/WORK mode, canonical conversation URL, Drive account/base folder ID, Job folder ID, turn document ID, signal cursor, phase와 재개에 필요한 상태를 영속합니다. 폴더 이름이나 표시 경로가 바뀌어도 저장된 Drive object ID가 접근 가능하면 그대로 사용합니다.
+`SelfRunStore`는 Run ID, CHAT/WORK mode, canonical conversation URL, Drive account/base folder ID, Job folder ID, turn document ID, signal cursor, phase와 재개에 필요한 상태를 영속합니다. pause에는 RUN_ID/origin/cause/pausedFromPhase/cursor/Drive version·modifiedTime/stable anchor ID를 함께 저장합니다. TURN_COMPLETED에는 pending cursor와 completion fingerprint를 저장하여 같은 completion 또는 process restart가 동일 continuation click을 반복하지 않도록 합니다. 폴더 이름이나 표시 경로가 바뀌어도 저장된 Drive object ID가 접근 가능하면 그대로 사용합니다.
+
+NEXT_INPUT 원문은 실행에 필요한 pending Drive signal/active command의 수명 동안만 app-private state에 존재합니다. `SelfRunHistoryStore`에는 `NEXT_INPUT_B64URL` 값을 redaction하여 복사하며 run log/notification/status에는 payload 원문을 기록하지 않습니다. continuation DOM은 completion cursor, pause anchor ID와 NEXT fingerprint에서 만든 stable marker를 사용하며 `clicked` marker가 있으면 retry/restart에서도 composer를 다시 클릭하지 않습니다.
+
+재개는 `PHASE_RESUME_BASELINE`에서 latest signal을 단순 baseline하지 않습니다. pause anchor 이후 event를 Drive에서 수집하고 `DriveResumePolicy`가 completion/blocking/DONE/no-new-signal/UI-manual case를 판정한 뒤 기존 state machine phase로 복귀하거나 continuation을 준비합니다. Drive read 실패는 plain CONTINUE fallback을 만들지 않습니다.
 
 ## OAuth와 Drive 객체
 

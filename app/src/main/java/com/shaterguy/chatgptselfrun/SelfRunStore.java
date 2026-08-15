@@ -50,6 +50,11 @@ final class SelfRunStore {
     static final String BOOTSTRAP_SUBMISSION_CONFIRMED = "BOOTSTRAP_SUBMISSION_CONFIRMED";
     static final String RETRY_BOOTSTRAP = "BOOTSTRAP";
     static final String RETRY_CONTINUE = "CONTINUE";
+    static final String PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED = "AI_USER_ACTION_REQUIRED";
+    static final String PAUSE_ORIGIN_AI_PAUSED = "AI_PAUSED";
+    static final String PAUSE_ORIGIN_UI_MANUAL = "UI_MANUAL";
+    static final String PAUSE_ORIGIN_EXTERNAL_MANUAL = "EXTERNAL_MANUAL";
+    static final String PAUSE_ORIGIN_UNKNOWN = "UNKNOWN";
 
     private final SharedPreferences prefs;
     private final SelfRunHistoryStore history;
@@ -86,10 +91,11 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
   .putString("lastSignal","").putString("lastErrorCode","").putString("lastErrorMessage","").putString("runDriveAccountId",driveAccountId()).putString("runBaseFolderId",driveRunsBaseFolderId())
   .putString("jobFolderId","").putString("turnDocumentId","").putString("turnDocumentUrl","").putInt("turn",0).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","")
   .putInt("driveSignalCursor",0).putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","")
-  .putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L)
+  .putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putInt("pendingDriveSignalCursor",0).putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putString("completionGuardFingerprint","").putBoolean("completionGuardArmed",false)
   .putString("activeCommandPrompt","").putString("activeCommandKind","").putInt("commandAttempt",0).putBoolean("awaitingCommandAck",false)
   .putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putInt("submissionRetryAttempt",0).putBoolean("submissionRetryReady",false)
   .putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)
+  .putString("pauseAnchorRunId","").putString("pauseAnchorOrigin","").putString("pauseAnchorCause","").putString("pauseAnchorPhase","").putInt("pauseAnchorCursor",0).putString("pauseAnchorDriveVersion","").putString("pauseAnchorModifiedTime","").putString("pauseAnchorSignalRaw","").putString("pauseAnchorSignalType","").putString("pauseAnchorId","")
   .putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","")
   .putBoolean("active",true).putBoolean("paused",false).putBoolean("userStopped",false)
   .remove("driveProtocolVersion").remove("expectedTurn").remove("lastConsumedEventSeq").remove("lastCommittedAt").remove("pendingEventSeq").remove("pendingTurn").remove("pendingSignalRaw").remove("pendingCommitId")
@@ -172,10 +178,13 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String pendingDriveSignalRaw() { return get("pendingDriveSignalRaw"); }
     String pendingDriveSignalTimestamp() { return get("pendingDriveSignalTimestamp"); }
     String pendingDriveSignalType() { return get("pendingDriveSignalType"); }
+    int pendingDriveSignalCursor() { return prefs.getInt("pendingDriveSignalCursor", 0); }
     long commitDetectedAt() { return prefs.getLong("commitDetectedAt", 0L); }
+    String completionGuardFingerprint() { return get("completionGuardFingerprint"); }
+    boolean completionGuardArmed() { return prefs.getBoolean("completionGuardArmed", false); }
     long guardDueAt() { return prefs.getLong("guardDueAt", 0L); }
     String activeCommandPrompt() { return get("activeCommandPrompt"); }
-    String activeCommandKind() { if(turnInfoRewriteRequired()&&PHASE_SEND_CONTINUE.equals(phase())&&get("activeCommandPrompt").isEmpty())SelfRunProtocol.requestTurnInfoRewrite(runId());return get("activeCommandKind"); }
+    String activeCommandKind() { if(PHASE_SEND_CONTINUE.equals(phase())&&get("activeCommandPrompt").isEmpty()){if(turnInfoRewriteRequired())SelfRunProtocol.requestTurnInfoRewrite(runId());else{NextInputCodec.Decoded next=DriveSignalParser.nextInput(pendingDriveSignalRaw());if(next.present&&next.valid)SelfRunProtocol.requestNextInput(runId(),next.text);}}return get("activeCommandKind"); }
     int commandAttempt() { return prefs.getInt("commandAttempt", 0); }
     boolean awaitingCommandAck() { return prefs.getBoolean("awaitingCommandAck", false); }
     String submissionRetryKind() { return get("submissionRetryKind"); }
@@ -197,6 +206,16 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String bootstrapSubmissionState() { return getOr("bootstrapSubmissionState", BOOTSTRAP_NOT_STARTED); }
     String pausedFromPhase() { return get("pausedFromPhase"); }
     boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }
+    String pauseAnchorRunId() { return get("pauseAnchorRunId"); }
+    String pauseAnchorOrigin() { return getOr("pauseAnchorOrigin", PAUSE_ORIGIN_UNKNOWN); }
+    String pauseAnchorCause() { return get("pauseAnchorCause"); }
+    String pauseAnchorPhase() { return get("pauseAnchorPhase"); }
+    int pauseAnchorCursor() { return prefs.getInt("pauseAnchorCursor", 0); }
+    String pauseAnchorDriveVersion() { return get("pauseAnchorDriveVersion"); }
+    String pauseAnchorModifiedTime() { return get("pauseAnchorModifiedTime"); }
+    String pauseAnchorSignalRaw() { return get("pauseAnchorSignalRaw"); }
+    String pauseAnchorSignalType() { return get("pauseAnchorSignalType"); }
+    String pauseAnchorId() { return get("pauseAnchorId"); }
     boolean terminalSideEffectPending() { return prefs.getBoolean("terminalSideEffectPending", false); }
     String terminalSideEffectType() { return get("terminalSideEffectType"); }
     String terminalSideEffectRunId() { return get("terminalSideEffectRunId"); }
@@ -244,17 +263,54 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
         if (!turnDocumentId().isEmpty()) throw new IllegalStateException("created document cannot be reset");
         commitOrThrow(prefs.edit().putString("creationStage", CREATION_FOLDER_CREATED));
     }
-    void updateDriveSeen(String version, String modifiedTime) { commitOrThrow(prefs.edit().putString("lastSeenDriveVersion", safe(version)).putString("lastSeenModifiedTime", safe(modifiedTime))); }
+    void updateDriveSeen(String version, String modifiedTime) { SharedPreferences.Editor e=prefs.edit().putString("lastSeenDriveVersion",safe(version)).putString("lastSeenModifiedTime",safe(modifiedTime));if(paused()&&runId().equals(pauseAnchorRunId()))e.putString("pauseAnchorDriveVersion",safe(version)).putString("pauseAnchorModifiedTime",safe(modifiedTime));commitOrThrow(e); }
 
 void baselineDriveSignals(int cursor,DriveSignalParser.Event latest){SharedPreferences.Editor e=prefs.edit().putInt("driveSignalCursor",Math.max(0,cursor));putLatest(e,latest);commitOrThrow(e);syncHistory();}
 void beginCommandAttempt(String kind,String prompt){if(!(RETRY_BOOTSTRAP.equals(kind)||RETRY_CONTINUE.equals(kind))||safe(prompt).isEmpty())throw new IllegalArgumentException("valid command attempt required");int n=commandAttempt()==Integer.MAX_VALUE?Integer.MAX_VALUE:commandAttempt()+1;commitOrThrow(prefs.edit().putString("activeCommandKind",kind).putString("activeCommandPrompt",prompt).putInt("commandAttempt",n).putBoolean("awaitingCommandAck",false));syncHistory();}
-String commandMarkerId(){return runId()+":"+commandAttempt();}
+String commandMarkerId(){if(RETRY_BOOTSTRAP.equals(get("activeCommandKind")))return runId()+":bootstrap:"+commandAttempt();String fp=DriveSignalParser.nextInputFingerprint(pendingDriveSignalRaw());String next=fp.isEmpty()?"none":fp.substring(0,Math.min(12,fp.length()));String anchor=pauseAnchorId().isEmpty()?"none":pauseAnchorId();return runId()+":continue:"+(pendingDriveSignalCursor()>0?pendingDriveSignalCursor():0)+":"+anchor+":"+next;}
 void markCommandSubmitted(String kind,long due){if(!kind.equals(activeCommandKind())||activeCommandPrompt().isEmpty()||due<=0)throw new IllegalStateException("prepared command required");int n=submissionRetryAttempt()==Integer.MAX_VALUE?Integer.MAX_VALUE:submissionRetryAttempt()+1;commitOrThrow(prefs.edit().putBoolean("awaitingCommandAck",true).putString("submissionRetryKind",kind).putString("submissionRetryReason","COMMAND_RECEIVED_PENDING").putLong("submissionRetryDueAt",due).putInt("submissionRetryAttempt",n).putBoolean("submissionRetryReady",false).putString("phase",PHASE_WAIT_DRIVE_COMMIT).putString("status","Drive COMMAND_RECEIVED 대기 · 5분 후 미수신 시 재제출").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
 void prepareCommandRetry(){if(!awaitingCommandAck()||!hasSubmissionRetry()||!submissionRetryDue())throw new IllegalStateException("command ACK retry is not due");String k=submissionRetryKind();String ph=RETRY_BOOTSTRAP.equals(k)?PHASE_BOOTSTRAP_SEND:PHASE_SEND_CONTINUE;commitOrThrow(prefs.edit().putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putBoolean("submissionRetryReady",false).putString("phase",ph).putString("status","COMMAND_RECEIVED 미수신 · 동일 명령 재제출 준비").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
-void applyDriveSignals(List<DriveSignalParser.Event> events,long detectedAt,long guardMs){if(events==null||events.isEmpty())return;SharedPreferences.Editor e=prefs.edit();boolean awaiting=awaitingCommandAck();int rank=PHASE_DONE.equals(phase())||PHASE_PAUSED.equals(phase())?3:PHASE_DRIVE_COMMIT_GUARD.equals(phase())?2:0;for(DriveSignalParser.Event x:events){e.putInt("driveSignalCursor",x.cursor);putLatest(e,x);if(awaiting){awaiting=false;clearCommandWait(e);}switch(x.type){case COMMAND_RECEIVED->{if(rank<2)e.putString("status","Drive COMMAND_RECEIVED 확인 · 작업 진행 중");}case TURN_COMPLETED->{if(rank<2){rank=2;e.putString("pendingDriveSignalRaw",x.raw).putString("pendingDriveSignalTimestamp",x.timestamp).putString("pendingDriveSignalType",x.type.name()).putLong("commitDetectedAt",detectedAt).putLong("guardDueAt",detectedAt+guardMs).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED 확인 · 안전 지연");}}case USER_ACTION_REQUIRED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"사용자 조치 필요");}case PAUSED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"SelfRun Drive 일시정지");}case DONE->{rank=3;clearCommandWait(e);e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,x);}}}e.putBoolean("awaitingCommandAck",awaiting).putLong("phaseStartedAt",System.currentTimeMillis());commitOrThrow(e);syncHistory();}
-void repairGuard(long now,long guardMs){SharedPreferences.Editor e=prefs.edit();String raw=pendingDriveSignalRaw(),ts=pendingDriveSignalTimestamp();if(!DriveSignalParser.Type.TURN_COMPLETED.name().equals(pendingDriveSignalType())||raw.isEmpty()){if(DriveSignalParser.Type.TURN_COMPLETED.name().equals(lastDriveSignalType())&&!lastDriveSignalRaw().isEmpty()){raw=lastDriveSignalRaw();ts=lastDriveSignalTimestamp();}else{int cursor=driveSignalCursor();int recoveryCursor=cursor>0?driveSignalCursor()-1:Integer.MAX_VALUE;commitOrThrow(e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putInt("driveSignalCursor",recoveryCursor).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","").putString("phase",PHASE_WAIT_DRIVE_COMMIT).putString("status",cursor>0?"Drive 완료 signal guard 손상 · 직전 신호 재검증":"Drive 완료 signal guard 손상 · 현재 문서 baseline 재확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}}commitOrThrow(e.putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",ts).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name()).putLong("commitDetectedAt",now).putLong("guardDueAt",now+guardMs).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED guard 복구"));syncHistory();}
-void beginManualResumeOverride(){commitOrThrow(clearCommandWait(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 override · Drive 최신 신호 baseline 확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
-void baselineManualResume(int cursor,DriveSignalParser.Event latest){SharedPreferences.Editor e=clearCommandWait(prefs.edit()).putInt("driveSignalCursor",Math.max(0,cursor)).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("phase",PHASE_SEND_CONTINUE).putString("status","사용자 재개 override · CONTINUE 강제 제출 준비").putLong("phaseStartedAt",System.currentTimeMillis());putLatest(e,latest);commitOrThrow(e);syncHistory();}
+void applyDriveSignals(List<DriveSignalParser.Event> events,long detectedAt,long guardMs){
+ if(events==null||events.isEmpty())return;
+ SharedPreferences.Editor e=prefs.edit();boolean awaiting=awaitingCommandAck();boolean guardArmed=completionGuardArmed();String guardFingerprint=completionGuardFingerprint();int rank=PHASE_DONE.equals(phase())||PHASE_PAUSED.equals(phase())?3:PHASE_DRIVE_COMMIT_GUARD.equals(phase())?2:0;
+ for(DriveSignalParser.Event x:events){
+  e.putInt("driveSignalCursor",x.cursor);putLatest(e,x);
+  if(x.type==DriveSignalParser.Type.TURN_COMPLETED&&guardArmed&&DriveSignalParser.completionFingerprint(x.raw).equals(guardFingerprint)){e.putString("status","Drive TURN_COMPLETED 중복 확인 · 기존 completion 유지");continue;}
+  if(x.type==DriveSignalParser.Type.COMMAND_RECEIVED){
+   if(awaiting){String prompt=get("activeCommandPrompt"),kind=get("activeCommandKind");boolean rewrite=prompt.startsWith("[SELF_RUN_TURN_INFO_REWRITE ");awaiting=false;clearCommandWait(e);if(RETRY_CONTINUE.equals(kind)&&!rewrite){clearPendingCompletion(e);clearPauseAnchor(e);resetCompletionGuard(e);guardArmed=false;guardFingerprint="";}}
+   if(rank<2)e.putString("status","Drive COMMAND_RECEIVED 확인 · 작업 진행 중");
+   continue;
+  }
+  if(awaiting){awaiting=false;clearCommandWait(e);protocolPause(e,x,"COMMAND_RECEIVED_REQUIRED");rank=3;continue;}
+  if(x.type==DriveSignalParser.Type.INVALID){protocolPause(e,x,x.protocolError.isEmpty()?"DRIVE_PROTOCOL_INVALID":x.protocolError);rank=3;continue;}
+  switch(x.type){
+   case TURN_COMPLETED->{if(rank<2){rank=2;String raw=x.raw;if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())raw=DriveSignalParser.mergeNextInputIfMissing(raw,pendingDriveSignalRaw());e.putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",x.timestamp).putString("pendingDriveSignalType",x.type.name()).putInt("pendingDriveSignalCursor",x.cursor).putLong("commitDetectedAt",detectedAt).putLong("guardDueAt",detectedAt+guardMs).putString("completionGuardFingerprint",DriveSignalParser.completionFingerprint(x.raw)).putBoolean("completionGuardArmed",true).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED 확인 · 안전 지연");guardFingerprint=DriveSignalParser.completionFingerprint(x.raw);guardArmed=true;}}
+   case USER_ACTION_REQUIRED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"사용자 조치 필요");}
+   case PAUSED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"SelfRun Drive 일시정지");}
+   case DONE->{rank=3;clearCommandWait(e);clearPendingCompletion(e);e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,x);}
+   case COMMAND_RECEIVED,INVALID->throw new IllegalStateException("handled above");
+  }
+ }
+ e.putBoolean("awaitingCommandAck",awaiting).putLong("phaseStartedAt",System.currentTimeMillis());commitOrThrow(e);syncHistory();
+}
+void repairGuard(long now,long guardMs){SharedPreferences.Editor e=prefs.edit();String raw=pendingDriveSignalRaw(),ts=pendingDriveSignalTimestamp();int pendingCursor=pendingDriveSignalCursor();if(!DriveSignalParser.Type.TURN_COMPLETED.name().equals(pendingDriveSignalType())||raw.isEmpty()){if(DriveSignalParser.Type.TURN_COMPLETED.name().equals(lastDriveSignalType())&&!lastDriveSignalRaw().isEmpty()){raw=lastDriveSignalRaw();ts=lastDriveSignalTimestamp();pendingCursor=driveSignalCursor();}else{int cursor=driveSignalCursor();int recoveryCursor=cursor>0?driveSignalCursor()-1:Integer.MAX_VALUE;commitOrThrow(clearPendingCompletion(e).putInt("driveSignalCursor",recoveryCursor).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","").putString("phase",PHASE_WAIT_DRIVE_COMMIT).putString("status",cursor>0?"Drive 완료 signal guard 손상 · 직전 신호 재검증":"Drive 완료 signal guard 손상 · 현재 문서 baseline 재확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}}commitOrThrow(e.putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",ts).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name()).putInt("pendingDriveSignalCursor",pendingCursor>0?pendingCursor:driveSignalCursor()).putLong("commitDetectedAt",now).putLong("guardDueAt",now+guardMs).putString("completionGuardFingerprint",DriveSignalParser.completionFingerprint(raw)).putBoolean("completionGuardArmed",true).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED guard 복구"));syncHistory();}
+void beginManualResumeOverride(){
+ if(!ensurePauseAnchor()){commitOrThrow(prefs.edit().putBoolean("paused",true).putBoolean("active",true).putString("phase",PHASE_PAUSED).putString("lastErrorCode","DRIVE_RESUME_ANCHOR_INVALID").putString("lastErrorMessage","pause anchor를 안전하게 복원할 수 없습니다.").putString("status","재개 차단 · pause anchor 확인 필요").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}
+ commitOrThrow(prefs.edit().putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 · Drive post-anchor signal 조정 중").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();
+}
+void baselineManualResume(List<DriveSignalParser.Event> postAnchor,int totalCount,DriveSignalParser.Event latest){
+ DriveResumePolicy.Origin origin=DriveResumePolicy.parseOrigin(pauseAnchorOrigin());DriveResumePolicy.Decision decision=DriveResumePolicy.decide(origin,pauseAnchorCursor(),totalCount,postAnchor);SharedPreferences.Editor e=prefs.edit().putInt("driveSignalCursor",Math.max(0,totalCount)).putBoolean("active",true).putBoolean("userStopped",false).putLong("phaseStartedAt",System.currentTimeMillis());putLatest(e,latest);
+ switch(decision.action){
+  case APPLY_COMPLETION->{DriveSignalParser.Event completion=decision.event;String raw=completion.raw;if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())raw=DriveSignalParser.mergeNextInputIfMissing(raw,pendingDriveSignalRaw());e.putBoolean("paused",false).putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",completion.timestamp).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name()).putInt("pendingDriveSignalCursor",completion.cursor).putLong("commitDetectedAt",System.currentTimeMillis()).putLong("guardDueAt",System.currentTimeMillis()).putString("completionGuardFingerprint",DriveSignalParser.completionFingerprint(completion.raw)).putBoolean("completionGuardArmed",true).putString("phase",PHASE_READ_NEXT_CONTROL).putString("status","재개 조정 완료 · POST_ANCHOR TURN_COMPLETED 적용");}
+  case CONTINUE->{clearPendingCompletion(e);resetCompletionGuard(e);e.putBoolean("paused",false).putString("phase",PHASE_SEND_CONTINUE).putString("status","재개 조정 완료 · 외부 수동조치 후 plain CONTINUE 준비");}
+  case RESTORE_PHASE->{String restore=pauseAnchorPhase();if(!validRestoredPhase(restore)){e.putBoolean("paused",true).putString("phase",PHASE_PAUSED).putString("lastErrorCode","DRIVE_RESUME_PHASE_INVALID").putString("lastErrorMessage","pausedFromPhase가 유효하지 않습니다.").putString("status","재개 차단 · 복귀 phase 확인 필요");}else{e.putBoolean("paused",false).putString("phase",restore).putString("status","UI 일시정지 해제 · 기존 phase 복귀");clearPauseAnchor(e);}}
+  case KEEP_PAUSED->{DriveSignalParser.Event blocking=decision.event;e.putBoolean("paused",true).putString("phase",PHASE_PAUSED).putString("status","재개 보류 · 더 최신 blocking signal 확인");recordPauseAnchor(e,blocking.type==DriveSignalParser.Type.USER_ACTION_REQUIRED?PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED:PAUSE_ORIGIN_AI_PAUSED,blocking.type.name(),pauseAnchorPhase().isEmpty()?PHASE_WAIT_DRIVE_COMMIT:pauseAnchorPhase(),totalCount,blocking);terminal(e,blocking);}
+  case DONE->{DriveSignalParser.Event done=decision.event;clearPendingCompletion(e);resetCompletionGuard(e);e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,done);}
+  case PROTOCOL_ERROR->{e.putBoolean("paused",true).putString("phase",PHASE_PAUSED).putString("lastErrorCode",safe(decision.reason)).putString("lastErrorMessage","Drive resume reconciliation이 fail-closed 처리되었습니다.").putString("status","재개 차단 · "+safe(decision.reason));}
+ }
+ commitOrThrow(e);syncHistory();
+}
+void baselineManualResume(int totalCount,DriveSignalParser.Event latest){baselineManualResume(latest==null?java.util.Collections.emptyList():java.util.Collections.singletonList(latest),totalCount,latest);}
 void captureConversationUrl(String value){
     ProjectUrlPolicy.ProjectRef expected=ProjectUrlPolicy.parseProject(projectUrl()),actual=ProjectUrlPolicy.parseProject(value);
     if(!conversationUrl().isEmpty()||expected==null||actual==null||actual.conversationId.isEmpty()||!expected.projectId.equals(actual.projectId))return;
@@ -262,7 +318,7 @@ void captureConversationUrl(String value){
 }
 private static SharedPreferences.Editor clearCommandWait(SharedPreferences.Editor e){return e.putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putInt("submissionRetryAttempt",0).putBoolean("submissionRetryReady",false);}
 private static void putLatest(SharedPreferences.Editor e,DriveSignalParser.Event x){if(x==null)e.putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","");else e.putString("lastDriveSignalRaw",x.raw).putString("lastDriveSignalTimestamp",x.timestamp).putString("lastDriveSignalType",x.type.name());}
-private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){e.putBoolean("paused",true).putBoolean("active",true).putBoolean("resumeNeedsContinuation",true).putString("pausedFromPhase",PHASE_WAIT_DRIVE_COMMIT).putString("phase",PHASE_PAUSED).putString("status",status);terminal(e,x);}
+private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){String origin=x.type==DriveSignalParser.Type.USER_ACTION_REQUIRED?PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED:PAUSE_ORIGIN_AI_PAUSED;e.putBoolean("paused",true).putBoolean("active",true).putBoolean("resumeNeedsContinuation",true).putString("pausedFromPhase",PHASE_WAIT_DRIVE_COMMIT).putString("phase",PHASE_PAUSED).putString("status",status);recordPauseAnchor(e,origin,x.type.name(),PHASE_WAIT_DRIVE_COMMIT,x.cursor,x);terminal(e,x);}
 private void terminal(SharedPreferences.Editor e,DriveSignalParser.Event x){e.putBoolean("terminalSideEffectPending",true).putString("terminalSideEffectType",x.type.name()).putString("terminalSideEffectRunId",runId()).putString("terminalSideEffectCommitId",x.raw);}
 
     boolean terminalSideEffectOwnedBy(String ownerRunId, String commitId, String type) {
@@ -285,16 +341,40 @@ private void terminal(SharedPreferences.Editor e,DriveSignalParser.Event x){e.pu
         }
     }
 
-    void enterPause(String priorPhase, boolean needsContinuation) {
-        commitOrThrow(prefs.edit().putString("pausedFromPhase", safe(priorPhase)).putBoolean("resumeNeedsContinuation", needsContinuation)
-                .putBoolean("paused", true).putString("phase", PHASE_PAUSED)
-                .putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory();
+    void enterPause(String priorPhase, boolean needsContinuation) { enterPause(priorPhase, needsContinuation, ""); }
+    void enterPause(String priorPhase, boolean needsContinuation, String cause) {
+        String origin = pauseOriginForCause(cause);
+        SharedPreferences.Editor e=prefs.edit().putString("pausedFromPhase",safe(priorPhase)).putBoolean("resumeNeedsContinuation",needsContinuation)
+                .putBoolean("paused",true).putString("phase",PHASE_PAUSED).putLong("phaseStartedAt",System.currentTimeMillis());
+        recordPauseAnchor(e,origin,cause,priorPhase,driveSignalCursor(),null);commitOrThrow(e);syncHistory();
     }
 
     void leavePause(String nextPhase) {
         commitOrThrow(prefs.edit().putBoolean("paused", false).putBoolean("active", true).putBoolean("userStopped", false)
                 .putString("phase", safe(nextPhase)).putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory();
     }
+
+    private boolean ensurePauseAnchor() {
+        if (runId().equals(pauseAnchorRunId()) && pauseAnchorCursor() >= 0
+                && DriveResumePolicy.parseOrigin(pauseAnchorOrigin()) != DriveResumePolicy.Origin.UNKNOWN
+                && !pauseAnchorId().isEmpty()) return true;
+        String origin = inferLegacyPauseOrigin();
+        if (PAUSE_ORIGIN_UNKNOWN.equals(origin)) return false;
+        String prior = pausedFromPhase().isEmpty() ? PHASE_WAIT_DRIVE_COMMIT : pausedFromPhase();
+        SharedPreferences.Editor e=prefs.edit();
+        DriveSignalParser.Event latest=null;
+        if(!lastDriveSignalRaw().isEmpty()) latest=new DriveSignalParser.Event(parseStoredSignalType(lastDriveSignalType()),lastDriveSignalTimestamp(),lastDriveSignalRaw(),driveSignalCursor());
+        recordPauseAnchor(e,origin,"LEGACY_PAUSE_MIGRATION",prior,driveSignalCursor(),latest);commitOrThrow(e);syncHistory();return true;
+    }
+    private String inferLegacyPauseOrigin(){String st=status();if(st.contains("사용자 조치 필요"))return PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED;if(st.contains("SelfRun Drive 일시정지"))return PAUSE_ORIGIN_AI_PAUSED;if(st.contains("사용자 일시정지"))return PAUSE_ORIGIN_UI_MANUAL;if(!lastErrorCode().isEmpty()||st.contains("로그인")||st.contains("OAuth")||st.contains("권한"))return PAUSE_ORIGIN_EXTERNAL_MANUAL;return PAUSE_ORIGIN_UNKNOWN;}
+    private static String pauseOriginForCause(String cause){String c=safe(cause);if("UI_PAUSE".equals(c))return PAUSE_ORIGIN_UI_MANUAL;if(c.isEmpty())return PAUSE_ORIGIN_UNKNOWN;return PAUSE_ORIGIN_EXTERNAL_MANUAL;}
+    private static DriveSignalParser.Type parseStoredSignalType(String value){try{return DriveSignalParser.Type.valueOf(value);}catch(Exception ignored){return DriveSignalParser.Type.COMMAND_RECEIVED;}}
+    private void recordPauseAnchor(SharedPreferences.Editor e,String origin,String cause,String priorPhase,int cursor,DriveSignalParser.Event signal){String raw=signal==null?"":DriveSignalParser.historySafeRaw(signal.raw);String type=signal==null?"":signal.type.name();String seed=runId()+"|"+origin+"|"+safe(cause)+"|"+safe(priorPhase)+"|"+Math.max(0,cursor)+"|"+raw;String id=NextInputCodec.fingerprintText(seed).substring(0,24);e.putString("pauseAnchorRunId",runId()).putString("pauseAnchorOrigin",safe(origin)).putString("pauseAnchorCause",safe(cause)).putString("pauseAnchorPhase",safe(priorPhase)).putInt("pauseAnchorCursor",Math.max(0,cursor)).putString("pauseAnchorDriveVersion",lastSeenDriveVersion()).putString("pauseAnchorModifiedTime",lastSeenModifiedTime()).putString("pauseAnchorSignalRaw",raw).putString("pauseAnchorSignalType",type).putString("pauseAnchorId",id);}
+    private static SharedPreferences.Editor clearPendingCompletion(SharedPreferences.Editor e){return e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putInt("pendingDriveSignalCursor",0).putLong("commitDetectedAt",0L).putLong("guardDueAt",0L);}
+    private static SharedPreferences.Editor resetCompletionGuard(SharedPreferences.Editor e){return e.putString("completionGuardFingerprint","").putBoolean("completionGuardArmed",false);}
+    private static SharedPreferences.Editor clearPauseAnchor(SharedPreferences.Editor e){return e.putString("pauseAnchorRunId","").putString("pauseAnchorOrigin","").putString("pauseAnchorCause","").putString("pauseAnchorPhase","").putInt("pauseAnchorCursor",0).putString("pauseAnchorDriveVersion","").putString("pauseAnchorModifiedTime","").putString("pauseAnchorSignalRaw","").putString("pauseAnchorSignalType","").putString("pauseAnchorId","");}
+    private void protocolPause(SharedPreferences.Editor e,DriveSignalParser.Event x,String code){e.putBoolean("paused",true).putBoolean("active",true).putString("phase",PHASE_PAUSED).putString("lastErrorCode",safe(code)).putString("lastErrorMessage","Drive protocol violation").putString("status","Drive protocol 오류 · "+safe(code));recordPauseAnchor(e,PAUSE_ORIGIN_AI_PAUSED,code,PHASE_WAIT_DRIVE_COMMIT,x.cursor,x);e.putBoolean("terminalSideEffectPending",true).putString("terminalSideEffectType",DriveSignalParser.Type.PAUSED.name()).putString("terminalSideEffectRunId",runId()).putString("terminalSideEffectCommitId","protocol:"+DriveSignalParser.completionFingerprint(x.raw));}
+    private static boolean validRestoredPhase(String phase){return phase!=null&&!phase.isEmpty()&&!PHASE_PAUSED.equals(phase)&&!PHASE_DONE.equals(phase)&&!PHASE_IDLE.equals(phase);}
 
     void syncHistory() { history.sync(this); }
     private void put(String key, String value) { commitOrThrow(prefs.edit().putString(key, safe(value))); syncHistory(); }

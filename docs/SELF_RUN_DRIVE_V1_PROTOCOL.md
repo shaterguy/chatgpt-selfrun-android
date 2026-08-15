@@ -7,7 +7,7 @@
 SelfRun Drive는 모든 대화에서 같은 bootstrap을 사용합니다. 앱은 현재 ChatGPT 대화가 Project인지 판정하지 않으며 Project 이름·ID·SKILL 위치를 탐색하지 않습니다.
 
 ```text
-[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_BOOTSTRAP 0.1.0 <RUN_ID> MODE=<CHAT|WORK>]
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_BOOTSTRAP 0.2.0 <RUN_ID> MODE=<CHAT|WORK>]
 SELF_RUN_CLIENT=DRIVE_V1
 SELF_RUN_SKILL_DOCUMENT_ID=1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs
 DRIVE_TURN_DOCUMENT_ID=<documentId>
@@ -30,22 +30,38 @@ bootstrap은 `[요구사항]` 직전에 `DRIVE_TURN_DOCUMENT_ID 문서에 Comman
 
 사용자가 앱에 입력한 원본 요구사항은 `[요구사항]` 행 바로 뒤에 trim·요약 없이 그대로 붙습니다. bootstrap에는 canonical SelfRun 운영문서가 소유하는 역할 전환·HANDOFF·continuation·제어신호·완료 판정 의미를 다시 설명하는 중복 문장을 넣지 않습니다.
 
-CONTINUE에는 global Skill ID나 Project metadata를 반복 삽입하지 않으며, ChatGPT가 실행턴 문서에 `SELF_RUN_COMMAND_RECEIVED`를 기록해야 함을 명확히 알리는 고정 문구를 두 번째 행에 붙입니다.
+CONTINUE에는 global Skill ID나 Project metadata를 반복 삽입하지 않으며, ChatGPT가 실행턴 문서에 `SELF_RUN_COMMAND_RECEIVED`를 기록해야 함을 명확히 알리는 고정 문구를 두 번째 행에 붙입니다. NEXT_INPUT이 없으면 기존 두 줄은 완전히 동일합니다.
 
 ```text
 [yyyy.mm.dd | hh:mm:ss] [SELF_RUN_CONTINUE <RUN_ID>]
 Command Recevied Record Required
 ```
 
-`Command Recevied Record Required`는 현재 앱 외부 프롬프트 계약의 고정 문자열이며 철자를 임의로 교정하지 않습니다.
+NEXT_INPUT이 있으면 위 두 줄을 바꾸지 않고 strict decode한 원문을 그 뒤에 그대로 붙입니다.
+
+```text
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_CONTINUE <RUN_ID>]
+Command Recevied Record Required
+<NEXT_INPUT 원문>
+```
+
+`Command Recevied Record Required`는 현재 앱 외부 프롬프트 계약의 고정 문자열이며 철자를 임의로 교정하지 않습니다. CONTINUE+optional NEXT_INPUT을 받은 ChatGPT도 payload를 해석하거나 작업하기 전에 먼저 `SELF_RUN_COMMAND_RECEIVED`를 기록·readback합니다. `SELF_RUN_TURN_INFO_REWRITE` 외부 문자열은 변경하지 않으며 repair completion은 기존 유효 NEXT_INPUT을 보존합니다.
 
 ## Drive 실행문서 signal
 
-Drive 작업문서는 append-only 실행 확인 채널입니다. 이벤트는 다음 형식 한 줄만 사용합니다.
+Drive 작업문서는 append-only 실행 확인 채널입니다. `COMMAND_RECEIVED`, `USER_ACTION_REQUIRED`, `PAUSED`, `DONE`은 기존 bare 단일행 형식을 유지합니다. protocol 0.2.0의 `TURN_COMPLETED`만 다음 optional payload grammar를 추가합니다.
 
 ```text
-[yyyy.mm.dd | hh:mm:ss] [<SIGNAL> <RUN_ID>]
+# CHAT
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_TURN_COMPLETED <RUN_ID>]
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_TURN_COMPLETED <RUN_ID> NEXT_INPUT_B64URL=<VALUE>]
+
+# WORK
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_TURN_COMPLETED <RUN_ID> MODEL=<MODEL> REASONING=<REASONING>]
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_TURN_COMPLETED <RUN_ID> MODEL=<MODEL> REASONING=<REASONING> NEXT_INPUT_B64URL=<VALUE>]
 ```
+
+`NEXT_INPUT_B64URL`은 UTF-8 원문의 Base64URL encoding이며 URL-safe alphabet, no padding, no wrap을 canonical 표현으로 사용합니다. unknown/duplicate field, padding을 포함한 non-canonical representation, decode 실패, invalid UTF-8, payload 크기 초과는 protocol error이며 plain continuation으로 강등하지 않습니다. 0.1.0 client에는 이 확장 tail을 보내지 않습니다.
 
 허용 signal은 `SELF_RUN_COMMAND_RECEIVED`, `SELF_RUN_TURN_COMPLETED`, `SELF_RUN_USER_ACTION_REQUIRED`, `SELF_RUN_PAUSED`, `SELF_RUN_DONE`입니다. timestamp에는 `KST`, UTC offset 같은 추가 문자열을 넣지 않습니다.
 
@@ -55,7 +71,7 @@ ChatGPT가 bootstrap 또는 CONTINUE를 실제 수신하면 실질 작업 전에
 
 앱은 명령 클릭 직후 user-message DOM, assistant streaming, stop button 또는 completion DOM을 기다리지 않고 Drive polling으로 복귀합니다. 마지막으로 소비한 실제 SelfRun signal의 cursor를 영속하고 이후 추가된 signal만 새 이벤트로 처리합니다. `modifiedTime`은 읽기 최적화 힌트일 뿐 상태신호가 아닙니다.
 
-`SELF_RUN_COMMAND_RECEIVED`를 별도로 보지 못했더라도 같은 polling read에서 TURN_COMPLETED 또는 더 진행된 특수 signal이 새로 확인되면 제출은 정상 수신된 것으로 처리합니다. 명령 제출 뒤 새 ACK 또는 더 진행된 signal이 없으면 5분 뒤 같은 의미의 bootstrap/CONTINUE를 다시 제출하며 retry 횟수나 누적 시간을 terminal 조건으로 사용하지 않습니다.
+bootstrap 또는 CONTINUE 제출 뒤에는 현재 command의 `SELF_RUN_COMMAND_RECEIVED`가 먼저 확인되어야 합니다. 동일 completion의 단순 중복을 제외하고 ACK가 필요한 상태에서 더 진행된 signal이 먼저 나타나면 정상 수신으로 추정하지 않고 protocol error로 fail closed합니다. ACK가 없으면 5분 뒤 같은 논리 command를 재확인하되 durable click marker가 이미 `clicked`이면 composer를 다시 클릭하지 않습니다. retry 횟수나 누적 시간을 terminal 조건으로 사용하지 않습니다.
 
 TURN_COMPLETED를 소비하면 30초∼1분의 단순 UI 안전 guard를 거친 뒤 같은 conversation에 CONTINUE를 제출하고 즉시 Drive polling으로 복귀합니다. 현재 구현 기본 guard는 45초입니다.
 
@@ -73,7 +89,16 @@ WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한
 
 ## 일시정지와 재개
 
-USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. 사용자가 앱에서 재개를 누르면 현재 작업문서의 마지막 실제 signal 위치만 baseline으로 저장한 뒤 최신 signal 종류와 관계없이 CONTINUE를 강제 제출합니다. 이후 ACK가 없으면 동일한 5분 무제한 재제출 규칙을 적용합니다.
+USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. pause 시 앱은 RUN_ID, origin/cause, `pausedFromPhase`, Drive signal cursor, Drive version/modifiedTime과 blocking signal identity를 durable하게 기록합니다. Resume 버튼은 현재 Drive 문서를 다시 읽고 **pause anchor 이후의 signal만** 조정합니다.
+
+- post-anchor `TURN_COMPLETED`가 있으면 그 completion을 처리합니다. `USER_ACTION_REQUIRED`에서 시작된 user-choice resume-preparation completion은 `NEXT_INPUT_B64URL`이 필수이며 없으면 protocol error입니다.
+- post-anchor newer `USER_ACTION_REQUIRED`/`PAUSED`면 계속 일시정지합니다.
+- post-anchor `DONE`이면 continuation을 만들지 않습니다.
+- 외부 수동 행동 origin은 새 completion이 없을 때만 plain continuation을 허용합니다.
+- UI 수동 pause는 새 material signal이 없으면 `pausedFromPhase`를 복구하고 새 continuation을 만들지 않습니다.
+- Drive 요청/anchor 검증에 실패하면 plain continuation fallback을 하지 않습니다.
+
+Drive 문서의 현재 전체 line을 resume baseline으로 덮고 무조건 continuation을 만드는 1.2.1 방식은 사용하지 않습니다.
 
 ## signal write/readback 실패
 

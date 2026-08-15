@@ -69,10 +69,10 @@ final class SelfRunHistoryStore {
             item.put("turnDocumentId", store.turnDocumentId());
             item.put("turnDocumentUrl", store.turnDocumentUrl());
             item.put("driveSignalCursor", store.driveSignalCursor());
-            item.put("lastDriveSignalRaw", bounded(store.lastDriveSignalRaw(), 1_000));
+            item.put("lastDriveSignalRaw", bounded(DriveSignalParser.historySafeRaw(store.lastDriveSignalRaw()), 1_000));
             item.put("lastDriveSignalTimestamp", store.lastDriveSignalTimestamp());
             item.put("lastDriveSignalType", store.lastDriveSignalType());
-            item.put("pendingDriveSignalRaw", bounded(store.pendingDriveSignalRaw(), 1_000));
+            item.put("pendingDriveSignalRaw", bounded(DriveSignalParser.historySafeRaw(store.pendingDriveSignalRaw()), 1_000));
             item.put("pendingDriveSignalTimestamp", store.pendingDriveSignalTimestamp());
             item.put("pendingDriveSignalType", store.pendingDriveSignalType());
             item.put("commitDetectedAt", store.commitDetectedAt());
