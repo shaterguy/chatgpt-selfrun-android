@@ -41,86 +41,53 @@ jobs:
           test "$(git merge-base HEAD d4ee904ac99747beaa49421e901a92e4f4f49a05)" = 'd4ee904ac99747beaa49421e901a92e4f4f49a05'
           python3 - <<'PY'
           from pathlib import Path
-
-          store_path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java')
-          store = store_path.read_text(encoding='utf-8')
-
-          replacements = [
-              (
-                  'private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){String origin=x.type==DriveSignalParser.Type.USER_ACTION_REQUIRED?PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED:PAUSE_ORIGIN_AI_PAUSED;',
-                  'private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){String origin=pauseOriginForDriveSignal(x.type);',
-                  'pauseEvent origin mapping'
-              ),
-              (
-                  'recordPauseAnchor(e,blocking.type==DriveSignalParser.Type.USER_ACTION_REQUIRED?PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED:PAUSE_ORIGIN_AI_PAUSED,blocking.type.name(),pauseAnchorPhase().isEmpty()?PHASE_WAIT_DRIVE_COMMIT:pauseAnchorPhase(),totalCount,blocking);',
-                  'recordPauseAnchor(e,pauseOriginForDriveSignal(blocking.type),blocking.type.name(),pauseAnchorPhase().isEmpty()?PHASE_WAIT_DRIVE_COMMIT:pauseAnchorPhase(),totalCount,blocking);',
-                  'post-anchor blocking origin mapping'
-              ),
-              (
-                  'if(st.contains("SelfRun Drive 일시정지"))return PAUSE_ORIGIN_AI_PAUSED;',
-                  'if(st.contains("SelfRun Drive 일시정지"))return PAUSE_ORIGIN_EXTERNAL_MANUAL;',
-                  'legacy drive pause origin'
-              ),
-          ]
-          for old, new, label in replacements:
-              count = store.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, got {count}')
-              store = store.replace(old, new, 1)
-
-          anchor = '    private static String pauseOriginForCause(String cause){String c=safe(cause);if("UI_PAUSE".equals(c))return PAUSE_ORIGIN_UI_MANUAL;if(c.isEmpty())return PAUSE_ORIGIN_UNKNOWN;return PAUSE_ORIGIN_EXTERNAL_MANUAL;}\n'
-          helper = ('    static String pauseOriginForDriveSignal(DriveSignalParser.Type type){'
-                    'if(type==DriveSignalParser.Type.USER_ACTION_REQUIRED)return PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED;'
-                    'if(type==DriveSignalParser.Type.PAUSED)return PAUSE_ORIGIN_EXTERNAL_MANUAL;'
-                    'return PAUSE_ORIGIN_AI_PAUSED;}\n')
-          if store.count(anchor) != 1:
-              raise SystemExit('pauseOriginForCause anchor mismatch')
-          if 'static String pauseOriginForDriveSignal(' in store:
-              raise SystemExit('pauseOriginForDriveSignal already exists unexpectedly')
-          store = store.replace(anchor, anchor + helper, 1)
-          store_path.write_text(store, encoding='utf-8')
-
-          policy_path = Path('app/src/test/java/com/shaterguy/chatgptselfrun/DriveResumePolicyTest.java')
-          policy = policy_path.read_text(encoding='utf-8')
-          marker = '    @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {\n'
-          test = '''    @Test public void drivePausedSignalMapsToExternalManualAndResumesPlainContinue() {
-        String origin = SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.PAUSED);
-        assertEquals(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, origin);
-        DriveResumePolicy.Decision decision = DriveResumePolicy.decide(
-                DriveResumePolicy.parseOrigin(origin), 3, 3, Collections.emptyList());
-        assertEquals(DriveResumePolicy.Action.CONTINUE, decision.action);
-        assertEquals("EXTERNAL_MANUAL_ACTION_COMPLETE", decision.reason);
-        assertEquals(SelfRunStore.PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED,
-                SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.USER_ACTION_REQUIRED));
-    }
-
-'''
-          if policy.count(marker) != 1:
-              raise SystemExit('DriveResumePolicyTest insertion anchor mismatch')
-          if 'drivePausedSignalMapsToExternalManualAndResumesPlainContinue' in policy:
-              raise SystemExit('integration policy test already exists unexpectedly')
-          policy_path.write_text(policy.replace(marker, test + marker, 1), encoding='utf-8')
-
-          source_path = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java')
-          source = source_path.read_text(encoding='utf-8')
-          marker2 = '    @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {\n'
-          test2 = '''    @Test public void drivePauseSignalUsesExternalManualOriginAcrossInitialAndReanchorPaths() throws Exception {
-        String store = src("SelfRunStore.java");
-        String pause = between(store, "private void pauseEvent", "private void terminal");
-        String resume = between(store, "void baselineManualResume", "void captureConversationUrl");
-        assertTrue(pause.contains("pauseOriginForDriveSignal(x.type)"));
-        assertTrue(resume.contains("pauseOriginForDriveSignal(blocking.type)"));
-        assertTrue(store.contains("if(type==DriveSignalParser.Type.PAUSED)return PAUSE_ORIGIN_EXTERNAL_MANUAL"));
-        assertTrue(store.contains("if(st.contains(\\\"SelfRun Drive 일시정지\\\"))return PAUSE_ORIGIN_EXTERNAL_MANUAL"));
-        assertTrue(store.contains("recordPauseAnchor(e,PAUSE_ORIGIN_AI_PAUSED,code"));
-    }
-
-'''
-          if source.count(marker2) != 1:
-              raise SystemExit('SelfRunPauseResumeTest insertion anchor mismatch')
-          if 'drivePauseSignalUsesExternalManualOriginAcrossInitialAndReanchorPaths' in source:
-              raise SystemExit('source integration test already exists unexpectedly')
-          source_path.write_text(source.replace(marker2, test2 + marker2, 1), encoding='utf-8')
+          store_path=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java')
+          store=store_path.read_text(encoding='utf-8')
+          replacements=[
+              ('private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){String origin=x.type==DriveSignalParser.Type.USER_ACTION_REQUIRED?PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED:PAUSE_ORIGIN_AI_PAUSED;', 'private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){String origin=pauseOriginForDriveSignal(x.type);', 'pauseEvent origin mapping'),
+              ('recordPauseAnchor(e,blocking.type==DriveSignalParser.Type.USER_ACTION_REQUIRED?PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED:PAUSE_ORIGIN_AI_PAUSED,blocking.type.name(),pauseAnchorPhase().isEmpty()?PHASE_WAIT_DRIVE_COMMIT:pauseAnchorPhase(),totalCount,blocking);', 'recordPauseAnchor(e,pauseOriginForDriveSignal(blocking.type),blocking.type.name(),pauseAnchorPhase().isEmpty()?PHASE_WAIT_DRIVE_COMMIT:pauseAnchorPhase(),totalCount,blocking);', 'post-anchor blocking origin mapping'),
+              ('if(st.contains("SelfRun Drive 일시정지"))return PAUSE_ORIGIN_AI_PAUSED;', 'if(st.contains("SelfRun Drive 일시정지"))return PAUSE_ORIGIN_EXTERNAL_MANUAL;', 'legacy drive pause origin')]
+          for old,new,label in replacements:
+              count=store.count(old)
+              if count!=1: raise SystemExit(f'{label}: expected one match, got {count}')
+              store=store.replace(old,new,1)
+          anchor='    private static String pauseOriginForCause(String cause){String c=safe(cause);if("UI_PAUSE".equals(c))return PAUSE_ORIGIN_UI_MANUAL;if(c.isEmpty())return PAUSE_ORIGIN_UNKNOWN;return PAUSE_ORIGIN_EXTERNAL_MANUAL;}\n'
+          helper='    static String pauseOriginForDriveSignal(DriveSignalParser.Type type){if(type==DriveSignalParser.Type.USER_ACTION_REQUIRED)return PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED;if(type==DriveSignalParser.Type.PAUSED)return PAUSE_ORIGIN_EXTERNAL_MANUAL;return PAUSE_ORIGIN_AI_PAUSED;}\n'
+          if store.count(anchor)!=1: raise SystemExit('pauseOriginForCause anchor mismatch')
+          if 'static String pauseOriginForDriveSignal(' in store: raise SystemExit('pauseOriginForDriveSignal already exists unexpectedly')
+          store_path.write_text(store.replace(anchor,anchor+helper,1),encoding='utf-8')
+          policy_path=Path('app/src/test/java/com/shaterguy/chatgptselfrun/DriveResumePolicyTest.java')
+          policy=policy_path.read_text(encoding='utf-8')
+          marker='    @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {\n'
+          test=('    @Test public void drivePausedSignalMapsToExternalManualAndResumesPlainContinue() {\n'
+                '        String origin = SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.PAUSED);\n'
+                '        assertEquals(SelfRunStore.PAUSE_ORIGIN_EXTERNAL_MANUAL, origin);\n'
+                '        DriveResumePolicy.Decision decision = DriveResumePolicy.decide(\n'
+                '                DriveResumePolicy.parseOrigin(origin), 3, 3, Collections.emptyList());\n'
+                '        assertEquals(DriveResumePolicy.Action.CONTINUE, decision.action);\n'
+                '        assertEquals("EXTERNAL_MANUAL_ACTION_COMPLETE", decision.reason);\n'
+                '        assertEquals(SelfRunStore.PAUSE_ORIGIN_AI_USER_ACTION_REQUIRED,\n'
+                '                SelfRunStore.pauseOriginForDriveSignal(DriveSignalParser.Type.USER_ACTION_REQUIRED));\n'
+                '    }\n\n')
+          if policy.count(marker)!=1: raise SystemExit('DriveResumePolicyTest insertion anchor mismatch')
+          if 'drivePausedSignalMapsToExternalManualAndResumesPlainContinue' in policy: raise SystemExit('integration policy test already exists unexpectedly')
+          policy_path.write_text(policy.replace(marker,test+marker,1),encoding='utf-8')
+          source_path=Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java')
+          source=source_path.read_text(encoding='utf-8')
+          marker2='    @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {\n'
+          test2=('    @Test public void drivePauseSignalUsesExternalManualOriginAcrossInitialAndReanchorPaths() throws Exception {\n'
+                 '        String store = src("SelfRunStore.java");\n'
+                 '        String pause = between(store, "private void pauseEvent", "private void terminal");\n'
+                 '        String resume = between(store, "void baselineManualResume", "void captureConversationUrl");\n'
+                 '        assertTrue(pause.contains("pauseOriginForDriveSignal(x.type)"));\n'
+                 '        assertTrue(resume.contains("pauseOriginForDriveSignal(blocking.type)"));\n'
+                 '        assertTrue(store.contains("if(type==DriveSignalParser.Type.PAUSED)return PAUSE_ORIGIN_EXTERNAL_MANUAL"));\n'
+                 '        assertTrue(store.contains("if(st.contains(\\\"SelfRun Drive 일시정지\\\"))return PAUSE_ORIGIN_EXTERNAL_MANUAL"));\n'
+                 '        assertTrue(store.contains("recordPauseAnchor(e,PAUSE_ORIGIN_AI_PAUSED,code"));\n'
+                 '    }\n\n')
+          if source.count(marker2)!=1: raise SystemExit('SelfRunPauseResumeTest insertion anchor mismatch')
+          if 'drivePauseSignalUsesExternalManualOriginAcrossInitialAndReanchorPaths' in source: raise SystemExit('source integration test already exists unexpectedly')
+          source_path.write_text(source.replace(marker2,test2+marker2,1),encoding='utf-8')
           PY
           git diff --check
           grep -Fq "def selfRunDriveVersionCode = 1000025" app/build.gradle
