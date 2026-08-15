@@ -60,9 +60,11 @@ public class DriveResumePolicyTest {
         assertEquals(DriveResumePolicy.Action.APPLY_COMPLETION,
                 DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
                         Collections.singletonList(event(DriveSignalParser.Type.TURN_COMPLETED, 4, false))).action);
-        assertEquals(DriveResumePolicy.Action.KEEP_PAUSED,
-                DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
-                        Collections.singletonList(event(DriveSignalParser.Type.PAUSED, 4, false))).action);
+        DriveResumePolicy.Decision blocking = DriveResumePolicy.decide(
+                DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
+                Collections.singletonList(event(DriveSignalParser.Type.PAUSED, 4, false)));
+        assertEquals(DriveResumePolicy.Action.KEEP_PAUSED, blocking.action);
+        assertNotNull(blocking.event);
         assertEquals(DriveResumePolicy.Action.DONE,
                 DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, false, 3, 4,
                         Collections.singletonList(event(DriveSignalParser.Type.DONE, 4, false))).action);
@@ -75,8 +77,10 @@ public class DriveResumePolicyTest {
                 DriveResumePolicy.Origin.AI_PAUSED, 3, 3, Collections.emptyList());
         assertEquals(DriveResumePolicy.Action.KEEP_PAUSED, userAction.action);
         assertEquals("USER_ACTION_RESUME_PREPARATION_REQUIRED", userAction.reason);
+        assertNull(userAction.event);
         assertEquals(DriveResumePolicy.Action.KEEP_PAUSED, aiPause.action);
         assertEquals("AI_PAUSE_REMAINS_LATCHED", aiPause.reason);
+        assertNull(aiPause.event);
     }
 
     @Test public void uiManualPauseWithoutNewSignalRestoresPriorPhase() {

@@ -42,7 +42,27 @@ public class SelfRunPauseResumeTest {
         assertTrue(store.contains("if(hasTurnDocument)return false"));
         assertTrue(store.contains("PAUSE_ORIGIN_EXTERNAL_MANUAL.equals(origin)&&!needsContinuation"));
         assertTrue(store.contains("DriveResumePolicy.decide(origin,resumeNeedsContinuation(),pauseAnchorCursor(),totalCount,postAnchor)"));
-        assertTrue(store.contains("putBoolean(\"resumeNeedsContinuation\",true).putString(\"phase\",PHASE_PAUSED)"));
+        assertTrue(store.contains("else{e.putBoolean(\"resumeNeedsContinuation\",true).putString(\"status\",\"재개 보류 · 더 최신 blocking signal 확인\")"));
+    }
+
+    @Test public void noMaterialAiLatchKeepsExistingAnchorWithoutTerminalReanchor() throws Exception {
+        String store = src("SelfRunStore.java");
+        String resume = between(store, "void baselineManualResume", "void captureConversationUrl");
+        int nullStart = resume.indexOf("if(blocking==null){");
+        int elseStart = nullStart < 0 ? -1 : resume.indexOf("}else{", nullStart);
+        int reanchorStart = elseStart < 0 ? -1 : resume.indexOf("pauseOriginForDriveSignal(blocking.type)", elseStart);
+        assertTrue(nullStart >= 0);
+        assertTrue(elseStart > nullStart);
+        assertTrue(reanchorStart > elseStart);
+        String nullBranch = resume.substring(nullStart, elseStart);
+        assertTrue(nullBranch.contains("기존 pause latch 유지"));
+        assertFalse(nullBranch.contains("recordPauseAnchor"));
+        assertFalse(nullBranch.contains("terminal(e,blocking)"));
+        assertFalse(nullBranch.contains("resumeNeedsContinuation"));
+        String blockingBranch = resume.substring(elseStart, resume.indexOf("case DONE", elseStart));
+        assertTrue(blockingBranch.contains("resumeNeedsContinuation"));
+        assertTrue(blockingBranch.contains("recordPauseAnchor"));
+        assertTrue(blockingBranch.contains("terminal(e,blocking)"));
     }
 
     @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {
