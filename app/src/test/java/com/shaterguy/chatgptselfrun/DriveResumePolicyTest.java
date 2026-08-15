@@ -19,16 +19,22 @@ public class DriveResumePolicyTest {
         assertEquals("USER_CHOICE_NEXT_INPUT_REQUIRED", missing.reason);
     }
 
-    @Test public void externalOrAiManualActionWithoutNewCompletionUsesPlainContinue() {
-        assertEquals(DriveResumePolicy.Action.CONTINUE,
-                DriveResumePolicy.decide(DriveResumePolicy.Origin.EXTERNAL_MANUAL, 3, 3,
-                        Collections.emptyList()).action);
-        assertEquals(DriveResumePolicy.Action.CONTINUE,
-                DriveResumePolicy.decide(DriveResumePolicy.Origin.AI_PAUSED, 3, 3,
-                        Collections.emptyList()).action);
-        assertEquals(DriveResumePolicy.Action.CONTINUE,
-                DriveResumePolicy.decide(DriveResumePolicy.Origin.AI_USER_ACTION_REQUIRED, 3, 3,
-                        Collections.emptyList()).action);
+    @Test public void externalManualActionWithoutNewCompletionUsesPlainContinue() {
+        DriveResumePolicy.Decision decision = DriveResumePolicy.decide(
+                DriveResumePolicy.Origin.EXTERNAL_MANUAL, 3, 3, Collections.emptyList());
+        assertEquals(DriveResumePolicy.Action.CONTINUE, decision.action);
+        assertEquals("EXTERNAL_MANUAL_ACTION_COMPLETE", decision.reason);
+    }
+
+    @Test public void aiUserActionAndAiPauseRemainLatchedWithoutResumeCompletion() {
+        DriveResumePolicy.Decision userAction = DriveResumePolicy.decide(
+                DriveResumePolicy.Origin.AI_USER_ACTION_REQUIRED, 3, 3, Collections.emptyList());
+        DriveResumePolicy.Decision aiPause = DriveResumePolicy.decide(
+                DriveResumePolicy.Origin.AI_PAUSED, 3, 3, Collections.emptyList());
+        assertEquals(DriveResumePolicy.Action.KEEP_PAUSED, userAction.action);
+        assertEquals("USER_ACTION_RESUME_PREPARATION_REQUIRED", userAction.reason);
+        assertEquals(DriveResumePolicy.Action.KEEP_PAUSED, aiPause.action);
+        assertEquals("AI_PAUSE_REMAINS_LATCHED", aiPause.reason);
     }
 
     @Test public void uiManualPauseWithoutNewSignalRestoresPriorPhase() {
