@@ -112,7 +112,7 @@ public final class SelfRunNewActivity extends Activity {
 
     private void reloadProjects() {
         String previous=store.defaultProjectUrl(); projectEntries=catalog.entries(); java.util.ArrayList<String> labels=new java.util.ArrayList<>(); labels.add("일반채팅"); int selected=0;
-        for(int i=0;i<projectEntries.size();i++){ProjectUrlPolicy.ProjectRef entry=projectEntries.get(i);labels.add(ProjectCatalog.displayName(entry));if(entry.canonicalUrl.equals(previous))selected=i+1;}
+        for(int i=0;i<projectEntries.size();i++){ProjectUrlPolicy.ProjectRef entry=projectEntries.get(i);labels.add(catalog.displayName(entry));if(entry.canonicalUrl.equals(previous))selected=i+1;}
         project.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels)); project.setSelection(selected);
     }
 
