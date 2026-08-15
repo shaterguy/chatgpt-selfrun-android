@@ -5,17 +5,40 @@ import java.nio.file.*;
 import static org.junit.Assert.*;
 
 public class SelfRunPauseResumeTest {
-    @Test public void manualResumeBaselinesThenForcesContinue() throws Exception {
+    @Test public void manualResumeReconcilesDriveBeforeContinuing() throws Exception {
         String service = src("SelfRunService.java");
         String store = src("SelfRunStore.java");
         String resume = between(service, "private void resumeFromUi", "private void enterPreservedPause");
         String baseline = between(store, "void baselineManualResume", "void captureConversationUrl");
         assertTrue(resume.contains("beginManualResumeOverride"));
-        assertFalse(resume.contains("resumeNeedsContinuation"));
-        assertFalse(resume.contains("pausedFromPhase"));
         assertTrue(store.contains("PHASE_RESUME_BASELINE"));
-        assertTrue(baseline.contains("PHASE_SEND_CONTINUE"));
-        assertFalse(baseline.contains("event.type"));
+        assertTrue(baseline.contains("DriveResumePolicy.decide"));
+        assertTrue(baseline.contains("APPLY_COMPLETION"));
+        assertTrue(baseline.contains("RESTORE_PHASE"));
+        assertTrue(baseline.contains("KEEP_PAUSED"));
+        assertTrue(baseline.contains("PROTOCOL_ERROR"));
+        assertFalse(baseline.contains("CONTINUE 강제 제출 준비"));
+    }
+
+    @Test public void pauseAnchorIsDurableAndIncludesOriginCursorAndDriveIdentity() throws Exception {
+        String store = src("SelfRunStore.java");
+        assertTrue(store.contains("pauseAnchorRunId"));
+        assertTrue(store.contains("pauseAnchorOrigin"));
+        assertTrue(store.contains("pauseAnchorPhase"));
+        assertTrue(store.contains("pauseAnchorCursor"));
+        assertTrue(store.contains("pauseAnchorDriveVersion"));
+        assertTrue(store.contains("pauseAnchorModifiedTime"));
+        assertTrue(store.contains("pauseAnchorId"));
+        assertTrue(store.contains("AI_USER_ACTION_REQUIRED"));
+        assertTrue(store.contains("AI_PAUSED"));
+        assertTrue(store.contains("UI_MANUAL"));
+    }
+
+    @Test public void resumeDriveReadbackReturnsToStateMachineNotBlindWebSend() throws Exception {
+        String service = src("SelfRunService.java");
+        String poll = between(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
+        assertTrue(poll.contains("handler.post(this::resumeAfterDriveReconciliation)"));
+        assertFalse(poll.contains("baselineManualResume(scan.totalCount,scan.latest);store.updateDriveSeen(metadata.version,metadata.modifiedTime);}))handler.post(this::ensureWebView)"));
     }
 
     private static String src(String f) throws Exception { Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f); if(!Files.exists(p)) p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f); return new String(Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8); }
