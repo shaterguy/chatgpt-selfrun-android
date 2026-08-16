@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -18,12 +19,14 @@ import java.util.Date;
 public final class SelfRunLogMenuActivity extends Activity {
     private SelfRunStore current;
     private SelfRunHistoryStore history;
+    private WebUiCalibrationStore calibration;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         current = new SelfRunStore(this);
         history = new SelfRunHistoryStore(this);
+        calibration = new WebUiCalibrationStore(this);
     }
 
     @Override
@@ -39,14 +42,15 @@ public final class SelfRunLogMenuActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         root.addView(Ui.title(this, "SelfRun Drive 로그"));
-        root.addView(Ui.body(this, "현재 실행 중인 작업과 과거 작업의 실행 로그·디버그 로그를 확인하고 각 로그를 파일로 저장할 수 있습니다."));
+        root.addView(Ui.body(this, "현재 실행 중인 작업과 과거 작업의 실행 로그·디버그 로그, 웹 UI 보정 로그를 확인할 수 있습니다."));
         root.addView(Ui.row(this,
+                Ui.button(this, "웹 UI 보정 로그", v -> showCalibrationLog()),
                 Ui.button(this, "새로고침", v -> { history.sync(current); render(); }),
                 Ui.button(this, "닫기", v -> finish())));
 
         JSONArray runs = history.read();
         if (runs.length() == 0) {
-            root.addView(Ui.section(this, "로그 없음"));
+            root.addView(Ui.section(this, "작업 로그 없음"));
             root.addView(Ui.body(this, "저장된 SelfRun Drive 작업이 없습니다."));
         } else {
             for (int i = 0; i < runs.length(); i++) {
@@ -56,6 +60,14 @@ public final class SelfRunLogMenuActivity extends Activity {
         }
         scroll.addView(root);
         Ui.setContent(this, scroll);
+    }
+
+    private void showCalibrationLog() {
+        new AlertDialog.Builder(this)
+                .setTitle("웹 UI 보정 로그")
+                .setMessage(calibration.logText(120))
+                .setPositiveButton("닫기", null)
+                .show();
     }
 
     private LinearLayout runCard(JSONObject item) {
