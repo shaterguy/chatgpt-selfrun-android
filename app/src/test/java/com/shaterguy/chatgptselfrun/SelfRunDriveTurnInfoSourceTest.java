@@ -20,14 +20,15 @@ public class SelfRunDriveTurnInfoSourceTest {
         assertTrue(service.contains("DriveSignalParser.scan(text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode)"));
     }
 
-    @Test public void invalidDriveProfileUsesRewriteWithoutChangingServiceStateMachine() throws Exception {
+    @Test public void invalidDriveProfileUsesRewriteWithoutAssistantControlState() throws Exception {
         String store = src("SelfRunStore.java");
         String work = src("WorkPreferenceDom.java");
         String service = src("SelfRunService.java");
         assertTrue(store.contains("SelfRunProtocol.requestTurnInfoRewrite(runId())"));
         assertTrue(work.contains("TURN_INFO_REWRITE_SENTINEL"));
         assertTrue(work.contains("preferenceBypass"));
-        assertTrue(service.contains("PHASE_READ_NEXT_CONTROL"));
+        assertFalse(service.contains("PHASE_READ_NEXT_CONTROL"));
+        assertTrue(service.contains("PHASE_APPLY_PREFS"));
         assertTrue(service.contains("WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel())"));
         assertTrue(service.contains("WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning())"));
         assertTrue(service.contains("SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId())"));
