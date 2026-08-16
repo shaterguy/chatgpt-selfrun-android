@@ -1,0 +1,58 @@
+package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.stream.Stream;
+import static org.junit.Assert.*;
+
+public class SelfRunDriveAssistantIsolationTest {
+    @Test public void productionJavaContainsNoAssistantControlObservationLegacy() throws Exception {
+        Path root = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun");
+        if (!Files.exists(root)) root = Paths.get("src/main/java/com/shaterguy/chatgptselfrun");
+        StringBuilder all = new StringBuilder();
+        try (Stream<Path> files = Files.walk(root)) {
+            for (Path path : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".java"))::iterator) {
+                all.append(new String(Files.readAllBytes(path), StandardCharsets.UTF_8)).append('\n');
+            }
+        }
+        String source = all.toString();
+        for (String banned : new String[]{
+                "readLatestSelfRunControl", "observeAssistant", "assistantSnapshot", "assistantBaselineKey",
+                "PHASE_READ_NEXT_CONTROL", "CONTROL_FOUND", "CONTROL_MISSING", "SELF_RUN_NEXT",
+                "conversation 제어신호", "data-message-author-role=\\\"assistant\\\"",
+                "article[data-turn=\\\"assistant\\\"]", "Command Recevied Record Required"}) {
+            assertFalse("banned assistant/control legacy remains: " + banned, source.contains(banned));
+        }
+    }
+
+    @Test public void completedDriveTurnRoutesDirectlyToUiExecution() throws Exception {
+        String service = src("SelfRunService.java");
+        String guard = between(service, "private void guardElapsed", "private void ensureWebView");
+        assertTrue(guard.contains("PHASE_APPLY_PREFS"));
+        assertTrue(guard.contains("PHASE_SEND_CONTINUE"));
+        assertTrue(guard.contains("MODE_WORK"));
+        assertFalse(guard.contains("READ_NEXT_CONTROL"));
+        assertFalse(guard.contains("SELF_RUN_NEXT"));
+    }
+
+    @Test public void workPreferencesStillComeFromPendingDriveCompletion() throws Exception {
+        String store = src("SelfRunStore.java");
+        assertTrue(store.contains("pendingDriveWorkProfile()"));
+        assertTrue(store.contains("DriveSignalParser.workProfile(pendingDriveSignalRaw())"));
+        assertTrue(store.contains("return p.valid?p.model"));
+        assertTrue(store.contains("return p.valid?p.reasoning"));
+    }
+
+    private static String src(String file) throws Exception {
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static String between(String source, String start, String end) {
+        return source.substring(source.indexOf(start), source.indexOf(end));
+    }
+}
