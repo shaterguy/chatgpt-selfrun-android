@@ -14,7 +14,7 @@ public class SelfRunNextInputDev6Test {
     private static final String RUN = "SR-20260816-112716-39Q4VK";
 
     @Test public void chatCompletionCarriesStrictNextInput() {
-        String input = "승인할게.\\n다음 줄도 유지  ";
+        String input = "승인할게.\n다음 줄도 유지  ";
         String raw = line("NEXT_INPUT_B64URL=" + encode(input));
         DriveSignalParser.Scan scan = DriveSignalParser.scan(raw, RUN, 0, SelfRunStore.MODE_CHAT);
         assertEquals(1, scan.totalCount);
@@ -41,18 +41,18 @@ public class SelfRunNextInputDev6Test {
     @Test public void malformedNextInputFailsClosedInsteadOfBecomingPlainCompletion() {
         String padded = line("NEXT_INPUT_B64URL=YWJj=");
         DriveSignalParser.Event bad = DriveSignalParser.latestCompletion(
-      DriveSignalParser.scan(padded, RUN, 0, SelfRunStore.MODE_CHAT).unseen);
+                DriveSignalParser.scan(padded, RUN, 0, SelfRunStore.MODE_CHAT).unseen);
         assertNotNull(bad);
         assertFalse(bad.protocolError.isEmpty());
 
         String duplicate = line("NEXT_INPUT_B64URL=YWJj NEXT_INPUT_B64URL=YWJj");
         bad = DriveSignalParser.latestCompletion(
-      DriveSignalParser.scan(duplicate, RUN, 0, SelfRunStore.MODE_CHAT).unseen);
+                DriveSignalParser.scan(duplicate, RUN, 0, SelfRunStore.MODE_CHAT).unseen);
         assertEquals("TURN_COMPLETED_DUPLICATE_FIELD", bad.protocolError);
 
         String unknown = line("NEXT_INPUT_B64URL=YWJj EXTRA=x");
         bad = DriveSignalParser.latestCompletion(
-      DriveSignalParser.scan(unknown, RUN, 0, SelfRunStore.MODE_CHAT).unseen);
+                DriveSignalParser.scan(unknown, RUN, 0, SelfRunStore.MODE_CHAT).unseen);
         assertEquals("TURN_COMPLETED_UNKNOWN_FIELD", bad.protocolError);
     }
 
@@ -65,7 +65,7 @@ public class SelfRunNextInputDev6Test {
     @Test public void laterValidCompletionSupersedesEarlierInvalidForResumeSelection() {
         String bad = line("NEXT_INPUT_B64URL=YWJj=");
         String good = line("NEXT_INPUT_B64URL=" + encode("최종 선택"));
-        DriveSignalParser.Scan scan = DriveSignalParser.scan(bad + "\\n" + good, RUN, 0, SelfRunStore.MODE_CHAT);
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(bad + "\n" + good, RUN, 0, SelfRunStore.MODE_CHAT);
         DriveSignalParser.Event completion = DriveSignalParser.latestCompletion(scan.unseen);
         assertEquals("", completion.protocolError);
         assertEquals("최종 선택", completion.nextInput);
@@ -74,9 +74,9 @@ public class SelfRunNextInputDev6Test {
     @Test public void laterPauseBlocksEarlierInvalidCompletion() {
         String bad = line("NEXT_INPUT_B64URL=YWJj=");
         String pause = "[2026.08.16 | 11:30:01] [SELF_RUN_PAUSED " + RUN + "]";
-        DriveSignalParser.Scan scan = DriveSignalParser.scan(bad + "\\n" + pause, RUN, 0, SelfRunStore.MODE_CHAT);
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(bad + "\n" + pause, RUN, 0, SelfRunStore.MODE_CHAT);
         assertTrue(DriveSignalParser.latestBlocking(scan.unseen).cursor
-      > DriveSignalParser.latestCompletion(scan.unseen).cursor);
+                > DriveSignalParser.latestCompletion(scan.unseen).cursor);
     }
 
     @Test public void legacyChatExtensionIsStillIgnoredAndHistoryIsRedacted() {
