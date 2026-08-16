@@ -44,4 +44,15 @@ public class SelfRunDomTest {
         assertTrue(model.contains("일반 Chat 범위 이탈"));
     }
 
+    @Test public void initialModeGateFallsBackOnlyForChatAfterRecordedClick() {
+        String script = SelfRunDom.prepareInitialContext(
+                SelfRunScript.GENERAL_CHAT_URL, SelfRunStore.MODE_CHAT, "SR-20260816-MODE00");
+        assertTrue(script.contains("const chatImplicitAfterClick=requestedMode==='chat'"));
+        assertTrue(script.contains("priorAction==='select-mode'"));
+        assertTrue(script.contains("priorRequested==='chat'"));
+        assertTrue(script.contains("selectedModes.length===0"));
+        assertTrue(script.contains("!!composer"));
+        assertTrue(script.contains("||chatImplicitAfterClick"));
+        assertFalse(script.contains("requestedMode==='work'&&priorAction==='select-mode'"));
+    }
 }
