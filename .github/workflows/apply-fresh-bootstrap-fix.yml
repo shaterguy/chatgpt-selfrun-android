@@ -1,0 +1,97 @@
+name: Apply fresh bootstrap fix
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.2.3-dev3'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply run-isolation fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          service = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java'
+
+          replace_once(service,
+          '''        if (!currentRunId.equals(runtimeRunId)) {
+              stopAutomationCallbacks();
+              runtimeRunId = currentRunId;
+              verifiedDriveAccountId = "";
+              accessToken = "";
+          }''',
+          '''        if (!currentRunId.equals(runtimeRunId)) {
+              stopAutomationCallbacks();
+              cleanupWebView();
+              runtimeRunId = currentRunId;
+              verifiedDriveAccountId = "";
+              accessToken = "";
+              runLog.record(store, "WEBVIEW_RESET_FOR_NEW_RUN", "run_boundary");
+          }''')
+
+          replace_once(service,
+          '''private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;maybeCaptureConversationUrl(webView.getUrl());String phase=store.phase();''',
+          '''private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;String phase=store.phase();if(freshBootstrapPhase(phase)&&!SelfRunScript.conversationId(webView.getUrl()).isEmpty()){rejectStaleBootstrapConversation();return;}maybeCaptureConversationUrl(webView.getUrl());''')
+
+          replace_once(service,
+          '''if("TARGET_ERROR".equals(status)){restoreCanonical();return;}if("AUTH_REQUIRED".equals(status))''',
+          '''if("TARGET_ERROR".equals(status)){restoreCanonical();return;}if("EXISTING_CONVERSATION".equals(status)&&freshBootstrapPhase(phase)){rejectStaleBootstrapConversation();return;}if("AUTH_REQUIRED".equals(status))''')
+
+          replace_once(service,
+          '''private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED","trusted_project_route");}}''',
+          '''private void maybeCaptureConversationUrl(String url){if(freshBootstrapPhase(store.phase()))return;if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED","trusted_project_route");}}
+
+static boolean freshBootstrapPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase);}
+
+private void rejectStaleBootstrapConversation(){if(!canRun()||!freshBootstrapPhase(store.phase()))return;runLog.record(store,"BOOTSTRAP_EXISTING_CONVERSATION_REJECTED","fresh_conversation_required");cleanupWebView();handler.post(()->{if(canRun()&&freshBootstrapPhase(store.phase()))launchWebView(store.projectUrl());});}''')
+
+          replace_once('app/build.gradle',
+          '''def selfRunDriveVersionCode = 1000026
+def selfRunDriveVersionName = '1.2.2' ''',
+          '''def selfRunDriveVersionCode = 1000027
+def selfRunDriveVersionName = '1.2.3-dev3' ''')
+
+          runtime = Path('docs/SELF_RUN_DRIVE_RUNTIME.md')
+          runtime_text = runtime.read_text(encoding='utf-8')
+          anchor = '''WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer 탐색과 명령 제출입니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.\n'''
+          addition = '''\n새 Run 경계에서는 이전 Run의 background WebView를 재사용하지 않습니다. `SelfRunService`가 다른 Run ID를 받으면 기존 WebView를 즉시 폐기하고 새 프로젝트 target에서 다시 생성합니다. bootstrap 첫 제출 전에는 기존 `/c/...` route를 현재 Run의 canonical conversation으로 채택하지 않으며, 기존 conversation이 검출되면 fresh WebView로 프로젝트 root를 다시 열어 새 conversation 진입을 재시도합니다.\n'''
+          if anchor not in runtime_text:
+              raise SystemExit('runtime doc anchor not found')
+          runtime.write_text(runtime_text.replace(anchor, anchor + addition, 1), encoding='utf-8')
+
+          test = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunFreshConversationPolicyTest.java')
+          test.write_text('''package com.shaterguy.chatgptselfrun;\n\nimport org.junit.Test;\n\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\nimport java.nio.file.Paths;\n\nimport static org.junit.Assert.*;\n\npublic class SelfRunFreshConversationPolicyTest {\n    @Test public void allPreSubmissionBootstrapPhasesRequireFreshConversation() {\n        assertTrue(SelfRunService.freshBootstrapPhase(SelfRunStore.PHASE_BOOTSTRAP));\n        assertTrue(SelfRunService.freshBootstrapPhase(SelfRunStore.PHASE_BOOTSTRAP_MODEL));\n        assertTrue(SelfRunService.freshBootstrapPhase(SelfRunStore.PHASE_BOOTSTRAP_REASONING));\n        assertTrue(SelfRunService.freshBootstrapPhase(SelfRunStore.PHASE_BOOTSTRAP_SEND));\n        assertFalse(SelfRunService.freshBootstrapPhase(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT));\n        assertFalse(SelfRunService.freshBootstrapPhase(SelfRunStore.PHASE_READ_NEXT_CONTROL));\n    }\n\n    @Test public void newRunDestroysOldWebViewBeforeAdoptingRunId() throws Exception {\n        String source = src("SelfRunService.java");\n        String boundary = "if (!currentRunId.equals(runtimeRunId)) {\\n"\n                + "            stopAutomationCallbacks();\\n"\n                + "            cleanupWebView();\\n"\n                + "            runtimeRunId = currentRunId;";\n        assertTrue(source.contains(boundary));\n        assertTrue(source.contains("WEBVIEW_RESET_FOR_NEW_RUN"));\n    }\n\n    @Test public void staleConversationIsRejectedBeforeBootstrapCapture() throws Exception {\n        String source = src("SelfRunService.java");\n        assertTrue(source.contains("if(freshBootstrapPhase(store.phase()))return;"));\n        assertTrue(source.contains("BOOTSTRAP_EXISTING_CONVERSATION_REJECTED"));\n        assertTrue(source.contains("freshBootstrapPhase(phase)&&!SelfRunScript.conversationId(webView.getUrl()).isEmpty()"));\n        assertTrue(source.contains("EXISTING_CONVERSATION\\\".equals(status)&&freshBootstrapPhase(phase)"));\n    }\n\n    private static String src(String file) throws Exception {\n        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);\n        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);\n        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);\n    }\n}\n''', encoding='utf-8')
+
+          workflow = Path('.github/workflows/apply-fresh-bootstrap-fix.yml')
+          if not workflow.exists():
+              raise SystemExit('one-shot workflow missing')
+          workflow.unlink()
+          PY
+
+          git diff --check
+          git diff -- app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunFreshConversationPolicyTest.java app/build.gradle docs/SELF_RUN_DRIVE_RUNTIME.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: isolate fresh project bootstrap between runs'
+          git push origin HEAD:selfrun-drive/v1.2.3-dev3
