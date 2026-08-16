@@ -7,7 +7,7 @@
 SelfRun Drive는 모든 대화에서 같은 bootstrap을 사용합니다. 앱은 현재 ChatGPT 대화가 Project인지 판정하지 않으며 Project 이름·ID·SKILL 위치를 탐색하지 않습니다.
 
 ```text
-[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_BOOTSTRAP 0.1.0 <RUN_ID> MODE=<CHAT|WORK>]
+[yyyy.mm.dd | hh:mm:ss] [SELF_RUN_BOOTSTRAP 0.2.0 <RUN_ID> MODE=<CHAT|WORK>]
 SELF_RUN_CLIENT=DRIVE_V1
 SELF_RUN_SKILL_DOCUMENT_ID=1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs
 DRIVE_TURN_DOCUMENT_ID=<documentId>
@@ -39,15 +39,11 @@ Command Recevied Record Required
 
 `Command Recevied Record Required`는 현재 앱 외부 프롬프트 계약의 고정 문자열이며 철자를 임의로 교정하지 않습니다.
 
+protocol 0.2.0에서 현재 적용 대상 `SELF_RUN_TURN_COMPLETED`에 유효한 `NEXT_INPUT_B64URL`이 있으면 앱은 strict Base64URL/UTF-8 검증 후 위 두 줄 뒤에 개행 하나와 decoded 원문을 정확히 한 번 추가합니다. payload가 없으면 기존 두 줄은 byte-for-byte 동일합니다. padding, unknown/duplicate field, invalid UTF-8, encoded 900,000 characters 또는 decoded 675,000 bytes 초과는 protocol error로 fail closed하며 plain CONTINUE로 강등하지 않습니다.
+
 ## Drive 실행문서 signal
 
-Drive 작업문서는 append-only 실행 확인 채널입니다. 이벤트는 다음 형식 한 줄만 사용합니다.
-
-```text
-[yyyy.mm.dd | hh:mm:ss] [<SIGNAL> <RUN_ID>]
-```
-
-허용 signal은 `SELF_RUN_COMMAND_RECEIVED`, `SELF_RUN_TURN_COMPLETED`, `SELF_RUN_USER_ACTION_REQUIRED`, `SELF_RUN_PAUSED`, `SELF_RUN_DONE`입니다. timestamp에는 `KST`, UTC offset 같은 추가 문자열을 넣지 않습니다.
+Drive 작업문서는 append-only 실행 확인 채널입니다. `SELF_RUN_COMMAND_RECEIVED`, `SELF_RUN_USER_ACTION_REQUIRED`, `SELF_RUN_PAUSED`, `SELF_RUN_DONE`은 계속 bare 한 줄 형식만 사용합니다. protocol 0.2.0의 CHAT `SELF_RUN_TURN_COMPLETED`는 bare 형식 또는 `NEXT_INPUT_B64URL=<VALUE>` 한 필드를 가질 수 있고, WORK completion은 기존 `MODEL`·`REASONING` 뒤에 optional `NEXT_INPUT_B64URL`을 마지막 field로 가질 수 있습니다. timestamp에는 `KST`, UTC offset 같은 추가 문자열을 넣지 않습니다.
 
 ChatGPT가 bootstrap 또는 CONTINUE를 실제 수신하면 실질 작업 전에 `SELF_RUN_COMMAND_RECEIVED`를 기록하고 같은 document ID를 readback합니다. 턴을 계속할 때는 최종 답변 직전에 `SELF_RUN_TURN_COMPLETED`를 기록하고 readback합니다. 사용자 조치, 명시적 pause, 전체 완료도 각각 대응 signal을 같은 방식으로 기록합니다.
 
@@ -73,7 +69,7 @@ WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한
 
 ## 일시정지와 재개
 
-USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. 사용자가 앱에서 재개를 누르면 현재 작업문서의 마지막 실제 signal 위치만 baseline으로 저장한 뒤 최신 signal 종류와 관계없이 CONTINUE를 강제 제출합니다. 이후 ACK가 없으면 동일한 5분 무제한 재제출 규칙을 적용합니다.
+USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. 사용자가 앱에서 재개를 누르면 1.2.1의 기존 `RESUME_BASELINE` 경로로 현재 작업문서를 먼저 다시 읽습니다. pause 이후 새로 추가된 최신 completion에 유효한 NEXT_INPUT이 있으면 그 원문만 기존 CONTINUE 뒤에 붙이고, 없으면 기존 plain CONTINUE를 그대로 제출합니다. 별도 pause-origin/anchor/fingerprint 상태머신은 추가하지 않습니다. 이후 ACK가 없으면 기존 5분 무제한 재제출 규칙을 적용합니다.
 
 ## signal write/readback 실패
 

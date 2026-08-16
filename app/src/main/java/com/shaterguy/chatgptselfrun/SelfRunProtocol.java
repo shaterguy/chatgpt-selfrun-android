@@ -29,10 +29,10 @@ final class SelfRunProtocol {
         }return last;
     }
     static boolean validWorkProfile(String model,String reasoning){if(!("sol".equals(model)||"terra".equals(model)||"luna".equals(model)))return false;if(!("high".equals(reasoning)||"xhigh".equals(reasoning)||"max".equals(reasoning)||"ultra".equals(reasoning)))return false;if("luna".equals(model))return "max".equals(reasoning);return !"ultra".equals(reasoning)||"sol".equals(model);}
-    static String bootstrap(String runId,String mode,String requirement){return "[SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n\n"+requirement.trim();}
+    static String bootstrap(String runId,String mode,String requirement){return "[SELF_RUN_BOOTSTRAP 0.2.0 "+runId+" MODE="+mode+"]\n\n"+requirement.trim();}
     static String bootstrapDrive(String runId,String mode,String requirement,String documentId){
         String originalRequirement=requirement==null?"":requirement;
-        return "["+kstTimestamp(new Date())+"] [SELF_RUN_BOOTSTRAP 0.1.0 "+runId+" MODE="+mode+"]\n"
+        return "["+kstTimestamp(new Date())+"] [SELF_RUN_BOOTSTRAP 0.2.0 "+runId+" MODE="+mode+"]\n"
                 +"SELF_RUN_CLIENT=DRIVE_V1\n"
                 +"SELF_RUN_SKILL_DOCUMENT_ID="+SELF_RUN_SKILL_DOCUMENT_ID+"\n"
                 +"DRIVE_TURN_DOCUMENT_ID="+documentId+"\n\n"
@@ -47,7 +47,12 @@ final class SelfRunProtocol {
     static String turnInfoRewrite(String runId){return "[SELF_RUN_TURN_INFO_REWRITE "+runId+"]";}
     static synchronized void requestTurnInfoRewrite(String runId){if(safeCode(runId))turnInfoRewriteRunId=runId;}
     private static synchronized boolean consumeTurnInfoRewrite(String runId){if(!safeCode(runId)||!runId.equals(turnInfoRewriteRunId))return false;turnInfoRewriteRunId="";return true;}
-    static String driveContinuation(String runId){if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);return "["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";}
+    static String driveContinuation(String runId){return driveContinuation(runId,"");}
+    static String driveContinuation(String runId,String nextInput){
+        if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);
+        String base="["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";
+        return nextInput==null||nextInput.isEmpty()?base:base+"\n"+nextInput;
+    }
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}
     static String kstTimestamp(Date date){SimpleDateFormat f=new SimpleDateFormat("yyyy.MM.dd | HH:mm:ss",Locale.US);f.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));return f.format(date);}
     private static String value(String payload,String key){Matcher m=Pattern.compile("(?:^|\\s)"+key+"=([^\\s]+)",Pattern.CASE_INSENSITIVE).matcher(payload);return m.find()?m.group(1).trim():"";}

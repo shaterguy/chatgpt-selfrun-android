@@ -33,6 +33,8 @@ retry 횟수와 누적 시간을 terminal 조건으로 사용하지 않습니다
 
 `SelfRunStore`는 Run ID, CHAT/WORK mode, canonical conversation URL, Drive account/base folder ID, Job folder ID, turn document ID, signal cursor, phase와 재개에 필요한 상태를 영속합니다. 폴더 이름이나 표시 경로가 바뀌어도 저장된 Drive object ID가 접근 가능하면 그대로 사용합니다.
 
+protocol 0.2.0의 NEXT_INPUT은 새 전용 resume state를 만들지 않고 기존 `pendingDriveSignalRaw`에 포함된 completion을 내구 원본으로 사용합니다. command prompt를 만들 때만 strict decode하며, history snapshot에는 payload token을 redaction합니다. 수동 재개에서는 `RESUME_BASELINE` 재조회에서 기존 cursor 이후 새 completion만 payload 후보로 사용합니다.
+
 ## OAuth와 Drive 객체
 
 승인 scope는 `https://www.googleapis.com/auth/drive.file` 하나입니다. 사용자가 Picker로 선택한 Runs 폴더와 앱이 그 아래 생성한 객체만 사용합니다. global SelfRun 운영문서의 ID를 bootstrap에 넣기 위해 그 문서를 앱이 직접 다운로드하지 않습니다.

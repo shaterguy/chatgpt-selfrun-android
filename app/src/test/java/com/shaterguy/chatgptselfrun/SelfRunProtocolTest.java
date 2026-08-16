@@ -59,11 +59,18 @@ public class SelfRunProtocolTest {
     @Test public void driveContinueAddsCommandReceivedReminderWithoutChangingBareControlSignal() {
         assertEquals("1970.01.01 | 09:00:00", SelfRunProtocol.kstTimestamp(new Date(0)));
         String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC);
-        assertTrue(bootstrap.split("\\n", 2)[0].matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_BOOTSTRAP 0\\.1\\.0 .*"));
+        assertTrue(bootstrap.split("\\n", 2)[0].matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_BOOTSTRAP 0\\.2\\.0 .*"));
         String driveContinue = SelfRunProtocol.driveContinuation(RUN);
         assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]\\nCommand Recevied Record Required$"));
         assertEquals("[SELF_RUN_CONTINUE " + RUN + "]", SelfRunProtocol.continuation(RUN));
         assertFalse(driveContinue.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
+    }
+
+    @Test public void driveContinueAppendsNextInputExactlyOnce() {
+        String input = "선택=승인\n둘째 줄  ";
+        String driveContinue = SelfRunProtocol.driveContinuation(RUN, input);
+        assertTrue(driveContinue.endsWith("Command Recevied Record Required\n" + input));
+        assertEquals(1, occurrences(driveContinue, input));
     }
 
     @Test public void turnInfoRewriteIsOneShotAndUntimestamped() {
