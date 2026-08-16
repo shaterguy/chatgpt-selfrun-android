@@ -5,18 +5,15 @@ import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 
-/** Private landscape desktop WebView host, matching the Prompt Scheduler automation viewport. */
+/** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
 final class HeadlessWebViewHost {
-    static final int WIDTH = 1440;
-    static final int HEIGHT = 900;
-    static final int DENSITY_DPI = 160;
-
     private final WebView webView;
     private final Presentation presentation;
     private final VirtualDisplay virtualDisplay;
@@ -37,13 +34,14 @@ final class HeadlessWebViewHost {
         Surface surface = null;
         VirtualDisplay display = null;
         Presentation presentation = null;
+        MobileDimensions dimensions = dimensions(context);
         try {
             texture = new SurfaceTexture(false);
-            texture.setDefaultBufferSize(WIDTH, HEIGHT);
+            texture.setDefaultBufferSize(dimensions.width, dimensions.height);
             surface = new Surface(texture);
             DisplayManager manager = context.getSystemService(DisplayManager.class);
-            display = manager.createVirtualDisplay("SelfRunDrive", WIDTH, HEIGHT, DENSITY_DPI,
-                    surface, DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
+            display = manager.createVirtualDisplay("SelfRunDriveMobile", dimensions.width, dimensions.height,
+                    dimensions.densityDpi, surface, DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                             | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION);
             if (display == null || display.getDisplay() == null) {
                 throw new IllegalStateException("virtual display unavailable");
@@ -58,7 +56,7 @@ final class HeadlessWebViewHost {
             presentation.setContentView(root);
             presentation.show();
             Window window = presentation.getWindow();
-            if (window != null) window.setLayout(WIDTH, HEIGHT);
+            if (window != null) window.setLayout(dimensions.width, dimensions.height);
             webView.requestFocus();
             return new HeadlessWebViewHost(webView, presentation, display, surface, texture);
         } catch (Throwable error) {
@@ -71,6 +69,27 @@ final class HeadlessWebViewHost {
             fallback.setFocusableInTouchMode(true);
             fallback.requestFocus();
             return new HeadlessWebViewHost(fallback, null, null, null, null);
+        }
+    }
+
+    private static MobileDimensions dimensions(Context context) {
+        WebUiCalibrationStore.Viewport viewport = new WebUiCalibrationStore(context).viewport();
+        if (viewport != null) {
+            return new MobileDimensions(viewport.pixelWidth(), viewport.pixelHeight(), viewport.densityDpi());
+        }
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        int shorter = Math.max(320, Math.min(metrics.widthPixels, metrics.heightPixels));
+        int longer = Math.max(480, Math.max(metrics.widthPixels, metrics.heightPixels));
+        int density = Math.max(120, Math.min(640, metrics.densityDpi));
+        return new MobileDimensions(shorter, longer, density);
+    }
+
+    private static final class MobileDimensions {
+        final int width;
+        final int height;
+        final int densityDpi;
+        MobileDimensions(int width, int height, int densityDpi) {
+            this.width = width; this.height = height; this.densityDpi = densityDpi;
         }
     }
 
