@@ -153,10 +153,10 @@ final class WebUiCalibrationStore {
     Viewport viewport() {
         JSONObject value = profile().optJSONObject("viewport");
         if (value == null) return null;
-        int cssWidth = value.optInt("innerWidth", 0);
-        int cssHeight = value.optInt("innerHeight", 0);
+        int cssWidth = value.optInt("screenWidth", value.optInt("innerWidth", 0));
+        int cssHeight = value.optInt("screenHeight", value.optInt("innerHeight", 0));
         double dpr = value.optDouble("devicePixelRatio", 0d);
-        if (cssWidth < 240 || cssWidth > 1200 || cssHeight < 320 || cssHeight > 2400
+        if (cssWidth < 240 || cssWidth > 1200 || cssHeight < 320 || cssHeight > 2600
                 || dpr < 0.75d || dpr > 5d) return null;
         return new Viewport(cssWidth, cssHeight, dpr);
     }
@@ -194,8 +194,8 @@ final class WebUiCalibrationStore {
     private static String captureSummary(JSONObject capture) {
         StringBuilder out = new StringBuilder("ready=").append(capture.optBoolean("ready", false) ? 1 : 0);
         JSONObject viewport = capture.optJSONObject("viewport");
-        if (viewport != null) out.append(";viewport=").append(viewport.optInt("innerWidth"))
-                .append('x').append(viewport.optInt("innerHeight"));
+        if (viewport != null) out.append(";viewport=").append(viewport.optInt("screenWidth", viewport.optInt("innerWidth")))
+                .append('x').append(viewport.optInt("screenHeight", viewport.optInt("innerHeight")));
         if (capture.optJSONObject("entry") != null) out.append(";entry=1");
         if (capture.optJSONObject("composer") != null) out.append(";composer=1");
         if (capture.optJSONObject("send") != null) out.append(";send=1");
