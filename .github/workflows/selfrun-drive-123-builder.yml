@@ -31,7 +31,11 @@ jobs:
           cat tools/selfrun_123_patch.part00.b64 tools/selfrun_123_patch.part01.b64 tools/selfrun_123_patch.part02.b64 tools/selfrun_123_patch.part03.b64 tools/selfrun_123_patch.part04.b64 > /tmp/selfrun_123_patch.b64
           base64 -d /tmp/selfrun_123_patch.b64 > /tmp/selfrun_123_patch.py
           python3 -m py_compile /tmp/selfrun_123_patch.py
-          python3 /tmp/selfrun_123_patch.py
+          if ! python3 /tmp/selfrun_123_patch.py; then
+            echo '--- residual ROLE references after patch ---'
+            grep -R -n -E 'setRole\(|store\.role\(\)' app/src/main/java || true
+            exit 1
+          fi
       - name: Install Android SDK
         shell: bash
         run: |
