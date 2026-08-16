@@ -12,6 +12,8 @@ Drive V1은 background WebView를 private virtual display에 호스팅하는 기
 
 WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer 탐색과 명령 제출입니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.
 
+새 Run은 이전 Run의 background WebView를 재사용하지 않는 것을 불변조건으로 합니다. `SelfRunNewActivity`는 기존 `SelfRunService`에 stop을 요청한 뒤 해당 서비스가 실제 실행 목록에서 사라진 상태를 연속 두 번 확인해야 새 Run의 `store.start(...)`와 foreground service 시작을 수행합니다. 종료 확인 중 시작 버튼을 다시 눌러도 중복 Run을 만들지 않으며, 제한 시간 안에 이전 서비스 종료를 확인하지 못하면 새 Run을 만들지 않고 사용자에게 재시도를 요구합니다. 이 barrier의 목적은 이전 Run의 WebView·conversation route가 새 Run bootstrap에 유입되는 stop/start 수명주기 경합을 차단하는 것입니다.
+
 ## Foreground Service와 WakeLock
 
 실행 중 Job은 Android Foreground Service로 유지합니다. WakeLock은 Drive 요청, WebView 복구, 명령 제출처럼 실제 작업이 필요한 짧은 구간에만 사용하고 단순 polling 대기·guard 대기에는 유지하지 않는 것을 원칙으로 합니다. 알림 채널, pause/resume 동작과 서비스 상태는 `SelfRunService`와 `NotificationHelper`가 소유합니다.
