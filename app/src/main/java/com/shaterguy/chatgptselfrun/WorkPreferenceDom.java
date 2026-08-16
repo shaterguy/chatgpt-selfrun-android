@@ -1,6 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
-/** Work model/reasoning selector aligned with the scheduler's composer-local structural readback flow. */
+/** Work model/reasoning selector with user-calibrated triggers and v1.2.2 semantic fallback. */
 final class WorkPreferenceDom {
     static final String TURN_INFO_REWRITE_SENTINEL = "__SELF_RUN_TURN_INFO_REWRITE__";
     private WorkPreferenceDom() {}
@@ -34,22 +34,22 @@ final class WorkPreferenceDom {
 
     private static String model(String guard, String wanted) {
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,diagnostics,url:location.href});"
-                + guard + helpers()
+                + guard + WebUiCalibrationDom.runtimePrelude() + helpers()
                 + "const wanted=" + q(wanted) + ";const modelOf=s=>{const v=text(s),m=v.match(/(?:^|\\s)(sol|terra|luna)(?:\\s|$)/);return m?m[1]:''};const direct=/^(?:(?:gpt-?)?5(?:\\.6)?\\s+)?(?:sol|terra|luna)(\\s|$)/;"
                 + "const options=[...document.querySelectorAll('[role=\"menuitemradio\"],[role=\"radio\"],[role=\"option\"],[role=\"menuitem\"]')].filter(visible).filter(e=>{const role=e.getAttribute('role')||'',l=label(e);return !!modelOf(l)&&(role!=='menuitem'||direct.test(l))});const option=options.find(e=>modelOf(label(e))===wanted);"
-                + "const level=[...document.querySelectorAll('[role=\"menuitem\"]')].filter(visible).find(e=>/^(model|모델)(\\s|$)/.test(label(e)));const trigger=[...document.querySelectorAll('button[aria-haspopup=\"menu\"],[role=\"button\"][aria-haspopup=\"menu\"]')].filter(visible).filter(near).find(e=>!!modelOf(label(e)));const expanded=!!trigger&&trigger.getAttribute('aria-expanded')==='true',current=trigger?modelOf(label(trigger)):'';"
+                + "const level=[...document.querySelectorAll('[role=\"menuitem\"]')].filter(visible).find(e=>/^(model|모델)(\\s|$)/.test(label(e)));const calibratedTrigger=__srFind(" + q(WebUiCalibrationStore.PURPOSE_WORK_MODEL) + ");const heuristicTrigger=[...document.querySelectorAll('button[aria-haspopup=\"menu\"],[role=\"button\"][aria-haspopup=\"menu\"]')].filter(visible).filter(near).find(e=>!!modelOf(label(e)));const trigger=calibratedTrigger||heuristicTrigger;const source=calibratedTrigger?'calibrated':'heuristic';const expanded=!!trigger&&trigger.getAttribute('aria-expanded')==='true',current=trigger?modelOf(label(trigger)):'';"
                 + "let ready=false,action='';if(option){if(selected(option)){ready=true;if(expanded){openMenu(trigger);action='close-selected-model-menu'}}else{option.click();action='select-model'}}else if(trigger&&current===wanted){ready=true}else if(level){level.click();action='open-model-menu'}else if(trigger&&!expanded){openMenu(trigger);action='open-work-settings-menu'}"
-                + "const diagnostics={requested:wanted,ready,action,current,triggerFound:!!trigger,triggerExpanded:expanded,levelFound:!!level,optionFound:!!option};if(action)return result('UI_WAIT','Work 모델 반영 대기',diagnostics);if(!ready)return result('UI_WAIT','Work 모델 선택 요소 대기',diagnostics);return result('READY','모델 적용 확인',diagnostics);})()";
+                + "const diagnostics={requested:wanted,ready,action,current,source,triggerFound:!!trigger,triggerExpanded:expanded,levelFound:!!level,optionFound:!!option};if(action)return result('UI_WAIT','Work 모델 반영 대기',diagnostics);if(!ready)return result('UI_WAIT','Work 모델 선택 요소 대기',diagnostics);return result('READY','모델 적용 확인',diagnostics);})()";
     }
 
     private static String reasoning(String guard, String wanted) {
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,diagnostics,url:location.href});"
-                + guard + helpers()
+                + guard + WebUiCalibrationDom.runtimePrelude() + helpers()
                 + "const wanted=" + q(wanted) + ";const effort=s=>{const v=text(s);if(v.includes('ultra')||v.includes('울트라'))return'ultra';if(v.includes('xhigh')||v.includes('extra high')||v.includes('very high')||v.includes('매우 높음'))return'xhigh';if(v.includes('maximum')||v.includes('max')||v.includes('최대'))return'max';if(v.includes('medium')||v.includes('중간'))return'medium';if(v.includes('light')||v.includes('가벼움'))return'light';if(v.includes('high')||v.includes('높음'))return'high';return''};const direct=/^(ultra|울트라|very high|extra high|xhigh|매우 높음|maximum|max|최대|medium|중간|light|가벼움|high|높음)(\\s|$)/;"
                 + "const options=[...document.querySelectorAll('[role=\"menuitemradio\"],[role=\"radio\"],[role=\"option\"],[role=\"menuitem\"]')].filter(visible).filter(e=>{const role=e.getAttribute('role')||'',l=label(e);return !!effort(l)&&(role!=='menuitem'||direct.test(l))});const option=options.find(e=>effort(label(e))===wanted);"
-                + "const level=[...document.querySelectorAll('[role=\"menuitem\"]')].filter(visible).find(e=>/^(reasoning (level|effort)|추론 (수준|강도|정도))(\\s|$)/.test(label(e)));const trigger=[...document.querySelectorAll('button[aria-haspopup=\"menu\"],[role=\"button\"][aria-haspopup=\"menu\"]')].filter(visible).filter(near).find(e=>!!effort(label(e)));const expanded=!!trigger&&trigger.getAttribute('aria-expanded')==='true',current=trigger?effort(label(trigger)):'';"
+                + "const level=[...document.querySelectorAll('[role=\"menuitem\"]')].filter(visible).find(e=>/^(reasoning (level|effort)|추론 (수준|강도|정도))(\\s|$)/.test(label(e)));const calibratedTrigger=__srFind(" + q(WebUiCalibrationStore.PURPOSE_WORK_REASONING) + ");const heuristicTrigger=[...document.querySelectorAll('button[aria-haspopup=\"menu\"],[role=\"button\"][aria-haspopup=\"menu\"]')].filter(visible).filter(near).find(e=>!!effort(label(e)));const trigger=calibratedTrigger||heuristicTrigger;const source=calibratedTrigger?'calibrated':'heuristic';const expanded=!!trigger&&trigger.getAttribute('aria-expanded')==='true',current=trigger?effort(label(trigger)):'';"
                 + "let ready=false,action='';if(option){if(selected(option)){ready=true;if(expanded){openMenu(trigger);action='close-selected-effort-menu'}}else{option.click();action='select-effort'}}else if(trigger&&current===wanted){ready=true;if(expanded){openMenu(trigger);action='close-selected-effort-menu'}}else if(level){level.click();action='open-effort-menu'}else if(trigger&&!expanded){openMenu(trigger);action='open-reasoning-menu'}"
-                + "const diagnostics={requested:wanted,ready,action,current,triggerFound:!!trigger,triggerExpanded:expanded,levelFound:!!level,optionFound:!!option};if(action)return result('UI_WAIT','추론 강도 반영 대기',diagnostics);if(!ready)return result('UI_WAIT','추론 강도 선택 요소 대기',diagnostics);return result('READY','추론 적용 확인',diagnostics);})()";
+                + "const diagnostics={requested:wanted,ready,action,current,source,triggerFound:!!trigger,triggerExpanded:expanded,levelFound:!!level,optionFound:!!option};if(action)return result('UI_WAIT','추론 강도 반영 대기',diagnostics);if(!ready)return result('UI_WAIT','추론 강도 선택 요소 대기',diagnostics);return result('READY','추론 적용 확인',diagnostics);})()";
     }
 
     private static String helpers() {
