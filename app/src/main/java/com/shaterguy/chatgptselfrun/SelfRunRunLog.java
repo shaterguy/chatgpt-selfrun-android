@@ -168,8 +168,9 @@ final class SelfRunRunLog {
     private static boolean isExecutionEvent(String event) {
         return event.startsWith("UI_") || event.startsWith("SERVICE_") || event.startsWith("SIGNAL_")
                 || event.startsWith("RATE_LIMIT") || event.startsWith("WEBVIEW_")
-                || event.startsWith("BOOTSTRAP_") || event.startsWith("DRIVE_")
+                || event.startsWith("BOOTSTRAP_") || event.startsWith("DRIVE_") || event.startsWith("DOM_")
                 || event.equals("PAUSED") || event.equals("DONE")
+                || event.equals("CONVERSATION_CAPTURED")
                 || event.equals("STATE_TRANSITION") || event.equals("PREFERENCE_VERIFIED")
                 || event.equals("TARGET_DRIFT") || event.equals("TARGET_RESTORE")
                 || event.equals("RENDERER_GONE") || event.equals("WEBVIEW_INIT_FAILED");
@@ -186,9 +187,12 @@ final class SelfRunRunLog {
             case "WEBVIEW_PAGE_FINISH" -> "ChatGPT 화면 로딩 완료";
             case "WEBVIEW_NAVIGATION" -> "ChatGPT 화면 이동";
             case "WEBVIEW_ERROR" -> "WebView 오류";
+            case "DOM_EVALUATE" -> "ChatGPT 화면 상태 확인";
+            case "DOM_RESULT" -> "ChatGPT 화면 상태 결과";
             case "BOOTSTRAP_CONTEXT_READY" -> "프로젝트 새 대화 준비 완료";
             case "BOOTSTRAP_SUBMITTED" -> "첫 요청 제출";
             case "BOOTSTRAP_CONFIRMED" -> "새 conversation 확인";
+            case "CONVERSATION_CAPTURED" -> "새 conversation URL 확인";
             case "SIGNAL_ACCEPTED" -> "제어 신호 수신";
             case "PREFERENCE_VERIFIED" -> "모델/추론 적용 확인";
             case "STATE_TRANSITION" -> "상태 전이";

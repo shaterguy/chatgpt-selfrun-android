@@ -11,6 +11,7 @@ public class SelfRunGeneralChatPolicyTest {
     @Test public void rootAndConversationShareGeneralChatScope() {
         assertEquals(SelfRunScript.GENERAL_CHAT_SCOPE, SelfRunScript.projectId("https://chatgpt.com/"));
         assertEquals(SelfRunScript.GENERAL_CHAT_SCOPE, SelfRunScript.projectId("https://chatgpt.com/c/conversation123"));
+        assertEquals("conversation123", SelfRunScript.conversationId("https://chatgpt.com/c/conversation123"));
         assertEquals("g-p-test", SelfRunScript.projectId("https://chatgpt.com/g/g-p-test/c/conversation123"));
         assertTrue(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://www.chatgpt.com/c/conversation123"));

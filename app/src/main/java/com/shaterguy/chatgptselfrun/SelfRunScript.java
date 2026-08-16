@@ -8,27 +8,18 @@ final class SelfRunScript {
     private SelfRunScript() {}
 
     static String projectId(String url) {
-        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(url);
-        return ref == null ? (isGeneralChatUrl(url) ? GENERAL_CHAT_SCOPE : "") : ref.projectId;
+        ChatRoutePolicy.Route route = ChatRoutePolicy.parse(url);
+        return route == null ? "" : (route.general ? GENERAL_CHAT_SCOPE : route.projectId);
     }
 
     static boolean isGeneralChatUrl(String url) {
-        if (!ProjectUrlPolicy.isTrustedChatgptPage(url)) return false;
-        try {
-            java.net.URI uri = java.net.URI.create(url.trim());
-            if (uri.getRawQuery() != null || uri.getRawFragment() != null) return false;
-            String path = uri.getPath();
-            if (path == null || path.isEmpty() || "/".equals(path)) return true;
-            String[] segments = path.split("/");
-            return segments.length == 3 && "c".equals(segments[1]) && !segments[2].isEmpty();
-        } catch (IllegalArgumentException ignored) {
-            return false;
-        }
+        ChatRoutePolicy.Route route = ChatRoutePolicy.parse(url);
+        return route != null && route.general;
     }
 
     static String conversationId(String url) {
-        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(url);
-        return ref == null ? "" : ref.conversationId;
+        ChatRoutePolicy.Route route = ChatRoutePolicy.parse(url);
+        return route == null ? "" : route.conversationId;
     }
 
     static String quote(String value) {

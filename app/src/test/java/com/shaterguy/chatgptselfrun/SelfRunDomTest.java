@@ -22,6 +22,19 @@ public class SelfRunDomTest {
         assertFalse(script.contains("CONFIRMED"));
         assertFalse(script.contains("assistant"));
     }
+
+    @Test public void bootstrapStageAndClickBothRecheckFreshRoute() {
+        String url = "https://chatgpt.com/g/g-p-test/project";
+        String stage = SelfRunDom.sendDriveInitial(url, "bootstrap", "m1");
+        String click = SelfRunDom.clickPreparedDriveInitial(url, "bootstrap", "m1");
+        for (String script : new String[]{stage, click}) {
+            assertTrue(script.contains("freshConversation"));
+            assertTrue(script.contains("freshTurnCount"));
+            assertTrue(script.contains("EXISTING_CONVERSATION"));
+            assertTrue(script.contains("STALE_NEW_ROUTE"));
+        }
+    }
+
     @Test public void generalChatScopeSupportsBootstrapAndWorkPreferences() {
         String initial = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL, SelfRunStore.MODE_CHAT, "SR-20260814-TEST00");
         String model = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
