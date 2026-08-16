@@ -25,21 +25,10 @@ jobs:
 
           service = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
           text = service.read_text(encoding='utf-8')
-          old = '''        if (!currentRunId.equals(runtimeRunId)) {
-              stopAutomationCallbacks();
-              runtimeRunId = currentRunId;
-              verifiedDriveAccountId = "";
-              accessToken = "";
-          }'''
-          new = '''        if (!currentRunId.equals(runtimeRunId)) {
-              stopAutomationCallbacks();
-              cleanupWebView();
-              runtimeRunId = currentRunId;
-              verifiedDriveAccountId = "";
-              accessToken = "";
-          }'''
+          old = "stopAutomationCallbacks();\n            runtimeRunId = currentRunId;"
+          new = "stopAutomationCallbacks();\n            cleanupWebView();\n            runtimeRunId = currentRunId;"
           if text.count(old) != 1:
-              raise SystemExit(f'expected one run-boundary block, found {text.count(old)}')
+              raise SystemExit(f'expected one run-boundary sequence, found {text.count(old)}')
           service.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           workflow = Path('.github/workflows/patch-selfrun-service-dev3.yml')
