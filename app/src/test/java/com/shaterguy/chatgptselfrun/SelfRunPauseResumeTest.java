@@ -9,7 +9,7 @@ public class SelfRunPauseResumeTest {
         String service = src("SelfRunService.java");
         String store = src("SelfRunStore.java");
         String resume = between(service, "private void resumeFromUi", "private void enterPreservedPause");
-        String baseline = between(store, "void baselineManualResume", "void captureConversationUrl");
+        String baseline = between(store, "void baselineManualResume", "boolean captureConversationUrl");
         assertTrue(resume.contains("beginManualResumeOverride"));
         assertFalse(resume.contains("resumeNeedsContinuation"));
         assertFalse(resume.contains("pausedFromPhase"));
