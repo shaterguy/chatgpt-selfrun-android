@@ -7,17 +7,18 @@ import android.webkit.WebView;
 final class WebViewConfig {
     private WebViewConfig() {}
 
+    /** Shared by the visible calibration WebView and the background automation WebView. */
     @SuppressWarnings("SetJavaScriptEnabled")
     static void applyAutomation(WebView webView) {
         WebSettings settings = common(webView);
-        settings.setUseWideViewPort(true);
-        settings.setLoadWithOverviewMode(true);
-        String current = settings.getUserAgentString();
-        if (current != null && !current.contains("SelfRunDrive/1.0.0-dev1")) {
-            settings.setUserAgentString(current + " SelfRunDrive/1.0.0-dev1");
-        }
-        settings.setBuiltInZoomControls(true);
+        settings.setUseWideViewPort(false);
+        settings.setLoadWithOverviewMode(false);
+        settings.setSupportZoom(false);
+        settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+        String current = settings.getUserAgentString();
+        String marker = "SelfRunDrive/" + BuildConfig.VERSION_NAME;
+        if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
     }
@@ -27,6 +28,7 @@ final class WebViewConfig {
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);
+        settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
     }
