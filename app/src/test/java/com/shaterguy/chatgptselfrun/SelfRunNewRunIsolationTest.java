@@ -10,29 +10,21 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public class SelfRunNewRunIsolationTest {
-    @Test public void newRunWaitsForPreviousServiceToDisappearBeforeStoreStart() throws Exception {
-        String source = src("SelfRunNewActivity.java");
-        int stop = source.indexOf("stopService(new Intent(this,SelfRunService.class));");
-        int fence = source.indexOf("waitForPreviousRuntimeShutdown(project,request,selectedMode,runId,0,0);");
-        int start = source.indexOf("store.start(runId,selectedMode,project,request);");
-        assertTrue(stop >= 0);
-        assertTrue(fence > stop);
-        assertTrue(start > fence);
-        assertTrue(source.contains("SERVICE_STOP_REQUIRED_CLEAR_POLLS = 2"));
-        assertTrue(source.contains("if(nextClear>=SERVICE_STOP_REQUIRED_CLEAR_POLLS)"));
+    @Test public void differentRunIdDestroysOldWebViewBeforeRuntimeAdoption() throws Exception {
+        String source = src("SelfRunService.java");
+        String expected = "if (!currentRunId.equals(runtimeRunId)) {\n"
+                + "            stopAutomationCallbacks();\n"
+                + "            cleanupWebView();\n"
+                + "            runtimeRunId = currentRunId;";
+        assertTrue(source.contains(expected));
     }
 
-    @Test public void repeatedStartTapCannotCreateTwoPendingRuns() throws Exception {
+    @Test public void activityKeepsExistingProjectSelectionContract() throws Exception {
         String source = src("SelfRunNewActivity.java");
-        assertTrue(source.contains("if(startPending)"));
-        assertTrue(source.contains("startPending=true;"));
-        assertTrue(source.contains("startPending=false;"));
-    }
-
-    @Test public void shutdownFenceTargetsOnlyThisApplicationsSelfRunService() throws Exception {
-        String source = src("SelfRunNewActivity.java");
-        assertTrue(source.contains("getPackageName().equals(info.service.getPackageName())"));
-        assertTrue(source.contains("SelfRunService.class.getName().equals(info.service.getClassName())"));
+        assertTrue(source.contains("store.setDefaultProjectUrl(project);"));
+        assertTrue(source.contains("stopService(new Intent(this,SelfRunService.class));"));
+        assertFalse(source.contains("getRunningServices"));
+        assertFalse(source.contains("ActivityManager"));
     }
 
     private static String src(String file) throws Exception {
