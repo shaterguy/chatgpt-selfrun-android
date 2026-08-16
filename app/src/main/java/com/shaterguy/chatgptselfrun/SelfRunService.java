@@ -87,6 +87,7 @@ public final class SelfRunService extends Service {
         String currentRunId = store.runId();
         if (!currentRunId.equals(runtimeRunId)) {
             stopAutomationCallbacks();
+            cleanupWebView();
             runtimeRunId = currentRunId;
             verifiedDriveAccountId = "";
             accessToken = "";
