@@ -61,15 +61,16 @@ public class SelfRunProtocolTest {
         String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC);
         assertTrue(bootstrap.split("\\n", 2)[0].matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_BOOTSTRAP 0\\.2\\.0 .*"));
         String driveContinue = SelfRunProtocol.driveContinuation(RUN);
-        assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]\\nCommand Recevied Record Required$"));
+        assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]\\nCommand Received Record Required$"));
         assertEquals("[SELF_RUN_CONTINUE " + RUN + "]", SelfRunProtocol.continuation(RUN));
         assertFalse(driveContinue.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
+        assertFalse(driveContinue.contains("Recevied"));
     }
 
     @Test public void driveContinueAppendsNextInputExactlyOnce() {
         String input = "선택=승인\n둘째 줄  ";
         String driveContinue = SelfRunProtocol.driveContinuation(RUN, input);
-        assertTrue(driveContinue.endsWith("Command Recevied Record Required\n" + input));
+        assertTrue(driveContinue.endsWith("Command Received Record Required\n" + input));
         assertEquals(1, occurrences(driveContinue, input));
     }
 
@@ -85,24 +86,13 @@ public class SelfRunProtocolTest {
         assertEquals(1L, filesWithId); assertEquals(SKILL_ID, SelfRunProtocol.SELF_RUN_SKILL_DOCUMENT_ID);
     }
 
-    @Test public void assistantControlSignalRemainsUntimestamped() {
-        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest("x\n[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER]", RUN, SelfRunStore.MODE_CHAT);
-        assertEquals(SelfRunProtocol.Type.NEXT, signal.type); assertTrue(signal.raw.startsWith("[SELF_RUN_NEXT "));
-    }
-
-    @Test public void workAssistantControlValidatesProfileButDoesNotSupplyIt() {
-        SelfRunProtocol.Signal signal = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER MODEL=luna REASONING=max]", RUN, SelfRunStore.MODE_WORK);
-        assertEquals(SelfRunProtocol.Type.NEXT, signal.type);
-        assertEquals("VERIFIER", signal.role);
-        assertEquals("", signal.model);
-        assertEquals("", signal.reasoning);
-    }
-
-    @Test public void workAssistantControlRejectsMissingOrInvalidProfile() {
-        SelfRunProtocol.Signal missing = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER]", RUN, SelfRunStore.MODE_WORK);
-        SelfRunProtocol.Signal invalid = SelfRunProtocol.parseLatest("[SELF_RUN_NEXT " + RUN + " ROLE=VERIFIER MODEL=luna REASONING=ultra]", RUN, SelfRunStore.MODE_WORK);
-        assertEquals(SelfRunProtocol.Type.NONE, missing.type);
-        assertEquals(SelfRunProtocol.Type.NONE, invalid.type);
+    @Test public void assistantControlParserIsAbsentFromDriveProtocol() {
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java");
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java");
+        String protocol = read(path);
+        assertFalse(protocol.contains("SELF_RUN_NEXT"));
+        assertFalse(protocol.contains("parseLatest("));
+        assertFalse(protocol.contains("class Signal"));
     }
 
     @Test public void workProfilePolicyMatchesCanonicalRules() {
