@@ -17,6 +17,7 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 
+        <activity android:name=".WebUiCalibrationActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".DriveSetupActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunLogsActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunLogMenuActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
