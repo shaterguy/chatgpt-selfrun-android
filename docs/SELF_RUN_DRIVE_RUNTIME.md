@@ -6,9 +6,13 @@
 
 Android 앱은 Run ID·실행턴 문서를 만들고 같은 ChatGPT conversation의 composer에 bootstrap/CONTINUE를 제출하며 Drive signal을 polling합니다. 앱은 SelfRun 운영문서의 내용을 읽거나 파싱하지 않고, `SelfRunProtocol.SELF_RUN_SKILL_DOCUMENT_ID` 값을 prompt metadata로 전달하기만 합니다. Project 판정·Project SKILL 탐색·규칙 충돌 해석도 수행하지 않습니다.
 
-## WebView host
+## WebView host와 UI 보정
 
-Drive V1은 background WebView를 private virtual display에 호스팅하는 기존 구조를 유지합니다. 현재 기준 virtual display는 1440×900, 160 dpi이며 wide viewport/overview mode를 사용합니다. WebView cookie jar는 앱의 로그인 세션과 공유합니다. 고정 Windows user-agent를 강제하는 방식은 사용하지 않습니다.
+Drive V1은 background WebView를 private virtual display에 호스팅하는 구조를 유지하되, v1.2.3 개발선부터 desktop 고정 1440×900/160 dpi 대신 visible calibration WebView와 동일한 mobile WebView 정책을 사용합니다. `WebViewConfig.applyAutomation`은 wide viewport/overview mode를 끄며, background virtual display는 사용자가 마지막으로 보정한 mobile screen width·height·devicePixelRatio에서 계산한 크기와 density를 우선 사용합니다. 유효한 보정 viewport가 없으면 현재 Android 기기의 display metrics를 portrait 기준으로 사용합니다.
+
+메인 화면의 `웹 UI 보정`은 사용자가 실제 ChatGPT 화면을 직접 조작해 자동화 대상의 DOM 특징을 다시 확보하는 복구 경로입니다. 현재 목적 키는 일반채팅/Work 모드 항목, Work 모델 항목, Work 추론 정도 항목, 프로젝트 새 대화 진입·composer·send, 일반 새 대화 진입·composer·send입니다. 단순 메뉴/선택 위치는 사용자의 터치 후 Android 확인 버튼으로 확정하고, 새 대화 제출은 composer input과 submit 행위를 함께 관찰해 확정합니다.
+
+보정 프로파일은 app-private SharedPreferences를 내구 원본으로 유지하고 같은 ChatGPT origin의 Web Storage에도 주입합니다. 런타임 DOM 코드는 보정 target을 우선 사용하되 매칭하지 못하면 v1.2.2의 기존 semantic/testid/role 휴리스틱으로 후퇴합니다. 보정 로그는 purpose별 arm/candidate/confirm/save/reset 상태만 기록하며 사용자가 테스트로 입력한 문구 내용은 기록하지 않습니다. `addJavascriptInterface`는 사용하지 않습니다.
 
 WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer 탐색과 명령 제출입니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.
 
@@ -32,6 +36,8 @@ retry 횟수와 누적 시간을 terminal 조건으로 사용하지 않습니다
 ## 로컬 영속 상태
 
 `SelfRunStore`는 Run ID, CHAT/WORK mode, canonical conversation URL, Drive account/base folder ID, Job folder ID, turn document ID, signal cursor, phase와 재개에 필요한 상태를 영속합니다. 폴더 이름이나 표시 경로가 바뀌어도 저장된 Drive object ID가 접근 가능하면 그대로 사용합니다.
+
+웹 UI 보정 상태는 실행 상태와 분리된 `WebUiCalibrationStore`가 소유합니다. 따라서 개별 SelfRun 시작·종료·이력 정리로 보정 프로파일이 초기화되지 않으며, 사용자가 보정 화면에서 명시적으로 전체 초기화를 실행할 때만 제거합니다.
 
 protocol 0.2.0의 NEXT_INPUT은 새 전용 resume state를 만들지 않고 기존 `pendingDriveSignalRaw`에 포함된 completion을 내구 원본으로 사용합니다. command prompt를 만들 때만 strict decode하며, history snapshot에는 payload token을 redaction합니다. 수동 재개에서는 `RESUME_BASELINE` 재조회에서 기존 cursor 이후 새 completion만 payload 후보로 사용합니다.
 
