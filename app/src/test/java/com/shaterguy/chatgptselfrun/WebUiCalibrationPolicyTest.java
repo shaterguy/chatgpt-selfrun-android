@@ -10,14 +10,14 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public class WebUiCalibrationPolicyTest {
-    @Test public void recorderNeverReadsComposerValueIntoCalibrationPayload() {
+    @Test public void recorderRedactsComposerTextFromCalibrationPayload() {
         String script = WebUiCalibrationDom.install(WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT);
         assertTrue(script.contains("addEventListener('input'"));
         assertTrue(script.contains("addEventListener('submit'"));
         assertTrue(script.contains("composer:state.composer"));
+        assertTrue(script.contains("text:inputLike(e)?'':norm(e.innerText||e.textContent)"));
         assertFalse(script.contains("target.value"));
         assertFalse(script.contains("composer.value"));
-        assertFalse(script.contains("innerText||e.textContent),value"));
     }
 
     @Test public void matcherPrioritizesStableAttributesAndKeepsFallbackThreshold() {
