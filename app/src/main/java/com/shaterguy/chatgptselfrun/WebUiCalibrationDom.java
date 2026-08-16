@@ -22,10 +22,10 @@ final class WebUiCalibrationDom {
                 + "const write=o=>{try{sessionStorage.setItem(captureKey,JSON.stringify(o));}catch(_){}};"
                 + "if(window.__selfRunUiCalibration&&window.__selfRunUiCalibration.purpose===purpose)return JSON.stringify({status:'ARMED'});"
                 + "try{sessionStorage.removeItem(captureKey);}catch(_){}const state={purpose,entry:null,composer:null,send:null};window.__selfRunUiCalibration=state;"
-                + "const finishSimple=e=>{if(!contextOk()||!e||!visible(e))return;write({ready:true,purpose,target:desc(e),viewport:viewport(),capturedAt:Date.now()});};"
+                + "const candidate=e=>{if(!contextOk()||!e||!visible(e))return;write({ready:false,purpose,target:desc(e),viewport:viewport(),capturedAt:Date.now()});};"
                 + "const finishSubmit=()=>{if(!contextOk()||!state.composer||!state.send)return;write({ready:true,purpose,entry:state.entry,composer:state.composer,send:state.send,viewport:viewport(),capturedAt:Date.now()});};"
                 + "document.addEventListener('input',ev=>{if(window.__selfRunUiCalibration!==state||!isSubmitPurpose)return;const e=actionable(ev.target);if(isComposer(e)){state.composer=desc(e);finishSubmit();}},true);"
-                + "document.addEventListener('click',ev=>{if(window.__selfRunUiCalibration!==state)return;const e=actionable(ev.target);if(!e||!visible(e))return;if(!isSubmitPurpose){finishSimple(e);return;}if(isComposer(e)){state.composer=desc(e);return;}if(state.composer){const form=e.closest?.('form');const composerForm=document.querySelector('#prompt-textarea')?.closest?.('form');if(e.tagName==='BUTTON'||e.getAttribute?.('role')==='button'||(form&&composerForm&&form===composerForm)){state.send=desc(e);finishSubmit();return;}}if(!state.composer&&!state.entry)state.entry=desc(e);},true);"
+                + "document.addEventListener('click',ev=>{if(window.__selfRunUiCalibration!==state)return;const e=actionable(ev.target);if(!e||!visible(e))return;if(!isSubmitPurpose){candidate(e);return;}if(isComposer(e)){state.composer=desc(e);return;}if(state.composer){const form=e.closest?.('form');const composerForm=document.querySelector('#prompt-textarea')?.closest?.('form');if(e.tagName==='BUTTON'||e.getAttribute?.('role')==='button'||(form&&composerForm&&form===composerForm)){state.send=desc(e);finishSubmit();return;}}if(!state.composer&&!state.entry)state.entry=desc(e);},true);"
                 + "document.addEventListener('submit',ev=>{if(window.__selfRunUiCalibration!==state||!isSubmitPurpose)return;const form=ev.target;if(!state.composer){const c=form?.querySelector?.('#prompt-textarea,textarea,[contenteditable=\"true\"]');if(c)state.composer=desc(c);}const s=ev.submitter||form?.querySelector?.('button[type=\"submit\"],button[data-testid*=\"send\"],button[data-testid*=\"submit\"]');if(s)state.send=desc(s);finishSubmit();},true);"
                 + "return JSON.stringify({status:'ARMED'});})()";
     }
@@ -34,6 +34,11 @@ final class WebUiCalibrationDom {
         return "(()=>{try{const raw=sessionStorage.getItem(" + SelfRunScript.quote(CAPTURE_KEY)
                 + ")||'';if(!raw)return '';const x=JSON.parse(raw);return x&&x.purpose==="
                 + SelfRunScript.quote(purpose) + "?raw:'';}catch(e){return '';}})()";
+    }
+
+    static String finalizeSimple(String purpose) {
+        return "(()=>{try{const k=" + SelfRunScript.quote(CAPTURE_KEY) + ",raw=sessionStorage.getItem(k)||'';if(!raw)return 'EMPTY';const x=JSON.parse(raw);if(x.purpose!=="
+                + SelfRunScript.quote(purpose) + "||!x.target)return 'MISMATCH';x.ready=true;x.confirmedAt=Date.now();sessionStorage.setItem(k,JSON.stringify(x));return 'OK';}catch(e){return 'ERROR';}})()";
     }
 
     static String clearCapture() {
