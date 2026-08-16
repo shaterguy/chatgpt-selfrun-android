@@ -42,7 +42,6 @@ public final class SelfRunDetailActivity extends Activity {
                         + "\n모델/추론: " + model(item)
                         + "\n프로젝트: " + empty(item.optString("projectUrl"))
                         + "\nconversation: " + empty(item.optString("conversationUrl"))
-                        + "\n마지막 신호: " + empty(item.optString("lastSignal"))
                         + "\n오류: " + error(item)));
         root.addView(Ui.section(this, "원본 요청"));
         root.addView(Ui.body(this, empty(item.optString("requirement"))));
