@@ -61,3 +61,4 @@ Drive의 post-anchor material signal이 기존 continuation의 authority를 대�
 - Unauthorized rebase invalidates prepared/pending continuation, completion guard, rewrite carry, and in-memory NEXT reservations before entering AI_PAUSED.
 
 - Guard recovery that moves back to `WAIT_DRIVE_COMMIT` immediately schedules a Drive poll; it never leaves a one-shot rebaseline or previous-signal revalidation waiting on an inactive guard callback.
+- WAIT/RESUME Drive poll admission is lossless: if a scheduled poll collides with an in-flight Drive request or authorization request, it requeues itself after 250 ms instead of dropping the poll; this busy requeue does not release the active Drive WakeLock.

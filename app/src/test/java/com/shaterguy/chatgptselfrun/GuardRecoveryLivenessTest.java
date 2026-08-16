@@ -37,6 +37,15 @@ public class GuardRecoveryLivenessTest {
         assertTrue(scheduler.contains("handler.postDelayed(driveRunnable,delay)"));
     }
 
+    @Test public void busyPollAdmissionRequeuesWithoutReleasingInflightWakeLock() throws Exception {
+        String service = src("SelfRunService.java");
+        String poll = between(service, "private void pollDrive(){", "private void pollDriveNow");
+        assertTrue(poll.contains("DrivePollAdmission.delayMs(eligible,canRun(),driveInFlight,authorizationInFlight)"));
+        assertTrue(poll.contains("if(delay>0L){handler.removeCallbacks(driveRunnable);handler.postDelayed(driveRunnable,delay);return;}"));
+        assertFalse(poll.contains("scheduleDrivePoll"));
+        assertTrue(poll.indexOf("handler.postDelayed(driveRunnable,delay)") < poll.indexOf("authorizeAndRunDrive()"));
+    }
+
     private static String src(String f) throws Exception {
         Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);
         if(!Files.exists(p)) p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);
