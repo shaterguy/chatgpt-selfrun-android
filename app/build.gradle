@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 1000026
-def selfRunDriveVersionName = '1.2.2'
+def selfRunDriveVersionCode = 1000027
+def selfRunDriveVersionName = '1.2.3-dev1'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -68,9 +68,22 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 throw new GradleException("${action} action must derive from applicationId")
             }
         }
+        def store = file('src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java').getText('UTF-8')
+        def dom = file('src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java').getText('UTF-8')
+        def protocol = file('src/main/java/com/shaterguy/chatgptselfrun/SelfRunProtocol.java').getText('UTF-8')
         if (service.contains('com.shaterguy.chatgptselfrun.RUN')
-                || service.contains('WAIT_ASSISTANT') || service.contains('SelfRunDom.observeAssistant')) {
-            throw new GradleException('legacy assistant runtime must not be reachable in Drive V1')
+                || service.contains('WAIT_ASSISTANT')
+                || service.contains('PHASE_READ_NEXT_CONTROL')
+                || service.contains('readLatestSelfRunControl')
+                || service.contains('applyNextControl')
+                || store.contains('PHASE_READ_NEXT_CONTROL')
+                || store.contains('setRole(')
+                || dom.contains('readLatestSelfRunControl')
+                || dom.contains('SELF_RUN_NEXT')
+                || dom.contains('observeAssistant')
+                || protocol.contains('parseLatest(')
+                || protocol.contains('SELF_RUN_NEXT')) {
+            throw new GradleException('Drive V1 progress must not depend on assistant conversation control or ROLE')
         }
     }
 }

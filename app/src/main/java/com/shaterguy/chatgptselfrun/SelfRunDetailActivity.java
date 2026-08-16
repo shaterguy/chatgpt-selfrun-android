@@ -38,7 +38,6 @@ public final class SelfRunDetailActivity extends Activity {
                         + "\n모드: " + item.optString("mode", "-")
                         + "\n상태: " + item.optString("status", "-")
                         + "\n단계: " + item.optString("phase", "-")
-                        + "\n역할: " + empty(item.optString("role"))
                         + "\n턴: " + item.optInt("turn")
                         + "\n모델/추론: " + model(item)
                         + "\n프로젝트: " + empty(item.optString("projectUrl"))

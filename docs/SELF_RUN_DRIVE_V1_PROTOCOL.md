@@ -53,7 +53,7 @@ ChatGPT가 bootstrap 또는 CONTINUE를 실제 수신하면 실질 작업 전에
 
 `SELF_RUN_COMMAND_RECEIVED`를 별도로 보지 못했더라도 같은 polling read에서 TURN_COMPLETED 또는 더 진행된 특수 signal이 새로 확인되면 제출은 정상 수신된 것으로 처리합니다. 명령 제출 뒤 새 ACK 또는 더 진행된 signal이 없으면 5분 뒤 같은 의미의 bootstrap/CONTINUE를 다시 제출하며 retry 횟수나 누적 시간을 terminal 조건으로 사용하지 않습니다.
 
-TURN_COMPLETED를 소비하면 30초∼1분의 단순 UI 안전 guard를 거친 뒤 같은 conversation에 CONTINUE를 제출하고 즉시 Drive polling으로 복귀합니다. 현재 구현 기본 guard는 45초입니다.
+TURN_COMPLETED를 소비하면 30초∼1분의 단순 UI 안전 guard를 거칩니다. 현재 구현 기본 guard는 45초입니다. guard 만료 후 CHAT은 별도 conversation 제어신호 확인 없이 같은 conversation에 CONTINUE를 제출하고, WORK는 같은 Drive TURN_COMPLETED에 기록된 MODEL·REASONING만 읽어 해당 UI를 적용한 뒤 CONTINUE를 제출합니다. ROLE은 앱이 읽거나 판단하지 않습니다.
 
 ## Runs folder binding
 
@@ -63,13 +63,13 @@ OAuth scope는 `https://www.googleapis.com/auth/drive.file` 하나를 유지합�
 
 ## WebView 책임
 
-Drive V1의 WebView 책임은 assistant 완료 감시가 아니라 canonical conversation의 composer 제어권 확보와 명령 제출입니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
+Drive V1의 WebView 책임은 canonical conversation의 composer 제어권 확보, bootstrap/CONTINUE 입력·전송, 그리고 WORK 모드의 MODEL·REASONING UI 적용으로 제한합니다. assistant 응답 내용, HANDOFF, SELF_RUN_NEXT, ROLE 또는 그 밖의 conversation 제어신호를 진행 판단에 사용하지 않습니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득하며, 장시간 대기 중에는 기존 composer/WebView 유지 구조로 불필요한 재접속을 방지합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
 
-WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한 번 best-effort로 읽어 role/model/reasoning을 적용할 수 있습니다. 이 read는 completion 판정이 아니며 읽지 못해도 현재 안전한 설정으로 CONTINUE를 진행합니다.
+WORK의 다음 MODEL·REASONING 권위 원본은 최신 유효 Drive SELF_RUN_TURN_COMPLETED뿐입니다. conversation DOM 값은 source나 fallback이 아니며 ROLE은 앱 책임이 아닙니다.
 
 ## 일시정지와 재개
 
-USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. 사용자가 앱에서 재개를 누르면 1.2.1의 기존 `RESUME_BASELINE` 경로로 현재 작업문서를 먼저 다시 읽습니다. pause 이후 새로 추가된 최신 completion에 유효한 NEXT_INPUT이 있으면 그 원문만 기존 CONTINUE 뒤에 붙이고, 없으면 기존 plain CONTINUE를 그대로 제출합니다. 별도 pause-origin/anchor/fingerprint 상태머신은 추가하지 않습니다. 이후 ACK가 없으면 기존 5분 무제한 재제출 규칙을 적용합니다.
+USER_ACTION_REQUIRED와 PAUSED는 Job 종료가 아닌 보존형 pause입니다. 사용자가 앱에서 재개를 누르면 `RESUME_BASELINE` 경로로 현재 실행턴 문서를 먼저 다시 읽습니다. pause 이후 새로 추가된 최신 completion이 있으면 CHAT은 NEXT_INPUT을 반영해 CONTINUE를 제출하고, WORK는 같은 completion의 MODEL·REASONING UI를 먼저 적용한 뒤 NEXT_INPUT을 포함한 CONTINUE를 제출합니다. 새 completion이 없는 외부 수동조치형 재개는 기존 plain CONTINUE를 그대로 제출합니다. 이 과정 어디에도 assistant DOM 또는 conversation 제어신호 확인을 삽입하지 않습니다. 이후 ACK가 없으면 기존 5분 무제한 재제출 규칙을 적용합니다.
 
 ## signal write/readback 실패
 

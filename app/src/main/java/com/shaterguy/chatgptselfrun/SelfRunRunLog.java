@@ -54,7 +54,6 @@ final class SelfRunRunLog {
             item.put("run_id", safeToken(store.runId()));
             item.put("event", safeEvent);
             item.put("phase", safeToken(store.phase()));
-            item.put("role", safeToken(store.role()));
             item.put("turn", store.turn());
             item.put("status", bounded(store.status(), 180));
             item.put("detail", safeDetail);

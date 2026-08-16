@@ -126,7 +126,6 @@ public final class MainActivity extends Activity {
                 + "\n모드: " + store.mode()
                 + "\n상태: " + store.status()
                 + "\n단계: " + store.phase()
-                + "\n현재/다음 역할: " + dash(store.role())
                 + "\n모델/추론: " + prefs
                 + "\n턴: " + store.turn()
                 + "\nconversation: " + dash(store.conversationUrl())

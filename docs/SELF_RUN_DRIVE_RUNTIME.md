@@ -10,7 +10,7 @@ Android 앱은 Run ID·실행턴 문서를 만들고 같은 ChatGPT conversation
 
 Drive V1은 background WebView를 private virtual display에 호스팅하는 기존 구조를 유지합니다. 현재 기준 virtual display는 1440×900, 160 dpi이며 wide viewport/overview mode를 사용합니다. WebView cookie jar는 앱의 로그인 세션과 공유합니다. 고정 Windows user-agent를 강제하는 방식은 사용하지 않습니다.
 
-WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer 탐색과 명령 제출입니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.
+WebView는 assistant completion, HANDOFF, SELF_RUN_NEXT, ROLE을 읽거나 진행 판단에 사용하지 않습니다. 책임은 새 conversation 진입, 저장된 canonical conversation URL 복구, bootstrap/CONTINUE composer 입력·전송과 WORK 모드의 MODEL·REASONING UI 적용으로 제한합니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리하며, 장시간 대기 중 composer/WebView를 유지해 불필요한 재접속을 방지하는 기존 구조를 보존합니다.
 
 ## Foreground Service와 WakeLock
 
@@ -26,6 +26,8 @@ WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conv
 - 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
 - `modifiedTime`: 읽기 최적화 힌트
 - authoritative progress: append-only SelfRun signal cursor
+
+`SELF_RUN_TURN_COMPLETED` guard 만료 후 CHAT은 바로 CONTINUE 제출 단계로, WORK는 같은 Drive completion의 MODEL·REASONING UI 적용 단계로 이동합니다. assistant DOM이나 conversation 제어신호 확인 단계는 상태머신에 존재하지 않습니다. 수동 재개도 `RESUME_BASELINE`에서 현재 실행턴 문서를 먼저 재조회한 뒤 동일한 mode-aware 분기를 사용합니다.
 
 retry 횟수와 누적 시간을 terminal 조건으로 사용하지 않습니다. Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
 

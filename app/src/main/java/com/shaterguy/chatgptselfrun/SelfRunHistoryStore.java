@@ -85,7 +85,6 @@ final class SelfRunHistoryStore {
             item.put("submissionRetryAttempt", store.submissionRetryAttempt());
             item.put("phase", store.phase());
             item.put("status", bounded(store.status(), 1_000));
-            item.put("role", store.role());
             item.put("pendingModel", store.pendingModel());
             item.put("pendingReasoning", store.pendingReasoning());
             item.put("lastSignal", bounded(store.lastSignal(), 1_000));

@@ -14,24 +14,19 @@ public class SelfRunDriveTurnInfoSourceTest {
         assertTrue(store.contains("DriveSignalParser.workProfile(pendingDriveSignalRaw())"));
         assertTrue(store.contains("return p.valid?p.model:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL"));
         assertTrue(store.contains("return p.valid?p.reasoning:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL"));
-        assertTrue(store.contains("if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put(\"pendingModel\", value)"));
-        assertTrue(store.contains("if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put(\"pendingReasoning\", value)"));
         assertTrue(service.contains("DriveSignalParser.scan(body,snapshot.runId,0,snapshot.mode)"));
         assertTrue(service.contains("DriveSignalParser.scan(text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode)"));
     }
 
-    @Test public void invalidDriveProfileUsesRewriteWithoutChangingServiceStateMachine() throws Exception {
-        String store = src("SelfRunStore.java");
-        String work = src("WorkPreferenceDom.java");
+    @Test public void serviceHasNoConversationControlHop() throws Exception {
         String service = src("SelfRunService.java");
-        assertTrue(store.contains("SelfRunProtocol.requestTurnInfoRewrite(runId())"));
-        assertTrue(work.contains("TURN_INFO_REWRITE_SENTINEL"));
-        assertTrue(work.contains("preferenceBypass"));
-        assertTrue(service.contains("PHASE_READ_NEXT_CONTROL"));
+        assertFalse(service.contains("PHASE_READ_NEXT_CONTROL"));
+        assertFalse(service.contains("readLatestSelfRunControl"));
+        assertFalse(service.contains("applyNextControl"));
+        assertFalse(service.contains("SELF_RUN_NEXT"));
+        assertTrue(service.contains("MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE"));
         assertTrue(service.contains("WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel())"));
         assertTrue(service.contains("WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning())"));
-        assertTrue(service.contains("SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId())"));
-        assertFalse(service.contains("TURN_INFO_REWRITE_SENTINEL"));
     }
 
     private static String src(String file) throws Exception {

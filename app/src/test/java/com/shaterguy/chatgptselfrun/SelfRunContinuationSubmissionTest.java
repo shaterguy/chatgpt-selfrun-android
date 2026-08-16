@@ -19,7 +19,7 @@ public class SelfRunContinuationSubmissionTest {
     @Test public void driveDomNeverConfirmsByUserMessage() throws Exception {
         String dom = src("SelfRunDom.java");
         String prepare = between(dom, "static String prepareDriveTurn", "static String clickPreparedDriveTurn");
-        String click = between(dom, "static String clickPreparedDriveTurn", "static String readLatestSelfRunControl");
+        String click = between(dom, "static String clickPreparedDriveTurn", "private static String projectGuard");
         assertFalse(prepare.contains("data-message-author-role=\\\"user\\\""));
         assertFalse(click.contains("data-message-author-role=\\\"user\\\""));
         assertFalse(prepare.contains("CONFIRMED"));
