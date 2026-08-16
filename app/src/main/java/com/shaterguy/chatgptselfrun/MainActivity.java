@@ -75,7 +75,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(Ui.title(this, "SelfRun Drive"));
-        root.addView(Ui.body(this, "v1.0.0-dev3 · Drive SelfRun 신호 로그를 기준으로 다음 턴을 진행합니다."));
+        root.addView(Ui.body(this, "v" + BuildConfig.VERSION_NAME + " · Drive SelfRun 신호를 기준으로 다음 턴을 진행합니다."));
 
         root.addView(Ui.section(this, "메뉴"));
         root.addView(Ui.row(this,
@@ -84,8 +84,9 @@ public final class MainActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "로그", v -> startActivity(new Intent(this, SelfRunLogMenuActivity.class))),
                 Ui.button(this, "로그인/세션", v -> startActivity(new Intent(this, LoginActivity.class)))));
-        root.addView(Ui.button(this, "Drive 실행문서 저장 위치", v ->
-                startActivity(new Intent(this, DriveSetupActivity.class))));
+        root.addView(Ui.row(this,
+                Ui.button(this, "Drive 실행문서 위치", v -> startActivity(new Intent(this, DriveSetupActivity.class))),
+                Ui.button(this, "웹 UI 보정", v -> startActivity(new Intent(this, WebUiCalibrationActivity.class)))));
 
         root.addView(Ui.section(this, "현재 SelfRun Drive"));
         currentStatus = Ui.body(this, "");
