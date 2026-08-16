@@ -67,6 +67,12 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(manifest.contains("android:exported=\"false\""));
     }
 
+    @Test public void purposeScopedCalibrationLogIsVisibleInsideExistingLogMenu() throws Exception {
+        String logMenu = src("SelfRunLogMenuActivity.java");
+        assertTrue(logMenu.contains("웹 UI 보정 로그"));
+        assertTrue(logMenu.contains("calibration.logText(120)"));
+    }
+
     private static String src(String file) throws Exception {
         return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
                 "src/main/java/com/shaterguy/chatgptselfrun/" + file);
