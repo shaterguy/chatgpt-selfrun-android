@@ -35,7 +35,6 @@ final class SelfRunRunLog {
     private long lastEvaluateAt;
     private String lastResultDetail = "";
     private long lastResultAt;
-    private long lastBaselineWaitAt;
 
     SelfRunRunLog(Context context) {
         directory = new File(context.getNoBackupFilesDir(), DIR);
@@ -54,7 +53,6 @@ final class SelfRunRunLog {
             item.put("run_id", safeToken(store.runId()));
             item.put("event", safeEvent);
             item.put("phase", safeToken(store.phase()));
-            item.put("role", safeToken(store.role()));
             item.put("turn", store.turn());
             item.put("status", bounded(store.status(), 180));
             item.put("detail", safeDetail);
@@ -77,10 +75,6 @@ final class SelfRunRunLog {
             lastResultDetail = detail;
             lastResultAt = now;
             return false;
-        }
-        if ("ASSISTANT_BASELINE_WAIT".equals(event)) {
-            if (now - lastBaselineWaitAt < NOISY_HEARTBEAT_MS) return true;
-            lastBaselineWaitAt = now;
         }
         return false;
     }
