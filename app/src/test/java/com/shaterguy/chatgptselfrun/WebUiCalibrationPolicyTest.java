@@ -10,22 +10,27 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public class WebUiCalibrationPolicyTest {
-    @Test public void recorderRedactsComposerTextFromCalibrationPayload() {
+    @Test public void recorderRedactsComposerTextAndFiltersSubmitControl() {
         String script = WebUiCalibrationDom.install(WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT);
         assertTrue(script.contains("addEventListener('input'"));
         assertTrue(script.contains("addEventListener('submit'"));
         assertTrue(script.contains("composer:state.composer"));
         assertTrue(script.contains("text:inputLike(e)?'':norm(e.innerText||e.textContent)"));
+        assertTrue(script.contains("const looksSubmit=e=>"));
+        assertTrue(script.contains("state.composer&&looksSubmit(e)"));
         assertFalse(script.contains("target.value"));
         assertFalse(script.contains("composer.value"));
     }
 
-    @Test public void matcherPrioritizesStableAttributesAndKeepsFallbackThreshold() {
+    @Test public void matcherPrioritizesStableAttributesKeepsFallbackAndLogsPurpose() {
         String script = WebUiCalibrationDom.runtimePrelude();
         assertTrue(script.contains(WebUiCalibrationStore.STORAGE_KEY));
         assertTrue(script.contains("__srFind"));
         assertTrue(script.contains("s+=14"));
         assertTrue(script.contains("score>=6"));
+        assertTrue(script.contains("found?'MATCH':'MISS'"));
+        assertTrue(script.contains("60000"));
+        assertTrue(WebUiCalibrationDom.readRuntimeLog().contains("ui-runtime-log"));
     }
 
     @Test public void runtimeUsesPurposeSpecificCalibrationBeforeLegacyHeuristics() {
@@ -67,10 +72,13 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(manifest.contains("android:exported=\"false\""));
     }
 
-    @Test public void purposeScopedCalibrationLogIsVisibleInsideExistingLogMenu() throws Exception {
+    @Test public void calibrationAndRuntimeLogsAreVisibleInsideApp() throws Exception {
         String logMenu = src("SelfRunLogMenuActivity.java");
+        String activity = src("WebUiCalibrationActivity.java");
         assertTrue(logMenu.contains("웹 UI 보정 로그"));
         assertTrue(logMenu.contains("calibration.logText(120)"));
+        assertTrue(activity.contains("[런타임 MATCH/MISS]"));
+        assertTrue(activity.contains("WebUiCalibrationDom.readRuntimeLog()"));
     }
 
     private static String src(String file) throws Exception {
