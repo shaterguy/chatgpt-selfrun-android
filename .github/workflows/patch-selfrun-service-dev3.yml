@@ -1,0 +1,56 @@
+name: Apply SelfRun service run isolation patch
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.2.3-dev3
+
+permissions:
+  contents: write
+
+jobs:
+  patch-service:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Patch service and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          text = service.read_text(encoding='utf-8')
+          old = '''        if (!currentRunId.equals(runtimeRunId)) {
+              stopAutomationCallbacks();
+              runtimeRunId = currentRunId;
+              verifiedDriveAccountId = "";
+              accessToken = "";
+          }'''
+          new = '''        if (!currentRunId.equals(runtimeRunId)) {
+              stopAutomationCallbacks();
+              cleanupWebView();
+              runtimeRunId = currentRunId;
+              verifiedDriveAccountId = "";
+              accessToken = "";
+          }'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one run-boundary block, found {text.count(old)}')
+          service.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          workflow = Path('.github/workflows/patch-selfrun-service-dev3.yml')
+          if not workflow.exists():
+              raise SystemExit('one-shot workflow missing')
+          workflow.unlink()
+          PY
+          git diff --check
+          grep -A7 -F 'if (!currentRunId.equals(runtimeRunId)) {' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: discard stale WebView when a new run starts'
+          git push origin HEAD:selfrun-drive/v1.2.3-dev3
