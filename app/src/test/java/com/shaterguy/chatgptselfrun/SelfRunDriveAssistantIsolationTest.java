@@ -21,11 +21,28 @@ public class SelfRunDriveAssistantIsolationTest {
         String source = all.toString();
         for (String banned : new String[]{
                 "readLatestSelfRunControl", "observeAssistant", "assistantSnapshot", "assistantBaselineKey",
-                "PHASE_READ_NEXT_CONTROL", "CONTROL_FOUND", "CONTROL_MISSING", "SELF_RUN_NEXT",
-                "conversation 제어신호", "data-message-author-role=\\\"assistant\\\"",
+                "ASSISTANT_BASELINE_WAIT", "PHASE_READ_NEXT_CONTROL", "CONTROL_FOUND", "CONTROL_MISSING",
+                "SELF_RUN_NEXT", "conversation 제어신호", "data-message-author-role=\\\"assistant\\\"",
                 "article[data-turn=\\\"assistant\\\"]", "Command Recevied Record Required"}) {
             assertFalse("banned assistant/control legacy remains: " + banned, source.contains(banned));
         }
+    }
+
+    @Test public void assistantRoleIsNotRuntimeStateOrDisplay() throws Exception {
+        String store = src("SelfRunStore.java");
+        String main = src("MainActivity.java");
+        String history = src("SelfRunHistoryStore.java");
+        String log = src("SelfRunRunLog.java");
+        String detail = src("SelfRunDetailActivity.java");
+        assertFalse(store.contains("String role()"));
+        assertFalse(store.contains("setRole("));
+        assertFalse(store.contains("putString(\"role\""));
+        assertFalse(main.contains("store.role()"));
+        assertFalse(main.contains("현재/다음 역할"));
+        assertFalse(history.contains("item.put(\"role\""));
+        assertFalse(log.contains("store.role()"));
+        assertFalse(log.contains("item.put(\"role\""));
+        assertFalse(detail.contains("optString(\"role\""));
     }
 
     @Test public void completedDriveTurnRoutesDirectlyToUiExecution() throws Exception {
