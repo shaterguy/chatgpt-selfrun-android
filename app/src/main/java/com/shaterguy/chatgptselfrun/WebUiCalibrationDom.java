@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 /** JavaScript recorder and runtime matcher for user-calibrated ChatGPT UI elements. */
 final class WebUiCalibrationDom {
     private static final String CAPTURE_KEY = "selfrun-drive:ui-calibration:capture";
+    private static final String RUNTIME_LOG_KEY = "selfrun-drive:ui-runtime-log:v1";
 
     private WebUiCalibrationDom() {}
 
@@ -25,8 +26,9 @@ final class WebUiCalibrationDom {
                 + "try{sessionStorage.removeItem(captureKey);}catch(_){}const state={purpose,entry:null,composer:null,send:null};window.__selfRunUiCalibration=state;"
                 + "const candidate=e=>{if(!contextOk()||!e||!visible(e))return;write({ready:false,purpose,target:desc(e),viewport:viewport(),capturedAt:Date.now()});};"
                 + "const finishSubmit=()=>{if(!contextOk()||!state.composer||!state.send)return;write({ready:true,purpose,entry:state.entry,composer:state.composer,send:state.send,viewport:viewport(),capturedAt:Date.now()});};"
+                + "const looksSubmit=e=>!!e&&(e.matches?.('button[type=\"submit\"]')||/send|submit|보내기/i.test(norm((e.dataset?.testid||'')+' '+(e.getAttribute?.('aria-label')||'')+' '+(e.getAttribute?.('title')||''))));"
                 + "document.addEventListener('input',ev=>{if(window.__selfRunUiCalibration!==state||!isSubmitPurpose)return;const e=actionable(ev.target);if(isComposer(e)){state.composer=desc(e);finishSubmit();}},true);"
-                + "document.addEventListener('click',ev=>{if(window.__selfRunUiCalibration!==state)return;const e=actionable(ev.target);if(!e||!visible(e))return;if(!isSubmitPurpose){candidate(e);return;}if(isComposer(e)){state.composer=desc(e);return;}if(state.composer){const form=e.closest?.('form');const composerForm=document.querySelector('#prompt-textarea')?.closest?.('form');if(e.tagName==='BUTTON'||e.getAttribute?.('role')==='button'||(form&&composerForm&&form===composerForm)){state.send=desc(e);finishSubmit();return;}}if(!state.composer&&!state.entry)state.entry=desc(e);},true);"
+                + "document.addEventListener('click',ev=>{if(window.__selfRunUiCalibration!==state)return;const e=actionable(ev.target);if(!e||!visible(e))return;if(!isSubmitPurpose){candidate(e);return;}if(isComposer(e)){state.composer=desc(e);return;}if(state.composer&&looksSubmit(e)){state.send=desc(e);finishSubmit();return;}if(!state.composer&&!state.entry)state.entry=desc(e);},true);"
                 + "document.addEventListener('submit',ev=>{if(window.__selfRunUiCalibration!==state||!isSubmitPurpose)return;const form=ev.target;if(!state.composer){const c=form?.querySelector?.('#prompt-textarea,textarea,[contenteditable=\"true\"]');if(c)state.composer=desc(c);}const s=ev.submitter||form?.querySelector?.('button[type=\"submit\"],button[data-testid*=\"send\"],button[data-testid*=\"submit\"]');if(s)state.send=desc(s);finishSubmit();},true);"
                 + "return JSON.stringify({status:'ARMED'});})()";
     }
@@ -47,6 +49,11 @@ final class WebUiCalibrationDom {
                 + ");window.__selfRunUiCalibration=null;return 'OK';}catch(e){return 'ERROR';}})()";
     }
 
+    static String readRuntimeLog() {
+        return "(()=>{try{return localStorage.getItem(" + SelfRunScript.quote(RUNTIME_LOG_KEY)
+                + ")||'[]';}catch(e){return '[]';}})()";
+    }
+
     /**
      * Defines __srFind(key), which scores stable element attributes captured by the user.
      * Text is deliberately low-weight; id/testid/aria/role and parent structure dominate.
@@ -55,8 +62,9 @@ final class WebUiCalibrationDom {
         return "const __srNorm=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase().slice(0,120);"
                 + "let __srProfile={};try{__srProfile=JSON.parse(localStorage.getItem('"
                 + WebUiCalibrationStore.STORAGE_KEY + "')||'{}')||{};}catch(_){}const __srTargets=__srProfile.targets||{};"
+                + "const __srRuntimeKey=" + SelfRunScript.quote(RUNTIME_LOG_KEY) + ",__srDedupeKey='selfrun-drive:ui-runtime-dedupe:v1';const __srTrace=(purpose,event,detail)=>{try{const now=Date.now(),signature=purpose+'|'+event+'|'+detail;let prior={};try{prior=JSON.parse(sessionStorage.getItem(__srDedupeKey)||'{}')||{};}catch(_){}if(prior.signature===signature&&now-Number(prior.at||0)<60000)return;sessionStorage.setItem(__srDedupeKey,JSON.stringify({signature,at:now}));let items=[];try{items=JSON.parse(localStorage.getItem(__srRuntimeKey)||'[]')||[];}catch(_){}if(!Array.isArray(items))items=[];items=items.slice(-79);items.push({at:now,purpose,event,detail:String(detail||'').slice(0,80)});localStorage.setItem(__srRuntimeKey,JSON.stringify(items));}catch(_){}};"
                 + "const __srVisible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const __srLabel=e=>__srNorm(e?.innerText||e?.textContent)||__srNorm(e?.getAttribute?.('aria-label'));"
                 + "const __srScore=(e,d)=>{if(!e||!d)return-999;let s=0;const p=e.parentElement,tag=(e.tagName||'').toLowerCase(),id=__srNorm(e.id),role=__srNorm(e.getAttribute?.('role')),testid=__srNorm(e.dataset?.testid),aria=__srNorm(e.getAttribute?.('aria-label')),name=__srNorm(e.getAttribute?.('name')),type=__srNorm(e.getAttribute?.('type')),text=__srLabel(e),href=__srNorm(e.getAttribute?.('href')),pr=__srNorm(p?.getAttribute?.('role')),pt=__srNorm(p?.dataset?.testid),pa=__srNorm(p?.getAttribute?.('aria-label'));if(d.id){if(id===__srNorm(d.id))s+=14;else s-=2;}if(d.testid){if(testid===__srNorm(d.testid))s+=14;else s-=2;}if(d.aria){if(aria===__srNorm(d.aria))s+=8;else if(aria&&(__srNorm(d.aria).includes(aria)||aria.includes(__srNorm(d.aria))))s+=3;}if(d.role&&role===__srNorm(d.role))s+=4;if(d.tag&&tag===__srNorm(d.tag))s+=3;if(d.name&&name===__srNorm(d.name))s+=3;if(d.type&&type===__srNorm(d.type))s+=2;if(d.href&&href===__srNorm(d.href))s+=4;if(d.text){const x=__srNorm(d.text);if(text===x)s+=4;else if(text&&x&&(text.includes(x)||x.includes(text)))s+=1;}if(d.parentRole&&pr===__srNorm(d.parentRole))s+=2;if(d.parentTestid&&pt===__srNorm(d.parentTestid))s+=4;if(d.parentAria&&pa===__srNorm(d.parentAria))s+=2;return s;};"
-                + "const __srFind=k=>{const d=__srTargets[k];if(!d)return null;const nodes=[...document.querySelectorAll('button,a,input,textarea,[contenteditable=\"true\"],[role=\"button\"],[role=\"radio\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"menuitemradio\"],[role=\"option\"]')].filter(__srVisible);let best=null,score=-999;for(const e of nodes){const n=__srScore(e,d);if(n>score){score=n;best=e;}}return score>=6?best:null;};";
+                + "const __srFind=k=>{const d=__srTargets[k];if(!d)return null;const nodes=[...document.querySelectorAll('button,a,input,textarea,[contenteditable=\"true\"],[role=\"button\"],[role=\"radio\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"menuitemradio\"],[role=\"option\"]')].filter(__srVisible);let best=null,score=-999;for(const e of nodes){const n=__srScore(e,d);if(n>score){score=n;best=e;}}const found=score>=6?best:null;__srTrace(k,found?'MATCH':'MISS','score='+score);return found;};";
     }
 }
