@@ -13,8 +13,8 @@ public class SelfRunNewRunIsolationTest {
     @Test public void newRunWaitsForPreviousServiceToDisappearBeforeStoreStart() throws Exception {
         String source = src("SelfRunNewActivity.java");
         int stop = source.indexOf("stopService(new Intent(this,SelfRunService.class));");
-        int fence = source.indexOf("waitForPreviousRuntimeShutdown(selectedProject,request,selectedMode,runId,0,0);");
-        int start = source.indexOf("store.start(runId,selectedMode,selectedProject,request);");
+        int fence = source.indexOf("waitForPreviousRuntimeShutdown(project,request,selectedMode,runId,0,0);");
+        int start = source.indexOf("store.start(runId,selectedMode,project,request);");
         assertTrue(stop >= 0);
         assertTrue(fence > stop);
         assertTrue(start > fence);
