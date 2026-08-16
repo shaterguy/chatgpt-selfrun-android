@@ -17,9 +17,11 @@ public class SelfRunNewRunIsolationTest {
                 + "            cleanupWebView();\n"
                 + "            runtimeRunId = currentRunId;";
         assertTrue(source.contains(expected));
+        assertTrue(source.indexOf("cleanupWebView();", source.indexOf("if (!currentRunId.equals(runtimeRunId))"))
+                < source.indexOf("runtimeRunId = currentRunId;", source.indexOf("if (!currentRunId.equals(runtimeRunId))")));
     }
 
-    @Test public void activityKeepsExistingProjectSelectionContract() throws Exception {
+    @Test public void activityKeepsExistingProjectSelectionContractWithoutDeprecatedServicePolling() throws Exception {
         String source = src("SelfRunNewActivity.java");
         assertTrue(source.contains("store.setDefaultProjectUrl(project);"));
         assertTrue(source.contains("stopService(new Intent(this,SelfRunService.class));"));
