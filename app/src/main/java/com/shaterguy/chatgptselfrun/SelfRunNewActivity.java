@@ -109,17 +109,17 @@ public final class SelfRunNewActivity extends Activity {
     private void startSelfRun() {
         if(startPending){Toast.makeText(this,"이전 실행 종료 확인 중입니다.",Toast.LENGTH_SHORT).show();return;}
         if(store.active()&&!store.userStopped()&&!SelfRunStore.PHASE_DONE.equals(store.phase())&&!SelfRunStore.PHASE_IDLE.equals(store.phase())){Toast.makeText(this,"현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.",Toast.LENGTH_LONG).show();return;}
-        String selectedProject=selectedProjectUrl(),request=requirement.getText().toString().trim();
+        String project=selectedProjectUrl(),request=requirement.getText().toString().trim();
         if(request.isEmpty()){Toast.makeText(this,"셀프런 명령을 입력하세요.",Toast.LENGTH_LONG).show();return;}
         if(!DriveApiClient.validFileId(store.driveRunsBaseFolderId())||!DriveApiClient.validOpaqueAccountId(store.driveAccountId())){Toast.makeText(this,"먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.",Toast.LENGTH_LONG).show();return;}
-        store.setDefaultProjectUrl(selectedProject); if(!store.runId().isEmpty())history.sync(store);
+        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store);
         String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()]; String runId=newRunId();
         startPending=true;
         stopService(new Intent(this,SelfRunService.class));
-        waitForPreviousRuntimeShutdown(selectedProject,request,selectedMode,runId,0,0);
+        waitForPreviousRuntimeShutdown(project,request,selectedMode,runId,0,0);
     }
 
-    private void waitForPreviousRuntimeShutdown(String selectedProject, String request, String selectedMode,
+    private void waitForPreviousRuntimeShutdown(String project, String request, String selectedMode,
                                                 String runId, int polls, int clearPolls) {
         if(!startPending)return;
         boolean running=isSelfRunServiceRunning();
@@ -127,14 +127,14 @@ public final class SelfRunNewActivity extends Activity {
             int nextClear=clearPolls+1;
             if(nextClear>=SERVICE_STOP_REQUIRED_CLEAR_POLLS){
                 startPending=false;
-                store.start(runId,selectedMode,selectedProject,request);
+                store.start(runId,selectedMode,project,request);
                 runLog.record(store,"UI_START","mode="+selectedMode+";previous_runtime=stopped");
                 startRunner();
                 Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show();
                 finish();
                 return;
             }
-            handler.postDelayed(()->waitForPreviousRuntimeShutdown(selectedProject,request,selectedMode,runId,polls+1,nextClear),SERVICE_STOP_POLL_MS);
+            handler.postDelayed(()->waitForPreviousRuntimeShutdown(project,request,selectedMode,runId,polls+1,nextClear),SERVICE_STOP_POLL_MS);
             return;
         }
         if(polls>=SERVICE_STOP_MAX_POLLS){
@@ -142,7 +142,7 @@ public final class SelfRunNewActivity extends Activity {
             Toast.makeText(this,"이전 SelfRun Drive 실행 서비스 종료를 확인하지 못했습니다. 다시 시작해 주세요.",Toast.LENGTH_LONG).show();
             return;
         }
-        handler.postDelayed(()->waitForPreviousRuntimeShutdown(selectedProject,request,selectedMode,runId,polls+1,0),SERVICE_STOP_POLL_MS);
+        handler.postDelayed(()->waitForPreviousRuntimeShutdown(project,request,selectedMode,runId,polls+1,0),SERVICE_STOP_POLL_MS);
     }
 
     @SuppressWarnings("deprecation")
