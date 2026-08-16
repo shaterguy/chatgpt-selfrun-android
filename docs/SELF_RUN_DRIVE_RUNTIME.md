@@ -59,3 +59,5 @@ Drive의 post-anchor material signal이 기존 continuation의 authority를 대�
 - Normal Drive polling treats a signal-count shrink below the durable cursor as a structural integrity failure and pauses without lowering the cursor.
 - Only guard recovery may mint a durable one-shot rebaseline authorization; it is bound to the Integer.MAX_VALUE recovery sentinel and consumed immediately after a successful baseline.
 - Unauthorized rebase invalidates prepared/pending continuation, completion guard, rewrite carry, and in-memory NEXT reservations before entering AI_PAUSED.
+
+- Guard recovery that moves back to `WAIT_DRIVE_COMMIT` immediately schedules a Drive poll; it never leaves a one-shot rebaseline or previous-signal revalidation waiting on an inactive guard callback.

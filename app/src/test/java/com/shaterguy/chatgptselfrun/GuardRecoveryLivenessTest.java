@@ -1,18 +1,4 @@
-#!/usr/bin/env python3
-from pathlib import Path
-
-service_path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
-test_path = Path('app/src/test/java/com/shaterguy/chatgptselfrun/GuardRecoveryLivenessTest.java')
-runtime_doc = Path('docs/SELF_RUN_DRIVE_RUNTIME.md')
-
-service = service_path.read_text()
-old = '''private void scheduleGuard(){releaseWakeLock();handler.removeCallbacks(webRunnable);handler.removeCallbacks(guardRunnable);long detected=store.commitDetectedAt(),due=store.guardDueAt();boolean valid=DriveSignalParser.Type.TURN_COMPLETED.name().equals(store.pendingDriveSignalType())&&!store.pendingDriveSignalRaw().isEmpty()&&detected>0&&due-detected==CONTINUATION_GUARD_MS;if(!valid){runLog.record(store,"DRIVE_GUARD_RECOVERY","invalid_guard_state");store.repairGuard(System.currentTimeMillis(),CONTINUATION_GUARD_MS);if(SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(store.phase())){ensureWebView();return;}due=store.guardDueAt();}handler.postDelayed(guardRunnable,Math.max(0,due-System.currentTimeMillis()));}'''
-new = '''private void scheduleGuard(){releaseWakeLock();handler.removeCallbacks(webRunnable);handler.removeCallbacks(guardRunnable);long detected=store.commitDetectedAt(),due=store.guardDueAt();boolean valid=DriveSignalParser.Type.TURN_COMPLETED.name().equals(store.pendingDriveSignalType())&&!store.pendingDriveSignalRaw().isEmpty()&&detected>0&&due-detected==CONTINUATION_GUARD_MS;if(!valid){runLog.record(store,"DRIVE_GUARD_RECOVERY","invalid_guard_state");store.repairGuard(System.currentTimeMillis(),CONTINUATION_GUARD_MS);if(SelfRunStore.PHASE_READ_NEXT_CONTROL.equals(store.phase())){ensureWebView();return;}if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())){scheduleDrivePoll(0L);return;}due=store.guardDueAt();}handler.postDelayed(guardRunnable,Math.max(0,due-System.currentTimeMillis()));}'''
-assert old in service, 'scheduleGuard baseline not found'
-service = service.replace(old, new, 1)
-service_path.write_text(service)
-
-test_path.write_text(r'''package com.shaterguy.chatgptselfrun;
+package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
 import java.nio.file.*;
@@ -58,12 +44,3 @@ public class GuardRecoveryLivenessTest {
     }
     private static String between(String s,String a,String b){return s.substring(s.indexOf(a),s.indexOf(b));}
 }
-''')
-
-runtime = runtime_doc.read_text()
-line = '- Guard recovery that moves back to `WAIT_DRIVE_COMMIT` immediately schedules a Drive poll; it never leaves a one-shot rebaseline or previous-signal revalidation waiting on an inactive guard callback.'
-if line not in runtime:
-    runtime += '\n' + line + '\n'
-runtime_doc.write_text(runtime)
-
-print('guard recovery liveness patch applied')
