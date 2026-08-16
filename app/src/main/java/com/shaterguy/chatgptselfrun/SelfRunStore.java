@@ -26,7 +26,6 @@ final class SelfRunStore {
     static final String PHASE_WAIT_DRIVE_COMMIT = "WAIT_DRIVE_COMMIT";
     static final String PHASE_DRIVE_COMMIT_GUARD = "DRIVE_COMMIT_GUARD";
     static final String PHASE_RESUME_BASELINE = "RESUME_BASELINE";
-    static final String PHASE_READ_NEXT_CONTROL = "READ_NEXT_CONTROL";
     static final String PHASE_APPLY_PREFS = "APPLY_PREFS";
     static final String PHASE_APPLY_REASONING = "APPLY_REASONING";
     static final String PHASE_SEND_CONTINUE = "SEND_CONTINUE";
@@ -81,9 +80,9 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
  long now=System.currentTimeMillis();
  commitOrThrow(prefs.edit().putString("runId",safe(runId)).putLong("createdAt",now).putLong("phaseStartedAt",now)
   .putString("mode",safe(mode)).putString("projectUrl",safe(projectUrl)).putString("requirement",safe(requirement)).putString("conversationUrl","")
-  .putString("phase",PHASE_DRIVE_ACCOUNT_CHECK).putString("status","Drive 계정 확인 준비").putString("role","PLANNER")
+  .putString("phase",PHASE_DRIVE_ACCOUNT_CHECK).putString("status","Drive 계정 확인 준비")
   .putString("pendingModel",MODE_WORK.equals(mode)?"sol":"").putString("pendingReasoning",MODE_WORK.equals(mode)?"xhigh":"")
-  .putString("lastSignal","").putString("lastErrorCode","").putString("lastErrorMessage","").putString("runDriveAccountId",driveAccountId()).putString("runBaseFolderId",driveRunsBaseFolderId())
+  .putString("lastErrorCode","").putString("lastErrorMessage","").putString("runDriveAccountId",driveAccountId()).putString("runBaseFolderId",driveRunsBaseFolderId())
   .putString("jobFolderId","").putString("turnDocumentId","").putString("turnDocumentUrl","").putInt("turn",0).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","")
   .putInt("driveSignalCursor",0).putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","")
   .putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L)
@@ -92,6 +91,7 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
   .putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)
   .putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","")
   .putBoolean("active",true).putBoolean("paused",false).putBoolean("userStopped",false)
+  .remove("role").remove("lastSignal")
   .remove("driveProtocolVersion").remove("expectedTurn").remove("lastConsumedEventSeq").remove("lastCommittedAt").remove("pendingEventSeq").remove("pendingTurn").remove("pendingSignalRaw").remove("pendingCommitId")
   .remove("submissionState").remove("submissionStartedAt").remove("submissionBaselineCount").remove("lastSubmittedCommitId").remove("bootstrapSubmittedAt").remove("bootstrapSubmissionState"));
  syncHistory();
@@ -142,10 +142,8 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String conversationUrl() { return get("conversationUrl"); }
     String phase() { return getOr("phase", PHASE_IDLE); }
     String status() { return getOr("status", "대기"); }
-    String role() { return get("role"); }
     String pendingModel() { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion()){DriveSignalParser.WorkProfile p=pendingDriveWorkProfile();return p.valid?p.model:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL;}return get("pendingModel"); }
     String pendingReasoning() { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion()){DriveSignalParser.WorkProfile p=pendingDriveWorkProfile();return p.valid?p.reasoning:WorkPreferenceDom.TURN_INFO_REWRITE_SENTINEL;}return get("pendingReasoning"); }
-    String lastSignal() { return get("lastSignal"); }
     String lastErrorCode() { return get("lastErrorCode"); }
     String lastErrorMessage() { return get("lastErrorMessage"); }
     int turn() { return prefs.getInt("turn", 0); }
@@ -215,10 +213,8 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     }
     void setPhase(String value) { commitOrThrow(prefs.edit().putString("phase", safe(value)).putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory(); }
     void setStatus(String value) { put("status", value); }
-    void setRole(String value) { put("role", value); }
     void setPendingModel(String value) { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put("pendingModel", value); }
     void setPendingReasoning(String value) { if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put("pendingReasoning", value); }
-    void setLastSignal(String value) { put("lastSignal", value); }
     void setLastError(String code, String message) { commitOrThrow(prefs.edit().putString("lastErrorCode", safe(code)).putString("lastErrorMessage", safe(message))); syncHistory(); }
     void clearLastError() { setLastError("", ""); }
     void setTurn(int value) { commitOrThrow(prefs.edit().putInt("turn", value)); syncHistory(); }
@@ -226,9 +222,6 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     void setActive(boolean value) { commitOrThrow(prefs.edit().putBoolean("active", value)); syncHistory(); }
     void setUserStopped(boolean value) { commitOrThrow(prefs.edit().putBoolean("userStopped", value)); syncHistory(); }
     void setCreationStage(String value) { commitOrThrow(prefs.edit().putString("creationStage", value)); }
-
-
-
 
     void reserveJobFolderId(String id) {
         DriveApiClient.requireParent(id);
