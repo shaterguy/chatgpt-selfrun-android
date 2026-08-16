@@ -15,11 +15,18 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
 /** Visible calibration WebView. It intentionally uses the same mobile profile as background automation. */
 public final class WebUiCalibrationActivity extends Activity {
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss").withZone(KST);
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable pollRunnable = this::pollCapture;
     private WebUiCalibrationStore store;
@@ -165,11 +172,47 @@ public final class WebUiCalibrationActivity extends Activity {
     }
 
     private void showLogs() {
+        if (webView == null) {
+            showLogDialog(store.logText(80), "런타임 매칭 로그를 읽을 WebView가 없습니다.");
+            return;
+        }
+        webView.evaluateJavascript(WebUiCalibrationDom.readRuntimeLog(), raw ->
+                showLogDialog(store.logText(80), runtimeLogText(jsString(raw))));
+    }
+
+    private void showLogDialog(String captureLog, String runtimeLog) {
         new AlertDialog.Builder(this)
                 .setTitle("웹 UI 보정 로그")
-                .setMessage(store.logText(80))
+                .setMessage("[보정 이력]\n" + captureLog + "\n\n[런타임 MATCH/MISS]\n" + runtimeLog)
                 .setPositiveButton("닫기", null)
                 .show();
+    }
+
+    private static String runtimeLogText(String raw) {
+        try {
+            JSONArray items = new JSONArray(raw == null || raw.isEmpty() ? "[]" : raw);
+            StringBuilder out = new StringBuilder();
+            int start = Math.max(0, items.length() - 80);
+            for (int i = start; i < items.length(); i++) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                if (out.length() > 0) out.append('\n');
+                long at = item.optLong("at", 0L);
+                out.append(at > 0 ? LOG_TIME.format(Instant.ofEpochMilli(at)) : "-")
+                        .append(" · ").append(item.optString("purpose"))
+                        .append(" · ").append(item.optString("event"));
+                String detail = item.optString("detail");
+                if (!detail.isEmpty()) out.append(" · ").append(detail);
+            }
+            return out.length() == 0 ? "런타임 매칭 로그가 없습니다." : out.toString();
+        } catch (Throwable ignored) { return "런타임 매칭 로그를 읽지 못했습니다."; }
+    }
+
+    private static String jsString(String raw) {
+        try {
+            Object value = new JSONTokener(raw == null ? "" : raw).nextValue();
+            return value instanceof String ? (String) value : String.valueOf(value);
+        } catch (Throwable ignored) { return "[]"; }
     }
 
     private void clearAll() {
@@ -180,7 +223,7 @@ public final class WebUiCalibrationActivity extends Activity {
         store.record("SYSTEM", "PROFILE_RESET", "user_requested");
         if (webView != null) {
             webView.evaluateJavascript("(()=>{try{localStorage.removeItem('" + WebUiCalibrationStore.STORAGE_KEY
-                    + "');sessionStorage.removeItem('selfrun-drive:ui-calibration:capture');return 'OK';}catch(e){return 'ERROR';}})()", ignored -> {});
+                    + "');localStorage.removeItem('selfrun-drive:ui-runtime-log:v1');sessionStorage.removeItem('selfrun-drive:ui-runtime-dedupe:v1');sessionStorage.removeItem('selfrun-drive:ui-calibration:capture');return 'OK';}catch(e){return 'ERROR';}})()", ignored -> {});
         }
         status.setText(statusText("모든 보정값을 초기화했습니다."));
     }
