@@ -23,7 +23,7 @@ public class SelfRunDriveAssistantIsolationTest {
                 "readLatestSelfRunControl", "observeAssistant", "assistantSnapshot", "assistantBaselineKey",
                 "ASSISTANT_BASELINE_WAIT", "PHASE_READ_NEXT_CONTROL", "CONTROL_FOUND", "CONTROL_MISSING",
                 "SELF_RUN_NEXT", "conversation 제어신호", "data-message-author-role=\\\"assistant\\\"",
-                "article[data-turn=\\\"assistant\\\"]"}) {
+                "article[data-turn=\\\"assistant\\\"]", "Command Recevied Record Required"}) {
             assertFalse("banned assistant/control legacy remains: " + banned, source.contains(banned));
         }
     }
