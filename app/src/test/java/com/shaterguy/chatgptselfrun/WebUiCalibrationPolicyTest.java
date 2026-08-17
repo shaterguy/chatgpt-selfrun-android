@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.Assert.*;
 
@@ -33,22 +35,50 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(WebUiCalibrationDom.readRuntimeLog().contains("ui-runtime-log"));
     }
 
-    @Test public void runtimeUsesPurposeSpecificCalibrationBeforeLegacyHeuristics() {
-        String chat = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL,
-                SelfRunStore.MODE_CHAT, "SR-20260816-CAL001");
-        String project = SelfRunDom.prepareInitialContext(
-                "https://chatgpt.com/g/g-p-test/project", SelfRunStore.MODE_WORK, "SR-20260816-CAL002");
-        String model = WorkPreferenceDom.modelForProject("https://chatgpt.com/g/g-p-test/project", "sol");
-        String reasoning = WorkPreferenceDom.reasoningForProject("https://chatgpt.com/g/g-p-test/project", "xhigh");
-        assertTrue(chat.contains(WebUiCalibrationStore.PURPOSE_MODE_CHAT));
-        assertTrue(chat.contains(WebUiCalibrationStore.TARGET_GENERAL_COMPOSER));
-        assertTrue(project.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
-        assertTrue(project.contains(WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT));
-        assertTrue(project.contains(WebUiCalibrationStore.TARGET_PROJECT_COMPOSER));
-        assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_WORK_MODEL));
-        assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_WORK_REASONING));
-        assertTrue(chat.contains("rawModeControls"));
-        assertTrue(model.contains("heuristicTrigger"));
+    @Test public void runtimeSelectsCalibrationByScopeAndTurnStage() {
+        String generalBootstrapModel = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
+        String generalBootstrapReasoning = WorkPreferenceDom.reasoningForProject(SelfRunScript.GENERAL_CHAT_URL, "xhigh");
+        String projectBootstrapModel = WorkPreferenceDom.modelForProject("https://chatgpt.com/g/g-p-test/project", "sol");
+        String projectBootstrapReasoning = WorkPreferenceDom.reasoningForProject("https://chatgpt.com/g/g-p-test/project", "xhigh");
+        String generalContinuationModel = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
+        String generalContinuationReasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
+        String projectContinuationModel = WorkPreferenceDom.modelForConversation("https://chatgpt.com/g/g-p-test/c/conversation123", "sol");
+        String projectContinuationReasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/g/g-p-test/c/conversation123", "xhigh");
+
+        assertTrue(generalBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL));
+        assertTrue(generalBootstrapReasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING));
+        assertTrue(projectBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL));
+        assertTrue(projectBootstrapReasoning.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING));
+        assertTrue(generalContinuationModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
+        assertTrue(generalContinuationReasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
+        assertTrue(projectContinuationModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL));
+        assertTrue(projectContinuationReasoning.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING));
+
+        assertFalse(generalBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL));
+        assertFalse(generalContinuationModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL));
+        assertFalse(projectBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL));
+        assertFalse(projectContinuationModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
+    }
+
+    @Test public void allEightWorkCalibrationTargetsAreDistinct() {
+        Set<String> purposes = new HashSet<>();
+        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL);
+        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING);
+        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL);
+        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING);
+        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL);
+        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING);
+        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL);
+        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING);
+        assertEquals(8, purposes.size());
+        assertEquals(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL,
+                WebUiCalibrationStore.workModelPurpose(true, true));
+        assertEquals(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL,
+                WebUiCalibrationStore.workModelPurpose(true, false));
+        assertEquals(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING,
+                WebUiCalibrationStore.workReasoningPurpose(false, true));
+        assertEquals(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING,
+                WebUiCalibrationStore.workReasoningPurpose(false, false));
     }
 
     @Test public void workPreferenceDoesNotTreatCalibratedOptionAsMenuTrigger() {
@@ -60,10 +90,24 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(reasoning.contains("calibratedOption=calibratedTarget&&!calibratedTrigger?calibratedTarget:null"));
         assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
         assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
+        assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
+        assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
         assertTrue(model.contains("open-work-mode-fallback"));
         assertTrue(reasoning.contains("open-work-mode-fallback"));
-        assertFalse(model.contains("calibratedTrigger=__srFind(\"WORK_MODEL\")"));
-        assertFalse(reasoning.contains("calibratedTrigger=__srFind(\"WORK_REASONING\")"));
+        assertTrue(model.contains("const option=calibratedWanted||semanticOption"));
+        assertTrue(reasoning.contains("const option=calibratedWanted||semanticOption"));
+    }
+
+    @Test public void calibrationActivityExposesFourIndependentWorkContexts() throws Exception {
+        String activity = src("WebUiCalibrationActivity.java");
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL));
+        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING));
     }
 
     @Test public void automationAndCalibrationShareMobileWebViewPolicy() throws Exception {
