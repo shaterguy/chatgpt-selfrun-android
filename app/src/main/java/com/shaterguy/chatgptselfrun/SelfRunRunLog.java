@@ -165,7 +165,7 @@ final class SelfRunRunLog {
                 || event.startsWith("BOOTSTRAP_") || event.startsWith("DRIVE_")
                 || event.equals("PAUSED") || event.equals("DONE")
                 || event.equals("STATE_TRANSITION") || event.equals("PREFERENCE_VERIFIED")
-                || event.equals("TARGET_DRIFT") || event.equals("TARGET_RESTORE")
+                || event.equals("TARGET_DRIFT") || event.equals("TARGET_RESTORE") || event.equals("DOM_RESULT")
                 || event.equals("RENDERER_GONE") || event.equals("WEBVIEW_INIT_FAILED");
     }
 
@@ -188,6 +188,7 @@ final class SelfRunRunLog {
             case "STATE_TRANSITION" -> "상태 전이";
             case "TARGET_DRIFT" -> "대상 화면 이탈 감지";
             case "TARGET_RESTORE" -> "대상 화면 복구";
+            case "DOM_RESULT" -> "WebView 대기/진단";
             case "RATE_LIMIT" -> "요청 제한 대기";
             case "PAUSED" -> "일시중지";
             case "DONE" -> "완료";

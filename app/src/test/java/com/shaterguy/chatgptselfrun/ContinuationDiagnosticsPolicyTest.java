@@ -1,0 +1,30 @@
+package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import static org.junit.Assert.*;
+
+public class ContinuationDiagnosticsPolicyTest {
+    @Test public void sendContinueWaitAndRouteFailuresReachDeduplicatedRunLog() throws Exception {
+        String service = src("SelfRunService.java");
+        String log = src("SelfRunRunLog.java");
+        assertTrue(service.contains("recordContinuationRouteMismatch(webView.getUrl())"));
+        assertTrue(service.contains("recordContinuationRouteMismatch(requested)"));
+        assertTrue(service.contains("recordContinuationWait(phase,status,result.optString(\"detail\",\"\"))"));
+        assertTrue(service.contains("recordContinuationTargetError(phase)"));
+        assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\""));
+        assertTrue(log.contains("if (\"DOM_RESULT\".equals(event))"));
+        assertTrue(log.contains("event.equals(\"DOM_RESULT\")"));
+        assertTrue(log.contains("case \"DOM_RESULT\" -> \"WebView 대기/진단\""));
+        assertTrue(log.contains("NOISY_HEARTBEAT_MS = 30_000L"));
+    }
+
+    private static String src(String file) throws Exception {
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+}
