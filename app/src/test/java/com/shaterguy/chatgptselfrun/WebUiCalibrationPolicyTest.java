@@ -51,6 +51,21 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(model.contains("heuristicTrigger"));
     }
 
+    @Test public void workPreferenceDoesNotTreatCalibratedOptionAsMenuTrigger() {
+        String model = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
+        String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
+        assertTrue(model.contains("calibratedTrigger=menuTrigger(calibratedTarget)?calibratedTarget:null"));
+        assertTrue(reasoning.contains("calibratedTrigger=menuTrigger(calibratedTarget)?calibratedTarget:null"));
+        assertTrue(model.contains("calibratedOption=calibratedTarget&&!calibratedTrigger?calibratedTarget:null"));
+        assertTrue(reasoning.contains("calibratedOption=calibratedTarget&&!calibratedTrigger?calibratedTarget:null"));
+        assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
+        assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
+        assertTrue(model.contains("open-work-mode-fallback"));
+        assertTrue(reasoning.contains("open-work-mode-fallback"));
+        assertFalse(model.contains("calibratedTrigger=__srFind(\"WORK_MODEL\")"));
+        assertFalse(reasoning.contains("calibratedTrigger=__srFind(\"WORK_REASONING\")"));
+    }
+
     @Test public void automationAndCalibrationShareMobileWebViewPolicy() throws Exception {
         String config = src("WebViewConfig.java");
         String host = src("HeadlessWebViewHost.java");
