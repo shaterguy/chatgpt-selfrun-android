@@ -11,12 +11,33 @@ public class SelfRunGeneralChatPolicyTest {
     @Test public void rootAndConversationShareGeneralChatScope() {
         assertEquals(SelfRunScript.GENERAL_CHAT_SCOPE, SelfRunScript.projectId("https://chatgpt.com/"));
         assertEquals(SelfRunScript.GENERAL_CHAT_SCOPE, SelfRunScript.projectId("https://chatgpt.com/c/conversation123"));
+        assertEquals("conversation123", SelfRunScript.conversationId("https://chatgpt.com/c/conversation123"));
         assertEquals("g-p-test", SelfRunScript.projectId("https://chatgpt.com/g/g-p-test/c/conversation123"));
+        assertEquals("conversation123", SelfRunScript.conversationId("https://chatgpt.com/g/g-p-test/c/conversation123"));
         assertTrue(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/"));
+        assertTrue(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/c/conversation123"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://www.chatgpt.com/c/conversation123"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/g/g-p-test"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://chatgpt.com/settings"));
         assertFalse(SelfRunScript.isGeneralChatUrl("https://example.com/c/conversation123"));
+    }
+
+    @Test public void generalConversationComparisonIsStrictAndProjectAware() {
+        assertTrue(ProjectUrlPolicy.sameConversation(
+                "https://chatgpt.com/c/conversation123", "https://chatgpt.com/c/conversation123"));
+        assertFalse(ProjectUrlPolicy.sameConversation(
+                "https://chatgpt.com/c/conversation123", "https://chatgpt.com/c/conversation456"));
+        assertFalse(ProjectUrlPolicy.sameConversation(
+                "https://chatgpt.com/c/conversation123", "https://chatgpt.com/g/g-p-test/c/conversation123"));
+        assertTrue(ProjectUrlPolicy.sameConversation(
+                "https://chatgpt.com/g/g-p-test/c/conversation123",
+                "https://chatgpt.com/g/g-p-test/c/conversation123"));
+    }
+
+    @Test public void generalConversationIdRejectsUnsafeRoutes() {
+        assertEquals("", SelfRunScript.conversationId("https://chatgpt.com/c/abc%2Fdef"));
+        assertEquals("", SelfRunScript.conversationId("https://chatgpt.com/c/abc?x=1"));
+        assertEquals("", SelfRunScript.conversationId("https://evil.example/c/conversation123"));
     }
 
     @Test public void generalChatIsSelectedFromTheFixedSafeOption() throws Exception {
