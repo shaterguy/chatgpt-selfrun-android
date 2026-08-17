@@ -48,16 +48,27 @@ public final class WebUiCalibrationActivity extends Activity {
         root.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
         root.addView(Ui.title(this, "웹 UI 보정"));
         root.addView(Ui.body(this,
-                "이 화면에서 직접 ChatGPT를 조작해 자동화 위치를 다시 확보합니다. 보정 WebView와 백그라운드 자동화 WebView는 같은 모바일 표시 정책을 사용합니다. 테스트 문구 내용은 보정 로그에 저장하지 않습니다."));
+                "이 화면에서 직접 ChatGPT를 조작해 자동화 위치를 다시 확보합니다. Work 모델·추론은 일반/프로젝트와 첫 턴/후속 턴을 각각 따로 보정합니다. 보정 WebView와 백그라운드 자동화 WebView는 같은 모바일 표시 정책을 사용합니다. 테스트 문구 내용은 보정 로그에 저장하지 않습니다."));
 
         status = Ui.body(this, statusText(""));
         root.addView(status);
         root.addView(Ui.row(this,
                 task("일반채팅 메뉴", WebUiCalibrationStore.PURPOSE_MODE_CHAT),
                 task("Work 메뉴", WebUiCalibrationStore.PURPOSE_MODE_WORK)));
+
         root.addView(Ui.row(this,
-                task("Work 모델", WebUiCalibrationStore.PURPOSE_WORK_MODEL),
-                task("Work 추론", WebUiCalibrationStore.PURPOSE_WORK_REASONING)));
+                task("일반 첫턴 모델", WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL),
+                task("일반 첫턴 추론", WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING)));
+        root.addView(Ui.row(this,
+                task("일반 후속 모델", WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL),
+                task("일반 후속 추론", WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING)));
+        root.addView(Ui.row(this,
+                task("프로젝트 첫턴 모델", WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL),
+                task("프로젝트 첫턴 추론", WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING)));
+        root.addView(Ui.row(this,
+                task("프로젝트 후속 모델", WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL),
+                task("프로젝트 후속 추론", WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING)));
+
         root.addView(Ui.row(this,
                 task("프로젝트 새대화 제출", WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT),
                 task("일반 새대화 제출", WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT)));
@@ -233,8 +244,18 @@ public final class WebUiCalibrationActivity extends Activity {
         if (!note.isEmpty()) out.append(note).append("\n\n");
         out.append("일반채팅 메뉴: ").append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_MODE_CHAT));
         out.append("\nWork 메뉴: ").append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_MODE_WORK));
-        out.append("\nWork 모델: ").append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_WORK_MODEL));
-        out.append("\nWork 추론: ").append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_WORK_REASONING));
+        out.append("\n일반 첫턴 모델/추론: ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL)).append(" / ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING));
+        out.append("\n일반 후속 모델/추론: ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL)).append(" / ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
+        out.append("\n프로젝트 첫턴 모델/추론: ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL)).append(" / ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING));
+        out.append("\n프로젝트 후속 모델/추론: ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL)).append(" / ")
+                .append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING));
         out.append("\n프로젝트 새대화 제출: ").append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT));
         out.append("\n일반 새대화 제출: ").append(store.purposeStatus(WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT));
         return out.toString();
@@ -244,8 +265,14 @@ public final class WebUiCalibrationActivity extends Activity {
         return switch (purpose) {
             case WebUiCalibrationStore.PURPOSE_MODE_CHAT -> "일반채팅 메뉴의 실제 목표 항목을 한 번 터치한 뒤 최근 터치 위치를 저장하세요.";
             case WebUiCalibrationStore.PURPOSE_MODE_WORK -> "Work 메뉴의 실제 목표 항목을 한 번 터치한 뒤 최근 터치 위치를 저장하세요.";
-            case WebUiCalibrationStore.PURPOSE_WORK_MODEL -> "Work에 들어가 실제 추론 모델 선택부를 한 번 터치한 뒤 최근 터치 위치를 저장하세요.";
-            case WebUiCalibrationStore.PURPOSE_WORK_REASONING -> "Work에 들어가 실제 추론 정도 선택부를 한 번 터치한 뒤 최근 터치 위치를 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL -> "ChatGPT 메인 새 대화에서 Work로 들어간 뒤 첫 요청 전 화면의 모델 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING -> "ChatGPT 메인 새 대화에서 Work로 들어간 뒤 첫 요청 전 화면의 추론 정도 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL -> "일반대화 Work 기존 방에서 첫 턴이 끝나고 다음 신호를 기다리는 화면의 모델 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING -> "일반대화 Work 기존 방에서 첫 턴이 끝나고 다음 신호를 기다리는 화면의 추론 정도 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL -> "아무 프로젝트의 새 대화에서 Work로 들어간 뒤 첫 요청 전 화면의 모델 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING -> "아무 프로젝트의 새 대화에서 Work로 들어간 뒤 첫 요청 전 화면의 추론 정도 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL -> "프로젝트 Work 기존 방에서 첫 턴이 끝나고 다음 신호를 기다리는 화면의 모델 선택부를 터치하고 저장하세요.";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING -> "프로젝트 Work 기존 방에서 첫 턴이 끝나고 다음 신호를 기다리는 화면의 추론 정도 선택부를 터치하고 저장하세요.";
             case WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT -> "아무 프로젝트에서 새 대화로 들어간 뒤 임의 문구를 입력하고 제출하세요. 입력창·전송·진입 위치를 자동 확보합니다.";
             case WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT -> "ChatGPT 메인 새 대화에서 임의 문구를 입력하고 제출하세요. 입력창·전송 위치를 자동 확보합니다.";
             default -> "";
@@ -256,8 +283,14 @@ public final class WebUiCalibrationActivity extends Activity {
         return switch (purpose) {
             case WebUiCalibrationStore.PURPOSE_MODE_CHAT -> "일반채팅 메뉴";
             case WebUiCalibrationStore.PURPOSE_MODE_WORK -> "Work 메뉴";
-            case WebUiCalibrationStore.PURPOSE_WORK_MODEL -> "Work 모델";
-            case WebUiCalibrationStore.PURPOSE_WORK_REASONING -> "Work 추론";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL -> "일반 첫턴 모델";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING -> "일반 첫턴 추론";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL -> "일반 후속 모델";
+            case WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING -> "일반 후속 추론";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL -> "프로젝트 첫턴 모델";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING -> "프로젝트 첫턴 추론";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL -> "프로젝트 후속 모델";
+            case WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING -> "프로젝트 후속 추론";
             case WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT -> "프로젝트 새대화 제출";
             case WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT -> "일반 새대화 제출";
             default -> purpose;
