@@ -110,6 +110,28 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING));
     }
 
+    @Test public void calibrationUsesWebViewFirstLayoutAndTransientPurposePicker() throws Exception {
+        String activity = src("WebUiCalibrationActivity.java");
+        assertTrue(activity.contains("root.addView(webView, new LinearLayout.LayoutParams("));
+        assertTrue(activity.contains("LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f"));
+        assertTrue(activity.contains("showPurposePicker()"));
+        assertTrue(activity.contains("setTitle(\"보정 항목 선택\")"));
+        assertTrue(activity.contains("setItems(items, (dialog, which) -> startPurpose(PURPOSES[which]))"));
+        assertFalse(activity.contains("statusText(\"\")"));
+        assertFalse(activity.contains("root.addView(Ui.title(this, \"웹 UI 보정\"))"));
+        assertFalse(activity.contains("task(\"일반채팅 메뉴\""));
+    }
+
+    @Test public void calibrationCaptureModeLeavesOnlyMinimalActionsVisible() throws Exception {
+        String activity = src("WebUiCalibrationActivity.java");
+        assertTrue(activity.contains("selectButton.setVisibility(active ? View.GONE : View.VISIBLE)"));
+        assertTrue(activity.contains("manageButton.setVisibility(active ? View.GONE : View.VISIBLE)"));
+        assertTrue(activity.contains("cancelButton.setVisibility(active ? View.VISIBLE : View.GONE)"));
+        assertTrue(activity.contains("confirmButton.setVisibility(canConfirm ? View.VISIBLE : View.GONE)"));
+        assertTrue(activity.contains("CAPTURE_CANCELLED"));
+        assertTrue(activity.contains("button.setMinHeight(Ui.dp(this, 48))"));
+    }
+
     @Test public void automationAndCalibrationShareMobileWebViewPolicy() throws Exception {
         String config = src("WebViewConfig.java");
         String host = src("HeadlessWebViewHost.java");
