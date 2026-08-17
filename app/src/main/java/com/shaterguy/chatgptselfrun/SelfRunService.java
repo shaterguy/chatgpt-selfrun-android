@@ -444,7 +444,7 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
         }
     }
 
-private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED","trusted_project_route");}}
+private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
 
     private void postWebCallback(Runnable callback, long delay) {
         int epoch = automationEpoch;

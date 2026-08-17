@@ -46,6 +46,33 @@ public class SelfRunGeneralChatPolicyTest {
         assertEquals("", SelfRunScript.conversationId("https://chatgpt.com/settings?c=conversation123"));
     }
 
+    @Test public void conversationCapturePolicySupportsGeneralAndProjectRoutes() {
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/c/conversation123"));
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://www.chatgpt.com/c/conversation123?temporary=1#state"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/settings"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/g/g-p-test/c/conversation123"));
+
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-test/c/conversation123"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-other/c/conversation123"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/c/conversation123"));
+    }
+
+    @Test public void captureLogRequiresPersistedConversationRoute() throws Exception {
+        String service = src("SelfRunService.java");
+        assertTrue(service.contains("store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))"));
+        assertTrue(service.contains("trusted_general_route"));
+        assertTrue(service.contains("trusted_project_route"));
+    }
+
     @Test public void generalChatIsSelectedFromTheFixedSafeOption() throws Exception {
         String activity = src("SelfRunNewActivity.java");
         assertTrue(activity.contains("position<=0?SelfRunScript.GENERAL_CHAT_URL"));
