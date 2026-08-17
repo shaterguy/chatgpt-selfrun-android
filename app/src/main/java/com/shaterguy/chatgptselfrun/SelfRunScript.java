@@ -4,6 +4,7 @@ package com.shaterguy.chatgptselfrun;
 final class SelfRunScript {
     static final String GENERAL_CHAT_URL = "https://chatgpt.com/";
     static final String GENERAL_CHAT_SCOPE = "__GENERAL_CHAT__";
+    private static final int MAX_OPAQUE_ID_LENGTH = 160;
 
     private SelfRunScript() {}
 
@@ -20,7 +21,7 @@ final class SelfRunScript {
             String path = uri.getPath();
             if (path == null || path.isEmpty() || "/".equals(path)) return true;
             String[] segments = path.split("/");
-            return segments.length == 3 && "c".equals(segments[1]) && !segments[2].isEmpty();
+            return segments.length == 3 && "c".equals(segments[1]) && validOpaqueId(segments[2]);
         } catch (IllegalArgumentException ignored) {
             return false;
         }
@@ -28,7 +29,25 @@ final class SelfRunScript {
 
     static String conversationId(String url) {
         ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(url);
-        return ref == null ? "" : ref.conversationId;
+        if (ref != null) return ref.conversationId;
+        if (!isGeneralChatUrl(url)) return "";
+        try {
+            String[] segments = java.net.URI.create(url.trim()).getPath().split("/");
+            return segments.length == 3 && "c".equals(segments[1]) && validOpaqueId(segments[2])
+                    ? segments[2] : "";
+        } catch (IllegalArgumentException ignored) {
+            return "";
+        }
+    }
+
+    private static boolean validOpaqueId(String value) {
+        if (value == null || value.isEmpty() || value.length() > MAX_OPAQUE_ID_LENGTH) return false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
+        }
+        return true;
     }
 
     static String quote(String value) {
