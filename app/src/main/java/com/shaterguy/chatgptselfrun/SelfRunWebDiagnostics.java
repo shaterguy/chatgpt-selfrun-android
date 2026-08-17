@@ -4,16 +4,25 @@ package com.shaterguy.chatgptselfrun;
 final class SelfRunWebDiagnostics {
     private SelfRunWebDiagnostics() {}
 
-    static String waitDetail(String status, String detail) {
+    static String waitDetail(String phase, String status, String detail) {
         String value = detail == null ? "" : detail;
         String reason;
-        if (value.contains("continuation 입력창 대기")) reason = "composer_wait";
+        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) reason = "model_wait";
+        else if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) reason = "reasoning_wait";
+        else if (value.contains("continuation 입력창 대기")) reason = "composer_wait";
         else if (value.contains("continuation 전송 버튼 대기")) reason = "send_wait";
         else if (value.contains("입력 반영 확인 대기")) reason = "input_reflection_wait";
         else if (value.contains("continuation 입력 대기")) reason = "input_wait";
         else reason = "ui_wait";
         String safeStatus = "WAIT".equals(status) ? "WAIT" : "UI_WAIT";
-        return "status=" + safeStatus + ";reason=" + reason;
+        return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=" + reason;
+    }
+
+    private static String phaseKind(String phase) {
+        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) return "apply_model";
+        if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "apply_reasoning";
+        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "send_continue";
+        return "other";
     }
 
     static String routeMismatchDetail(String expected, String actual) {

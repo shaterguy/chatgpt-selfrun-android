@@ -5,16 +5,16 @@ import static org.junit.Assert.*;
 
 public class SelfRunWebDiagnosticsTest {
     @Test public void continuationWaitsUseStablePrivacySafeReasons() {
-        assertEquals("status=UI_WAIT;reason=composer_wait",
-                SelfRunWebDiagnostics.waitDetail("UI_WAIT", "continuation 입력창 대기"));
-        assertEquals("status=UI_WAIT;reason=send_wait",
-                SelfRunWebDiagnostics.waitDetail("UI_WAIT", "continuation 전송 버튼 대기"));
-        assertEquals("status=UI_WAIT;reason=input_reflection_wait",
-                SelfRunWebDiagnostics.waitDetail("UI_WAIT", "입력 반영 확인 대기"));
-        assertEquals("status=WAIT;reason=input_wait",
-                SelfRunWebDiagnostics.waitDetail("WAIT", "continuation 입력 대기"));
-        String future = SelfRunWebDiagnostics.waitDetail("UI_WAIT", "future detail containing user text");
-        assertEquals("status=UI_WAIT;reason=ui_wait", future);
+        assertEquals("status=UI_WAIT;phase=send_continue;reason=composer_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "continuation 입력창 대기"));
+        assertEquals("status=UI_WAIT;phase=send_continue;reason=send_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "continuation 전송 버튼 대기"));
+        assertEquals("status=UI_WAIT;phase=send_continue;reason=input_reflection_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "입력 반영 확인 대기"));
+        assertEquals("status=WAIT;phase=send_continue;reason=input_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "WAIT", "continuation 입력 대기"));
+        String future = SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "future detail containing user text");
+        assertEquals("status=UI_WAIT;phase=send_continue;reason=ui_wait", future);
         assertFalse(future.contains("future detail"));
         assertFalse(future.contains("user text"));
     }

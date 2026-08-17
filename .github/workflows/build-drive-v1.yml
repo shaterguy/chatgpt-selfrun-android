@@ -159,7 +159,7 @@ jobs:
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
       - name: Build current and exact legacy debug APKs
         run: |
-          gradle --no-daemon --console=plain :app:assembleDebug
+          gradle --no-daemon --console=plain :app:assembleDebug :app:assembleDebugAndroidTest
           gradle --no-daemon --console=plain --project-dir legacy-baseline :app:assembleDebug
       - name: Enable hardware acceleration
         run: |
@@ -168,7 +168,7 @@ jobs:
       - name: Verify full co-install isolation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
-          api-level: 35
+          api-level: 36
           target: google_apis
           arch: x86_64
           profile: pixel_6
@@ -179,7 +179,10 @@ jobs:
           disable-animations: true
           script: >-
             bash -o pipefail -c
-            'VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
+            'gradle --no-daemon --console=plain :app:connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest;
+            adb shell dumpsys webviewupdate | tee webview-evidence.txt;
+            VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
             sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$VERSION\"/" tools/verify_coinstall_emulator.sh;
             timeout --foreground 8m tools/verify_coinstall_emulator.sh
             legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
@@ -190,6 +193,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chatgpt-selfrun-drive-coinstall-evidence
-          path: coinstall-evidence.txt
+          path: |
+            coinstall-evidence.txt
+            webview-evidence.txt
           if-no-files-found: warn
           retention-days: 30

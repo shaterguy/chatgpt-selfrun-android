@@ -14,6 +14,8 @@ import java.time.format.DateTimeFormatter;
 final class WebUiCalibrationStore {
     static final String PURPOSE_MODE_CHAT = "MODE_CHAT";
     static final String PURPOSE_MODE_WORK = "MODE_WORK";
+    static final String PURPOSE_LEGACY_WORK_MODEL = "WORK_MODEL";
+    static final String PURPOSE_LEGACY_WORK_REASONING = "WORK_REASONING";
 
     static final String PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL = "GENERAL_BOOTSTRAP_WORK_MODEL";
     static final String PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING = "GENERAL_BOOTSTRAP_WORK_REASONING";
@@ -89,11 +91,47 @@ final class WebUiCalibrationStore {
     synchronized JSONObject profile() {
         try {
             String raw = prefs.getString(KEY_PROFILE, "");
-            if (raw != null && !raw.isEmpty()) return new JSONObject(raw);
+            if (raw != null && !raw.isEmpty()) {
+                JSONObject profile = new JSONObject(raw);
+                if (migrateLegacyWorkTargets(profile)) prefs.edit().putString(KEY_PROFILE, profile.toString()).commit();
+                return profile;
+            }
         } catch (Throwable ignored) {}
         JSONObject fresh = new JSONObject();
         try { fresh.put("version", 2); fresh.put("targets", new JSONObject()); } catch (Throwable ignored) {}
         return fresh;
+    }
+
+    /** Maps the v1 shared Work targets to every v2 scope without replacing scoped recaptures. */
+    static boolean migrateLegacyWorkTargets(JSONObject profile) {
+        if (profile == null) return false;
+        try {
+            JSONObject targets = profile.optJSONObject("targets");
+            if (targets == null) { targets = new JSONObject(); profile.put("targets", targets); }
+            boolean changed = copyLegacyTarget(targets, PURPOSE_LEGACY_WORK_MODEL,
+                    PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL, PURPOSE_GENERAL_CONTINUATION_WORK_MODEL,
+                    PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL, PURPOSE_PROJECT_CONTINUATION_WORK_MODEL);
+            changed |= copyLegacyTarget(targets, PURPOSE_LEGACY_WORK_REASONING,
+                    PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING, PURPOSE_GENERAL_CONTINUATION_WORK_REASONING,
+                    PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING, PURPOSE_PROJECT_CONTINUATION_WORK_REASONING);
+            if (profile.optInt("version", 1) < 2) { profile.put("version", 2); changed = true; }
+            if (changed) profile.put("migratedFrom", "v1-work-targets");
+            return changed;
+        } catch (Throwable ignored) { return false; }
+    }
+
+    private static boolean copyLegacyTarget(JSONObject targets, String legacyKey, String... scopedKeys) {
+        JSONObject legacy = targets.optJSONObject(legacyKey);
+        if (!descriptor(legacy)) return false;
+        boolean changed = false;
+        for (String scopedKey : scopedKeys) {
+            if (descriptor(targets.optJSONObject(scopedKey))) continue;
+            try {
+                targets.put(scopedKey, new JSONObject(legacy.toString()));
+                changed = true;
+            } catch (Throwable ignored) {}
+        }
+        return changed;
     }
 
     String profileJson() { return profile().toString(); }

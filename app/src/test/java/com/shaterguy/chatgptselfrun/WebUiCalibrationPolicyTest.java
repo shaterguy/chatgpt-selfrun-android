@@ -9,6 +9,8 @@ import java.nio.file.Paths;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.json.JSONObject;
+
 import static org.junit.Assert.*;
 
 public class WebUiCalibrationPolicyTest {
@@ -81,7 +83,7 @@ public class WebUiCalibrationPolicyTest {
                 WebUiCalibrationStore.workReasoningPurpose(false, false));
     }
 
-    @Test public void workPreferenceDoesNotTreatCalibratedOptionAsMenuTrigger() {
+    @Test public void workPreferencePrioritizesVisibleOptionsAndRecognizesComposerSiblingTriggers() {
         String model = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
         String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
         assertTrue(model.contains("calibratedTrigger=menuTrigger(calibratedTarget)?calibratedTarget:null"));
@@ -94,8 +96,35 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
         assertTrue(model.contains("open-work-mode-fallback"));
         assertTrue(reasoning.contains("open-work-mode-fallback"));
-        assertTrue(model.contains("const option=calibratedWanted||semanticOption"));
-        assertTrue(reasoning.contains("const option=calibratedWanted||semanticOption"));
+        assertTrue(model.contains("const option=semanticOption||calibratedWanted"));
+        assertTrue(reasoning.contains("const option=semanticOption||calibratedWanted"));
+        assertTrue(model.contains("[aria-haspopup],[aria-expanded]"));
+        assertTrue(reasoning.contains("[aria-haspopup],[aria-expanded]"));
+        assertTrue(model.contains("form.contains(e)||rectNear(e)"));
+        assertTrue(reasoning.contains("form.contains(e)||rectNear(e)"));
+        assertTrue(model.contains("menu|listbox|dialog|true"));
+        assertTrue(reasoning.contains("menu|listbox|dialog|true"));
+    }
+
+    @Test public void v1WorkTargetsPopulateAllScopedV2TargetsWithoutReplacingRecaptures() throws Exception {
+        JSONObject profile = new JSONObject();
+        JSONObject targets = new JSONObject();
+        JSONObject model = new JSONObject().put("testid", "legacy-model");
+        JSONObject reasoning = new JSONObject().put("aria", "legacy-reasoning");
+        JSONObject scoped = new JSONObject().put("id", "fresh-continuation-model");
+        targets.put(WebUiCalibrationStore.PURPOSE_LEGACY_WORK_MODEL, model);
+        targets.put(WebUiCalibrationStore.PURPOSE_LEGACY_WORK_REASONING, reasoning);
+        targets.put(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL, scoped);
+        profile.put("version", 1).put("targets", targets);
+
+        assertTrue(WebUiCalibrationStore.migrateLegacyWorkTargets(profile));
+        assertEquals(2, profile.getInt("version"));
+        assertEquals("v1-work-targets", profile.getString("migratedFrom"));
+        assertEquals("legacy-model", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL).getString("testid"));
+        assertEquals("fresh-continuation-model", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL).getString("id"));
+        assertEquals("legacy-model", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL).getString("testid"));
+        assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING).getString("aria"));
+        assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING).getString("aria"));
     }
 
     @Test public void calibrationActivityExposesFourIndependentWorkContexts() throws Exception {

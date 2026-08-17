@@ -15,11 +15,21 @@ public class ContinuationDiagnosticsPolicyTest {
         assertTrue(service.contains("recordContinuationRouteMismatch(requested)"));
         assertTrue(service.contains("recordContinuationWait(phase,status,result.optString(\"detail\",\"\"))"));
         assertTrue(service.contains("recordContinuationTargetError(phase)"));
+        assertTrue(service.contains("isContinuationDiagnosticPhase(phase)"));
         assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\""));
         assertTrue(log.contains("if (\"DOM_RESULT\".equals(event))"));
         assertTrue(log.contains("event.equals(\"DOM_RESULT\")"));
         assertTrue(log.contains("case \"DOM_RESULT\" -> \"WebView 대기/진단\""));
         assertTrue(log.contains("NOISY_HEARTBEAT_MS = 30_000L"));
+    }
+
+    @Test public void applyModelAndReasoningWaitsUsePrivacySafePhaseCategories() {
+        assertEquals("status=UI_WAIT;phase=apply_model;reason=model_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_APPLY_PREFS, "UI_WAIT", "private detail"));
+        assertEquals("status=WAIT;phase=apply_reasoning;reason=reasoning_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_APPLY_REASONING, "WAIT", "private detail"));
+        assertEquals("status=UI_WAIT;phase=send_continue;reason=composer_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "continuation 입력창 대기"));
     }
 
     private static String src(String file) throws Exception {
