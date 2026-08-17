@@ -30,7 +30,7 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(script.contains("__srFind"));
         assertTrue(script.contains("s+=14"));
         assertTrue(script.contains("score>=6"));
-        assertTrue(script.contains("found?'MATCH':'MISS'"));
+        assertTrue(script.contains("rawScore>=6?'REJECT':'MISS'"));
         assertTrue(script.contains("60000"));
         assertTrue(WebUiCalibrationDom.readRuntimeLog().contains("ui-runtime-log"));
     }
