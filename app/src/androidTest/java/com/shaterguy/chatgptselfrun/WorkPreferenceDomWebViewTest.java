@@ -19,19 +19,21 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-/** Exercises the generated selector on a real Android WebView fixture for an existing general chat. */
+/** Exercises Work continuation selectors on a real Android WebView fixture for an existing general chat. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkPreferenceDomWebViewTest {
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
 
-    @Test public void modelSelectorCompletesForDialogAndNoPopupComposerSiblingTriggers() throws Exception {
-        assertSelection("aria-haspopup=\"dialog\"", false);
-        assertSelection("", false);
+    @Test public void modelSelectorCompletesForClickPointerAndMouseTriggersUsingLunaProfile() throws Exception {
+        assertSelection("", "click", false);
+        assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "pointerdown", false);
+        assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "mousedown", false);
     }
 
-    @Test public void reasoningSelectorCompletesForDialogAndNoPopupComposerSiblingTriggers() throws Exception {
-        assertSelection("aria-haspopup=\"dialog\"", true);
-        assertSelection("", true);
+    @Test public void reasoningSelectorCompletesForClickPointerAndMouseTriggersUsingMaxProfile() throws Exception {
+        assertSelection("", "click", true);
+        assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "pointerdown", true);
+        assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "mousedown", true);
     }
 
     @Test public void v1WorkTargetsPopulateAllScopedV2TargetsWithoutReplacingRecaptures() throws Exception {
@@ -55,28 +57,35 @@ public final class WorkPreferenceDomWebViewTest {
         assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING).getString("aria"));
     }
 
-    private static void assertSelection(String popupAttribute, boolean reasoning) throws Exception {
+    private static void assertSelection(String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            loadFixture(scenario, web, popupAttribute, reasoning);
+            loadFixture(scenario, web, triggerAttributes, triggerEvent, reasoning);
             assertNotNull("Android System WebView must be available", WebView.getCurrentWebViewPackage());
+            String wanted = reasoning ? "max" : "luna";
             String script = reasoning
-                    ? WorkPreferenceDom.reasoningForConversation(CONVERSATION_URL, "xhigh")
-                    : WorkPreferenceDom.modelForConversation(CONVERSATION_URL, "terra");
+                    ? WorkPreferenceDom.reasoningForConversation(CONVERSATION_URL, wanted)
+                    : WorkPreferenceDom.modelForConversation(CONVERSATION_URL, wanted);
 
-            assertEquals("UI_WAIT", evaluate(scenario, web, script).getString("status"));
-            assertEquals("UI_WAIT", evaluate(scenario, web, script).getString("status"));
-            assertEquals("UI_WAIT", evaluate(scenario, web, script).getString("status"));
-            JSONObject ready = evaluate(scenario, web, script);
-            assertEquals("READY", ready.getString("status"));
-            assertEquals(reasoning ? "xhigh" : "terra", ready.getJSONObject("diagnostics").getString("current"));
+            JSONObject result = null;
+            boolean sawWait = false;
+            for (int attempt = 0; attempt < 10; attempt++) {
+                result = evaluate(scenario, web, script);
+                if ("READY".equals(result.getString("status"))) break;
+                assertEquals("UI_WAIT", result.getString("status"));
+                sawWait = true;
+            }
+            assertNotNull(result);
+            assertTrue("selector must exercise an asynchronous UI_WAIT before READY", sawWait);
+            assertEquals("READY", result.getString("status"));
+            assertEquals(wanted, result.getJSONObject("diagnostics").getString("current"));
             assertTrue("fixture must update the combined composer control", read(scenario, web,
-                    "document.getElementById('trigger').textContent").contains(reasoning ? "xhigh" : "terra"));
+                    "document.getElementById('trigger').textContent").contains(wanted));
         }
     }
 
     private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
-                                    String popupAttribute, boolean reasoning) throws Exception {
+                                    String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
@@ -88,7 +97,8 @@ public final class WorkPreferenceDomWebViewTest {
             });
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(CONVERSATION_URL, fixture(popupAttribute, reasoning), "text/html", "UTF-8", null);
+            view.loadDataWithBaseURL(CONVERSATION_URL,
+                    fixture(triggerAttributes, triggerEvent, reasoning), "text/html", "UTF-8", null);
         });
         assertTrue("WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
@@ -118,16 +128,16 @@ public final class WorkPreferenceDomWebViewTest {
         return String.valueOf(new JSONTokener(raw.get()).nextValue());
     }
 
-    private static String fixture(String popupAttribute, boolean reasoning) {
+    private static String fixture(String triggerAttributes, String triggerEvent, boolean reasoning) {
         String current = reasoning ? "medium" : "sol";
-        String wanted = reasoning ? "xhigh" : "terra";
+        String wanted = reasoning ? "max" : "luna";
         return "<!doctype html><html><head><style>body{margin:20px}form{height:54px}button{display:block;margin:8px}#popup[hidden]{display:none}</style></head>"
                 + "<body><form><textarea id='prompt-textarea'></textarea></form>"
-                + "<button id='trigger' aria-expanded='false' " + popupAttribute + ">" + current + "</button>"
+                + "<button id='trigger' " + triggerAttributes + ">" + current + "</button>"
                 + "<div id='popup' role='dialog' hidden><button id='wanted' role='option' aria-selected='false'>" + wanted + "</button></div>"
                 + "<script>const trigger=document.getElementById('trigger'),popup=document.getElementById('popup'),wanted=document.getElementById('wanted');"
-                + "function toggle(){popup.hidden=!popup.hidden;trigger.setAttribute('aria-expanded',String(!popup.hidden));}"
-                + "trigger.addEventListener('pointerdown',toggle);trigger.addEventListener('mousedown',toggle);"
+                + "function toggle(){popup.hidden=!popup.hidden;if(trigger.hasAttribute('aria-expanded'))trigger.setAttribute('aria-expanded',String(!popup.hidden));}"
+                + "trigger.addEventListener('" + triggerEvent + "',toggle);"
                 + "wanted.addEventListener('click',()=>{trigger.textContent=wanted.textContent;wanted.setAttribute('aria-selected','true');});</script>"
                 + "</body></html>";
     }
