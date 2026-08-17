@@ -57,6 +57,8 @@ public class SelfRunGeneralChatPolicyTest {
                 SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/settings"));
         assertFalse(SelfRunStore.canCaptureConversationUrl(
                 SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/g/g-p-test/c/conversation123"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://evil.example/c/conversation123"));
 
         assertTrue(SelfRunStore.canCaptureConversationUrl(
                 "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-test/c/conversation123"));
