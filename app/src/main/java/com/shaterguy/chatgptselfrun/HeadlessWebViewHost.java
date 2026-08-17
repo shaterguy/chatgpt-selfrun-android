@@ -48,7 +48,7 @@ final class HeadlessWebViewHost {
             }
             presentation = new Presentation(context, display.getDisplay(), android.R.style.Theme_DeviceDefault_NoActionBar);
             FrameLayout root = new FrameLayout(presentation.getContext());
-            WebView webView = new WebView(presentation.getContext());
+            WebView webView = new FocusPreservingWebView(presentation.getContext());
             webView.setFocusable(true);
             webView.setFocusableInTouchMode(true);
             root.addView(webView, new FrameLayout.LayoutParams(
@@ -64,7 +64,7 @@ final class HeadlessWebViewHost {
             if (display != null) try { display.release(); } catch (Throwable ignored) {}
             if (surface != null) try { surface.release(); } catch (Throwable ignored) {}
             if (texture != null) try { texture.release(); } catch (Throwable ignored) {}
-            WebView fallback = new WebView(context);
+            WebView fallback = new FocusPreservingWebView(context);
             fallback.setFocusable(true);
             fallback.setFocusableInTouchMode(true);
             fallback.requestFocus();
@@ -90,6 +90,20 @@ final class HeadlessWebViewHost {
         final int densityDpi;
         MobileDimensions(int width, int height, int densityDpi) {
             this.width = width; this.height = height; this.densityDpi = densityDpi;
+        }
+    }
+
+    private static final class FocusPreservingWebView extends WebView {
+        FocusPreservingWebView(Context context) { super(context); }
+
+        @Override public void onResume() {
+            super.onResume();
+            requestFocus();
+        }
+
+        @Override public void onWindowFocusChanged(boolean hasWindowFocus) {
+            super.onWindowFocusChanged(hasWindowFocus);
+            if (hasWindowFocus) requestFocus();
         }
     }
 
