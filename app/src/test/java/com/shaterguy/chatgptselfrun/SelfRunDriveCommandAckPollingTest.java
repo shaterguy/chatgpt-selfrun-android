@@ -31,7 +31,7 @@ public class SelfRunDriveCommandAckPollingTest {
         assertTrue(apply.contains("if(awaiting){awaiting=false;clearCommandWait(e);}"));
         assertTrue(seen.contains(": safe(version)"));
         assertTrue(poll.contains("if(!changed&&!resume&&!retry){applyDriveResult(epoch,this::scheduleDrivePoll);return;}"));
-        assertTrue(poll.indexOf("store.applyDriveSignals") < poll.indexOf("store.updateDriveSeen"));
+        assertTrue(poll.contains("store.applyDriveSignals(scan.unseen,System.currentTimeMillis(),CONTINUATION_GUARD_MS);store.updateDriveSeen(metadata.version,metadata.modifiedTime)"));
     }
 
     @Test public void fiveMinuteRetryCanOnlyHappenAfterLatestBodyRead() throws Exception {
