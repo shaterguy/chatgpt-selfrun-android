@@ -33,7 +33,7 @@ final class SelfRunProtocol {
     static String driveContinuation(String runId){return driveContinuation(runId,"");}
     static String driveContinuation(String runId,String nextInput){
         if(consumeTurnInfoRewrite(runId))return turnInfoRewrite(runId);
-        String base="["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Recevied Record Required";
+        String base="["+kstTimestamp(new Date())+"] "+continuation(runId)+"\nCommand Received Record Required";
         return nextInput==null||nextInput.isEmpty()?base:base+"\n"+nextInput;
     }
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}
