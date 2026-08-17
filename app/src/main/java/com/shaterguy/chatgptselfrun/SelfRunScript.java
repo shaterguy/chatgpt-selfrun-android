@@ -5,6 +5,7 @@ final class SelfRunScript {
     static final String GENERAL_CHAT_URL = "https://chatgpt.com/";
     static final String GENERAL_CHAT_SCOPE = "__GENERAL_CHAT__";
     private static final int MAX_OPAQUE_ID_LENGTH = 160;
+    private static final int MAX_URL_LENGTH = 2048;
 
     private SelfRunScript() {}
 
@@ -13,13 +14,24 @@ final class SelfRunScript {
         return ref == null ? (isGeneralChatUrl(url) ? GENERAL_CHAT_SCOPE : "") : ref.projectId;
     }
 
+    /**
+     * General-chat runtime routes are identified by their canonical path, not provider-added
+     * query/fragment state. Both chatgpt.com and www.chatgpt.com are accepted because the
+     * WebView-side guard already treats them as the same trusted ChatGPT surface.
+     */
     static boolean isGeneralChatUrl(String url) {
-        if (!ProjectUrlPolicy.isTrustedChatgptPage(url)) return false;
+        if (url == null || url.isEmpty() || url.length() > MAX_URL_LENGTH || containsControl(url)) return false;
         try {
             java.net.URI uri = java.net.URI.create(url.trim());
-            if (uri.getRawQuery() != null || uri.getRawFragment() != null) return false;
+            String host = uri.getHost();
+            if (!"https".equals(uri.getScheme())
+                    || !("chatgpt.com".equals(host) || "www.chatgpt.com".equals(host))
+                    || uri.getRawUserInfo() != null || uri.getPort() != -1) return false;
+            String rawPath = uri.getRawPath();
             String path = uri.getPath();
-            if (path == null || path.isEmpty() || "/".equals(path)) return true;
+            if (rawPath == null || !rawPath.equals(path) || rawPath.contains("//")
+                    || rawPath.contains("\\") || rawPath.contains("..") || rawPath.contains("%")) return false;
+            if (path.isEmpty() || "/".equals(path)) return true;
             String[] segments = path.split("/");
             return segments.length == 3 && "c".equals(segments[1]) && validOpaqueId(segments[2]);
         } catch (IllegalArgumentException ignored) {
@@ -48,6 +60,11 @@ final class SelfRunScript {
                     || (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
         }
         return true;
+    }
+
+    private static boolean containsControl(String value) {
+        for (int i = 0; i < value.length(); i++) if (Character.isISOControl(value.charAt(i))) return true;
+        return false;
     }
 
     static String quote(String value) {
