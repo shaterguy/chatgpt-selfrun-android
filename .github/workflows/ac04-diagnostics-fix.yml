@@ -1,0 +1,42 @@
+name: Apply AC04 continuation diagnostics
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.2.3-dev11'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' && contains(github.event.head_commit.message, 'stage ac04 diagnostics workflow') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply narrowly scoped AC04 patch
+        run: python3 tools/apply_ac04_diagnostics.py
+      - name: Validate patch shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test ! -e .github/workflows/ac04-diagnostics-fix.yml
+          test ! -e tools/apply_ac04_diagnostics.py
+          git diff -- app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRunLog.java \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunWebDiagnostics.java \
+            app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunWebDiagnosticsTest.java \
+            app/src/test/java/com/shaterguy/chatgptselfrun/ContinuationDiagnosticsPolicyTest.java
+      - name: Commit final source-only patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(drive): log continuation wait diagnostics'
+          git push origin HEAD:selfrun-drive/v1.2.3-dev11
