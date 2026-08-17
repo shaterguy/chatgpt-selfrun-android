@@ -14,8 +14,16 @@ import java.time.format.DateTimeFormatter;
 final class WebUiCalibrationStore {
     static final String PURPOSE_MODE_CHAT = "MODE_CHAT";
     static final String PURPOSE_MODE_WORK = "MODE_WORK";
-    static final String PURPOSE_WORK_MODEL = "WORK_MODEL";
-    static final String PURPOSE_WORK_REASONING = "WORK_REASONING";
+
+    static final String PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL = "GENERAL_BOOTSTRAP_WORK_MODEL";
+    static final String PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING = "GENERAL_BOOTSTRAP_WORK_REASONING";
+    static final String PURPOSE_GENERAL_CONTINUATION_WORK_MODEL = "GENERAL_CONTINUATION_WORK_MODEL";
+    static final String PURPOSE_GENERAL_CONTINUATION_WORK_REASONING = "GENERAL_CONTINUATION_WORK_REASONING";
+    static final String PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL = "PROJECT_BOOTSTRAP_WORK_MODEL";
+    static final String PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING = "PROJECT_BOOTSTRAP_WORK_REASONING";
+    static final String PURPOSE_PROJECT_CONTINUATION_WORK_MODEL = "PROJECT_CONTINUATION_WORK_MODEL";
+    static final String PURPOSE_PROJECT_CONTINUATION_WORK_REASONING = "PROJECT_CONTINUATION_WORK_REASONING";
+
     static final String PURPOSE_PROJECT_NEW_CHAT = "PROJECT_NEW_CHAT";
     static final String PURPOSE_GENERAL_NEW_CHAT = "GENERAL_NEW_CHAT";
 
@@ -66,7 +74,7 @@ final class WebUiCalibrationStore {
             JSONObject viewport = capture.optJSONObject("viewport");
             if (viewport != null && viewport.optInt("innerWidth", 0) > 0
                     && viewport.optInt("innerHeight", 0) > 0) profile.put("viewport", viewport);
-            profile.put("version", 1);
+            profile.put("version", 2);
             profile.put("updatedAt", System.currentTimeMillis());
             profile.put("lastPurpose", purpose);
             boolean committed = prefs.edit().putString(KEY_PROFILE, profile.toString()).commit();
@@ -84,7 +92,7 @@ final class WebUiCalibrationStore {
             if (raw != null && !raw.isEmpty()) return new JSONObject(raw);
         } catch (Throwable ignored) {}
         JSONObject fresh = new JSONObject();
-        try { fresh.put("version", 1); fresh.put("targets", new JSONObject()); } catch (Throwable ignored) {}
+        try { fresh.put("version", 2); fresh.put("targets", new JSONObject()); } catch (Throwable ignored) {}
         return fresh;
     }
 
@@ -108,6 +116,16 @@ final class WebUiCalibrationStore {
             return hasTarget(TARGET_GENERAL_COMPOSER) && hasTarget(TARGET_GENERAL_SEND) ? "확보됨" : "미설정";
         }
         return hasTarget(purpose) ? "확보됨" : "미설정";
+    }
+
+    static String workModelPurpose(boolean general, boolean bootstrap) {
+        if (general) return bootstrap ? PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL : PURPOSE_GENERAL_CONTINUATION_WORK_MODEL;
+        return bootstrap ? PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL : PURPOSE_PROJECT_CONTINUATION_WORK_MODEL;
+    }
+
+    static String workReasoningPurpose(boolean general, boolean bootstrap) {
+        if (general) return bootstrap ? PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING : PURPOSE_GENERAL_CONTINUATION_WORK_REASONING;
+        return bootstrap ? PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING : PURPOSE_PROJECT_CONTINUATION_WORK_REASONING;
     }
 
     synchronized void clearAll() {
@@ -176,7 +194,14 @@ final class WebUiCalibrationStore {
 
     private static boolean knownPurpose(String purpose) {
         return PURPOSE_MODE_CHAT.equals(purpose) || PURPOSE_MODE_WORK.equals(purpose)
-                || PURPOSE_WORK_MODEL.equals(purpose) || PURPOSE_WORK_REASONING.equals(purpose)
+                || PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL.equals(purpose)
+                || PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING.equals(purpose)
+                || PURPOSE_GENERAL_CONTINUATION_WORK_MODEL.equals(purpose)
+                || PURPOSE_GENERAL_CONTINUATION_WORK_REASONING.equals(purpose)
+                || PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL.equals(purpose)
+                || PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING.equals(purpose)
+                || PURPOSE_PROJECT_CONTINUATION_WORK_MODEL.equals(purpose)
+                || PURPOSE_PROJECT_CONTINUATION_WORK_REASONING.equals(purpose)
                 || PURPOSE_PROJECT_NEW_CHAT.equals(purpose) || PURPOSE_GENERAL_NEW_CHAT.equals(purpose);
     }
 
