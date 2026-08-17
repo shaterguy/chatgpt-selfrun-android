@@ -61,16 +61,16 @@ public class SelfRunProtocolTest {
         String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC);
         assertTrue(bootstrap.split("\\n", 2)[0].matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_BOOTSTRAP 0\\.2\\.0 .*"));
         String driveContinue = SelfRunProtocol.driveContinuation(RUN);
-        assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]\\nCommand Recevied Record Required$"));
+        assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]\\nCommand Received Record Required$"));
         assertEquals("[SELF_RUN_CONTINUE " + RUN + "]", SelfRunProtocol.continuation(RUN));
         assertFalse(driveContinue.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
-        assertTrue(driveContinue.contains("Command Recevied Record Required"));
+        assertFalse(driveContinue.contains("Recevied"));
     }
 
     @Test public void driveContinueAppendsNextInputExactlyOnce() {
         String input = "선택=승인\n둘째 줄  ";
         String driveContinue = SelfRunProtocol.driveContinuation(RUN, input);
-        assertTrue(driveContinue.endsWith("Command Recevied Record Required\n" + input));
+        assertTrue(driveContinue.endsWith("Command Received Record Required\n" + input));
         assertEquals(1, occurrences(driveContinue, input));
     }
 
