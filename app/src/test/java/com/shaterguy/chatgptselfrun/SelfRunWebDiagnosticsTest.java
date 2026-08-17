@@ -13,8 +13,10 @@ public class SelfRunWebDiagnosticsTest {
                 SelfRunWebDiagnostics.waitDetail("UI_WAIT", "입력 반영 확인 대기"));
         assertEquals("status=WAIT;reason=input_wait",
                 SelfRunWebDiagnostics.waitDetail("WAIT", "continuation 입력 대기"));
-        assertEquals("status=UI_WAIT;reason=ui_wait",
-                SelfRunWebDiagnostics.waitDetail("UI_WAIT", "future detail containing user text"));
+        String future = SelfRunWebDiagnostics.waitDetail("UI_WAIT", "future detail containing user text");
+        assertEquals("status=UI_WAIT;reason=ui_wait", future);
+        assertFalse(future.contains("future detail"));
+        assertFalse(future.contains("user text"));
     }
 
     @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {
