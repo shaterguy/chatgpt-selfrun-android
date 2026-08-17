@@ -1,7 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
 import java.net.URI;
-import java.util.Locale;
 
 /** Strict, shared policy for every persisted or executed ChatGPT project target. */
 final class ProjectUrlPolicy {
@@ -57,6 +56,14 @@ final class ProjectUrlPolicy {
     }
 
     static boolean sameConversation(String expected, String actual) {
+        boolean expectedGeneral = SelfRunScript.isGeneralChatUrl(expected);
+        boolean actualGeneral = SelfRunScript.isGeneralChatUrl(actual);
+        if (expectedGeneral || actualGeneral) {
+            if (!expectedGeneral || !actualGeneral) return false;
+            String left = SelfRunScript.conversationId(expected);
+            String right = SelfRunScript.conversationId(actual);
+            return !left.isEmpty() && left.equals(right);
+        }
         ProjectRef left = parseProject(expected), right = parseProject(actual);
         return left != null && right != null && !left.conversationId.isEmpty()
                 && left.projectId.equals(right.projectId) && left.conversationId.equals(right.conversationId);
