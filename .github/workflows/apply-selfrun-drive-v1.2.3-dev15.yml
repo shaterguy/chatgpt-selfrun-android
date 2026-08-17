@@ -1,0 +1,116 @@
+name: Apply SelfRun Drive v1.2.3-dev15
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.2.3-dev15'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.2.3-dev15
+          fetch-depth: 0
+      - name: Apply scoped general Chat continuation fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def patch(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected text not found in {path}: {old[:160]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          patch(
+              'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '''void captureConversationUrl(String value){
+    ProjectUrlPolicy.ProjectRef expected=ProjectUrlPolicy.parseProject(projectUrl()),actual=ProjectUrlPolicy.parseProject(value);
+    if(!conversationUrl().isEmpty()||expected==null||actual==null||actual.conversationId.isEmpty()||!expected.projectId.equals(actual.projectId))return;
+    commitOrThrow(prefs.edit().putString("conversationUrl",safe(value)));syncHistory();
+}
+''',
+              '''static boolean canCaptureConversationUrl(String projectUrl,String value){
+    if(SelfRunScript.isGeneralChatUrl(projectUrl)){
+        return SelfRunScript.isGeneralChatUrl(value)&&!SelfRunScript.conversationId(value).isEmpty();
+    }
+    ProjectUrlPolicy.ProjectRef expected=ProjectUrlPolicy.parseProject(projectUrl),actual=ProjectUrlPolicy.parseProject(value);
+    return expected!=null&&actual!=null&&!actual.conversationId.isEmpty()&&expected.projectId.equals(actual.projectId);
+}
+void captureConversationUrl(String value){
+    if(!conversationUrl().isEmpty()||!canCaptureConversationUrl(projectUrl(),value))return;
+    commitOrThrow(prefs.edit().putString("conversationUrl",safe(value)));syncHistory();
+}
+'''
+          )
+
+          patch(
+              'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java',
+              '''private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);runLog.record(store,"CONVERSATION_CAPTURED","trusted_project_route");}}
+''',
+              '''private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
+'''
+          )
+
+          test = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunGeneralChatPolicyTest.java')
+          text = test.read_text(encoding='utf-8')
+          marker = '''    @Test public void generalChatIsSelectedFromTheFixedSafeOption() throws Exception {
+'''
+          extra = '''    @Test public void conversationCapturePolicySupportsGeneralAndProjectRoutes() {
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/c/conversation123"));
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://www.chatgpt.com/c/conversation123?temporary=1#state"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/settings"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                SelfRunScript.GENERAL_CHAT_URL, "https://chatgpt.com/g/g-p-test/c/conversation123"));
+
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-test/c/conversation123"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-other/c/conversation123"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/c/conversation123"));
+    }
+
+    @Test public void captureLogRequiresPersistedConversationRoute() throws Exception {
+        String service = src("SelfRunService.java");
+        assertTrue(service.contains("store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))"));
+        assertTrue(service.contains("trusted_general_route"));
+        assertTrue(service.contains("trusted_project_route"));
+    }
+
+'''
+          if extra.strip() in text:
+              raise SystemExit('general Chat capture regression tests already present')
+          if marker not in text:
+              raise SystemExit('general Chat policy insertion marker missing')
+          test.write_text(text.replace(marker, extra + marker, 1), encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/apply-selfrun-drive-v1.2.3-dev15.yml
+          git diff --check
+          git diff -- app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java \
+                     app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
+                     app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunGeneralChatPolicyTest.java
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java \
+                  app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunGeneralChatPolicyTest.java \
+                  .github/workflows/apply-selfrun-drive-v1.2.3-dev15.yml
+          git commit -m 'fix(dev15): persist general Chat conversation route'
+          git push origin HEAD:selfrun-drive/v1.2.3-dev15
