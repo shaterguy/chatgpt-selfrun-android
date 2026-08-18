@@ -1,9 +1,18 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
+import android.content.UriPermission;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 final class SelfRunStore {
     /** Shared by Activity run replacement and Service result application. */
@@ -16,6 +25,7 @@ final class SelfRunStore {
     static final String PHASE_DRIVE_BASE_FOLDER_CHECK = "DRIVE_BASE_FOLDER_CHECK";
     static final String PHASE_JOB_ID_CREATE = "JOB_ID_CREATE";
     static final String PHASE_DRIVE_JOB_FOLDER_CREATE = "DRIVE_JOB_FOLDER_CREATE";
+    static final String PHASE_DRIVE_ATTACHMENT_UPLOAD = "DRIVE_ATTACHMENT_UPLOAD";
     static final String PHASE_DRIVE_TURN_DOCUMENT_CREATE = "DRIVE_TURN_DOCUMENT_CREATE";
     static final String PHASE_DRIVE_DOCUMENT_INIT = "DRIVE_DOCUMENT_INIT";
     static final String PHASE_DRIVE_DOCUMENT_READBACK = "DRIVE_DOCUMENT_READBACK";
@@ -39,6 +49,14 @@ final class SelfRunStore {
     static final String CREATION_DOCUMENT_CREATING = "DOCUMENT_CREATING";
     static final String CREATION_DOCUMENT_CREATED = "DOCUMENT_CREATED";
 
+    static final String ATTACHMENT_PENDING = "PENDING";
+    static final String ATTACHMENT_ID_RESERVED = "ID_RESERVED";
+    static final String ATTACHMENT_UPLOADING = "UPLOADING";
+    static final String ATTACHMENT_COMMITTED = "COMMITTED";
+    static final int MAX_ATTACHMENTS_PER_RUN = 10;
+    static final long MAX_ATTACHMENT_BYTES = 100L * 1024L * 1024L;
+    static final int MAX_ATTACHMENT_UPLOAD_ATTEMPTS = 3;
+
     static final String EVENT_DETECTED = "EVENT_DETECTED";
     static final String EVENT_GUARDING = "EVENT_GUARDING";
     static final String SUBMISSION_STARTED = "SUBMISSION_STARTED";
@@ -50,6 +68,37 @@ final class SelfRunStore {
     static final String RETRY_BOOTSTRAP = "BOOTSTRAP";
     static final String RETRY_CONTINUE = "CONTINUE";
     private static final String COMMAND_ACK_FORCE_BODY_VERSION = "__COMMAND_ACK_FORCE_BODY__";
+    private static final String KEY_ATTACHMENTS = "attachmentsJson";
+    private static final String KEY_ATTACHMENT_GRANT_CLEANUP = "attachmentGrantCleanupJson";
+
+    static final class Attachment {
+        final int index;
+        final String uri;
+        final String name;
+        final String mimeType;
+        final long size;
+        final String driveFileId;
+        final String stage;
+        final int uploadAttempts;
+
+        Attachment(int index, String uri, String name, String mimeType, long size,
+                   String driveFileId, String stage, int uploadAttempts) {
+            this.index = index;
+            this.uri = safe(uri);
+            this.name = safe(name);
+            this.mimeType = safe(mimeType);
+            this.size = size;
+            this.driveFileId = safe(driveFileId);
+            this.stage = safe(stage);
+            this.uploadAttempts = Math.max(0, uploadAttempts);
+        }
+
+        static Attachment draft(int index, String uri, String name, String mimeType, long size) {
+            return new Attachment(index, uri, name, mimeType, size, "", ATTACHMENT_PENDING, 0);
+        }
+
+        boolean committed() { return ATTACHMENT_COMMITTED.equals(stage); }
+    }
 
     private final SharedPreferences prefs;
     private final SelfRunHistoryStore history;
@@ -59,9 +108,14 @@ final class SelfRunStore {
         app = context.getApplicationContext();
         prefs = app.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE);
         history = new SelfRunHistoryStore(app);
+        drainAttachmentGrantCleanupJournal();
     }
 
     void start(String runId, String mode, String projectUrl, String requirement) {
+        start(runId, mode, projectUrl, requirement, new ArrayList<>());
+    }
+
+    void start(String runId, String mode, String projectUrl, String requirement, List<Attachment> attachments) {
         synchronized (RUN_STATE_LOCK) {
             if (!DriveApiClient.validOpaqueAccountId(driveAccountId())
                     || !DriveApiClient.validFileId(driveRunsBaseFolderId())) {
@@ -73,18 +127,18 @@ final class SelfRunStore {
                 if (ref == null) throw new IllegalArgumentException("trusted ChatGPT project URL required");
                 target = ref.canonicalUrl;
             }
-            startLocked(runId, mode, target, requirement);
+            startLocked(runId, mode, target, requirement, normalizeDrafts(attachments));
         }
     }
 
-private void startLocked(String runId,String mode,String projectUrl,String requirement){
+private void startLocked(String runId,String mode,String projectUrl,String requirement,List<Attachment> attachments){
  long now=System.currentTimeMillis();
  commitOrThrow(prefs.edit().putString("runId",safe(runId)).putLong("createdAt",now).putLong("phaseStartedAt",now)
   .putString("mode",safe(mode)).putString("projectUrl",safe(projectUrl)).putString("requirement",safe(requirement)).putString("conversationUrl","")
   .putString("phase",PHASE_DRIVE_ACCOUNT_CHECK).putString("status","Drive 계정 확인 준비")
   .putString("pendingModel",MODE_WORK.equals(mode)?"sol":"").putString("pendingReasoning",MODE_WORK.equals(mode)?"xhigh":"")
   .putString("lastErrorCode","").putString("lastErrorMessage","").putString("runDriveAccountId",driveAccountId()).putString("runBaseFolderId",driveRunsBaseFolderId())
-  .putString("jobFolderId","").putString("turnDocumentId","").putString("turnDocumentUrl","").putInt("turn",0).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","")
+  .putString("jobFolderId","").putString("turnDocumentId","").putString("turnDocumentUrl","").putString(KEY_ATTACHMENTS,encodeAttachments(attachments)).putString(KEY_ATTACHMENT_GRANT_CLEANUP,"[]").putInt("turn",0).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","")
   .putInt("driveSignalCursor",0).putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","")
   .putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L)
   .putString("activeCommandPrompt","").putString("activeCommandKind","").putInt("commandAttempt",0).putBoolean("awaitingCommandAck",false)
@@ -100,28 +154,35 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
 
     void stopByUser() {
         synchronized (RUN_STATE_LOCK) {
-            commitOrThrow(prefs.edit().putBoolean("active", false).putBoolean("paused", false)
+            List<Attachment> priorAttachments = attachments();
+            commitOrThrow(prefs.edit().putString(KEY_ATTACHMENTS, "[]")
+                    .putString(KEY_ATTACHMENT_GRANT_CLEANUP, encodeAttachmentUris(priorAttachments))
+                    .putBoolean("active", false).putBoolean("paused", false)
                     .putBoolean("userStopped", true).putString("phase", PHASE_IDLE)
                     .putString("status", "사용자 중지").putLong("phaseStartedAt", System.currentTimeMillis()));
+            drainAttachmentGrantCleanupJournal();
             syncHistory();
         }
     }
 
     void clear() {
-        String account = driveAccountId();
-        String id = driveRunsBaseFolderId(), name = driveRunsBaseFolderName(), url = driveRunsBaseFolderUrl();
-        long boundAt = driveRunsBaseFolderBoundAt();
-        new ProjectCatalog(app).clear();
-        commitOrThrow(prefs.edit().clear().putString("driveAccountId", account)
-                .putString("driveRunsBaseFolderId", id).putString("driveRunsBaseFolderName", name)
-                .putString("driveRunsBaseFolderUrl", url).putLong("driveRunsBaseFolderBoundAt", boundAt));
+        synchronized (RUN_STATE_LOCK) {
+            List<Attachment> priorAttachments = attachments();
+            String account = driveAccountId();
+            String id = driveRunsBaseFolderId(), name = driveRunsBaseFolderName(), url = driveRunsBaseFolderUrl();
+            long boundAt = driveRunsBaseFolderBoundAt();
+            new ProjectCatalog(app).clear();
+            commitOrThrow(prefs.edit().clear().putString("driveAccountId", account)
+                    .putString("driveRunsBaseFolderId", id).putString("driveRunsBaseFolderName", name)
+                    .putString("driveRunsBaseFolderUrl", url).putLong("driveRunsBaseFolderBoundAt", boundAt)
+                    .putString(KEY_ATTACHMENT_GRANT_CLEANUP, encodeAttachmentUris(priorAttachments)));
+            drainAttachmentGrantCleanupJournal();
+        }
     }
 
     void bindBaseFolder(String accountId, String id, String name, String url, long boundAt) {
         DriveApiClient.requireParent(id);
-        if (!DriveApiClient.validOpaqueAccountId(accountId)) {
-            throw new IllegalArgumentException("Drive account permissionId required");
-        }
+        if (!DriveApiClient.validOpaqueAccountId(accountId)) throw new IllegalArgumentException("Drive account permissionId required");
         commitOrThrow(prefs.edit().putString("driveAccountId", safe(accountId)).putString("driveRunsBaseFolderId", id)
                 .putString("driveRunsBaseFolderName", safe(name)).putString("driveRunsBaseFolderUrl", safe(url))
                 .putLong("driveRunsBaseFolderBoundAt", boundAt));
@@ -183,13 +244,8 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     long submissionRetryDueAt() { return prefs.getLong("submissionRetryDueAt", 0L); }
     int submissionRetryAttempt() { return prefs.getInt("submissionRetryAttempt", 0); }
     boolean submissionRetryReady() { return prefs.getBoolean("submissionRetryReady", false); }
-    boolean hasSubmissionRetry() {
-        return (RETRY_BOOTSTRAP.equals(submissionRetryKind()) || RETRY_CONTINUE.equals(submissionRetryKind()))
-                && submissionRetryDueAt() > 0L;
-    }
-    boolean submissionRetryDue() {
-        return hasSubmissionRetry() && System.currentTimeMillis() >= submissionRetryDueAt();
-    }
+    boolean hasSubmissionRetry() { return (RETRY_BOOTSTRAP.equals(submissionRetryKind()) || RETRY_CONTINUE.equals(submissionRetryKind())) && submissionRetryDueAt() > 0L; }
+    boolean submissionRetryDue() { return hasSubmissionRetry() && System.currentTimeMillis() >= submissionRetryDueAt(); }
     boolean retryForBootstrap() { return RETRY_BOOTSTRAP.equals(submissionRetryKind()); }
     boolean retryForContinue() { return RETRY_CONTINUE.equals(submissionRetryKind()); }
     String creationStage() { return getOr("creationStage", CREATION_NONE); }
@@ -201,6 +257,20 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String terminalSideEffectType() { return get("terminalSideEffectType"); }
     String terminalSideEffectRunId() { return get("terminalSideEffectRunId"); }
     String terminalSideEffectCommitId() { return get("terminalSideEffectCommitId"); }
+
+    List<Attachment> attachments() { return decodeAttachments(get(KEY_ATTACHMENTS)); }
+    int attachmentCount() { return attachments().size(); }
+    boolean hasAttachments() { return attachmentCount() > 0; }
+    boolean allAttachmentsCommitted() {
+        List<Attachment> items = attachments();
+        if (items.isEmpty()) return true;
+        for (Attachment item : items) if (!item.committed()) return false;
+        return true;
+    }
+    Attachment nextUncommittedAttachment() {
+        for (Attachment item : attachments()) if (!item.committed()) return item;
+        return null;
+    }
 
     private boolean hasPendingDriveCompletion() { return DriveSignalParser.Type.TURN_COMPLETED.name().equals(pendingDriveSignalType())&&!pendingDriveSignalRaw().isEmpty(); }
     private DriveSignalParser.WorkProfile pendingDriveWorkProfile() { return DriveSignalParser.workProfile(pendingDriveSignalRaw()); }
@@ -226,8 +296,7 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
 
     void reserveJobFolderId(String id) {
         DriveApiClient.requireParent(id);
-        commitOrThrow(prefs.edit().putString("jobFolderId", id)
-                .putString("creationStage", CREATION_FOLDER_ID_RESERVED));
+        commitOrThrow(prefs.edit().putString("jobFolderId", id).putString("creationStage", CREATION_FOLDER_ID_RESERVED));
     }
     void markJobFolderCreating() {
         if (jobFolderId().isEmpty()) throw new IllegalStateException("reserved folder id required");
@@ -239,10 +308,73 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
         if (!turnDocumentId().isEmpty()) throw new IllegalStateException("created document cannot be reset");
         commitOrThrow(prefs.edit().putString("creationStage", CREATION_FOLDER_CREATED));
     }
+
+    void reserveAttachmentFileId(int index, String fileId) {
+        DriveApiClient.requireParent(fileId);
+        synchronized (RUN_STATE_LOCK) {
+            Attachment item = requireAttachment(index);
+            if (item.committed()) return;
+            if (!item.driveFileId.isEmpty() && !item.driveFileId.equals(fileId)) throw new IllegalStateException("attachment already owns a different Drive id");
+            replaceAttachment(new Attachment(item.index, item.uri, item.name, item.mimeType, item.size,
+                    fileId, ATTACHMENT_ID_RESERVED, item.uploadAttempts));
+        }
+    }
+
+    void updateAttachmentSize(int index, long size) {
+        if (size < 0 || size > MAX_ATTACHMENT_BYTES) throw new IllegalArgumentException("known attachment size required");
+        synchronized (RUN_STATE_LOCK) {
+            Attachment item = requireAttachment(index);
+            if (item.committed()) return;
+            replaceAttachment(new Attachment(item.index, item.uri, item.name, item.mimeType, size,
+                    item.driveFileId, item.stage, item.uploadAttempts));
+        }
+    }
+
+    void markAttachmentUploading(int index) {
+        synchronized (RUN_STATE_LOCK) {
+            Attachment item = requireAttachment(index);
+            if (item.committed()) return;
+            if (!DriveApiClient.validFileId(item.driveFileId)) throw new IllegalStateException("reserved Drive id required before upload");
+            if (item.uploadAttempts >= MAX_ATTACHMENT_UPLOAD_ATTEMPTS) throw new IllegalStateException("attachment upload retry budget exhausted");
+            replaceAttachment(new Attachment(item.index, item.uri, item.name, item.mimeType, item.size,
+                    item.driveFileId, ATTACHMENT_UPLOADING, item.uploadAttempts + 1));
+        }
+    }
+
+    void markAttachmentCommitted(int index) {
+        synchronized (RUN_STATE_LOCK) {
+            Attachment item = requireAttachment(index);
+            if (!item.committed()) {
+                if (!DriveApiClient.validFileId(item.driveFileId)) throw new IllegalStateException("committed attachment Drive id required");
+                // Persist COMMITTED before releasing the URI grant so a process death cannot lose both
+                // the source permission and the durable upload result. URI cleanup is recoverable below.
+                replaceAttachment(new Attachment(item.index, item.uri, item.name, item.mimeType, item.size,
+                        item.driveFileId, ATTACHMENT_COMMITTED, item.uploadAttempts));
+            }
+            releaseCommittedAttachmentPermissions();
+        }
+    }
+
+    void releaseCommittedAttachmentPermissions() {
+        synchronized (RUN_STATE_LOCK) {
+            List<Attachment> items = attachments();
+            boolean changed = false;
+            for (int i = 0; i < items.size(); i++) {
+                Attachment item = items.get(i);
+                if (!item.committed() || item.uri.isEmpty()) continue;
+                if (releaseAttachmentPermission(item.uri)) {
+                    items.set(i, new Attachment(item.index, "", item.name, item.mimeType, item.size,
+                            item.driveFileId, ATTACHMENT_COMMITTED, item.uploadAttempts));
+                    changed = true;
+                }
+            }
+            if (changed) commitOrThrow(prefs.edit().putString(KEY_ATTACHMENTS, encodeAttachments(items)));
+        }
+    }
+
     void updateDriveSeen(String version, String modifiedTime) {
         String seenVersion = awaitingCommandAck() ? COMMAND_ACK_FORCE_BODY_VERSION : safe(version);
-        commitOrThrow(prefs.edit().putString("lastSeenDriveVersion", seenVersion)
-                .putString("lastSeenModifiedTime", safe(modifiedTime)));
+        commitOrThrow(prefs.edit().putString("lastSeenDriveVersion", seenVersion).putString("lastSeenModifiedTime", safe(modifiedTime)));
     }
 
 void baselineDriveSignals(int cursor,DriveSignalParser.Event latest){SharedPreferences.Editor e=prefs.edit().putInt("driveSignalCursor",Math.max(0,cursor));putLatest(e,latest);commitOrThrow(e);syncHistory();}
@@ -252,19 +384,10 @@ void markCommandSubmitted(String kind,long due){if(!kind.equals(activeCommandKin
 void prepareCommandRetry(){if(!awaitingCommandAck()||!hasSubmissionRetry()||!submissionRetryDue())throw new IllegalStateException("command ACK retry is not due");String k=submissionRetryKind();String ph=RETRY_BOOTSTRAP.equals(k)?PHASE_BOOTSTRAP_SEND:PHASE_SEND_CONTINUE;commitOrThrow(prefs.edit().putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putBoolean("submissionRetryReady",false).putString("phase",ph).putString("status","COMMAND_RECEIVED 미수신 · 동일 명령 재제출 준비").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
 void applyDriveSignals(List<DriveSignalParser.Event> events,long detectedAt,long guardMs){if(events==null||events.isEmpty())return;SharedPreferences.Editor e=prefs.edit();boolean awaiting=awaitingCommandAck();int rank=PHASE_DONE.equals(phase())||PHASE_PAUSED.equals(phase())?3:PHASE_DRIVE_COMMIT_GUARD.equals(phase())?2:0;for(DriveSignalParser.Event x:events){e.putInt("driveSignalCursor",x.cursor);putLatest(e,x);if(awaiting){awaiting=false;clearCommandWait(e);}switch(x.type){case COMMAND_RECEIVED->{if(rank<2)e.putString("status","Drive COMMAND_RECEIVED 확인 · 작업 진행 중");}case TURN_COMPLETED->{if(!x.protocolError.isEmpty())continue;if(rank<2){rank=2;e.putString("pendingDriveSignalRaw",x.raw).putString("pendingDriveSignalTimestamp",x.timestamp).putString("pendingDriveSignalType",x.type.name()).putLong("commitDetectedAt",detectedAt).putLong("guardDueAt",detectedAt+guardMs).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED 확인 · 안전 지연");}}case USER_ACTION_REQUIRED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"사용자 조치 필요");}case PAUSED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"SelfRun Drive 일시정지");}case DONE->{rank=3;clearCommandWait(e);e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,x);}}}e.putBoolean("awaitingCommandAck",awaiting).putLong("phaseStartedAt",System.currentTimeMillis());commitOrThrow(e);syncHistory();}
 void repairGuard(long now,long guardMs){SharedPreferences.Editor e=prefs.edit();String raw=pendingDriveSignalRaw(),ts=pendingDriveSignalTimestamp();if(!DriveSignalParser.Type.TURN_COMPLETED.name().equals(pendingDriveSignalType())||raw.isEmpty()){if(DriveSignalParser.Type.TURN_COMPLETED.name().equals(lastDriveSignalType())&&!lastDriveSignalRaw().isEmpty()){raw=lastDriveSignalRaw();ts=lastDriveSignalTimestamp();}else{int cursor=driveSignalCursor();int recoveryCursor=cursor>0?driveSignalCursor()-1:Integer.MAX_VALUE;commitOrThrow(e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putInt("driveSignalCursor",recoveryCursor).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","").putString("phase",PHASE_WAIT_DRIVE_COMMIT).putString("status",cursor>0?"Drive 완료 signal guard 손상 · 직전 신호 재검증":"Drive 완료 signal guard 손상 · 현재 문서 baseline 재확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}}commitOrThrow(e.putString("pendingDriveSignalRaw",raw).putString("pendingDriveSignalTimestamp",ts).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name()).putLong("commitDetectedAt",now).putLong("guardDueAt",now+guardMs).putString("phase",PHASE_DRIVE_COMMIT_GUARD).putString("status","Drive TURN_COMPLETED guard 복구"));syncHistory();}
-void beginManualResumeOverride(){commitOrThrow(clearCommandWait(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 override · Drive 최신 신호 baseline 확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
+void beginManualResumeOverride(){if(PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(pausedFromPhase())&&turnDocumentId().isEmpty()){commitOrThrow(clearCommandWait(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DRIVE_ATTACHMENT_UPLOAD).putString("status","사용자 재개 · 첨부파일 Drive 업로드 재확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}commitOrThrow(clearCommandWait(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putLong("guardDueAt",0L).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 override · Drive 최신 신호 baseline 확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
 void baselineManualResume(int cursor,DriveSignalParser.Event latest,DriveSignalParser.Event latestUnseenCompletion){SharedPreferences.Editor e=clearCommandWait(prefs.edit()).putInt("driveSignalCursor",Math.max(0,cursor)).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("phase",PHASE_SEND_CONTINUE).putString("status","사용자 재개 override · CONTINUE 강제 제출 준비").putLong("phaseStartedAt",System.currentTimeMillis());if(latestUnseenCompletion!=null&&latestUnseenCompletion.protocolError.isEmpty()){e.putString("pendingDriveSignalRaw",latestUnseenCompletion.raw).putString("pendingDriveSignalTimestamp",latestUnseenCompletion.timestamp).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name());}else{e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","");}putLatest(e,latest);commitOrThrow(e);syncHistory();}
-static boolean canCaptureConversationUrl(String projectUrl,String value){
-    if(SelfRunScript.isGeneralChatUrl(projectUrl)){
-        return SelfRunScript.isGeneralChatUrl(value)&&!SelfRunScript.conversationId(value).isEmpty();
-    }
-    ProjectUrlPolicy.ProjectRef expected=ProjectUrlPolicy.parseProject(projectUrl),actual=ProjectUrlPolicy.parseProject(value);
-    return expected!=null&&actual!=null&&!actual.conversationId.isEmpty()&&expected.projectId.equals(actual.projectId);
-}
-void captureConversationUrl(String value){
-    if(!conversationUrl().isEmpty()||!canCaptureConversationUrl(projectUrl(),value))return;
-    commitOrThrow(prefs.edit().putString("conversationUrl",safe(value)));syncHistory();
-}
+static boolean canCaptureConversationUrl(String projectUrl,String value){if(SelfRunScript.isGeneralChatUrl(projectUrl)){return SelfRunScript.isGeneralChatUrl(value)&&!SelfRunScript.conversationId(value).isEmpty();}ProjectUrlPolicy.ProjectRef expected=ProjectUrlPolicy.parseProject(projectUrl),actual=ProjectUrlPolicy.parseProject(value);return expected!=null&&actual!=null&&!actual.conversationId.isEmpty()&&expected.projectId.equals(actual.projectId);}
+void captureConversationUrl(String value){if(!conversationUrl().isEmpty()||!canCaptureConversationUrl(projectUrl(),value))return;commitOrThrow(prefs.edit().putString("conversationUrl",safe(value)));syncHistory();}
 private static SharedPreferences.Editor clearCommandWait(SharedPreferences.Editor e){return e.putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putInt("submissionRetryAttempt",0).putBoolean("submissionRetryReady",false);}
 private static void putLatest(SharedPreferences.Editor e,DriveSignalParser.Event x){if(x==null)e.putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","");else e.putString("lastDriveSignalRaw",x.raw).putString("lastDriveSignalTimestamp",x.timestamp).putString("lastDriveSignalType",x.type.name());}
 private void pauseEvent(SharedPreferences.Editor e,DriveSignalParser.Event x,String status){e.putBoolean("paused",true).putBoolean("active",true).putBoolean("resumeNeedsContinuation",true).putString("pausedFromPhase",PHASE_WAIT_DRIVE_COMMIT).putString("phase",PHASE_PAUSED).putString("status",status);terminal(e,x);}
@@ -283,8 +406,7 @@ private void terminal(SharedPreferences.Editor e,DriveSignalParser.Event x){e.pu
         synchronized (RUN_STATE_LOCK) {
             if (!terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return false;
             commitOrThrow(prefs.edit().putBoolean("terminalSideEffectPending", false)
-                    .putString("terminalSideEffectType", "")
-                    .putString("terminalSideEffectRunId", "")
+                    .putString("terminalSideEffectType", "").putString("terminalSideEffectRunId", "")
                     .putString("terminalSideEffectCommitId", ""));
             return true;
         }
@@ -300,6 +422,157 @@ private void terminal(SharedPreferences.Editor e,DriveSignalParser.Event x){e.pu
         commitOrThrow(prefs.edit().putBoolean("paused", false).putBoolean("active", true).putBoolean("userStopped", false)
                 .putString("phase", safe(nextPhase)).putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory();
     }
+
+    static String encodeAttachmentDrafts(List<Attachment> attachments) { return encodeAttachments(normalizeDrafts(attachments)); }
+    static List<Attachment> decodeAttachmentDrafts(String raw) { return decodeAttachments(raw); }
+
+    private static List<Attachment> normalizeDrafts(List<Attachment> source) {
+        ArrayList<Attachment> result = new ArrayList<>();
+        Set<Integer> indexes = new HashSet<>();
+        Set<String> uris = new HashSet<>();
+        if (source == null) return result;
+        if (source.size() > MAX_ATTACHMENTS_PER_RUN) throw new IllegalArgumentException("too many attachments");
+        for (Attachment item : source) {
+            if (item == null || item.index < 0 || !indexes.add(item.index)) throw new IllegalArgumentException("unique attachment index required");
+            Uri parsed = Uri.parse(item.uri);
+            if (!"content".equals(parsed.getScheme()) || item.uri.isEmpty() || !uris.add(item.uri)) throw new IllegalArgumentException("unique content attachment URI required");
+            if (item.name.isEmpty() || item.name.length() > 180) throw new IllegalArgumentException("safe attachment name required");
+            if (!DriveApiClient.validAttachmentMimeType(item.mimeType)) throw new IllegalArgumentException("safe attachment MIME type required");
+            if (item.size < -1 || item.size > MAX_ATTACHMENT_BYTES) throw new IllegalArgumentException("attachment size invalid");
+            result.add(Attachment.draft(item.index, item.uri, item.name, item.mimeType, item.size));
+        }
+        return result;
+    }
+
+    private static String encodeAttachments(List<Attachment> attachments) {
+        try {
+            JSONArray array = new JSONArray();
+            if (attachments != null) {
+                for (Attachment item : attachments) {
+                    array.put(new JSONObject().put("index", item.index).put("uri", item.uri)
+                            .put("name", item.name).put("mimeType", item.mimeType).put("size", item.size)
+                            .put("driveFileId", item.driveFileId).put("stage", item.stage).put("uploadAttempts", item.uploadAttempts));
+                }
+            }
+            return array.toString();
+        } catch (Throwable error) { throw new IllegalStateException("attachment state encode failed", error); }
+    }
+
+    private static List<Attachment> decodeAttachments(String raw) {
+        ArrayList<Attachment> result = new ArrayList<>();
+        if (raw == null || raw.isEmpty()) return result;
+        try {
+            JSONArray array = new JSONArray(raw);
+            Set<Integer> indexes = new HashSet<>();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject json = array.getJSONObject(i);
+                Attachment item = new Attachment(json.getInt("index"), json.optString("uri", ""),
+                        json.optString("name", ""), json.optString("mimeType", ""), json.optLong("size", -1L),
+                        json.optString("driveFileId", ""), json.optString("stage", ATTACHMENT_PENDING),
+                        json.optInt("uploadAttempts", 0));
+                if (array.length() > MAX_ATTACHMENTS_PER_RUN || item.index < 0 || !indexes.add(item.index) || item.name.isEmpty() || item.name.length() > 180
+                        || !DriveApiClient.validAttachmentMimeType(item.mimeType) || item.size < -1 || item.size > MAX_ATTACHMENT_BYTES
+                        || item.uploadAttempts < 0 || item.uploadAttempts > MAX_ATTACHMENT_UPLOAD_ATTEMPTS
+                        || !validAttachmentStage(item.stage)
+                        || (!item.driveFileId.isEmpty() && !DriveApiClient.validFileId(item.driveFileId))) {
+                    throw new IllegalStateException("attachment state invalid");
+                }
+                if (!item.committed()) {
+                    Uri parsed = Uri.parse(item.uri);
+                    if (!"content".equals(parsed.getScheme()) || item.uri.isEmpty()) throw new IllegalStateException("active attachment URI invalid");
+                }
+                result.add(item);
+            }
+            return result;
+        } catch (IllegalStateException error) { throw error; }
+        catch (Throwable error) { throw new IllegalStateException("attachment state decode failed", error); }
+    }
+
+    private static boolean validAttachmentStage(String stage) {
+        return ATTACHMENT_PENDING.equals(stage) || ATTACHMENT_ID_RESERVED.equals(stage)
+                || ATTACHMENT_UPLOADING.equals(stage) || ATTACHMENT_COMMITTED.equals(stage);
+    }
+
+    private Attachment requireAttachment(int index) {
+        for (Attachment item : attachments()) if (item.index == index) return item;
+        throw new IllegalStateException("attachment index not found");
+    }
+
+    private void replaceAttachment(Attachment updated) {
+        List<Attachment> items = attachments();
+        boolean replaced = false;
+        for (int i = 0; i < items.size(); i++) {
+            if (items.get(i).index == updated.index) { items.set(i, updated); replaced = true; break; }
+        }
+        if (!replaced) throw new IllegalStateException("attachment index not found");
+        commitOrThrow(prefs.edit().putString(KEY_ATTACHMENTS, encodeAttachments(items)));
+    }
+
+
+    void prepareAttachmentGrantHandoff(List<Attachment> attachments) {
+        List<Attachment> drafts = normalizeDrafts(attachments);
+        commitOrThrow(prefs.edit().putString(KEY_ATTACHMENT_GRANT_CLEANUP, encodeAttachmentUris(drafts)));
+    }
+
+    void cancelAttachmentGrantHandoff() { drainAttachmentGrantCleanupJournal(); }
+
+    private static String encodeAttachmentUris(List<Attachment> attachments) {
+        try {
+            JSONArray array = new JSONArray();
+            if (attachments != null) for (Attachment item : attachments) if (item != null && !item.uri.isEmpty()) array.put(item.uri);
+            return array.toString();
+        } catch (Throwable error) { throw new IllegalStateException("attachment grant journal encode failed", error); }
+    }
+
+    private List<String> decodeAttachmentGrantCleanupJournal() {
+        ArrayList<String> result = new ArrayList<>();
+        String raw = get(KEY_ATTACHMENT_GRANT_CLEANUP);
+        if (raw.isEmpty()) return result;
+        try {
+            JSONArray array = new JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                String value = array.optString(i, "");
+                Uri uri = Uri.parse(value);
+                if (!value.isEmpty() && "content".equals(uri.getScheme())) result.add(value);
+            }
+            return result;
+        } catch (Throwable ignored) { return result; }
+    }
+
+    private void drainAttachmentGrantCleanupJournal() {
+        synchronized (RUN_STATE_LOCK) {
+            List<String> pending = decodeAttachmentGrantCleanupJournal();
+            if (pending.isEmpty()) {
+                if (!"[]".equals(get(KEY_ATTACHMENT_GRANT_CLEANUP))) commitOrThrow(prefs.edit().putString(KEY_ATTACHMENT_GRANT_CLEANUP, "[]"));
+                return;
+            }
+            JSONArray remaining = new JSONArray();
+            for (String value : pending) if (!releaseAttachmentPermission(value)) remaining.put(value);
+            commitOrThrow(prefs.edit().putString(KEY_ATTACHMENT_GRANT_CLEANUP, remaining.toString()));
+        }
+    }
+
+    private boolean hasPersistedReadGrant(Uri uri) {
+        if (uri == null) return false;
+        try {
+            for (UriPermission permission : app.getContentResolver().getPersistedUriPermissions()) {
+                if (permission != null && permission.isReadPermission() && uri.equals(permission.getUri())) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private boolean releaseAttachmentPermission(String value) {
+        if (value == null || value.isEmpty()) return true;
+        try {
+            Uri uri = Uri.parse(value);
+            if (!"content".equals(uri.getScheme())) return true;
+            try { app.getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
+            catch (Throwable ignored) {}
+            return !hasPersistedReadGrant(uri);
+        } catch (Throwable ignored) { return false; }
+    }
+
 
     void syncHistory() { history.sync(this); }
     private void put(String key, String value) { commitOrThrow(prefs.edit().putString(key, safe(value))); syncHistory(); }
