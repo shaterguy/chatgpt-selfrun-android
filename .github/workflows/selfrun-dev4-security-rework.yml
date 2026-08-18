@@ -10,55 +10,35 @@ permissions:
 
 jobs:
   apply-security-rework:
-    if: ${{ !contains(github.event.head_commit.message, '[security-rework-final-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[security-rework-final2-applied]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: selfrun-drive/v1.3.0-dev4
-      - name: Restrict canonical capture to confirmed bootstrap submit
+      - name: Remove final opportunistic canonical capture
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          service = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
-          tests = Path('app/src/test/java/com/shaterguy/chatgptselfrun/ConversationFreshnessBarrierTest.java')
-          s = service.read_text(encoding='utf-8')
-          t = tests.read_text(encoding='utf-8')
-
-          def rep(text, old, new, label):
-              if text.count(old) != 1:
-                  raise SystemExit(f'{label}: expected exactly one match, got {text.count(old)}')
-              return text.replace(old, new, 1)
-
-          s = rep(s,
-              'generation++; domInFlight = false; maybeCaptureConversationUrl(url);onMainFramePageStarted();',
-              'generation++; domInFlight = false; onMainFramePageStarted();',
-              'page-start opportunistic capture')
-          s = rep(s,
-              'if (!launchedRunId.equals(store.runId())) return;maybeCaptureConversationUrl(url);if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase()))',
-              'if (!launchedRunId.equals(store.runId())) return;if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase()))',
-              'page-finish opportunistic capture')
-          s = rep(s,
-              'private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;maybeCaptureConversationUrl(webView.getUrl());String phase=store.phase();',
-              'private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;String phase=store.phase();',
-              'web-step opportunistic capture')
-
-          old = '''    @Test public void bootstrapConversationBindingIsCausalBoundedAndLocalOnly() throws Exception {\n        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void postWebCallback");\n        assertTrue(binding.contains("SelfRunScript.conversationId(current).isEmpty()"));\n        assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));\n        assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));\n        assertTrue(binding.contains("bootstrapConversationCaptureWebView=active"));\n        assertTrue(binding.contains("store.awaitingCommandAck()"));\n        assertTrue(binding.contains("store.retryForBootstrap()"));\n        assertTrue(binding.contains("BOOTSTRAP_CONVERSATION_CAPTURE_WINDOW_MS"));\n        assertFalse(binding.contains("loadUrl("));assertFalse(binding.contains("reload("));assertFalse(binding.contains("evaluateJavascript("));\n        String submit=between(s,"private void commandSubmitted","private static boolean isSubmissionPhase");\n        assertTrue(submit.contains("\\\"BOOTSTRAP_SUBMITTED\\\".equals(detail)"));\n        assertTrue(submit.contains("scheduleBootstrapConversationCapture()"));\n        String handling=between(s,"private void handleWebResult","private String driveBootstrap");\n        assertTrue(handling.contains("armBootstrapConversationCapture()"));\n        assertTrue(handling.contains("BOOTSTRAP_CONVERSATION_BIND_ORIGIN_INVALID"));\n    }\n'''
-          new = '''    @Test public void bootstrapConversationBindingIsCausalBoundedAndLocalOnly() throws Exception {\n        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void postWebCallback");\n        assertTrue(binding.contains("SelfRunScript.conversationId(current).isEmpty()"));\n        assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));\n        assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));\n        assertTrue(binding.contains("bootstrapConversationCaptureWebView=active"));\n        assertTrue(binding.contains("store.awaitingCommandAck()"));\n        assertTrue(binding.contains("store.retryForBootstrap()"));\n        assertTrue(binding.contains("BOOTSTRAP_CONVERSATION_CAPTURE_WINDOW_MS"));\n        assertFalse(binding.contains("loadUrl("));assertFalse(binding.contains("reload("));assertFalse(binding.contains("evaluateJavascript("));\n        String submit=between(s,"private void commandSubmitted","private static boolean isSubmissionPhase");\n        assertTrue(submit.contains("\\\"BOOTSTRAP_SUBMITTED\\\".equals(detail)"));\n        assertTrue(submit.contains("scheduleBootstrapConversationCapture()"));\n        String handling=between(s,"private void handleWebResult","private String driveBootstrap");\n        assertTrue(handling.contains("armBootstrapConversationCapture()"));\n        assertTrue(handling.contains("BOOTSTRAP_CONVERSATION_BIND_ORIGIN_INVALID"));\n        String callbacks=between(s,"webView.setWebViewClient(new WebViewClient()","private boolean armBootstrapConversationCapture()");\n        String webStep=between(s,"private void runWebStep()","private void evaluate(");\n        assertFalse(callbacks.contains("maybeCaptureConversationUrl("));\n        assertFalse(webStep.contains("maybeCaptureConversationUrl("));\n        assertEquals(2,count(s,"maybeCaptureConversationUrl("));\n    }\n'''
-          t = rep(t, old, new, 'binding test hardening')
-          service.write_text(s, encoding='utf-8')
-          tests.write_text(t, encoding='utf-8')
+          p=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          s=p.read_text(encoding='utf-8')
+          old='if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}'
+          new='if(webView!=null){scheduleWeb(250L);return;}'
+          if s.count(old)!=1:
+              raise SystemExit(f'ensureWebView opportunistic capture: expected 1 match, got {s.count(old)}')
+          s=s.replace(old,new,1)
+          p.write_text(s,encoding='utf-8')
           PY
           git diff --check
-          git diff -- app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/test/java/com/shaterguy/chatgptselfrun/ConversationFreshnessBarrierTest.java
-      - name: Commit security rework
+          test "$(grep -o 'maybeCaptureConversationUrl(' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java | wc -l)" -eq 2
+      - name: Commit final security rework
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'SHatergUY'
           git config user.email '108107617+shaterguy@users.noreply.github.com'
-          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/test/java/com/shaterguy/chatgptselfrun/ConversationFreshnessBarrierTest.java
-          git commit -m 'fix(drive): restrict canonical capture to confirmed bootstrap [security-rework-final-applied]'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          git commit -m 'fix(drive): make bootstrap poll sole canonical binder [security-rework-final2-applied]'
           git push origin HEAD:selfrun-drive/v1.3.0-dev4
