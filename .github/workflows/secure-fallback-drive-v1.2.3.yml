@@ -1,0 +1,300 @@
+name: Secure Fallback SelfRun Drive v1.2.3
+
+on:
+  push:
+    branches:
+      - ops/selfrun-drive-v1.2.3-release-recovery
+    paths:
+      - .github/workflows/secure-fallback-drive-v1.2.3.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selfrun-drive-v1.2.3-release-recovery
+  cancel-in-progress: false
+
+env:
+  STABLE_SHA: eb011e96aa4b0e8d57818c44b898af8947e907ba
+  DRIVE_VERSION_NAME: 1.2.3
+  DRIVE_VERSION_CODE: '1000040'
+  DRIVE_TAG: drive-v1.2.3
+  EXPECTED_CERT_SHA256: b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe
+  RELAY_BRANCH: ops/selfrun-drive-v1.2.3-release-recovery
+  RELAY_PATH: release-input/passphrase.enc
+
+jobs:
+  release-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact stable source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.STABLE_SHA }}
+          path: stable
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out exact legacy baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 526a9f604fc6e2b3d785293d7ce056bfc5efa5af
+          path: legacy-baseline
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Install exact Android build SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Reverify exact stable identity, policy, tests, and builds
+        working-directory: stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$STABLE_SHA"
+          test "$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)" = "$DRIVE_VERSION_NAME"
+          test "$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)" = "$DRIVE_VERSION_CODE"
+          grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
+          tools/verify_drive_variant.sh
+          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+
+      - name: Build exact legacy baseline
+        shell: bash
+        run: gradle --no-daemon --console=plain --project-dir legacy-baseline :app:assembleDebug
+
+      - name: Enable hardware acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+
+      - name: Verify full co-install isolation before secret arrival
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: >-
+            bash -o pipefail -c
+            'cd stable;
+            sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$DRIVE_VERSION_NAME\"/" tools/verify_coinstall_emulator.sh;
+            timeout --foreground 8m tools/verify_coinstall_emulator.sh
+            ../legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk'
+
+      - name: Install hash-locked signing dependencies before secret arrival
+        working-directory: stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == 'Linux' ]]
+          [[ "$(uname -m)" == 'x86_64' ]]
+          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          [[ "$PYTHON_VERSION" == '3.12' ]]
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+          python3 - <<'PY'
+          import cffi
+          import cryptography
+          import pycparser
+          assert cryptography.__version__ == '45.0.6'
+          assert cffi.__version__ == '1.17.1'
+          assert pycparser.__version__ == '2.22'
+          PY
+
+      - name: Verify release target and clean relay state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$MAIN_SHA" = "$STABLE_SHA"
+          TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$DRIVE_TAG" --jq .object.sha 2>/dev/null || true)"
+          if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$STABLE_SHA" ]]; then
+            echo "tag $DRIVE_TAG already points to another commit" >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/contents/$RELAY_PATH?ref=$RELAY_BRANCH" >/dev/null 2>&1; then
+            echo "stale encrypted relay input already exists" >&2
+            exit 1
+          fi
+
+      - name: Generate one-time transport key
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+            -out "$RUNNER_TEMP/release-transport-private.pem" >/dev/null 2>&1
+          openssl pkey -in "$RUNNER_TEMP/release-transport-private.pem" -pubout \
+            -out "$RUNNER_TEMP/release-transport-public.pem"
+
+      - name: Publish one-time public key
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-v1.2.3-release-transport-public-key
+          path: ${{ runner.temp }}/release-transport-public.pem
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Await encrypted signing passphrase
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          API_PATH="repos/$GITHUB_REPOSITORY/contents/$RELAY_PATH?ref=$RELAY_BRANCH"
+          for attempt in $(seq 1 240); do
+            if gh api "$API_PATH" --jq .content > "$RUNNER_TEMP/content.b64" 2>/dev/null; then
+              tr -d '\n' < "$RUNNER_TEMP/content.b64" | base64 -d > "$RUNNER_TEMP/ciphertext.txt"
+              base64 -d "$RUNNER_TEMP/ciphertext.txt" > "$RUNNER_TEMP/ciphertext.bin"
+              openssl pkeyutl -decrypt \
+                -inkey "$RUNNER_TEMP/release-transport-private.pem" \
+                -in "$RUNNER_TEMP/ciphertext.bin" \
+                -out "$RUNNER_TEMP/selfrun-drive-signing-pass" \
+                -pkeyopt rsa_padding_mode:oaep \
+                -pkeyopt rsa_oaep_md:sha256 \
+                -pkeyopt rsa_mgf1_md:sha256
+              test "$(wc -c < "$RUNNER_TEMP/selfrun-drive-signing-pass")" -ge 20
+              chmod 600 "$RUNNER_TEMP/selfrun-drive-signing-pass"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'encrypted passphrase relay timed out' >&2
+          exit 1
+
+      - name: Sign and verify formal APK
+        working-directory: stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          SRC=app/build/outputs/apk/release/app-release-unsigned.apk
+          OUT="$RUNNER_TEMP/release-output"
+          mkdir -p "$OUT"
+          ALIGNED="$OUT/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
+          APK="$OUT/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
+          "$BT/zipalign" -p -f 4 "$SRC" "$ALIGNED"
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh \
+            "$ALIGNED" "$RUNNER_TEMP/selfrun-drive-signing-pass" "$APK" \
+            > "$OUT/APKSIGNER_VERIFY.txt"
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > "$OUT/APK_CERT.txt"
+          grep -Fqi "$EXPECTED_CERT_SHA256" "$OUT/APK_CERT.txt"
+          BADGING="$($BT/aapt dump badging "$APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+          grep -Fq "versionCode='$DRIVE_VERSION_CODE'" <<<"$BADGING"
+          grep -Fq "versionName='$DRIVE_VERSION_NAME'" <<<"$BADGING"
+          grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
+          "$BT/zipalign" -c -p 4 "$APK"
+          unzip -t "$APK" >/dev/null
+          sha256sum "$APK" > "$OUT/SHA256SUMS.txt"
+          cat > "$OUT/RELEASE_NOTES.md" <<EOF
+          SelfRun Drive v${DRIVE_VERSION_NAME} 정식 릴리스입니다.
+
+          - 검증된 1.2.3-dev15 focusfix 계보를 exact stable SHA ${STABLE_SHA} 기준으로 정식 승격했습니다.
+          - application ID com.shaterguy.chatgptselfrun.drive와 기존 SelfRun Drive 고정 서명 인증서를 유지합니다.
+          - focus retention 및 1.2.3 개발선의 검증된 기능 상태를 보존합니다.
+          EOF
+
+      - name: Create exact tag and GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$MAIN_SHA" = "$STABLE_SHA"
+          TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$DRIVE_TAG" --jq .object.sha 2>/dev/null || true)"
+          if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$STABLE_SHA" ]]; then
+            echo "tag $DRIVE_TAG already points to another commit" >&2
+            exit 1
+          fi
+          if [[ -z "$TAG_SHA" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$DRIVE_TAG" -f sha="$STABLE_SHA" >/dev/null
+          fi
+          OUT="$RUNNER_TEMP/release-output"
+          APK="$OUT/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
+          if ! gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$DRIVE_TAG" "$APK" "$OUT/SHA256SUMS.txt" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$STABLE_SHA" \
+              --title "SelfRun Drive v${DRIVE_VERSION_NAME}" \
+              --notes-file "$OUT/RELEASE_NOTES.md"
+          fi
+          gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,targetCommitish,assets,url > "$OUT/RELEASE_READBACK.json"
+          ASSETS="$(gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          grep -Fxq "chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk" <<<"$ASSETS"
+          grep -Fxq 'SHA256SUMS.txt' <<<"$ASSETS"
+
+      - name: Upload recovery release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-v1.2.3-recovery-release-evidence
+          path: |
+            ${{ runner.temp }}/release-output/APKSIGNER_VERIFY.txt
+            ${{ runner.temp }}/release-output/APK_CERT.txt
+            ${{ runner.temp }}/release-output/SHA256SUMS.txt
+            ${{ runner.temp }}/release-output/RELEASE_READBACK.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove encrypted relay input
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          API_PATH="repos/$GITHUB_REPOSITORY/contents/$RELAY_PATH"
+          RELAY_SHA="$(gh api "$API_PATH?ref=$RELAY_BRANCH" --jq .sha 2>/dev/null || true)"
+          if [[ -n "$RELAY_SHA" ]]; then
+            gh api --method DELETE "$API_PATH" \
+              -f message='chore: remove encrypted SelfRun Drive 1.2.3 release relay' \
+              -f sha="$RELAY_SHA" \
+              -f branch="$RELAY_BRANCH" >/dev/null
+          fi
+
+      - name: Remove plaintext signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/selfrun-drive-signing-pass" \
+            "$RUNNER_TEMP/release-transport-private.pem" \
+            "$RUNNER_TEMP/release-transport-public.pem" \
+            "$RUNNER_TEMP/ciphertext.bin" \
+            "$RUNNER_TEMP/ciphertext.txt" \
+            "$RUNNER_TEMP/content.b64"
