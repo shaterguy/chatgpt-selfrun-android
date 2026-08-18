@@ -27,8 +27,9 @@ public class GeneralContinuationCalibrationSafetyTest {
                 "https://chatgpt.com/c/conversation123", "continue", "marker-general");
         assertTrue(general.contains("__srFind(\"GENERAL_COMPOSER\")"));
         assertTrue(general.contains("__srFind(\"GENERAL_SEND\")"));
-        assertTrue(general.contains("if(!composer){for(const s of selectors)"));
-        assertTrue(general.contains("const calibrated=__srFind"));
+        assertTrue(general.contains("const __srComposerPool=()=>"));
+        assertTrue(general.contains("xs[xs.length-1]"));
+        assertTrue(general.contains("scope.contains(calibrated)"));
     }
 
     @Test public void projectContinuationStillUsesProjectTargets() {
