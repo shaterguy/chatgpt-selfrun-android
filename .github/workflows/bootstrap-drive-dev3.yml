@@ -1,0 +1,369 @@
+name: Bootstrap SelfRun Drive dev3
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.3.0-dev3'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-dev3-source:
+    if: github.event.head_commit.message == 'chore(dev3): bootstrap worktree patch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - name: Apply conversation freshness barrier in Git worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one replacement, found {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Version identity.
+          replace_once('app/build.gradle',
+              "def selfRunDriveVersionCode = 1000042\ndef selfRunDriveVersionName = '1.3.0-dev2'",
+              "def selfRunDriveVersionCode = 1000043\ndef selfRunDriveVersionName = '1.3.0-dev3'")
+
+          # Durable continuation-sync state.
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '    static final String PHASE_RESUME_BASELINE = "RESUME_BASELINE";\n    static final String PHASE_APPLY_PREFS = "APPLY_PREFS";',
+              '    static final String PHASE_RESUME_BASELINE = "RESUME_BASELINE";\n    static final String PHASE_SYNC_CONVERSATION = "SYNC_CONVERSATION";\n    static final String PHASE_APPLY_PREFS = "APPLY_PREFS";')
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '  .putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)',
+              '  .putString("creationStage",CREATION_NONE).putString("conversationSyncNextPhase","").putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)')
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '    String status() { return getOr("status", "대기"); }\n',
+              '    String status() { return getOr("status", "대기"); }\n    String conversationSyncNextPhase() { return get("conversationSyncNextPhase"); }\n')
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '    void reserveJobFolderId(String id) {',
+              '''    private static boolean validConversationSyncNextPhase(String phase) {
+        return PHASE_APPLY_PREFS.equals(phase) || PHASE_APPLY_REASONING.equals(phase) || PHASE_SEND_CONTINUE.equals(phase);
+    }
+
+    void beginConversationSync(String nextPhase, String status) {
+        if (!validConversationSyncNextPhase(nextPhase)) throw new IllegalArgumentException("valid post-sync phase required");
+        commitOrThrow(prefs.edit().putString("conversationSyncNextPhase", nextPhase)
+                .putString("phase", PHASE_SYNC_CONVERSATION).putString("status", safe(status))
+                .putLong("phaseStartedAt", System.currentTimeMillis()));
+        syncHistory();
+    }
+
+    String finishConversationSync() {
+        String next = conversationSyncNextPhase();
+        if (!validConversationSyncNextPhase(next)) throw new IllegalStateException("post-sync phase missing");
+        commitOrThrow(prefs.edit().putString("conversationSyncNextPhase", "")
+                .putString("phase", next).putString("status", "conversation freshness 확인 완료")
+                .putLong("phaseStartedAt", System.currentTimeMillis()));
+        syncHistory();
+        return next;
+    }
+
+    void reserveJobFolderId(String id) {''')
+
+          old_retry = '''void prepareCommandRetry(){if(!awaitingCommandAck()||!hasSubmissionRetry()||!submissionRetryDue())throw new IllegalStateException("command ACK retry is not due");String k=submissionRetryKind();String ph=RETRY_BOOTSTRAP.equals(k)?PHASE_BOOTSTRAP_SEND:PHASE_SEND_CONTINUE;commitOrThrow(prefs.edit().putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putBoolean("submissionRetryReady",false).putString("phase",ph).putString("status","COMMAND_RECEIVED 미수신 · 동일 명령 재제출 준비").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}'''
+          new_retry = '''void prepareCommandRetry(){
+    if(!awaitingCommandAck()||!hasSubmissionRetry()||!submissionRetryDue())throw new IllegalStateException("command ACK retry is not due");
+    String k=submissionRetryKind();
+    SharedPreferences.Editor e=prefs.edit().putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","")
+            .putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putBoolean("submissionRetryReady",false);
+    if(RETRY_BOOTSTRAP.equals(k)){
+        e.putString("conversationSyncNextPhase","").putString("phase",PHASE_BOOTSTRAP_SEND)
+                .putString("status","COMMAND_RECEIVED 미수신 · 동일 bootstrap 재제출 준비");
+    }else{
+        e.putString("conversationSyncNextPhase",PHASE_SEND_CONTINUE).putString("phase",PHASE_SYNC_CONVERSATION)
+                .putString("status","COMMAND_RECEIVED 미수신 · conversation freshness sync 후 동일 CONTINUE 재제출 준비");
+    }
+    commitOrThrow(e.putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();
+}'''
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java', old_retry, new_retry)
+
+          old_baseline = '''void baselineManualResume(int cursor,DriveSignalParser.Event latest,DriveSignalParser.Event latestUnseenCompletion){SharedPreferences.Editor e=clearCommandWait(prefs.edit()).putInt("driveSignalCursor",Math.max(0,cursor)).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("phase",PHASE_SEND_CONTINUE).putString("status","사용자 재개 override · CONTINUE 강제 제출 준비").putLong("phaseStartedAt",System.currentTimeMillis());if(latestUnseenCompletion!=null&&latestUnseenCompletion.protocolError.isEmpty()){e.putString("pendingDriveSignalRaw",latestUnseenCompletion.raw).putString("pendingDriveSignalTimestamp",latestUnseenCompletion.timestamp).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name());}else{e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","");}putLatest(e,latest);commitOrThrow(e);syncHistory();}'''
+          new_baseline = '''void baselineManualResume(int cursor,DriveSignalParser.Event latest,DriveSignalParser.Event latestUnseenCompletion){SharedPreferences.Editor e=clearCommandWait(prefs.edit()).putInt("driveSignalCursor",Math.max(0,cursor)).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("conversationSyncNextPhase",PHASE_SEND_CONTINUE).putString("phase",PHASE_SYNC_CONVERSATION).putString("status","사용자 재개 override · conversation freshness sync 후 CONTINUE 강제 제출 준비").putLong("phaseStartedAt",System.currentTimeMillis());if(latestUnseenCompletion!=null&&latestUnseenCompletion.protocolError.isEmpty()){e.putString("pendingDriveSignalRaw",latestUnseenCompletion.raw).putString("pendingDriveSignalTimestamp",latestUnseenCompletion.timestamp).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name());}else{e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","");}putLatest(e,latest);commitOrThrow(e);syncHistory();}'''
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java', old_baseline, new_baseline)
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '.putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DRIVE_ATTACHMENT_UPLOAD)',
+              '.putBoolean("resumeNeedsContinuation",false).putString("conversationSyncNextPhase","").putString("phase",PHASE_DRIVE_ATTACHMENT_UPLOAD)')
+          replace_once('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java',
+              '.putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE)',
+              '.putBoolean("resumeNeedsContinuation",false).putString("conversationSyncNextPhase","").putString("phase",PHASE_RESUME_BASELINE)')
+
+          # Conversation composer safety + per-page freshness token.
+          dom = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java'
+          old_prepare = r'''    /** Stage the continuation line while keeping the Drive commit ID internal. */
+    static String prepareDriveTurn(String conversationUrl,String prompt,String markerId){String expected=q(prompt),marker=q("selfrun-drive:command:"+markerId),composerKey=composerKey(conversationUrl),sendKey=sendKey(conversationUrl);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))+authGuard()+calibration()+textHelpers(expected)+composer(composerKey)+"if(!composer)return result('UI_WAIT','continuation 입력창 대기');"+composerOps(sendKey)+"if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','continuation 전송 버튼 대기');const markerKey2="+marker+",v=JSON.stringify({state:'prepared',at:Date.now()});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','continuation 제출 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"+input()+"return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";}
+
+    /** Clicks at most once per attempt, only after Android durably stores the baseline and SUBMISSION_STARTED. */
+    static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId){String expected=q(prompt),marker=q("selfrun-drive:command:"+markerId),composerKey=composerKey(conversationUrl),sendKey=sendKey(conversationUrl);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))+authGuard()+calibration()+textHelpers(expected)+durableMarkerRead(marker)+"if(!prior)return result('MARKER_FAILED','continuation 제출 준비 표식 없음');"+composer(composerKey)+"if(!composer)return result('UI_WAIT','제출 직전 최신 continuation 입력창 대기');"+composerOps(sendKey)+"if(!same()){ "+input()+"return result('UI_WAIT','제출 직전 최신 continuation 입력창 재확보 · 입력 재반영');}const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','제출 직전 최신 continuation 전송 버튼 대기');const markerKey2="+marker+";try{const data=JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('SUBMITTED','continuation 클릭 완료');})()";}
+'''
+          new_prepare = r'''    /** Stage the continuation line while keeping the Drive commit ID internal. */
+    static String prepareDriveTurn(String conversationUrl,String prompt,String markerId){return prepareDriveTurn(conversationUrl,prompt,markerId,"");}
+    static String prepareDriveTurn(String conversationUrl,String prompt,String markerId,String freshnessToken){String expected=q(prompt),marker=q("selfrun-drive:command:"+markerId),composerKey=composerKey(conversationUrl),sendKey=sendKey(conversationUrl);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))+authGuard()+calibration()+textHelpers(expected)+freshnessGuard(freshnessToken)+composer(composerKey)+"if(!composer)return result('UI_WAIT','continuation 입력창 대기');"+composerOps(sendKey)+"if(same()){const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','continuation 전송 버튼 대기');const markerKey2="+marker+",v=JSON.stringify({state:'prepared',at:Date.now(),freshnessToken:__srFreshnessToken});let persisted=false;try{localStorage.setItem(markerKey2,v);persisted=localStorage.getItem(markerKey2)===v;}catch(_){}if(!persisted){try{sessionStorage.setItem(markerKey2,v);persisted=sessionStorage.getItem(markerKey2)===v;}catch(_){}}if(!persisted)return result('MARKER_FAILED','continuation 제출 표식 저장 실패');return result('READY_TO_SUBMIT','continuation 제출 준비 완료');}"+input()+"return result('UI_WAIT',same()?'입력 반영 확인 대기':'continuation 입력 대기');})()";}
+
+    /** Clicks at most once per attempt, only after Android durably stores the baseline and SUBMISSION_STARTED. */
+    static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId){return clickPreparedDriveTurn(conversationUrl,prompt,markerId,"");}
+    static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId,String freshnessToken){String expected=q(prompt),marker=q("selfrun-drive:command:"+markerId),composerKey=composerKey(conversationUrl),sendKey=sendKey(conversationUrl);return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"+conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))+authGuard()+calibration()+textHelpers(expected)+freshnessGuard(freshnessToken)+durableMarkerRead(marker)+"if(!prior)return result('MARKER_FAILED','continuation 제출 준비 표식 없음');let priorData=null;try{priorData=JSON.parse(prior);}catch(_){}if(__srFreshnessToken&&(!priorData||priorData.freshnessToken!==__srFreshnessToken))return result('FRESHNESS_STALE','prepared continuation belongs to stale generation');"+composer(composerKey)+"if(!composer)return result('UI_WAIT','제출 직전 최신 continuation 입력창 대기');"+composerOps(sendKey)+"if(!same()){ "+input()+"return result('UI_WAIT','제출 직전 최신 continuation 입력창 재확보 · 입력 재반영');}const send=findSend();if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return result('UI_WAIT','제출 직전 최신 continuation 전송 버튼 대기');const markerKey2="+marker+";try{const data=priorData||JSON.parse(prior);data.state='clicked';data.clickedAt=Date.now();localStorage.setItem(markerKey2,JSON.stringify(data));}catch(_){}send.click();return result('SUBMITTED','continuation 클릭 완료');})()";}
+'''
+          replace_once(dom, old_prepare, new_prepare)
+
+          old_composer = r'''    private static String composer(String targetKey) {
+        return "const __srComposerSelector='textarea#prompt-textarea,textarea[data-testid=\"prompt-textarea\"],div#prompt-textarea[contenteditable=\"true\"],main form [contenteditable=\"true\"][data-lexical-editor=\"true\"],main form [contenteditable=\"true\"]';const __srTurnContained=e=>!!e&&!!e.closest('[data-message-author-role],[data-testid^=\"conversation-turn\"],article[data-testid^=\"conversation-turn\"]');const __srComposerPool=()=>[...document.querySelectorAll(__srComposerSelector)].filter(e=>e&&e.isConnected&&e.offsetParent!==null&&!__srTurnContained(e));const __srLatestComposer=()=>{const xs=__srComposerPool();return xs.length?xs[xs.length-1]:null;};const calibratedComposer=__srFind(" + q(targetKey) + ");const safeCalibratedComposer=calibratedComposer&&!__srTurnContained(calibratedComposer)?calibratedComposer:null;let composer=__srLatestComposer()||safeCalibratedComposer;";
+    }
+
+    private static String composerOps(String sendKey) {
+        return "composer.focus();const raw=()=>('value'in composer?composer.value:(composer.innerText||composer.textContent||''));const same=()=>canonical(raw())===canonical(expected);const findSend=()=>{const scope=composer.closest('form')||composer.closest('[data-testid*=\"composer\"]')||composer.parentElement;if(!scope)return null;const calibrated=__srFind(" + q(sendKey) + ");if(calibrated&&calibrated.isConnected&&calibrated.offsetParent!==null&&scope.contains(calibrated))return calibrated;const buttons=[...scope.querySelectorAll('button')].filter(b=>b&&b.isConnected&&b.offsetParent!==null&&(b.dataset.testid==='send-button'||b.dataset.testid==='composer-submit-button'||/send|보내기|submit/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||''))));return buttons.length?buttons[buttons.length-1]:null;};";
+    }
+'''
+          new_composer = r'''    private static String composer(String targetKey) {
+        return "const __srComposerSelector='textarea#prompt-textarea,textarea[data-testid=\"prompt-textarea\"],div#prompt-textarea[contenteditable=\"true\"],main form [contenteditable=\"true\"][data-lexical-editor=\"true\"],main form [contenteditable=\"true\"]';const __srTurnContained=e=>!!e&&!!e.closest('[data-message-author-role],[data-testid^=\"conversation-turn\"],article[data-testid^=\"conversation-turn\"]');const __srEditContext=e=>{if(!e)return false;const host=e.closest('[data-testid*=\"edit\"],[data-testid*=\"message-edit\"],[role=\"dialog\"],form');if(!host)return false;const tid=String(host.dataset?.testid||'').toLowerCase(),meta=String((host.getAttribute?.('aria-label')||'')+' '+(host.getAttribute?.('title')||'')).toLowerCase(),role=String(host.getAttribute?.('role')||'').toLowerCase();return /edit/.test(tid)||(role==='dialog'&&(/edit/.test(meta)||/수정|편집/.test(meta)));};const __srComposerScope=e=>e?(e.closest('form')||e.closest('[data-testid*=\"composer\"]')||e.parentElement):null;const __srMainComposer=e=>{if(!e||!e.isConnected||e.offsetParent===null||__srTurnContained(e)||__srEditContext(e))return false;const scope=__srComposerScope(e);if(!scope||__srTurnContained(scope)||__srEditContext(scope))return false;const inMain=!!e.closest('main'),scopeTest=String(scope.dataset?.testid||'').toLowerCase(),strong=e.id==='prompt-textarea'||e.dataset?.testid==='prompt-textarea'||e.getAttribute?.('data-lexical-editor')==='true';return inMain||(strong&&/composer|prompt/.test(scopeTest));};const __srComposerPool=()=>[...document.querySelectorAll(__srComposerSelector)].filter(__srMainComposer);const __srLatestComposer=()=>{const xs=__srComposerPool();return xs.length?xs[xs.length-1]:null;};const calibratedComposer=__srFind(" + q(targetKey) + ");const safeCalibratedComposer=__srMainComposer(calibratedComposer)?calibratedComposer:null;let composer=__srLatestComposer()||safeCalibratedComposer;";
+    }
+
+    private static String composerOps(String sendKey) {
+        return "composer.focus();const raw=()=>('value'in composer?composer.value:(composer.innerText||composer.textContent||''));const same=()=>canonical(raw())===canonical(expected);const findSend=()=>{const scope=__srComposerScope(composer);if(!scope||__srTurnContained(scope)||__srEditContext(scope))return null;const calibrated=__srFind(" + q(sendKey) + ");if(calibrated&&calibrated.isConnected&&calibrated.offsetParent!==null&&scope.contains(calibrated))return calibrated;const buttons=[...scope.querySelectorAll('button')].filter(b=>b&&b.isConnected&&b.offsetParent!==null&&(b.dataset.testid==='send-button'||b.dataset.testid==='composer-submit-button'||/send|보내기|submit/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||''))));return buttons.length?buttons[buttons.length-1]:null;};";
+    }
+'''
+          replace_once(dom, old_composer, new_composer)
+
+          replace_once(dom,
+              '    private static String projectGuard(String project) {',
+              r'''    static String conversationFreshnessReady(String conversationUrl,String freshnessToken){String token=q(freshnessToken),composerKey=composerKey(conversationUrl);return "(() =>{const result=(status,detail='',extra={})=>JSON.stringify({status,detail,url:location.href,...extra});"+conversationGuard(q(SelfRunScript.conversationId(conversationUrl)))+authGuard()+calibration()+composer(composerKey)+"const candidates=__srComposerPool(),candidateCount=candidates.length,selectedTurnContained=!!composer&&__srTurnContained(composer),selectedEditComposer=!!composer&&__srEditContext(composer),scope=__srComposerScope(composer),submitScope=!!scope&&!__srTurnContained(scope)&&!__srEditContext(scope);if(document.readyState!=='complete'&&document.readyState!=='interactive')return result('UI_WAIT','document readiness',{composerCandidateCount:candidateCount,turnContained:selectedTurnContained,editComposer:selectedEditComposer,submitScope});if(!composer||selectedTurnContained||selectedEditComposer||!submitScope)return result('UI_WAIT','conversation composer readiness',{composerCandidateCount:candidateCount,turnContained:selectedTurnContained,editComposer:selectedEditComposer,submitScope});const freshness="+token+";window.__selfRunDriveFreshnessToken=freshness;window.addEventListener('pagehide',()=>{if(window.__selfRunDriveFreshnessToken===freshness)window.__selfRunDriveFreshnessToken='';},{once:true});return result('READY','conversation freshness ready',{composerCandidateCount:candidateCount,turnContained:selectedTurnContained,editComposer:selectedEditComposer,submitScope});})()";}
+
+    private static String freshnessGuard(String token) {
+        return "const __srFreshnessToken="+q(token)+";if(__srFreshnessToken&&window.__selfRunDriveFreshnessToken!==__srFreshnessToken)return result('FRESHNESS_STALE','conversation freshness generation changed');";
+    }
+
+    private static String projectGuard(String project) {''')
+
+          # Privacy-safe sync diagnostics.
+          diag = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunWebDiagnostics.java'
+          replace_once(diag,
+              '    static String routeMismatchDetail(String expected, String actual) {',
+              '''    static String syncDetail(long syncEpoch, int generation, boolean canonicalMatch, String navigation,
+                             int candidateCount, boolean turnContained, boolean submitScope,
+                             boolean generationMatch, boolean discarded) {
+        String safeNavigation = switch (navigation == null ? "" : navigation) {
+            case "reload", "loadUrl", "loadUrl_recovery", "new_webview", "pending" -> navigation;
+            default -> "none";
+        };
+        return "sync_epoch=" + syncEpoch + ";generation=" + generation
+                + ";canonical_match=" + (canonicalMatch ? "1" : "0")
+                + ";navigation=" + safeNavigation
+                + ";candidate_count=" + candidateCount
+                + ";turn_contained=" + (turnContained ? "1" : "0")
+                + ";submit_scope=" + (submitScope ? "1" : "0")
+                + ";generation_match=" + (generationMatch ? "1" : "0")
+                + ";discarded=" + (discarded ? "1" : "0");
+    }
+
+    static String routeMismatchDetail(String expected, String actual) {''')
+
+          # Service-level freshness barrier, visual readiness, generation invalidation.
+          service = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java'
+          replace_once(service,
+              '    private boolean domInFlight;\n    private int generation;\n    private volatile int automationEpoch;',
+              '''    private boolean domInFlight;
+    private int generation;
+    private long conversationSyncEpoch;
+    private long activeConversationSyncEpoch;
+    private long conversationVisualRequestId;
+    private int activeConversationSyncGeneration = -1;
+    private int conversationFreshnessGeneration = -1;
+    private boolean conversationSyncInFlight;
+    private boolean conversationSyncRecoveryLoadUsed;
+    private String activeConversationSyncNavigation = "none";
+    private String conversationFreshnessToken = "";
+    private volatile int automationEpoch;''')
+          replace_once(service,
+              'private void guardElapsed(){if(canRun()&&SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(store.phase())){String next=SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE;transition(next,"Drive TURN_COMPLETED 확인 · continuation 준비","guard_elapsed");ensureWebView();}}',
+              'private void guardElapsed(){if(canRun()&&SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(store.phase())){String next=SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE;enterConversationSync(next,"guard_elapsed","Drive TURN_COMPLETED 확인 · conversation freshness sync");}}')
+          old_ensure = 'private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,SUBMISSION_RETRY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}launchWebView(target);}'
+          new_ensure = '''private void ensureWebView(){
+    if(!canRun()||!isWebAutomationPhase(store.phase()))return;
+    String phase=store.phase();
+    if(isContinuationPhase(phase)&&!freshnessValid()){enterConversationSync(phase,"freshness_required","continuation 전 conversation freshness sync");return;}
+    String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();
+    if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,SUBMISSION_RETRY_MS);return;}
+    acquireWakeLock();
+    if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(phase)){
+        if(store.conversationUrl().isEmpty()){store.setLastError("CONVERSATION_SYNC_TARGET_MISSING","canonical conversation URL을 재확인합니다.");handler.postDelayed(this::ensureWebView,2000L);return;}
+        if(webView==null){beginConversationSyncCycle();activeConversationSyncNavigation="new_webview";launchWebView(target);return;}
+        startConversationSyncNavigation();return;
+    }
+    if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}
+    launchWebView(target);
+}'''
+          replace_once(service, old_ensure, new_ensure)
+          replace_once(service,
+              '                @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {if (!launchedRunId.equals(store.runId())) return;generation++; domInFlight = false; maybeCaptureConversationUrl(url);}',
+              '                @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {if (!launchedRunId.equals(store.runId())) return;generation++; domInFlight = false; maybeCaptureConversationUrl(url);onMainFramePageStarted();}')
+          replace_once(service,
+              '                @Override public void onPageFinished(WebView view, String url) {if (!launchedRunId.equals(store.runId())) return;maybeCaptureConversationUrl(url);if (isWebAutomationPhase(store.phase())) scheduleWeb(800L);}',
+              '                @Override public void onPageFinished(WebView view, String url) {if (!launchedRunId.equals(store.runId())) return;maybeCaptureConversationUrl(url);if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase())){handleConversationSyncPageFinished(view,url);return;}if (isWebAutomationPhase(store.phase())) scheduleWeb(800L);}')
+          replace_once(service,
+              '            webView.loadUrl(target);',
+              '            if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase())&&conversationSyncInFlight){activeConversationSyncNavigation="new_webview";runLog.record(store,"CONVERSATION_SYNC_NAVIGATION",SelfRunWebDiagnostics.syncDetail(activeConversationSyncEpoch,generation,true,activeConversationSyncNavigation,-1,false,false,true,false));}\n            webView.loadUrl(target);')
+          replace_once(service,
+              'private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;maybeCaptureConversationUrl(webView.getUrl());String phase=store.phase();',
+              'private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;maybeCaptureConversationUrl(webView.getUrl());String phase=store.phase();if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(phase)){ensureWebView();return;}if(isContinuationPhase(phase)&&!freshnessValid()){enterConversationSync(phase,"generation_invalidated","navigation 이후 conversation freshness 재확인");return;}')
+          replace_once(service,
+              'script=SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId());',
+              'script=SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId(),conversationFreshnessToken);')
+          replace_once(service,
+              'private void evaluate(String phase,String script){WebView active=webView;int epoch=generation;String runId=store.runId();domInFlight=true;active.evaluateJavascript(script,raw->{if(active!=webView||epoch!=generation||!runId.equals(store.runId()))return;domInFlight=false;if(!canRun())return;JSONObject result=parse(raw);String status=result.optString("status","SCRIPT_ERROR");',
+              'private void evaluate(String phase,String script){WebView active=webView;int epoch=generation;String runId=store.runId();String freshnessAtStart=isContinuationPhase(phase)?conversationFreshnessToken:"";if(isContinuationPhase(phase)&&!freshnessValid())return;domInFlight=true;active.evaluateJavascript(script,raw->{if(active!=webView||epoch!=generation||!runId.equals(store.runId())||(isContinuationPhase(phase)&&(!freshnessValid()||!freshnessAtStart.equals(conversationFreshnessToken))))return;domInFlight=false;if(!canRun())return;JSONObject result=parse(raw);String status=result.optString("status","SCRIPT_ERROR");if("FRESHNESS_STALE".equals(status)){runLog.record(store,"CONTINUE_SUBMIT_GUARD",SelfRunWebDiagnostics.syncDetail(activeConversationSyncEpoch,generation,routeAcceptable(webView==null?"":webView.getUrl()),activeConversationSyncNavigation,-1,false,false,false,true));enterConversationSync(phase,"stale_prepared_attempt","prepared continuation generation 폐기 · freshness 재확인");return;}')
+          old_send_ready = 'if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_CONTINUE);evaluate(phase,SelfRunDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId()));return;}'
+          new_send_ready = 'if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){boolean generationMatch=freshnessValid();runLog.record(store,"CONTINUE_SUBMIT_GUARD",SelfRunWebDiagnostics.syncDetail(activeConversationSyncEpoch,generation,routeAcceptable(webView==null?"":webView.getUrl()),activeConversationSyncNavigation,-1,false,true,generationMatch,!generationMatch));if(!generationMatch){enterConversationSync(phase,"pre_click_generation_changed","click 직전 generation 변경 · freshness 재확인");return;}String prompt=commandPrompt(SelfRunStore.RETRY_CONTINUE);evaluate(phase,SelfRunDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId(),conversationFreshnessToken));return;}'
+          replace_once(service, old_send_ready, new_send_ready)
+          replace_once(service,
+              'private void commandSubmitted(String kind,String detail){if(!canRun())return;long due=System.currentTimeMillis()+SUBMISSION_RETRY_MS;store.markCommandSubmitted(kind,due);runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);releaseWakeLock();scheduleDrivePoll(0L);}',
+              'private void commandSubmitted(String kind,String detail){if(!canRun())return;long due=System.currentTimeMillis()+SUBMISSION_RETRY_MS;store.markCommandSubmitted(kind,due);if(SelfRunStore.RETRY_CONTINUE.equals(kind))invalidateConversationFreshness();runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);releaseWakeLock();scheduleDrivePoll(0L);}')
+          replace_once(service,
+              'private static boolean isWebAutomationPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}',
+              'private static boolean isWebAutomationPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_SYNC_CONVERSATION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}')
+
+          helpers = r'''
+
+private static boolean isContinuationPhase(String phase){return SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
+private void invalidateConversationFreshness(){conversationFreshnessToken="";conversationFreshnessGeneration=-1;}
+private boolean freshnessValid(){return webView!=null&&!conversationFreshnessToken.isEmpty()&&conversationFreshnessGeneration==generation&&!store.conversationUrl().isEmpty()&&sameConversation(store.conversationUrl(),webView.getUrl());}
+private void enterConversationSync(String nextPhase,String reason,String status){String prior=store.phase();store.beginConversationSync(nextPhase,status);conversationSyncInFlight=false;invalidateConversationFreshness();runLog.record(store,"STATE_TRANSITION","from="+prior+";to="+SelfRunStore.PHASE_SYNC_CONVERSATION+";reason="+reason);ensureWebView();}
+private void beginConversationSyncCycle(){activeConversationSyncEpoch=++conversationSyncEpoch;activeConversationSyncGeneration=-1;conversationSyncInFlight=true;conversationSyncRecoveryLoadUsed=false;activeConversationSyncNavigation="pending";invalidateConversationFreshness();runLog.record(store,"CONVERSATION_SYNC_START",SelfRunWebDiagnostics.syncDetail(activeConversationSyncEpoch,generation,routeAcceptable(webView==null?canonicalUrl():webView.getUrl()),activeConversationSyncNavigation,-1,false,false,true,false));}
+private void startConversationSyncNavigation(){if(!canRun()||!SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase())||webView==null||conversationSyncInFlight)return;beginConversationSyncCycle();String canonical=canonicalUrl(),current=webView.getUrl();boolean match=sameConversation(canonical,current);activeConversationSyncNavigation=match?"reload":"loadUrl";conversationSyncRecoveryLoadUsed=!match;runLog.record(store,"CONVERSATION_SYNC_NAVIGATION",SelfRunWebDiagnostics.syncDetail(activeConversationSyncEpoch,generation,match,activeConversationSyncNavigation,-1,false,false,true,false));if(match)webView.reload();else webView.loadUrl(canonical);}
+private void onMainFramePageStarted(){if(SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase())&&conversationSyncInFlight){activeConversationSyncGeneration=generation;}else if(isContinuationPhase(store.phase()))invalidateConversationFreshness();}
+private void handleConversationSyncPageFinished(WebView view,String url){if(!conversationSyncInFlight||view!=webView||!SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase()))return;long sync=activeConversationSyncEpoch;int expectedGeneration=activeConversationSyncGeneration;if(expectedGeneration<0||expectedGeneration!=generation){runLog.record(store,"CONVERSATION_SYNC_DISCARDED",SelfRunWebDiagnostics.syncDetail(sync,generation,false,activeConversationSyncNavigation,-1,false,false,false,true));return;}boolean canonicalMatch=sameConversation(canonicalUrl(),url)&&sameConversation(canonicalUrl(),view.getUrl());runLog.record(store,"CONVERSATION_SYNC_PAGE_FINISHED",SelfRunWebDiagnostics.syncDetail(sync,generation,canonicalMatch,activeConversationSyncNavigation,-1,false,false,true,false));if(!canonicalMatch){if(!conversationSyncRecoveryLoadUsed){conversationSyncRecoveryLoadUsed=true;activeConversationSyncNavigation="loadUrl_recovery";runLog.record(store,"CONVERSATION_SYNC_NAVIGATION",SelfRunWebDiagnostics.syncDetail(sync,generation,false,activeConversationSyncNavigation,-1,false,false,true,false));view.loadUrl(canonicalUrl());return;}conversationSyncInFlight=false;runLog.record(store,"CONVERSATION_SYNC_DISCARDED",SelfRunWebDiagnostics.syncDetail(sync,generation,false,activeConversationSyncNavigation,-1,false,false,false,true));handler.postDelayed(this::ensureWebView,1500L);return;}requestConversationVisualReady(view,sync,expectedGeneration);}
+private void requestConversationVisualReady(WebView view,long sync,int expectedGeneration){long requestId=++conversationVisualRequestId;try{view.postVisualStateCallback(requestId,new WebView.VisualStateCallback(){@Override public void onComplete(long completedRequestId){if(completedRequestId!=requestId)return;onConversationVisualReady(view,sync,expectedGeneration,false);}});}catch(Throwable unsupported){handler.postDelayed(()->onConversationVisualReady(view,sync,expectedGeneration,true),250L);}}
+private void onConversationVisualReady(WebView view,long sync,int expectedGeneration,boolean fallback){if(view!=webView||!conversationSyncInFlight||sync!=activeConversationSyncEpoch||expectedGeneration!=generation||!SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase())){runLog.record(store,"CONVERSATION_SYNC_DISCARDED",SelfRunWebDiagnostics.syncDetail(sync,generation,false,activeConversationSyncNavigation,-1,false,false,false,true));return;}boolean canonicalMatch=sameConversation(canonicalUrl(),view.getUrl());runLog.record(store,"CONVERSATION_SYNC_VISUAL_READY",SelfRunWebDiagnostics.syncDetail(sync,generation,canonicalMatch,activeConversationSyncNavigation,-1,false,false,true,false)+(fallback?";fallback=1":";fallback=0"));if(!canonicalMatch){handleConversationSyncPageFinished(view,view.getUrl());return;}evaluateConversationSyncReadiness(view,sync,expectedGeneration);}
+private void evaluateConversationSyncReadiness(WebView view,long sync,int expectedGeneration){if(view!=webView||!conversationSyncInFlight||sync!=activeConversationSyncEpoch||expectedGeneration!=generation||!SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase()))return;String token=sync+":"+expectedGeneration;view.evaluateJavascript(SelfRunDom.conversationFreshnessReady(store.conversationUrl(),token),raw->{if(view!=webView||!conversationSyncInFlight||sync!=activeConversationSyncEpoch||expectedGeneration!=generation||!SelfRunStore.PHASE_SYNC_CONVERSATION.equals(store.phase())){runLog.record(store,"CONVERSATION_SYNC_DISCARDED",SelfRunWebDiagnostics.syncDetail(sync,generation,false,activeConversationSyncNavigation,-1,false,false,false,true));return;}JSONObject result=parse(raw);String status=result.optString("status","SCRIPT_ERROR");int candidates=result.optInt("composerCandidateCount",-1);boolean turnContained=result.optBoolean("turnContained",false),submitScope=result.optBoolean("submitScope",false);if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}if("TARGET_ERROR".equals(status)){if(!conversationSyncRecoveryLoadUsed){conversationSyncRecoveryLoadUsed=true;activeConversationSyncNavigation="loadUrl_recovery";view.loadUrl(canonicalUrl());return;}conversationSyncInFlight=false;handler.postDelayed(this::ensureWebView,1500L);return;}if(!"READY".equals(status)){runLog.record(store,"CONVERSATION_SYNC_VISUAL_READY",SelfRunWebDiagnostics.syncDetail(sync,generation,true,activeConversationSyncNavigation,candidates,turnContained,submitScope,true,false));handler.postDelayed(()->evaluateConversationSyncReadiness(view,sync,expectedGeneration),750L);return;}if(!sameConversation(canonicalUrl(),view.getUrl())){conversationSyncInFlight=false;handler.post(this::ensureWebView);return;}conversationFreshnessToken=token;conversationFreshnessGeneration=generation;conversationSyncInFlight=false;String next=store.finishConversationSync();runLog.record(store,"CONVERSATION_SYNC_READY",SelfRunWebDiagnostics.syncDetail(sync,generation,true,activeConversationSyncNavigation,candidates,turnContained,submitScope,true,false)+";next="+(SelfRunStore.PHASE_APPLY_PREFS.equals(next)?"apply_model":SelfRunStore.PHASE_APPLY_REASONING.equals(next)?"apply_reasoning":"send_continue"));scheduleWeb(250L);});}
+'''
+          replace_once(service,
+              '    private void handleDriveFailure(Throwable error, int epoch) {',
+              helpers + '\n    private void handleDriveFailure(Throwable error, int epoch) {')
+          replace_once(service,
+              'automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;store.enterPause(prior, needsContinuation);',
+              'automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;invalidateConversationFreshness();conversationSyncInFlight=false;store.enterPause(prior, needsContinuation);')
+          replace_once(service,
+              'private void stopAutomationCallbacks() {removeAutomationCallbacks();synchronized (automationStateLock) {automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;}}',
+              'private void stopAutomationCallbacks() {removeAutomationCallbacks();synchronized (automationStateLock) {automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;invalidateConversationFreshness();conversationSyncInFlight=false;}}')
+          replace_once(service,
+              'private void cleanupWebView() {handler.removeCallbacks(webRunnable); generation++; domInFlight = false;if (host != null) { host.destroy(); host = null; } webView = null;}',
+              'private void cleanupWebView() {handler.removeCallbacks(webRunnable); generation++; domInFlight = false;invalidateConversationFreshness();if (host != null) { host.destroy(); host = null; } webView = null;}')
+
+          # Existing regression assertions updated to require the barrier.
+          replace_once('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunPauseResumeTest.java',
+              '        assertTrue(baseline.contains("PHASE_SEND_CONTINUE"));',
+              '        assertTrue(store.contains("PHASE_SYNC_CONVERSATION"));\n        assertTrue(baseline.contains("putString(\\"conversationSyncNextPhase\\",PHASE_SEND_CONTINUE)"));\n        assertTrue(baseline.contains("putString(\\"phase\\",PHASE_SYNC_CONVERSATION)"));')
+          replace_once('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveDev3PolicyTest.java',
+              'assertTrue(b.contains("driveSignalCursor"));assertTrue(b.contains("PHASE_SEND_CONTINUE"));assertFalse(b.contains("event.type"));',
+              'assertTrue(b.contains("driveSignalCursor"));assertTrue(b.contains("conversationSyncNextPhase"));assertTrue(b.contains("PHASE_SYNC_CONVERSATION"));assertTrue(b.contains("PHASE_SEND_CONTINUE"));assertFalse(b.contains("event.type"));')
+
+          test = r'''package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import static org.junit.Assert.*;
+
+public class ConversationFreshnessBarrierTest {
+    @Test public void manualResumeRefreshesCanonicalConversationBeforeContinue() throws Exception {
+        String st=src("SelfRunStore.java"),s=src("SelfRunService.java"),b=between(st,"void baselineManualResume","static boolean canCaptureConversationUrl");
+        assertTrue(b.contains("conversationSyncNextPhase"));assertTrue(b.contains("PHASE_SYNC_CONVERSATION"));assertTrue(b.contains("PHASE_SEND_CONTINUE"));
+        assertTrue(s.contains("startConversationSyncNavigation"));assertTrue(s.contains("postVisualStateCallback"));
+    }
+    @Test public void everyContinuationPassesConversationFreshnessBarrier() throws Exception {
+        String s=src("SelfRunService.java"),st=src("SelfRunStore.java");
+        assertTrue(between(s,"private void guardElapsed","private void ensureWebView").contains("enterConversationSync"));
+        assertTrue(between(st,"void prepareCommandRetry","void applyDriveSignals").contains("PHASE_SYNC_CONVERSATION"));
+        assertTrue(s.contains("if(isContinuationPhase(phase)&&!freshnessValid())"));
+    }
+    @Test public void preservedWebViewIsNotDestroyedDuringPause() throws Exception {
+        String s=src("SelfRunService.java"),p=between(s,"private void enterPreservedPause","private void removeAutomationCallbacks");
+        assertTrue(p.contains("pauseWebView()"));assertFalse(p.contains("cleanupWebView()"));assertTrue(s.contains("webview=preserved"));
+    }
+    @Test public void staleConversationCannotSubmitBeforeRefresh() throws Exception {
+        String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
+        assertTrue(s.contains("if(isContinuationPhase(phase)&&!freshnessValid())"));assertTrue(d.contains("FRESHNESS_STALE"));assertTrue(d.contains("__selfRunDriveFreshnessToken"));
+    }
+    @Test public void refreshCompletionAllowsExactlyOneContinue() throws Exception {
+        String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
+        assertTrue(s.contains("String next=store.finishConversationSync()"));assertTrue(s.contains("CONVERSATION_SYNC_READY"));
+        assertEquals(1,count(between(d,"static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId,String freshnessToken)","private static String projectGuard"),"send.click()"));
+    }
+    @Test public void navigationDuringPreparedSubmissionInvalidatesAttempt() throws Exception {
+        String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
+        assertTrue(s.contains("onMainFramePageStarted"));assertTrue(s.contains("invalidateConversationFreshness"));
+        assertTrue(d.contains("pagehide"));assertTrue(d.contains("prepared continuation belongs to stale generation"));
+    }
+    @Test public void latestComposerSafetyStillPasses() throws Exception {
+        String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
+        assertTrue(script.contains("__srComposerPool"));assertTrue(script.contains("xs[xs.length-1]"));assertTrue(script.contains("scope.contains(calibrated)"));assertTrue(script.contains("__srTurnContained"));
+    }
+    @Test public void editComposerNeverWinsOverMainComposer() {
+        String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
+        assertTrue(script.contains("__srEditContext"));assertTrue(script.contains("__srMainComposer"));assertTrue(script.contains("safeCalibratedComposer=__srMainComposer(calibratedComposer)?calibratedComposer:null"));
+    }
+    @Test public void generalChatAndProjectConversationBothRefreshCorrectly() throws Exception {
+        String s=src("SelfRunService.java");
+        assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/c/a","https://chatgpt.com/c/a"));
+        assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/g/g-p-test/c/a","https://chatgpt.com/g/g-p-test/c/a"));
+        assertTrue(s.contains("webView.reload()"));assertTrue(s.contains("webView.loadUrl(canonical)"));
+    }
+    @Test public void workAndChatModesBothPreserveBehavior() throws Exception {
+        String s=src("SelfRunService.java"),g=between(s,"private void guardElapsed","private void ensureWebView");
+        assertTrue(g.contains("MODE_WORK"));assertTrue(g.contains("PHASE_APPLY_PREFS"));assertTrue(g.contains("PHASE_SEND_CONTINUE"));
+        assertTrue(s.contains("WorkPreferenceDom.modelForConversation"));assertTrue(s.contains("WorkPreferenceDom.reasoningForConversation"));
+    }
+    @Test public void commandAckAndDrivePollingRegression() throws Exception {
+        String s=src("SelfRunService.java"),st=src("SelfRunStore.java");
+        assertTrue(s.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));assertTrue(s.contains("DriveSignalParser.scan"));assertTrue(st.contains("COMMAND_RECEIVED_PENDING"));
+        assertTrue(between(st,"void prepareCommandRetry","void applyDriveSignals").contains("RETRY_BOOTSTRAP"));assertTrue(st.contains("case USER_ACTION_REQUIRED"));assertTrue(st.contains("case PAUSED"));assertTrue(st.contains("case DONE"));
+    }
+    @Test public void repeatedRefreshCallbacksCannotDoubleSubmit() throws Exception {
+        String s=src("SelfRunService.java");
+        assertTrue(s.contains("sync!=activeConversationSyncEpoch"));assertTrue(s.contains("expectedGeneration!=generation"));assertTrue(s.contains("conversationSyncInFlight"));assertTrue(s.contains("CONVERSATION_SYNC_DISCARDED"));
+    }
+    private static int count(String s,String token){int n=0,i=0;while((i=s.indexOf(token,i))>=0){n++;i+=token.length();}return n;}
+    private static String src(String f)throws Exception{Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);if(!Files.exists(p))p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);return new String(Files.readAllBytes(p),StandardCharsets.UTF_8);}
+    private static String between(String s,String a,String b){int x=s.indexOf(a),y=s.indexOf(b,x);assertTrue(x>=0&&y>x);return s.substring(x,y);}
+}
+'''
+          Path('app/src/test/java/com/shaterguy/chatgptselfrun/ConversationFreshnessBarrierTest.java').write_text(test, encoding='utf-8')
+
+          # Privacy-safe diagnostics regression.
+          diag_test = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunWebDiagnosticsTest.java')
+          text = diag_test.read_text(encoding='utf-8')
+          anchor = '    @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {'
+          insert = '''    @Test public void conversationSyncDiagnosticsContainOnlySafeCategories() {\n        String detail = SelfRunWebDiagnostics.syncDetail(7L, 12, true, "reload", 2, false, true, true, false);\n        assertEquals("sync_epoch=7;generation=12;canonical_match=1;navigation=reload;candidate_count=2;turn_contained=0;submit_scope=1;generation_match=1;discarded=0", detail);\n        assertFalse(detail.contains("chatgpt.com"));\n        assertFalse(detail.contains("conversation"));\n    }\n\n'''
+          if text.count(anchor) != 1: raise SystemExit('SelfRunWebDiagnosticsTest anchor mismatch')
+          diag_test.write_text(text.replace(anchor, insert + anchor, 1), encoding='utf-8')
+
+          # Sanity: Drive remains the only completion-control source and no temporary assistant DOM gate was introduced.
+          service_text = Path(service).read_text(encoding='utf-8')
+          if 'observeAssistant' in service_text or 'PHASE_READ_NEXT_CONTROL' in service_text or 'WAIT_ASSISTANT' in service_text:
+              raise SystemExit('legacy assistant completion control must remain absent')
+          if 'PHASE_SYNC_CONVERSATION' not in service_text or 'CONVERSATION_SYNC_READY' not in service_text:
+              raise SystemExit('freshness barrier missing')
+          PY
+
+          git rm .github/workflows/bootstrap-drive-dev3.yml
+          git diff --check
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(drive): add conversation freshness barrier'
+          git push origin HEAD:selfrun-drive/v1.3.0-dev3
