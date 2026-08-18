@@ -67,7 +67,7 @@ public class ConversationFreshnessBarrierTest {
         assertFalse(sync.contains("reload()"));
         assertTrue(sync.contains("if(match)"));
         assertTrue(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
-        assertTrue(sync.contains("webView.loadUrl(canonical)"));
+        assertEquals(1,count(sync,"webView.loadUrl(canonical)"));
     }
     @Test public void workAndChatModesBothPreserveBehavior() throws Exception {
         String s=src("SelfRunService.java"),g=between(s,"private void guardElapsed","private void ensureWebView");
