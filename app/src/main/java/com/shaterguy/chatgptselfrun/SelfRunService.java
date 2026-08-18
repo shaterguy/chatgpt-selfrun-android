@@ -491,7 +491,7 @@ private void ensureWebView(){
         if(webView==null){beginConversationSyncCycle();activeConversationSyncNavigation="new_webview";launchWebView(store.conversationUrl());return;}
         startConversationSyncNavigation();return;
     }
-    if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}
+    if(webView!=null){scheduleWeb(250L);return;}
     launchWebView(target);
 }
 
