@@ -25,6 +25,23 @@ final class SelfRunWebDiagnostics {
         return "other";
     }
 
+    static String syncDetail(long syncEpoch, int generation, boolean canonicalMatch, String navigation,
+                   int candidateCount, boolean turnContained, boolean submitScope,
+                   boolean generationMatch, boolean discarded) {
+        String safeNavigation = switch (navigation == null ? "" : navigation) {
+  case "reload", "loadUrl", "loadUrl_recovery", "new_webview", "pending" -> navigation;
+  default -> "none";
+        };
+        return "sync_epoch=" + syncEpoch + ";generation=" + generation
+      + ";canonical_match=" + (canonicalMatch ? "1" : "0")
+      + ";navigation=" + safeNavigation
+      + ";candidate_count=" + candidateCount
+      + ";turn_contained=" + (turnContained ? "1" : "0")
+      + ";submit_scope=" + (submitScope ? "1" : "0")
+      + ";generation_match=" + (generationMatch ? "1" : "0")
+      + ";discarded=" + (discarded ? "1" : "0");
+    }
+
     static String routeMismatchDetail(String expected, String actual) {
         String expectedId = SelfRunScript.conversationId(expected);
         String actualId = SelfRunScript.conversationId(actual);

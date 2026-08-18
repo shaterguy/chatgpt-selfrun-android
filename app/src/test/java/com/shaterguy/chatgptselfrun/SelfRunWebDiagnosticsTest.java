@@ -19,6 +19,13 @@ public class SelfRunWebDiagnosticsTest {
         assertFalse(future.contains("user text"));
     }
 
+    @Test public void conversationSyncDiagnosticsContainOnlySafeCategories() {
+        String detail = SelfRunWebDiagnostics.syncDetail(7L, 12, true, "reload", 2, false, true, true, false);
+        assertEquals("sync_epoch=7;generation=12;canonical_match=1;navigation=reload;candidate_count=2;turn_contained=0;submit_scope=1;generation_match=1;discarded=0", detail);
+        assertFalse(detail.contains("chatgpt.com"));
+        assertFalse(detail.contains("conversation"));
+    }
+
     @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {
         String detail = SelfRunWebDiagnostics.routeMismatchDetail(
                 "https://chatgpt.com/c/conversation123", "https://chatgpt.com/settings");

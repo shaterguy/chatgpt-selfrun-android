@@ -9,7 +9,9 @@ public class LatestComposerSubmissionPolicyTest {
         String script = SelfRunDom.prepareDriveTurn(
                 "https://chatgpt.com/c/conversation123", "continue", "marker-latest");
         assertTrue(script.contains("const __srComposerPool=()=>"));
-        assertTrue(script.contains("!__srTurnContained(e)"));
+        assertTrue(script.contains("filter(__srMainComposer)"));
+        assertTrue(script.contains("__srTurnContained"));
+        assertTrue(script.contains("__srEditContext"));
         assertTrue(script.contains("xs[xs.length-1]"));
         assertTrue(script.contains("data-message-author-role"));
         assertTrue(script.contains("conversation-turn"));
@@ -20,7 +22,8 @@ public class LatestComposerSubmissionPolicyTest {
         String script = SelfRunDom.prepareDriveTurn(
                 "https://chatgpt.com/c/conversation123", "continue", "marker-old-calibration");
         assertTrue(script.contains("const __srTurnContained=e=>"));
-        assertTrue(script.contains("const safeCalibratedComposer=calibratedComposer&&!__srTurnContained(calibratedComposer)?calibratedComposer:null"));
+        assertTrue(script.contains("const safeCalibratedComposer=__srMainComposer(calibratedComposer)?calibratedComposer:null"));
+        assertTrue(script.contains("__srEditContext"));
         assertTrue(script.contains("let composer=__srLatestComposer()||safeCalibratedComposer"));
         assertFalse(script.contains("__srLatestComposer()||calibratedComposer"));
     }

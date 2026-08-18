@@ -14,7 +14,9 @@ public class SelfRunPauseResumeTest {
         assertFalse(resume.contains("resumeNeedsContinuation"));
         assertFalse(resume.contains("pausedFromPhase"));
         assertTrue(store.contains("PHASE_RESUME_BASELINE"));
-        assertTrue(baseline.contains("PHASE_SEND_CONTINUE"));
+        assertTrue(store.contains("PHASE_SYNC_CONVERSATION"));
+        assertTrue(baseline.contains("putString(\"conversationSyncNextPhase\",PHASE_SEND_CONTINUE)"));
+        assertTrue(baseline.contains("putString(\"phase\",PHASE_SYNC_CONVERSATION)"));
         assertFalse(baseline.contains("event.type"));
     }
 

@@ -31,7 +31,7 @@ public class SelfRunDriveTurnInfoSourceTest {
         assertTrue(service.contains("PHASE_APPLY_PREFS"));
         assertTrue(service.contains("WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel())"));
         assertTrue(service.contains("WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning())"));
-        assertTrue(service.contains("SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId())"));
+        assertTrue(service.contains("SelfRunDom.prepareDriveTurn(store.conversationUrl(),prompt,store.commandMarkerId(),conversationFreshnessToken)"));
         assertFalse(service.contains("TURN_INFO_REWRITE_SENTINEL"));
     }
 
