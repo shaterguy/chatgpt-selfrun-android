@@ -16,10 +16,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-/** Exercises Work continuation selectors on a real Android WebView fixture for an existing general chat. */
+/** Exercises Work continuation selectors and Drive composer safety on a real Android WebView fixture. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkPreferenceDomWebViewTest {
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
@@ -57,6 +58,54 @@ public final class WorkPreferenceDomWebViewTest {
         assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING).getString("aria"));
     }
 
+    @Test public void editOnlyComposerFailsClosedWithoutOverwritingSubmittedPrompt() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadRawFixture(scenario, web, composerFixture(false));
+            JSONObject result = evaluate(scenario, web, SelfRunDom.prepareDriveTurn(
+                    CONVERSATION_URL, "app-continue", "marker-edit-only"));
+            assertEquals("UI_WAIT", result.getString("status"));
+            assertEquals("old submitted prompt", read(scenario, web,
+                    "document.getElementById('old-edit').value"));
+        }
+    }
+
+    @Test public void historicalCalibratedComposerFailsClosedWithoutOverwritingSubmittedPrompt() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadRawFixture(scenario, web, composerFixture(false));
+            JSONObject profile = new JSONObject().put("targets", new JSONObject().put(
+                    WebUiCalibrationStore.TARGET_GENERAL_COMPOSER,
+                    new JSONObject().put("id", "old-edit").put("tag", "textarea")));
+            assertEquals("ok", read(scenario, web,
+                    "localStorage.setItem(" + SelfRunScript.quote(WebUiCalibrationStore.STORAGE_KEY) + ","
+                            + SelfRunScript.quote(profile.toString()) + ");'ok'"));
+            JSONObject result = evaluate(scenario, web, SelfRunDom.prepareDriveTurn(
+                    CONVERSATION_URL, "app-continue", "marker-calibrated-edit"));
+            assertEquals("UI_WAIT", result.getString("status"));
+            assertEquals("old submitted prompt", read(scenario, web,
+                    "document.getElementById('old-edit').value"));
+        }
+    }
+
+    @Test public void newestNonTurnComposerWinsWhileHistoricalEditRemainsUntouched() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadRawFixture(scenario, web, composerFixture(true));
+            String script = SelfRunDom.prepareDriveTurn(
+                    CONVERSATION_URL, "app-continue", "marker-newest-live");
+            JSONObject first = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", first.getString("status"));
+            assertEquals("old submitted prompt", read(scenario, web,
+                    "document.getElementById('old-edit').value"));
+            assertEquals("app-continue", read(scenario, web,
+                    "document.getElementById('prompt-textarea').value"));
+            JSONObject second = evaluate(scenario, web, script);
+            assertEquals("READY_TO_SUBMIT", second.getString("status"));
+            assertFalse(read(scenario, web, "document.getElementById('send').disabled").contains("true"));
+        }
+    }
+
     private static void assertSelection(String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
@@ -86,6 +135,11 @@ public final class WorkPreferenceDomWebViewTest {
 
     private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                     String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
+        loadRawFixture(scenario, web, fixture(triggerAttributes, triggerEvent, reasoning));
+    }
+
+    private static void loadRawFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
+                                       String html) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
@@ -97,8 +151,7 @@ public final class WorkPreferenceDomWebViewTest {
             });
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(CONVERSATION_URL,
-                    fixture(triggerAttributes, triggerEvent, reasoning), "text/html", "UTF-8", null);
+            view.loadDataWithBaseURL(CONVERSATION_URL, html, "text/html", "UTF-8", null);
         });
         assertTrue("WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
@@ -140,5 +193,16 @@ public final class WorkPreferenceDomWebViewTest {
                 + "trigger.addEventListener('" + triggerEvent + "',toggle);"
                 + "wanted.addEventListener('click',()=>{trigger.textContent=wanted.textContent;wanted.setAttribute('aria-selected','true');});</script>"
                 + "</body></html>";
+    }
+
+    private static String composerFixture(boolean includeLiveComposer) {
+        String live = includeLiveComposer
+                ? "<form id='live-form'><textarea id='prompt-textarea'></textarea><button id='send' data-testid='send-button'>Send</button></form>"
+                : "";
+        return "<!doctype html><html><head><style>body{margin:20px}textarea,button{display:block}</style></head><body><main>"
+                + "<article data-testid='conversation-turn-1'><div data-message-author-role='user'><form>"
+                + "<textarea id='old-edit' data-testid='prompt-textarea'>old submitted prompt</textarea>"
+                + "<button id='old-send' data-testid='send-button'>Send</button></form></div></article>"
+                + live + "</main></body></html>";
     }
 }
