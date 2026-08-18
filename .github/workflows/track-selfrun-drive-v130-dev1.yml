@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      CANDIDATE: fef94e8e9e99beaae82f94875a1bb8214ca9cf82
+      CANDIDATE: 626aa79a05e714f63957e4a68d2d17171f5f8cad
       TARGET: selfrun-drive/v1.3.0-dev1
     steps:
       - uses: actions/checkout@v4
