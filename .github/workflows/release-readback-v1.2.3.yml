@@ -22,11 +22,12 @@ jobs:
       APK_NAME: chatgpt-selfrun-drive-v1.2.3.apk
       SUMS_NAME: SHA256SUMS.txt
     steps:
-      - name: Verify release and publish readback statuses
+      - name: Verify release and publish staged readback statuses
         shell: bash
         run: |
           set -euo pipefail
           RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${DRIVE_TAG}"
+          CURRENT_STAGE=init
           post_status() {
             local state="$1" context="$2" description="$3"
             gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
@@ -35,29 +36,40 @@ jobs:
               -f description="$description" \
               -f target_url="$RELEASE_URL" >/dev/null
           }
-          trap 'rc=$?; if [ "$rc" -ne 0 ]; then set +e; post_status failure "release-readback/core" "probe failed rc=$rc"; fi' EXIT
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then set +e; post_status failure "release-readback/core" "failed stage=${CURRENT_STAGE} rc=${rc}"; fi' EXIT
 
+          CURRENT_STAGE=tag
           MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
           TAG_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${DRIVE_TAG}" --jq .object.sha)"
           test "$MAIN_SHA" = "$EXPECTED_SHA"
           test "$TAG_SHA" = "$EXPECTED_SHA"
+          post_status success "release-readback/tag" "$EXPECTED_SHA"
 
+          CURRENT_STAGE=release
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${DRIVE_TAG}" > release.json
           test "$(jq -r .tag_name release.json)" = "$DRIVE_TAG"
           test "$(jq -r .draft release.json)" = "false"
           test "$(jq -r .prerelease release.json)" = "false"
+          post_status success "release-readback/release" "published GitHub Release exists"
+
+          CURRENT_STAGE=assets
           jq -e --arg n "$APK_NAME" '.assets[] | select(.name == $n and .state == "uploaded")' release.json >/dev/null
           jq -e --arg n "$SUMS_NAME" '.assets[] | select(.name == $n and .state == "uploaded")' release.json >/dev/null
+          post_status success "release-readback/assets" "APK and SHA256SUMS.txt uploaded"
 
+          CURRENT_STAGE=download
           mkdir -p probe
           gh release download "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" \
             -p "$APK_NAME" -p "$SUMS_NAME" -D probe
+          post_status success "release-readback/download" "release assets downloaded"
+
+          CURRENT_STAGE=checksum
           (cd probe && sha256sum -c "$SUMS_NAME")
           APK_SHA="$(sha256sum "probe/$APK_NAME" | awk '{print $1}')"
           APK_SIZE="$(stat -c %s "probe/$APK_NAME")"
           PUBLISHED_AT="$(jq -r .published_at release.json)"
-
-          post_status success "release-readback/core" "main/tag/release/assets verified"
+          post_status success "release-readback/checksum" "SHA256SUMS verified"
           post_status success "release-readback/apk-sha256" "$APK_SHA"
           post_status success "release-readback/apk-size" "${APK_SIZE} bytes"
           post_status success "release-readback/published" "$PUBLISHED_AT"
+          post_status success "release-readback/core" "main/tag/release/assets verified"
