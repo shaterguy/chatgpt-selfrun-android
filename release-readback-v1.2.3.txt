@@ -1,0 +1,11 @@
+repository=shaterguy/chatgpt-selfrun-android
+default_branch=main
+main_sha=640b872b2896df9c60f62cbed493fa375aec0fba
+release_tag=drive-v1.2.3
+release_url=https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v1.2.3
+apk_name=chatgpt-selfrun-drive-v1.2.3.apk
+apk_size_bytes=2339656
+apk_sha256=626d94c2a4f49125742ac17d8f9d6a7b200de222c862a0aa38b5e5aa3eb922cb
+checksum_asset=SHA256SUMS.txt
+published_at=2026-08-18T02:45:06Z
+status=RELEASED_AND_VERIFIED
