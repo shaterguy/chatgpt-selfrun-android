@@ -64,12 +64,14 @@ jobs:
           post_status success "release-readback/download" "release assets downloaded"
 
           CURRENT_STAGE=checksum
-          (cd probe && sha256sum -c "$SUMS_NAME")
-          APK_SHA="$(sha256sum "probe/$APK_NAME" | awk '{print $1}')"
+          EXPECTED_APK_SHA="$(awk -v n="$APK_NAME" '$2 ~ (n "$\\") {print $1; exit}' "probe/$SUMS_NAME")"
+          ACTUAL_APK_SHA="$(sha256sum "probe/$APK_NAME" | awk '{print $1}')"
+          test -n "$EXPECTED_APK_SHA"
+          test "$EXPECTED_APK_SHA" = "$ACTUAL_APK_SHA"
           APK_SIZE="$(stat -c %s "probe/$APK_NAME")"
           PUBLISHED_AT="$(jq -r .published_at release.json)"
-          post_status success "release-readback/checksum" "SHA256SUMS verified"
-          post_status success "release-readback/apk-sha256" "$APK_SHA"
+          post_status success "release-readback/checksum" "SHA256SUMS digest matches APK"
+          post_status success "release-readback/apk-sha256" "$ACTUAL_APK_SHA"
           post_status success "release-readback/apk-size" "${APK_SIZE} bytes"
           post_status success "release-readback/published" "$PUBLISHED_AT"
           post_status success "release-readback/core" "main/tag/release/assets verified"
