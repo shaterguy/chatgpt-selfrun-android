@@ -126,7 +126,7 @@ public class AttachmentUploadPolicyTest {
     @Test public void developmentVersionAdvancesWithoutDependencyChange() throws Exception {
         Path p = Paths.get("app/build.gradle");
         if (!Files.exists(p)) p = Paths.get("build.gradle");
-        String gradle = Files.readString(p, StandardCharsets.UTF_8);
+        String gradle = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
         assertTrue(gradle.contains("selfRunDriveVersionCode = 1000041"));
         assertTrue(gradle.contains("selfRunDriveVersionName = '1.3.0-dev1'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
@@ -142,6 +142,6 @@ public class AttachmentUploadPolicyTest {
     private static String src(String file) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
