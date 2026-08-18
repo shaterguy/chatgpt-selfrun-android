@@ -145,7 +145,7 @@ public final class WorkPreferenceDomWebViewTest {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
-            view.getSettings().setJavaScriptEnabled(true);
+            WebViewConfig.applyAutomation(view);
             view.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView ignored, String url) {
                     if (CONVERSATION_URL.equals(url)) loaded.countDown();
