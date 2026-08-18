@@ -77,9 +77,11 @@ public final class WorkPreferenceDomWebViewTest {
             JSONObject profile = new JSONObject().put("targets", new JSONObject().put(
                     WebUiCalibrationStore.TARGET_GENERAL_COMPOSER,
                     new JSONObject().put("id", "old-edit").put("tag", "textarea")));
-            assertEquals("ok", read(scenario, web,
+            read(scenario, web,
                     "localStorage.setItem(" + SelfRunScript.quote(WebUiCalibrationStore.STORAGE_KEY) + ","
-                            + SelfRunScript.quote(profile.toString()) + ");'ok'"));
+                            + SelfRunScript.quote(profile.toString()) + ")");
+            assertEquals(profile.toString(), read(scenario, web,
+                    "localStorage.getItem(" + SelfRunScript.quote(WebUiCalibrationStore.STORAGE_KEY) + ")"));
             JSONObject result = evaluate(scenario, web, SelfRunDom.prepareDriveTurn(
                     CONVERSATION_URL, "app-continue", "marker-calibrated-edit"));
             assertEquals("UI_WAIT", result.getString("status"));
