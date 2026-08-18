@@ -54,13 +54,28 @@ public class ConversationFreshnessBarrierTest {
         assertFalse(sync.contains("webView.reload()"));
         assertTrue(sync.contains("webView.loadUrl(canonical)"));
     }
-    @Test public void syncCapturesLiveConversationBeforeMissingTargetDecision() throws Exception {
+    @Test public void syncNeverBindsUnknownLiveConversation() throws Exception {
         String s=src("SelfRunService.java"),ensure=between(s,"private void ensureWebView(){","private void launchWebView");
-        int capture=ensure.indexOf("maybeCaptureConversationUrl(webView.getUrl())");
-        int missing=ensure.indexOf("CONVERSATION_SYNC_TARGET_MISSING");
-        assertTrue(capture>=0);assertTrue(missing>capture);
+        assertFalse(ensure.contains("maybeCaptureConversationUrl(webView.getUrl())"));
         assertTrue(ensure.contains("enterPreservedPause(\"CONVERSATION_SYNC_TARGET_MISSING\""));
         assertFalse(ensure.contains("handler.postDelayed(this::ensureWebView,2000L)"));
+    }
+    @Test public void bootstrapConversationBindingIsCausalBoundedAndLocalOnly() throws Exception {
+        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void postWebCallback");
+        assertTrue(binding.contains("SelfRunScript.conversationId(current).isEmpty()"));
+        assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));
+        assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));
+        assertTrue(binding.contains("bootstrapConversationCaptureWebView=active"));
+        assertTrue(binding.contains("store.awaitingCommandAck()"));
+        assertTrue(binding.contains("store.retryForBootstrap()"));
+        assertTrue(binding.contains("BOOTSTRAP_CONVERSATION_CAPTURE_WINDOW_MS"));
+        assertFalse(binding.contains("loadUrl("));assertFalse(binding.contains("reload("));assertFalse(binding.contains("evaluateJavascript("));
+        String submit=between(s,"private void commandSubmitted","private static boolean isSubmissionPhase");
+        assertTrue(submit.contains("\"BOOTSTRAP_SUBMITTED\".equals(detail)"));
+        assertTrue(submit.contains("scheduleBootstrapConversationCapture()"));
+        String handling=between(s,"private void handleWebResult","private String driveBootstrap");
+        assertTrue(handling.contains("armBootstrapConversationCapture()"));
+        assertTrue(handling.contains("BOOTSTRAP_CONVERSATION_BIND_ORIGIN_INVALID"));
     }
     @Test public void matchingConversationSyncDoesNotAddNetworkReload() throws Exception {
         String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
