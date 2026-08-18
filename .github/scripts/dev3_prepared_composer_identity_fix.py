@@ -166,5 +166,7 @@ if 'window.__selfRunDrivePreparedContinuation={markerKey:markerKey2,composer' no
     raise SystemExit('prepare-time composer identity not retained')
 if 'prepared.composer!==composer' not in dom_text or 'prepared.clicked=true;send.click()' not in dom_text:
     raise SystemExit('prepared composer identity/click-once guard missing')
-if 'composer_replaced_abort' not in diag_text or 'abort=stale_callback' not in diag_text:
-    raise SystemExit('privacy-safe abort diagnostics missing')
+if 'composer_replaced_abort' not in diag_text:
+    raise SystemExit('composer replacement privacy-safe diagnostic missing')
+if 'static String abortDetail' not in diag_text or '"stale_callback".equals(reason)' not in diag_text or 'return "abort=" + safeReason' not in diag_text:
+    raise SystemExit('stale callback privacy-safe diagnostic missing')
