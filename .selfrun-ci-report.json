@@ -1,191 +1,27 @@
 {
-  "candidate": "fef94e8e9e99beaae82f94875a1bb8214ca9cf82",
+  "candidate": "626aa79a05e714f63957e4a68d2d17171f5f8cad",
   "target": "selfrun-drive/v1.3.0-dev1",
-  "run_id": 32118589720,
+  "run_id": 32125170774,
   "status": "completed",
-  "conclusion": "failure",
-  "run_url": "https://github.com/shaterguy/chatgpt-selfrun-android/actions/runs/32118589720",
+  "conclusion": "success",
+  "run_url": "https://github.com/shaterguy/chatgpt-selfrun-android/actions/runs/32125170774",
   "jobs": [
     {
-      "id": 95653620273,
-      "run_id": 32118589720,
+      "id": 95674001166,
+      "run_id": 32125170774,
       "workflow_name": "Build SelfRun Drive",
       "head_branch": "selfrun-drive/v1.3.0-dev1",
-      "run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/runs/32118589720",
+      "run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/runs/32125170774",
       "run_attempt": 1,
-      "node_id": "CR_kwDOT0N_zs8AAAAWRWZqMQ",
-      "head_sha": "fef94e8e9e99beaae82f94875a1bb8214ca9cf82",
-      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/jobs/95653620273",
-      "html_url": "https://github.com/shaterguy/chatgpt-selfrun-android/actions/runs/32118589720/job/95653620273",
-      "status": "completed",
-      "conclusion": "failure",
-      "created_at": "2026-08-18T08:52:11Z",
-      "started_at": "2026-08-18T08:52:14Z",
-      "completed_at": "2026-08-18T08:53:26Z",
-      "name": "build-drive-v1",
-      "steps": [
-        {
-          "name": "Set up job",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 1,
-          "started_at": "2026-08-18T08:52:14Z",
-          "completed_at": "2026-08-18T08:52:18Z"
-        },
-        {
-          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 2,
-          "started_at": "2026-08-18T08:52:18Z",
-          "completed_at": "2026-08-18T08:52:19Z"
-        },
-        {
-          "name": "Run actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 3,
-          "started_at": "2026-08-18T08:52:19Z",
-          "completed_at": "2026-08-18T08:52:19Z"
-        },
-        {
-          "name": "Run android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 4,
-          "started_at": "2026-08-18T08:52:19Z",
-          "completed_at": "2026-08-18T08:52:45Z"
-        },
-        {
-          "name": "Install Android SDK",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 5,
-          "started_at": "2026-08-18T08:52:45Z",
-          "completed_at": "2026-08-18T08:52:47Z"
-        },
-        {
-          "name": "Run gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 6,
-          "started_at": "2026-08-18T08:52:47Z",
-          "completed_at": "2026-08-18T08:53:10Z"
-        },
-        {
-          "name": "Policy and unit tests",
-          "status": "completed",
-          "conclusion": "failure",
-          "number": 7,
-          "started_at": "2026-08-18T08:53:10Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Build debug and unsigned release",
-          "status": "completed",
-          "conclusion": "skipped",
-          "number": 8,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Upload aligned unsigned APK",
-          "status": "completed",
-          "conclusion": "skipped",
-          "number": 9,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Check optional stable signing secret",
-          "status": "completed",
-          "conclusion": "skipped",
-          "number": 10,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Install hash-locked signing dependencies",
-          "status": "completed",
-          "conclusion": "skipped",
-          "number": 11,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Sign and verify update-installable candidate APK",
-          "status": "completed",
-          "conclusion": "skipped",
-          "number": 12,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Upload stable-signed candidate",
-          "status": "completed",
-          "conclusion": "skipped",
-          "number": 13,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Post Run gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 24,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Post Run actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 25,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 26,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        },
-        {
-          "name": "Complete job",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 27,
-          "started_at": "2026-08-18T08:53:23Z",
-          "completed_at": "2026-08-18T08:53:23Z"
-        }
-      ],
-      "check_run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/check-runs/95653620273",
-      "labels": [
-        "ubuntu-latest"
-      ],
-      "runner_id": 1000003047,
-      "runner_name": "GitHub Actions 1000003047",
-      "runner_group_id": 0,
-      "runner_group_name": "GitHub Actions"
-    },
-    {
-      "id": 95653620452,
-      "run_id": 32118589720,
-      "workflow_name": "Build SelfRun Drive",
-      "head_branch": "selfrun-drive/v1.3.0-dev1",
-      "run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/runs/32118589720",
-      "run_attempt": 1,
-      "node_id": "CR_kwDOT0N_zs8AAAAWRWZq5A",
-      "head_sha": "fef94e8e9e99beaae82f94875a1bb8214ca9cf82",
-      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/jobs/95653620452",
-      "html_url": "https://github.com/shaterguy/chatgpt-selfrun-android/actions/runs/32118589720/job/95653620452",
+      "node_id": "CR_kwDOT0N_zs8AAAAWRp1nDg",
+      "head_sha": "626aa79a05e714f63957e4a68d2d17171f5f8cad",
+      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/jobs/95674001166",
+      "html_url": "https://github.com/shaterguy/chatgpt-selfrun-android/actions/runs/32125170774/job/95674001166",
       "status": "completed",
       "conclusion": "success",
-      "created_at": "2026-08-18T08:52:11Z",
-      "started_at": "2026-08-18T08:52:14Z",
-      "completed_at": "2026-08-18T08:58:46Z",
+      "created_at": "2026-08-18T10:07:27Z",
+      "started_at": "2026-08-18T10:07:31Z",
+      "completed_at": "2026-08-18T10:14:19Z",
       "name": "verify-coinstall-emulator",
       "steps": [
         {
@@ -193,159 +29,363 @@
           "status": "completed",
           "conclusion": "success",
           "number": 1,
-          "started_at": "2026-08-18T08:52:15Z",
-          "completed_at": "2026-08-18T08:52:18Z"
+          "started_at": "2026-08-18T10:07:32Z",
+          "completed_at": "2026-08-18T10:07:36Z"
         },
         {
           "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
           "status": "completed",
           "conclusion": "success",
           "number": 2,
-          "started_at": "2026-08-18T08:52:18Z",
-          "completed_at": "2026-08-18T08:52:20Z"
+          "started_at": "2026-08-18T10:07:36Z",
+          "completed_at": "2026-08-18T10:07:37Z"
         },
         {
           "name": "Check out exact legacy baseline",
           "status": "completed",
           "conclusion": "success",
           "number": 3,
-          "started_at": "2026-08-18T08:52:20Z",
-          "completed_at": "2026-08-18T08:52:21Z"
+          "started_at": "2026-08-18T10:07:37Z",
+          "completed_at": "2026-08-18T10:07:38Z"
         },
         {
           "name": "Run actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
           "status": "completed",
           "conclusion": "success",
           "number": 4,
-          "started_at": "2026-08-18T08:52:21Z",
-          "completed_at": "2026-08-18T08:52:21Z"
+          "started_at": "2026-08-18T10:07:38Z",
+          "completed_at": "2026-08-18T10:07:38Z"
         },
         {
           "name": "Run android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407",
           "status": "completed",
           "conclusion": "success",
           "number": 5,
-          "started_at": "2026-08-18T08:52:21Z",
-          "completed_at": "2026-08-18T08:52:41Z"
+          "started_at": "2026-08-18T10:07:38Z",
+          "completed_at": "2026-08-18T10:07:58Z"
         },
         {
           "name": "Run gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d",
           "status": "completed",
           "conclusion": "success",
           "number": 6,
-          "started_at": "2026-08-18T08:52:41Z",
-          "completed_at": "2026-08-18T08:52:52Z"
+          "started_at": "2026-08-18T10:07:58Z",
+          "completed_at": "2026-08-18T10:08:13Z"
         },
         {
           "name": "Install Android build SDK",
           "status": "completed",
           "conclusion": "success",
           "number": 7,
-          "started_at": "2026-08-18T08:52:52Z",
-          "completed_at": "2026-08-18T08:52:55Z"
+          "started_at": "2026-08-18T10:08:13Z",
+          "completed_at": "2026-08-18T10:08:16Z"
         },
         {
           "name": "Build current and exact legacy debug APKs",
           "status": "completed",
           "conclusion": "success",
           "number": 8,
-          "started_at": "2026-08-18T08:52:55Z",
-          "completed_at": "2026-08-18T08:53:38Z"
+          "started_at": "2026-08-18T10:08:16Z",
+          "completed_at": "2026-08-18T10:09:03Z"
         },
         {
           "name": "Enable hardware acceleration",
           "status": "completed",
           "conclusion": "success",
           "number": 9,
-          "started_at": "2026-08-18T08:53:38Z",
-          "completed_at": "2026-08-18T08:53:38Z"
+          "started_at": "2026-08-18T10:09:03Z",
+          "completed_at": "2026-08-18T10:09:03Z"
         },
         {
           "name": "Verify full co-install isolation",
           "status": "completed",
           "conclusion": "success",
           "number": 10,
-          "started_at": "2026-08-18T08:53:38Z",
-          "completed_at": "2026-08-18T08:58:43Z"
+          "started_at": "2026-08-18T10:09:03Z",
+          "completed_at": "2026-08-18T10:14:13Z"
         },
         {
           "name": "Upload co-install evidence",
           "status": "completed",
           "conclusion": "success",
           "number": 11,
-          "started_at": "2026-08-18T08:58:43Z",
-          "completed_at": "2026-08-18T08:58:43Z"
+          "started_at": "2026-08-18T10:14:13Z",
+          "completed_at": "2026-08-18T10:14:15Z"
         },
         {
           "name": "Post Run gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d",
           "status": "completed",
           "conclusion": "success",
           "number": 19,
-          "started_at": "2026-08-18T08:58:43Z",
-          "completed_at": "2026-08-18T08:58:44Z"
+          "started_at": "2026-08-18T10:14:15Z",
+          "completed_at": "2026-08-18T10:14:15Z"
         },
         {
           "name": "Post Run actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
           "status": "completed",
           "conclusion": "success",
           "number": 20,
-          "started_at": "2026-08-18T08:58:44Z",
-          "completed_at": "2026-08-18T08:58:44Z"
+          "started_at": "2026-08-18T10:14:15Z",
+          "completed_at": "2026-08-18T10:14:15Z"
         },
         {
           "name": "Post Check out exact legacy baseline",
           "status": "completed",
           "conclusion": "success",
           "number": 21,
-          "started_at": "2026-08-18T08:58:44Z",
-          "completed_at": "2026-08-18T08:58:44Z"
+          "started_at": "2026-08-18T10:14:15Z",
+          "completed_at": "2026-08-18T10:14:15Z"
         },
         {
           "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
           "status": "completed",
           "conclusion": "success",
           "number": 22,
-          "started_at": "2026-08-18T08:58:44Z",
-          "completed_at": "2026-08-18T08:58:44Z"
+          "started_at": "2026-08-18T10:14:15Z",
+          "completed_at": "2026-08-18T10:14:15Z"
         },
         {
           "name": "Complete job",
           "status": "completed",
           "conclusion": "success",
           "number": 23,
-          "started_at": "2026-08-18T08:58:44Z",
-          "completed_at": "2026-08-18T08:58:44Z"
+          "started_at": "2026-08-18T10:14:15Z",
+          "completed_at": "2026-08-18T10:14:15Z"
         }
       ],
-      "check_run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/check-runs/95653620452",
+      "check_run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/check-runs/95674001166",
       "labels": [
         "ubuntu-latest"
       ],
-      "runner_id": 1000003048,
-      "runner_name": "GitHub Actions 1000003048",
+      "runner_id": 1000003050,
+      "runner_name": "GitHub Actions 1000003050",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 95674001189,
+      "run_id": 32125170774,
+      "workflow_name": "Build SelfRun Drive",
+      "head_branch": "selfrun-drive/v1.3.0-dev1",
+      "run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/runs/32125170774",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOT0N_zs8AAAAWRp1nJQ",
+      "head_sha": "626aa79a05e714f63957e4a68d2d17171f5f8cad",
+      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/jobs/95674001189",
+      "html_url": "https://github.com/shaterguy/chatgpt-selfrun-android/actions/runs/32125170774/job/95674001189",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-08-18T10:07:27Z",
+      "started_at": "2026-08-18T10:07:30Z",
+      "completed_at": "2026-08-18T10:09:26Z",
+      "name": "build-drive-v1",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-08-18T10:07:31Z",
+          "completed_at": "2026-08-18T10:07:35Z"
+        },
+        {
+          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-08-18T10:07:35Z",
+          "completed_at": "2026-08-18T10:07:36Z"
+        },
+        {
+          "name": "Run actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-08-18T10:07:36Z",
+          "completed_at": "2026-08-18T10:07:36Z"
+        },
+        {
+          "name": "Run android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-08-18T10:07:36Z",
+          "completed_at": "2026-08-18T10:08:01Z"
+        },
+        {
+          "name": "Install Android SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-08-18T10:08:01Z",
+          "completed_at": "2026-08-18T10:08:04Z"
+        },
+        {
+          "name": "Run gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-08-18T10:08:04Z",
+          "completed_at": "2026-08-18T10:08:16Z"
+        },
+        {
+          "name": "Policy and unit tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-08-18T10:08:16Z",
+          "completed_at": "2026-08-18T10:08:36Z"
+        },
+        {
+          "name": "Build debug and unsigned release",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-08-18T10:08:36Z",
+          "completed_at": "2026-08-18T10:09:15Z"
+        },
+        {
+          "name": "Upload aligned unsigned APK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-08-18T10:09:15Z",
+          "completed_at": "2026-08-18T10:09:17Z"
+        },
+        {
+          "name": "Check optional stable signing secret",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-08-18T10:09:17Z",
+          "completed_at": "2026-08-18T10:09:17Z"
+        },
+        {
+          "name": "Install hash-locked signing dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-08-18T10:09:17Z",
+          "completed_at": "2026-08-18T10:09:19Z"
+        },
+        {
+          "name": "Sign and verify update-installable candidate APK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-08-18T10:09:19Z",
+          "completed_at": "2026-08-18T10:09:22Z"
+        },
+        {
+          "name": "Upload stable-signed candidate",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-08-18T10:09:22Z",
+          "completed_at": "2026-08-18T10:09:23Z"
+        },
+        {
+          "name": "Post Run gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 24,
+          "started_at": "2026-08-18T10:09:23Z",
+          "completed_at": "2026-08-18T10:09:23Z"
+        },
+        {
+          "name": "Post Run actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 25,
+          "started_at": "2026-08-18T10:09:23Z",
+          "completed_at": "2026-08-18T10:09:24Z"
+        },
+        {
+          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 26,
+          "started_at": "2026-08-18T10:09:24Z",
+          "completed_at": "2026-08-18T10:09:24Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-08-18T10:09:24Z",
+          "completed_at": "2026-08-18T10:09:24Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/check-runs/95674001189",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000003051,
+      "runner_name": "GitHub Actions 1000003051",
       "runner_group_id": 0,
       "runner_group_name": "GitHub Actions"
     }
   ],
   "artifacts": [
     {
-      "id": 9317833364,
-      "node_id": "MDg6QXJ0aWZhY3Q5MzE3ODMzMzY0",
+      "id": 9320249871,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzIwMjQ5ODcx",
       "name": "chatgpt-selfrun-drive-coinstall-evidence",
-      "size_in_bytes": 2260,
-      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9317833364",
-      "archive_download_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9317833364/zip",
+      "size_in_bytes": 2255,
+      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9320249871",
+      "archive_download_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9320249871/zip",
       "expired": false,
-      "digest": "sha256:c1af43f7c3d44950b79104c74af90829d3ed11c5c04404c9d2efd50416cd3f2c",
-      "created_at": "2026-08-18T08:58:43Z",
-      "updated_at": "2026-08-18T08:58:43Z",
-      "expires_at": "2026-09-17T08:58:43Z",
+      "digest": "sha256:965c2a3d21eb7c622566b6d18a42859abe972e00708477539f5cf998d3dfba70",
+      "created_at": "2026-08-18T10:14:14Z",
+      "updated_at": "2026-08-18T10:14:14Z",
+      "expires_at": "2026-09-17T10:14:14Z",
       "workflow_run": {
-        "id": 32118589720,
+        "id": 32125170774,
         "repository_id": 1329823694,
         "head_repository_id": 1329823694,
         "head_branch": "selfrun-drive/v1.3.0-dev1",
-        "head_sha": "fef94e8e9e99beaae82f94875a1bb8214ca9cf82"
+        "head_sha": "626aa79a05e714f63957e4a68d2d17171f5f8cad"
+      }
+    },
+    {
+      "id": 9320096457,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzIwMDk2NDU3",
+      "name": "chatgpt-selfrun-drive-build",
+      "size_in_bytes": 4397177,
+      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9320096457",
+      "archive_download_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9320096457/zip",
+      "expired": false,
+      "digest": "sha256:ece4aafbf923120ce9a6ed544482620b5ed39cbdcf3dd610fc7aaa56b8645eb8",
+      "created_at": "2026-08-18T10:09:23Z",
+      "updated_at": "2026-08-18T10:09:23Z",
+      "expires_at": "2026-09-17T10:09:22Z",
+      "workflow_run": {
+        "id": 32125170774,
+        "repository_id": 1329823694,
+        "head_repository_id": 1329823694,
+        "head_branch": "selfrun-drive/v1.3.0-dev1",
+        "head_sha": "626aa79a05e714f63957e4a68d2d17171f5f8cad"
+      }
+    },
+    {
+      "id": 9320093130,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzIwMDkzMTMw",
+      "name": "chatgpt-selfrun-drive-unsigned",
+      "size_in_bytes": 2191028,
+      "url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9320093130",
+      "archive_download_url": "https://api.github.com/repos/shaterguy/chatgpt-selfrun-android/actions/artifacts/9320093130/zip",
+      "expired": false,
+      "digest": "sha256:916a3a151237ed6955e502bf12352ce748f77ceefcb161e1b3b8ce4bbbc0c932",
+      "created_at": "2026-08-18T10:09:17Z",
+      "updated_at": "2026-08-18T10:09:17Z",
+      "expires_at": "2026-09-17T10:09:16Z",
+      "workflow_run": {
+        "id": 32125170774,
+        "repository_id": 1329823694,
+        "head_repository_id": 1329823694,
+        "head_branch": "selfrun-drive/v1.3.0-dev1",
+        "head_sha": "626aa79a05e714f63957e4a68d2d17171f5f8cad"
       }
     }
   ]
