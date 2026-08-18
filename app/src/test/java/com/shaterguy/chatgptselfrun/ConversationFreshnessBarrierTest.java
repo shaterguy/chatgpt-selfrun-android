@@ -45,11 +45,29 @@ public class ConversationFreshnessBarrierTest {
         String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
         assertTrue(script.contains("__srEditContext"));assertTrue(script.contains("__srMainComposer"));assertTrue(script.contains("safeCalibratedComposer=__srMainComposer(calibratedComposer)?calibratedComposer:null"));
     }
-    @Test public void generalChatAndProjectConversationBothRefreshCorrectly() throws Exception {
-        String s=src("SelfRunService.java");
+    @Test public void generalChatAndProjectConversationBothRefreshCorrectlyWithoutReload() throws Exception {
+        String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
         assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/c/a","https://chatgpt.com/c/a"));
         assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/g/g-p-test/c/a","https://chatgpt.com/g/g-p-test/c/a"));
-        assertTrue(s.contains("webView.reload()"));assertTrue(s.contains("webView.loadUrl(canonical)"));
+        assertTrue(sync.contains("activeConversationSyncNavigation=\"reuse\""));
+        assertTrue(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
+        assertFalse(sync.contains("webView.reload()"));
+        assertTrue(sync.contains("webView.loadUrl(canonical)"));
+    }
+    @Test public void syncCapturesLiveConversationBeforeMissingTargetDecision() throws Exception {
+        String s=src("SelfRunService.java"),ensure=between(s,"private void ensureWebView(){","private void launchWebView");
+        int capture=ensure.indexOf("maybeCaptureConversationUrl(webView.getUrl())");
+        int missing=ensure.indexOf("CONVERSATION_SYNC_TARGET_MISSING");
+        assertTrue(capture>=0);assertTrue(missing>capture);
+        assertTrue(ensure.contains("enterPreservedPause(\"CONVERSATION_SYNC_TARGET_MISSING\""));
+        assertFalse(ensure.contains("handler.postDelayed(this::ensureWebView,2000L)"));
+    }
+    @Test public void matchingConversationSyncDoesNotAddNetworkReload() throws Exception {
+        String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
+        assertFalse(sync.contains("reload()"));
+        assertTrue(sync.contains("if(match)"));
+        assertTrue(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
+        assertTrue(sync.contains("webView.loadUrl(canonical)"));
     }
     @Test public void workAndChatModesBothPreserveBehavior() throws Exception {
         String s=src("SelfRunService.java"),g=between(s,"private void guardElapsed","private void ensureWebView");
