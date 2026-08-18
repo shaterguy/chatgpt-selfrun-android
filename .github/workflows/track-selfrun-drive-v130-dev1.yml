@@ -4,7 +4,7 @@ on:
     branches:
       - 'ops/selfrun-drive-v1.3.0-dev1-reconstruct'
 permissions:
-  actions: write
+  actions: read
   contents: write
 jobs:
   track:
@@ -12,26 +12,22 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      CANDIDATE: 4d56eff639f6a9bed75d25f008788d51eb76d31a
+      CANDIDATE: fef94e8e9e99beaae82f94875a1bb8214ca9cf82
       TARGET: selfrun-drive/v1.3.0-dev1
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Dispatch exact candidate build
+      - name: Wait for exact push run and collect result
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin "$TARGET"
           test "$(git rev-parse "origin/$TARGET")" = "$CANDIDATE"
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-v1.yml/dispatches" -f ref="$TARGET"
-      - name: Wait for run and collect result
-        shell: bash
-        run: |
-          set -euo pipefail
+
           RUN_ID=''
           for i in $(seq 1 40); do
-            RUN_ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-v1.yml/runs?branch=${TARGET}&event=workflow_dispatch&per_page=20" \
+            RUN_ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-v1.yml/runs?branch=${TARGET}&event=push&per_page=20" \
               --jq ".workflow_runs[] | select(.head_sha == \"${CANDIDATE}\") | .id" | head -n1 || true)
             test -n "$RUN_ID" && break
             sleep 15
