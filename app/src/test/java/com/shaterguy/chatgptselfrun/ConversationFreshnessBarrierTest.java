@@ -76,6 +76,11 @@ public class ConversationFreshnessBarrierTest {
         String handling=between(s,"private void handleWebResult","private String driveBootstrap");
         assertTrue(handling.contains("armBootstrapConversationCapture()"));
         assertTrue(handling.contains("BOOTSTRAP_CONVERSATION_BIND_ORIGIN_INVALID"));
+        String callbacks=between(s,"webView.setWebViewClient(new WebViewClient()","private boolean armBootstrapConversationCapture()");
+        String webStep=between(s,"private void runWebStep()","private void evaluate(");
+        assertFalse(callbacks.contains("maybeCaptureConversationUrl("));
+        assertFalse(webStep.contains("maybeCaptureConversationUrl("));
+        assertEquals(2,count(s,"maybeCaptureConversationUrl("));
     }
     @Test public void matchingConversationSyncDoesNotAddNetworkReload() throws Exception {
         String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
