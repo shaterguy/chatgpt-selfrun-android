@@ -8,7 +8,7 @@ on:
       - .github/workflows/release-readback-v1.2.3.yml
 
 permissions:
-  contents: read
+  contents: write
   statuses: write
 
 jobs:
@@ -21,8 +21,9 @@ jobs:
       DRIVE_TAG: drive-v1.2.3
       APK_NAME: chatgpt-selfrun-drive-v1.2.3.apk
       SUMS_NAME: SHA256SUMS.txt
+      EVIDENCE_PATH: release-readback-v1.2.3.txt
     steps:
-      - name: Verify release and publish readback statuses
+      - name: Verify release and publish readback evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -71,6 +72,26 @@ jobs:
           test "$EXPECTED_APK_SHA" = "$ACTUAL_APK_SHA"
           APK_SIZE="$(stat -c %s "probe/$APK_NAME")"
           PUBLISHED_AT="$(jq -r .published_at release.json)"
+          printf '%s\n' \
+            "repository=$GITHUB_REPOSITORY" \
+            "default_branch=main" \
+            "main_sha=$MAIN_SHA" \
+            "release_tag=$DRIVE_TAG" \
+            "release_url=$RELEASE_URL" \
+            "apk_name=$APK_NAME" \
+            "apk_size_bytes=$APK_SIZE" \
+            "apk_sha256=$ACTUAL_APK_SHA" \
+            "checksum_asset=$SUMS_NAME" \
+            "published_at=$PUBLISHED_AT" \
+            "status=RELEASED_AND_VERIFIED" > evidence.txt
+
+          CURRENT_STAGE=evidence
+          CONTENT_B64="$(base64 -w0 evidence.txt)"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" \
+            -f message='chore(release): record v1.2.3 readback evidence' \
+            -f content="$CONTENT_B64" \
+            -f branch="$GITHUB_REF_NAME" >/dev/null
+
           post_status success "release-readback/checksum" "SHA256SUMS digest matches APK"
           post_status success "release-readback/apk-sha256" "$ACTUAL_APK_SHA"
           post_status success "release-readback/apk-size" "${APK_SIZE} bytes"
