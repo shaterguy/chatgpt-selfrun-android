@@ -13,10 +13,20 @@ public class SelfRunWebDiagnosticsTest {
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "입력 반영 확인 대기"));
         assertEquals("status=WAIT;phase=send_continue;reason=input_wait",
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "WAIT", "continuation 입력 대기"));
+        assertEquals("status=UI_WAIT;phase=send_continue;reason=composer_replaced_abort",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "prepared continuation composer replaced · click abort"));
         String future = SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "future detail containing user text");
         assertEquals("status=UI_WAIT;phase=send_continue;reason=ui_wait", future);
         assertFalse(future.contains("future detail"));
         assertFalse(future.contains("user text"));
+    }
+
+    @Test public void staleCallbackAbortContainsOnlySafeCategories() {
+        String detail = SelfRunWebDiagnostics.abortDetail("stale_callback", false, false, false);
+        assertEquals("abort=stale_callback;webview_match=0;generation_match=0;freshness_match=0", detail);
+        assertFalse(detail.contains("chatgpt.com"));
+        assertFalse(detail.contains("conversation"));
+        assertFalse(detail.contains("continue"));
     }
 
     @Test public void conversationSyncDiagnosticsContainOnlySafeCategories() {

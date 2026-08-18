@@ -35,7 +35,7 @@ public class ConversationFreshnessBarrierTest {
     @Test public void navigationDuringPreparedSubmissionInvalidatesAttempt() throws Exception {
         String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
         assertTrue(s.contains("onMainFramePageStarted"));assertTrue(s.contains("invalidateConversationFreshness"));
-        assertTrue(d.contains("pagehide"));assertTrue(d.contains("prepared continuation belongs to stale generation"));
+        assertTrue(d.contains("pagehide"));assertTrue(d.contains("prepared continuation belongs to stale generation"));assertTrue(d.contains("__selfRunDrivePreparedContinuation=null"));
     }
     @Test public void latestComposerSafetyStillPasses() throws Exception {
         String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
@@ -79,6 +79,24 @@ public class ConversationFreshnessBarrierTest {
         assertTrue(script.contains("role==='dialog'"));
         assertTrue(script.contains("message-edit"));
         assertFalse(script.contains("e.closest('[data-testid*=\"edit\"],[data-testid*=\"message-edit\"],[role=\"dialog\"],form')"));
+    }
+    @Test public void replacedPreparedComposerCannotSubmitEvenWhenTextMatches() {
+        String prepare=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
+        String click=SelfRunDom.clickPreparedDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
+        assertTrue(prepare.contains("window.__selfRunDrivePreparedContinuation={markerKey:markerKey2,composer,freshnessToken:__srFreshnessToken,clicked:false}"));
+        assertTrue(click.contains("prepared.composer!==composer"));
+        assertTrue(click.contains("prepared.clicked"));
+        assertTrue(click.contains("SUBMISSION_PENDING"));
+        assertTrue(click.indexOf("prepared.composer!==composer")<click.indexOf("send.click()"));
+    }
+    @Test public void staleContinuationCallbackHasPrivacySafeAbortDiagnostic() throws Exception {
+        String s=src("SelfRunService.java");
+        assertTrue(s.contains("CONTINUE_SUBMIT_ABORT"));
+        assertTrue(s.contains("SelfRunWebDiagnostics.abortDetail(\"stale_callback\""));
+        String detail=SelfRunWebDiagnostics.abortDetail("stale_callback",false,false,false);
+        assertEquals("abort=stale_callback;webview_match=0;generation_match=0;freshness_match=0",detail);
+        assertFalse(detail.contains("chatgpt.com"));
+        assertFalse(detail.contains("conversation123"));
     }
     private static int count(String s,String token){int n=0,i=0;while((i=s.indexOf(token,i))>=0){n++;i+=token.length();}return n;}
     private static String src(String f)throws Exception{Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);if(!Files.exists(p))p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);return new String(Files.readAllBytes(p),StandardCharsets.UTF_8);}

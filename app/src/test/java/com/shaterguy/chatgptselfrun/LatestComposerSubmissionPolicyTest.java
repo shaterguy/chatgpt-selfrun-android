@@ -36,8 +36,16 @@ public class LatestComposerSubmissionPolicyTest {
     }
 
     @Test public void preClickComposerReplacementIsFastRetryNotDriveAckWait() {
+        String prepare = SelfRunDom.prepareDriveTurn(
+                "https://chatgpt.com/c/conversation123", "continue", "marker-reacquire", "1:2");
         String click = SelfRunDom.clickPreparedDriveTurn(
-                "https://chatgpt.com/c/conversation123", "continue", "marker-reacquire");
+                "https://chatgpt.com/c/conversation123", "continue", "marker-reacquire", "1:2");
+        assertTrue(prepare.contains("window.__selfRunDrivePreparedContinuation={markerKey:markerKey2,composer,freshnessToken:__srFreshnessToken,clicked:false}"));
+        assertTrue(click.contains("prepared.composer!==composer"));
+        assertTrue(click.contains("prepared continuation composer replaced · click abort"));
+        assertTrue(click.contains("prepared.clicked"));
+        assertTrue(click.contains("SUBMISSION_PENDING"));
+        assertTrue(click.indexOf("prepared.composer!==composer") < click.indexOf("send.click()"));
         assertTrue(click.contains("제출 직전 최신 continuation 입력창 재확보 · 입력 재반영"));
         assertTrue(click.contains("return result('UI_WAIT'"));
         assertFalse(click.contains("SUBMISSION_AMBIGUOUS"));

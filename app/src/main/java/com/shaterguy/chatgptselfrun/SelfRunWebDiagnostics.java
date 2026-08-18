@@ -13,6 +13,7 @@ final class SelfRunWebDiagnostics {
         else if (value.contains("continuation 전송 버튼 대기")) reason = "send_wait";
         else if (value.contains("입력 반영 확인 대기")) reason = "input_reflection_wait";
         else if (value.contains("continuation 입력 대기")) reason = "input_wait";
+        else if (value.contains("prepared continuation composer replaced")) reason = "composer_replaced_abort";
         else reason = "ui_wait";
         String safeStatus = "WAIT".equals(status) ? "WAIT" : "UI_WAIT";
         return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=" + reason;
@@ -40,6 +41,14 @@ final class SelfRunWebDiagnostics {
       + ";submit_scope=" + (submitScope ? "1" : "0")
       + ";generation_match=" + (generationMatch ? "1" : "0")
       + ";discarded=" + (discarded ? "1" : "0");
+    }
+
+    static String abortDetail(String reason, boolean webViewMatch, boolean generationMatch, boolean freshnessMatch) {
+        String safeReason = "stale_callback".equals(reason) ? "stale_callback" : "other";
+        return "abort=" + safeReason
+                + ";webview_match=" + (webViewMatch ? "1" : "0")
+                + ";generation_match=" + (generationMatch ? "1" : "0")
+                + ";freshness_match=" + (freshnessMatch ? "1" : "0");
     }
 
     static String routeMismatchDetail(String expected, String actual) {
