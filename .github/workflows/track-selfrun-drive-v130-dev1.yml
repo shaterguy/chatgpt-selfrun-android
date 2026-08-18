@@ -1,0 +1,71 @@
+name: Track SelfRun Drive v1.3.0-dev1 CI
+on:
+  push:
+    branches:
+      - 'ops/selfrun-drive-v1.3.0-dev1-reconstruct'
+permissions:
+  actions: write
+  contents: write
+jobs:
+  track:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE: 4d56eff639f6a9bed75d25f008788d51eb76d31a
+      TARGET: selfrun-drive/v1.3.0-dev1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Dispatch exact candidate build
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET"
+          test "$(git rev-parse "origin/$TARGET")" = "$CANDIDATE"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-v1.yml/dispatches" -f ref="$TARGET"
+      - name: Wait for run and collect result
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for i in $(seq 1 40); do
+            RUN_ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-v1.yml/runs?branch=${TARGET}&event=workflow_dispatch&per_page=20" \
+              --jq ".workflow_runs[] | select(.head_sha == \"${CANDIDATE}\") | .id" | head -n1 || true)
+            test -n "$RUN_ID" && break
+            sleep 15
+          done
+          test -n "$RUN_ID"
+
+          CONCLUSION=''
+          STATUS=''
+          RUN_URL=''
+          for i in $(seq 1 80); do
+            STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq .status)
+            CONCLUSION=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.conclusion // ""')
+            RUN_URL=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq .html_url)
+            test "$STATUS" = 'completed' && break
+            sleep 15
+          done
+          test "$STATUS" = 'completed'
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > /tmp/jobs.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" > /tmp/artifacts.json
+          jq -n \
+            --arg candidate "$CANDIDATE" \
+            --arg target "$TARGET" \
+            --argjson run_id "$RUN_ID" \
+            --arg status "$STATUS" \
+            --arg conclusion "$CONCLUSION" \
+            --arg run_url "$RUN_URL" \
+            --slurpfile jobs /tmp/jobs.json \
+            --slurpfile artifacts /tmp/artifacts.json \
+            '{candidate:$candidate,target:$target,run_id:$run_id,status:$status,conclusion:$conclusion,run_url:$run_url,jobs:$jobs[0].jobs,artifacts:$artifacts[0].artifacts}' \
+            > .selfrun-ci-report.json
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .selfrun-ci-report.json
+          git commit -m "chore(ci): record SelfRun Drive v1.3.0-dev1 build result"
+          git push origin HEAD
