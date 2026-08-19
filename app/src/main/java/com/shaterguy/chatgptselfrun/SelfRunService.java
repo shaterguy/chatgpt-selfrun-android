@@ -41,7 +41,7 @@ public final class SelfRunService extends Service {
     static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME";
     private static final int NOTIFICATION_ID = 17021;
     private static final long NORMAL_POLL_MS = 60_000L;
-    static final long CONTINUATION_GUARD_MS = 45_000L;
+    static final long CONTINUATION_GUARD_MS = 60_000L;
     static final long SUBMISSION_RETRY_MS = 5 * 60_000L;
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
     private static final int ATTACHMENT_COUNT_BUFFER = 64 * 1024;
