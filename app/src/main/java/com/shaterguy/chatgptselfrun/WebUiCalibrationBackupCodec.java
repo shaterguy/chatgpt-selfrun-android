@@ -103,10 +103,54 @@ final class WebUiCalibrationBackupCodec {
             validated.put("updatedAt", System.currentTimeMillis());
             SharedPreferences prefs = context.getApplicationContext()
                     .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            return prefs.edit().putString(KEY_PROFILE, validated.toString()).commit();
+            return replaceProfile(prefs, validated.toString());
         } catch (Throwable error) {
             return false;
         }
+    }
+
+    /**
+     * Replaces only KEY_PROFILE. SharedPreferences commit() updates its in-memory map before disk I/O,
+     * so a false/throwing commit must explicitly restore the prior in-memory state before returning failure.
+     */
+    static boolean replaceProfile(SharedPreferences prefs, String newProfileRaw) {
+        if (prefs == null || newProfileRaw == null) return false;
+        final boolean hadPrevious;
+        final String previousRaw;
+        try {
+            hadPrevious = prefs.contains(KEY_PROFILE);
+            previousRaw = hadPrevious ? prefs.getString(KEY_PROFILE, null) : null;
+        } catch (Throwable error) {
+            return false;
+        }
+
+        try {
+            if (prefs.edit().putString(KEY_PROFILE, newProfileRaw).commit()) return true;
+        } catch (Throwable ignored) {
+            // A throwing implementation may still have mutated its in-memory map. Always roll back below.
+        }
+        restorePreviousProfile(prefs, hadPrevious, previousRaw);
+        return false;
+    }
+
+    private static boolean restorePreviousProfile(SharedPreferences prefs, boolean hadPrevious, String previousRaw) {
+        try {
+            SharedPreferences.Editor rollback = prefs.edit();
+            if (hadPrevious) rollback.putString(KEY_PROFILE, previousRaw);
+            else rollback.remove(KEY_PROFILE);
+            // Even if this disk write also fails, commit() applies the rollback to SharedPreferences' in-memory map first.
+            rollback.commit();
+            if (hadPrevious) {
+                return prefs.contains(KEY_PROFILE) && same(previousRaw, prefs.getString(KEY_PROFILE, null));
+            }
+            return !prefs.contains(KEY_PROFILE);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean same(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private static JSONObject canonicalProfile(JSONObject source, boolean strictTopLevel) {
