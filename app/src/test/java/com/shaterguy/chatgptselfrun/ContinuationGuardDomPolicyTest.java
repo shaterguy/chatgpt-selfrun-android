@@ -35,7 +35,7 @@ public class ContinuationGuardDomPolicyTest {
                 "https://chatgpt.com/c/conversation123", "continue", "m", "tok", "h1", "c1", "s1");
         int firstClassify = script.indexOf("let a=classifyAction()");
         int input = script.indexOf("composer.focus();if('value'in composer)");
-        int secondClassify = script.indexOf("a=classifyAction()", firstClassify + 1);
+        int secondClassify = script.indexOf("a=classifyAction()", input + 1);
         assertTrue(firstClassify >= 0 && input > firstClassify && secondClassify > input);
         assertTrue(script.contains("RESPONSE_ACTIVE_AFTER_INPUT"));
         assertTrue(script.contains("composer replaced during input"));

@@ -7,13 +7,14 @@ import static org.junit.Assert.*;
 public class SelfRunContinuationSubmissionTest {
     @Test public void clickImmediatelyMovesToDriveAckWait() throws Exception {
         String service = src("SelfRunService.java");
+        String compact = service.replaceAll("\\s+", "");
         assertFalse(service.contains("checkDriveTurnSubmitted"));
         assertFalse(service.contains("checkDriveInitialSubmitted"));
         assertFalse(service.contains("SUBMISSION_CONFIRMATION_GRACE_MS"));
-        assertTrue(service.contains("store.markCommandSubmitted(kind,due)"));
-        assertTrue(service.contains("scheduleDrivePoll(0L)"));
+        assertTrue(compact.contains("store.markCommandSubmitted(kind,due)"));
+        assertTrue(compact.contains("scheduleDrivePoll(0L)"));
         assertTrue(service.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));
-        assertTrue(service.contains("store.prepareCommandRetry()"));
+        assertTrue(compact.contains("store.prepareCommandRetry()"));
     }
 
     @Test public void driveDomNeverConfirmsByUserMessage() throws Exception {

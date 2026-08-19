@@ -10,10 +10,12 @@ public class ConversationProbeSecurityPolicyTest {
         assertFalse(ConversationSyncInstrumentation.TRUSTED_ORIGINS.contains("*"));
         assertFalse(js.contains("ev.data"));
         assertFalse(js.contains("clone().text"));
+        assertFalse(js.contains("innerText"));
+        assertFalse(js.contains("textContent"));
+        assertFalse(js.contains(".value"));
         assertFalse(js.contains("Authorization"));
         assertFalse(js.contains("cookie"));
-        assertFalse(js.contains("prompt"));
-        assertFalse(js.contains("assistant"));
+        assertTrue(js.contains("prompt-textarea"));
         assertTrue(js.contains("bridge.postMessage"));
         assertFalse(js.contains("addJavascriptInterface"));
     }

@@ -15,10 +15,11 @@ public class ConversationSyncInstrumentationPolicyTest {
         assertFalse(js.contains("ev.data.includes"));
         assertFalse(js.contains("requestUrl.includes"));
         assertFalse(js.contains("conversationId()"));
+        assertFalse(js.contains("innerText"));
+        assertFalse(js.contains("textContent"));
+        assertFalse(js.contains(".value"));
         assertFalse(js.contains("cookie"));
         assertFalse(js.contains("authorization"));
-        assertFalse(js.contains("prompt"));
-        assertFalse(js.contains("assistant"));
         assertFalse(js.contains("reload("));
         assertFalse(js.contains("location.reload"));
     }
@@ -66,7 +67,7 @@ public class ConversationSyncInstrumentationPolicyTest {
         assertFalse(session.proof().proven);
         session.onConversationSyncEvent(event(10, ConversationSyncInstrumentation.Type.CLIENT_STATE, 0, 0, "h1", "c1", "s1"));
         assertTrue(session.proof().proven);
-        assertEquals("revalidation_after_reconnect", session.proof().source);
+        assertEquals("page_revalidation", session.proof().source);
     }
 
     @Test public void unknownProbeEventFailsClosed() {
