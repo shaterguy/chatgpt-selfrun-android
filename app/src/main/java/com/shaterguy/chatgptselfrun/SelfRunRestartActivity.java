@@ -1,0 +1,417 @@
+package com.shaterguy.chatgptselfrun;
+
+import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.common.api.ApiException;
+
+import org.json.JSONObject;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/** Restarts a historical stopped run without replaying its bootstrap. */
+public final class SelfRunRestartActivity extends Activity {
+    static final String EXTRA_RUN_ID = "runId";
+    private static final int REQUEST_AUTHORIZATION = 5201;
+    private static final String RESTART_PREFS = "selfrun_drive_restart";
+    private static final long CLAIM_STALE_MS = 2 * 60_000L;
+
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private SelfRunStore store;
+    private SelfRunHistoryStore history;
+    private JSONObject snapshot;
+    private TextView status;
+    private String runId = "";
+    private String claimToken = "";
+    private boolean recoveryStarted;
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        store = new SelfRunStore(this);
+        history = new SelfRunHistoryStore(this);
+        runId = getIntent() == null ? "" : getIntent().getStringExtra(EXTRA_RUN_ID);
+        if (runId == null) runId = "";
+        render();
+        snapshot = history.get(runId);
+        if (!SelfRunRestartPolicy.restartable(snapshot)) {
+            failure("재시작할 수 있는 중지 작업이 아닙니다.");
+            return;
+        }
+        if (!SelfRunStore.canCaptureConversationUrl(snapshot.optString("projectUrl"), snapshot.optString("conversationUrl"))) {
+            failure("등록된 대화방 주소를 안전하게 확인할 수 없습니다.");
+            return;
+        }
+        if (!claimRestart()) return;
+        requestAuthorization();
+    }
+
+    private void render() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
+        root.addView(Ui.title(this, "중지 작업 재시작"));
+        status = Ui.body(this, "작업 이력과 Drive 리소스를 확인하는 중입니다…");
+        root.addView(status);
+        root.addView(Ui.button(this, "닫기", v -> finish()));
+        Ui.setContent(this, root);
+    }
+
+    private boolean claimRestart() {
+        synchronized (SelfRunStore.RUN_STATE_LOCK) {
+            if (store.active()) {
+                failure("현재 실행 중인 SelfRun이 있어 과거 작업으로 전환할 수 없습니다.");
+                return false;
+            }
+            SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
+            long now = System.currentTimeMillis();
+            String owner = lock.getString("claimRunId", "");
+            long claimedAt = lock.getLong("claimedAt", 0L);
+            if (!owner.isEmpty() && now - claimedAt >= 0L && now - claimedAt < CLAIM_STALE_MS) {
+                failure("다른 재시작 요청이 이미 처리 중입니다.");
+                return false;
+            }
+            claimToken = runId + ":" + now + ":" + Long.toHexString(System.nanoTime());
+            boolean committed = lock.edit()
+                    .putString("claimRunId", runId)
+                    .putString("claimToken", claimToken)
+                    .putLong("claimedAt", now)
+                    .remove("reservedFolderId")
+                    .commit();
+            if (!committed) {
+                claimToken = "";
+                failure("재시작 상태를 저장하지 못했습니다.");
+                return false;
+            }
+            return true;
+        }
+    }
+
+    private void requestAuthorization() {
+        status.setText("Drive 계정과 기존 작업 리소스를 확인하는 중입니다…");
+        DriveAuthorization.requestSilently(this, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) { startRecovery(result); }
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                try {
+                    startIntentSenderForResult(pendingIntent.getIntentSender(), REQUEST_AUTHORIZATION,
+                            null, 0, 0, 0);
+                } catch (Exception error) {
+                    failure("Drive 권한 확인 화면을 열지 못했습니다.");
+                }
+            }
+            @Override public void onFailure(Throwable error) {
+                failure("Drive 권한을 확인하지 못했습니다.");
+            }
+        });
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_AUTHORIZATION) return;
+        if (resultCode != RESULT_OK || data == null) {
+            failure("Drive 권한 확인이 취소되었습니다.");
+            return;
+        }
+        try {
+            startRecovery(DriveAuthorization.fromIntent(this, data));
+        } catch (ApiException error) {
+            failure("Drive 권한 결과를 확인하지 못했습니다.");
+        }
+    }
+
+    private void startRecovery(AuthorizationResult result) {
+        if (recoveryStarted) return;
+        String accessToken = DriveAuthorization.accessToken(result);
+        if (accessToken.isEmpty()) {
+            failure("Drive 액세스 토큰을 얻지 못했습니다.");
+            return;
+        }
+        recoveryStarted = true;
+        io.execute(() -> recover(accessToken));
+    }
+
+    private void recover(String accessToken) {
+        try {
+            DriveApiClient api = new DriveApiClient();
+            String expectedAccount = snapshot.optString("driveAccountId", "");
+            String actualAccount = api.getAccountPermissionId(accessToken);
+            if (expectedAccount.isEmpty() || !expectedAccount.equals(actualAccount)) {
+                throw new IllegalStateException("historical Drive account mismatch");
+            }
+
+            String baseFolderId = snapshot.optString("runBaseFolderId", "");
+            if (baseFolderId.isEmpty()) baseFolderId = snapshot.optString("driveRunsBaseFolderId", "");
+            if (!DriveApiClient.validFileId(baseFolderId)) {
+                throw new IllegalStateException("historical Runs base folder is missing");
+            }
+            DriveApiClient.Metadata base = api.getMetadata(accessToken, baseFolderId);
+            verifyBaseFolder(base, baseFolderId);
+
+            DriveApiClient.Metadata jobFolder = reusableMetadata(api, accessToken,
+                    snapshot.optString("jobFolderId", ""));
+            boolean folderRecreated = jobFolder == null;
+            if (jobFolder == null) jobFolder = createOrRecoverJobFolder(api, accessToken, baseFolderId);
+            else verifyJobFolder(jobFolder, baseFolderId);
+
+            String oldDocumentId = snapshot.optString("turnDocumentId", "");
+            DriveApiClient.Metadata document = folderRecreated ? null
+                    : reusableMetadata(api, accessToken, oldDocumentId);
+            if (document != null) verifyTurnDocument(document, jobFolder.id);
+            if (document == null) document = createOrRecoverTurnDocument(api, accessToken, jobFolder.id);
+            verifyTurnDocument(document, jobFolder.id);
+
+            String body = api.readDocumentText(accessToken, document.id);
+            DriveSignalParser.Scan baseline = DriveSignalParser.scan(body, runId, 0,
+                    snapshot.optString("mode", SelfRunStore.MODE_CHAT));
+            boolean documentChanged = !document.id.equals(oldDocumentId);
+            String prompt = SelfRunRestartPolicy.continuationPrompt(runId,
+                    documentChanged ? document.id : "");
+            restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, prompt);
+            runOnUiThread(this::startRecoveredService);
+        } catch (Throwable error) {
+            failure("작업 재시작 준비에 실패했습니다. 기존 작업과 Drive 리소스는 변경하지 않았습니다.");
+        }
+    }
+
+    private DriveApiClient.Metadata reusableMetadata(DriveApiClient api, String token, String id) throws Exception {
+        if (!DriveApiClient.validFileId(id)) return null;
+        try {
+            DriveApiClient.Metadata metadata = api.getMetadata(token, id);
+            return metadata.trashed ? null : metadata;
+        } catch (DriveApiClient.ApiException error) {
+            if (error.status == 404) return null;
+            throw error;
+        }
+    }
+
+    private DriveApiClient.Metadata createOrRecoverJobFolder(DriveApiClient api, String token,
+                                                               String baseFolderId) throws Exception {
+        SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
+        String folderId = lock.getString("reservedFolderId", "");
+        if (!DriveApiClient.validFileId(folderId)) {
+            folderId = api.generateFolderId(token);
+            if (!lock.edit().putString("reservedFolderId", folderId).commit()) {
+                throw new IllegalStateException("reserved restart folder id was not persisted");
+            }
+        }
+        DriveApiClient.Metadata existing = reusableMetadata(api, token, folderId);
+        if (existing != null) {
+            verifyJobFolder(existing, baseFolderId);
+            return existing;
+        }
+        try {
+            DriveApiClient.Metadata created = api.createJobFolder(token, folderId, runId, baseFolderId);
+            verifyJobFolder(created, baseFolderId);
+        } catch (Throwable createError) {
+            DriveApiClient.Metadata recovered = reusableMetadata(api, token, folderId);
+            if (recovered == null) throw createError;
+            verifyJobFolder(recovered, baseFolderId);
+        }
+        DriveApiClient.Metadata readback = api.getMetadata(token, folderId);
+        verifyJobFolder(readback, baseFolderId);
+        return readback;
+    }
+
+    private DriveApiClient.Metadata createOrRecoverTurnDocument(DriveApiClient api, String token,
+                                                                  String jobFolderId) throws Exception {
+        DriveApiClient.Metadata recovered = api.findSingleTurnDocument(token, runId, jobFolderId);
+        if (recovered != null) {
+            verifyTurnDocument(recovered, jobFolderId);
+            return recovered;
+        }
+        try {
+            DriveApiClient.Metadata created = api.createTurnDocument(token, runId, jobFolderId);
+            verifyTurnDocument(created, jobFolderId);
+            DriveApiClient.Metadata readback = api.getMetadata(token, created.id);
+            verifyTurnDocument(readback, jobFolderId);
+            return readback;
+        } catch (DriveApiClient.OutcomeUnknownException unknown) {
+            DriveApiClient.Metadata afterUnknown = api.findSingleTurnDocument(token, runId, jobFolderId);
+            if (afterUnknown == null) throw unknown;
+            verifyTurnDocument(afterUnknown, jobFolderId);
+            return afterUnknown;
+        }
+    }
+
+    private void verifyBaseFolder(DriveApiClient.Metadata metadata, String expectedId) {
+        if (metadata.trashed || metadata.shared || !metadata.isAppAuthorized || !metadata.canAddChildren
+                || !expectedId.equals(metadata.id) || !DriveApiClient.MIME_FOLDER.equals(metadata.mimeType)) {
+            throw new IllegalStateException("historical Runs base folder is not writable");
+        }
+    }
+
+    private void verifyJobFolder(DriveApiClient.Metadata metadata, String baseFolderId) {
+        if (metadata.trashed || metadata.shared || !metadata.isAppAuthorized || !metadata.canAddChildren
+                || !runId.equals(metadata.name) || !DriveApiClient.MIME_FOLDER.equals(metadata.mimeType)
+                || !baseFolderId.equals(metadata.parentId)
+                || !runId.equals(metadata.appProperties.optString("job_id"))
+                || !"job_folder".equals(metadata.appProperties.optString("selfrun_kind"))) {
+            throw new IllegalStateException("historical job folder metadata mismatch");
+        }
+    }
+
+    private void verifyTurnDocument(DriveApiClient.Metadata metadata, String jobFolderId) {
+        if (metadata.trashed || metadata.shared || !metadata.isAppAuthorized
+                || !runId.equals(metadata.name) || !DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
+                || !jobFolderId.equals(metadata.parentId)
+                || !runId.equals(metadata.appProperties.optString("job_id"))
+                || !"turn_document".equals(metadata.appProperties.optString("selfrun_kind"))) {
+            throw new IllegalStateException("historical turn document metadata mismatch");
+        }
+    }
+
+    private void restoreRun(String baseFolderId, String accountId,
+                            DriveApiClient.Metadata jobFolder, DriveApiClient.Metadata document,
+                            DriveSignalParser.Scan baseline, String prompt) {
+        synchronized (SelfRunStore.RUN_STATE_LOCK) {
+            if (store.active()) throw new IllegalStateException("another SelfRun became active during restart");
+            String mode = snapshot.optString("mode", SelfRunStore.MODE_CHAT);
+            String model = snapshot.optString("pendingModel", "");
+            String reasoning = snapshot.optString("pendingReasoning", "");
+            if (SelfRunStore.MODE_WORK.equals(mode) && !SelfRunProtocol.validWorkProfile(model, reasoning)) {
+                model = "sol";
+                reasoning = "xhigh";
+            }
+            if (!SelfRunStore.MODE_WORK.equals(mode)) {
+                model = "";
+                reasoning = "";
+            }
+            long now = System.currentTimeMillis();
+            long createdAt = snapshot.optLong("createdAt", now);
+            DriveSignalParser.Event latest = baseline.latest;
+            SharedPreferences prefs = getSharedPreferences("selfrun_drive", MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit()
+                    .putString("runId", runId)
+                    .putLong("createdAt", createdAt > 0L ? createdAt : now)
+                    .putLong("phaseStartedAt", now)
+                    .putString("mode", mode)
+                    .putString("projectUrl", snapshot.optString("projectUrl", ""))
+                    .putString("requirement", snapshot.optString("requirement", ""))
+                    .putString("conversationUrl", snapshot.optString("conversationUrl", ""))
+                    .putString("phase", SelfRunRestartPolicy.restartPhase(mode))
+                    .putString("status", "과거 중지 작업 재시작 · CONTINUE 준비")
+                    .putString("pendingModel", model)
+                    .putString("pendingReasoning", reasoning)
+                    .putString("lastErrorCode", "")
+                    .putString("lastErrorMessage", "")
+                    .putString("runDriveAccountId", accountId)
+                    .putString("runBaseFolderId", baseFolderId)
+                    .putString("jobFolderId", jobFolder.id)
+                    .putString("turnDocumentId", document.id)
+                    .putString("turnDocumentUrl", documentUrl(document.id))
+                    .putString("attachmentsJson", "[]")
+                    .putString("attachmentGrantCleanupJson", "[]")
+                    .putInt("turn", Math.max(0, snapshot.optInt("turn", 0)))
+                    .putString("lastSeenDriveVersion", document.version)
+                    .putString("lastSeenModifiedTime", document.modifiedTime)
+                    .putInt("driveSignalCursor", baseline.totalCount)
+                    .putString("lastDriveSignalRaw", latest == null ? "" : latest.raw)
+                    .putString("lastDriveSignalTimestamp", latest == null ? "" : latest.timestamp)
+                    .putString("lastDriveSignalType", latest == null ? "" : latest.type.name())
+                    .putString("pendingDriveSignalRaw", "")
+                    .putString("pendingDriveSignalTimestamp", "")
+                    .putString("pendingDriveSignalType", "")
+                    .putLong("commitDetectedAt", 0L)
+                    .putLong("guardDueAt", 0L)
+                    .putString("activeCommandPrompt", prompt)
+                    .putString("activeCommandKind", SelfRunStore.RETRY_CONTINUE)
+                    .putInt("commandAttempt", 0)
+                    .putBoolean("awaitingCommandAck", false)
+                    .putString("submissionRetryKind", "")
+                    .putString("submissionRetryReason", "")
+                    .putLong("submissionRetryDueAt", 0L)
+                    .putInt("submissionRetryAttempt", 0)
+                    .putBoolean("submissionRetryReady", false)
+                    .putString("creationStage", SelfRunStore.CREATION_DOCUMENT_CREATED)
+                    .putString("pausedFromPhase", "")
+                    .putBoolean("resumeNeedsContinuation", false)
+                    .putBoolean("terminalSideEffectPending", false)
+                    .putString("terminalSideEffectType", "")
+                    .putString("terminalSideEffectRunId", "")
+                    .putString("terminalSideEffectCommitId", "")
+                    .putBoolean("active", true)
+                    .putBoolean("paused", false)
+                    .putBoolean("userStopped", false)
+                    .remove("lastSignal")
+                    .remove("driveProtocolVersion")
+                    .remove("expectedTurn")
+                    .remove("lastConsumedEventSeq")
+                    .remove("lastCommittedAt")
+                    .remove("pendingEventSeq")
+                    .remove("pendingTurn")
+                    .remove("pendingSignalRaw")
+                    .remove("pendingCommitId")
+                    .remove("submissionState")
+                    .remove("submissionStartedAt")
+                    .remove("submissionBaselineCount")
+                    .remove("lastSubmittedCommitId")
+                    .remove("bootstrapSubmittedAt")
+                    .remove("bootstrapSubmissionState");
+            String role = snapshot.optString("role", "");
+            if (role.isEmpty()) editor.remove("role"); else editor.putString("role", role);
+            if (!editor.commit()) throw new IllegalStateException("historical run state was not persisted");
+            history.sync(new SelfRunStore(this));
+        }
+    }
+
+    private void startRecoveredService() {
+        try {
+            Intent service = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_RUN);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
+            else startService(service);
+            releaseClaim();
+            status.setText("재시작 준비 완료 · 기존 대화방에 CONTINUE를 전송합니다.");
+            Toast.makeText(this, "중지 작업을 재시작했습니다.", Toast.LENGTH_LONG).show();
+            finish();
+        } catch (Throwable error) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                getSharedPreferences("selfrun_drive", MODE_PRIVATE).edit()
+                        .putBoolean("active", false)
+                        .putBoolean("userStopped", true)
+                        .putString("phase", SelfRunStore.PHASE_IDLE)
+                        .putString("status", "재시작 서비스 시작 실패")
+                        .commit();
+                history.sync(new SelfRunStore(this));
+            }
+            failure("재시작 서비스 시작에 실패했습니다.");
+        }
+    }
+
+    private static String documentUrl(String documentId) {
+        return new Uri.Builder().scheme("https").authority("docs.google.com")
+                .appendPath("document").appendPath("d").appendPath(documentId).appendPath("edit")
+                .build().toString();
+    }
+
+    private void releaseClaim() {
+        if (claimToken.isEmpty()) return;
+        synchronized (SelfRunStore.RUN_STATE_LOCK) {
+            SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
+            if (claimToken.equals(lock.getString("claimToken", ""))) lock.edit().clear().commit();
+        }
+        claimToken = "";
+    }
+
+    private void failure(String message) {
+        runOnUiThread(() -> {
+            recoveryStarted = false;
+            releaseClaim();
+            if (status != null) status.setText(message);
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        });
+    }
+
+    @Override protected void onDestroy() {
+        io.shutdownNow();
+        super.onDestroy();
+    }
+}
