@@ -61,7 +61,7 @@ public class ConversationFreshnessBarrierTest {
         assertFalse(ensure.contains("handler.postDelayed(this::ensureWebView,2000L)"));
     }
     @Test public void bootstrapConversationBindingIsCausalBoundedAndLocalOnly() throws Exception {
-        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void postWebCallback");
+        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void handleMainFrameLoadError");
         assertTrue(binding.contains("SelfRunScript.conversationId(current).isEmpty()"));
         assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));
         assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));
