@@ -26,6 +26,7 @@ public class AttachmentUploadPolicyTest {
     @Test public void stateMachineUploadsAttachmentsBeforeTurnDocumentAndBootstrap() throws Exception {
         String store = src("SelfRunStore.java");
         String service = src("SelfRunService.java");
+        String compact = compact(service);
         assertTrue(store.contains("PHASE_DRIVE_ATTACHMENT_UPLOAD"));
         assertTrue(store.contains("ATTACHMENT_ID_RESERVED"));
         assertTrue(store.contains("ATTACHMENT_UPLOADING"));
@@ -35,8 +36,8 @@ public class AttachmentUploadPolicyTest {
         assertTrue(service.contains("drive.getMetadata(accessToken, fileId)"));
         assertTrue(service.contains("drive.uploadAttachmentResumable"));
         assertTrue(service.contains("store.allAttachmentsCommitted()"));
-        int attachmentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch)");
-        int documentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch)");
+        int attachmentPhase = compact.indexOf("caseSelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch);");
+        int documentPhase = compact.indexOf("caseSelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch);");
         assertTrue(attachmentPhase >= 0 && documentPhase > attachmentPhase);
     }
 
@@ -75,7 +76,6 @@ public class AttachmentUploadPolicyTest {
         assertFalse(protocol.contains("attachment.name"));
         assertFalse(protocol.contains("attachment.uri"));
     }
-
 
     @Test public void displayNameIsSanitizedBeforeDriveMetadataUse() {
         String name = SelfRunNewActivity.sanitizeDisplayName("../bad\nname\\x.pdf", 2);
@@ -141,14 +141,17 @@ public class AttachmentUploadPolicyTest {
         assertTrue(activity.contains("store.cancelAttachmentGrantHandoff()"));
     }
 
-    @Test public void developmentVersionAdvancesWithoutDependencyChange() throws Exception {
+    @Test public void developmentVersionAdvancesWithScopedWebkitDependency() throws Exception {
         Path p = Paths.get("app/build.gradle");
         if (!Files.exists(p)) p = Paths.get("build.gradle");
         String gradle = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000047"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.3.0-dev7'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000048"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.3.0-dev8'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
+        assertTrue(gradle.contains("implementation 'androidx.webkit:webkit:1.16.0'"));
     }
+
+    private static String compact(String value) { return value.replaceAll("\\s+", ""); }
 
     private static String between(String source, String start, String end) {
         int a = source.indexOf(start);

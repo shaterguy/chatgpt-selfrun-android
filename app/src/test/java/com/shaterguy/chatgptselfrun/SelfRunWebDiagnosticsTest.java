@@ -29,11 +29,14 @@ public class SelfRunWebDiagnosticsTest {
         assertFalse(detail.contains("continue"));
     }
 
-    @Test public void conversationSyncDiagnosticsContainOnlySafeCategories() {
-        String detail = SelfRunWebDiagnostics.syncDetail(7L, 12, true, "reload", 2, false, true, true, false);
-        assertEquals("sync_epoch=7;generation=12;canonical_match=1;navigation=reload;candidate_count=2;turn_contained=0;submit_scope=1;generation_match=1;discarded=0", detail);
+    @Test public void conversationSyncDiagnosticsRejectReloadAsNormalNavigation() {
+        String detail = SelfRunWebDiagnostics.syncDetail(7L, 12, true, "reuse", 2, false, true, true, false);
+        assertEquals("sync_epoch=7;generation=12;canonical_match=1;navigation=reuse;candidate_count=2;turn_contained=0;submit_scope=1;generation_match=1;discarded=0", detail);
         assertFalse(detail.contains("chatgpt.com"));
         assertFalse(detail.contains("conversation"));
+        String legacy = SelfRunWebDiagnostics.syncDetail(7L, 12, true, "reload", 2, false, true, true, false);
+        assertTrue(legacy.contains("navigation=none"));
+        assertFalse(legacy.contains("navigation=reload"));
     }
 
     @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {

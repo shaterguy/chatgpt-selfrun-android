@@ -88,7 +88,7 @@ public class SelfRunNextInputDev6Test {
     }
 
     @Test public void sourceKeepsStableResumeBaselineAndUsesExistingDurableCompletion() throws Exception {
-        String service = source("SelfRunService.java");
+        String service = compact(source("SelfRunService.java"));
         String store = source("SelfRunStore.java");
         assertTrue(service.contains("store.baselineManualResume(scan.totalCount,scan.latest,latestCompletion)"));
         assertTrue(service.contains("SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput())"));
@@ -98,6 +98,7 @@ public class SelfRunNextInputDev6Test {
         assertFalse(store.contains("pauseAnchor"));
     }
 
+    private static String compact(String value) { return value.replaceAll("\\s+", ""); }
     private static String line(String tail) {
         return "[2026.08.16 | 11:30:00] [SELF_RUN_TURN_COMPLETED " + RUN + " " + tail + "]";
     }
