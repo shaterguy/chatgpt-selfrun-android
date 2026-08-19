@@ -104,7 +104,7 @@ public final class MainActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "알림 권한", v -> requestNotificationPermission()),
                 Ui.button(this, "배터리 최적화 제외", v -> requestBatteryExemption())));
-        root.addView(Ui.body(this, "Drive 대기와 45초 guard 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
+        root.addView(Ui.body(this, "Drive 대기와 60초 guard 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
 
         Ui.setContent(this, scroll);
         root.requestFocus();
@@ -162,59 +162,62 @@ public final class MainActivity extends Activity {
 
     private void stopSelfRun() {
         if (store.runId().isEmpty()) return;
-        store.stopByUser();
-        runLog.record(store, "UI_STOP", "user_stop");
-        stopService(new Intent(this, SelfRunService.class));
+        Intent intent = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_STOP);
+        try {
+            startService(intent);
+        } catch (Throwable ignored) {
+            store.stopByUser();
+        }
         refreshCurrent();
+    }
+
+    private void sendRunnerAction(String action) {
+        Intent intent = new Intent(this, SelfRunService.class).setAction(action);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
+        else startService(intent);
     }
 
     private void openCurrentLogs() {
         if (store.runId().isEmpty()) return;
-        startActivity(new Intent(this, SelfRunLogsActivity.class)
-                .putExtra(SelfRunLogsActivity.EXTRA_RUN_ID, store.runId())
-                .putExtra(SelfRunLogsActivity.EXTRA_KIND, SelfRunLogsActivity.KIND_DEBUG));
-    }
-
-    private void startRunner() {
-        sendRunnerAction(SelfRunService.ACTION_RUN);
-    }
-
-    private void sendRunnerAction(String action) {
-        Intent intent = new Intent(this, SelfRunService.class);
-        intent.setAction(action);
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
-    }
-
-    private void refreshBackgroundStatus() {
-        if (backgroundStatus == null) return;
-        boolean notifications = Build.VERSION.SDK_INT < 33
-                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
-        PowerManager power = getSystemService(PowerManager.class);
-        boolean battery = Build.VERSION.SDK_INT < 23 || power.isIgnoringBatteryOptimizations(getPackageName());
-        backgroundStatus.setText((notifications ? "✓" : "✕") + " 실행 알림 권한"
-                + "\n" + (battery ? "✓" : "△") + " 배터리 최적화 제외");
-    }
-
-    private void requestBatteryExemption() {
-        if (Build.VERSION.SDK_INT < 23) return;
-        PowerManager power = getSystemService(PowerManager.class);
-        if (power.isIgnoringBatteryOptimizations(getPackageName())) {
-            Toast.makeText(this, "이미 배터리 최적화 제외 상태입니다.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        try {
-            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:" + getPackageName())));
-        } catch (Exception error) {
-            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-        }
+        Intent intent = new Intent(this, SelfRunLogsActivity.class);
+        intent.putExtra(SelfRunLogsActivity.EXTRA_RUN_ID, store.runId());
+        intent.putExtra(SelfRunLogsActivity.EXTRA_KIND, SelfRunLogsActivity.KIND_EXECUTION);
+        startActivity(intent);
     }
 
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+        } else {
+            Toast.makeText(this, "알림 권한이 이미 허용되어 있습니다.", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void requestBatteryExemption() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        PowerManager manager = getSystemService(PowerManager.class);
+        if (manager != null && manager.isIgnoringBatteryOptimizations(getPackageName())) {
+            Toast.makeText(this, "배터리 최적화 제외가 이미 적용되어 있습니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Throwable error) {
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        }
+    }
+
+    private void refreshBackgroundStatus() {
+        if (backgroundStatus == null) return;
+        String text;
+        if (store.userStopped()) text = "사용자가 SelfRun Drive를 중지했습니다.";
+        else if (store.paused()) text = "일시정지 상태입니다. WebView와 Drive 실행정보는 보존됩니다.";
+        else if (store.active()) text = "SelfRun Drive 포그라운드 서비스가 실행 상태를 관리합니다.";
+        else text = "실행 중인 SelfRun Drive가 없습니다.";
+        backgroundStatus.setText(text);
     }
 
     private static String dash(String value) {
