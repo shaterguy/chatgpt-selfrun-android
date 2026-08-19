@@ -1,0 +1,54 @@
+name: Apply SelfRun Drive 1.4.0 guard change
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.4.0-dev1'
+    paths:
+      - '.github/workflows/apply-v1.4.0-guard.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.4.0-dev1
+      - name: Apply exact guard change and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java'):
+                  ('CONTINUATION_GUARD_MS = 45_000L', 'CONTINUATION_GUARD_MS = 60_000L'),
+              Path('app/src/test/java/com/shaterguy/chatgptselfrun/DriveVariantPolicyTest.java'):
+                  ('CONTINUATION_GUARD_MS = 45_000L', 'CONTINUATION_GUARD_MS = 60_000L'),
+              Path('tools/verify_drive_variant.sh'):
+                  ('CONTINUATION_GUARD_MS = 45_000L', 'CONTINUATION_GUARD_MS = 60_000L'),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count == 1:
+                  path.write_text(text.replace(old, new), encoding='utf-8')
+              elif count == 0 and text.count(new) == 1:
+                  pass
+              else:
+                  raise SystemExit(f'unexpected guard token count in {path}: old={count}, new={text.count(new)}')
+          PY
+          git rm -f .github/workflows/apply-v1.4.0-guard.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/DriveVariantPolicyTest.java \
+                  tools/verify_drive_variant.sh
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'feat(drive): increase continuation safety delay to 60s'
+          git push origin HEAD:selfrun-drive/v1.4.0-dev1
