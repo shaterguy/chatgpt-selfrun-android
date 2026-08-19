@@ -3,6 +3,8 @@ package com.shaterguy.chatgptselfrun;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,6 +23,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -29,6 +35,8 @@ import java.time.format.DateTimeFormatter;
 public final class WebUiCalibrationActivity extends Activity {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss").withZone(KST);
+    private static final int REQUEST_EXPORT_CALIBRATION = 6101;
+    private static final int REQUEST_IMPORT_CALIBRATION = 6102;
     private static final String[] PURPOSES = new String[] {
             WebUiCalibrationStore.PURPOSE_MODE_CHAT,
             WebUiCalibrationStore.PURPOSE_MODE_WORK,
@@ -129,21 +137,39 @@ public final class WebUiCalibrationActivity extends Activity {
     }
 
     private void showManageDialog() {
-        String[] items = new String[] {"보정 로그", "ChatGPT 홈", "새로고침", "보정값 전체 초기화", "화면 닫기"};
+        String[] items = new String[] {
+                "보정 로그", "보정값 내보내기", "보정값 가져오기", "ChatGPT 홈", "새로고침", "보정값 전체 초기화", "화면 닫기"};
         new AlertDialog.Builder(this)
                 .setTitle("웹 UI 보정 관리")
                 .setItems(items, (dialog, which) -> {
                     switch (which) {
                         case 0 -> showLogs();
-                        case 1 -> webView.loadUrl(SelfRunScript.GENERAL_CHAT_URL);
-                        case 2 -> webView.reload();
-                        case 3 -> confirmClearAll();
-                        case 4 -> finish();
+                        case 1 -> startExportCalibration();
+                        case 2 -> startImportCalibration();
+                        case 3 -> webView.loadUrl(SelfRunScript.GENERAL_CHAT_URL);
+                        case 4 -> webView.reload();
+                        case 5 -> confirmClearAll();
+                        case 6 -> finish();
                         default -> { }
                     }
                 })
                 .setNegativeButton("닫기", null)
                 .show();
+    }
+
+    private void startExportCalibration() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, WebUiCalibrationBackupCodec.DEFAULT_FILE_NAME);
+        startActivityForResult(intent, REQUEST_EXPORT_CALIBRATION);
+    }
+
+    private void startImportCalibration() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        startActivityForResult(intent, REQUEST_IMPORT_CALIBRATION);
     }
 
     private void confirmClearAll() {
@@ -314,6 +340,72 @@ public final class WebUiCalibrationActivity extends Activity {
                     + "');localStorage.removeItem('selfrun-drive:ui-runtime-log:v1');sessionStorage.removeItem('selfrun-drive:ui-runtime-dedupe:v1');sessionStorage.removeItem('selfrun-drive:ui-calibration:capture');return 'OK';}catch(e){return 'ERROR';}})()", ignored -> {});
         }
         updateControls("모든 보정값 초기화됨");
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        if (requestCode == REQUEST_EXPORT_CALIBRATION) {
+            exportCalibration(uri);
+        } else if (requestCode == REQUEST_IMPORT_CALIBRATION) {
+            importCalibration(uri);
+        }
+    }
+
+    private void exportCalibration(Uri uri) {
+        try {
+            String payload = WebUiCalibrationBackupCodec.exportEnvelope(store.profile());
+            byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+            if (bytes.length > WebUiCalibrationBackupCodec.MAX_BACKUP_BYTES) throw new IllegalStateException("backup_too_large");
+            try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                if (out == null) throw new IllegalStateException("output_unavailable");
+                out.write(bytes);
+                out.flush();
+            }
+            store.record("SYSTEM", "PROFILE_EXPORTED", "formatVersion=" + WebUiCalibrationBackupCodec.FORMAT_VERSION);
+            updateControls("보정값 내보내기 완료");
+            Toast.makeText(this, "웹 UI 보정값을 저장했습니다.", Toast.LENGTH_SHORT).show();
+        } catch (Throwable error) {
+            store.record("SYSTEM", "PROFILE_EXPORT_FAILED", error.getClass().getSimpleName());
+            updateControls("보정값 내보내기 실패");
+            Toast.makeText(this, "보정값 파일을 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void importCalibration(Uri uri) {
+        try {
+            String raw = readBackup(uri);
+            if (!WebUiCalibrationBackupCodec.importInto(this, raw)) throw new IllegalArgumentException("invalid_backup");
+            store.record("SYSTEM", "PROFILE_IMPORTED", "formatVersion=" + WebUiCalibrationBackupCodec.FORMAT_VERSION);
+            seedProfile();
+            updateControls("보정값 가져오기 완료");
+            Toast.makeText(this, "웹 UI 보정값을 적용했습니다.", Toast.LENGTH_SHORT).show();
+        } catch (Throwable error) {
+            store.record("SYSTEM", "PROFILE_IMPORT_REJECTED", error.getClass().getSimpleName());
+            updateControls("보정값 가져오기 실패");
+            Toast.makeText(this, "올바른 웹 UI 보정값 파일이 아닙니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private String readBackup(Uri uri) throws Exception {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) throw new IllegalStateException("input_unavailable");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int total = 0;
+            while (true) {
+                int read = in.read(buffer);
+                if (read < 0) break;
+                total += read;
+                if (total > WebUiCalibrationBackupCodec.MAX_BACKUP_BYTES) {
+                    throw new IllegalArgumentException("backup_too_large");
+                }
+                out.write(buffer, 0, read);
+            }
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        }
     }
 
     private static String capturePrompt(String purpose) {

@@ -132,6 +132,10 @@ private void resumeStateMachine(){if(!canRun())return;String phase=store.phase()
 
 private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)||SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)||SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)||SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)||SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(phase)||SelfRunStore.PHASE_RESUME_BASELINE.equals(phase);}
 
+static boolean shouldContinueSamePhaseDriveStep(String phase, boolean hasUncommittedAttachment) {
+    return SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase) && hasUncommittedAttachment;
+}
+
     private void authorizeAndRunDrive() {
         if (!canRun() || !drivePhase(store.phase()) || driveInFlight || authorizationInFlight) return;
         final int epoch = automationEpoch;
@@ -200,7 +204,12 @@ private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_
                     if (!canApplyDriveResult(epoch)) return;
                     String prior = store.phase();
                     runDriveStep(epoch);
-                    if (prior.equals(store.phase()) || SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase()) || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) break;
+                    if (prior.equals(store.phase())) {
+                        if (shouldContinueSamePhaseDriveStep(prior, store.nextUncommittedAttachment() != null)) continue;
+                        break;
+                    }
+                    if (SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())
+                            || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) break;
                 } while (canApplyDriveResult(epoch) && drivePhase(store.phase()));
                 retryAttempt = 0;
             } catch (Throwable error) {

@@ -304,7 +304,7 @@ public final class SelfRunNewActivity extends Activity {
 
     private void startRunner() { Intent intent=new Intent(this,SelfRunService.class); intent.setAction(SelfRunService.ACTION_RUN); if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent); }
 
-    @Override protected void onResume() { super.onResume(); if (firstResume) { firstResume=false; return; } if(project!=null) reloadProjects(); }
+    @Override protected void onResume() { super.onResume(); if (firstResume) { firstResume=false; return; } if(project!=null) reloadProjects(selectedProjectUrl()); }
 
     @Override protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -332,8 +332,10 @@ public final class SelfRunNewActivity extends Activity {
         super.onDestroy();
     }
 
-    private void reloadProjects() {
-        String previous=store.defaultProjectUrl(); projectEntries=catalog.entries(); ArrayList<String> labels=new ArrayList<>(); labels.add("일반채팅"); int selected=0;
+    private void reloadProjects() { reloadProjects(store.defaultProjectUrl()); }
+
+    private void reloadProjects(String preferredUrl) {
+        String previous=preferredUrl==null?"":preferredUrl; projectEntries=catalog.entries(); ArrayList<String> labels=new ArrayList<>(); labels.add("일반채팅"); int selected=0;
         for(int i=0;i<projectEntries.size();i++){ProjectUrlPolicy.ProjectRef entry=projectEntries.get(i);labels.add(catalog.displayName(entry));if(entry.canonicalUrl.equals(previous))selected=i+1;}
         project.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels)); project.setSelection(selected);
     }
