@@ -38,42 +38,106 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo '[coinstall] verify Drive variant policy'
           tools/verify_drive_variant.sh
+          echo '[coinstall] run unit tests and build TEST qaApp'
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleQaApp
+          echo '[coinstall] build exact formal 1.3.0 baseline'
           gradle --no-daemon --console=plain --stacktrace --project-dir formal-baseline :app:assembleDebug
+      - name: Install hash-locked TEST signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == 'Linux' ]]
+          [[ "$(uname -m)" == 'x86_64' ]]
+          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          [[ "$PYTHON_VERSION" == '3.12' ]]
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Prepare and validate co-install APK identities
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+          PRE=drive-test-coinstall-preflight.txt
+          : > "$PRE"
+          note() {
+            printf '%s\n' "$1" | tee -a "$PRE"
+          }
+
+          note 'preflight: start'
+          test -n "$SIGNING_PASSPHRASE" || fail 'TEST signing passphrase secret is unavailable'
           BT="$ANDROID_HOME/build-tools/36.0.0"
+          test -x "$BT/aapt" || fail 'aapt is unavailable'
+          test -x "$BT/zipalign" || fail 'zipalign is unavailable'
+          test -x "$BT/apksigner" || fail 'apksigner is unavailable'
+
           TEST_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           TEST_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           FORMAL_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" formal-baseline/app/build.gradle | head -1)"
           FORMAL_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' formal-baseline/app/build.gradle | head -1)"
-          [[ "$FORMAL_VERSION_NAME" == '1.3.0' ]]
-          [[ "$FORMAL_VERSION_CODE" == '1000050' ]]
+          [[ "$FORMAL_VERSION_NAME" == '1.3.0' ]] || fail "formal versionName mismatch: $FORMAL_VERSION_NAME"
+          [[ "$FORMAL_VERSION_CODE" == '1000050' ]] || fail "formal versionCode mismatch: $FORMAL_VERSION_CODE"
+          [[ "$TEST_VERSION_NAME" == '1.4.0-dev1' ]] || fail "TEST versionName mismatch: $TEST_VERSION_NAME"
+          [[ "$TEST_VERSION_CODE" == '1000051' ]] || fail "TEST versionCode mismatch: $TEST_VERSION_CODE"
+          note "formal identity: versionName=$FORMAL_VERSION_NAME versionCode=$FORMAL_VERSION_CODE"
+          note "TEST identity: versionName=$TEST_VERSION_NAME versionCode=$TEST_VERSION_CODE"
+
           TEST_UNSIGNED="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
-          test -n "$TEST_UNSIGNED"
-          test -s "$TEST_UNSIGNED"
-          TEST_ALIGNED="app/build/outputs/apk/qaApp/app-qaApp-emulator-aligned.apk"
-          TEST_SIGNED="app/build/outputs/apk/qaApp/app-qaApp-emulator-signed.apk"
-          "$BT/zipalign" -p -f 4 "$TEST_UNSIGNED" "$TEST_ALIGNED"
-          test -s "$HOME/.android/debug.keystore"
-          "$BT/apksigner" sign \
-            --ks "$HOME/.android/debug.keystore" \
-            --ks-key-alias androiddebugkey \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            --out "$TEST_SIGNED" \
-            "$TEST_ALIGNED"
-          "$BT/apksigner" verify --verbose "$TEST_SIGNED"
+          test -n "$TEST_UNSIGNED" || fail 'TEST unsigned APK was not produced'
+          test -s "$TEST_UNSIGNED" || fail "TEST unsigned APK is empty: $TEST_UNSIGNED"
           FORMAL_APK="formal-baseline/app/build/outputs/apk/debug/app-debug.apk"
-          FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL_APK")"
-          TEST_BADGING="$($BT/aapt dump badging "$TEST_SIGNED")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING"
-          grep -Fq "versionCode='$FORMAL_VERSION_CODE'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionCode='$TEST_VERSION_CODE'" <<<"$TEST_BADGING"
-          grep -Fq "versionName='$FORMAL_VERSION_NAME'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionName='$TEST_VERSION_NAME'" <<<"$TEST_BADGING"
+          test -s "$FORMAL_APK" || fail "formal baseline APK is missing or empty: $FORMAL_APK"
+          note "TEST unsigned APK: $TEST_UNSIGNED"
+          note "formal APK: $FORMAL_APK"
+
+          TEST_ALIGNED="app/build/outputs/apk/qaApp/app-qaApp-coinstall-aligned.apk"
+          TEST_SIGNED="app/build/outputs/apk/qaApp/app-qaApp-coinstall-signed.apk"
+          "$BT/zipalign" -p -f 4 "$TEST_UNSIGNED" "$TEST_ALIGNED" || fail 'TEST APK zipalign failed'
+          "$BT/zipalign" -c -v 4 "$TEST_ALIGNED" >/dev/null || fail 'TEST aligned APK validation failed'
+          note 'TEST APK zipalign: PASS'
+
+          PASS_FILE="$RUNNER_TEMP/selfrun-test-signing-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$TEST_ALIGNED" "$PASS_FILE" "$TEST_SIGNED" >/dev/null \
+            || fail 'stable TEST signing failed'
+          test -s "$TEST_SIGNED" || fail 'stable TEST signed APK is missing or empty'
+          "$BT/apksigner" verify --verbose --print-certs "$TEST_SIGNED" > app/build/outputs/apk/qaApp/coinstall-test-cert.txt \
+            || fail 'stable TEST APK signature verification failed'
+          TEST_CERT_SHA256="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' app/build/outputs/apk/qaApp/coinstall-test-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          TEST_CERT_SHA1="$(awk -F': ' '/Signer #1 certificate SHA-1 digest:/ {print $2; exit}' app/build/outputs/apk/qaApp/coinstall-test-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$TEST_CERT_SHA256" == '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' ]] \
+            || fail "TEST certificate SHA-256 mismatch: $TEST_CERT_SHA256"
+          [[ "$TEST_CERT_SHA1" == '91f7420d62af199020848cf87e0758ce60c3b009' ]] \
+            || fail "TEST certificate SHA-1 mismatch: $TEST_CERT_SHA1"
+          note "TEST certificate SHA-256: $TEST_CERT_SHA256"
+          note "TEST certificate SHA-1: $TEST_CERT_SHA1"
+
+          FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL_APK")" || fail 'formal APK badging read failed'
+          TEST_BADGING="$($BT/aapt dump badging "$TEST_SIGNED")" || fail 'TEST APK badging read failed'
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING" \
+            || fail 'formal package identity mismatch'
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING" \
+            || fail 'TEST package identity mismatch'
+          grep -Fq "versionCode='$FORMAL_VERSION_CODE'" <<<"$FORMAL_BADGING" \
+            || fail 'formal versionCode badging mismatch'
+          grep -Fq "versionCode='$TEST_VERSION_CODE'" <<<"$TEST_BADGING" \
+            || fail 'TEST versionCode badging mismatch'
+          grep -Fq "versionName='$FORMAL_VERSION_NAME'" <<<"$FORMAL_BADGING" \
+            || fail 'formal versionName badging mismatch'
+          grep -Fq "versionName='$TEST_VERSION_NAME'" <<<"$TEST_BADGING" \
+            || fail 'TEST versionName badging mismatch'
+          note 'formal package identity: com.shaterguy.chatgptselfrun.drive'
+          note 'TEST package identity: com.shaterguy.chatgptselfrun.drive.test'
+          note 'preflight: PASS'
       - name: Enable hardware acceleration
         run: |
           test -c /dev/kvm
@@ -96,13 +160,16 @@ jobs:
             FORMAL_EXPECTED_VERSION="1.3.0" TEST_EXPECTED_VERSION="$TEST_VERSION"
             timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh
             formal-baseline/app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/qaApp/app-qaApp-emulator-signed.apk |
+            app/build/outputs/apk/qaApp/app-qaApp-coinstall-signed.apk |
             tee drive-test-coinstall-evidence.txt'
       - name: Upload TEST co-install evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chatgpt-selfrun-drive-test-coinstall-evidence
-          path: drive-test-coinstall-evidence.txt
+          path: |
+            drive-test-coinstall-preflight.txt
+            drive-test-coinstall-evidence.txt
+            app/build/outputs/apk/qaApp/coinstall-test-cert.txt
           if-no-files-found: warn
           retention-days: 30
