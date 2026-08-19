@@ -34,16 +34,34 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build formal 1.3.0 and TEST APKs for emulator
+      - name: Build formal 1.3.0 and current TEST APKs for emulator
         shell: bash
         run: |
           set -euo pipefail
           echo '[coinstall] verify Drive variant policy'
           tools/verify_drive_variant.sh
-          echo '[coinstall] run unit tests and build TEST qaApp'
+          echo '[coinstall] run unit tests and build current TEST qaApp'
           gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleQaApp
           echo '[coinstall] build exact formal 1.3.0 baseline'
           gradle --no-daemon --console=plain --stacktrace --project-dir formal-baseline :app:assembleDebug
+      - name: Build lower-version TEST predecessor for update verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREV_SRC="$RUNNER_TEMP/selfrun-drive-test-prev-src"
+          rm -rf "$PREV_SRC"
+          git worktree add --detach "$PREV_SRC" "$GITHUB_SHA"
+          sed -i "s/def selfRunDriveVersionCode = 1000051/def selfRunDriveVersionCode = 1000050/" "$PREV_SRC/app/build.gradle"
+          sed -i "s/def selfRunDriveVersionName = '1.4.0-dev1'/def selfRunDriveVersionName = '1.4.0-dev0'/" "$PREV_SRC/app/build.gradle"
+          grep -Fq 'def selfRunDriveVersionCode = 1000050' "$PREV_SRC/app/build.gradle"
+          grep -Fq "def selfRunDriveVersionName = '1.4.0-dev0'" "$PREV_SRC/app/build.gradle"
+          gradle --no-daemon --console=plain --stacktrace --project-dir "$PREV_SRC" :app:assembleQaApp
+          PREV_UNSIGNED="$(find "$PREV_SRC/app/build/outputs/apk/qaApp" -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          test -n "$PREV_UNSIGNED"
+          test -s "$PREV_UNSIGNED"
+          mkdir -p app/build/outputs/apk/qaApp
+          cp "$PREV_UNSIGNED" app/build/outputs/apk/qaApp/app-qaApp-prev-unsigned.apk
+          git worktree remove --force "$PREV_SRC"
       - name: Install hash-locked TEST signing dependencies
         shell: bash
         run: |
@@ -55,7 +73,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check \
             --require-hashes --only-binary=:all: \
             -r tools/signing-requirements-linux-x86_64-py312.txt
-      - name: Prepare and validate co-install APK identities
+      - name: Prepare and validate co-install and update APK identities
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
@@ -80,69 +98,97 @@ jobs:
 
           TEST_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           TEST_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          TEST_PREV_VERSION_NAME='1.4.0-dev0'
+          TEST_PREV_VERSION_CODE='1000050'
           FORMAL_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" formal-baseline/app/build.gradle | head -1)"
           FORMAL_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' formal-baseline/app/build.gradle | head -1)"
           [[ "$FORMAL_VERSION_NAME" == '1.3.0' ]] || fail "formal versionName mismatch: $FORMAL_VERSION_NAME"
           [[ "$FORMAL_VERSION_CODE" == '1000050' ]] || fail "formal versionCode mismatch: $FORMAL_VERSION_CODE"
           [[ "$TEST_VERSION_NAME" == '1.4.0-dev1' ]] || fail "TEST versionName mismatch: $TEST_VERSION_NAME"
           [[ "$TEST_VERSION_CODE" == '1000051' ]] || fail "TEST versionCode mismatch: $TEST_VERSION_CODE"
+          (( TEST_VERSION_CODE > TEST_PREV_VERSION_CODE )) || fail 'TEST current versionCode is not greater than predecessor'
           note "formal identity: versionName=$FORMAL_VERSION_NAME versionCode=$FORMAL_VERSION_CODE"
-          note "TEST identity: versionName=$TEST_VERSION_NAME versionCode=$TEST_VERSION_CODE"
+          note "TEST predecessor identity: versionName=$TEST_PREV_VERSION_NAME versionCode=$TEST_PREV_VERSION_CODE"
+          note "TEST current identity: versionName=$TEST_VERSION_NAME versionCode=$TEST_VERSION_CODE"
 
-          TEST_UNSIGNED="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
-          test -n "$TEST_UNSIGNED" || fail 'TEST unsigned APK was not produced'
-          test -s "$TEST_UNSIGNED" || fail "TEST unsigned APK is empty: $TEST_UNSIGNED"
+          TEST_UNSIGNED="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name 'app-qaApp-unsigned.apk' -print -quit)"
+          TEST_PREV_UNSIGNED="app/build/outputs/apk/qaApp/app-qaApp-prev-unsigned.apk"
+          test -n "$TEST_UNSIGNED" || fail 'current TEST unsigned APK was not produced'
+          test -s "$TEST_UNSIGNED" || fail "current TEST unsigned APK is empty: $TEST_UNSIGNED"
+          test -s "$TEST_PREV_UNSIGNED" || fail "TEST predecessor unsigned APK is missing or empty: $TEST_PREV_UNSIGNED"
           FORMAL_APK="formal-baseline/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$FORMAL_APK" || fail "formal baseline APK is missing or empty: $FORMAL_APK"
-          note "TEST unsigned APK: $TEST_UNSIGNED"
+          note "TEST predecessor unsigned APK: $TEST_PREV_UNSIGNED"
+          note "TEST current unsigned APK: $TEST_UNSIGNED"
           note "formal APK: $FORMAL_APK"
 
+          TEST_PREV_ALIGNED="app/build/outputs/apk/qaApp/app-qaApp-prev-coinstall-aligned.apk"
+          TEST_PREV_SIGNED="app/build/outputs/apk/qaApp/app-qaApp-prev-coinstall-signed.apk"
           TEST_ALIGNED="app/build/outputs/apk/qaApp/app-qaApp-coinstall-aligned.apk"
           TEST_SIGNED="app/build/outputs/apk/qaApp/app-qaApp-coinstall-signed.apk"
-          "$BT/zipalign" -p -f 4 "$TEST_UNSIGNED" "$TEST_ALIGNED" || fail 'TEST APK zipalign failed'
-          "$BT/zipalign" -c -v 4 "$TEST_ALIGNED" >/dev/null || fail 'TEST aligned APK validation failed'
-          note 'TEST APK zipalign: PASS'
+          "$BT/zipalign" -p -f 4 "$TEST_PREV_UNSIGNED" "$TEST_PREV_ALIGNED" || fail 'TEST predecessor APK zipalign failed'
+          "$BT/zipalign" -c -v 4 "$TEST_PREV_ALIGNED" >/dev/null || fail 'TEST predecessor aligned APK validation failed'
+          "$BT/zipalign" -p -f 4 "$TEST_UNSIGNED" "$TEST_ALIGNED" || fail 'current TEST APK zipalign failed'
+          "$BT/zipalign" -c -v 4 "$TEST_ALIGNED" >/dev/null || fail 'current TEST aligned APK validation failed'
+          note 'TEST predecessor/current APK zipalign: PASS'
 
           PASS_FILE="$RUNNER_TEMP/selfrun-test-signing-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$TEST_PREV_ALIGNED" "$PASS_FILE" "$TEST_PREV_SIGNED" >/dev/null \
+            || fail 'stable TEST predecessor signing failed'
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$TEST_ALIGNED" "$PASS_FILE" "$TEST_SIGNED" >/dev/null \
-            || fail 'stable TEST signing failed'
-          test -s "$TEST_SIGNED" || fail 'stable TEST signed APK is missing or empty'
+            || fail 'stable current TEST signing failed'
+          test -s "$TEST_PREV_SIGNED" || fail 'stable TEST predecessor signed APK is missing or empty'
+          test -s "$TEST_SIGNED" || fail 'stable current TEST signed APK is missing or empty'
+          "$BT/apksigner" verify --verbose --print-certs "$TEST_PREV_SIGNED" > app/build/outputs/apk/qaApp/coinstall-test-prev-cert.txt \
+            || fail 'stable TEST predecessor APK signature verification failed'
           "$BT/apksigner" verify --verbose --print-certs "$TEST_SIGNED" > app/build/outputs/apk/qaApp/coinstall-test-cert.txt \
-            || fail 'stable TEST APK signature verification failed'
+            || fail 'stable current TEST APK signature verification failed'
+          TEST_PREV_CERT_SHA256="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' app/build/outputs/apk/qaApp/coinstall-test-prev-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           TEST_CERT_SHA256="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' app/build/outputs/apk/qaApp/coinstall-test-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           TEST_CERT_SHA1="$(awk -F': ' '/Signer #1 certificate SHA-1 digest:/ {print $2; exit}' app/build/outputs/apk/qaApp/coinstall-test-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$TEST_PREV_CERT_SHA256" == '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' ]] \
+            || fail "TEST predecessor certificate SHA-256 mismatch: $TEST_PREV_CERT_SHA256"
           [[ "$TEST_CERT_SHA256" == '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' ]] \
-            || fail "TEST certificate SHA-256 mismatch: $TEST_CERT_SHA256"
+            || fail "current TEST certificate SHA-256 mismatch: $TEST_CERT_SHA256"
+          [[ "$TEST_PREV_CERT_SHA256" == "$TEST_CERT_SHA256" ]] \
+            || fail 'TEST predecessor/current signing certificates differ'
           [[ "$TEST_CERT_SHA1" == '91f7420d62af199020848cf87e0758ce60c3b009' ]] \
-            || fail "TEST certificate SHA-1 mismatch: $TEST_CERT_SHA1"
-          note "TEST certificate SHA-256: $TEST_CERT_SHA256"
-          note "TEST certificate SHA-1: $TEST_CERT_SHA1"
+            || fail "current TEST certificate SHA-1 mismatch: $TEST_CERT_SHA1"
+          note "TEST predecessor/current certificate SHA-256: $TEST_CERT_SHA256"
+          note "TEST current certificate SHA-1: $TEST_CERT_SHA1"
 
           FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL_APK")" || fail 'formal APK badging read failed'
-          TEST_BADGING="$($BT/aapt dump badging "$TEST_SIGNED")" || fail 'TEST APK badging read failed'
+          TEST_PREV_BADGING="$($BT/aapt dump badging "$TEST_PREV_SIGNED")" || fail 'TEST predecessor APK badging read failed'
+          TEST_BADGING="$($BT/aapt dump badging "$TEST_SIGNED")" || fail 'current TEST APK badging read failed'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING" \
             || fail 'formal package identity mismatch'
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_PREV_BADGING" \
+            || fail 'TEST predecessor package identity mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING" \
-            || fail 'TEST package identity mismatch'
+            || fail 'current TEST package identity mismatch'
           grep -Fq "versionCode='$FORMAL_VERSION_CODE'" <<<"$FORMAL_BADGING" \
             || fail 'formal versionCode badging mismatch'
+          grep -Fq "versionCode='$TEST_PREV_VERSION_CODE'" <<<"$TEST_PREV_BADGING" \
+            || fail 'TEST predecessor versionCode badging mismatch'
           grep -Fq "versionCode='$TEST_VERSION_CODE'" <<<"$TEST_BADGING" \
-            || fail 'TEST versionCode badging mismatch'
+            || fail 'current TEST versionCode badging mismatch'
           grep -Fq "versionName='$FORMAL_VERSION_NAME'" <<<"$FORMAL_BADGING" \
             || fail 'formal versionName badging mismatch'
+          grep -Fq "versionName='$TEST_PREV_VERSION_NAME'" <<<"$TEST_PREV_BADGING" \
+            || fail 'TEST predecessor versionName badging mismatch'
           grep -Fq "versionName='$TEST_VERSION_NAME'" <<<"$TEST_BADGING" \
-            || fail 'TEST versionName badging mismatch'
+            || fail 'current TEST versionName badging mismatch'
           note 'formal package identity: com.shaterguy.chatgptselfrun.drive'
-          note 'TEST package identity: com.shaterguy.chatgptselfrun.drive.test'
+          note 'TEST predecessor/current package identity: com.shaterguy.chatgptselfrun.drive.test'
           note 'preflight: PASS'
       - name: Enable hardware acceleration
         run: |
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
-      - name: Verify formal 1.3.0 and TEST simultaneous installation
+      - name: Verify formal co-install and TEST in-place update
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 36
@@ -157,9 +203,10 @@ jobs:
           script: >-
             bash -o pipefail -c
             'TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
-            FORMAL_EXPECTED_VERSION="1.3.0" TEST_EXPECTED_VERSION="$TEST_VERSION"
+            FORMAL_EXPECTED_VERSION="1.3.0" TEST_PREV_EXPECTED_VERSION="1.4.0-dev0" TEST_EXPECTED_VERSION="$TEST_VERSION"
             timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh
             formal-baseline/app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/qaApp/app-qaApp-prev-coinstall-signed.apk
             app/build/outputs/apk/qaApp/app-qaApp-coinstall-signed.apk |
             tee drive-test-coinstall-evidence.txt'
       - name: Upload TEST co-install evidence
@@ -170,6 +217,7 @@ jobs:
           path: |
             drive-test-coinstall-preflight.txt
             drive-test-coinstall-evidence.txt
+            app/build/outputs/apk/qaApp/coinstall-test-prev-cert.txt
             app/build/outputs/apk/qaApp/coinstall-test-cert.txt
           if-no-files-found: warn
           retention-days: 30
