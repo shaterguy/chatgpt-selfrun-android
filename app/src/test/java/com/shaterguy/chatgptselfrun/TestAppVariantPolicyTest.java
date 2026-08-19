@@ -13,7 +13,7 @@ public final class TestAppVariantPolicyTest {
     @Test public void testAppHasFixedSeparateInstallIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
-        assertTrue(gradle.contains("testApp {"));
+        assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
