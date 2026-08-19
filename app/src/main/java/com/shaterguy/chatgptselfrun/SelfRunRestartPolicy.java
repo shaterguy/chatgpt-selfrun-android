@@ -21,7 +21,7 @@ final class SelfRunRestartPolicy {
                                boolean userStopped, boolean paused) {
         if (runId == null || runId.isEmpty() || conversationUrl == null || conversationUrl.isEmpty()
                 || SelfRunStore.PHASE_DONE.equals(phase)) return false;
-        return userStopped || paused || SelfRunStore.PHASE_PAUSED.equals(phase);
+        return userStopped;
     }
 
     static boolean processClaimConflicts(String existingToken, String existingProcessId,
