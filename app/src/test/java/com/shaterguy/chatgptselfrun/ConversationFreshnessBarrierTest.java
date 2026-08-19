@@ -45,14 +45,16 @@ public class ConversationFreshnessBarrierTest {
         String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
         assertTrue(script.contains("__srEditContext"));assertTrue(script.contains("__srMainComposer"));assertTrue(script.contains("safeCalibratedComposer=__srMainComposer(calibratedComposer)?calibratedComposer:null"));
     }
-    @Test public void generalChatAndProjectConversationBothRefreshCorrectlyWithoutReload() throws Exception {
+    @Test public void generalChatAndProjectConversationBothRefreshThroughNetworkNavigation() throws Exception {
         String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
         assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/c/a","https://chatgpt.com/c/a"));
         assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/g/g-p-test/c/a","https://chatgpt.com/g/g-p-test/c/a"));
-        assertTrue(sync.contains("activeConversationSyncNavigation=\"reuse\""));
-        assertTrue(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
-        assertFalse(sync.contains("webView.reload()"));
-        assertTrue(sync.contains("webView.loadUrl(canonical)"));
+        assertTrue(sync.contains("activeConversationSyncNavigation=match?\"reload\":\"loadUrl\""));
+        assertTrue(sync.contains("if(match)webView.reload();else webView.loadUrl(canonical)"));
+        assertEquals(1,count(sync,"webView.reload()"));
+        assertEquals(1,count(sync,"webView.loadUrl(canonical)"));
+        assertFalse(sync.contains("activeConversationSyncNavigation=\"reuse\""));
+        assertFalse(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
     }
     @Test public void syncNeverBindsUnknownLiveConversation() throws Exception {
         String s=src("SelfRunService.java"),ensure=between(s,"private void ensureWebView(){","private void launchWebView");
@@ -82,12 +84,15 @@ public class ConversationFreshnessBarrierTest {
         assertFalse(webStep.contains("maybeCaptureConversationUrl("));
         assertEquals(2,count(s,"maybeCaptureConversationUrl("));
     }
-    @Test public void matchingConversationSyncDoesNotAddNetworkReload() throws Exception {
+    @Test public void matchingConversationSyncReloadsBeforeVisualFreshness() throws Exception {
         String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
-        assertFalse(sync.contains("reload()"));
-        assertTrue(sync.contains("if(match)"));
-        assertTrue(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
+        assertTrue(sync.contains("boolean match=sameConversation(canonical,current)"));
+        assertTrue(sync.contains("activeConversationSyncNavigation=match?\"reload\":\"loadUrl\""));
+        assertTrue(sync.contains("conversationSyncRecoveryLoadUsed=!match"));
+        assertTrue(sync.contains("if(match)webView.reload();else webView.loadUrl(canonical)"));
+        assertEquals(1,count(sync,"webView.reload()"));
         assertEquals(1,count(sync,"webView.loadUrl(canonical)"));
+        assertFalse(sync.contains("requestConversationVisualReady("));
     }
     @Test public void mainFrameNetworkRecoveryIsBoundedAndBackedOff() throws Exception {
         String s=src("SelfRunService.java");
