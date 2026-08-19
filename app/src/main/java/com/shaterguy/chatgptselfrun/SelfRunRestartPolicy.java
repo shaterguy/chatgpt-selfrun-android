@@ -24,6 +24,13 @@ final class SelfRunRestartPolicy {
         return userStopped || paused || SelfRunStore.PHASE_PAUSED.equals(phase);
     }
 
+    static boolean processClaimConflicts(String existingToken, String existingProcessId,
+                                         String currentProcessId) {
+        return existingToken != null && !existingToken.isEmpty()
+                && currentProcessId != null && !currentProcessId.isEmpty()
+                && currentProcessId.equals(existingProcessId);
+    }
+
     static String restartPhase(String mode) {
         return SelfRunStore.MODE_WORK.equals(mode)
                 ? SelfRunStore.PHASE_APPLY_PREFS
