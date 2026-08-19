@@ -9,6 +9,14 @@ final class SelfRunWebDiagnostics {
         String reason;
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) reason = "model_wait";
         else if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) reason = "reasoning_wait";
+        else if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) {
+            if (value.contains("composer replaced")) reason = "composer_replaced_abort";
+            else if (value.contains("전송 버튼") || value.contains("send button")) reason = "send_wait";
+            else if (value.contains("입력 반영") || value.contains("input reflection")) reason = "input_reflection_wait";
+            else if (value.contains("입력창") || value.contains("composer")) reason = "composer_wait";
+            else if ("WAIT".equals(status) && (value.contains("입력") || value.contains("input"))) reason = "input_wait";
+            else reason = "ui_wait";
+        }
         else if (value.contains("composer")) reason = "composer_wait";
         else if (value.contains("input")) reason = "input_wait";
         else reason = "ui_wait";
