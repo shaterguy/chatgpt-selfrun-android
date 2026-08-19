@@ -138,7 +138,11 @@ final class ConversationSyncInstrumentation {
         private String composerAtDirty = "";
 
         @Override public synchronized void onConversationSyncEvent(Event event) {
-            if (event == null || event.sequence <= lastEventSequence) return;
+            if (event == null) return;
+            if (event.type == Type.DOCUMENT_READY && event.sequence <= lastEventSequence) {
+                resetDocumentSequence();
+            }
+            if (event.sequence <= lastEventSequence) return;
             lastEventSequence = event.sequence;
             switch (event.type) {
                 case DOCUMENT_READY -> {
@@ -175,6 +179,26 @@ final class ConversationSyncInstrumentation {
                 case CLIENT_STATE -> applyClientState(event);
                 default -> markDirty(event.sequence, "unknown_probe_event");
             }
+        }
+
+        private void resetDocumentSequence() {
+            lastEventSequence = 0L;
+            dirtySinceSequence = 0L;
+            clientStateSequence = 0L;
+            lastChannelActivitySequence = 0L;
+            lastChannelCloseSequence = 0L;
+            lastFetchStartSequence = 0L;
+            lastFetchCompleteSequence = 0L;
+            lastCompletedNetworkId = 0;
+            channelOpen = false;
+            dirty = true;
+            dirtyReason = "document_rollover";
+            proofSource = "unproven";
+            headKey = "";
+            composerKey = "";
+            stateSignature = "";
+            headAtDirty = "";
+            composerAtDirty = "";
         }
 
         private void applyClientState(Event event) {

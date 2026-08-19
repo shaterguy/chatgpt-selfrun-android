@@ -23,8 +23,8 @@ public class ConversationFreshnessBarrierTest {
         String sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
         assertFalse(sync.contains("webView.reload()"));
         assertFalse(sync.contains("if(match)webView.reload()"));
-        assertTrue(sync.contains("activeConversationSyncNavigation=\"reuse\""));
-        assertTrue(sync.contains("if(!match)"));
+        assertTrue(sync.contains("activeConversationSyncNavigation = \"reuse\""));
+        assertTrue(sync.contains("if (!match)"));
         assertTrue(sync.contains("loadUrl_recovery"));
     }
 
@@ -54,7 +54,7 @@ public class ConversationFreshnessBarrierTest {
     @Test public void guardRemainsExactly45Seconds() throws Exception {
         String s=src("SelfRunService.java");
         assertTrue(s.contains("CONTINUATION_GUARD_MS = 45_000L"));
-        assertTrue(s.contains("due-detected==CONTINUATION_GUARD_MS"));
+        assertTrue(s.contains("due - detected == CONTINUATION_GUARD_MS"));
     }
 
     @Test public void stopWaitIsExactlyTenSecondsAndNeverForced() throws Exception {
@@ -75,7 +75,7 @@ public class ConversationFreshnessBarrierTest {
     }
 
     @Test public void mainFrameRecoveryLoadUrlRemainsBoundedRecoveryOnly() throws Exception {
-        String s=src("SelfRunService.java"),recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");
+        String s=src("SelfRunService.java"),recovery=between(s,"private void handleMainFrameLoadError","private void resetMainFrameRecovery");
         assertTrue(recovery.contains("MAX_MAIN_FRAME_RECOVERY_ATTEMPTS"));
         assertEquals(1,count(recovery,"view.loadUrl(target)"));
         assertFalse(recovery.contains("reload()"));
@@ -94,8 +94,8 @@ public class ConversationFreshnessBarrierTest {
 
     @Test public void bootstrapConversationBindingStaysCausalAndLocal() throws Exception {
         String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void handleMainFrameLoadError");
-        assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));
-        assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));
+        assertTrue(binding.contains("bootstrapConversationCaptureEpoch = automationEpoch"));
+        assertTrue(binding.contains("bootstrapConversationCaptureRunId = store.runId()"));
         assertTrue(binding.contains("BOOTSTRAP_CONVERSATION_CAPTURE_WINDOW_MS"));
         assertFalse(binding.contains("reload("));
     }
