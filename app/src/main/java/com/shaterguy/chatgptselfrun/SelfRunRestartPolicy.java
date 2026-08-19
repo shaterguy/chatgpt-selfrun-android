@@ -12,13 +12,16 @@ final class SelfRunRestartPolicy {
 
     static boolean restartable(JSONObject item) {
         if (item == null) return false;
-        String runId = item.optString("runId", "");
-        String phase = item.optString("phase", "");
-        String conversationUrl = item.optString("conversationUrl", "");
-        if (runId.isEmpty() || conversationUrl.isEmpty() || SelfRunStore.PHASE_DONE.equals(phase)) return false;
-        return item.optBoolean("userStopped", false)
-                || item.optBoolean("paused", false)
-                || SelfRunStore.PHASE_PAUSED.equals(phase);
+        return restartable(item.optString("runId", ""), item.optString("phase", ""),
+                item.optString("conversationUrl", ""), item.optBoolean("userStopped", false),
+                item.optBoolean("paused", false));
+    }
+
+    static boolean restartable(String runId, String phase, String conversationUrl,
+                               boolean userStopped, boolean paused) {
+        if (runId == null || runId.isEmpty() || conversationUrl == null || conversationUrl.isEmpty()
+                || SelfRunStore.PHASE_DONE.equals(phase)) return false;
+        return userStopped || paused || SelfRunStore.PHASE_PAUSED.equals(phase);
     }
 
     static String restartPhase(String mode) {
