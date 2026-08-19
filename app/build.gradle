@@ -24,7 +24,7 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
-        testApp {
+        qaApp {
             initWith release
             applicationIdSuffix '.test'
             manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive TEST']
@@ -60,7 +60,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        def testType = android.buildTypes.getByName('testApp')
+        def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
             throw new GradleException('SelfRun Drive TEST applicationId suffix must remain .test')
         }
