@@ -18,13 +18,16 @@ import org.json.JSONObject;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** Restarts a historical stopped run without replaying its bootstrap. */
 public final class SelfRunRestartActivity extends Activity {
     static final String EXTRA_RUN_ID = "runId";
     private static final int REQUEST_AUTHORIZATION = 5201;
     private static final String RESTART_PREFS = "selfrun_drive_restart";
-    private static final long CLAIM_STALE_MS = 2 * 60_000L;
+    private static final String PROCESS_INSTANCE_ID = Long.toHexString(System.currentTimeMillis())
+            + ":" + Long.toHexString(System.nanoTime())
+            + ":" + Long.toHexString(ThreadLocalRandom.current().nextLong());
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private SelfRunStore store;
@@ -62,7 +65,7 @@ public final class SelfRunRestartActivity extends Activity {
         root.addView(Ui.title(this, "중지 작업 재시작"));
         status = Ui.body(this, "작업 이력과 Drive 리소스를 확인하는 중입니다…");
         root.addView(status);
-        root.addView(Ui.button(this, "닫기", v -> finish()));
+        root.addView(Ui.button(this, "닫기", v -> cancelBeforeRecovery()));
         Ui.setContent(this, root);
     }
 
@@ -73,17 +76,18 @@ public final class SelfRunRestartActivity extends Activity {
                 return false;
             }
             SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
-            long now = System.currentTimeMillis();
-            String owner = lock.getString("claimRunId", "");
-            long claimedAt = lock.getLong("claimedAt", 0L);
-            if (!owner.isEmpty() && now - claimedAt >= 0L && now - claimedAt < CLAIM_STALE_MS) {
+            String existingToken = lock.getString("claimToken", "");
+            String existingProcess = lock.getString("claimProcessId", "");
+            if (SelfRunRestartPolicy.processClaimConflicts(existingToken, existingProcess, PROCESS_INSTANCE_ID)) {
                 failure("다른 재시작 요청이 이미 처리 중입니다.");
                 return false;
             }
+            long now = System.currentTimeMillis();
             claimToken = runId + ":" + now + ":" + Long.toHexString(System.nanoTime());
             SharedPreferences.Editor claim = lock.edit()
                     .putString("claimRunId", runId)
                     .putString("claimToken", claimToken)
+                    .putString("claimProcessId", PROCESS_INSTANCE_ID)
                     .putLong("claimedAt", now);
             if (!runId.equals(lock.getString("reservedRunId", ""))) {
                 claim.remove("reservedFolderId").remove("reservedRunId");
@@ -143,6 +147,7 @@ public final class SelfRunRestartActivity extends Activity {
 
     private void recover(String accessToken) {
         try {
+            requireClaimOwnership();
             DriveApiClient api = new DriveApiClient();
             String expectedAccount = snapshot.optString("driveAccountId", "");
             String actualAccount = api.getAccountPermissionId(accessToken);
@@ -197,6 +202,7 @@ public final class SelfRunRestartActivity extends Activity {
 
     private DriveApiClient.Metadata createOrRecoverJobFolder(DriveApiClient api, String token,
                                                                String baseFolderId) throws Exception {
+        requireClaimOwnership();
         SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
         String folderId = runId.equals(lock.getString("reservedRunId", ""))
                 ? lock.getString("reservedFolderId", "") : "";
@@ -213,6 +219,7 @@ public final class SelfRunRestartActivity extends Activity {
             return existing;
         }
         try {
+            requireClaimOwnership();
             DriveApiClient.Metadata created = api.createJobFolder(token, folderId, runId, baseFolderId);
             verifyJobFolder(created, baseFolderId);
         } catch (Throwable createError) {
@@ -227,12 +234,14 @@ public final class SelfRunRestartActivity extends Activity {
 
     private DriveApiClient.Metadata createOrRecoverTurnDocument(DriveApiClient api, String token,
                                                                   String jobFolderId) throws Exception {
+        requireClaimOwnership();
         DriveApiClient.Metadata recovered = api.findSingleTurnDocument(token, runId, jobFolderId);
         if (recovered != null) {
             verifyTurnDocument(recovered, jobFolderId);
             return recovered;
         }
         try {
+            requireClaimOwnership();
             DriveApiClient.Metadata created = api.createTurnDocument(token, runId, jobFolderId);
             verifyTurnDocument(created, jobFolderId);
             DriveApiClient.Metadata readback = api.getMetadata(token, created.id);
@@ -277,6 +286,7 @@ public final class SelfRunRestartActivity extends Activity {
                             DriveApiClient.Metadata jobFolder, DriveApiClient.Metadata document,
                             DriveSignalParser.Scan baseline, String prompt) {
         synchronized (SelfRunStore.RUN_STATE_LOCK) {
+            requireClaimOwnership();
             if (store.active()) throw new IllegalStateException("another SelfRun became active during restart");
             String mode = snapshot.optString("mode", SelfRunStore.MODE_CHAT);
             String model = snapshot.optString("pendingModel", "");
@@ -369,6 +379,7 @@ public final class SelfRunRestartActivity extends Activity {
 
     private void startRecoveredService() {
         try {
+            requireClaimOwnership();
             Intent service = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_RUN);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
             else startService(service);
@@ -402,7 +413,8 @@ public final class SelfRunRestartActivity extends Activity {
             SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
             if (claimToken.equals(lock.getString("claimToken", ""))) {
                 SharedPreferences.Editor editor = lock.edit()
-                        .remove("claimRunId").remove("claimToken").remove("claimedAt");
+                        .remove("claimRunId").remove("claimToken")
+                        .remove("claimProcessId").remove("claimedAt");
                 if (clearReservation) editor.remove("reservedFolderId").remove("reservedRunId");
                 editor.commit();
             }
@@ -411,16 +423,44 @@ public final class SelfRunRestartActivity extends Activity {
     }
 
     private void failure(String message) {
+        releaseClaim(false);
         runOnUiThread(() -> {
             recoveryStarted = false;
-            releaseClaim(false);
             if (status != null) status.setText(message);
             Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         });
     }
 
+    private void requireClaimOwnership() {
+        if (claimToken.isEmpty()) throw new IllegalStateException("restart claim is missing");
+        SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
+        if (!claimToken.equals(lock.getString("claimToken", ""))
+                || !PROCESS_INSTANCE_ID.equals(lock.getString("claimProcessId", ""))) {
+            throw new IllegalStateException("restart claim ownership changed");
+        }
+    }
+
+    private void cancelBeforeRecovery() {
+        if (recoveryStarted) {
+            Toast.makeText(this, "Drive 복구가 진행 중일 때는 재시작 화면을 닫을 수 없습니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        releaseClaim(false);
+        finish();
+    }
+
+    @Override public void onBackPressed() {
+        if (recoveryStarted) {
+            Toast.makeText(this, "Drive 복구가 진행 중일 때는 뒤로 갈 수 없습니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        releaseClaim(false);
+        super.onBackPressed();
+    }
+
     @Override protected void onDestroy() {
-        io.shutdownNow();
+        if (recoveryStarted) io.shutdown();
+        else io.shutdownNow();
         super.onDestroy();
     }
 }
