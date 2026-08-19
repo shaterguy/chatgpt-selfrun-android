@@ -9,11 +9,8 @@ final class SelfRunWebDiagnostics {
         String reason;
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) reason = "model_wait";
         else if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) reason = "reasoning_wait";
-        else if (value.contains("continuation 입력창 대기")) reason = "composer_wait";
-        else if (value.contains("continuation 전송 버튼 대기")) reason = "send_wait";
-        else if (value.contains("입력 반영 확인 대기")) reason = "input_reflection_wait";
-        else if (value.contains("continuation 입력 대기")) reason = "input_wait";
-        else if (value.contains("prepared continuation composer replaced")) reason = "composer_replaced_abort";
+        else if (value.contains("composer")) reason = "composer_wait";
+        else if (value.contains("input")) reason = "input_wait";
         else reason = "ui_wait";
         String safeStatus = "WAIT".equals(status) ? "WAIT" : "UI_WAIT";
         return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=" + reason;
@@ -30,17 +27,17 @@ final class SelfRunWebDiagnostics {
                    int candidateCount, boolean turnContained, boolean submitScope,
                    boolean generationMatch, boolean discarded) {
         String safeNavigation = switch (navigation == null ? "" : navigation) {
-  case "reload", "loadUrl", "loadUrl_recovery", "new_webview", "pending" -> navigation;
-  default -> "none";
+            case "reuse", "loadUrl_recovery", "new_webview", "pending" -> navigation;
+            default -> "none";
         };
         return "sync_epoch=" + syncEpoch + ";generation=" + generation
-      + ";canonical_match=" + (canonicalMatch ? "1" : "0")
-      + ";navigation=" + safeNavigation
-      + ";candidate_count=" + candidateCount
-      + ";turn_contained=" + (turnContained ? "1" : "0")
-      + ";submit_scope=" + (submitScope ? "1" : "0")
-      + ";generation_match=" + (generationMatch ? "1" : "0")
-      + ";discarded=" + (discarded ? "1" : "0");
+                + ";canonical_match=" + (canonicalMatch ? "1" : "0")
+                + ";navigation=" + safeNavigation
+                + ";candidate_count=" + candidateCount
+                + ";turn_contained=" + (turnContained ? "1" : "0")
+                + ";submit_scope=" + (submitScope ? "1" : "0")
+                + ";generation_match=" + (generationMatch ? "1" : "0")
+                + ";discarded=" + (discarded ? "1" : "0");
     }
 
     static String abortDetail(String reason, boolean webViewMatch, boolean generationMatch, boolean freshnessMatch) {

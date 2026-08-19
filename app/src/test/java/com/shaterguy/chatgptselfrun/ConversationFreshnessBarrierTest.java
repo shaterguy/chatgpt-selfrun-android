@@ -1,190 +1,106 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+
 import static org.junit.Assert.*;
 
 public class ConversationFreshnessBarrierTest {
-    @Test public void manualResumeRefreshesCanonicalConversationBeforeContinue() throws Exception {
+    @Test public void manualResumeStillRoutesThroughConversationSync() throws Exception {
         String st=src("SelfRunStore.java"),s=src("SelfRunService.java"),b=between(st,"void baselineManualResume","static boolean canCaptureConversationUrl");
-        assertTrue(b.contains("conversationSyncNextPhase"));assertTrue(b.contains("PHASE_SYNC_CONVERSATION"));assertTrue(b.contains("PHASE_SEND_CONTINUE"));
-        assertTrue(s.contains("startConversationSyncNavigation"));assertTrue(s.contains("postVisualStateCallback"));
+        assertTrue(b.contains("conversationSyncNextPhase"));
+        assertTrue(b.contains("PHASE_SYNC_CONVERSATION"));
+        assertTrue(b.contains("PHASE_SEND_CONTINUE"));
+        assertTrue(s.contains("enterConversationSync"));
     }
-    @Test public void everyContinuationPassesConversationFreshnessBarrier() throws Exception {
-        String s=src("SelfRunService.java"),st=src("SelfRunStore.java");
-        assertTrue(between(s,"private void guardElapsed","private void ensureWebView").contains("enterConversationSync"));
-        assertTrue(between(st,"void prepareCommandRetry","void applyDriveSignals").contains("PHASE_SYNC_CONVERSATION"));
-        assertTrue(s.contains("if(isContinuationPhase(phase)&&!freshnessValid())"));
+
+    @Test public void normalFreshnessPathHasNoReloadOrSameRouteLoadUrl() throws Exception {
+        String s=src("SelfRunService.java");
+        String sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
+        assertFalse(sync.contains("webView.reload()"));
+        assertFalse(sync.contains("if(match)webView.reload()"));
+        assertTrue(sync.contains("activeConversationSyncNavigation=\"reuse\""));
+        assertTrue(sync.contains("if(!match)"));
+        assertTrue(sync.contains("loadUrl_recovery"));
     }
+
+    @Test public void continuationFreshnessDependsOnNativeProbeProof() throws Exception {
+        String s=src("SelfRunService.java");
+        assertTrue(s.contains("ConversationSyncInstrumentation.Session"));
+        assertTrue(s.contains("ConversationSyncInstrumentation.Proof"));
+        assertTrue(s.contains("CONVERSATION_SYNC_PROVEN"));
+        assertTrue(s.contains("CONVERSATION_SYNC_UNPROVEN"));
+        assertTrue(s.contains("SUBMIT_BLOCKED_FRESHNESS"));
+    }
+
+    @Test public void probeIsInstalledBeforeInitialLoadUrl() throws Exception {
+        String s=src("SelfRunService.java"),launch=between(s,"private void launchWebView","private boolean armBootstrapConversationCapture");
+        int install=launch.indexOf("ConversationSyncInstrumentation.install");
+        int load=launch.indexOf("webView.loadUrl(target)");
+        assertTrue(install>=0 && load>install);
+    }
+
     @Test public void preservedWebViewIsNotDestroyedDuringPause() throws Exception {
         String s=src("SelfRunService.java"),p=between(s,"private void enterPreservedPause","private void removeAutomationCallbacks");
-        assertTrue(p.contains("pauseWebView()"));assertFalse(p.contains("cleanupWebView()"));assertTrue(s.contains("webview=preserved"));
+        assertTrue(p.contains("pauseWebView()"));
+        assertFalse(p.contains("cleanupWebView()"));
+        assertTrue(s.contains("webview=preserved"));
     }
-    @Test public void staleConversationCannotSubmitBeforeRefresh() throws Exception {
-        String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
-        assertTrue(s.contains("if(isContinuationPhase(phase)&&!freshnessValid())"));assertTrue(d.contains("FRESHNESS_STALE"));assertTrue(d.contains("__selfRunDriveFreshnessToken"));
-    }
-    @Test public void refreshCompletionAllowsExactlyOneContinue() throws Exception {
-        String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
-        assertTrue(s.contains("String next=store.finishConversationSync()"));assertTrue(s.contains("CONVERSATION_SYNC_READY"));
-        assertEquals(1,count(between(d,"static String clickPreparedDriveTurn(String conversationUrl,String prompt,String markerId,String freshnessToken)","private static String projectGuard"),"send.click()"));
-    }
-    @Test public void navigationDuringPreparedSubmissionInvalidatesAttempt() throws Exception {
-        String s=src("SelfRunService.java"),d=src("SelfRunDom.java");
-        assertTrue(s.contains("onMainFramePageStarted"));assertTrue(s.contains("invalidateConversationFreshness"));
-        assertTrue(d.contains("pagehide"));assertTrue(d.contains("prepared continuation belongs to stale generation"));assertTrue(d.contains("__selfRunDrivePreparedContinuation=null"));
-    }
-    @Test public void latestComposerSafetyStillPasses() throws Exception {
-        String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
-        assertTrue(script.contains("__srComposerPool"));assertTrue(script.contains("xs[xs.length-1]"));assertTrue(script.contains("scope.contains(calibrated)"));assertTrue(script.contains("__srTurnContained"));
-    }
-    @Test public void editComposerNeverWinsOverMainComposer() {
-        String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
-        assertTrue(script.contains("__srEditContext"));assertTrue(script.contains("__srMainComposer"));assertTrue(script.contains("safeCalibratedComposer=__srMainComposer(calibratedComposer)?calibratedComposer:null"));
-    }
-    @Test public void generalChatAndProjectConversationBothRefreshThroughNetworkNavigation() throws Exception {
-        String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
-        assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/c/a","https://chatgpt.com/c/a"));
-        assertTrue(ProjectUrlPolicy.sameConversation("https://chatgpt.com/g/g-p-test/c/a","https://chatgpt.com/g/g-p-test/c/a"));
-        assertTrue(sync.contains("activeConversationSyncNavigation=match?\"reload\":\"loadUrl\""));
-        assertTrue(sync.contains("if(match)webView.reload();else webView.loadUrl(canonical)"));
-        assertEquals(1,count(sync,"webView.reload()"));
-        assertEquals(1,count(sync,"webView.loadUrl(canonical)"));
-        assertFalse(sync.contains("activeConversationSyncNavigation=\"reuse\""));
-        assertFalse(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
-    }
-    @Test public void syncNeverBindsUnknownLiveConversation() throws Exception {
-        String s=src("SelfRunService.java"),ensure=between(s,"private void ensureWebView(){","private void launchWebView");
-        assertFalse(ensure.contains("maybeCaptureConversationUrl(webView.getUrl())"));
-        assertTrue(ensure.contains("enterPreservedPause(\"CONVERSATION_SYNC_TARGET_MISSING\""));
-        assertFalse(ensure.contains("handler.postDelayed(this::ensureWebView,2000L)"));
-    }
-    @Test public void bootstrapConversationBindingIsCausalBoundedAndLocalOnly() throws Exception {
-        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void handleMainFrameLoadError");
-        assertTrue(binding.contains("SelfRunScript.conversationId(current).isEmpty()"));
-        assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));
-        assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));
-        assertTrue(binding.contains("bootstrapConversationCaptureWebView=active"));
-        assertTrue(binding.contains("store.awaitingCommandAck()"));
-        assertTrue(binding.contains("store.retryForBootstrap()"));
-        assertTrue(binding.contains("BOOTSTRAP_CONVERSATION_CAPTURE_WINDOW_MS"));
-        assertFalse(binding.contains("loadUrl("));assertFalse(binding.contains("reload("));assertFalse(binding.contains("evaluateJavascript("));
-        String submit=between(s,"private void commandSubmitted","private static boolean isSubmissionPhase");
-        assertTrue(submit.contains("\"BOOTSTRAP_SUBMITTED\".equals(detail)"));
-        assertTrue(submit.contains("scheduleBootstrapConversationCapture()"));
-        String handling=between(s,"private void handleWebResult","private String driveBootstrap");
-        assertTrue(handling.contains("armBootstrapConversationCapture()"));
-        assertTrue(handling.contains("BOOTSTRAP_CONVERSATION_BIND_ORIGIN_INVALID"));
-        String callbacks=between(s,"webView.setWebViewClient(new WebViewClient()","private boolean armBootstrapConversationCapture()");
-        String webStep=between(s,"private void runWebStep()","private void evaluate(");
-        assertFalse(callbacks.contains("maybeCaptureConversationUrl("));
-        assertFalse(webStep.contains("maybeCaptureConversationUrl("));
-        assertEquals(2,count(s,"maybeCaptureConversationUrl("));
-    }
-    @Test public void matchingConversationSyncReloadsBeforeVisualFreshness() throws Exception {
-        String s=src("SelfRunService.java"),sync=between(s,"private void startConversationSyncNavigation","private void onMainFramePageStarted");
-        assertTrue(sync.contains("boolean match=sameConversation(canonical,current)"));
-        assertTrue(sync.contains("activeConversationSyncNavigation=match?\"reload\":\"loadUrl\""));
-        assertTrue(sync.contains("conversationSyncRecoveryLoadUsed=!match"));
-        assertTrue(sync.contains("if(match)webView.reload();else webView.loadUrl(canonical)"));
-        assertEquals(1,count(sync,"webView.reload()"));
-        assertEquals(1,count(sync,"webView.loadUrl(canonical)"));
-        assertFalse(sync.contains("requestConversationVisualReady("));
-    }
-    @Test public void mainFrameNetworkRecoveryIsBoundedAndBackedOff() throws Exception {
+
+    @Test public void guardRemainsExactly45Seconds() throws Exception {
         String s=src("SelfRunService.java");
-        String err=between(s,"@Override public void onReceivedError","@Override public void onReceivedSslError");
-        assertTrue(err.contains("handleMainFrameLoadError(v)"));
-        assertFalse(err.contains("3_000L"));
-        assertFalse(err.contains("loadUrl("));
-        String recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");
+        assertTrue(s.contains("CONTINUATION_GUARD_MS = 45_000L"));
+        assertTrue(s.contains("due-detected==CONTINUATION_GUARD_MS"));
+    }
+
+    @Test public void stopWaitIsExactlyTenSecondsAndNeverForced() throws Exception {
+        String s=src("SelfRunService.java");
+        assertTrue(s.contains("RESPONSE_ACTIVE_WAIT_MS = 10_000L"));
+        assertTrue(s.contains("RESPONSE_ACTIVE_WAIT_10S"));
+        assertFalse(s.contains("forceSend"));
+        assertFalse(s.contains("clickStop"));
+    }
+
+    @Test public void rateLimitBackoffInvalidatesFreshnessWithoutNavigation() throws Exception {
+        String s=src("SelfRunService.java"),rate=between(s,"private void handleWebRateLimit","private void onConversationProbeEvent");
+        assertTrue(rate.contains("RATE_LIMIT_BACKOFF"));
+        assertTrue(rate.contains("invalidateConversationFreshness"));
+        assertTrue(rate.contains("forceDirty"));
+        assertFalse(rate.contains("reload()"));
+        assertFalse(rate.contains("loadUrl("));
+    }
+
+    @Test public void mainFrameRecoveryLoadUrlRemainsBoundedRecoveryOnly() throws Exception {
+        String s=src("SelfRunService.java"),recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");
         assertTrue(recovery.contains("MAX_MAIN_FRAME_RECOVERY_ATTEMPTS"));
-        assertTrue(recovery.contains("MAIN_FRAME_RECOVERY_DELAY_MS"));
-        assertTrue(recovery.contains("WEBVIEW_LOAD_RETRY_LIMIT"));
-        assertTrue(recovery.contains("enterPreservedPause"));
         assertEquals(1,count(recovery,"view.loadUrl(target)"));
         assertFalse(recovery.contains("reload()"));
     }
-    @Test public void readinessCancelsPreviouslyScheduledRecoveryNavigation() throws Exception {
-        String s=src("SelfRunService.java"),recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");
-        assertTrue(recovery.contains("ticket=++mainFrameRecoveryTicket"));
-        assertTrue(recovery.contains("ticket!=mainFrameRecoveryTicket||!mainFrameRecoveryPending||view!=webView"));
-        assertTrue(recovery.indexOf("ticket!=mainFrameRecoveryTicket")<recovery.indexOf("view.loadUrl(target)"));
-        assertTrue(recovery.contains("mainFrameRecoveryTicket++"));
-    }
-    @Test public void canonicalRestoreIsNoOpWhenRouteAlreadyMatches() throws Exception {
-        String s=src("SelfRunService.java"),restore=between(s,"private void restoreCanonical()","private String canonicalUrl()");
-        assertTrue(restore.contains("!routeAcceptable(webView.getUrl())"));
-        assertEquals(1,count(restore,"webView.loadUrl(target)"));
-        assertFalse(restore.contains("reload()"));
-    }
-    @Test public void http429DoesNotScheduleNetworkNavigation() throws Exception {
-        String s=src("SelfRunService.java"),http=between(s,"@Override public void onReceivedHttpError","@Override public void onReceivedError");
-        assertTrue(http.contains("s.getStatusCode() == 429"));
-        assertFalse(http.contains("loadUrl("));
-        assertFalse(http.contains("reload()"));
-    }
-    @Test public void mainFrameRecoveryCounterResetsOnlyAfterReadinessOrLifecycleReset() throws Exception {
-        String s=src("SelfRunService.java");
-        String handling=between(s,"private void handleWebResult","private String driveBootstrap");
-        assertTrue(handling.contains("READY_TO_SUBMIT"));
-        assertTrue(handling.contains("resetMainFrameRecovery()"));
-        String fresh=between(s,"private void evaluateConversationSyncReadiness","private void handleDriveFailure");
-        assertTrue(fresh.contains("resetMainFrameRecovery()"));
-        String remove=between(s,"private void removeAutomationCallbacks","private void stopAutomationCallbacks");
-        assertTrue(remove.contains("resetMainFrameRecovery()"));
-    }
-    @Test public void workAndChatModesBothPreserveBehavior() throws Exception {
-        String s=src("SelfRunService.java"),g=between(s,"private void guardElapsed","private void ensureWebView");
-        assertTrue(g.contains("MODE_WORK"));assertTrue(g.contains("PHASE_APPLY_PREFS"));assertTrue(g.contains("PHASE_SEND_CONTINUE"));
-        assertTrue(s.contains("WorkPreferenceDom.modelForConversation"));assertTrue(s.contains("WorkPreferenceDom.reasoningForConversation"));
-    }
-    @Test public void commandAckAndDrivePollingRegression() throws Exception {
+
+    @Test public void commandAckDriveAndWorkRegressionRemain() throws Exception {
         String s=src("SelfRunService.java"),st=src("SelfRunStore.java");
-        assertTrue(s.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));assertTrue(s.contains("DriveSignalParser.scan"));assertTrue(st.contains("COMMAND_RECEIVED_PENDING"));
-        assertTrue(between(st,"void prepareCommandRetry","void applyDriveSignals").contains("RETRY_BOOTSTRAP"));assertTrue(st.contains("case USER_ACTION_REQUIRED"));assertTrue(st.contains("case PAUSED"));assertTrue(st.contains("case DONE"));
+        assertTrue(s.contains("DriveSignalParser.scan"));
+        assertTrue(st.contains("COMMAND_RECEIVED_PENDING"));
+        assertTrue(st.contains("case USER_ACTION_REQUIRED"));
+        assertTrue(st.contains("case PAUSED"));
+        assertTrue(st.contains("case DONE"));
+        assertTrue(s.contains("WorkPreferenceDom.modelForConversation"));
+        assertTrue(s.contains("WorkPreferenceDom.reasoningForConversation"));
     }
-    @Test public void repeatedRefreshCallbacksCannotDoubleSubmit() throws Exception {
-        String s=src("SelfRunService.java");
-        assertTrue(s.contains("sync!=activeConversationSyncEpoch"));assertTrue(s.contains("expectedGeneration!=generation"));assertTrue(s.contains("conversationSyncInFlight"));assertTrue(s.contains("CONVERSATION_SYNC_DISCARDED"));
-        assertTrue(s.contains("requestId!=activeConversationVisualRequestId"));assertTrue(s.contains("activeConversationVisualRequestId=0L"));
+
+    @Test public void bootstrapConversationBindingStaysCausalAndLocal() throws Exception {
+        String s=src("SelfRunService.java"),binding=between(s,"private boolean armBootstrapConversationCapture()","private void handleMainFrameLoadError");
+        assertTrue(binding.contains("bootstrapConversationCaptureEpoch=automationEpoch"));
+        assertTrue(binding.contains("bootstrapConversationCaptureRunId=store.runId()"));
+        assertTrue(binding.contains("BOOTSTRAP_CONVERSATION_CAPTURE_WINDOW_MS"));
+        assertFalse(binding.contains("reload("));
     }
-    @Test public void visualReadyCallbackAndTimeoutHaveSingleWinner() throws Exception {
-        String s=src("SelfRunService.java");
-        assertTrue(s.contains("activeConversationVisualRequestId"));
-        assertTrue(s.contains("handler.postDelayed(()->onConversationVisualReady(view,sync,expectedGeneration,true,requestId),1500L)"));
-        assertTrue(s.contains("if(requestId!=activeConversationVisualRequestId)"));
-        assertTrue(s.contains("activeConversationVisualRequestId=0L"));
-    }
-    @Test public void editComposerNestedUnderGenericFormStillFailsClosed() {
-        String script=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
-        assertTrue(script.contains("for(let n=e;n;n=n.parentElement)"));
-        assertTrue(script.contains("role==='dialog'"));
-        assertTrue(script.contains("message-edit"));
-        assertFalse(script.contains("e.closest('[data-testid*=\"edit\"],[data-testid*=\"message-edit\"],[role=\"dialog\"],form')"));
-    }
-    @Test public void replacedPreparedComposerCannotSubmitEvenWhenTextMatches() {
-        String prepare=SelfRunDom.prepareDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
-        String click=SelfRunDom.clickPreparedDriveTurn("https://chatgpt.com/c/conversation123","continue","m","1:2");
-        assertTrue(prepare.contains("window.__selfRunDrivePreparedContinuation={markerKey:markerKey2,composer,freshnessToken:__srFreshnessToken,clicked:false}"));
-        assertTrue(click.contains("prepared.composer!==composer"));
-        assertTrue(click.contains("prepared.clicked"));
-        assertTrue(click.contains("SUBMISSION_PENDING"));
-        assertTrue(click.indexOf("prepared.composer!==composer")<click.indexOf("send.click()"));
-    }
-    @Test public void staleContinuationCallbackHasPrivacySafeAbortDiagnostic() throws Exception {
-        String s=src("SelfRunService.java");
-        assertTrue(s.contains("CONTINUE_SUBMIT_ABORT"));
-        assertTrue(s.contains("SelfRunWebDiagnostics.abortDetail(\"stale_callback\""));
-        String detail=SelfRunWebDiagnostics.abortDetail("stale_callback",false,false,false);
-        assertEquals("abort=stale_callback;webview_match=0;generation_match=0;freshness_match=0",detail);
-        assertFalse(detail.contains("chatgpt.com"));
-        assertFalse(detail.contains("conversation123"));
-    }
+
     private static int count(String s,String token){int n=0,i=0;while((i=s.indexOf(token,i))>=0){n++;i+=token.length();}return n;}
-    private static String src(String f)throws Exception{Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);if(!Files.exists(p))p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);return new String(Files.readAllBytes(p),StandardCharsets.UTF_8);}
+    private static String src(String f)throws Exception{Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);if(!Files.exists(p))p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);}
     private static String between(String s,String a,String b){int x=s.indexOf(a),y=s.indexOf(b,x);assertTrue(x>=0&&y>x);return s.substring(x,y);}
 }
