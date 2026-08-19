@@ -79,6 +79,7 @@ final class ConversationSyncInstrumentation {
         final long probeEpoch;
         final long remoteEpoch;
         final long revalidationEpoch;
+        final long proofVersion;
         final long eventSequence;
         final String headKey;
         final String composerKey;
@@ -86,13 +87,14 @@ final class ConversationSyncInstrumentation {
         final String source;
 
         private Proof(boolean proven, long probeEpoch, long remoteEpoch,
-                      long revalidationEpoch, long eventSequence,
+                      long revalidationEpoch, long proofVersion, long eventSequence,
                       String headKey, String composerKey,
                       String stateSignature, String source) {
             this.proven = proven;
             this.probeEpoch = probeEpoch;
             this.remoteEpoch = remoteEpoch;
             this.revalidationEpoch = revalidationEpoch;
+            this.proofVersion = proofVersion;
             this.eventSequence = eventSequence;
             this.headKey = safe(headKey);
             this.composerKey = safe(composerKey);
@@ -101,13 +103,17 @@ final class ConversationSyncInstrumentation {
         }
 
         static Proof unproven() {
-            return new Proof(false, 0L, 0L, 0L, 0L, "", "", "", "unproven");
+            return new Proof(false, 0L, 0L, 0L, 0L, 0L, "", "", "", "unproven");
         }
 
+        /**
+         * The submission token changes only when the proof itself is invalidated/re-established,
+         * not for unrelated same-origin page requests. The raw event sequence remains diagnostic.
+         */
         String tokenPart() {
             if (!proven) return "";
             return probeEpoch + ":" + remoteEpoch + ":" + revalidationEpoch + ":"
-                    + eventSequence + ":" + headKey + ":" + composerKey + ":" + stateSignature;
+                    + proofVersion + ":" + headKey + ":" + composerKey + ":" + stateSignature;
         }
     }
 
@@ -119,6 +125,7 @@ final class ConversationSyncInstrumentation {
         private long probeEpoch;
         private long remoteEpoch;
         private long revalidationEpoch;
+        private long proofVersion;
         private long lastEventSequence;
         private long dirtySinceSequence;
         private long clientStateSequence;
@@ -182,6 +189,7 @@ final class ConversationSyncInstrumentation {
         }
 
         private void resetDocumentSequence() {
+            proofVersion++;
             lastEventSequence = 0L;
             dirtySinceSequence = 0L;
             clientStateSequence = 0L;
@@ -259,6 +267,7 @@ final class ConversationSyncInstrumentation {
 
         private void markDirty(long sequence, String reason) {
             if (!dirty) {
+                proofVersion++;
                 headAtDirty = headKey;
                 composerAtDirty = composerKey;
             }
@@ -269,6 +278,7 @@ final class ConversationSyncInstrumentation {
         }
 
         private void clearDirty(String source) {
+            if (dirty) proofVersion++;
             dirty = false;
             proofSource = safe(source);
         }
@@ -292,7 +302,7 @@ final class ConversationSyncInstrumentation {
                 return Proof.unproven();
             }
             return new Proof(true, probeEpoch, remoteEpoch, revalidationEpoch,
-                    lastEventSequence, headKey, composerKey, stateSignature, proofSource);
+                    proofVersion, lastEventSequence, headKey, composerKey, stateSignature, proofSource);
         }
     }
 
