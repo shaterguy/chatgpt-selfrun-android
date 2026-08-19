@@ -40,7 +40,7 @@ public final class SelfRunHistoryActivity extends Activity {
         root.addView(Ui.row(this,
                 Ui.button(this, "뒤로", v -> finish()),
                 Ui.button(this, "새로고침", v -> render())));
-        root.addView(Ui.body(this, "현재 작업과 지난 작업을 함께 보존합니다. 각 작업의 실행 로그와 디버그 로그를 별도로 확인할 수 있습니다."));
+        root.addView(Ui.body(this, "현재 작업과 지난 작업을 함께 보존합니다. 각 작업의 실행 로그와 디버그 로그를 별도로 확인할 수 있습니다. 중지된 과거 작업은 동일 Job ID와 기존 대화방을 유지해 재시작할 수 있습니다."));
 
         JSONArray runs = history.read();
         if (runs.length() == 0) {
@@ -74,11 +74,20 @@ public final class SelfRunHistoryActivity extends Activity {
                 Ui.button(this, "작업 보기", v -> openDetail(runId)),
                 Ui.button(this, "실행 로그", v -> openLogs(runId, SelfRunLogsActivity.KIND_EXECUTION)),
                 Ui.button(this, "디버그 로그", v -> openLogs(runId, SelfRunLogsActivity.KIND_DEBUG))));
+        if (SelfRunRestartPolicy.restartable(item)) {
+            root.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(runId)));
+        }
     }
 
     private void openDetail(String runId) {
         Intent intent = new Intent(this, SelfRunDetailActivity.class);
         intent.putExtra(SelfRunDetailActivity.EXTRA_RUN_ID, runId);
+        startActivity(intent);
+    }
+
+    private void openRestart(String runId) {
+        Intent intent = new Intent(this, SelfRunRestartActivity.class);
+        intent.putExtra(SelfRunRestartActivity.EXTRA_RUN_ID, runId);
         startActivity(intent);
     }
 
