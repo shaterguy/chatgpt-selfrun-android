@@ -38,6 +38,26 @@ public final class TestAppVariantPolicyTest {
         assertTrue(gradle.contains("selfRunDriveVersionCode = 1000051"));
     }
 
+    @Test public void devPushBuildsOnlyTheTestApplicationChannel() throws Exception {
+        String production = read(".github/workflows/build-drive-v1.yml", "../.github/workflows/build-drive-v1.yml");
+        String test = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
+        assertFalse(production.contains("- 'selfrun-drive/v*-dev*'"));
+        assertTrue(production.contains("- 'selfrun-drive/v*-rc*'"));
+        assertTrue(production.contains("workflow_dispatch:"));
+        assertTrue(test.contains("- 'selfrun-drive/v*-dev*'"));
+        assertTrue(test.contains(":app:assembleQaApp"));
+        assertTrue(test.contains("com.shaterguy.chatgptselfrun.drive.test"));
+    }
+
+    @Test public void restartClaimIsWiredToProcessOwnership() throws Exception {
+        String activity = read(
+                "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java");
+        assertTrue(activity.contains("claimProcessId"));
+        assertTrue(activity.contains("SelfRunRestartPolicy.processClaimConflicts"));
+        assertTrue(activity.contains("requireClaimOwnership();"));
+    }
+
     private static String read(String first, String second) throws Exception {
         Path path = Paths.get(first);
         if (!Files.exists(path)) path = Paths.get(second);
