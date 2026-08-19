@@ -103,6 +103,13 @@ public class ConversationFreshnessBarrierTest {
         assertEquals(1,count(recovery,"view.loadUrl(target)"));
         assertFalse(recovery.contains("reload()"));
     }
+    @Test public void readinessCancelsPreviouslyScheduledRecoveryNavigation() throws Exception {
+        String s=src("SelfRunService.java"),recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");
+        assertTrue(recovery.contains("ticket=++mainFrameRecoveryTicket"));
+        assertTrue(recovery.contains("ticket!=mainFrameRecoveryTicket||!mainFrameRecoveryPending||view!=webView"));
+        assertTrue(recovery.indexOf("ticket!=mainFrameRecoveryTicket")<recovery.indexOf("view.loadUrl(target)"));
+        assertTrue(recovery.contains("mainFrameRecoveryTicket++"));
+    }
     @Test public void canonicalRestoreIsNoOpWhenRouteAlreadyMatches() throws Exception {
         String s=src("SelfRunService.java"),restore=between(s,"private void restoreCanonical()","private String canonicalUrl()");
         assertTrue(restore.contains("!routeAcceptable(webView.getUrl())"));
