@@ -17,6 +17,12 @@ public final class SelfRunRestartPolicyTest {
                 "", true, false));
     }
 
+    @Test public void sameProcessRestartClaimNeverExpiresByElapsedTime() {
+        assertTrue(SelfRunRestartPolicy.processClaimConflicts("claim-1", "process-A", "process-A"));
+        assertFalse(SelfRunRestartPolicy.processClaimConflicts("claim-1", "process-A", "process-B"));
+        assertFalse(SelfRunRestartPolicy.processClaimConflicts("", "process-A", "process-A"));
+    }
+
     @Test public void restartNeverUsesBootstrapPhase() {
         assertEquals(SelfRunStore.PHASE_SEND_CONTINUE,
                 SelfRunRestartPolicy.restartPhase(SelfRunStore.MODE_CHAT));
