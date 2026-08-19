@@ -10,7 +10,8 @@ FORMAL_APK="$1"
 TEST_APK="$2"
 ADB_BINARY="${ADB:-adb}"
 ADB_COMMAND_TIMEOUT_SECONDS="${ADB_COMMAND_TIMEOUT_SECONDS:-60}"
-DRIVE_EXPECTED_VERSION="${DRIVE_EXPECTED_VERSION:-1.4.0-dev1}"
+FORMAL_EXPECTED_VERSION="${FORMAL_EXPECTED_VERSION:-1.3.0}"
+TEST_EXPECTED_VERSION="${TEST_EXPECTED_VERSION:-1.4.0-dev1}"
 
 adb_checked() {
   timeout --foreground "${ADB_COMMAND_TIMEOUT_SECONDS}s" "$ADB_BINARY" "$@"
@@ -74,7 +75,7 @@ require_file "$TEST_APK"
 "$ADB" uninstall "$FORMAL_PACKAGE" >/dev/null 2>&1 || true
 "$ADB" uninstall "$TEST_PACKAGE" >/dev/null 2>&1 || true
 
-echo "Installing formal SelfRun Drive and TEST app together"
+echo "Installing formal SelfRun Drive 1.3.0 and TEST app together"
 "$ADB" install -r "$FORMAL_APK" >/dev/null
 "$ADB" install -r "$TEST_APK" >/dev/null
 package_installed "$FORMAL_PACKAGE" || fail "formal Drive package not installed"
@@ -82,9 +83,9 @@ package_installed "$TEST_PACKAGE" || fail "TEST Drive package not installed"
 
 assert_launcher "$FORMAL_PACKAGE" "$FORMAL_MAIN"
 assert_launcher "$TEST_PACKAGE" "$TEST_MAIN"
-[[ "$(package_version "$FORMAL_PACKAGE")" == "$DRIVE_EXPECTED_VERSION" ]] \
+[[ "$(package_version "$FORMAL_PACKAGE")" == "$FORMAL_EXPECTED_VERSION" ]] \
   || fail "unexpected formal version: $(package_version "$FORMAL_PACKAGE")"
-[[ "$(package_version "$TEST_PACKAGE")" == "$DRIVE_EXPECTED_VERSION" ]] \
+[[ "$(package_version "$TEST_PACKAGE")" == "$TEST_EXPECTED_VERSION" ]] \
   || fail "unexpected TEST version: $(package_version "$TEST_PACKAGE")"
 
 formal_uid="$(package_uid "$FORMAL_PACKAGE")"
@@ -126,8 +127,8 @@ cat <<EOF
 DRIVE_TEST_COINSTALL_VERIFY_PASS
 formal_package=$FORMAL_PACKAGE
 test_package=$TEST_PACKAGE
-formal_version=$DRIVE_EXPECTED_VERSION
-test_version=$DRIVE_EXPECTED_VERSION
+formal_version=$FORMAL_EXPECTED_VERSION
+test_version=$TEST_EXPECTED_VERSION
 formal_uid=$formal_uid
 test_uid=$test_uid
 formal_data_dir=$formal_data_dir
