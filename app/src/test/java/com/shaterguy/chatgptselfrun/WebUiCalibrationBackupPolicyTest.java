@@ -80,8 +80,8 @@ public class WebUiCalibrationBackupPolicyTest {
 
     @Test public void developmentVersionIdentityIsBumped() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000051"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.0-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000052"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.0-dev2'"));
     }
 
     private static final class FailingFirstCommitPreferences implements SharedPreferences {
