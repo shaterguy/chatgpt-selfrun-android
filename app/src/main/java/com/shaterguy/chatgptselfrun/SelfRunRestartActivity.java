@@ -81,12 +81,14 @@ public final class SelfRunRestartActivity extends Activity {
                 return false;
             }
             claimToken = runId + ":" + now + ":" + Long.toHexString(System.nanoTime());
-            boolean committed = lock.edit()
+            SharedPreferences.Editor claim = lock.edit()
                     .putString("claimRunId", runId)
                     .putString("claimToken", claimToken)
-                    .putLong("claimedAt", now)
-                    .remove("reservedFolderId")
-                    .commit();
+                    .putLong("claimedAt", now);
+            if (!runId.equals(lock.getString("reservedRunId", ""))) {
+                claim.remove("reservedFolderId").remove("reservedRunId");
+            }
+            boolean committed = claim.commit();
             if (!committed) {
                 claimToken = "";
                 failure("재시작 상태를 저장하지 못했습니다.");
@@ -196,10 +198,12 @@ public final class SelfRunRestartActivity extends Activity {
     private DriveApiClient.Metadata createOrRecoverJobFolder(DriveApiClient api, String token,
                                                                String baseFolderId) throws Exception {
         SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
-        String folderId = lock.getString("reservedFolderId", "");
+        String folderId = runId.equals(lock.getString("reservedRunId", ""))
+                ? lock.getString("reservedFolderId", "") : "";
         if (!DriveApiClient.validFileId(folderId)) {
             folderId = api.generateFolderId(token);
-            if (!lock.edit().putString("reservedFolderId", folderId).commit()) {
+            if (!lock.edit().putString("reservedFolderId", folderId)
+                    .putString("reservedRunId", runId).commit()) {
                 throw new IllegalStateException("reserved restart folder id was not persisted");
             }
         }
@@ -368,7 +372,7 @@ public final class SelfRunRestartActivity extends Activity {
             Intent service = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_RUN);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
             else startService(service);
-            releaseClaim();
+            releaseClaim(true);
             status.setText("재시작 준비 완료 · 기존 대화방에 CONTINUE를 전송합니다.");
             Toast.makeText(this, "중지 작업을 재시작했습니다.", Toast.LENGTH_LONG).show();
             finish();
@@ -392,11 +396,16 @@ public final class SelfRunRestartActivity extends Activity {
                 .build().toString();
     }
 
-    private void releaseClaim() {
+    private void releaseClaim(boolean clearReservation) {
         if (claimToken.isEmpty()) return;
         synchronized (SelfRunStore.RUN_STATE_LOCK) {
             SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);
-            if (claimToken.equals(lock.getString("claimToken", ""))) lock.edit().clear().commit();
+            if (claimToken.equals(lock.getString("claimToken", ""))) {
+                SharedPreferences.Editor editor = lock.edit()
+                        .remove("claimRunId").remove("claimToken").remove("claimedAt");
+                if (clearReservation) editor.remove("reservedFolderId").remove("reservedRunId");
+                editor.commit();
+            }
         }
         claimToken = "";
     }
@@ -404,7 +413,7 @@ public final class SelfRunRestartActivity extends Activity {
     private void failure(String message) {
         runOnUiThread(() -> {
             recoveryStarted = false;
-            releaseClaim();
+            releaseClaim(false);
             if (status != null) status.setText(message);
             Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         });
