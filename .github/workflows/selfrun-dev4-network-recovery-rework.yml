@@ -1,0 +1,111 @@
+name: SelfRun Drive dev4 bounded network recovery rework
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.3.0-dev4'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-bounded-network-recovery:
+    if: ${{ !contains(github.event.head_commit.message, '[network-recovery-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.3.0-dev4
+      - name: Apply bounded WebView recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          tests = Path('app/src/test/java/com/shaterguy/chatgptselfrun/ConversationFreshnessBarrierTest.java')
+          s = service.read_text(encoding='utf-8')
+          t = tests.read_text(encoding='utf-8')
+
+          def rep(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, got {count}')
+              return text.replace(old, new, 1)
+
+          s = rep(s,
+              '    private static final long BOOTSTRAP_CONVERSATION_CAPTURE_POLL_MS = 500L;\n'
+              '    private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};\n',
+              '    private static final long BOOTSTRAP_CONVERSATION_CAPTURE_POLL_MS = 500L;\n'
+              '    private static final int MAX_MAIN_FRAME_RECOVERY_ATTEMPTS = 1;\n'
+              '    private static final long MAIN_FRAME_RECOVERY_DELAY_MS = 30_000L;\n'
+              '    private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};\n',
+              'network recovery constants')
+
+          s = rep(s,
+              '    private WebView bootstrapConversationCaptureWebView;\n'
+              '    private volatile int automationEpoch;\n',
+              '    private WebView bootstrapConversationCaptureWebView;\n'
+              '    private int mainFrameRecoveryAttempts;\n'
+              '    private boolean mainFrameRecoveryPending;\n'
+              '    private volatile int automationEpoch;\n',
+              'network recovery state')
+
+          s = rep(s,
+              '                @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && canRun() && isWebAutomationPhase(store.phase())) postWebCallback(() -> { if (v == webView) v.loadUrl(canonicalUrl()); }, 3_000L);}\n',
+              '                @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && canRun() && isWebAutomationPhase(store.phase())) handleMainFrameLoadError(v);}\n',
+              'main-frame error callback')
+
+          marker = '''private void maybeCaptureConversationUrl(String url){if(!bootstrapConversationCaptureArmed||!store.conversationUrl().isEmpty())return;if(sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url)){runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route;proof=bootstrap_submit":"trusted_project_route;proof=bootstrap_submit");disarmBootstrapConversationCapture();}}}\n\n'''
+          helper = '''private void maybeCaptureConversationUrl(String url){if(!bootstrapConversationCaptureArmed||!store.conversationUrl().isEmpty())return;if(sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url)){runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route;proof=bootstrap_submit":"trusted_project_route;proof=bootstrap_submit");disarmBootstrapConversationCapture();}}}\nprivate void handleMainFrameLoadError(WebView view){if(view!=webView||!canRun()||!isWebAutomationPhase(store.phase()))return;if(mainFrameRecoveryPending)return;if(mainFrameRecoveryAttempts>=MAX_MAIN_FRAME_RECOVERY_ATTEMPTS){store.setLastError("WEBVIEW_LOAD_RETRY_LIMIT","ChatGPT main-frame 네트워크 복구 한도에 도달했습니다.");runLog.record(store,"WEBVIEW_LOAD_RECOVERY_LIMIT","attempts="+mainFrameRecoveryAttempts+";action=pause");enterPreservedPause("WEBVIEW_LOAD_RETRY_LIMIT","ChatGPT 네트워크 복구 한도 도달 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}int attempt=++mainFrameRecoveryAttempts;mainFrameRecoveryPending=true;runLog.record(store,"WEBVIEW_LOAD_RECOVERY_SCHEDULED","attempt="+attempt+";delayMs="+MAIN_FRAME_RECOVERY_DELAY_MS);postWebCallback(()->{mainFrameRecoveryPending=false;if(view!=webView)return;String target=canonicalUrl();if(!validAutomationTarget(target)){store.setLastError("WEBVIEW_LOAD_RECOVERY_TARGET_MISSING","ChatGPT 복구 대상 URL을 확인할 수 없습니다.");enterPreservedPause("WEBVIEW_LOAD_RECOVERY_TARGET_MISSING","ChatGPT 복구 대상 확인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}runLog.record(store,"WEBVIEW_LOAD_RECOVERY_NAVIGATION","attempt="+attempt+";bounded=1");view.loadUrl(target);},MAIN_FRAME_RECOVERY_DELAY_MS);}\nprivate void resetMainFrameRecovery(){mainFrameRecoveryAttempts=0;mainFrameRecoveryPending=false;}\n\n'''
+          s = rep(s, marker, helper, 'bounded recovery helpers')
+
+          s = rep(s,
+              'private void handleWebResult(String phase,String status,JSONObject result){if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){',
+              'private void handleWebResult(String phase,String status,JSONObject result){if("READY".equals(status)||"READY_TO_SUBMIT".equals(status))resetMainFrameRecovery();if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){',
+              'healthy DOM reset')
+
+          s = rep(s,
+              'if(!"READY".equals(status)){runLog.record(store,"CONVERSATION_SYNC_VISUAL_READY",SelfRunWebDiagnostics.syncDetail(sync,generation,true,activeConversationSyncNavigation,candidates,turnContained,submitScope,true,false));handler.postDelayed(()->evaluateConversationSyncReadiness(view,sync,expectedGeneration),750L);return;}if(!sameConversation(canonicalUrl(),view.getUrl()))',
+              'if(!"READY".equals(status)){runLog.record(store,"CONVERSATION_SYNC_VISUAL_READY",SelfRunWebDiagnostics.syncDetail(sync,generation,true,activeConversationSyncNavigation,candidates,turnContained,submitScope,true,false));handler.postDelayed(()->evaluateConversationSyncReadiness(view,sync,expectedGeneration),750L);return;}resetMainFrameRecovery();if(!sameConversation(canonicalUrl(),view.getUrl()))',
+              'freshness readiness reset')
+
+          s = rep(s,
+              '    private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);handler.removeCallbacks(guardRunnable); handler.removeCallbacks(driveRetryRunnable);disarmBootstrapConversationCapture();}\n',
+              '    private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);handler.removeCallbacks(guardRunnable); handler.removeCallbacks(driveRetryRunnable);disarmBootstrapConversationCapture();resetMainFrameRecovery();}\n',
+              'network recovery cancellation')
+
+          s = rep(s,
+              '    private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target)) webView.loadUrl(target); }\n',
+              '    private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target) && !routeAcceptable(webView.getUrl())) webView.loadUrl(target); }\n',
+              'idempotent canonical restore')
+
+          anchor = '''    @Test public void workAndChatModesBothPreserveBehavior() throws Exception {\n'''
+          added = '''    @Test public void mainFrameNetworkRecoveryIsBoundedAndBackedOff() throws Exception {\n        String s=src("SelfRunService.java");\n        String err=between(s,"@Override public void onReceivedError","@Override public void onReceivedSslError");\n        assertTrue(err.contains("handleMainFrameLoadError(v)"));\n        assertFalse(err.contains("3_000L"));\n        assertFalse(err.contains("loadUrl("));\n        String recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");\n        assertTrue(recovery.contains("MAX_MAIN_FRAME_RECOVERY_ATTEMPTS"));\n        assertTrue(recovery.contains("MAIN_FRAME_RECOVERY_DELAY_MS"));\n        assertTrue(recovery.contains("WEBVIEW_LOAD_RETRY_LIMIT"));\n        assertTrue(recovery.contains("enterPreservedPause"));\n        assertEquals(1,count(recovery,"view.loadUrl(target)"));\n        assertFalse(recovery.contains("reload()"));\n    }\n    @Test public void canonicalRestoreIsNoOpWhenRouteAlreadyMatches() throws Exception {\n        String s=src("SelfRunService.java"),restore=between(s,"private void restoreCanonical()","private String canonicalUrl()");\n        assertTrue(restore.contains("!routeAcceptable(webView.getUrl())"));\n        assertEquals(1,count(restore,"webView.loadUrl(target)"));\n        assertFalse(restore.contains("reload()"));\n    }\n    @Test public void http429DoesNotScheduleNetworkNavigation() throws Exception {\n        String s=src("SelfRunService.java"),http=between(s,"@Override public void onReceivedHttpError","@Override public void onReceivedError");\n        assertTrue(http.contains("s.getStatusCode() == 429"));\n        assertFalse(http.contains("loadUrl("));\n        assertFalse(http.contains("reload()"));\n    }\n    @Test public void mainFrameRecoveryCounterResetsOnlyAfterReadinessOrLifecycleReset() throws Exception {\n        String s=src("SelfRunService.java");\n        String handling=between(s,"private void handleWebResult","private String driveBootstrap");\n        assertTrue(handling.contains("READY_TO_SUBMIT"));\n        assertTrue(handling.contains("resetMainFrameRecovery()"));\n        String fresh=between(s,"private void evaluateConversationSyncReadiness","private void handleDriveFailure");\n        assertTrue(fresh.contains("resetMainFrameRecovery()"));\n        String remove=between(s,"private void removeAutomationCallbacks","private void stopAutomationCallbacks");\n        assertTrue(remove.contains("resetMainFrameRecovery()"));\n    }\n''' + anchor
+          t = rep(t, anchor, added, 'network recovery regression tests')
+
+          service.write_text(s, encoding='utf-8')
+          tests.write_text(t, encoding='utf-8')
+          PY
+
+          git diff --check
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java').read_text()
+          assert 'postWebCallback(() -> { if (v == webView) v.loadUrl(canonicalUrl()); }, 3_000L)' not in s
+          assert 'MAX_MAIN_FRAME_RECOVERY_ATTEMPTS = 1' in s
+          assert 'MAIN_FRAME_RECOVERY_DELAY_MS = 30_000L' in s
+          assert '!routeAcceptable(webView.getUrl())' in s
+          assert 'webView.reload()' not in s
+          PY
+      - name: Commit bounded recovery and remove patch workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SHatergUY'
+          git config user.email '108107617+shaterguy@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/test/java/com/shaterguy/chatgptselfrun/ConversationFreshnessBarrierTest.java
+          git rm .github/workflows/selfrun-dev4-network-recovery-rework.yml
+          git commit -m 'fix(drive): bound WebView network recovery [network-recovery-applied]'
+          git push origin HEAD:selfrun-drive/v1.3.0-dev4
