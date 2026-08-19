@@ -33,11 +33,11 @@ jobs:
         run: |
           set -euo pipefail
           tools/verify_drive_variant.sh
-          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleTestApp
+          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleQaApp
           BT="$ANDROID_HOME/build-tools/36.0.0"
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          UNSIGNED="$(find app/build/outputs/apk/testApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          UNSIGNED="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           test -n "$UNSIGNED"
           test -s "$UNSIGNED"
           BADGING="$($BT/aapt dump badging "$UNSIGNED")"
