@@ -40,6 +40,24 @@ public class AttachmentUploadPolicyTest {
         assertTrue(attachmentPhase >= 0 && documentPhase > attachmentPhase);
     }
 
+    @Test public void multiAttachmentBatchContinuesUntilTheLastAttachmentCommits() {
+        assertTrue(SelfRunService.shouldContinueSamePhaseDriveStep(
+                SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD, true));
+        assertFalse(SelfRunService.shouldContinueSamePhaseDriveStep(
+                SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD, false));
+        assertFalse(SelfRunService.shouldContinueSamePhaseDriveStep(
+                SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE, true));
+    }
+
+    @Test public void attachmentPickerResumePreservesCurrentProjectDraft() throws Exception {
+        String activity = src("SelfRunNewActivity.java");
+        String resume = between(activity, "@Override protected void onResume", "@Override protected void onSaveInstanceState");
+        String reload = between(activity, "private void reloadProjects()", "private String selectedProjectUrl()");
+        assertTrue(resume.contains("reloadProjects(selectedProjectUrl())"));
+        assertTrue(reload.contains("reloadProjects(store.defaultProjectUrl())"));
+        assertTrue(reload.contains("private void reloadProjects(String preferredUrl)"));
+    }
+
     @Test public void resumableUploadDoesNotPersistOrLogSessionUrl() throws Exception {
         String drive = src("DriveApiClient.java");
         String store = src("SelfRunStore.java");
@@ -127,8 +145,8 @@ public class AttachmentUploadPolicyTest {
         Path p = Paths.get("app/build.gradle");
         if (!Files.exists(p)) p = Paths.get("build.gradle");
         String gradle = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000045"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.3.0-dev5'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000046"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.3.0-dev6'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
     }
 
