@@ -5,11 +5,11 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class SelfRunRestartPolicyTest {
-    @Test public void stoppedOrPausedHistoricalRunIsRestartable() {
+    @Test public void onlyUserStoppedHistoricalRunIsRestartable() {
         String conversation = "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc";
         assertTrue(SelfRunRestartPolicy.restartable("SR-1", SelfRunStore.PHASE_IDLE,
                 conversation, true, false));
-        assertTrue(SelfRunRestartPolicy.restartable("SR-2", SelfRunStore.PHASE_PAUSED,
+        assertFalse(SelfRunRestartPolicy.restartable("SR-2", SelfRunStore.PHASE_PAUSED,
                 conversation, false, true));
         assertFalse(SelfRunRestartPolicy.restartable("SR-3", SelfRunStore.PHASE_DONE,
                 conversation, true, false));
