@@ -24,7 +24,7 @@ public final class SelfRunFocusRetentionTest {
         assertTrue(focusWebView.contains("if (hasWindowFocus) requestFocus();"));
     }
 
-    @Test public void composerRefocusRunsBeforeSameContentFastPaths() {
+    @Test public void composerRefocusRunsBeforeEquivalentContentFastPaths() {
         String prompt = "[2026.08.17 | 21:13:30] [SELF_RUN_CONTINUE SR-FOCUS-TEST]";
         String prepare = SelfRunDom.prepareDriveTurn(
                 "https://chatgpt.com/c/conversation123", prompt, "focus-prepare");
@@ -32,11 +32,11 @@ public final class SelfRunFocusRetentionTest {
                 "https://chatgpt.com/c/conversation123", prompt, "focus-click");
 
         int prepareFocus = prepare.indexOf("composer.focus();");
-        int prepareFastPath = prepare.indexOf("if(same())");
+        int prepareFastPath = prepare.indexOf("if(!acceptable())");
         int clickFocus = click.indexOf("composer.focus();");
-        int clickFastPath = click.indexOf("if(!same())");
-        assertTrue(prepareFocus >= 0 && prepareFocus < prepareFastPath);
-        assertTrue(clickFocus >= 0 && clickFocus < clickFastPath);
+        int clickFastPath = click.indexOf("if(!acceptable())");
+        assertTrue(prepareFocus >= 0 && prepareFastPath >= 0 && prepareFocus < prepareFastPath);
+        assertTrue(clickFocus >= 0 && clickFastPath >= 0 && clickFocus < clickFastPath);
     }
 
     private static String src(String file) throws Exception {
