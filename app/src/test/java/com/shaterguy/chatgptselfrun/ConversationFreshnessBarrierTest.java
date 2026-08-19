@@ -89,6 +89,42 @@ public class ConversationFreshnessBarrierTest {
         assertTrue(sync.contains("requestConversationVisualReady(webView,activeConversationSyncEpoch,generation)"));
         assertEquals(1,count(sync,"webView.loadUrl(canonical)"));
     }
+    @Test public void mainFrameNetworkRecoveryIsBoundedAndBackedOff() throws Exception {
+        String s=src("SelfRunService.java");
+        String err=between(s,"@Override public void onReceivedError","@Override public void onReceivedSslError");
+        assertTrue(err.contains("handleMainFrameLoadError(v)"));
+        assertFalse(err.contains("3_000L"));
+        assertFalse(err.contains("loadUrl("));
+        String recovery=between(s,"private void handleMainFrameLoadError","private void postWebCallback");
+        assertTrue(recovery.contains("MAX_MAIN_FRAME_RECOVERY_ATTEMPTS"));
+        assertTrue(recovery.contains("MAIN_FRAME_RECOVERY_DELAY_MS"));
+        assertTrue(recovery.contains("WEBVIEW_LOAD_RETRY_LIMIT"));
+        assertTrue(recovery.contains("enterPreservedPause"));
+        assertEquals(1,count(recovery,"view.loadUrl(target)"));
+        assertFalse(recovery.contains("reload()"));
+    }
+    @Test public void canonicalRestoreIsNoOpWhenRouteAlreadyMatches() throws Exception {
+        String s=src("SelfRunService.java"),restore=between(s,"private void restoreCanonical()","private String canonicalUrl()");
+        assertTrue(restore.contains("!routeAcceptable(webView.getUrl())"));
+        assertEquals(1,count(restore,"webView.loadUrl(target)"));
+        assertFalse(restore.contains("reload()"));
+    }
+    @Test public void http429DoesNotScheduleNetworkNavigation() throws Exception {
+        String s=src("SelfRunService.java"),http=between(s,"@Override public void onReceivedHttpError","@Override public void onReceivedError");
+        assertTrue(http.contains("s.getStatusCode() == 429"));
+        assertFalse(http.contains("loadUrl("));
+        assertFalse(http.contains("reload()"));
+    }
+    @Test public void mainFrameRecoveryCounterResetsOnlyAfterReadinessOrLifecycleReset() throws Exception {
+        String s=src("SelfRunService.java");
+        String handling=between(s,"private void handleWebResult","private String driveBootstrap");
+        assertTrue(handling.contains("READY_TO_SUBMIT"));
+        assertTrue(handling.contains("resetMainFrameRecovery()"));
+        String fresh=between(s,"private void evaluateConversationSyncReadiness","private void handleDriveFailure");
+        assertTrue(fresh.contains("resetMainFrameRecovery()"));
+        String remove=between(s,"private void removeAutomationCallbacks","private void stopAutomationCallbacks");
+        assertTrue(remove.contains("resetMainFrameRecovery()"));
+    }
     @Test public void workAndChatModesBothPreserveBehavior() throws Exception {
         String s=src("SelfRunService.java"),g=between(s,"private void guardElapsed","private void ensureWebView");
         assertTrue(g.contains("MODE_WORK"));assertTrue(g.contains("PHASE_APPLY_PREFS"));assertTrue(g.contains("PHASE_SEND_CONTINUE"));
