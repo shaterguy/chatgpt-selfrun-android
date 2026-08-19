@@ -1,0 +1,56 @@
+name: Apply historical restart claim hardening
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.4.0-dev1'
+    paths:
+      - '.github/workflows/apply-v1.4.0-restart-claim-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.4.0-dev1
+      - name: Harden restart claim ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java')
+          text = path.read_text(encoding='utf-8')
+          changes = [
+              ('''import java.util.concurrent.ExecutorService;\nimport java.util.concurrent.Executors;''', '''import java.util.concurrent.ExecutorService;\nimport java.util.concurrent.Executors;\nimport java.util.concurrent.ThreadLocalRandom;'''),
+              ('''    private static final String RESTART_PREFS = "selfrun_drive_restart";\n    private static final long CLAIM_STALE_MS = 2 * 60_000L;''', '''    private static final String RESTART_PREFS = "selfrun_drive_restart";\n    private static final String PROCESS_INSTANCE_ID = Long.toHexString(System.currentTimeMillis())\n            + ":" + Long.toHexString(System.nanoTime())\n            + ":" + Long.toHexString(ThreadLocalRandom.current().nextLong());'''),
+              ('''        root.addView(Ui.button(this, "닫기", v -> finish()));''', '''        root.addView(Ui.button(this, "닫기", v -> cancelBeforeRecovery()));'''),
+              ('''            long now = System.currentTimeMillis();\n            String owner = lock.getString("claimRunId", "");\n            long claimedAt = lock.getLong("claimedAt", 0L);\n            if (!owner.isEmpty() && now - claimedAt >= 0L && now - claimedAt < CLAIM_STALE_MS) {\n                failure("다른 재시작 요청이 이미 처리 중입니다.");\n                return false;\n            }\n            claimToken = runId + ":" + now + ":" + Long.toHexString(System.nanoTime());\n            SharedPreferences.Editor claim = lock.edit()\n                    .putString("claimRunId", runId)\n                    .putString("claimToken", claimToken)\n                    .putLong("claimedAt", now);''', '''            String existingToken = lock.getString("claimToken", "");\n            String existingProcess = lock.getString("claimProcessId", "");\n            if (SelfRunRestartPolicy.processClaimConflicts(existingToken, existingProcess, PROCESS_INSTANCE_ID)) {\n                failure("다른 재시작 요청이 이미 처리 중입니다.");\n                return false;\n            }\n            long now = System.currentTimeMillis();\n            claimToken = runId + ":" + now + ":" + Long.toHexString(System.nanoTime());\n            SharedPreferences.Editor claim = lock.edit()\n                    .putString("claimRunId", runId)\n                    .putString("claimToken", claimToken)\n                    .putString("claimProcessId", PROCESS_INSTANCE_ID)\n                    .putLong("claimedAt", now);'''),
+              ('''    private void recover(String accessToken) {\n        try {\n            DriveApiClient api = new DriveApiClient();''', '''    private void recover(String accessToken) {\n        try {\n            requireClaimOwnership();\n            DriveApiClient api = new DriveApiClient();'''),
+              ('''    private DriveApiClient.Metadata createOrRecoverJobFolder(DriveApiClient api, String token,\n                                                               String baseFolderId) throws Exception {\n        SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);''', '''    private DriveApiClient.Metadata createOrRecoverJobFolder(DriveApiClient api, String token,\n                                                               String baseFolderId) throws Exception {\n        requireClaimOwnership();\n        SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);'''),
+              ('''        try {\n            DriveApiClient.Metadata created = api.createJobFolder(token, folderId, runId, baseFolderId);''', '''        try {\n            requireClaimOwnership();\n            DriveApiClient.Metadata created = api.createJobFolder(token, folderId, runId, baseFolderId);'''),
+              ('''    private DriveApiClient.Metadata createOrRecoverTurnDocument(DriveApiClient api, String token,\n                                                                  String jobFolderId) throws Exception {\n        DriveApiClient.Metadata recovered = api.findSingleTurnDocument(token, runId, jobFolderId);''', '''    private DriveApiClient.Metadata createOrRecoverTurnDocument(DriveApiClient api, String token,\n                                                                  String jobFolderId) throws Exception {\n        requireClaimOwnership();\n        DriveApiClient.Metadata recovered = api.findSingleTurnDocument(token, runId, jobFolderId);'''),
+              ('''        try {\n            DriveApiClient.Metadata created = api.createTurnDocument(token, runId, jobFolderId);''', '''        try {\n            requireClaimOwnership();\n            DriveApiClient.Metadata created = api.createTurnDocument(token, runId, jobFolderId);'''),
+              ('''        synchronized (SelfRunStore.RUN_STATE_LOCK) {\n            if (store.active()) throw new IllegalStateException("another SelfRun became active during restart");''', '''        synchronized (SelfRunStore.RUN_STATE_LOCK) {\n            requireClaimOwnership();\n            if (store.active()) throw new IllegalStateException("another SelfRun became active during restart");'''),
+              ('''    private void startRecoveredService() {\n        try {\n            Intent service = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_RUN);''', '''    private void startRecoveredService() {\n        try {\n            requireClaimOwnership();\n            Intent service = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_RUN);'''),
+              ('''                SharedPreferences.Editor editor = lock.edit()\n                        .remove("claimRunId").remove("claimToken").remove("claimedAt");''', '''                SharedPreferences.Editor editor = lock.edit()\n                        .remove("claimRunId").remove("claimToken")\n                        .remove("claimProcessId").remove("claimedAt");'''),
+              ('''    private void failure(String message) {\n        runOnUiThread(() -> {\n            recoveryStarted = false;\n            releaseClaim(false);\n            if (status != null) status.setText(message);''', '''    private void failure(String message) {\n        releaseClaim(false);\n        runOnUiThread(() -> {\n            recoveryStarted = false;\n            if (status != null) status.setText(message);'''),
+              ('''    @Override protected void onDestroy() {\n        io.shutdownNow();\n        super.onDestroy();\n    }''', '''    private void requireClaimOwnership() {\n        if (claimToken.isEmpty()) throw new IllegalStateException("restart claim is missing");\n        SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);\n        if (!claimToken.equals(lock.getString("claimToken", ""))\n                || !PROCESS_INSTANCE_ID.equals(lock.getString("claimProcessId", ""))) {\n            throw new IllegalStateException("restart claim ownership changed");\n        }\n    }\n\n    private void cancelBeforeRecovery() {\n        if (recoveryStarted) {\n            Toast.makeText(this, "Drive 복구가 진행 중일 때는 재시작 화면을 닫을 수 없습니다.", Toast.LENGTH_LONG).show();\n            return;\n        }\n        releaseClaim(false);\n        finish();\n    }\n\n    @Override public void onBackPressed() {\n        if (recoveryStarted) {\n            Toast.makeText(this, "Drive 복구가 진행 중일 때는 뒤로 갈 수 없습니다.", Toast.LENGTH_LONG).show();\n            return;\n        }\n        releaseClaim(false);\n        super.onBackPressed();\n    }\n\n    @Override protected void onDestroy() {\n        if (recoveryStarted) io.shutdown();\n        else io.shutdownNow();\n        super.onDestroy();\n    }'''),
+          ]
+          for old, new in changes:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'unexpected restart source token count={count}: {old[:100]!r}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git rm -f .github/workflows/apply-v1.4.0-restart-claim-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java
+          git commit -m 'fix(drive): harden historical restart ownership'
+          git push origin HEAD:selfrun-drive/v1.4.0-dev1
