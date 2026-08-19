@@ -2,18 +2,39 @@
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 BUILD=app/build.gradle
+MANIFEST=app/src/main/AndroidManifest.xml
 SRC=app/src/main/java/com/shaterguy/chatgptselfrun
 SERVICE=$SRC/SelfRunService.java
 STORE=$SRC/SelfRunStore.java
 PROTOCOL=$SRC/SelfRunProtocol.java
 PARSER=$SRC/DriveCommitParser.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
+HISTORY=$SRC/SelfRunHistoryActivity.java
+RESTART=$SRC/SelfRunRestartActivity.java
+RESTART_POLICY=$SRC/SelfRunRestartPolicy.java
 SETUP=$SRC/DriveSetupActivity.java
 AUTH=$SRC/DriveAuthorization.java
 API=$SRC/DriveApiClient.java
 NOTIFICATION=$SRC/NotificationHelper.java
+TEST_DERIVE=tools/derive_test_signing_identity.py
+TEST_SIGN=tools/sign_test.sh
 
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
+grep -Fq "applicationIdSuffix '.test'" "$BUILD"
+grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
+grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
+grep -Fq '.SelfRunRestartActivity" android:exported="false"' "$MANIFEST"
+grep -Fq 'TEST_APPLICATION_ID = "com.shaterguy.chatgptselfrun.drive.test"' "$RESTART_POLICY"
+grep -Fq 'Ui.button(this, "중지 작업 재시작"' "$HISTORY"
+grep -Fq 'SelfRunProtocol.continuation(runId)' "$RESTART_POLICY"
+grep -Fq 'DRIVE_TURN_DOCUMENT_ID=' "$RESTART_POLICY"
+! grep -Fq 'SELF_RUN_BOOTSTRAP' "$RESTART_POLICY"
+grep -Fq 'DriveAuthorization.requestSilently' "$RESTART"
+grep -Fq 'driveAccountId' "$RESTART"
+grep -Fq 'findSingleTurnDocument' "$RESTART"
+grep -Fq 'PHASE_SEND_CONTINUE' "$RESTART_POLICY"
+grep -Fq 'chatgpt-selfrun-test-signing-v1|' "$TEST_DERIVE"
+grep -Fq '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$TEST_SIGN"
 VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$BUILD" | head -1)"
 VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUILD" | head -1)"
 [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
