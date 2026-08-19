@@ -1,0 +1,47 @@
+name: Apply historical restart idempotency hardening
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.4.0-dev1'
+    paths:
+      - '.github/workflows/apply-v1.4.0-restart-idempotency.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.4.0-dev1
+      - name: Preserve reserved recovery IDs across same-run retries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java')
+          text = path.read_text(encoding='utf-8')
+          changes = [
+              ('''            boolean committed = lock.edit()\n                    .putString("claimRunId", runId)\n                    .putString("claimToken", claimToken)\n                    .putLong("claimedAt", now)\n                    .remove("reservedFolderId")\n                    .commit();''', '''            SharedPreferences.Editor claim = lock.edit()\n                    .putString("claimRunId", runId)\n                    .putString("claimToken", claimToken)\n                    .putLong("claimedAt", now);\n            if (!runId.equals(lock.getString("reservedRunId", ""))) {\n                claim.remove("reservedFolderId").remove("reservedRunId");\n            }\n            boolean committed = claim.commit();'''),
+              ('''        String folderId = lock.getString("reservedFolderId", "");\n        if (!DriveApiClient.validFileId(folderId)) {\n            folderId = api.generateFolderId(token);\n            if (!lock.edit().putString("reservedFolderId", folderId).commit()) {''', '''        String folderId = runId.equals(lock.getString("reservedRunId", ""))\n                ? lock.getString("reservedFolderId", "") : "";\n        if (!DriveApiClient.validFileId(folderId)) {\n            folderId = api.generateFolderId(token);\n            if (!lock.edit().putString("reservedFolderId", folderId)\n                    .putString("reservedRunId", runId).commit()) {'''),
+              ('releaseClaim();\n            status.setText("재시작 준비 완료', 'releaseClaim(true);\n            status.setText("재시작 준비 완료'),
+              ('''    private void releaseClaim() {\n        if (claimToken.isEmpty()) return;\n        synchronized (SelfRunStore.RUN_STATE_LOCK) {\n            SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);\n            if (claimToken.equals(lock.getString("claimToken", ""))) lock.edit().clear().commit();\n        }\n        claimToken = "";\n    }''', '''    private void releaseClaim(boolean clearReservation) {\n        if (claimToken.isEmpty()) return;\n        synchronized (SelfRunStore.RUN_STATE_LOCK) {\n            SharedPreferences lock = getSharedPreferences(RESTART_PREFS, MODE_PRIVATE);\n            if (claimToken.equals(lock.getString("claimToken", ""))) {\n                SharedPreferences.Editor editor = lock.edit()\n                        .remove("claimRunId").remove("claimToken").remove("claimedAt");\n                if (clearReservation) editor.remove("reservedFolderId").remove("reservedRunId");\n                editor.commit();\n            }\n        }\n        claimToken = "";\n    }'''),
+              ('            releaseClaim();\n            if (status != null)', '            releaseClaim(false);\n            if (status != null)'),
+          ]
+          for old, new in changes:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'unexpected restart source token count: {count} for {old[:80]!r}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git rm -f .github/workflows/apply-v1.4.0-restart-idempotency.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java
+          git commit -m 'fix(drive): preserve historical restart recovery reservation'
+          git push origin HEAD:selfrun-drive/v1.4.0-dev1
