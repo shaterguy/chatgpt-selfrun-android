@@ -147,14 +147,20 @@ final class WebUiCalibrationStore {
     }
 
     String purposeStatus(String purpose) {
+        JSONObject targets = profile().optJSONObject("targets");
+        if (targets == null) return "미설정";
         if (PURPOSE_PROJECT_NEW_CHAT.equals(purpose)) {
-            return hasTarget(TARGET_PROJECT_COMPOSER) && hasTarget(TARGET_PROJECT_SEND) ? "확보됨" : "미설정";
+            return AutomationViewportPolicy.purposeStatus(
+                    targets.optJSONObject(TARGET_PROJECT_COMPOSER), targets.optJSONObject(TARGET_PROJECT_SEND));
         }
         if (PURPOSE_GENERAL_NEW_CHAT.equals(purpose)) {
-            return hasTarget(TARGET_GENERAL_COMPOSER) && hasTarget(TARGET_GENERAL_SEND) ? "확보됨" : "미설정";
+            return AutomationViewportPolicy.purposeStatus(
+                    targets.optJSONObject(TARGET_GENERAL_COMPOSER), targets.optJSONObject(TARGET_GENERAL_SEND));
         }
-        return hasTarget(purpose) ? "확보됨" : "미설정";
+        return AutomationViewportPolicy.purposeStatus(targets.optJSONObject(purpose));
     }
+
+    String profileStatus() { return AutomationViewportPolicy.profileStatus(profile()); }
 
     static String workModelPurpose(boolean general, boolean bootstrap) {
         if (general) return bootstrap ? PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL : PURPOSE_GENERAL_CONTINUATION_WORK_MODEL;
