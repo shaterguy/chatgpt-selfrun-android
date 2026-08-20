@@ -8,6 +8,7 @@ SERVICE=$SRC/SelfRunService.java
 STORE=$SRC/SelfRunStore.java
 PROTOCOL=$SRC/SelfRunProtocol.java
 PARSER=$SRC/DriveCommitParser.java
+CONTINUE_DOM=$SRC/SelfRunContinuationDom.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
 HISTORY=$SRC/SelfRunHistoryActivity.java
 RESTART=$SRC/SelfRunRestartActivity.java
@@ -22,6 +23,8 @@ TEST_SIGN=tools/sign_test.sh
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
 grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
+grep -Fq 'selfRunDriveVersionCode = 1000058' "$BUILD"
+grep -Fq "selfRunDriveVersionName = '1.4.1-dev4'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 grep -Fq '.SelfRunRestartActivity" android:exported="false"' "$MANIFEST"
 grep -Fq 'TEST_APPLICATION_ID = "com.shaterguy.chatgptselfrun.drive.test"' "$RESTART_POLICY"
@@ -70,8 +73,25 @@ grep -Fq 'driveSignalCursor' "$STORE"
 grep -Fq 'PHASE_RESUME_BASELINE' "$STORE"
 grep -Fq 'beginManualResumeOverride' "$SERVICE"
 grep -Fq 'baselineManualResume' "$STORE"
-grep -Fq 'CONTINUATION_GUARD_MS = 60_000L' "$SERVICE"
+grep -Fq 'CONTINUATION_GUARD_MS = 0L' "$SERVICE"
+grep -Fq 'CONTINUATION_VERIFY_INTERVAL_MS = 250L' "$SERVICE"
+grep -Fq 'CONTINUATION_FAILURE_MS = 2_500L' "$SERVICE"
 grep -Fq 'SUBMISSION_RETRY_MS = 5 * 60_000L' "$SERVICE"
+! grep -Fq 'guardRunnable' "$SERVICE"
+! grep -Fq 'scheduleGuard()' "$SERVICE"
+! grep -Fq 'guardElapsed()' "$SERVICE"
+grep -Fq 'SelfRunContinuationDom.buttonState' "$SERVICE"
+grep -Fq 'SelfRunContinuationDom.verifyDriveTurnSubmission' "$SERVICE"
+grep -Fq 'command_received_ack=unused' "$SERVICE"
+grep -Fq 'store.phaseStartedAt()' "$SERVICE"
+grep -Fq 'SEND_ENABLED' "$CONTINUE_DOM"
+grep -Fq 'STOP' "$CONTINUE_DOM"
+grep -Fq 'SEND_DISABLED' "$CONTINUE_DOM"
+grep -Fq 'UNKNOWN' "$CONTINUE_DOM"
+grep -Fq 'CONTINUE_CLICKED' "$CONTINUE_DOM"
+grep -Fq 'SUBMISSION_CONFIRMED' "$CONTINUE_DOM"
+grep -Fq 'SUBMISSION_FAILED' "$CONTINUE_DOM"
+grep -Fq 'data-message-author-role' "$CONTINUE_DOM"
 grep -Fq 'scheduleDrivePoll(0L)' "$SERVICE"
 ! grep -Fq 'DriveCommitParser' "$SERVICE"
 ! grep -Fq 'DriveInitialDocument' "$SERVICE"
