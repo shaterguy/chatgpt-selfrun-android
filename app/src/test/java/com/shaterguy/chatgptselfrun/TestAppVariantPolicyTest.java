@@ -32,10 +32,10 @@ public final class TestAppVariantPolicyTest {
         assertTrue(signer.contains("2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e"));
     }
 
-    @Test public void developmentVersionAdvancesPastFormal130() throws Exception {
+    @Test public void developmentVersionAdvancesPastFormal140() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.0'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000054"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.1-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000055"));
     }
 
     @Test public void devPushBuildsOnlyTheTestApplicationChannel() throws Exception {
