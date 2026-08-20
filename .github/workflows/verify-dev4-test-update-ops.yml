@@ -1,0 +1,151 @@
+name: Verify dev4 TEST update ops
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/ops-v1.4.1-dev4-build'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-test-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact dev4 candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 0fae67a6f436d0965aa9c1196e5fd7d74c399f66
+          path: candidate
+          persist-credentials: false
+      - name: Check out exact dev3 predecessor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: afac697ef36b042abe5a5f1facdfd11c6c8d72b3
+          path: predecessor
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build exact TEST APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain --stacktrace --project-dir predecessor :app:assembleQaApp
+          gradle --no-daemon --console=plain --stacktrace --project-dir candidate :app:assembleQaApp
+      - name: Install hash-locked TEST signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == 'Linux' ]]
+          [[ "$(uname -m)" == 'x86_64' ]]
+          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          [[ "$PYTHON_VERSION" == '3.12' ]]
+          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r candidate/tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Sign and verify TEST identities
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          mkdir -p out
+          PREV_UNSIGNED="$(find predecessor/app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          CUR_UNSIGNED="$(find candidate/app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
+          test -s "$PREV_UNSIGNED"
+          test -s "$CUR_UNSIGNED"
+          "$BT/zipalign" -p -f 4 "$PREV_UNSIGNED" out/selfrun-drive-test-v1.4.1-dev3-aligned-unsigned.apk
+          "$BT/zipalign" -p -f 4 "$CUR_UNSIGNED" out/selfrun-drive-test-v1.4.1-dev4-aligned-unsigned.apk
+          PASS_FILE="$RUNNER_TEMP/selfrun-test-signing-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          APKSIGNER="$BT/apksigner" bash candidate/tools/sign_test.sh out/selfrun-drive-test-v1.4.1-dev3-aligned-unsigned.apk "$PASS_FILE" out/selfrun-drive-test-v1.4.1-dev3.apk > out/dev3-sign.txt
+          APKSIGNER="$BT/apksigner" bash candidate/tools/sign_test.sh out/selfrun-drive-test-v1.4.1-dev4-aligned-unsigned.apk "$PASS_FILE" out/selfrun-drive-test-v1.4.1-dev4.apk > out/dev4-sign.txt
+          "$BT/apksigner" verify --verbose --print-certs out/selfrun-drive-test-v1.4.1-dev3.apk > out/dev3-cert.txt
+          "$BT/apksigner" verify --verbose --print-certs out/selfrun-drive-test-v1.4.1-dev4.apk > out/dev4-cert.txt
+          PREV_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' out/dev3-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          CUR_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' out/dev4-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$PREV_CERT" == '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' ]]
+          [[ "$CUR_CERT" == "$PREV_CERT" ]]
+          PREV_BADGING="$($BT/aapt dump badging out/selfrun-drive-test-v1.4.1-dev3.apk)"
+          CUR_BADGING="$($BT/aapt dump badging out/selfrun-drive-test-v1.4.1-dev4.apk)"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$PREV_BADGING"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$CUR_BADGING"
+          grep -Fq "versionCode='1000057'" <<<"$PREV_BADGING"
+          grep -Fq "versionName='1.4.1-dev3'" <<<"$PREV_BADGING"
+          grep -Fq "versionCode='1000058'" <<<"$CUR_BADGING"
+          grep -Fq "versionName='1.4.1-dev4'" <<<"$CUR_BADGING"
+          sha256sum out/selfrun-drive-test-v1.4.1-dev4.apk > out/SHA256SUMS.txt
+          cat > out/verify-test-update.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PKG='com.shaterguy.chatgptselfrun.drive.test'
+          PREV='out/selfrun-drive-test-v1.4.1-dev3.apk'
+          CUR='out/selfrun-drive-test-v1.4.1-dev4.apk'
+          fail(){ echo "TEST_UPDATE_FAIL: $*" >&2; exit 1; }
+          version(){ adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1; }
+          code(){ adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -1; }
+          uid(){ adb shell pm list packages -U "$PKG" | tr -d '\r' | sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' | head -1; }
+          data_dir(){ adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*dataDir=//p' | head -1; }
+          adb wait-for-device
+          adb uninstall "$PKG" >/dev/null 2>&1 || true
+          adb install --no-incremental "$PREV" >/dev/null || fail 'dev3 install failed'
+          [[ "$(version)" == '1.4.1-dev3' ]] || fail "unexpected dev3 version $(version)"
+          [[ "$(code)" == '1000057' ]] || fail "unexpected dev3 code $(code)"
+          BEFORE_UID="$(uid)"; BEFORE_DIR="$(data_dir)"
+          [[ -n "$BEFORE_UID" && -n "$BEFORE_DIR" ]] || fail 'dev3 identity unavailable'
+          adb install -r --no-incremental "$CUR" >/dev/null || fail 'adb install -r dev4 failed'
+          [[ "$(version)" == '1.4.1-dev4' ]] || fail "unexpected dev4 version $(version)"
+          [[ "$(code)" == '1000058' ]] || fail "unexpected dev4 code $(code)"
+          AFTER_UID="$(uid)"; AFTER_DIR="$(data_dir)"
+          [[ "$AFTER_UID" == "$BEFORE_UID" ]] || fail "UID changed $BEFORE_UID -> $AFTER_UID"
+          [[ "$AFTER_DIR" == "$BEFORE_DIR" ]] || fail "dataDir changed $BEFORE_DIR -> $AFTER_DIR"
+          echo 'TEST_UPDATE_PASS'
+          echo "package=$PKG"
+          echo 'from=1.4.1-dev3/1000057'
+          echo 'to=1.4.1-dev4/1000058'
+          echo "uid=$AFTER_UID"
+          echo "data_dir=$AFTER_DIR"
+          SH
+          chmod +x out/verify-test-update.sh
+      - name: Enable hardware acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Verify dev3 to dev4 TEST in-place update
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: bash -o pipefail -c 'out/verify-test-update.sh 2>&1 | tee out/update-evidence.txt; grep -Fxq TEST_UPDATE_PASS out/update-evidence.txt'
+      - name: Upload verified dev4 TEST APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-v1.4.1-dev4-test-update-verified
+          path: |
+            out/selfrun-drive-test-v1.4.1-dev4.apk
+            out/SHA256SUMS.txt
+            out/dev4-cert.txt
+            out/dev4-sign.txt
+            out/update-evidence.txt
+          if-no-files-found: error
+          retention-days: 30
