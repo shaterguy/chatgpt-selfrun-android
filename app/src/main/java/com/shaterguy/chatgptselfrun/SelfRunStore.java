@@ -199,7 +199,12 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     long phaseStartedAt() { return prefs.getLong("phaseStartedAt", createdAt()); }
     String mode() { return getOr("mode", MODE_WORK); }
     String projectUrl() { return get("projectUrl"); }
-    String defaultProjectUrl() { return get("defaultProjectUrl"); }
+    String defaultProjectUrl() { return canonicalStoredProjectUrl(get("defaultProjectUrl")); }
+    static String canonicalStoredProjectUrl(String value) {
+        if (value == null || value.isEmpty()) return "";
+        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(value);
+        return ref == null ? value : ref.canonicalUrl;
+    }
     String requirement() { return get("requirement"); }
     String conversationUrl() { return get("conversationUrl"); }
     String phase() { return getOr("phase", PHASE_IDLE); }
