@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class SelfRunFocusRetentionTest {
@@ -16,12 +17,23 @@ public final class SelfRunFocusRetentionTest {
                 "private static final class FocusPreservingWebView",
                 "WebView webView()");
         assertTrue(host.contains("new FocusPreservingWebView(presentation.getContext())"));
-        assertTrue(host.contains("new FocusPreservingWebView(context)"));
+        assertFalse(host.contains("new FocusPreservingWebView(context)"));
+        assertTrue(host.contains("fixed mobile virtual display unavailable"));
         assertTrue(focusWebView.contains("@Override public void onResume()"));
         assertTrue(focusWebView.contains("super.onResume();"));
         assertTrue(focusWebView.contains("requestFocus();"));
         assertTrue(focusWebView.contains("@Override public void onWindowFocusChanged(boolean hasWindowFocus)"));
         assertTrue(focusWebView.contains("if (hasWindowFocus) requestFocus();"));
+    }
+
+    @Test public void normalContinuationReusesExistingWebViewWithoutReloadOrRecreation() throws Exception {
+        String service = src("SelfRunService.java");
+        String ensure = between(service, "private void ensureWebView()", "private void launchWebView");
+        assertTrue(ensure.contains("if(webView!=null)"));
+        assertTrue(ensure.contains("scheduleWeb(250L);return;"));
+        assertFalse(ensure.contains("loadUrl("));
+        assertFalse(ensure.contains("cleanupWebView()"));
+        assertFalse(ensure.contains("HeadlessWebViewHost.create"));
     }
 
     @Test public void composerRefocusRunsBeforeEquivalentContentFastPaths() {
