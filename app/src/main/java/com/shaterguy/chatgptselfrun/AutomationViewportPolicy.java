@@ -12,6 +12,10 @@ final class AutomationViewportPolicy {
 
     private AutomationViewportPolicy() {}
 
+    static int initialScaleForDensityDpi(int densityDpi) {
+        return densityDpi == DENSITY_DPI ? 100 : 0;
+    }
+
     static boolean isMobileCalibrationViewport(int cssWidth, int cssHeight) {
         return cssWidth >= 320 && cssWidth <= 600 && cssHeight > cssWidth;
     }
