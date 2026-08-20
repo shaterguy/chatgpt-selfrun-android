@@ -67,6 +67,12 @@ public final class WorkPreferenceDomWebViewTest {
             JSONObject state = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
             assertEquals(SelfRunContinuationDom.STOP, state.getString("status"));
 
+            JSONObject prepare = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-before-input-probe"));
+            assertEquals(SelfRunContinuationDom.STOP, prepare.getString("status"));
+            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
+            assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
+
             evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:stop-probe':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
             JSONObject click = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe"));
