@@ -211,7 +211,10 @@ jobs:
           disable-animations: true
           script: >-
             bash -o pipefail -c
-            'TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
+            'gradle --no-daemon --console=plain :app:connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest;
+            adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
+            TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
             FORMAL_EXPECTED_VERSION="1.4.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"
             timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh
             formal-baseline/app/build/outputs/apk/debug/app-debug.apk
@@ -226,6 +229,7 @@ jobs:
           path: |
             drive-test-coinstall-preflight.txt
             drive-test-coinstall-evidence.txt
+            drive-test-webview-evidence.txt
             app/build/outputs/apk/qaApp/coinstall-test-prev-cert.txt
             app/build/outputs/apk/qaApp/coinstall-test-cert.txt
           if-no-files-found: warn
