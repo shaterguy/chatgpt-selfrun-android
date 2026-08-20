@@ -1,0 +1,36 @@
+name: Apply SelfRun Drive dev4 continuation patch
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.4.1-dev4
+    paths:
+      - .github/workflows/apply-dev4-continuation.yml
+      - tools/dev4-continuation.patch
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: selfrun-drive/v1.4.1-dev4
+          fetch-depth: 0
+      - name: Verify and apply patch
+        run: |
+          set -euo pipefail
+          git apply --check tools/dev4-continuation.patch
+          git apply tools/dev4-continuation.patch
+          git rm tools/dev4-continuation.patch .github/workflows/apply-dev4-continuation.yml
+      - name: Commit patched source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          git commit -m 'fix(drive): verify continuation submission before retry'
+          git push origin HEAD:selfrun-drive/v1.4.1-dev4
