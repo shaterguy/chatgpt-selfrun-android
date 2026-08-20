@@ -30,7 +30,7 @@ final class WebUiCalibrationBackupCodec {
             "innerWidth", "innerHeight", "devicePixelRatio", "screenWidth", "screenHeight");
     private static final Set<String> DESCRIPTOR_FIELDS = setOf(
             "tag", "id", "role", "testid", "aria", "name", "type", "text", "href",
-            "parentRole", "parentTestid", "parentAria");
+            "parentRole", "parentTestid", "parentAria", "layoutFamily");
     private static final Set<String> TARGET_KEYS = setOf(
             WebUiCalibrationStore.PURPOSE_MODE_CHAT,
             WebUiCalibrationStore.PURPOSE_MODE_WORK,
