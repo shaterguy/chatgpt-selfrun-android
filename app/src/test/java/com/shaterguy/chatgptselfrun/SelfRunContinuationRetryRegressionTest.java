@@ -11,23 +11,23 @@ public final class SelfRunContinuationRetryRegressionTest {
     private static final String URL = "https://chatgpt.com/g/g-p-test/c/conversation123";
 
     @Test public void timestampOnlyChangeKeepsSameContinuationMeaning() {
-        String first = "[2026.08.20 | 00:42:10] [SELF_RUN_CONTINUE SR-RETRY]\nCommand Received Record Required";
-        String retry = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]\nCommand Received Record Required";
+        String first = "[2026.08.20 | 00:42:10] [SELF_RUN_CONTINUE SR-RETRY]";
+        String retry = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]";
 
         assertEquals(SelfRunDom.continuationComparablePrompt(first),
                 SelfRunDom.continuationComparablePrompt(retry));
     }
 
     @Test public void nextInputChangeIsNotCollapsedIntoTimestampEquivalence() {
-        String prior = "[2026.08.20 | 00:42:10] [SELF_RUN_CONTINUE SR-RETRY]\nCommand Received Record Required";
-        String changed = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]\nCommand Received Record Required\n새 요구사항";
+        String prior = "[2026.08.20 | 00:42:10] [SELF_RUN_CONTINUE SR-RETRY]";
+        String changed = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]\n새 요구사항";
 
         assertNotEquals(SelfRunDom.continuationComparablePrompt(prior),
                 SelfRunDom.continuationComparablePrompt(changed));
     }
 
     @Test public void continuationPreparationUsesBoundedIdempotentComposerReplacement() {
-        String prompt = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]\nCommand Received Record Required";
+        String prompt = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]";
         String script = SelfRunDom.prepareDriveTurn(URL, prompt, "SR-RETRY:2");
 
         assertTrue(script.contains("const acceptable=()=>same()||comparable(raw())===comparableExpected"));
@@ -41,7 +41,7 @@ public final class SelfRunContinuationRetryRegressionTest {
     }
 
     @Test public void clickReadbackAcceptsTimestampEquivalentContinuation() {
-        String prompt = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]\nCommand Received Record Required";
+        String prompt = "[2026.08.20 | 00:47:11] [SELF_RUN_CONTINUE SR-RETRY]";
         String script = SelfRunDom.clickPreparedDriveTurn(URL, prompt, "SR-RETRY:2");
 
         assertTrue(script.contains("const acceptable=()=>same()||comparable(raw())===comparableExpected"));

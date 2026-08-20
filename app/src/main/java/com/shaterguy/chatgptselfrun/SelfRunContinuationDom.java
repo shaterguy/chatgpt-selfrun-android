@@ -37,7 +37,7 @@ final class SelfRunContinuationDom {
                 + composerOps() + controls(sendKey) + markerOps(marker)
                 + "let m=readMarker();if(m.state==='clicked')return result('VERIFY_REQUIRED','prior bootstrap click requires submission verification');"
                 + "if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','bootstrap submission was already confirmed');"
-                + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "')return result(c0.state,'bootstrap waits for enabled SEND before composer mutation');"
+                + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "'&&c0.state!=='" + SEND_DISABLED + "')return result(c0.state,'bootstrap waits for idle SEND control before composer mutation');"
                 + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','bootstrap composer cleared');}"
                 + "if(m.state==='clearing'){if(!empty()){clearComposer();return result('COMPOSER_CLEARING','waiting for empty bootstrap composer readback');}writeMarker({state:'inputting',at:Date.now()});inputComposer();return result('COMPOSER_INPUTTING','fresh bootstrap inserted');}"
                 + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','bootstrap composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact bootstrap readback');}const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'waiting for enabled SEND after bootstrap readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact bootstrap prepared');}"
@@ -90,7 +90,7 @@ final class SelfRunContinuationDom {
                 + composerOps() + controls(sendKey) + markerOps(marker)
                 + "let m=readMarker();if(m.state==='clicked')return result('VERIFY_REQUIRED','prior click requires submission verification');"
                 + "if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','submission was already confirmed');"
-                + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "')return result(c0.state,'continuation waits for enabled SEND before composer mutation');"
+                + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "'&&c0.state!=='" + SEND_DISABLED + "')return result(c0.state,'continuation waits for idle SEND control before composer mutation');"
                 + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','existing composer content cleared');}"
                 + "if(m.state==='clearing'){if(!empty()){clearComposer();return result('COMPOSER_CLEARING','waiting for empty composer readback');}writeMarker({state:'inputting',at:Date.now()});inputComposer();return result('COMPOSER_INPUTTING','fresh continuation inserted');}"
                 + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact continuation readback');}const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'waiting for enabled SEND after exact readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact continuation prepared');}"

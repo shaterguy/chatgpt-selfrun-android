@@ -12,7 +12,7 @@ public class SelfRunContinuationSubmissionTest {
         assertFalse(service.contains("checkDriveTurnSubmitted"));
         assertFalse(service.contains("checkDriveInitialSubmitted"));
         assertFalse(service.contains("SUBMISSION_CONFIRMATION_GRACE_MS"));
-        assertTrue(continuationSubmitted.contains("command_received_ack=unused"));
+        assertFalse(continuationSubmitted.contains("command_received_ack"));
         assertFalse(continuationSubmitted.contains("markCommandSubmitted"));
         assertFalse(continuationSubmitted.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS"));
         assertFalse(service.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS"));

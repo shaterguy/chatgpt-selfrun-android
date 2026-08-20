@@ -16,7 +16,7 @@ public class SelfRunDriveCommandAckPollingTest {
         String submitted = between(service, "private void bootstrapSubmitted", "private String commandPrompt");
 
         assertTrue(submitted.contains("store.bootstrapSubmissionConfirmed()"));
-        assertTrue(submitted.contains("command_received_ack=unused"));
+        assertFalse(submitted.contains("command_received_ack"));
         assertTrue(store.contains("void bootstrapSubmissionConfirmed"));
         assertTrue(store.contains("첫 요청 제출 확인 · Drive 턴 결과 신호 대기"));
         assertFalse(service.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS"));
@@ -40,6 +40,18 @@ public class SelfRunDriveCommandAckPollingTest {
         assertFalse(poll.contains("submissionRetryDue"));
         assertFalse(poll.contains("prepareCommandRetry"));
         assertTrue(service.contains("private static final long NORMAL_POLL_MS = 60_000L"));
+    }
+
+    @Test public void retiredAckDisplayMigrationClearsOnlyPresentationState() throws Exception {
+        String store = src("SelfRunStore.java");
+        String migration = between(store, "private void migrateRetiredSignalDisplay", "private static void putLatest");
+        assertTrue(migration.contains("lastDriveSignalType()"));
+        assertTrue(migration.contains("lastDriveSignalRaw"));
+        assertTrue(migration.contains("lastDriveSignalTimestamp"));
+        assertTrue(migration.contains("lastDriveSignalType"));
+        assertTrue(migration.contains("Drive 턴 결과 신호 대기"));
+        assertFalse(migration.contains("driveSignalCursor"));
+        assertFalse(migration.contains("putString(\"phase\""));
     }
 
     private static String src(String file) throws Exception {

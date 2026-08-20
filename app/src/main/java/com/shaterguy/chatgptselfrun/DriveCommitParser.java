@@ -4,7 +4,7 @@ import java.util.*;
 import java.util.regex.*;
 
 final class DriveSignalParser {
-    enum Type { COMMAND_RECEIVED, TURN_COMPLETED, USER_ACTION_REQUIRED, PAUSED, DONE }
+    enum Type { TURN_COMPLETED, USER_ACTION_REQUIRED, PAUSED, DONE }
 
     static final class Event {
         final Type type;
@@ -53,8 +53,14 @@ final class DriveSignalParser {
 
     private static final Pattern LINE = Pattern.compile(
   "^\\[(\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2})] "
-          + "\\[(SELF_RUN_COMMAND_RECEIVED|SELF_RUN_TURN_COMPLETED|SELF_RUN_USER_ACTION_REQUIRED|SELF_RUN_PAUSED|SELF_RUN_DONE) "
+          + "\\[(SELF_RUN_TURN_COMPLETED|SELF_RUN_USER_ACTION_REQUIRED|SELF_RUN_PAUSED|SELF_RUN_DONE) "
           + "([A-Za-z0-9._-]{1,128})(?:\\s+([^\\]]*))?]$");
+    // Older documents may contain a retired acknowledgement line. It is not an
+    // event, but still occupies its historical cursor position so an in-place
+    // update cannot replay an already-consumed completion.
+    private static final Pattern RETIRED_CURSOR_LINE = Pattern.compile(
+  "^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] "
+          + "\\[SELF_RUN_COMMAND_RECEIVED ([A-Za-z0-9._-]{1,128})]$");
     private static final Pattern WORK_PROFILE = Pattern.compile(
   "^MODEL=([A-Za-z0-9._-]+)\\s+REASONING=([A-Za-z0-9._-]+)$", Pattern.CASE_INSENSITIVE);
     private static final String NEXT = "NEXT_INPUT_B64URL";
@@ -68,25 +74,35 @@ final class DriveSignalParser {
     static Scan scan(String text, String jobId, int consumed, String mode) {
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
         List<Event> all = new ArrayList<>();
+        int absoluteCursor = 0;
         for (String source : (text == null ? "" : text).split("\\r?\\n")) {
-  Matcher matcher = LINE.matcher(source.trim());
+  String trimmed = source.trim();
+  Matcher retired = RETIRED_CURSOR_LINE.matcher(trimmed);
+  if (retired.matches() && jobId.equals(retired.group(1))) {
+      absoluteCursor++;
+      continue;
+  }
+  Matcher matcher = LINE.matcher(trimmed);
   if (!matcher.matches() || !jobId.equals(matcher.group(3))) continue;
   Type type = type(matcher.group(2));
   String tail = matcher.group(4) == null ? "" : matcher.group(4).trim();
   if (type != Type.TURN_COMPLETED) {
       if (!tail.isEmpty()) continue; // Preserve 1.2.1 non-completion behavior.
-      all.add(new Event(type, matcher.group(1), matcher.group(0), all.size() + 1));
+      absoluteCursor++;
+      all.add(new Event(type, matcher.group(1), matcher.group(0), absoluteCursor));
       continue;
   }
-  Event completion = completion(matcher.group(1), matcher.group(0), all.size() + 1, tail, work);
-  if (completion != null) all.add(completion);
+  Event completion = completion(matcher.group(1), matcher.group(0), absoluteCursor + 1, tail, work);
+  if (completion != null) {
+      absoluteCursor++;
+      all.add(completion);
+  }
         }
         int requested = Math.max(0, consumed);
-        boolean rebased = requested > all.size();
-        int base = Math.min(requested, all.size());
-        List<Event> unseen = base >= all.size() ? Collections.emptyList()
-      : new ArrayList<>(all.subList(base, all.size()));
-        return new Scan(Collections.unmodifiableList(unseen), all.size(),
+        boolean rebased = requested > absoluteCursor;
+        List<Event> unseen = new ArrayList<>();
+        if (!rebased) for (Event event : all) if (event.cursor > requested) unseen.add(event);
+        return new Scan(Collections.unmodifiableList(unseen), absoluteCursor,
       all.isEmpty() ? null : all.get(all.size() - 1), rebased);
     }
 
@@ -192,7 +208,6 @@ final class DriveSignalParser {
 
     private static Type type(String value) {
         return switch (value) {
-  case "SELF_RUN_COMMAND_RECEIVED" -> Type.COMMAND_RECEIVED;
   case "SELF_RUN_TURN_COMPLETED" -> Type.TURN_COMPLETED;
   case "SELF_RUN_USER_ACTION_REQUIRED" -> Type.USER_ACTION_REQUIRED;
   case "SELF_RUN_PAUSED" -> Type.PAUSED;

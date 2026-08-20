@@ -50,6 +50,7 @@ public class SelfRunDriveAssistantIsolationTest {
         String handler = between(service, "private void handleWebResult", "private String driveBootstrap");
         assertTrue(handler.contains("PHASE_WAIT_INTERNAL_SEND.equals(phase)"));
         assertTrue(handler.contains("SelfRunContinuationDom.SEND_ENABLED.equals(status)"));
+        assertTrue(handler.contains("SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
         assertTrue(handler.contains("MODE_WORK"));
         assertTrue(handler.contains("PHASE_APPLY_PREFS"));
         assertTrue(handler.contains("PHASE_SEND_CONTINUE"));

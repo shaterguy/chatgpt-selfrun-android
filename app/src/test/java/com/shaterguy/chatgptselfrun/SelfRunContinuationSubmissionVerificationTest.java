@@ -12,7 +12,7 @@ import static org.junit.Assert.assertTrue;
 
 public final class SelfRunContinuationSubmissionVerificationTest {
     private static final String URL = "https://chatgpt.com/g/g-p-test/c/conversation123";
-    private static final String PROMPT = "[2026.08.20 | 19:14:40] [SELF_RUN_CONTINUE SR-TEST]\nCommand Received Record Required";
+    private static final String PROMPT = "[2026.08.20 | 19:14:40] [SELF_RUN_CONTINUE SR-TEST]";
 
     @Test public void buttonClassifierSeparatesStopSendDisabledAndUnknown() {
         String js = SelfRunContinuationDom.buttonState(URL);
@@ -32,6 +32,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
     @Test public void continuationAlwaysClearsThenReinputsAndRequiresExactReadback() {
         String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "marker-1");
         assertTrue(js.contains("c0.state!=='SEND_ENABLED'"));
+        assertTrue(js.contains("c0.state!=='SEND_DISABLED'"));
         assertTrue(js.indexOf("c0.state!=='SEND_ENABLED'") < js.indexOf("clearComposer()"));
         assertTrue(js.contains("state:'clearing'"));
         assertTrue(js.contains("clearComposer()"));
@@ -73,6 +74,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         String click = SelfRunContinuationDom.clickPreparedBootstrap(project, PROMPT, "bootstrap-marker");
         String verify = SelfRunContinuationDom.verifyBootstrapSubmission(project, PROMPT, "bootstrap-marker", 2500L);
         assertTrue(prepare.contains("c0.state!=='SEND_ENABLED'"));
+        assertTrue(prepare.contains("c0.state!=='SEND_DISABLED'"));
         assertTrue(prepare.contains("state:'clearing'"));
         assertTrue(prepare.contains("state:'inputting'"));
         assertTrue(prepare.contains("exact bootstrap prepared"));
@@ -87,7 +89,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
     @Test public void serviceDoesNotUseCommandReceivedAsContinuationAck() throws Exception {
         String service = source("SelfRunService.java");
         String continuationSubmitted = section(service, "private void continuationSubmitted", "private String commandPrompt");
-        assertTrue(continuationSubmitted.contains("command_received_ack=unused"));
+        assertFalse(continuationSubmitted.contains("command_received_ack"));
         assertTrue(continuationSubmitted.contains("PHASE_WAIT_DRIVE_COMMIT"));
         assertFalse(continuationSubmitted.contains("markCommandSubmitted"));
         assertFalse(continuationSubmitted.contains("SUBMISSION_RETRY_MS"));
@@ -104,7 +106,19 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(handler.contains("PHASE_SEND_CONTINUE"));
         String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "work-marker");
         assertTrue(js.contains("c0.state!=='SEND_ENABLED'"));
+        assertTrue(js.contains("c0.state!=='SEND_DISABLED'"));
         assertTrue(js.indexOf("c0.state!=='SEND_ENABLED'") < js.indexOf("clearComposer()"));
+    }
+
+    @Test public void idleDisabledSendAdvancesOutOfInternalWaitWithoutClickingStop() throws Exception {
+        String service = source("SelfRunService.java");
+        String handler = section(service, "private void handleWebResult", "private String driveBootstrap");
+        assertTrue(handler.contains("SelfRunContinuationDom.SEND_ENABLED.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
+        assertTrue(handler.contains("send_control_ready"));
+        assertFalse(handler.contains("SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
+        String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "idle-marker");
+        assertTrue(js.contains("c0.state!=='SEND_ENABLED'&&c0.state!=='SEND_DISABLED'"));
+        assertTrue(js.contains("const c=controlState();if(c.state!=='SEND_ENABLED')"));
     }
 
     @Test public void normalContinuationDoesNotRestoreCanonicalOnDiagnosticMismatch() throws Exception {

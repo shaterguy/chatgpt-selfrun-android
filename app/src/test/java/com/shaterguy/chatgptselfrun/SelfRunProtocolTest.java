@@ -13,7 +13,6 @@ public class SelfRunProtocolTest {
     private static final String RUN = "SR-20260813-220315-A1B2C3";
     private static final String DOC = "document_12345678";
     private static final String SKILL_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
-    private static final String COMMAND_RECEIVED_REQUIREMENT_GATE = "DRIVE_TURN_DOCUMENT_ID 문서에 Command Received 신호 입력 후 아래 요구사항을 수행할 것.";
     private static final String REMOVED_BOOTSTRAP_SENTENCE = "SelfRun의 역할 전환, HANDOFF, continuation, SelfRun 제어신호, Drive 실행턴 signal, pause/resume의 AI 측 의미, SelfRun 완료 판정은 위 canonical SelfRun 운영문서를 따른다.";
 
     @Test public void bootstrapContainsGlobalSkillMetadataExactlyOnce() {
@@ -25,8 +24,8 @@ public class SelfRunProtocolTest {
         assertFalse(bootstrap.contains("앱은 현재 대화가 Project인지 직접 판정하지 않는다."));
         assertFalse(bootstrap.contains("위 메타데이터 및 설명 뒤에 사용자가 앱에 입력한 원본 요구사항을 내용 손실이나 요약 없이 그대로 붙인다."));
         assertFalse(bootstrap.contains(REMOVED_BOOTSTRAP_SENTENCE));
-        assertEquals(1, occurrences(bootstrap, COMMAND_RECEIVED_REQUIREMENT_GATE));
-        assertTrue(bootstrap.contains("\n\n" + COMMAND_RECEIVED_REQUIREMENT_GATE + "\n\n[요구사항]\nwork"));
+        assertFalse(bootstrap.toLowerCase().contains("command received"));
+        assertTrue(bootstrap.contains("\n\n[요구사항]\nwork"));
     }
 
     @Test public void originalRequirementIsPreservedWithoutTrimOrSummary() {
@@ -34,13 +33,13 @@ public class SelfRunProtocolTest {
         String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, requirement, DOC);
         assertTrue(bootstrap.endsWith("[요구사항]\n" + requirement));
         assertTrue(bootstrap.endsWith(requirement));
-        assertTrue(bootstrap.indexOf(COMMAND_RECEIVED_REQUIREMENT_GATE) < bootstrap.indexOf("[요구사항]"));
+        assertFalse(bootstrap.toLowerCase().contains("command received"));
     }
 
-    @Test public void emptyRequirementStillKeepsCommandReceivedGateImmediatelyBeforeRequirements() {
+    @Test public void emptyRequirementEndsAtRequirementsHeader() {
         String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, null, DOC);
-        assertEquals(1, occurrences(bootstrap, COMMAND_RECEIVED_REQUIREMENT_GATE));
-        assertTrue(bootstrap.endsWith(COMMAND_RECEIVED_REQUIREMENT_GATE + "\n\n[요구사항]\n"));
+        assertFalse(bootstrap.toLowerCase().contains("command received"));
+        assertTrue(bootstrap.endsWith("[요구사항]\n"));
     }
 
     @Test public void chatAndWorkUseSameGlobalSkillIdWithoutProjectSpecificMetadata() {
@@ -51,26 +50,27 @@ public class SelfRunProtocolTest {
         for (String bootstrap : new String[]{chat, work}) {
             assertFalse(bootstrap.contains("Vibe Coding")); assertFalse(bootstrap.contains("PROJECT_ID=")); assertFalse(bootstrap.contains("PROJECT_NAME=")); assertFalse(bootstrap.contains("PROJECT_SKILL"));
             assertFalse(bootstrap.contains(REMOVED_BOOTSTRAP_SENTENCE));
-            assertEquals(1, occurrences(bootstrap, COMMAND_RECEIVED_REQUIREMENT_GATE));
-            assertTrue(bootstrap.contains(COMMAND_RECEIVED_REQUIREMENT_GATE + "\n\n[요구사항]\n"));
+            assertFalse(bootstrap.toLowerCase().contains("command received"));
+            assertTrue(bootstrap.contains("\n\n[요구사항]\n"));
         }
     }
 
-    @Test public void driveContinueAddsCommandReceivedReminderWithoutChangingBareControlSignal() {
+    @Test public void driveContinueIsOnlyTimestampedControlSignal() {
         assertEquals("1970.01.01 | 09:00:00", SelfRunProtocol.kstTimestamp(new Date(0)));
         String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC);
         assertTrue(bootstrap.split("\\n", 2)[0].matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_BOOTSTRAP 0\\.2\\.0 .*"));
         String driveContinue = SelfRunProtocol.driveContinuation(RUN);
-        assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]\\nCommand Received Record Required$"));
+        assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]$"));
         assertEquals("[SELF_RUN_CONTINUE " + RUN + "]", SelfRunProtocol.continuation(RUN));
         assertFalse(driveContinue.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
-        assertFalse(driveContinue.contains("Recevied"));
+        assertFalse(driveContinue.toLowerCase().contains("command received"));
     }
 
     @Test public void driveContinueAppendsNextInputExactlyOnce() {
         String input = "선택=승인\n둘째 줄  ";
         String driveContinue = SelfRunProtocol.driveContinuation(RUN, input);
-        assertTrue(driveContinue.endsWith("Command Received Record Required\n" + input));
+        assertTrue(driveContinue.endsWith("]\n" + input));
+        assertFalse(driveContinue.toLowerCase().contains("command received"));
         assertEquals(1, occurrences(driveContinue, input));
     }
 

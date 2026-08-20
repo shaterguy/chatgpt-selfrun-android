@@ -6,13 +6,32 @@ import static org.junit.Assert.*;
 public class DriveSignalParserTest {
     private static final String JOB = "SR-20260813-220315-A1B2C3";
 
-    @Test public void parsesAckAndCompletionTogether() {
+    @Test public void retiredAckOnlyPreservesCursorAndNeverBecomesAnEvent() {
         String text = "[2026.08.13 | 22:03:19] [SELF_RUN_COMMAND_RECEIVED " + JOB + "]\n"
                 + "[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB + "]\n";
         DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 0, SelfRunStore.MODE_CHAT);
         assertEquals(2, scan.totalCount);
-        assertEquals(DriveSignalParser.Type.COMMAND_RECEIVED, scan.unseen.get(0).type);
-        assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.unseen.get(1).type);
+        assertEquals(1, scan.unseen.size());
+        assertEquals(2, scan.unseen.get(0).cursor);
+        assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.unseen.get(0).type);
+        assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.latest.type);
+    }
+
+    @Test public void installedCursorAfterRetiredAckStillReceivesNextCompletionOnce() {
+        String text = "[2026.08.13 | 22:03:19] [SELF_RUN_COMMAND_RECEIVED " + JOB + "]\n"
+                + "[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB + "]\n";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 1, SelfRunStore.MODE_CHAT);
+        assertEquals(1, scan.unseen.size());
+        assertEquals(2, scan.unseen.get(0).cursor);
+        assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.unseen.get(0).type);
+    }
+
+    @Test public void retiredAckAloneHasNoLatestControlSignal() {
+        String text = "[2026.08.13 | 22:03:19] [SELF_RUN_COMMAND_RECEIVED " + JOB + "]\n";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 0, SelfRunStore.MODE_CHAT);
+        assertEquals(1, scan.totalCount);
+        assertTrue(scan.unseen.isEmpty());
+        assertNull(scan.latest);
     }
 
     @Test public void chatCompletionGrammarRemainsBareOnly() {

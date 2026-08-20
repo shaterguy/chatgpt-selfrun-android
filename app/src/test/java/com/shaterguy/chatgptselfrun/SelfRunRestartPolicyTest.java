@@ -32,8 +32,8 @@ public final class SelfRunRestartPolicyTest {
 
     @Test public void reusedDocumentUsesPlainContinuation() {
         String prompt = SelfRunRestartPolicy.continuationPrompt("SR-REUSE", "");
-        assertTrue(prompt.contains("[SELF_RUN_CONTINUE SR-REUSE]"));
-        assertTrue(prompt.contains("Command Received Record Required"));
+        assertTrue(prompt.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE SR-REUSE]$"));
+        assertFalse(prompt.toLowerCase().contains("command received"));
         assertFalse(prompt.contains("SELF_RUN_BOOTSTRAP"));
         assertFalse(prompt.contains("DRIVE_TURN_DOCUMENT_ID="));
     }
@@ -43,6 +43,7 @@ public final class SelfRunRestartPolicyTest {
         String prompt = SelfRunRestartPolicy.continuationPrompt("SR-RECOVERY", documentId);
         assertTrue(prompt.contains("[SELF_RUN_CONTINUE SR-RECOVERY]"));
         assertTrue(prompt.contains("DRIVE_TURN_DOCUMENT_ID=" + documentId));
+        assertFalse(prompt.toLowerCase().contains("command received"));
         assertTrue(prompt.contains("향후 SelfRun Drive signal"));
         assertTrue(prompt.contains("Bootstrap은 재실행하지 말 것"));
         assertFalse(prompt.contains("SELF_RUN_BOOTSTRAP"));

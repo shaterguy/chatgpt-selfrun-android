@@ -39,8 +39,7 @@ final class SelfRunRestartPolicy {
 
     static String continuationPrompt(String runId, String replacementDocumentId) {
         String base = "[" + SelfRunProtocol.kstTimestamp(new Date()) + "] "
-                + SelfRunProtocol.continuation(runId)
-                + "\nCommand Received Record Required";
+                + SelfRunProtocol.continuation(runId);
         if (replacementDocumentId == null || replacementDocumentId.isEmpty()) return base;
         if (!DriveApiClient.validFileId(replacementDocumentId)) {
             throw new IllegalArgumentException("valid replacement turn document id required");

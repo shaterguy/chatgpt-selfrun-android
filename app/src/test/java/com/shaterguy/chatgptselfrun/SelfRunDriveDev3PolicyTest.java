@@ -25,7 +25,7 @@ public class SelfRunDriveDev3PolicyTest {
         assertFalse(service.contains("prepareCommandRetry"));
         assertFalse(store.contains("void markCommandSubmitted"));
         assertFalse(store.contains("void prepareCommandRetry"));
-        assertTrue(service.contains("command_received_ack=unused"));
+        assertFalse(service.contains("command_received_ack"));
     }
 
     @Test public void completionGoesDirectlyToInternalSendStateWithoutGuard() throws Exception {

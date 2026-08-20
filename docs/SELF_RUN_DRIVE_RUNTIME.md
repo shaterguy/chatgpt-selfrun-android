@@ -25,13 +25,13 @@ WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conv
 현재 구현의 주요 값은 다음과 같습니다.
 
 - 정상 Drive polling 기본 주기: 60초
-- TURN_COMPLETED 후 continuation UI guard: 45초
-- bootstrap/CONTINUE 제출 후 새 ACK가 없을 때 재제출: 5분
+- TURN_COMPLETED 후 내부 버튼 재확인: 250ms
+- 제출 클릭 실패 판정: 2.5초 후 전문 삭제·재입력
 - 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
 - `modifiedTime`: 읽기 최적화 힌트
 - authoritative progress: append-only SelfRun signal cursor
 
-retry 횟수와 누적 시간을 terminal 조건으로 사용하지 않습니다. Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
+Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. TURN_COMPLETED 뒤에는 STOP을 클릭하지 않고, SEND 버튼이 존재하는 idle 상태에서 composer 입력을 시작하며, 전문 readback 후 SEND 활성 상태에서만 클릭합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
 
 ## 로컬 영속 상태
 
