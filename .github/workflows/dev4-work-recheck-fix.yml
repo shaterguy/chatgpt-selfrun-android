@@ -1,0 +1,49 @@
+name: Apply dev4 WORK send recheck simplification
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.4.1-dev4
+    paths:
+      - .github/workflows/dev4-work-recheck-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.4.1-dev4
+          fetch-depth: 0
+      - name: Replace WORK post-reasoning transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          s=p.read_text(encoding='utf-8')
+          old='if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&"READY".equals(status)){evaluate(phase,SelfRunContinuationDom.buttonState(store.conversationUrl()));return;}if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&SelfRunContinuationDom.SEND_ENABLED.equals(status)){transition(SelfRunStore.PHASE_SEND_CONTINUE,"Work MODEL/REASONING 적용 후 SEND 재확인 완료","reasoning_send_ready");scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)){scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}'
+          new='if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_SEND_CONTINUE,"Work MODEL/REASONING 적용 완료 · SEND 재확인 준비","reasoning_ready_for_send_recheck");scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}'
+          if s.count(old)!=1:
+              raise SystemExit(f'expected one WORK reasoning fragment, got {s.count(old)}')
+          s=s.replace(old,new,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+          git diff --check
+          grep -Fq 'reasoning_ready_for_send_recheck' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          ! grep -Fq 'PHASE_APPLY_REASONING.equals(phase)&&SelfRunContinuationDom.SEND_ENABLED.equals(status)' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          git rm .github/workflows/dev4-work-recheck-fix.yml
+      - name: Commit bounded correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'selfrun-dev4-builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          git diff --cached --check
+          git commit -m 'fix(drive): recheck SEND before WORK continuation input'
+          git push origin HEAD:selfrun-drive/v1.4.1-dev4
