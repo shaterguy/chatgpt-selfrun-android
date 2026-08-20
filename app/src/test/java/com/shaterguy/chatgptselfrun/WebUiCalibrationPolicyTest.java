@@ -35,6 +35,19 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(WebUiCalibrationDom.readRuntimeLog().contains("ui-runtime-log"));
     }
 
+    @Test public void newChatCalibrationRejectsModeMenuItemsAtSaveAndRuntime() throws Exception {
+        String runtime = WebUiCalibrationDom.runtimePrelude();
+        String store = src("WebUiCalibrationStore.java");
+        assertTrue(runtime.contains("const __srNewChatKey="));
+        assertTrue(runtime.contains("const __srNewChatCandidate=e=>"));
+        assertTrue(runtime.contains("menuitemradio|radio|tab|option"));
+        assertTrue(runtime.contains("newChat.test(text)||newChat.test(aria)"));
+        assertTrue(runtime.contains("__srNewChatKey(k)?__srNewChatCandidate(e)"));
+        assertTrue(store.contains("if (newChatDescriptor(entry))"));
+        assertTrue(store.contains("role.matches(\"menuitemradio|radio|tab|option\")"));
+        assertTrue(store.contains("newChatLabel(value.optString(\"aria\"))"));
+    }
+
     @Test public void runtimeSelectsCalibrationByScopeAndTurnStage() {
         String generalBootstrapModel = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
         String generalBootstrapReasoning = WorkPreferenceDom.reasoningForProject(SelfRunScript.GENERAL_CHAT_URL, "xhigh");

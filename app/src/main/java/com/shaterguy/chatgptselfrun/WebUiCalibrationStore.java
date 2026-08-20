@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 /** Durable app-local UI calibration profile and purpose-scoped audit log. */
 final class WebUiCalibrationStore {
@@ -60,11 +61,11 @@ final class WebUiCalibrationStore {
                 if (!descriptor(composer) || !descriptor(send)) return false;
                 JSONObject entry = capture.optJSONObject("entry");
                 if (PURPOSE_PROJECT_NEW_CHAT.equals(purpose)) {
-                    if (descriptor(entry)) targets.put(PURPOSE_PROJECT_NEW_CHAT, entry);
+                    if (newChatDescriptor(entry)) targets.put(PURPOSE_PROJECT_NEW_CHAT, entry);
                     targets.put(TARGET_PROJECT_COMPOSER, composer);
                     targets.put(TARGET_PROJECT_SEND, send);
                 } else {
-                    if (descriptor(entry)) targets.put(PURPOSE_GENERAL_NEW_CHAT, entry);
+                    if (newChatDescriptor(entry)) targets.put(PURPOSE_GENERAL_NEW_CHAT, entry);
                     targets.put(TARGET_GENERAL_COMPOSER, composer);
                     targets.put(TARGET_GENERAL_SEND, send);
                 }
@@ -258,6 +259,20 @@ final class WebUiCalibrationStore {
         return !value.optString("id").isEmpty() || !value.optString("testid").isEmpty()
                 || !value.optString("aria").isEmpty() || !value.optString("text").isEmpty()
                 || !value.optString("role").isEmpty() || !value.optString("tag").isEmpty();
+    }
+
+    private static boolean newChatDescriptor(JSONObject value) {
+        if (!descriptor(value)) return false;
+        String role = value.optString("role").trim().toLowerCase(Locale.ROOT);
+        String tag = value.optString("tag").trim().toLowerCase(Locale.ROOT);
+        if (role.matches("menuitemradio|radio|tab|option")
+                || !("button".equals(tag) || "a".equals(tag) || "button".equals(role))) return false;
+        return newChatLabel(value.optString("aria")) || newChatLabel(value.optString("text"));
+    }
+
+    private static boolean newChatLabel(String value) {
+        String label = value == null ? "" : value.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+        return label.matches("new chat|new conversation|새 채팅|새 대화");
     }
 
     private static String captureSummary(JSONObject capture) {

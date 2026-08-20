@@ -19,6 +19,32 @@ public class SelfRunWebDiagnosticsTest {
         assertFalse(future.contains("user text"));
     }
 
+    @Test public void bootstrapWaitsUseStablePrivacySafeReasons() {
+        assertEquals("status=UI_WAIT;phase=bootstrap_context;reason=mode_switch_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP, "UI_WAIT", "모드 전환 반영 대기 · private"));
+        assertEquals("status=UI_WAIT;phase=bootstrap_context;reason=mode_state_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP, "UI_WAIT", "실행 모드 실제 상태 대기 · private"));
+        assertEquals("status=UI_WAIT;phase=bootstrap_context;reason=composer_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP, "UI_WAIT", "새 대화 입력창 대기"));
+        assertEquals("status=WAIT;phase=bootstrap_model;reason=model_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_MODEL, "WAIT", "private"));
+        assertEquals("status=UI_WAIT;phase=bootstrap_reasoning;reason=reasoning_wait",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_REASONING, "UI_WAIT", "private"));
+    }
+
+    @Test public void launchAndPageDiagnosticsNeverExposeUrlsOrErrorMessages() {
+        String retry = SelfRunWebDiagnostics.launchRetryDetail(new IllegalStateException("private url"), 2_500L);
+        assertEquals("error=IllegalStateException;retry_in_ms=2500", retry);
+        assertFalse(retry.contains("private"));
+        assertEquals("route=project_conversation",
+                SelfRunWebDiagnostics.pageDetail("https://chatgpt.com/g/g-p-secret/c/private-conversation"));
+        assertEquals("reason=target_missing;phase=bootstrap_context;retry_in_ms=300000",
+                SelfRunWebDiagnostics.targetRetryDetail(SelfRunStore.PHASE_BOOTSTRAP, 300_000L));
+        assertEquals("reason=renderer_gone;retry_in_ms=2000",
+                SelfRunWebDiagnostics.rendererRetryDetail(2_000L));
+        assertEquals("error_code=-2;retry_in_ms=3000", SelfRunWebDiagnostics.pageErrorDetail(-2, 3_000L));
+    }
+
     @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {
         String detail = SelfRunWebDiagnostics.routeMismatchDetail(
                 "https://chatgpt.com/c/conversation123", "https://chatgpt.com/settings");

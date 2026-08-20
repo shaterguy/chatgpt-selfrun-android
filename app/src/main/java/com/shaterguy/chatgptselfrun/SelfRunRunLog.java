@@ -178,6 +178,8 @@ final class SelfRunRunLog {
             case "WEBVIEW_LAUNCH" -> "자동화 WebView 시작";
             case "WEBVIEW_PAGE_START" -> "ChatGPT 화면 로딩 시작";
             case "WEBVIEW_PAGE_FINISH" -> "ChatGPT 화면 로딩 완료";
+            case "WEBVIEW_LAUNCH_RETRY" -> "자동화 WebView 시작 재시도";
+            case "RENDERER_GONE" -> "WebView 렌더러 종료 재시도";
             case "WEBVIEW_NAVIGATION" -> "ChatGPT 화면 이동";
             case "WEBVIEW_ERROR" -> "WebView 오류";
             case "BOOTSTRAP_CONTEXT_READY" -> "프로젝트 새 대화 준비 완료";
