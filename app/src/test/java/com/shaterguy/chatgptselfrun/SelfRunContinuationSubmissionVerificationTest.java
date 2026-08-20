@@ -27,6 +27,8 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(js.indexOf("const stop=controls.find(isStop)") < js.indexOf("const send=calibrated"));
         assertTrue(js.contains("isSend(calibrated)"));
         assertTrue(js.contains("speech|voice|mic|microphone|dictation"));
+        assertTrue(js.contains("isStop(e)||isVoice(e)||!inComposer(e)"));
+        assertTrue(js.indexOf("const isVoice=") < js.indexOf("const isSend="));
         assertTrue(js.contains("composerEditable()"));
         assertTrue(js.contains("if(voice&&composerEditable())return{state:'COMPOSER_IDLE'"));
         assertFalse(js.contains("!isStop(calibrated))?calibrated"));

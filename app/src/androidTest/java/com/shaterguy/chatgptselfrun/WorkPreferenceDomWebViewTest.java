@@ -22,6 +22,7 @@ import static org.junit.Assert.assertTrue;
 /** Exercises Work continuation selectors on a real Android WebView fixture for an existing general chat. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkPreferenceDomWebViewTest {
+    private static final String PROJECT_URL = "https://chatgpt.com/g/g-p-test";
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
     private static final String CONTINUE_PROMPT = "SELF_RUN_CONTINUE_PROBE";
 
@@ -86,7 +87,7 @@ public final class WorkPreferenceDomWebViewTest {
     @Test public void voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            loadVoiceIdleFixture(scenario, web);
+            loadVoiceIdleFixture(scenario, web, CONVERSATION_URL);
 
             JSONObject idle = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
             assertEquals(SelfRunContinuationDom.COMPOSER_IDLE, idle.getString("status"));
@@ -104,6 +105,29 @@ public final class WorkPreferenceDomWebViewTest {
             JSONObject clicked = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe"));
             assertEquals("CONTINUE_CLICKED", clicked.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
+        }
+    }
+
+    @Test public void bootstrapVoiceIdleComposerAlsoClicksOnlySend() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadVoiceIdleFixture(scenario, web, PROJECT_URL);
+
+            JSONObject prepared = null;
+            for (int attempt = 0; attempt < 8; attempt++) {
+                prepared = evaluate(scenario, web,
+                        SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
+                if ("READY_TO_SUBMIT".equals(prepared.getString("status"))) break;
+            }
+            assertNotNull(prepared);
+            assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
+
+            JSONObject clicked = evaluate(scenario, web,
+                    SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
+            assertEquals("BOOTSTRAP_CLICKED", clicked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
             assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
         }
@@ -183,19 +207,19 @@ public final class WorkPreferenceDomWebViewTest {
     }
 
     private static void loadVoiceIdleFixture(ActivityScenario<SelfRunNewActivity> scenario,
-                                             AtomicReference<WebView> web) throws Exception {
+                                             AtomicReference<WebView> web, String baseUrl) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
             view.getSettings().setJavaScriptEnabled(true);
             view.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView ignored, String url) {
-                    if (CONVERSATION_URL.equals(url)) loaded.countDown();
+                    if (baseUrl.equals(url)) loaded.countDown();
                 }
             });
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(CONVERSATION_URL, voiceIdleFixture(), "text/html", "UTF-8", null);
+            view.loadDataWithBaseURL(baseUrl, voiceIdleFixture(), "text/html", "UTF-8", null);
         });
         assertTrue("Voice-idle WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
@@ -253,10 +277,10 @@ public final class WorkPreferenceDomWebViewTest {
     private static String voiceIdleFixture() {
         return "<!doctype html><html><head><style>body{margin:20px}button{display:block;margin:8px}</style></head>"
                 + "<body><main><form id='composer'><textarea id='prompt-textarea'></textarea>"
-                + "<button id='voice' type='button' data-testid='composer-speech-button' aria-label='Start voice mode'>Voice</button>"
+                + "<button id='voice' type='submit' data-testid='composer-speech-button' aria-label='Start voice mode'>Voice</button>"
                 + "</form></main><script>window.voiceClicks=0;window.sendClicks=0;"
                 + "const form=document.getElementById('composer'),composer=document.getElementById('prompt-textarea'),voice=document.getElementById('voice');"
-                + "voice.addEventListener('click',()=>window.voiceClicks++);"
+                + "voice.addEventListener('click',event=>{event.preventDefault();window.voiceClicks++;});"
                 + "composer.addEventListener('input',()=>{if(!composer.value||document.getElementById('send'))return;voice.remove();"
                 + "const send=document.createElement('button');send.id='send';send.type='submit';send.dataset.testid='send-button';send.setAttribute('aria-label','Send');send.textContent='Send';"
                 + "send.addEventListener('click',event=>{event.preventDefault();window.sendClicks++;});form.appendChild(send);});</script>"
