@@ -7,9 +7,24 @@ import android.webkit.WebView;
 final class WebViewConfig {
     private WebViewConfig() {}
 
-    /** Shared by the visible calibration WebView and the background automation WebView. */
+    /** Fixed mdpi profile for the private background automation WebView. */
     @SuppressWarnings("SetJavaScriptEnabled")
     static void applyAutomation(WebView webView) {
+        applyAutomationSettings(webView);
+        // The headless host itself is 160 dpi, so 100% preserves its fixed mdpi contract.
+        webView.setInitialScale(100);
+    }
+
+    /** Visible calibration keeps the same browser settings but lets WebView honor device density. */
+    @SuppressWarnings("SetJavaScriptEnabled")
+    static void applyCalibration(WebView webView) {
+        applyAutomationSettings(webView);
+        // 0 selects WebView's density-aware default scale. With wide viewport disabled,
+        // the visible Activity is exposed to the page in device-independent CSS pixels.
+        webView.setInitialScale(0);
+    }
+
+    private static void applyAutomationSettings(WebView webView) {
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);
@@ -19,7 +34,6 @@ final class WebViewConfig {
         String current = settings.getUserAgentString();
         String marker = "SelfRunDrive/" + BuildConfig.VERSION_NAME;
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
-        webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
     }
 
