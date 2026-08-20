@@ -30,6 +30,13 @@ jobs:
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           compile(body, 'dev4-embedded-patch.py', 'exec')
           exec(body, {'__name__': '__main__'})
+          verifier = Path('tools/verify_drive_variant.sh')
+          text = verifier.read_text(encoding='utf-8')
+          old = "grep -Fq 'CONTINUATION_GUARD_MS = 60_000L' \"$SERVICE\"\ngrep -Fq 'SUBMISSION_RETRY_MS = 5 * 60_000L' \"$SERVICE\""
+          new = "! grep -Fq 'CONTINUATION_GUARD_MS' \"$SERVICE\"\n! grep -Fq 'SUBMISSION_RETRY_MS' \"$SERVICE\"\ngrep -Fq 'CONTINUE_DOM_POLL_MS = 250L' \"$SERVICE\"\ngrep -Fq 'CONTINUE_RETRY_MS = 2_500L' \"$SERVICE\"\ngrep -Fq 'PHASE_VERIFY_CONTINUE_SUBMISSION' \"$SERVICE\"\ngrep -Fq 'SUBMISSION_CONFIRMED' \"$SERVICE\""
+          if text.count(old) != 1:
+              raise SystemExit('legacy continuation timing verifier block not found exactly once')
+          verifier.write_text(text.replace(old, new, 1), encoding='utf-8')
           RUNNER
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -58,7 +65,7 @@ jobs:
           git config user.name 'selfrun-dev4-builder'
           git config user.email 'actions@users.noreply.github.com'
           git rm .github/workflows/dev4-apply.yml .github/workflows/dev4-run.yml
-          git add app/build.gradle app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java app/src/test/java/com/shaterguy/chatgptselfrun/DriveVariantPolicyTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunContinuationRetryRegressionTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunContinuationSubmissionTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveCommandAckPollingTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveDev3PolicyTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveAssistantIsolationTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunFocusRetentionTest.java
+          git add app/build.gradle app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java tools/verify_drive_variant.sh app/src/test/java/com/shaterguy/chatgptselfrun/DriveVariantPolicyTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunContinuationRetryRegressionTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunContinuationSubmissionTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveCommandAckPollingTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveDev3PolicyTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunDriveAssistantIsolationTest.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunFocusRetentionTest.java
           git diff --cached --check
           git commit -m 'feat(drive): verify continuation submission before retry'
           git push origin HEAD:selfrun-drive/v1.4.1-dev4
