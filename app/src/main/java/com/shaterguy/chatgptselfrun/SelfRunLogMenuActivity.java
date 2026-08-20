@@ -43,6 +43,8 @@ public final class SelfRunLogMenuActivity extends Activity {
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
         root.addView(Ui.title(this, "SelfRun Drive 로그"));
         root.addView(Ui.body(this, "현재 실행 중인 작업과 과거 작업의 실행 로그·디버그 로그, 웹 UI 보정 로그를 확인할 수 있습니다."));
+        root.addView(Ui.body(this, "내부 자동화 WebView: " + AutomationViewportPolicy.runtimeContract()
+                + "\n웹 UI 보정 상태: " + calibration.profileStatus()));
         root.addView(Ui.row(this,
                 Ui.button(this, "웹 UI 보정 로그", v -> showCalibrationLog()),
                 Ui.button(this, "새로고침", v -> { history.sync(current); render(); }),
@@ -65,7 +67,9 @@ public final class SelfRunLogMenuActivity extends Activity {
     private void showCalibrationLog() {
         new AlertDialog.Builder(this)
                 .setTitle("웹 UI 보정 로그")
-                .setMessage(calibration.logText(120))
+                .setMessage("자동화 화면: " + AutomationViewportPolicy.runtimeContract()
+                        + "\n보정 상태: " + calibration.profileStatus()
+                        + "\n\n" + calibration.logText(120))
                 .setPositiveButton("닫기", null)
                 .show();
     }
