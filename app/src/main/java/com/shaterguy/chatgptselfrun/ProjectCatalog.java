@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Minimal local catalog. It stores canonical project URLs plus user-visible project names. */
@@ -27,11 +28,25 @@ final class ProjectCatalog {
         int schema = prefs.getInt(KEY_SCHEMA, 0);
         if (schema != LEGACY_SCHEMA && schema != SCHEMA) return Collections.emptyList();
         Set<String> raw = prefs.getStringSet(KEY_URLS, Collections.emptySet());
+        LinkedHashSet<String> urls = canonicalizeStoredUrls(raw);
         ArrayList<ProjectUrlPolicy.ProjectRef> out = new ArrayList<>();
-        if (raw != null) for (String value : raw) {
+        for (String value : urls) {
             ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(value);
             if (ref != null && !contains(out, ref.projectId)) out.add(ref);
         }
+
+        SharedPreferences.Editor migration = null;
+        if (raw == null || !urls.equals(raw)) migration = prefs.edit().putStringSet(KEY_URLS, urls);
+        Map<String, ?> values = prefs.getAll();
+        for (ProjectUrlPolicy.ProjectRef ref : out) {
+            String exact = normalizeDisplayName(stringValue(values.get(nameKey(ref.projectId))));
+            if (!exact.isEmpty()) continue;
+            String recovered = legacyDisplayName(values, ref.projectId);
+            if (recovered.isEmpty()) continue;
+            if (migration == null) migration = prefs.edit();
+            migration.putString(nameKey(ref.projectId), recovered);
+        }
+        if (migration != null) migration.commit();
         return out;
     }
 
@@ -69,7 +84,43 @@ final class ProjectCatalog {
     String displayName(ProjectUrlPolicy.ProjectRef ref) {
         if (ref == null) return fallbackDisplayName(null);
         String stored = normalizeDisplayName(prefs.getString(nameKey(ref.projectId), ""));
-        return stored.isEmpty() ? fallbackDisplayName(ref) : stored;
+        if (!stored.isEmpty()) return stored;
+        String recovered = legacyDisplayName(prefs.getAll(), ref.projectId);
+        if (!recovered.isEmpty()) {
+            prefs.edit().putString(nameKey(ref.projectId), recovered).commit();
+            return recovered;
+        }
+        return fallbackDisplayName(ref);
+    }
+
+    static LinkedHashSet<String> canonicalizeStoredUrls(Set<String> raw) {
+        LinkedHashSet<String> urls = new LinkedHashSet<>();
+        if (raw != null) for (String value : raw) {
+            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(value);
+            if (ref != null) urls.add(ref.canonicalUrl);
+        }
+        while (urls.size() > MAX_ENTRIES) urls.remove(urls.iterator().next());
+        return urls;
+    }
+
+    static String legacyDisplayName(Map<String, ?> values, String projectId) {
+        if (values == null || projectId == null || projectId.isEmpty()) return "";
+        String exactKey = nameKey(projectId);
+        String exact = normalizeDisplayName(stringValue(values.get(exactKey)));
+        if (!exact.isEmpty()) return exact;
+
+        ArrayList<String> aliases = new ArrayList<>();
+        for (String key : values.keySet()) {
+            if (key != null && key.startsWith(KEY_NAME_PREFIX) && !key.equals(exactKey)) aliases.add(key);
+        }
+        Collections.sort(aliases);
+        for (String key : aliases) {
+            String sourceId = key.substring(KEY_NAME_PREFIX.length());
+            if (!projectId.equals(ProjectUrlPolicy.canonicalProjectId(sourceId))) continue;
+            String candidate = normalizeDisplayName(stringValue(values.get(key)));
+            if (!candidate.isEmpty()) return candidate;
+        }
+        return "";
     }
 
     static String normalizeDisplayName(String value) {
@@ -95,6 +146,8 @@ final class ProjectCatalog {
     }
 
     private static String nameKey(String projectId) { return KEY_NAME_PREFIX + projectId; }
+
+    private static String stringValue(Object value) { return value instanceof String ? (String) value : ""; }
 
     private static boolean contains(List<ProjectUrlPolicy.ProjectRef> entries, String id) {
         for (ProjectUrlPolicy.ProjectRef entry : entries) if (entry.projectId.equals(id)) return true;

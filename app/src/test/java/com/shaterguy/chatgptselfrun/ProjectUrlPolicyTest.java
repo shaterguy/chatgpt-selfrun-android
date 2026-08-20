@@ -10,8 +10,32 @@ public class ProjectUrlPolicyTest {
         ProjectUrlPolicy.ProjectRef project = ProjectUrlPolicy.parseProject("https://chatgpt.com/g/g-p-Ab_9/project");
         ProjectUrlPolicy.ProjectRef conversation = ProjectUrlPolicy.parseProject("https://chatgpt.com/g/g-p-Ab_9/c/abc_123");
         assertNotNull(root); assertNotNull(project); assertNotNull(conversation);
+        assertEquals("g-p-Ab_9", root.projectId);
         assertEquals("https://chatgpt.com/g/g-p-Ab_9/project", root.canonicalUrl);
         assertEquals("abc_123", conversation.conversationId);
+    }
+
+    @Test public void sluggedAndUnsluggedModernProjectRoutesShareIdentity() {
+        String id = "g-p-6a582c824ba08191ac7e74e9bad721fc";
+        String plain = "https://chatgpt.com/g/" + id + "/project";
+        String slugged = "https://chatgpt.com/g/" + id + "-vibe-coding/project";
+        String sluggedConversation = "https://chatgpt.com/g/" + id + "-vibe-coding/c/abc_123";
+        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(slugged);
+        ProjectUrlPolicy.ProjectRef conversation = ProjectUrlPolicy.parseProject(sluggedConversation);
+        assertNotNull(ref); assertNotNull(conversation);
+        assertEquals(id, ref.projectId);
+        assertEquals(id, conversation.projectId);
+        assertEquals("https://chatgpt.com/g/" + id + "/project", ref.canonicalUrl);
+        assertEquals("abc_123", conversation.conversationId);
+        assertTrue(ProjectUrlPolicy.sameProject(plain, slugged));
+        assertTrue(ProjectUrlPolicy.sameConversation(
+                "https://chatgpt.com/g/" + id + "/c/abc_123", sluggedConversation));
+    }
+
+    @Test public void doesNotStripSuffixFromLegacyOpaqueProjectIds() {
+        ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject("https://chatgpt.com/g/g-p-AbCd-legacy/project");
+        assertNotNull(ref);
+        assertEquals("g-p-AbCd-legacy", ref.projectId);
     }
 
     @Test public void rejectsOriginAndParsingConfusion() {
