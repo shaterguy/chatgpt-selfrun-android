@@ -67,7 +67,7 @@ public final class WorkPreferenceDomWebViewTest {
             JSONObject state = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
             assertEquals(SelfRunContinuationDom.STOP, state.getString("status"));
 
-            evaluate(scenario, web, "(()=>{localStorage.setItem('selfrun-drive:verified-continuation:stop-probe',JSON.stringify({state:'prepared'}));document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
+            evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:stop-probe':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
             JSONObject click = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe"));
             assertEquals(SelfRunContinuationDom.STOP, click.getString("status"));
@@ -75,13 +75,13 @@ public final class WorkPreferenceDomWebViewTest {
         }
     }
 
-    @Test public void continuationClassifierSeparatesSendDisabledAndUnknown() throws Exception {
+    @Test public void continuationClassifierSeparatesSendDisabledAndEditableIdle() throws Exception {
         assertContinuationState("<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>",
                 SelfRunContinuationDom.SEND_ENABLED);
         assertContinuationState("<button type='submit' data-testid='send-button' aria-label='Send' disabled>Send</button>",
                 SelfRunContinuationDom.SEND_DISABLED);
-        assertContinuationState("<button type='button' aria-label='Settings'>Settings</button>",
-                SelfRunContinuationDom.UNKNOWN);
+        assertContinuationState("<button type='button' aria-label='Attach files'>Attach</button>",
+                SelfRunContinuationDom.COMPOSER_IDLE);
     }
 
     @Test public void voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice() throws Exception {

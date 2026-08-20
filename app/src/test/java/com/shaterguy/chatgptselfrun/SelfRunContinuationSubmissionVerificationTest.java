@@ -30,7 +30,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(js.contains("isStop(e)||isVoice(e)||!inComposer(e)"));
         assertTrue(js.indexOf("const isVoice=") < js.indexOf("const isSend="));
         assertTrue(js.contains("composerEditable()"));
-        assertTrue(js.contains("if(voice&&composerEditable())return{state:'COMPOSER_IDLE'"));
+        assertTrue(js.contains("if(composerEditable())return{state:'COMPOSER_IDLE'"));
         assertFalse(js.contains("!isStop(calibrated))?calibrated"));
         assertTrue(js.contains("if(stop)return{state:'STOP'"));
     }
@@ -51,6 +51,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertFalse(js.contains("continuationComparablePrompt"));
         assertTrue(js.contains("state:'prepared'"));
         assertTrue(js.contains("READY_TO_SUBMIT"));
+        assertTrue(js.contains("window.__selfRunDriveMarkers"));
     }
 
     @Test public void clickIsOnlyStartOfVerificationNotSubmissionConfirmation() {
@@ -86,6 +87,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(prepare.contains("state:'clearing'"));
         assertTrue(prepare.contains("state:'inputting'"));
         assertTrue(prepare.contains("exact bootstrap prepared"));
+        assertTrue(prepare.contains("window.__selfRunDriveMarkers"));
         assertTrue(click.contains("BOOTSTRAP_CLICKED"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertTrue(verify.contains("c.state==='STOP'"));

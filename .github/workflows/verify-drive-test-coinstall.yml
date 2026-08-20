@@ -211,7 +211,8 @@ jobs:
           disable-animations: true
           script: >-
             bash -o pipefail -c
-            'gradle --no-daemon --console=plain :app:connectedDebugAndroidTest
+            'set -euo pipefail;
+            gradle --no-daemon --console=plain :app:connectedDebugAndroidTest
             -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest;
             adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
