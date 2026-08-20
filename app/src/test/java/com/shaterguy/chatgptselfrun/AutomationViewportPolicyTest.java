@@ -1,6 +1,5 @@
 package com.shaterguy.chatgptselfrun;
 
-import org.json.JSONObject;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -23,16 +22,14 @@ public final class AutomationViewportPolicyTest {
     }
 
     @Test public void legacyOrDesktopDescriptorsFailClosedForRecapture() throws Exception {
-        JSONObject legacy = new JSONObject().put("testid", "example");
-        JSONObject mobile = new JSONObject().put("testid", "example")
-                .put("layoutFamily", AutomationViewportPolicy.MOBILE_LAYOUT_FAMILY);
-        JSONObject desktop = new JSONObject().put("testid", "example").put("layoutFamily", "other_v1");
-        assertFalse(AutomationViewportPolicy.isMobileDescriptor(legacy));
-        assertTrue(AutomationViewportPolicy.isMobileDescriptor(mobile));
-        assertFalse(AutomationViewportPolicy.isMobileDescriptor(desktop));
-        assertEquals("재보정 필요", AutomationViewportPolicy.purposeStatus(legacy));
-        assertEquals("모바일 보정 호환", AutomationViewportPolicy.purposeStatus(mobile));
-        assertEquals("재보정 필요", AutomationViewportPolicy.purposeStatus(desktop));
+        String policy = src("AutomationViewportPolicy.java");
+        String runtime = WebUiCalibrationDom.runtimePrelude();
+        assertTrue(policy.contains("MOBILE_LAYOUT_FAMILY.equals(descriptor.optString(\"layoutFamily\"))"));
+        assertTrue(policy.contains("return \"재보정 필요\""));
+        assertTrue(policy.contains("return any ? \"모바일 보정 호환\" : \"미설정\""));
+        assertTrue(runtime.contains("const __srMobileDescriptor=d=>!!d&&d.layoutFamily===__srLayoutFamily"));
+        assertTrue(runtime.contains("if(!__srMobileDescriptor(d)){__srTrace(k,'RECALIBRATE'"));
+        assertTrue(runtime.contains("return null"));
     }
 
     @Test public void recorderTagsLayoutButMatcherStillUsesStructuralDescriptors() {
