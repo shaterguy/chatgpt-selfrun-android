@@ -34,7 +34,7 @@ public class SelfRunDriveCommandAckPollingTest {
         assertTrue(poll.contains("store.applyDriveSignals(scan.unseen,System.currentTimeMillis(),CONTINUATION_GUARD_MS);store.updateDriveSeen(metadata.version,metadata.modifiedTime)"));
     }
 
-    @Test public void fiveMinuteRetryCanOnlyHappenAfterLatestBodyRead() throws Exception {
+    @Test public void fiveMinuteBootstrapRetryCanOnlyHappenAfterLatestBodyRead() throws Exception {
         String service = src("SelfRunService.java");
         String poll = between(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
 
@@ -43,7 +43,7 @@ public class SelfRunDriveCommandAckPollingTest {
         assertTrue(bodyRead >= 0);
         assertTrue(prepareRetry > bodyRead);
         assertTrue(service.contains("private static final long NORMAL_POLL_MS = 60_000L"));
-        assertTrue(service.contains("SUBMISSION_RETRY_MS = 5 * 60_000L"));
+        assertTrue(service.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS = 5 * 60_000L"));
     }
 
     private static String src(String file) throws Exception {

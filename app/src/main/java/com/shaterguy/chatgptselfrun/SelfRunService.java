@@ -42,7 +42,8 @@ public final class SelfRunService extends Service {
     private static final int NOTIFICATION_ID = 17021;
     private static final long NORMAL_POLL_MS = 60_000L;
     static final long CONTINUATION_GUARD_MS = 0L;
-    static final long SUBMISSION_RETRY_MS = 5 * 60_000L;
+    static final long BOOTSTRAP_COMMAND_ACK_RETRY_MS = 5 * 60_000L;
+    private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
     static final long CONTINUATION_VERIFY_INTERVAL_MS = 250L;
     static final long CONTINUATION_FAILURE_MS = 2_500L;
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
@@ -465,7 +466,7 @@ private void replayTerminalSideEffect(){startForegroundCompat();String owner=sto
 private void finishPersistedTerminalPause(String cause, String alertTitle, String ownerRunId,String commitId, String type) {if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;stopAutomationCallbacks();releaseWakeLock();pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");NotificationHelper.notifyUser(this, alertTitle, store.status());store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type);}
 
 
-private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,SUBMISSION_RETRY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}launchWebView(target);}
+private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,WEB_RECOVERY_DELAY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;}launchWebView(target);}
 
     private void launchWebView(String target) {
         cleanupWebView();
@@ -478,7 +479,7 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
                 @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {if (!launchedRunId.equals(store.runId())) return true;if (!request.isForMainFrame()) return false;String requested = String.valueOf(request.getUrl());boolean allowed = store.conversationUrl().isEmpty()? sameProject(store.projectUrl(), requested) : sameConversation(store.conversationUrl(), requested);if (!allowed) { recordContinuationRouteMismatch(requested); postWebCallback(SelfRunService.this::restoreCanonical, 800L); }return !allowed;}
                 @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse s) {if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && s.getStatusCode() == 429) scheduleWeb(30_000L);}
                 @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && canRun() && isWebAutomationPhase(store.phase())) postWebCallback(() -> { if (v == webView) v.loadUrl(canonicalUrl()); }, 3_000L);}
-                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, SUBMISSION_RETRY_MS);}}
+                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}
                 @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {cleanupWebView();if (launchedRunId.equals(store.runId()) && !store.paused() && isWebAutomationPhase(store.phase())) postWebCallback(SelfRunService.this::ensureWebView, 2_000L);return true;}
             });
             webView.loadUrl(target);
@@ -508,11 +509,11 @@ private void continuationSubmitted(String detail){if(!canRun())return;runLog.rec
 
 private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?SelfRunProtocol.bootstrapDrive(store.runId(),store.mode(),store.requirement(),store.turnDocumentId(),store.jobFolderId(),store.hasAttachments()):SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
 private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}
-private void commandSubmitted(String kind,String detail){if(!canRun())return;long due=System.currentTimeMillis()+SUBMISSION_RETRY_MS;store.markCommandSubmitted(kind,due);runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);releaseWakeLock();scheduleDrivePoll(0L);}
+private void commandSubmitted(String kind,String detail){if(!canRun()||!SelfRunStore.RETRY_BOOTSTRAP.equals(kind))return;long due=System.currentTimeMillis()+BOOTSTRAP_COMMAND_ACK_RETRY_MS;store.markCommandSubmitted(kind,due);runLog.record(store,"COMMAND_SUBMITTED_DRIVE_WAIT","kind="+kind+";attempt="+store.submissionRetryAttempt()+";retryDueAt="+due+";detail="+detail);releaseWakeLock();scheduleDrivePoll(0L);}
 
     private static boolean isSubmissionPhase(String phase) {return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase) || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 private void scheduleDrivePoll(){scheduleDrivePoll(NORMAL_POLL_MS);}
-private void scheduleDrivePoll(long requestedDelay){handler.removeCallbacks(driveRunnable);releaseWakeLock();if(!canRun())return;long delay=Math.max(0L,requestedDelay);if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())&&store.awaitingCommandAck()&&store.hasSubmissionRetry()){long until=Math.max(0L,store.submissionRetryDueAt()-System.currentTimeMillis());delay=Math.min(delay,until);}handler.postDelayed(driveRunnable,delay);}
+private void scheduleDrivePoll(long requestedDelay){handler.removeCallbacks(driveRunnable);releaseWakeLock();if(!canRun())return;long delay=Math.max(0L,requestedDelay);if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())&&store.awaitingCommandAck()&&store.retryForBootstrap()&&store.hasSubmissionRetry()){long until=Math.max(0L,store.submissionRetryDueAt()-System.currentTimeMillis());delay=Math.min(delay,until);}handler.postDelayed(driveRunnable,delay);}
 private void scheduleWeb(long delay){handler.removeCallbacks(webRunnable);if(webView!=null&&canRun()&&isWebAutomationPhase(store.phase()))handler.postDelayed(webRunnable,delay);}
 private static boolean isWebAutomationPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_DRIVE_COMMIT_GUARD.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 

@@ -20,7 +20,12 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(js.contains("STOP"));
         assertTrue(js.contains("SEND_DISABLED"));
         assertTrue(js.contains("UNKNOWN"));
-        assertTrue(js.indexOf("const stop=buttons.find(isStop)") < js.indexOf("const send=(calibrated"));
+        assertTrue(js.contains("continuation composer unavailable"));
+        assertTrue(js.contains("button,[role=\"button\"]"));
+        assertTrue(js.contains("generating|streaming|responding"));
+        assertTrue(js.indexOf("const stop=controls.find(isStop)") < js.indexOf("const send=calibrated"));
+        assertTrue(js.contains("isSend(calibrated)"));
+        assertFalse(js.contains("!isStop(calibrated))?calibrated"));
         assertTrue(js.contains("if(stop)return{state:'STOP'"));
     }
 

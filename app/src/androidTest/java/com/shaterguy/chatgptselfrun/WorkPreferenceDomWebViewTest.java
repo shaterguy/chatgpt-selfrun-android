@@ -23,6 +23,7 @@ import static org.junit.Assert.assertTrue;
 @RunWith(AndroidJUnit4.class)
 public final class WorkPreferenceDomWebViewTest {
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
+    private static final String CONTINUE_PROMPT = "SELF_RUN_CONTINUE_PROBE";
 
     @Test public void modelSelectorCompletesForClickPointerAndMouseTriggersUsingLunaProfile() throws Exception {
         assertSelection("", "click", false);
@@ -55,6 +56,40 @@ public final class WorkPreferenceDomWebViewTest {
         assertEquals("legacy-model", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL).getString("testid"));
         assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING).getString("aria"));
         assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING).getString("aria"));
+    }
+
+    @Test public void continuationClassifierPrioritizesAStopOutsideTheComposerForm() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadContinuationFixture(scenario, web, "<div id='stop' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
+
+            JSONObject state = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
+            assertEquals(SelfRunContinuationDom.STOP, state.getString("status"));
+
+            evaluate(scenario, web, "(()=>{localStorage.setItem('selfrun-drive:verified-continuation:stop-probe',JSON.stringify({state:'prepared'}));document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
+            JSONObject click = evaluate(scenario, web,
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe"));
+            assertEquals(SelfRunContinuationDom.STOP, click.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
+        }
+    }
+
+    @Test public void continuationClassifierSeparatesSendDisabledAndUnknown() throws Exception {
+        assertContinuationState("<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>",
+                SelfRunContinuationDom.SEND_ENABLED);
+        assertContinuationState("<button type='submit' data-testid='send-button' aria-label='Send' disabled>Send</button>",
+                SelfRunContinuationDom.SEND_DISABLED);
+        assertContinuationState("<button type='button' aria-label='Settings'>Settings</button>",
+                SelfRunContinuationDom.UNKNOWN);
+    }
+
+    private static void assertContinuationState(String controls, String expected) throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadContinuationFixture(scenario, web, controls);
+            assertEquals(expected, evaluate(scenario, web,
+                    SelfRunContinuationDom.buttonState(CONVERSATION_URL)).getString("status"));
+        }
     }
 
     private static void assertSelection(String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
@@ -103,6 +138,24 @@ public final class WorkPreferenceDomWebViewTest {
         assertTrue("WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
 
+    private static void loadContinuationFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
+                                                String controls) throws Exception {
+        CountDownLatch loaded = new CountDownLatch(1);
+        scenario.onActivity(activity -> {
+            WebView view = new WebView(activity);
+            view.getSettings().setJavaScriptEnabled(true);
+            view.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView ignored, String url) {
+                    if (CONVERSATION_URL.equals(url)) loaded.countDown();
+                }
+            });
+            activity.setContentView(view);
+            web.set(view);
+            view.loadDataWithBaseURL(CONVERSATION_URL, continuationFixture(controls), "text/html", "UTF-8", null);
+        });
+        assertTrue("Continuation WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+    }
+
     private static JSONObject evaluate(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                        String script) throws Exception {
         CountDownLatch complete = new CountDownLatch(1);
@@ -139,6 +192,17 @@ public final class WorkPreferenceDomWebViewTest {
                 + "function toggle(){popup.hidden=!popup.hidden;if(trigger.hasAttribute('aria-expanded'))trigger.setAttribute('aria-expanded',String(!popup.hidden));}"
                 + "trigger.addEventListener('" + triggerEvent + "',toggle);"
                 + "wanted.addEventListener('click',()=>{trigger.textContent=wanted.textContent;wanted.setAttribute('aria-selected','true');});</script>"
+                + "</body></html>";
+    }
+
+    private static String continuationFixture(String controls) {
+        String formControls = controls.contains("stop-stream-action")
+                ? "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>"
+                : controls;
+        return "<!doctype html><html><head><style>body{margin:20px}button,[role=button]{display:block;margin:8px}</style></head>"
+                + "<body><main><div id='composer-shell'><form><textarea id='prompt-textarea'></textarea>"
+                + formControls + "</form><div id='continuation-controls'>" + controls + "</div></div></main>"
+                + "<script>window.stopClicks=0;const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
                 + "</body></html>";
     }
 }
