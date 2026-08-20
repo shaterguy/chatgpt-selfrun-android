@@ -15,6 +15,9 @@ public final class AutomationViewportPolicyTest {
         assertEquals(844, AutomationViewportPolicy.HEIGHT_PX);
         assertEquals(160, AutomationViewportPolicy.DENSITY_DPI);
         assertEquals(1.0d, AutomationViewportPolicy.DEVICE_PIXEL_RATIO, 0.0d);
+        assertEquals(100, AutomationViewportPolicy.initialScaleForDensityDpi(160));
+        assertEquals(0, AutomationViewportPolicy.initialScaleForDensityDpi(320));
+        assertEquals(0, AutomationViewportPolicy.initialScaleForDensityDpi(420));
         assertTrue(AutomationViewportPolicy.isMobileCalibrationViewport(390, 844));
         assertTrue(AutomationViewportPolicy.isMobileCalibrationViewport(412, 915));
         assertFalse(AutomationViewportPolicy.isMobileCalibrationViewport(844, 390));
@@ -46,6 +49,16 @@ public final class AutomationViewportPolicyTest {
         assertFalse(capture.contains("getBoundingClientRect"));
         assertFalse(capture.contains("offsetLeft"));
         assertFalse(capture.contains("offsetTop"));
+    }
+
+    @Test public void sharedWebViewConfigKeepsRuntimeMdpiButLetsVisibleCalibrationUseDeviceDensity() throws Exception {
+        String config = src("WebViewConfig.java");
+        String calibration = src("WebUiCalibrationActivity.java");
+        String service = src("SelfRunService.java");
+        assertTrue(config.contains("getDisplayMetrics().densityDpi"));
+        assertTrue(config.contains("AutomationViewportPolicy.initialScaleForDensityDpi(densityDpi)"));
+        assertTrue(calibration.contains("WebViewConfig.applyAutomation(webView)"));
+        assertTrue(service.contains("WebViewConfig.applyAutomation(webView)"));
     }
 
     @Test public void headlessHostNeverMirrorsPhysicalOrCalibrationDensity() throws Exception {
