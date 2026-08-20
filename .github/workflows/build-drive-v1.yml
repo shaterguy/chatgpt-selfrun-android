@@ -133,6 +133,159 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  verify-formal-update-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out exact formal 1.3.0 baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: a1d41d849c4c59fcd1fd319293246161e720c2dc
+          path: formal-baseline
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Install Android build SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build release APKs for formal update verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/verify_drive_variant.sh
+          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleRelease
+          gradle --no-daemon --console=plain --stacktrace --project-dir formal-baseline :app:assembleRelease
+      - name: Install hash-locked signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == 'Linux' ]]
+          [[ "$(uname -m)" == 'x86_64' ]]
+          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          [[ "$PYTHON_VERSION" == '3.12' ]]
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Prepare stable-signed formal update pair
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          CURRENT_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          BASE_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" formal-baseline/app/build.gradle | head -1)"
+          BASE_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' formal-baseline/app/build.gradle | head -1)"
+          [[ "$CURRENT_VERSION_NAME" == '1.4.0' ]]
+          [[ "$CURRENT_VERSION_CODE" == '1000054' ]]
+          [[ "$BASE_VERSION_NAME" == '1.3.0' ]]
+          [[ "$BASE_VERSION_CODE" == '1000050' ]]
+          (( CURRENT_VERSION_CODE > BASE_VERSION_CODE ))
+
+          mkdir -p formal-update
+          BASE_UNSIGNED=formal-baseline/app/build/outputs/apk/release/app-release-unsigned.apk
+          CURRENT_UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
+          BASE_ALIGNED=formal-update/selfrun-drive-v1.3.0-aligned-unsigned.apk
+          CURRENT_ALIGNED=formal-update/selfrun-drive-v1.4.0-aligned-unsigned.apk
+          BASE_APK=formal-update/selfrun-drive-v1.3.0.apk
+          CURRENT_APK=formal-update/selfrun-drive-v1.4.0.apk
+          test -s "$BASE_UNSIGNED"
+          test -s "$CURRENT_UNSIGNED"
+          "$BT/zipalign" -p -f 4 "$BASE_UNSIGNED" "$BASE_ALIGNED"
+          "$BT/zipalign" -p -f 4 "$CURRENT_UNSIGNED" "$CURRENT_ALIGNED"
+          "$BT/zipalign" -c -v 4 "$BASE_ALIGNED" >/dev/null
+          "$BT/zipalign" -c -v 4 "$CURRENT_ALIGNED" >/dev/null
+
+          PASS_FILE="$RUNNER_TEMP/selfrun-drive-formal-update-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$BASE_ALIGNED" "$PASS_FILE" "$BASE_APK" >/dev/null
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$CURRENT_ALIGNED" "$PASS_FILE" "$CURRENT_APK" >/dev/null
+          "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-update/base-cert.txt
+          "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > formal-update/current-cert.txt
+          BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-update/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          CURRENT_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-update/current-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$BASE_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]]
+          [[ "$CURRENT_CERT" == "$BASE_CERT" ]]
+
+          BASE_BADGING="$($BT/aapt dump badging "$BASE_APK")"
+          CURRENT_BADGING="$($BT/aapt dump badging "$CURRENT_APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$CURRENT_BADGING"
+          grep -Fq "versionCode='1000050'" <<<"$BASE_BADGING"
+          grep -Fq "versionName='1.3.0'" <<<"$BASE_BADGING"
+          grep -Fq "versionCode='1000054'" <<<"$CURRENT_BADGING"
+          grep -Fq "versionName='1.4.0'" <<<"$CURRENT_BADGING"
+
+          cat > formal-update/verify-formal-update.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PKG='com.shaterguy.chatgptselfrun.drive'
+          BASE_APK='formal-update/selfrun-drive-v1.3.0.apk'
+          CURRENT_APK='formal-update/selfrun-drive-v1.4.0.apk'
+          adb uninstall "$PKG" >/dev/null 2>&1 || true
+          echo '[formal-update] install 1.3.0 baseline'
+          adb install --no-incremental "$BASE_APK"
+          BASE_DUMP="$(adb shell dumpsys package "$PKG")"
+          grep -Fq 'versionName=1.3.0' <<<"$BASE_DUMP"
+          grep -Fq 'versionCode=1000050' <<<"$BASE_DUMP"
+          BEFORE_UID="$(sed -n 's/.*userId=\([0-9][0-9]*\).*/\1/p' <<<"$BASE_DUMP" | head -1)"
+          test -n "$BEFORE_UID"
+          echo "[formal-update] baseline uid=$BEFORE_UID"
+          echo '[formal-update] update in place to 1.4.0'
+          adb install -r --no-incremental "$CURRENT_APK"
+          CURRENT_DUMP="$(adb shell dumpsys package "$PKG")"
+          grep -Fq 'versionName=1.4.0' <<<"$CURRENT_DUMP"
+          grep -Fq 'versionCode=1000054' <<<"$CURRENT_DUMP"
+          AFTER_UID="$(sed -n 's/.*userId=\([0-9][0-9]*\).*/\1/p' <<<"$CURRENT_DUMP" | head -1)"
+          test -n "$AFTER_UID"
+          [[ "$BEFORE_UID" == "$AFTER_UID" ]]
+          adb shell pm path "$PKG"
+          echo "[formal-update] updated uid=$AFTER_UID"
+          echo '[formal-update] PASS'
+          SH
+          chmod +x formal-update/verify-formal-update.sh
+      - name: Enable hardware acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Verify formal 1.3.0 to 1.4.0 in-place update
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: bash formal-update/verify-formal-update.sh | tee formal-update/formal-update-evidence.txt
+      - name: Upload formal update evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-formal-update-evidence
+          path: |
+            formal-update/base-cert.txt
+            formal-update/current-cert.txt
+            formal-update/formal-update-evidence.txt
+            formal-update/verify-formal-update.sh
+          if-no-files-found: warn
+          retention-days: 30
+
   verify-coinstall-emulator:
     runs-on: ubuntu-latest
     timeout-minutes: 45
