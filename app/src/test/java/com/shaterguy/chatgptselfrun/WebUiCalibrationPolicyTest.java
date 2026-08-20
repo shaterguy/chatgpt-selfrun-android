@@ -138,15 +138,17 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(activity.contains("button.setMinHeight(Ui.dp(this, 48))"));
     }
 
-    @Test public void automationAndCalibrationShareMobileWebViewPolicy() throws Exception {
+    @Test public void automationUsesFixedMobileViewportWhileCalibrationKeepsSharedWebPolicy() throws Exception {
         String config = src("WebViewConfig.java");
         String host = src("HeadlessWebViewHost.java");
         String activity = src("WebUiCalibrationActivity.java");
         assertTrue(config.contains("setUseWideViewPort(false)"));
         assertTrue(config.contains("setLoadWithOverviewMode(false)"));
-        assertFalse(host.contains("1440"));
-        assertFalse(host.contains("900"));
-        assertTrue(host.contains("new WebUiCalibrationStore(context).viewport()"));
+        assertTrue(host.contains("AutomationViewportPolicy.WIDTH_PX"));
+        assertTrue(host.contains("AutomationViewportPolicy.HEIGHT_PX"));
+        assertTrue(host.contains("AutomationViewportPolicy.DENSITY_DPI"));
+        assertFalse(host.contains("new WebUiCalibrationStore(context).viewport()"));
+        assertFalse(host.contains("DisplayMetrics"));
         assertTrue(activity.contains("WebViewConfig.applyAutomation(webView)"));
     }
 
@@ -164,6 +166,7 @@ public class WebUiCalibrationPolicyTest {
         String activity = src("WebUiCalibrationActivity.java");
         assertTrue(logMenu.contains("웹 UI 보정 로그"));
         assertTrue(logMenu.contains("calibration.logText(120)"));
+        assertTrue(logMenu.contains("calibration.profileStatus()"));
         assertTrue(activity.contains("[런타임 MATCH/MISS]"));
         assertTrue(activity.contains("WebUiCalibrationDom.readRuntimeLog()"));
     }
