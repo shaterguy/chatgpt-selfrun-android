@@ -133,7 +133,6 @@ public final class MainActivity extends Activity {
                 + "\nDrive 문서: " + dash(store.turnDocumentUrl())
                 + "\nDrive signal cursor: " + store.driveSignalCursor()
                 + "\n마지막 Drive signal: " + dash(store.lastDriveSignalType())
-                + "\nCOMMAND_RECEIVED 대기: " + (store.awaitingCommandAck() ? "예" : "아니오")
                 + "\n마지막 오류: " + errorSummary());
         boolean paused = store.paused() && !store.userStopped();
         boolean running = store.active() && !store.paused() && !store.userStopped()
