@@ -67,6 +67,23 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(js.contains("SUBMISSION_PENDING"));
     }
 
+    @Test public void bootstrapUsesTheSameVerifiedSendStopAndFullRetryProtocol() {
+        String project = "https://chatgpt.com/g/g-p-test";
+        String prepare = SelfRunContinuationDom.prepareBootstrap(project, PROMPT, "bootstrap-marker");
+        String click = SelfRunContinuationDom.clickPreparedBootstrap(project, PROMPT, "bootstrap-marker");
+        String verify = SelfRunContinuationDom.verifyBootstrapSubmission(project, PROMPT, "bootstrap-marker", 2500L);
+        assertTrue(prepare.contains("c0.state!=='SEND_ENABLED'"));
+        assertTrue(prepare.contains("state:'clearing'"));
+        assertTrue(prepare.contains("state:'inputting'"));
+        assertTrue(prepare.contains("exact bootstrap prepared"));
+        assertTrue(click.contains("BOOTSTRAP_CLICKED"));
+        assertFalse(click.contains("SUBMISSION_CONFIRMED"));
+        assertTrue(verify.contains("c.state==='STOP'"));
+        assertTrue(verify.contains("users>baseline&&isEmpty"));
+        assertTrue(verify.contains("elapsed>=2500"));
+        assertTrue(verify.contains("state:'failed'"));
+    }
+
     @Test public void serviceDoesNotUseCommandReceivedAsContinuationAck() throws Exception {
         String service = source("SelfRunService.java");
         String continuationSubmitted = section(service, "private void continuationSubmitted", "private String commandPrompt");
