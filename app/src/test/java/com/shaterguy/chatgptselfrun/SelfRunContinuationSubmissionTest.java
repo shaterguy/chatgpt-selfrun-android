@@ -30,7 +30,7 @@ public class SelfRunContinuationSubmissionTest {
         String prepare = between(dom, "static String prepareDriveTurn", "static String clickPreparedDriveTurn");
         String click = between(dom, "static String clickPreparedDriveTurn", "static String verifyDriveTurnSubmission");
         String verify = between(dom, "static String verifyDriveTurnSubmission", "private static String conversationGuard");
-        assertFalse(prepare.contains("SUBMISSION_CONFIRMED"));
+        assertFalse(prepare.contains("users>baseline"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertTrue(click.contains("baselineUserCount=userMessageCount()"));
         assertTrue(verify.contains("users>baseline&&isEmpty"));
