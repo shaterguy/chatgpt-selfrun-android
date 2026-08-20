@@ -51,10 +51,10 @@ jobs:
           PREV_SRC="$RUNNER_TEMP/selfrun-drive-test-prev-src"
           rm -rf "$PREV_SRC"
           git worktree add --detach "$PREV_SRC" "$GITHUB_SHA"
-          sed -i "s/def selfRunDriveVersionCode = 1000055/def selfRunDriveVersionCode = 1000054/" "$PREV_SRC/app/build.gradle"
-          sed -i "s/def selfRunDriveVersionName = '1.4.1-dev1'/def selfRunDriveVersionName = '1.4.0'/" "$PREV_SRC/app/build.gradle"
-          grep -Fq 'def selfRunDriveVersionCode = 1000054' "$PREV_SRC/app/build.gradle"
-          grep -Fq "def selfRunDriveVersionName = '1.4.0'" "$PREV_SRC/app/build.gradle"
+          sed -i "s/def selfRunDriveVersionCode = 1000056/def selfRunDriveVersionCode = 1000055/" "$PREV_SRC/app/build.gradle"
+          sed -i "s/def selfRunDriveVersionName = '1.4.1-dev2'/def selfRunDriveVersionName = '1.4.1-dev1'/" "$PREV_SRC/app/build.gradle"
+          grep -Fq 'def selfRunDriveVersionCode = 1000055' "$PREV_SRC/app/build.gradle"
+          grep -Fq "def selfRunDriveVersionName = '1.4.1-dev1'" "$PREV_SRC/app/build.gradle"
           gradle --no-daemon --console=plain --stacktrace --project-dir "$PREV_SRC" :app:assembleQaApp
           PREV_UNSIGNED="$(find "$PREV_SRC/app/build/outputs/apk/qaApp" -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           test -n "$PREV_UNSIGNED"
@@ -98,14 +98,14 @@ jobs:
 
           TEST_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           TEST_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          TEST_PREV_VERSION_NAME='1.4.0'
-          TEST_PREV_VERSION_CODE='1000054'
+          TEST_PREV_VERSION_NAME='1.4.1-dev1'
+          TEST_PREV_VERSION_CODE='1000055'
           FORMAL_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" formal-baseline/app/build.gradle | head -1)"
           FORMAL_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' formal-baseline/app/build.gradle | head -1)"
           [[ "$FORMAL_VERSION_NAME" == '1.4.0' ]] || fail "formal versionName mismatch: $FORMAL_VERSION_NAME"
           [[ "$FORMAL_VERSION_CODE" == '1000054' ]] || fail "formal versionCode mismatch: $FORMAL_VERSION_CODE"
-          [[ "$TEST_VERSION_NAME" == '1.4.1-dev1' ]] || fail "TEST versionName mismatch: $TEST_VERSION_NAME"
-          [[ "$TEST_VERSION_CODE" == '1000055' ]] || fail "TEST versionCode mismatch: $TEST_VERSION_CODE"
+          [[ "$TEST_VERSION_NAME" == '1.4.1-dev2' ]] || fail "TEST versionName mismatch: $TEST_VERSION_NAME"
+          [[ "$TEST_VERSION_CODE" == '1000056' ]] || fail "TEST versionCode mismatch: $TEST_VERSION_CODE"
           (( TEST_VERSION_CODE > TEST_PREV_VERSION_CODE )) || fail 'TEST current versionCode is not greater than predecessor'
           note "formal identity: versionName=$FORMAL_VERSION_NAME versionCode=$FORMAL_VERSION_CODE"
           note "TEST predecessor identity: versionName=$TEST_PREV_VERSION_NAME versionCode=$TEST_PREV_VERSION_CODE"
@@ -203,7 +203,7 @@ jobs:
           script: >-
             bash -o pipefail -c
             'TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
-            FORMAL_EXPECTED_VERSION="1.4.0" TEST_PREV_EXPECTED_VERSION="1.4.0" TEST_EXPECTED_VERSION="$TEST_VERSION"
+            FORMAL_EXPECTED_VERSION="1.4.0" TEST_PREV_EXPECTED_VERSION="1.4.1-dev1" TEST_EXPECTED_VERSION="$TEST_VERSION"
             timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh
             formal-baseline/app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/qaApp/app-qaApp-prev-coinstall-signed.apk
