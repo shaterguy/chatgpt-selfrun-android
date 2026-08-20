@@ -31,7 +31,7 @@ public class SelfRunDriveDev3PolicyTest {
     @Test public void completionGoesDirectlyToInternalSendStateWithoutGuard() throws Exception {
         String apply = between(src("SelfRunStore.java"), "void applyDriveSignals", "void beginManualResumeOverride");
         assertTrue(apply.contains("PHASE_WAIT_INTERNAL_SEND"));
-        assertTrue(apply.contains("내부 WebView SEND 상태 확인"));
+        assertTrue(apply.contains("내부 WebView 입력 대기 상태 확인"));
         assertFalse(apply.contains("안전 지연"));
         assertFalse(apply.contains("PHASE_DRIVE_COMMIT_GUARD"));
     }

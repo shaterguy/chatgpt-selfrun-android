@@ -49,6 +49,7 @@ public class SelfRunDriveAssistantIsolationTest {
         String service = src("SelfRunService.java");
         String handler = between(service, "private void handleWebResult", "private String driveBootstrap");
         assertTrue(handler.contains("PHASE_WAIT_INTERNAL_SEND.equals(phase)"));
+        assertTrue(handler.contains("SelfRunContinuationDom.COMPOSER_IDLE.equals(status)"));
         assertTrue(handler.contains("SelfRunContinuationDom.SEND_ENABLED.equals(status)"));
         assertTrue(handler.contains("SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
         assertTrue(handler.contains("MODE_WORK"));

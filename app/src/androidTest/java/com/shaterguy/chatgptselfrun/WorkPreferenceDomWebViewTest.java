@@ -83,6 +83,32 @@ public final class WorkPreferenceDomWebViewTest {
                 SelfRunContinuationDom.UNKNOWN);
     }
 
+    @Test public void voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadVoiceIdleFixture(scenario, web);
+
+            JSONObject idle = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
+            assertEquals(SelfRunContinuationDom.COMPOSER_IDLE, idle.getString("status"));
+
+            JSONObject prepared = null;
+            for (int attempt = 0; attempt < 8; attempt++) {
+                prepared = evaluate(scenario, web,
+                        SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe"));
+                if ("READY_TO_SUBMIT".equals(prepared.getString("status"))) break;
+            }
+            assertNotNull(prepared);
+            assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
+
+            JSONObject clicked = evaluate(scenario, web,
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe"));
+            assertEquals("CONTINUE_CLICKED", clicked.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
+        }
+    }
+
     private static void assertContinuationState(String controls, String expected) throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
@@ -156,6 +182,24 @@ public final class WorkPreferenceDomWebViewTest {
         assertTrue("Continuation WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
 
+    private static void loadVoiceIdleFixture(ActivityScenario<SelfRunNewActivity> scenario,
+                                             AtomicReference<WebView> web) throws Exception {
+        CountDownLatch loaded = new CountDownLatch(1);
+        scenario.onActivity(activity -> {
+            WebView view = new WebView(activity);
+            view.getSettings().setJavaScriptEnabled(true);
+            view.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView ignored, String url) {
+                    if (CONVERSATION_URL.equals(url)) loaded.countDown();
+                }
+            });
+            activity.setContentView(view);
+            web.set(view);
+            view.loadDataWithBaseURL(CONVERSATION_URL, voiceIdleFixture(), "text/html", "UTF-8", null);
+        });
+        assertTrue("Voice-idle WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+    }
+
     private static JSONObject evaluate(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                        String script) throws Exception {
         CountDownLatch complete = new CountDownLatch(1);
@@ -203,6 +247,19 @@ public final class WorkPreferenceDomWebViewTest {
                 + "<body><main><div id='composer-shell'><form><textarea id='prompt-textarea'></textarea>"
                 + formControls + "</form><div id='continuation-controls'>" + controls + "</div></div></main>"
                 + "<script>window.stopClicks=0;const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
+                + "</body></html>";
+    }
+
+    private static String voiceIdleFixture() {
+        return "<!doctype html><html><head><style>body{margin:20px}button{display:block;margin:8px}</style></head>"
+                + "<body><main><form id='composer'><textarea id='prompt-textarea'></textarea>"
+                + "<button id='voice' type='button' data-testid='composer-speech-button' aria-label='Start voice mode'>Voice</button>"
+                + "</form></main><script>window.voiceClicks=0;window.sendClicks=0;"
+                + "const form=document.getElementById('composer'),composer=document.getElementById('prompt-textarea'),voice=document.getElementById('voice');"
+                + "voice.addEventListener('click',()=>window.voiceClicks++);"
+                + "composer.addEventListener('input',()=>{if(!composer.value||document.getElementById('send'))return;voice.remove();"
+                + "const send=document.createElement('button');send.id='send';send.type='submit';send.dataset.testid='send-button';send.setAttribute('aria-label','Send');send.textContent='Send';"
+                + "send.addEventListener('click',event=>{event.preventDefault();window.sendClicks++;});form.appendChild(send);});</script>"
                 + "</body></html>";
     }
 }

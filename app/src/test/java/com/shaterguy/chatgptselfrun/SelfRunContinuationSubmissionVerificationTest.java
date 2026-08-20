@@ -14,17 +14,21 @@ public final class SelfRunContinuationSubmissionVerificationTest {
     private static final String URL = "https://chatgpt.com/g/g-p-test/c/conversation123";
     private static final String PROMPT = "[2026.08.20 | 19:14:40] [SELF_RUN_CONTINUE SR-TEST]";
 
-    @Test public void buttonClassifierSeparatesStopSendDisabledAndUnknown() {
+    @Test public void buttonClassifierSeparatesStopSendComposerIdleAndUnknown() {
         String js = SelfRunContinuationDom.buttonState(URL);
         assertTrue(js.contains("SEND_ENABLED"));
         assertTrue(js.contains("STOP"));
         assertTrue(js.contains("SEND_DISABLED"));
+        assertTrue(js.contains("COMPOSER_IDLE"));
         assertTrue(js.contains("UNKNOWN"));
         assertTrue(js.contains("continuation composer unavailable"));
         assertTrue(js.contains("button,[role=\"button\"]"));
         assertTrue(js.contains("generating|streaming|responding"));
         assertTrue(js.indexOf("const stop=controls.find(isStop)") < js.indexOf("const send=calibrated"));
         assertTrue(js.contains("isSend(calibrated)"));
+        assertTrue(js.contains("speech|voice|mic|microphone|dictation"));
+        assertTrue(js.contains("composerEditable()"));
+        assertTrue(js.contains("if(voice&&composerEditable())return{state:'COMPOSER_IDLE'"));
         assertFalse(js.contains("!isStop(calibrated))?calibrated"));
         assertTrue(js.contains("if(stop)return{state:'STOP'"));
     }
@@ -33,6 +37,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "marker-1");
         assertTrue(js.contains("c0.state!=='SEND_ENABLED'"));
         assertTrue(js.contains("c0.state!=='SEND_DISABLED'"));
+        assertTrue(js.contains("c0.state!=='COMPOSER_IDLE'"));
         assertTrue(js.indexOf("c0.state!=='SEND_ENABLED'") < js.indexOf("clearComposer()"));
         assertTrue(js.contains("state:'clearing'"));
         assertTrue(js.contains("clearComposer()"));
@@ -75,6 +80,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         String verify = SelfRunContinuationDom.verifyBootstrapSubmission(project, PROMPT, "bootstrap-marker", 2500L);
         assertTrue(prepare.contains("c0.state!=='SEND_ENABLED'"));
         assertTrue(prepare.contains("c0.state!=='SEND_DISABLED'"));
+        assertTrue(prepare.contains("c0.state!=='COMPOSER_IDLE'"));
         assertTrue(prepare.contains("state:'clearing'"));
         assertTrue(prepare.contains("state:'inputting'"));
         assertTrue(prepare.contains("exact bootstrap prepared"));
@@ -107,17 +113,18 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "work-marker");
         assertTrue(js.contains("c0.state!=='SEND_ENABLED'"));
         assertTrue(js.contains("c0.state!=='SEND_DISABLED'"));
+        assertTrue(js.contains("c0.state!=='COMPOSER_IDLE'"));
         assertTrue(js.indexOf("c0.state!=='SEND_ENABLED'") < js.indexOf("clearComposer()"));
     }
 
-    @Test public void idleDisabledSendAdvancesOutOfInternalWaitWithoutClickingStop() throws Exception {
+    @Test public void idleComposerOrDisabledSendAdvancesOutOfInternalWaitWithoutClickingStop() throws Exception {
         String service = source("SelfRunService.java");
         String handler = section(service, "private void handleWebResult", "private String driveBootstrap");
-        assertTrue(handler.contains("SelfRunContinuationDom.SEND_ENABLED.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
-        assertTrue(handler.contains("send_control_ready"));
+        assertTrue(handler.contains("SelfRunContinuationDom.COMPOSER_IDLE.equals(status)||SelfRunContinuationDom.SEND_ENABLED.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
+        assertTrue(handler.contains("composer_idle_ready"));
         assertFalse(handler.contains("SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)"));
         String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "idle-marker");
-        assertTrue(js.contains("c0.state!=='SEND_ENABLED'&&c0.state!=='SEND_DISABLED'"));
+        assertTrue(js.contains("c0.state!=='SEND_ENABLED'&&c0.state!=='SEND_DISABLED'&&c0.state!=='COMPOSER_IDLE'"));
         assertTrue(js.contains("const c=controlState();if(c.state!=='SEND_ENABLED')"));
     }
 
