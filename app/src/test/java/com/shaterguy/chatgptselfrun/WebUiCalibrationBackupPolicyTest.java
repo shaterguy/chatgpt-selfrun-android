@@ -25,6 +25,7 @@ public class WebUiCalibrationBackupPolicyTest {
         assertTrue(codec.contains("ROOT_FIELDS"));
         assertTrue(codec.contains("PROFILE_FIELDS"));
         assertTrue(codec.contains("DESCRIPTOR_FIELDS"));
+        assertTrue(codec.contains("\"layoutFamily\""));
         assertTrue(codec.contains("TARGET_KEYS"));
         assertTrue(codec.contains("requireOnlyFields"));
         assertTrue(codec.contains("unknown_target_key"));
@@ -78,10 +79,10 @@ public class WebUiCalibrationBackupPolicyTest {
         assertTrue(manifest.contains(".WebUiCalibrationActivity\" android:exported=\"false\""));
     }
 
-    @Test public void formalVersionIdentityIsBumped() throws Exception {
+    @Test public void developmentVersionIdentityIsBumped() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000054"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000055"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.1-dev1'"));
     }
 
     private static final class FailingFirstCommitPreferences implements SharedPreferences {
