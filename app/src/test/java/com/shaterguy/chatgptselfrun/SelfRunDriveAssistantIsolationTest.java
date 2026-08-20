@@ -45,14 +45,16 @@ public class SelfRunDriveAssistantIsolationTest {
         assertFalse(detail.contains("optString(\"role\""));
     }
 
-    @Test public void completedDriveTurnRoutesDirectlyToUiExecution() throws Exception {
+    @Test public void completedDriveTurnRoutesDirectlyToUiExecutionAfterSendReadiness() throws Exception {
         String service = src("SelfRunService.java");
-        String guard = between(service, "private void guardElapsed", "private void ensureWebView");
-        assertTrue(guard.contains("PHASE_APPLY_PREFS"));
-        assertTrue(guard.contains("PHASE_SEND_CONTINUE"));
-        assertTrue(guard.contains("MODE_WORK"));
-        assertFalse(guard.contains("READ_NEXT_CONTROL"));
-        assertFalse(guard.contains("SELF_RUN_NEXT"));
+        String handler = between(service, "private void handleWebResult", "private String driveBootstrap");
+        assertTrue(handler.contains("PHASE_DRIVE_COMMIT_GUARD.equals(phase)"));
+        assertTrue(handler.contains("SelfRunContinuationDom.SEND_ENABLED.equals(status)"));
+        assertTrue(handler.contains("MODE_WORK"));
+        assertTrue(handler.contains("PHASE_APPLY_PREFS"));
+        assertTrue(handler.contains("PHASE_SEND_CONTINUE"));
+        assertFalse(handler.contains("READ_NEXT_CONTROL"));
+        assertFalse(handler.contains("SELF_RUN_NEXT"));
     }
 
     @Test public void workPreferencesStillComeFromPendingDriveCompletion() throws Exception {
@@ -70,6 +72,8 @@ public class SelfRunDriveAssistantIsolationTest {
     }
 
     private static String between(String source, String start, String end) {
-        return source.substring(source.indexOf(start), source.indexOf(end));
+        int a = source.indexOf(start), b = source.indexOf(end, Math.max(0, a));
+        assertTrue(a >= 0 && b > a);
+        return source.substring(a, b);
     }
 }
