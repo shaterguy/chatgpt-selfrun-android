@@ -7,43 +7,39 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class SelfRunDriveCommandAckPollingTest {
-    @Test public void commandAckWaitForcesBodyReadDespiteStaleDriveMetadata() throws Exception {
+    @Test public void bootstrapSubmissionWaitsForDriveResultsNotCommandReceived() throws Exception {
+        String service = src("SelfRunService.java");
         String store = src("SelfRunStore.java");
-        String submitted = between(store, "void markCommandSubmitted", "void prepareCommandRetry");
-        String seen = between(store, "void updateDriveSeen", "void baselineDriveSignals");
+        String submitted = between(service, "private void bootstrapSubmitted", "private String commandPrompt");
 
-        assertTrue(store.contains("COMMAND_ACK_FORCE_BODY_VERSION"));
-        assertTrue(submitted.contains("putBoolean(\"awaitingCommandAck\",true)"));
-        assertTrue(submitted.contains("putString(\"lastSeenDriveVersion\",COMMAND_ACK_FORCE_BODY_VERSION)"));
-        assertTrue(seen.contains("awaitingCommandAck() ? COMMAND_ACK_FORCE_BODY_VERSION : safe(version)"));
+        assertTrue(submitted.contains("store.bootstrapSubmissionConfirmed()"));
+        assertTrue(submitted.contains("command_received_ack=unused"));
+        assertTrue(store.contains("void bootstrapSubmissionConfirmed"));
+        assertTrue(store.contains("첫 요청 제출 확인 · Drive 턴 결과 신호 대기"));
+        assertFalse(service.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS"));
+        assertFalse(service.contains("prepareCommandRetry"));
     }
 
-    @Test public void turnCompletionWaitKeepsMetadataOptimizationAfterAck() throws Exception {
+    @Test public void installedDev5AckWaitIsMigratedWithoutResubmitting() throws Exception {
         String store = src("SelfRunStore.java");
-        String service = src("SelfRunService.java");
-        String apply = between(store, "void applyDriveSignals", "void repairGuard");
-        String seen = between(store, "void updateDriveSeen", "void baselineDriveSignals");
-        String poll = between(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
-
-        assertTrue(apply.contains("if(awaiting){awaiting=false;clearCommandWait(e);}"));
-        assertTrue(seen.contains(": safe(version)"));
-        assertTrue(poll.contains("if(!changed&&!resume&&!retry){applyDriveResult(epoch,this::scheduleDrivePoll);return;}"));
-        assertTrue(poll.contains("store.applyDriveSignals(scan.unseen,System.currentTimeMillis(),CONTINUATION_GUARD_MS);store.updateDriveSeen(metadata.version,metadata.modifiedTime)"));
+        String migration = between(store, "void migrateLegacyBootstrapAckWait", "void migrateLegacyDriveCommitGuard");
+        assertTrue(migration.contains("RETRY_BOOTSTRAP"));
+        assertTrue(migration.contains("PHASE_WAIT_DRIVE_COMMIT"));
+        assertTrue(migration.contains("clearCommandWait"));
+        assertTrue(migration.contains("업데이트된 bootstrap · Drive 턴 결과 신호 대기"));
+        assertFalse(migration.contains("PHASE_BOOTSTRAP_SEND"));
     }
 
-    @Test public void fiveMinuteBootstrapRetryCanOnlyHappenAfterLatestBodyRead() throws Exception {
+    @Test public void pollingNeverSchedulesFiveMinuteAckRetry() throws Exception {
         String service = src("SelfRunService.java");
         String poll = between(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
-
-        int bodyRead = poll.indexOf("drive.readDocumentText(accessToken,snapshot.turnDocumentId)");
-        int prepareRetry = poll.indexOf("store.prepareCommandRetry()");
-        assertTrue(bodyRead >= 0);
-        assertTrue(prepareRetry > bodyRead);
+        assertTrue(poll.contains("drive.readDocumentText(accessToken,snapshot.turnDocumentId)"));
+        assertFalse(poll.contains("submissionRetryDue"));
+        assertFalse(poll.contains("prepareCommandRetry"));
         assertTrue(service.contains("private static final long NORMAL_POLL_MS = 60_000L"));
-        assertTrue(service.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS = 5 * 60_000L"));
     }
 
     private static String src(String file) throws Exception {
@@ -54,8 +50,8 @@ public class SelfRunDriveCommandAckPollingTest {
 
     private static String between(String source, String start, String end) {
         int from = source.indexOf(start);
-        int to = source.indexOf(end);
-        if (from < 0 || to < 0 || from >= to) throw new IllegalArgumentException("source markers not found");
+        int to = source.indexOf(end, from);
+        assertTrue(from >= 0 && to > from);
         return source.substring(from, to);
     }
 }

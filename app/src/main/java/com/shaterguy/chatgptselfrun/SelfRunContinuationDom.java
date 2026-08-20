@@ -24,6 +24,60 @@ final class SelfRunContinuationDom {
                 + "const c=controlState();return result(c.state,'continuation button state');})()";
     }
 
+    /** Uses the same verified SEND/STOP protocol for the very first Drive request. */
+    static String prepareBootstrap(String projectUrl, String prompt, String markerId) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:verified-bootstrap:" + markerId);
+        String composerKey = composerKey(projectUrl);
+        String sendKey = sendKey(projectUrl);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + projectGuard(project) + authGuard() + calibration() + textHelpers(expected)
+                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','bootstrap composer unavailable');"
+                + composerOps() + controls(sendKey) + markerOps(marker)
+                + "let m=readMarker();if(m.state==='clicked')return result('VERIFY_REQUIRED','prior bootstrap click requires submission verification');"
+                + "if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','bootstrap submission was already confirmed');"
+                + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "')return result(c0.state,'bootstrap waits for enabled SEND before composer mutation');"
+                + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','bootstrap composer cleared');}"
+                + "if(m.state==='clearing'){if(!empty()){clearComposer();return result('COMPOSER_CLEARING','waiting for empty bootstrap composer readback');}writeMarker({state:'inputting',at:Date.now()});inputComposer();return result('COMPOSER_INPUTTING','fresh bootstrap inserted');}"
+                + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','bootstrap composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact bootstrap readback');}const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'waiting for enabled SEND after bootstrap readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact bootstrap prepared');}"
+                + "if(m.state==='prepared'){if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','prepared bootstrap changed; restarting input');}const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'prepared bootstrap waiting for SEND');return result('READY_TO_SUBMIT','exact bootstrap prepared');}"
+                + "writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','unknown bootstrap marker state reset');})()";
+    }
+
+    static String clickPreparedBootstrap(String projectUrl, String prompt, String markerId) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:verified-bootstrap:" + markerId);
+        String composerKey = composerKey(projectUrl);
+        String sendKey = sendKey(projectUrl);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + projectGuard(project) + authGuard() + calibration() + textHelpers(expected)
+                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','bootstrap composer unavailable before click');"
+                + composerOps() + controls(sendKey) + markerOps(marker)
+                + "const m=readMarker();if(m.state!=='prepared')return result('VERIFY_REQUIRED','bootstrap prepared marker changed before click');"
+                + "if(!same())return result('COMPOSER_CLEARING','exact bootstrap readback lost before click');"
+                + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'SEND no longer enabled for bootstrap');"
+                + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});c.send.focus?.();c.send.click();return result('BOOTSTRAP_CLICKED','SEND clicked; bootstrap verification required');})()";
+    }
+
+    static String verifyBootstrapSubmission(String projectUrl, String prompt, String markerId, long failureMs) {
+        String project = q(SelfRunScript.projectId(projectUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:verified-bootstrap:" + markerId);
+        String composerKey = composerKey(projectUrl);
+        String sendKey = sendKey(projectUrl);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + projectGuard(project) + authGuard() + calibration() + textHelpers(expected)
+                + composer(composerKey) + composerOpsNullable() + controls(sendKey) + markerOps(marker)
+                + "const m=readMarker();if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','bootstrap submission already confirmed');if(m.state!=='clicked')return result('SUBMISSION_FAILED','bootstrap clicked marker unavailable');"
+                + "const c=controlState(),users=userMessageCount(),baseline=Math.max(0,Number(m.baselineUserCount)||0),isEmpty=empty(),stillSame=same(),elapsed=Math.max(0,Date.now()-Math.max(0,Number(m.clickedAt)||0));"
+                + "if(c.state==='" + STOP + "'){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'STOP'});return result('SUBMISSION_CONFIRMED','SEND changed to STOP');}"
+                + "if(users>baseline&&isEmpty){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'USER_MESSAGE'});return result('SUBMISSION_CONFIRMED','new user message exists and composer is empty');}"
+                + "if(elapsed>=" + failureMs + "&&c.state==='" + SEND_ENABLED + "'&&stillSame&&users<=baseline){writeMarker({state:'failed',failedAt:Date.now()});return result('SUBMISSION_FAILED','SEND remained enabled; bootstrap remained; no new user message');}"
+                + "return result('SUBMISSION_PENDING','bootstrap submission verification pending; state='+c.state+';empty='+(isEmpty?1:0)+';users='+users+';baseline='+baseline+';elapsed='+elapsed);})()";
+    }
+
     static String prepareDriveTurn(String conversationUrl, String prompt, String markerId) {
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(prompt);
@@ -79,6 +133,11 @@ final class SelfRunContinuationDom {
 
     private static String conversationGuard(String conversation) {
         return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','host mismatch');const p=location.pathname.split('/').filter(Boolean);const after=k=>{const i=p.indexOf(k);return i>=0&&i+1<p.length?p[i+1]:''};if(after('c')!==" + conversation + ")return result('TARGET_ERROR','canonical conversation mismatch');";
+    }
+
+    private static String projectGuard(String project) {
+        String general = q(SelfRunScript.GENERAL_CHAT_SCOPE);
+        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','host mismatch');const p=location.pathname.split('/').filter(Boolean);const after=k=>{const i=p.indexOf(k);return i>=0&&i+1<p.length?p[i+1]:''};const expectedProject=" + project + ";const actualProject=after('g');if(expectedProject===" + general + "){const generalNew=p.length===0;const generalConversation=p.length===2&&p[0]==='c'&&!!p[1];if(!generalNew&&!generalConversation)return result('TARGET_ERROR','general chat target mismatch');}else if(actualProject!==expectedProject)return result('TARGET_ERROR','project mismatch');";
     }
 
     private static String authGuard() {

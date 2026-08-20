@@ -48,7 +48,7 @@ public class SelfRunDriveAssistantIsolationTest {
     @Test public void completedDriveTurnRoutesDirectlyToUiExecutionAfterSendReadiness() throws Exception {
         String service = src("SelfRunService.java");
         String handler = between(service, "private void handleWebResult", "private String driveBootstrap");
-        assertTrue(handler.contains("PHASE_DRIVE_COMMIT_GUARD.equals(phase)"));
+        assertTrue(handler.contains("PHASE_WAIT_INTERNAL_SEND.equals(phase)"));
         assertTrue(handler.contains("SelfRunContinuationDom.SEND_ENABLED.equals(status)"));
         assertTrue(handler.contains("MODE_WORK"));
         assertTrue(handler.contains("PHASE_APPLY_PREFS"));

@@ -335,7 +335,6 @@ public final class SelfRunRestartActivity extends Activity {
                     .putString("pendingDriveSignalTimestamp", "")
                     .putString("pendingDriveSignalType", "")
                     .putLong("commitDetectedAt", 0L)
-                    .putLong("guardDueAt", 0L)
                     .putString("activeCommandPrompt", prompt)
                     .putString("activeCommandKind", SelfRunStore.RETRY_CONTINUE)
                     .putInt("commandAttempt", 0)

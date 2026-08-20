@@ -16,7 +16,7 @@ public class ContinuationDiagnosticsPolicyTest {
         assertTrue(service.contains("recordContinuationWait(phase,status,detail)"));
         assertTrue(service.contains("recordContinuationTargetError(phase)"));
         assertTrue(service.contains("isContinuationDiagnosticPhase(phase)"));
-        assertTrue(service.contains("PHASE_DRIVE_COMMIT_GUARD.equals(phase)"));
+        assertTrue(service.contains("PHASE_WAIT_INTERNAL_SEND.equals(phase)"));
         assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\""));
         assertTrue(log.contains("if (\"DOM_RESULT\".equals(event))"));
         assertTrue(log.contains("event.equals(\"DOM_RESULT\")"));

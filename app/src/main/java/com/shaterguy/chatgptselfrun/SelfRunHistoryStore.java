@@ -76,7 +76,6 @@ final class SelfRunHistoryStore {
             item.put("pendingDriveSignalTimestamp", store.pendingDriveSignalTimestamp());
             item.put("pendingDriveSignalType", store.pendingDriveSignalType());
             item.put("commitDetectedAt", store.commitDetectedAt());
-            item.put("guardDueAt", store.guardDueAt());
             item.put("awaitingCommandAck", store.awaitingCommandAck());
             item.put("activeCommandKind", store.activeCommandKind());
             item.put("commandAttempt", store.commandAttempt());
