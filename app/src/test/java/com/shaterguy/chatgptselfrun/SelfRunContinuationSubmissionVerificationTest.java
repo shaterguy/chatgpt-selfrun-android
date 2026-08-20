@@ -69,6 +69,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertFalse(continuationSubmitted.contains("SUBMISSION_RETRY_MS"));
         assertTrue(service.contains("CONTINUATION_VERIFY_INTERVAL_MS = 250L"));
         assertTrue(service.contains("CONTINUATION_FAILURE_MS = 2_500L"));
+        assertTrue(service.contains("store.phaseStartedAt()"));
     }
 
     @Test public void workFlowRechecksSendAfterReasoning() throws Exception {
@@ -84,6 +85,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         String service = source("SelfRunService.java");
         String web = section(service, "private void runWebStep", "private void evaluate");
         assertTrue(web.contains("recordContinuationRouteMismatch(webView.getUrl())"));
+        assertTrue(web.contains("scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS)"));
         assertFalse(web.contains("restoreCanonical()"));
         assertFalse(web.contains("loadUrl("));
     }
