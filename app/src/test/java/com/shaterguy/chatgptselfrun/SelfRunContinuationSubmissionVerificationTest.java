@@ -26,6 +26,8 @@ public final class SelfRunContinuationSubmissionVerificationTest {
 
     @Test public void continuationAlwaysClearsThenReinputsAndRequiresExactReadback() {
         String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "marker-1");
+        assertTrue(js.contains("c0.state!=='SEND_ENABLED'"));
+        assertTrue(js.indexOf("c0.state!=='SEND_ENABLED'") < js.indexOf("clearComposer()"));
         assertTrue(js.contains("state:'clearing'"));
         assertTrue(js.contains("clearComposer()"));
         assertTrue(js.contains("if(!empty())"));
@@ -72,13 +74,15 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(service.contains("store.phaseStartedAt()"));
     }
 
-    @Test public void workFlowRechecksSendAfterReasoning() throws Exception {
+    @Test public void workFlowRechecksSendAfterReasoningBeforeComposerMutation() throws Exception {
         String service = source("SelfRunService.java");
         String handler = section(service, "private void handleWebResult", "private String driveBootstrap");
         assertTrue(handler.contains("PHASE_APPLY_REASONING.equals(phase)&&\"READY\".equals(status)"));
-        assertTrue(handler.contains("SelfRunContinuationDom.buttonState(store.conversationUrl())"));
-        assertTrue(handler.contains("PHASE_APPLY_REASONING.equals(phase)&&SelfRunContinuationDom.SEND_ENABLED.equals(status)"));
+        assertTrue(handler.contains("reasoning_ready_for_send_recheck"));
         assertTrue(handler.contains("PHASE_SEND_CONTINUE"));
+        String js = SelfRunContinuationDom.prepareDriveTurn(URL, PROMPT, "work-marker");
+        assertTrue(js.contains("c0.state!=='SEND_ENABLED'"));
+        assertTrue(js.indexOf("c0.state!=='SEND_ENABLED'") < js.indexOf("clearComposer()"));
     }
 
     @Test public void normalContinuationDoesNotRestoreCanonicalOnDiagnosticMismatch() throws Exception {
