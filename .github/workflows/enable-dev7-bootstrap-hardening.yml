@@ -54,6 +54,17 @@ jobs:
           for line in body.splitlines():
               lines.append(line[10:] if line.startswith('          ') else line)
           script = '\n'.join(lines) + '\n'
+          needle = """if old_model not in detail:
+              raise SystemExit('SelfRunDetailActivity.java: model block missing')
+          detail_path.write_text(detail.replace(old_model, new_model, 1), encoding='utf-8')"""
+          replacement = """model_start = detail.find('    private String model(JSONObject item) {')
+          model_end = detail.find('\\n\\n    private static String error', model_start)
+          if model_start < 0 or model_end < 0:
+              raise SystemExit('SelfRunDetailActivity.java: model boundaries missing')
+          detail_path.write_text(detail[:model_start] + new_model + detail[model_end:], encoding='utf-8')"""
+          if needle not in script:
+              raise SystemExit('detail replacement guard not found in staged patch')
+          script = script.replace(needle, replacement, 1)
           exec(compile(script, 'apply-dev7-bootstrap-hardening', 'exec'), {'__name__': '__main__'})
           PY
       - name: Verify policy and unit tests
