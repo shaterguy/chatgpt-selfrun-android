@@ -144,6 +144,39 @@ public final class ChatReasoningDelayedDomWebViewTest {
         }
     }
 
+    @Test public void newChatTransitionWaitsForAcknowledgementBeforeFiniteFailure() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web, newChatTransitionFixture());
+            assertEquals("/c/fixture", read(scenario, web,
+                    "(()=>{history.replaceState(null,'','/c/fixture');return location.pathname;})()"));
+            String script = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL,
+                    SelfRunStore.MODE_CHAT, "SR-NEW-CHAT-WINDOW");
+
+            JSONObject first = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", first.getString("status"));
+            assertEquals("1", read(scenario, web, "String(window.newChatClicks)"));
+
+            setNow(scenario, web, 2_200L);
+            JSONObject protectedWait = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", protectedWait.getString("status"));
+            assertEquals("1", read(scenario, web, "String(window.newChatClicks)"));
+
+            setNow(scenario, web, 3_000L);
+            JSONObject secondClick = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", secondClick.getString("status"));
+            assertEquals("2", read(scenario, web, "String(window.newChatClicks)"));
+
+            setNow(scenario, web, 5_200L);
+            assertEquals("UI_WAIT", evaluate(scenario, web, script).getString("status"));
+
+            setNow(scenario, web, 5_600L);
+            JSONObject finiteFailure = evaluate(scenario, web, script);
+            assertEquals("CHAT_BOOTSTRAP_NEW_CHAT_FAILED", finiteFailure.getString("status"));
+            assertEquals(2, finiteFailure.getJSONObject("diagnostics").getInt("newChatClicks"));
+        }
+    }
+
     @Test public void bootstrapResultPolicyParsesAndClassifiesOnAndroid() {
         BootstrapResultPolicy.Parsed valid = BootstrapResultPolicy.parse(
                 "\"{\\\"status\\\":\\\"UI_WAIT\\\",\\\"detail\\\":\\\"mode\\\"}\"");
@@ -348,6 +381,18 @@ public final class ChatReasoningDelayedDomWebViewTest {
                 <script>
                 window.testNow=1000;Date.now=()=>window.testNow;const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');
                 trigger.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;trigger.setAttribute('aria-expanded','true');}else{menu.hidden=true;trigger.setAttribute('aria-expanded','false');}});
+                </script></body></html>
+                """;
+    }
+
+    private static String newChatTransitionFixture() {
+        return """
+                <!doctype html><html><head><style>
+                body{margin:0;min-height:800px}button{display:block;width:160px;height:48px}
+                </style></head><body><button id="new-chat" type="button" aria-label="New chat">New chat</button>
+                <script>
+                window.testNow=1000;Date.now=()=>window.testNow;window.newChatClicks=0;
+                document.getElementById('new-chat').addEventListener('click',()=>{window.newChatClicks++;});
                 </script></body></html>
                 """;
     }

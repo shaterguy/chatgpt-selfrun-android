@@ -31,6 +31,8 @@ public final class BootstrapFiniteStateWiringTest {
         assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
         assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
         assertTrue(dom.contains("CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"));
+        assertTrue(dom.contains("newChatRetryMs=1800"));
+        assertTrue(dom.contains("newChatFailureMs=10000"));
         assertTrue(history.contains("BootstrapRunStateStore.appendHistory"));
         assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));
         assertFalse(detail.contains("ChatReasoningPreferenceStore.summary(this"));
