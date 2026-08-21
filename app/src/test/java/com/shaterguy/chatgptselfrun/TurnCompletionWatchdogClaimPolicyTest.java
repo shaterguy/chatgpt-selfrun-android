@@ -47,13 +47,15 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         String service = sourceMain("SelfRunService.java");
         String poll = section(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
         int fence = poll.indexOf("if(watchdogFinalRecheck)");
-        int applySignals = poll.indexOf("store.applyDriveSignals(scan.unseen,System.currentTimeMillis())", fence);
+        int applySignals = poll.indexOf("store.applyDriveSignals(normalUnseen,System.currentTimeMillis())", fence);
+        int quarantine = poll.indexOf("normalUnseen.size()!=scan.unseen.size()", fence);
         int claimStart = poll.indexOf("store.beginWatchdogClaim(scan.totalCount)", fence);
         int cas = poll.indexOf("drive.createNamedRangeClaim", fence);
         int openClick = poll.indexOf("store.ownWatchdogClaimAndEnterClick", fence);
         assertTrue(fence >= 0);
         assertTrue(applySignals > fence);
-        assertTrue(claimStart > applySignals);
+        assertTrue(quarantine > applySignals);
+        assertTrue(claimStart > quarantine);
         assertTrue(cas > claimStart);
         assertTrue(openClick > cas);
         assertFalse(section(poll, "if(watchdogFinalRecheck)", "if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)")
