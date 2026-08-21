@@ -191,6 +191,8 @@ public final class WorkPreferenceDomWebViewTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadChatReasoningFixture(scenario, web, html);
             assertNotNull("Android System WebView must be available", WebView.getCurrentWebViewPackage());
+            assertEquals("true", read(scenario, web,
+                    "String(document.getElementById('prompt-textarea').getBoundingClientRect().top-document.getElementById('trigger').getBoundingClientRect().bottom>280)"));
             String script = chatReasoningScript(selection);
 
             JSONObject result = null;
@@ -345,8 +347,9 @@ public final class WorkPreferenceDomWebViewTest {
     }
 
     private static String chatReasoningFixture(String sliderMarkup, String sliderScript) {
-        return "<!doctype html><html><head><style>body{margin:20px}form{height:72px}button{display:block;margin:8px}#reasoning-menu[hidden]{display:none}#reasoning-menu{width:280px;height:48px}#track{position:relative;width:240px;height:24px;background:#ddd}#slider[role=slider]{position:absolute;left:0;top:3px;width:18px;height:18px;background:#222}</style></head>"
-                + "<body><form><textarea id='prompt-textarea'></textarea><button id='trigger' type='button' aria-haspopup='menu' aria-expanded='false'>Instant</button></form>"
+        return "<!doctype html><html><head><style>body{margin:0}header{height:64px;padding:8px}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}button{display:block;margin:8px}#reasoning-menu[hidden]{display:none}#reasoning-menu{width:280px;height:48px}#track{position:relative;width:240px;height:24px;background:#ddd}#slider[role=slider]{position:absolute;left:0;top:3px;width:18px;height:18px;background:#222}</style></head>"
+                + "<body><header><button id='trigger' type='button' aria-haspopup='menu' aria-controls='reasoning-menu' aria-expanded='false'>Flash Extended</button></header>"
+                + "<main><form><textarea id='prompt-textarea'></textarea></form></main>"
                 + "<div id='reasoning-menu' role='menu' hidden>" + sliderMarkup + "</div>"
                 + "<script>window.menuOpenClicks=0;window.menuCloseClicks=0;const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');"
                 + "trigger.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;window.menuOpenClicks++;trigger.setAttribute('aria-expanded','true');}else{menu.hidden=true;window.menuCloseClicks++;trigger.setAttribute('aria-expanded','false');}});"
