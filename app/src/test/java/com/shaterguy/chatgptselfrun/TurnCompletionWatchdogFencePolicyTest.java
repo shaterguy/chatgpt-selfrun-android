@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TurnCompletionWatchdogFencePolicyTest {
-    @Test public void watchdogRecoverySubmissionPhasesStayPlainContinuationOwned() {
+    @Test public void watchdogRecoverySubmissionPhasesStayRecoveryContinuationOwned() {
         assertTrue(SelfRunService.isWatchdogRecoverySubmissionPhase("WATCHDOG_SEND_CONTINUE"));
         assertTrue(SelfRunService.isWatchdogRecoverySubmissionPhase("WATCHDOG_CLICK_CONTINUE"));
         assertFalse(SelfRunService.isWatchdogRecoverySubmissionPhase(SelfRunStore.PHASE_SEND_CONTINUE));
@@ -27,7 +27,7 @@ public final class TurnCompletionWatchdogFencePolicyTest {
         assertFalse(watchdogPrepared.contains("clickPreparedDriveTurn"));
     }
 
-    @Test public void finalFenceConsumesLateDriveSignalsBeforeClaimAndClick() throws Exception {
+    @Test public void finalFenceConsumesNormalSignalsAndQuarantinesRecoverySignalsBeforeClaimAndClick() throws Exception {
         String service = source("SelfRunService.java");
         String drivePhases = section(service, "private static boolean drivePhase", "static boolean shouldContinueSamePhaseDriveStep");
         assertTrue(drivePhases.contains("PHASE_WATCHDOG_FINAL_RECHECK"));
@@ -36,13 +36,15 @@ public final class TurnCompletionWatchdogFencePolicyTest {
 
         String poll = section(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
         int fence = poll.indexOf("if(watchdogFinalRecheck)");
-        int applySignals = poll.indexOf("store.applyDriveSignals(scan.unseen,System.currentTimeMillis())", fence);
+        int applySignals = poll.indexOf("store.applyDriveSignals(normalUnseen,System.currentTimeMillis())", fence);
+        int quarantine = poll.indexOf("normalUnseen.size()!=scan.unseen.size()", fence);
         int claim = poll.indexOf("drive.createNamedRangeClaim", fence);
         int openClick = poll.indexOf("store.ownWatchdogClaimAndEnterClick", fence);
         int clearAttempt = poll.indexOf("clearContinuationAttempt", fence);
         assertTrue(fence >= 0);
         assertTrue(applySignals > fence);
-        assertTrue(claim > applySignals);
+        assertTrue(quarantine > applySignals);
+        assertTrue(claim > quarantine);
         assertTrue(openClick > claim);
         assertTrue(clearAttempt > fence);
     }
