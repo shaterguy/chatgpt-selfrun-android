@@ -14,14 +14,16 @@ import static org.junit.Assert.assertTrue;
 public final class ChatReasoningProcessRecreationPolicyTest {
     @Test public void processInitializerAndContextExplicitLookupAreWired() throws Exception {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
+        String gradle = read("app/build.gradle", "build.gradle");
         String application = src("SelfRunApplication.java");
         String preferences = src("ChatReasoningPreferenceStore.java");
         String history = src("SelfRunHistoryActivity.java");
         String instrumentation = read(
                 "app/src/androidTest/java/com/shaterguy/chatgptselfrun/ChatReasoningProcessRecreationAndroidTest.java",
                 "src/androidTest/java/com/shaterguy/chatgptselfrun/ChatReasoningProcessRecreationAndroidTest.java");
-        String coinstall = read("tools/verify_drive_test_coinstall_emulator.sh",
-                "../tools/verify_drive_test_coinstall_emulator.sh");
+        String runner = read(
+                "app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunAndroidTestRunner.java",
+                "src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunAndroidTestRunner.java");
 
         assertTrue(manifest.contains("android:name=\".SelfRunApplication\""));
         assertTrue(application.contains("initializeProcess(this)"));
@@ -30,8 +32,9 @@ public final class ChatReasoningProcessRecreationPolicyTest {
         assertTrue(preferences.contains("BootstrapRunStateStore.requested(application, runId)"));
         assertTrue(instrumentation.contains("processRecreationReloadsDurableRunSelection"));
         assertTrue(instrumentation.contains("resetProcessCache()"));
-        assertTrue(coinstall.contains("ChatReasoningProcessRecreationAndroidTest"));
-        assertTrue(coinstall.contains("PROCESS_RECREATION_TEST_PASS"));
+        assertTrue(gradle.contains("testInstrumentationRunner 'com.shaterguy.chatgptselfrun.SelfRunAndroidTestRunner'"));
+        assertTrue(runner.contains("ChatReasoningProcessRecreationAndroidTest"));
+        assertTrue(runner.contains("selected + \",\" + PROCESS_RECREATION_TEST"));
         assertTrue(history.contains("BootstrapRunStateStore.summary(item)"));
         assertFalse(history.contains("모델 변경 없음"));
     }
