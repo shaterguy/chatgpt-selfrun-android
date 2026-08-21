@@ -19,7 +19,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-/** Exercises Work continuation selectors on a real Android WebView fixture for an existing general chat. */
+/** Exercises Work and Chat preference selectors on real Android WebView fixtures. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkPreferenceDomWebViewTest {
     private static final String PROJECT_URL = "https://chatgpt.com/g/g-p-test";
@@ -36,6 +36,16 @@ public final class WorkPreferenceDomWebViewTest {
         assertSelection("", "click", true);
         assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "pointerdown", true);
         assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "mousedown", true);
+    }
+
+    @Test public void chatReasoningNativeRangeUsesHtmlDefaultsWhenAriaValuesAreAbsent() throws Exception {
+        assertChatReasoningFixture(nativeChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
+                "document.getElementById('slider').value", "100");
+    }
+
+    @Test public void chatReasoningAriaSliderUsesDefaultBoundsWhenBoundsAreAbsent() throws Exception {
+        assertChatReasoningFixture(ariaChatReasoningFixture(), ChatReasoningPreferenceStore.HIGH,
+                "document.getElementById('slider').getAttribute('aria-valuenow')", "50");
     }
 
     @Test public void v1WorkTargetsPopulateAllScopedV2TargetsWithoutReplacingRecaptures() throws Exception {
@@ -175,6 +185,35 @@ public final class WorkPreferenceDomWebViewTest {
         }
     }
 
+    private static void assertChatReasoningFixture(String html, String selection,
+                                                   String valueExpression, String expectedValue) throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadChatReasoningFixture(scenario, web, html);
+            assertNotNull("Android System WebView must be available", WebView.getCurrentWebViewPackage());
+            String script = chatReasoningScript(selection);
+
+            JSONObject result = null;
+            boolean sawOpen = false;
+            boolean sawSet = false;
+            for (int attempt = 0; attempt < 12; attempt++) {
+                result = evaluate(scenario, web, script);
+                if ("READY".equals(result.getString("status"))) break;
+                assertEquals("UI_WAIT", result.getString("status"));
+                JSONObject diagnostics = result.optJSONObject("diagnostics");
+                String action = diagnostics == null ? "" : diagnostics.optString("action");
+                if ("open-menu".equals(action)) sawOpen = true;
+                if ("set-slider".equals(action)) sawSet = true;
+            }
+            assertNotNull(result);
+            assertTrue("Chat selector must open the menu", sawOpen);
+            assertTrue("Chat selector must move the slider", sawSet);
+            assertEquals("READY", result.getString("status"));
+            assertEquals(expectedValue, read(scenario, web, valueExpression));
+            assertEquals("1", read(scenario, web, "String(window.menuOpenClicks)"));
+        }
+    }
+
     private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                     String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
@@ -192,6 +231,24 @@ public final class WorkPreferenceDomWebViewTest {
                     fixture(triggerAttributes, triggerEvent, reasoning), "text/html", "UTF-8", null);
         });
         assertTrue("WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+    }
+
+    private static void loadChatReasoningFixture(ActivityScenario<SelfRunNewActivity> scenario,
+                                                 AtomicReference<WebView> web, String html) throws Exception {
+        CountDownLatch loaded = new CountDownLatch(1);
+        scenario.onActivity(activity -> {
+            WebView view = new WebView(activity);
+            view.getSettings().setJavaScriptEnabled(true);
+            view.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView ignored, String url) {
+                    if (PROJECT_URL.equals(url)) loaded.countDown();
+                }
+            });
+            activity.setContentView(view);
+            web.set(view);
+            view.loadDataWithBaseURL(PROJECT_URL, html, "text/html", "UTF-8", null);
+        });
+        assertTrue("Chat reasoning WebView fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
 
     private static void loadContinuationFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
@@ -255,6 +312,14 @@ public final class WorkPreferenceDomWebViewTest {
         return String.valueOf(new JSONTokener(raw.get()).nextValue());
     }
 
+    private static String chatReasoningScript(String selection) {
+        return "(()=>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,diagnostics});"
+                + "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const exactText=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();"
+                + "const labelOf=e=>exactText(e?.innerText||'')||exactText(e?.getAttribute?.('aria-label')||'');const composer=document.getElementById('prompt-textarea');"
+                + ChatReasoningDom.inline(selection, "SR-CHAT-REASONING-TEST")
+                + "return result('READY','Chat reasoning fixture ready');})()";
+    }
+
     private static String fixture(String triggerAttributes, String triggerEvent, boolean reasoning) {
         String current = reasoning ? "medium" : "sol";
         String wanted = reasoning ? "max" : "luna";
@@ -267,6 +332,25 @@ public final class WorkPreferenceDomWebViewTest {
                 + "trigger.addEventListener('" + triggerEvent + "',toggle);"
                 + "wanted.addEventListener('click',()=>{trigger.textContent=wanted.textContent;wanted.setAttribute('aria-selected','true');});</script>"
                 + "</body></html>";
+    }
+
+    private static String nativeChatReasoningFixture() {
+        return chatReasoningFixture("<input id='slider' type='range' value='0'>",
+                "const slider=document.getElementById('slider');function updateNative(){const v=Number(slider.value);trigger.textContent=v>=100?'Pro':v>=75?'Extra High':v>=50?'High':v>=25?'Medium':'Instant';}slider.addEventListener('input',updateNative);slider.addEventListener('change',updateNative);");
+    }
+
+    private static String ariaChatReasoningFixture() {
+        return chatReasoningFixture("<div id='track'><div id='slider' role='slider' tabindex='0' aria-valuenow='0'></div></div>",
+                "const slider=document.getElementById('slider'),track=document.getElementById('track');function updateAria(event){const r=track.getBoundingClientRect();const value=Math.round(Math.max(0,Math.min(1,(event.clientX-r.left)/r.width))*100);slider.setAttribute('aria-valuenow',String(value));trigger.textContent=value>=100?'Pro':value>=75?'Extra High':value>=50?'High':value>=25?'Medium':'Instant';}for(const type of ['pointerup','mouseup','click']){track.addEventListener(type,updateAria);slider.addEventListener(type,updateAria);}");
+    }
+
+    private static String chatReasoningFixture(String sliderMarkup, String sliderScript) {
+        return "<!doctype html><html><head><style>body{margin:20px}form{height:72px}button{display:block;margin:8px}#reasoning-menu[hidden]{display:none}#reasoning-menu{width:280px;height:48px}#track{position:relative;width:240px;height:24px;background:#ddd}#slider[role=slider]{position:absolute;left:0;top:3px;width:18px;height:18px;background:#222}</style></head>"
+                + "<body><form><textarea id='prompt-textarea'></textarea><button id='trigger' type='button' aria-haspopup='menu' aria-expanded='false'>Instant</button></form>"
+                + "<div id='reasoning-menu' role='menu' hidden>" + sliderMarkup + "</div>"
+                + "<script>window.menuOpenClicks=0;window.menuCloseClicks=0;const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');"
+                + "trigger.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;window.menuOpenClicks++;trigger.setAttribute('aria-expanded','true');}else{menu.hidden=true;window.menuCloseClicks++;trigger.setAttribute('aria-expanded','false');}});"
+                + sliderScript + "</script></body></html>";
     }
 
     private static String continuationFixture(String controls) {
