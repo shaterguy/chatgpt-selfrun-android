@@ -61,10 +61,10 @@ public final class SelfRunDetailActivity extends Activity {
 
     private String model(JSONObject item) {
         return SelfRunStore.MODE_WORK.equals(item.optString("mode"))
-                ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
-                : ChatReasoningPreferenceStore.summary(this, item.optString("runId"),
-                        item.optString("phase"), item.optString("lastErrorCode"));
+      ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
+      : BootstrapRunStateStore.summary(item);
     }
+
 
     private static String error(JSONObject item) {
         String code = item.optString("lastErrorCode");

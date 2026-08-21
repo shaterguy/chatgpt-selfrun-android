@@ -12,10 +12,12 @@ final class SelfRunHistoryStore {
     private static final String KEY_BACKUP = "runsBackup";
     private static final int MAX_RUNS = 100;
 
+    private final Context app;
     private final SharedPreferences prefs;
 
     SelfRunHistoryStore(Context context) {
-        prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        app = context.getApplicationContext();
+        prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     synchronized boolean sync(SelfRunStore store) {
@@ -52,7 +54,7 @@ final class SelfRunHistoryStore {
         return null;
     }
 
-    private static JSONObject snapshot(SelfRunStore store) {
+    private JSONObject snapshot(SelfRunStore store) {
         JSONObject item = new JSONObject();
         try {
             item.put("runId", store.runId());
@@ -93,6 +95,7 @@ final class SelfRunHistoryStore {
             item.put("lastErrorCode", store.lastErrorCode());
             item.put("lastErrorMessage", bounded(store.lastErrorMessage(), 1_000));
             item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || store.userStopped());
+            BootstrapRunStateStore.appendHistory(app, store.runId(), item);
         } catch (Exception ignored) {
         }
         return item;
