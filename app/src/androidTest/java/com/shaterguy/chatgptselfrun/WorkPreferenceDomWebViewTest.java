@@ -48,6 +48,35 @@ public final class WorkPreferenceDomWebViewTest {
                 "document.getElementById('slider').getAttribute('aria-valuenow')", "50");
     }
 
+    @Test public void chatReasoningReducedRangeAppliesAvailableHigh() throws Exception {
+    assertChatReasoningFixture(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.HIGH,
+            "document.getElementById('slider').value", "2");
+}
+
+    @Test public void chatReasoningReducedRangeRejectsUnavailableLevels() throws Exception {
+    assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
+            "CHAT_REASONING_OPTION_UNAVAILABLE");
+    assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
+            "CHAT_REASONING_OPTION_UNAVAILABLE");
+}
+
+    @Test public void chatReasoningSemanticMismatchNeverFallsBackToNumericPosition() throws Exception {
+    assertChatReasoningTerminal(semanticMismatchFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
+            "CHAT_REASONING_READBACK_MISMATCH");
+}
+
+    @Test public void chatReasoningMissingTriggerAndSliderTerminate() throws Exception {
+    assertChatReasoningTerminal(missingTriggerFixture(), ChatReasoningPreferenceStore.HIGH,
+            "CHAT_REASONING_TRIGGER_NOT_FOUND");
+    assertChatReasoningTerminal(missingSliderFixture(), ChatReasoningPreferenceStore.HIGH,
+            "CHAT_REASONING_SLIDER_NOT_FOUND");
+}
+
+    @Test public void chatReasoningMenuCloseFailureTerminates() throws Exception {
+    assertChatReasoningTerminal(closeBlockedFixture(), ChatReasoningPreferenceStore.INSTANT,
+            "CHAT_REASONING_MENU_CLOSE_FAILED");
+}
+
     @Test public void v1WorkTargetsPopulateAllScopedV2TargetsWithoutReplacingRecaptures() throws Exception {
         JSONObject profile = new JSONObject();
         JSONObject targets = new JSONObject();
@@ -216,6 +245,21 @@ public final class WorkPreferenceDomWebViewTest {
         }
     }
 
+    private static void assertChatReasoningTerminal(String html, String selection,
+                                             String expectedStatus) throws Exception {
+    try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+        AtomicReference<WebView> web = new AtomicReference<>();
+        loadChatReasoningFixture(scenario, web, html);
+        JSONObject result = null;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            result = evaluate(scenario, web, chatReasoningScript(selection));
+            if (!"UI_WAIT".equals(result.getString("status"))) break;
+        }
+        assertNotNull(result);
+        assertEquals(expectedStatus, result.getString("status"));
+    }
+}
+
     private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                     String triggerAttributes, String triggerEvent, boolean reasoning) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
@@ -336,25 +380,77 @@ public final class WorkPreferenceDomWebViewTest {
                 + "</body></html>";
     }
 
+    private static String fullLevelsMarkup() {
+    return "<span data-level='instant'>Instant</span><span data-level='medium'>Medium</span>"
+            + "<span data-level='high'>High</span><span data-level='xhigh'>Extra High</span>"
+            + "<span data-level='pro'>Pro</span>";
+}
+
+    private static String reducedLevelsMarkup() {
+    return "<span data-level='instant'>Instant</span><span data-level='medium'>Medium</span>"
+            + "<span data-level='high'>High</span>";
+}
+
     private static String nativeChatReasoningFixture() {
-        return chatReasoningFixture("<input id='slider' type='range' value='0'>",
-                "const slider=document.getElementById('slider');function updateNative(){const v=Number(slider.value);trigger.textContent=v>=100?'Pro':v>=75?'Extra High':v>=50?'High':v>=25?'Medium':'Instant';}slider.addEventListener('input',updateNative);slider.addEventListener('change',updateNative);");
-    }
+    return chatReasoningFixture("<input id='slider' type='range' min='0' max='4' step='1' value='0' aria-valuetext='Instant'>",
+            fullLevelsMarkup(), "Flash Instant",
+            "const labels=['Instant','Medium','High','Extra High','Pro'];const slider=document.getElementById('slider');"
+                    + "function updateNative(){const value=Math.max(0,Math.min(4,Math.round(Number(slider.value))));const text=labels[value];slider.setAttribute('aria-valuetext',text);trigger.textContent=text;}"
+                    + "slider.addEventListener('input',updateNative);slider.addEventListener('change',updateNative);", false);
+}
 
     private static String ariaChatReasoningFixture() {
-        return chatReasoningFixture("<div id='track'><div id='slider' role='slider' tabindex='0' aria-valuenow='0'></div></div>",
-                "const slider=document.getElementById('slider'),track=document.getElementById('track');function updateAria(event){const r=track.getBoundingClientRect();const value=Math.round(Math.max(0,Math.min(1,(event.clientX-r.left)/r.width))*100);slider.setAttribute('aria-valuenow',String(value));trigger.textContent=value>=100?'Pro':value>=75?'Extra High':value>=50?'High':value>=25?'Medium':'Instant';}for(const type of ['pointerup','mouseup','click']){track.addEventListener(type,updateAria);slider.addEventListener(type,updateAria);}");
-    }
+    return chatReasoningFixture("<div id='track'><div id='slider' role='slider' tabindex='0' aria-valuemin='0' aria-valuemax='4' aria-valuenow='1' aria-valuetext='Medium'></div></div>",
+            fullLevelsMarkup(), "Flash Standard",
+            "const labels=['Instant','Medium','High','Extra High','Pro'];const slider=document.getElementById('slider'),track=document.getElementById('track');"
+                    + "function updateAria(event){const rect=track.getBoundingClientRect();const value=Math.round(Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width))*4);const text=labels[value];slider.setAttribute('aria-valuenow',String(value));slider.setAttribute('aria-valuetext',text);trigger.textContent=text;}"
+                    + "for(const type of ['pointerup','mouseup','click']){track.addEventListener(type,updateAria);slider.addEventListener(type,updateAria);}", false);
+}
 
-    private static String chatReasoningFixture(String sliderMarkup, String sliderScript) {
-        return "<!doctype html><html><head><style>body{margin:0}header{height:64px;padding:8px}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}button{display:block;margin:8px}#reasoning-menu[hidden]{display:none}#reasoning-menu{width:280px;height:48px}#track{position:relative;width:240px;height:24px;background:#ddd}#slider[role=slider]{position:absolute;left:0;top:3px;width:18px;height:18px;background:#222}</style></head>"
-                + "<body><header><button id='trigger' type='button' aria-haspopup='menu' aria-controls='reasoning-menu' aria-expanded='false'>Flash Extended</button></header>"
-                + "<main><form><textarea id='prompt-textarea'></textarea></form></main>"
-                + "<div id='reasoning-menu' role='menu' hidden>" + sliderMarkup + "</div>"
-                + "<script>window.menuOpenClicks=0;window.menuCloseClicks=0;const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');"
-                + "trigger.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;window.menuOpenClicks++;trigger.setAttribute('aria-expanded','true');}else{menu.hidden=true;window.menuCloseClicks++;trigger.setAttribute('aria-expanded','false');}});"
-                + sliderScript + "</script></body></html>";
-    }
+    private static String reducedChatReasoningFixture() {
+    return chatReasoningFixture("<input id='slider' type='range' min='0' max='2' step='1' value='0' aria-valuetext='Instant'>",
+            reducedLevelsMarkup(), "Instant",
+            "const labels=['Instant','Medium','High'];const slider=document.getElementById('slider');"
+                    + "function updateReduced(){const value=Math.max(0,Math.min(2,Math.round(Number(slider.value))));const text=labels[value];slider.setAttribute('aria-valuetext',text);trigger.textContent=text;}"
+                    + "slider.addEventListener('input',updateReduced);slider.addEventListener('change',updateReduced);", false);
+}
+
+    private static String semanticMismatchFixture() {
+    return chatReasoningFixture("<input id='slider' type='range' min='0' max='4' step='1' value='2' aria-valuetext='High'>",
+            fullLevelsMarkup(), "High",
+            "const slider=document.getElementById('slider');function keepHigh(){slider.setAttribute('aria-valuetext','High');trigger.textContent='High';}"
+                    + "slider.addEventListener('input',keepHigh);slider.addEventListener('change',keepHigh);", false);
+}
+
+    private static String closeBlockedFixture() {
+    return chatReasoningFixture("<input id='slider' type='range' min='0' max='4' step='1' value='0' aria-valuetext='Instant'>",
+            fullLevelsMarkup(), "Instant", "", true);
+}
+
+    private static String missingTriggerFixture() {
+    return "<!doctype html><html><head><style>body{margin:0}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}</style></head>"
+            + "<body><main><form><textarea id='prompt-textarea'></textarea></form></main></body></html>";
+}
+
+    private static String missingSliderFixture() {
+    return "<!doctype html><html><head><style>body{margin:0}header{height:64px;padding:8px}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}#reasoning-menu[hidden]{display:none}</style></head>"
+            + "<body><header><button id='trigger' type='button' aria-haspopup='menu' aria-controls='reasoning-menu' aria-expanded='false'>Instant</button></header>"
+            + "<main><form><textarea id='prompt-textarea'></textarea></form></main><div id='reasoning-menu' role='menu' hidden><span data-level='instant'>Instant</span><span data-level='high'>High</span></div>"
+            + "<script>const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');trigger.addEventListener('click',()=>{menu.hidden=false;trigger.setAttribute('aria-expanded','true');});</script></body></html>";
+}
+
+    private static String chatReasoningFixture(String sliderMarkup, String levelsMarkup,
+                                             String initialLabel, String sliderScript,
+                                             boolean refuseClose) {
+    String closeBranch = refuseClose ? "" : "else{menu.hidden=true;window.menuCloseClicks++;trigger.setAttribute('aria-expanded','false');}";
+    return "<!doctype html><html><head><style>body{margin:0}header{height:64px;padding:8px}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}button{display:block;margin:8px}#reasoning-menu[hidden]{display:none}#reasoning-menu{width:320px;min-height:72px}#levels{display:flex;gap:8px}#track{position:relative;width:240px;height:24px;background:#ddd}#slider[role=slider]{position:absolute;left:0;top:3px;width:18px;height:18px;background:#222}</style></head>"
+            + "<body><header><button id='trigger' type='button' aria-haspopup='menu' aria-controls='reasoning-menu' aria-expanded='false'>" + initialLabel + "</button></header>"
+            + "<main><form><textarea id='prompt-textarea'></textarea></form></main>"
+            + "<div id='reasoning-menu' role='menu' hidden><div id='levels'>" + levelsMarkup + "</div>" + sliderMarkup + "</div>"
+            + "<script>window.menuOpenClicks=0;window.menuCloseClicks=0;const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');"
+            + "trigger.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;window.menuOpenClicks++;trigger.setAttribute('aria-expanded','true');}" + closeBranch + "});"
+            + sliderScript + "</script></body></html>";
+}
 
     private static String continuationFixture(String controls) {
         String formControls = controls.contains("stop-stream-action")

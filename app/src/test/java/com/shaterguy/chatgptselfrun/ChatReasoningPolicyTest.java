@@ -23,18 +23,32 @@ public final class ChatReasoningPolicyTest {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
     }
 
-    @Test public void chatSliderScriptUsesOneMenuOpenAndNeverTraversesAdvanced() {
-        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-TEST");
-        assertTrue(script.contains("[role=\"slider\"]"));
-        assertTrue(script.contains("input[type=\"range\"]"));
-        assertTrue(script.contains("aria-valuemin"));
-        assertTrue(script.contains("aria-valuemax"));
-        assertTrue(script.contains("aria-valuenow"));
-        assertTrue(script.contains("menuClicks<1"));
-        assertTrue(script.contains("전송 차단"));
-        assertFalse(script.contains("open-advanced"));
-        assertFalse(script.contains("select-advanced"));
+    @Test public void chatSliderScriptUsesSemanticReadbackAndFiniteFailures() {
+    String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-TEST");
+    assertTrue(script.contains("aria-valuetext"));
+    assertTrue(script.contains("pendingReadback"));
+    assertTrue(script.contains("CHAT_REASONING_TRIGGER_NOT_FOUND"));
+    assertTrue(script.contains("CHAT_REASONING_SLIDER_NOT_FOUND"));
+    assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
+    assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
+    assertTrue(script.contains("CHAT_REASONING_MENU_CLOSE_FAILED"));
+    assertTrue(script.contains("menuClicks<1"));
+    assertFalse(script.contains("__srcWantedOrdinal/4"));
+    assertFalse(script.contains("open-advanced"));
+}
+
+    @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
+    String[] statuses = {
+            "CHAT_REASONING_TRIGGER_NOT_FOUND", "CHAT_REASONING_SLIDER_NOT_FOUND",
+            "CHAT_REASONING_OPTION_UNAVAILABLE", "CHAT_REASONING_READBACK_MISMATCH",
+            "CHAT_REASONING_MENU_CLOSE_FAILED"
+    };
+    for (String status : statuses) {
+        assertTrue(SelfRunService.isChatReasoningFailureStatus(status));
+        assertFalse(SelfRunService.chatReasoningFailureMessage(status).isEmpty());
     }
+    assertFalse(SelfRunService.isChatReasoningFailureStatus("UI_WAIT"));
+}
 
     @Test public void newTaskAndBootstrapAreWiredWithoutChangingWorkContinuation() throws Exception {
         String activity = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java",
