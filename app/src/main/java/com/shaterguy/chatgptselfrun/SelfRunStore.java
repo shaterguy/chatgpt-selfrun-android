@@ -66,6 +66,10 @@ final class SelfRunStore {
     static final String BOOTSTRAP_SUBMISSION_CONFIRMED = "BOOTSTRAP_SUBMISSION_CONFIRMED";
     static final String RETRY_BOOTSTRAP = "BOOTSTRAP";
     static final String RETRY_CONTINUE = "CONTINUE";
+    static final String WATCHDOG_CLAIM_NONE = "NONE";
+    static final String WATCHDOG_CLAIMING = "CLAIMING";
+    static final String WATCHDOG_CLAIM_OWNED = "OWNED";
+    static final String WATCHDOG_CLAIM_SUBMITTED = "SUBMITTED";
     private static final String KEY_ATTACHMENTS = "attachmentsJson";
     private static final String KEY_ATTACHMENT_GRANT_CLEANUP = "attachmentGrantCleanupJson";
 
@@ -143,6 +147,7 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
   .putString("jobFolderId","").putString("turnDocumentId","").putString("turnDocumentUrl","").putString(KEY_ATTACHMENTS,encodeAttachments(attachments)).putString(KEY_ATTACHMENT_GRANT_CLEANUP,"[]").putInt("turn",0).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","")
   .putInt("driveSignalCursor",0).putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","")
   .putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L)
+  .putInt("watchdogClaimAttempt",0).putString("watchdogClaimName","").putString("watchdogClaimState",WATCHDOG_CLAIM_NONE).putInt("watchdogClaimCursor",0)
   .putString("activeCommandPrompt","").putString("activeCommandKind","").putInt("commandAttempt",0).putBoolean("awaitingCommandAck",false)
   .putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putInt("submissionRetryAttempt",0).putBoolean("submissionRetryReady",false)
   .putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)
@@ -157,8 +162,8 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     void stopByUser() {
         synchronized (RUN_STATE_LOCK) {
             List<Attachment> priorAttachments = attachments();
-            commitOrThrow(prefs.edit().putString(KEY_ATTACHMENTS, "[]")
-                    .putString(KEY_ATTACHMENT_GRANT_CLEANUP, encodeAttachmentUris(priorAttachments))
+            commitOrThrow(clearWatchdogClaimFields(prefs.edit().putString(KEY_ATTACHMENTS, "[]")
+                    .putString(KEY_ATTACHMENT_GRANT_CLEANUP, encodeAttachmentUris(priorAttachments)))
                     .putBoolean("active", false).putBoolean("paused", false)
                     .putBoolean("userStopped", true).putString("phase", PHASE_IDLE)
                     .putString("status", "사용자 중지").putLong("phaseStartedAt", System.currentTimeMillis()));
@@ -241,6 +246,12 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     String pendingDriveSignalType() { return get("pendingDriveSignalType"); }
     String pendingNextInput() { NextInputCodec.Decoded next=DriveSignalParser.nextInput(pendingDriveSignalRaw());return next.present&&next.valid?next.text:""; }
     long commitDetectedAt() { return prefs.getLong("commitDetectedAt", 0L); }
+    int watchdogClaimAttempt() { return prefs.getInt("watchdogClaimAttempt", 0); }
+    String watchdogClaimName() { return get("watchdogClaimName"); }
+    String watchdogClaimState() { return getOr("watchdogClaimState", WATCHDOG_CLAIM_NONE); }
+    int watchdogClaimCursor() { return prefs.getInt("watchdogClaimCursor", 0); }
+    boolean watchdogClaimOwned() { return WATCHDOG_CLAIM_OWNED.equals(watchdogClaimState()) && !watchdogClaimName().isEmpty(); }
+    boolean watchdogClaimSubmitted() { return WATCHDOG_CLAIM_SUBMITTED.equals(watchdogClaimState()) && !watchdogClaimName().isEmpty(); }
     String activeCommandPrompt() { return get("activeCommandPrompt"); }
     String activeCommandKind() { if(turnInfoRewriteRequired()&&PHASE_SEND_CONTINUE.equals(phase())&&get("activeCommandPrompt").isEmpty())SelfRunProtocol.requestTurnInfoRewrite(runId());return get("activeCommandKind"); }
     int commandAttempt() { return prefs.getInt("commandAttempt", 0); }
@@ -382,16 +393,86 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
         commitOrThrow(prefs.edit().putString("lastSeenDriveVersion", safe(version)).putString("lastSeenModifiedTime", safe(modifiedTime)));
     }
 
+    String beginWatchdogClaim(int cursor) {
+        synchronized (RUN_STATE_LOCK) {
+            String state = watchdogClaimState(), existing = watchdogClaimName();
+            if ((WATCHDOG_CLAIMING.equals(state) || WATCHDOG_CLAIM_OWNED.equals(state))
+                    && !existing.isEmpty() && watchdogClaimCursor() == Math.max(0, cursor)) return existing;
+            int next = watchdogClaimAttempt() == Integer.MAX_VALUE ? Integer.MAX_VALUE : watchdogClaimAttempt() + 1;
+            String name = watchdogClaimNameFor(runId(), next);
+            commitOrThrow(prefs.edit().putInt("watchdogClaimAttempt", next).putString("watchdogClaimName", name)
+                    .putString("watchdogClaimState", WATCHDOG_CLAIMING).putInt("watchdogClaimCursor", Math.max(0, cursor)));
+            syncHistory();
+            return name;
+        }
+    }
+
+    static String watchdogClaimNameFor(String runId, int attempt) {
+        String normalized = safe(runId).replaceAll("[^A-Za-z0-9._-]", "_");
+        if (normalized.isEmpty()) throw new IllegalArgumentException("run id required for watchdog claim");
+        return "selfrun_watchdog_" + normalized + "_" + Math.max(1, attempt);
+    }
+
+    void ownWatchdogClaimAndEnterClick(String clickPhase, String status) {
+        synchronized (RUN_STATE_LOCK) {
+            if (watchdogClaimName().isEmpty() || !(WATCHDOG_CLAIMING.equals(watchdogClaimState()) || WATCHDOG_CLAIM_OWNED.equals(watchdogClaimState()))) {
+                throw new IllegalStateException("persisted watchdog claim required before click");
+            }
+            commitOrThrow(prefs.edit().putString("watchdogClaimState", WATCHDOG_CLAIM_OWNED)
+                    .putString("phase", safe(clickPhase)).putString("status", safe(status)).putLong("phaseStartedAt", System.currentTimeMillis()));
+            syncHistory();
+        }
+    }
+
+    void confirmWatchdogSubmission(String postSubmitPhase, String status) {
+        synchronized (RUN_STATE_LOCK) {
+            if (!watchdogClaimOwned()) throw new IllegalStateException("owned watchdog claim required before submission confirmation");
+            commitOrThrow(prefs.edit().putString("watchdogClaimState", WATCHDOG_CLAIM_SUBMITTED)
+                    .putString("phase", safe(postSubmitPhase)).putString("status", safe(status)).putLong("phaseStartedAt", System.currentTimeMillis()));
+            syncHistory();
+        }
+    }
+
+    void abandonWatchdogClaim() {
+        synchronized (RUN_STATE_LOCK) {
+            commitOrThrow(clearWatchdogClaimFields(prefs.edit()));
+            syncHistory();
+        }
+    }
+
+    void abandonWatchdogClaimAndWait(String status) {
+        synchronized (RUN_STATE_LOCK) {
+            SharedPreferences.Editor e = clearWatchdogClaimFields(prefs.edit())
+                    .putString("phase", PHASE_WAIT_DRIVE_COMMIT).putString("status", safe(status))
+                    .putLong("phaseStartedAt", System.currentTimeMillis());
+            commitOrThrow(e); syncHistory();
+        }
+    }
+
+    void finishWatchdogRecoveryBaseline(int cursor, DriveSignalParser.Event latest) {
+        synchronized (RUN_STATE_LOCK) {
+            if (!watchdogClaimSubmitted()) throw new IllegalStateException("submitted watchdog claim required for recovery baseline");
+            SharedPreferences.Editor e = clearWatchdogClaimFields(prefs.edit())
+                    .putInt("driveSignalCursor", Math.max(0, cursor))
+                    .putString("pendingDriveSignalRaw", "").putString("pendingDriveSignalTimestamp", "")
+                    .putString("pendingDriveSignalType", "").putLong("commitDetectedAt", 0L)
+                    .putString("phase", PHASE_WAIT_DRIVE_COMMIT).putString("status", "Drive 턴 결과 신호 대기")
+                    .putLong("phaseStartedAt", System.currentTimeMillis());
+            putLatest(e, latest); commitOrThrow(e); syncHistory();
+        }
+    }
+
 void baselineDriveSignals(int cursor,DriveSignalParser.Event latest){SharedPreferences.Editor e=prefs.edit().putInt("driveSignalCursor",Math.max(0,cursor));putLatest(e,latest);commitOrThrow(e);syncHistory();}
 void beginCommandAttempt(String kind,String prompt){if(!(RETRY_BOOTSTRAP.equals(kind)||RETRY_CONTINUE.equals(kind))||safe(prompt).isEmpty())throw new IllegalArgumentException("valid command attempt required");int n=commandAttempt()==Integer.MAX_VALUE?Integer.MAX_VALUE:commandAttempt()+1;commitOrThrow(prefs.edit().putString("activeCommandKind",kind).putString("activeCommandPrompt",prompt).putInt("commandAttempt",n).putBoolean("awaitingCommandAck",false));syncHistory();}
 String commandMarkerId(){return runId()+":"+commandAttempt();}
 void bootstrapSubmissionConfirmed(){if(!RETRY_BOOTSTRAP.equals(activeCommandKind())||activeCommandPrompt().isEmpty())throw new IllegalStateException("prepared bootstrap command required");commitOrThrow(clearCommandWait(prefs.edit()).putString("phase",PHASE_WAIT_DRIVE_COMMIT).putString("status","첫 요청 제출 확인 · Drive 턴 결과 신호 대기").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
 void applyDriveSignals(List<DriveSignalParser.Event> events,long detectedAt){if(events==null||events.isEmpty())return;SharedPreferences.Editor e=prefs.edit();int rank=PHASE_DONE.equals(phase())||PHASE_PAUSED.equals(phase())?3:PHASE_WAIT_INTERNAL_SEND.equals(phase())?2:0;for(DriveSignalParser.Event x:events){e.putInt("driveSignalCursor",x.cursor);putLatest(e,x);switch(x.type){case TURN_COMPLETED->{if(!x.protocolError.isEmpty())continue;if(rank<2){rank=2;e.putString("pendingDriveSignalRaw",x.raw).putString("pendingDriveSignalTimestamp",x.timestamp).putString("pendingDriveSignalType",x.type.name()).putLong("commitDetectedAt",detectedAt).putString("phase",PHASE_WAIT_INTERNAL_SEND).putString("status","Drive TURN_COMPLETED 확인 · 내부 WebView 입력 대기 상태 확인");}}case USER_ACTION_REQUIRED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"사용자 조치 필요");}case PAUSED->{rank=3;clearCommandWait(e);pauseEvent(e,x,"SelfRun Drive 일시정지");}case DONE->{rank=3;clearCommandWait(e);e.putBoolean("active",false).putBoolean("paused",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DONE).putString("status","SelfRun Drive 완료");terminal(e,x);}}}e.putBoolean("awaitingCommandAck",false).putLong("phaseStartedAt",System.currentTimeMillis());commitOrThrow(e);syncHistory();}
-void beginManualResumeOverride(){if(PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(pausedFromPhase())&&turnDocumentId().isEmpty()){commitOrThrow(clearCommandWait(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DRIVE_ATTACHMENT_UPLOAD).putString("status","사용자 재개 · 첨부파일 Drive 업로드 재확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}commitOrThrow(clearCommandWait(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 override · Drive 최신 신호 baseline 확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
+void beginManualResumeOverride(){if(PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(pausedFromPhase())&&turnDocumentId().isEmpty()){commitOrThrow(clearWatchdogClaimFields(clearCommandWait(prefs.edit())).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DRIVE_ATTACHMENT_UPLOAD).putString("status","사용자 재개 · 첨부파일 Drive 업로드 재확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();return;}commitOrThrow(clearWatchdogClaimFields(clearCommandWait(prefs.edit())).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 override · Drive 최신 신호 baseline 확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}
 void baselineManualResume(int cursor,DriveSignalParser.Event latest,DriveSignalParser.Event latestUnseenCompletion){SharedPreferences.Editor e=clearCommandWait(prefs.edit()).putInt("driveSignalCursor",Math.max(0,cursor)).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putString("phase",PHASE_SEND_CONTINUE).putString("status","사용자 재개 override · CONTINUE 강제 제출 준비").putLong("phaseStartedAt",System.currentTimeMillis());if(latestUnseenCompletion!=null&&latestUnseenCompletion.protocolError.isEmpty()){e.putString("pendingDriveSignalRaw",latestUnseenCompletion.raw).putString("pendingDriveSignalTimestamp",latestUnseenCompletion.timestamp).putString("pendingDriveSignalType",DriveSignalParser.Type.TURN_COMPLETED.name());}else{e.putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","");}putLatest(e,latest);commitOrThrow(e);syncHistory();}
 static boolean canCaptureConversationUrl(String projectUrl,String value){if(SelfRunScript.isGeneralChatUrl(projectUrl)){return SelfRunScript.isGeneralChatUrl(value)&&!SelfRunScript.conversationId(value).isEmpty();}ProjectUrlPolicy.ProjectRef expected=ProjectUrlPolicy.parseProject(projectUrl),actual=ProjectUrlPolicy.parseProject(value);return expected!=null&&actual!=null&&!actual.conversationId.isEmpty()&&expected.projectId.equals(actual.projectId);}
 void captureConversationUrl(String value){if(!conversationUrl().isEmpty()||!canCaptureConversationUrl(projectUrl(),value))return;commitOrThrow(prefs.edit().putString("conversationUrl",safe(value)));syncHistory();}
 private static SharedPreferences.Editor clearCommandWait(SharedPreferences.Editor e){return e.putBoolean("awaitingCommandAck",false).putString("activeCommandPrompt","").putString("activeCommandKind","").putString("submissionRetryKind","").putString("submissionRetryReason","").putLong("submissionRetryDueAt",0L).putInt("submissionRetryAttempt",0).putBoolean("submissionRetryReady",false);}
+private static SharedPreferences.Editor clearWatchdogClaimFields(SharedPreferences.Editor e){return e.putString("watchdogClaimName","").putString("watchdogClaimState",WATCHDOG_CLAIM_NONE).putInt("watchdogClaimCursor",0);}
 private void migrateLegacyContinuationAckWait(){synchronized(RUN_STATE_LOCK){if(!RETRY_CONTINUE.equals(get("submissionRetryKind")))return;SharedPreferences.Editor e=clearCommandWait(prefs.edit());if(PHASE_WAIT_DRIVE_COMMIT.equals(phase()))e.putString("status","업데이트된 continuation · Drive 결과 신호 대기").putLong("phaseStartedAt",System.currentTimeMillis());commitOrThrow(e);syncHistory();}}
 private void migrateLegacyBootstrapAckWait(){synchronized(RUN_STATE_LOCK){if(!(awaitingCommandAck()&&RETRY_BOOTSTRAP.equals(get("submissionRetryKind"))&&PHASE_WAIT_DRIVE_COMMIT.equals(phase())))return;commitOrThrow(clearCommandWait(prefs.edit()).putString("status","업데이트된 bootstrap · Drive 턴 결과 신호 대기").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}}
 private void migrateLegacyDriveCommitGuard(){synchronized(RUN_STATE_LOCK){if(!"DRIVE_COMMIT_GUARD".equals(phase()))return;commitOrThrow(prefs.edit().putString("phase",PHASE_WAIT_INTERNAL_SEND).putString("status","업데이트된 TURN_COMPLETED · 내부 WebView 입력 대기 상태 확인").putLong("phaseStartedAt",System.currentTimeMillis()));syncHistory();}}

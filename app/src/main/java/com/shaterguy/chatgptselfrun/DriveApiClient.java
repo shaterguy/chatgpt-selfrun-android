@@ -84,6 +84,33 @@ final class DriveApiClient {
         }
     }
 
+    /** One coherent Docs read used for optimistic recovery-claim arbitration. */
+    static final class DocumentSnapshot {
+        final String text;
+        final String revisionId;
+        final String tabId;
+        final int claimStartIndex;
+        final int claimEndIndex;
+        private final JSONObject namedRanges;
+
+        DocumentSnapshot(String text, String revisionId, String tabId, int claimStartIndex,
+                         int claimEndIndex, JSONObject namedRanges) {
+            this.text = text == null ? "" : text;
+            this.revisionId = revisionId == null ? "" : revisionId;
+            this.tabId = tabId == null ? "" : tabId;
+            this.claimStartIndex = claimStartIndex;
+            this.claimEndIndex = claimEndIndex;
+            this.namedRanges = namedRanges == null ? new JSONObject() : namedRanges;
+        }
+
+        boolean hasNamedRange(String name) {
+            if (!validNamedRangeName(name)) return false;
+            JSONObject matches = namedRanges.optJSONObject(name);
+            JSONArray ranges = matches == null ? null : matches.optJSONArray("namedRanges");
+            return ranges != null && ranges.length() > 0;
+        }
+    }
+
     String getAccountPermissionId(String accessToken) throws Exception {
         JSONObject json = request("GET", "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)", accessToken, null);
         JSONObject user = json.optJSONObject("user");
@@ -261,19 +288,65 @@ final class DriveApiClient {
         request("POST", "https://docs.googleapis.com/v1/documents/" + documentId + ":batchUpdate", accessToken, body);
     }
 
-    String readDocumentText(String accessToken, String documentId) throws Exception {
+    DocumentSnapshot readDocumentSnapshot(String accessToken, String documentId) throws Exception {
         requireFileId(documentId);
         JSONObject document = request("GET", "https://docs.googleapis.com/v1/documents/" + documentId + "?includeTabsContent=true", accessToken, null);
+        String revisionId = document.optString("revisionId", "");
+        if (revisionId.isEmpty()) throw new IllegalStateException("execution document revisionId missing");
         JSONArray tabs = document.optJSONArray("tabs");
         if (tabs == null || tabs.length() != 1) throw new IllegalStateException("execution document must contain exactly one tab");
         JSONObject tab = tabs.optJSONObject(0);
         if (tab == null || (tab.optJSONArray("childTabs") != null && tab.optJSONArray("childTabs").length() > 0)) throw new IllegalStateException("nested execution document tabs are forbidden");
+        JSONObject tabProperties = tab.optJSONObject("tabProperties");
+        String tabId = tabProperties == null ? "" : tabProperties.optString("tabId", "");
+        if (tabId.isEmpty()) throw new IllegalStateException("execution document tabId missing");
         JSONObject documentTab = tab.optJSONObject("documentTab");
         JSONObject body = documentTab == null ? null : documentTab.optJSONObject("body");
         if (body == null) throw new IllegalStateException("execution document body missing");
-        StringBuilder text = new StringBuilder(); appendTextRuns(body.optJSONArray("content"), text);
+        JSONArray content = body.optJSONArray("content");
+        StringBuilder text = new StringBuilder(); appendTextRuns(content, text);
         if (text.length() > MAX_DOCUMENT_CHARS) throw new IllegalStateException("execution document too large");
-        return text.toString();
+        int[] claimRange = firstClaimRange(content);
+        JSONObject namedRanges = documentTab.optJSONObject("namedRanges");
+        return new DocumentSnapshot(text.toString(), revisionId, tabId,
+                claimRange[0], claimRange[1], namedRanges);
+    }
+
+    String readDocumentText(String accessToken, String documentId) throws Exception {
+        return readDocumentSnapshot(accessToken, documentId).text;
+    }
+
+    /**
+     * Atomically creates a parser-invisible named-range recovery claim against one exact Docs revision.
+     * Returns false only when a concurrent document edit won the revision race; ambiguous transport outcomes
+     * are thrown so the caller can read back the deterministic claim before retrying.
+     */
+    boolean createNamedRangeClaim(String accessToken, String documentId, DocumentSnapshot snapshot,
+                                  String claimName) throws Exception {
+        requireFileId(documentId);
+        if (snapshot == null || snapshot.revisionId.isEmpty()) throw new IllegalArgumentException("document snapshot required");
+        if (!validNamedRangeName(claimName)) throw new IllegalArgumentException("safe named range claim required");
+        if (snapshot.hasNamedRange(claimName)) return true;
+        if (snapshot.claimStartIndex < 1 || snapshot.claimEndIndex <= snapshot.claimStartIndex) {
+            throw new IllegalStateException("valid recovery claim range unavailable");
+        }
+        JSONObject range = new JSONObject().put("startIndex", snapshot.claimStartIndex)
+                .put("endIndex", snapshot.claimEndIndex).put("tabId", snapshot.tabId);
+        JSONObject create = new JSONObject().put("name", claimName).put("range", range);
+        JSONObject body = new JSONObject()
+                .put("requests", new JSONArray().put(new JSONObject().put("createNamedRange", create)))
+                .put("writeControl", new JSONObject().put("requiredRevisionId", snapshot.revisionId));
+        try {
+            request("POST", "https://docs.googleapis.com/v1/documents/" + documentId + ":batchUpdate",
+                    accessToken, body, true, "watchdog recovery claim result unknown");
+            return true;
+        } catch (ApiException api) {
+            if (api.status != 400) throw api;
+            DocumentSnapshot current = readDocumentSnapshot(accessToken, documentId);
+            if (current.hasNamedRange(claimName)) return true;
+            if (!snapshot.revisionId.equals(current.revisionId)) return false;
+            throw api;
+        }
     }
 
     private Metadata create(String accessToken, JSONObject body, boolean outcomeSensitive) throws Exception {
@@ -288,6 +361,10 @@ final class DriveApiClient {
 
     private static JSONObject request(String method, String endpoint, String accessToken, JSONObject body) throws Exception { return request(method, endpoint, accessToken, body, false); }
     private static JSONObject request(String method, String endpoint, String accessToken, JSONObject body, boolean outcomeSensitive) throws Exception {
+        return request(method, endpoint, accessToken, body, outcomeSensitive, "native document create result unknown");
+    }
+    private static JSONObject request(String method, String endpoint, String accessToken, JSONObject body,
+                                      boolean outcomeSensitive, String outcomeUnknownMessage) throws Exception {
         URL url = requireAllowedUrl(endpoint);
         HttpURLConnection connection = null;
         try {
@@ -304,13 +381,13 @@ final class DriveApiClient {
             String response = readBounded(stream);
             if (status < 200 || status >= 300) {
                 ApiException api = apiException(status, response);
-                if (outcomeSensitive && (status == 408 || status == 429 || status >= 500)) throw new OutcomeUnknownException("native document create result unknown", api);
+                if (outcomeSensitive && (status == 408 || status == 429 || status >= 500)) throw new OutcomeUnknownException(outcomeUnknownMessage, api);
                 throw api;
             }
             return response.trim().isEmpty() ? new JSONObject() : new JSONObject(response);
         } catch (IOException error) {
             if (error instanceof OutcomeUnknownException) throw error;
-            if (outcomeSensitive) throw new OutcomeUnknownException("native document create result unknown", error);
+            if (outcomeSensitive) throw new OutcomeUnknownException(outcomeUnknownMessage, error);
             throw error;
         } finally { if (connection != null) connection.disconnect(); }
     }
@@ -354,6 +431,21 @@ final class DriveApiClient {
             JSONObject textRun = object.optJSONObject("textRun"); if (textRun != null) output.append(textRun.optString("content", ""));
             Iterator<String> keys = object.keys(); while (keys.hasNext()) { String key = keys.next(); if (!"textRun".equals(key)) appendTextRuns(object.opt(key), output); }
         } else if (value instanceof JSONArray array) { for (int i = 0; i < array.length(); i++) appendTextRuns(array.opt(i), output); }
+    }
+
+    private static int[] firstClaimRange(JSONArray content) {
+        if (content != null) for (int i = 0; i < content.length(); i++) {
+            JSONObject item = content.optJSONObject(i);
+            if (item == null || item.optJSONObject("paragraph") == null) continue;
+            int start = item.optInt("startIndex", -1), end = item.optInt("endIndex", -1);
+            if (start >= 1 && end > start) return new int[]{start, Math.min(end, start + 1)};
+        }
+        throw new IllegalStateException("execution document has no claimable paragraph range");
+    }
+
+    private static boolean validNamedRangeName(String value) {
+        return value != null && !value.isEmpty() && value.length() <= 256
+                && value.matches("[A-Za-z0-9._-]{1,256}");
     }
 
     private static long parseSize(Object value) {
