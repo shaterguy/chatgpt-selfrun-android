@@ -61,9 +61,8 @@ final class DriveSignalParser {
     private static final Pattern RETIRED_CURSOR_LINE = Pattern.compile(
   "^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] "
           + "\\[SELF_RUN_COMMAND_RECEIVED ([A-Za-z0-9._-]{1,128})]$");
-    private static final Pattern WORK_PROFILE = Pattern.compile(
-  "^MODEL=([A-Za-z0-9._-]+)\\s+REASONING=([A-Za-z0-9._-]+)$", Pattern.CASE_INSENSITIVE);
     private static final String NEXT = "NEXT_INPUT_B64URL";
+    private static final String RECOVERY = "RECOVERY_ID";
 
     private DriveSignalParser() {}
 
@@ -124,15 +123,10 @@ final class DriveSignalParser {
         Matcher line = LINE.matcher(raw == null ? "" : raw.trim());
         if (!line.matches() || !"SELF_RUN_TURN_COMPLETED".equals(line.group(2))) return invalidProfile();
         String tail = line.group(4) == null ? "" : line.group(4).trim();
-        if (!mentionsNext(tail)) {
-  Matcher profile = WORK_PROFILE.matcher(tail);
-  if (!profile.matches()) return invalidProfile();
-  String model = profile.group(1).toLowerCase(Locale.ROOT);
-  String reasoning = profile.group(2).toLowerCase(Locale.ROOT);
-  return new WorkProfile(model, reasoning, SelfRunProtocol.validWorkProfile(model, reasoning));
-        }
         Fields fields = fields(tail);
         if (!fields.valid || hasUnknown(fields.values, true)) return invalidProfile();
+        String recovery = fields.values.get(RECOVERY);
+        if (recovery != null && !SelfRunProtocol.safeRecoveryId(recovery)) return invalidProfile();
         NextInputCodec.Decoded next = decodeNext(fields.values);
         if (next.present && !next.valid) return invalidProfile();
         String model = lower(fields.values.get("MODEL"));
@@ -147,7 +141,18 @@ final class DriveSignalParser {
         if (!mentionsNext(tail)) return NextInputCodec.absent();
         Fields fields = fields(tail);
         if (!fields.valid || hasUnknown(fields.values, true)) return NextInputCodec.decodeToken("");
+        String recovery = fields.values.get(RECOVERY);
+        if (recovery != null && !SelfRunProtocol.safeRecoveryId(recovery)) return NextInputCodec.decodeToken("");
         return decodeNext(fields.values);
+    }
+
+    static String recoveryId(String raw) {
+        Matcher line = LINE.matcher(raw == null ? "" : raw.trim());
+        if (!line.matches() || !"SELF_RUN_TURN_COMPLETED".equals(line.group(2))) return "";
+        Fields fields = fields(line.group(4) == null ? "" : line.group(4).trim());
+        if (!fields.valid || hasUnknown(fields.values, true)) return "";
+        String value = fields.values.get(RECOVERY);
+        return SelfRunProtocol.safeRecoveryId(value) ? value : "";
     }
 
     static String historySafeRaw(String raw) {
@@ -157,16 +162,17 @@ final class DriveSignalParser {
 
     private static Event completion(String timestamp, String raw, int cursor, String tail, boolean work) {
         if (tail.isEmpty()) return new Event(Type.TURN_COMPLETED, timestamp, raw, cursor);
-        if (!mentionsNext(tail)) {
-  return work ? new Event(Type.TURN_COMPLETED, timestamp, raw, cursor) : null;
-        }
+        boolean hasNext = mentionsNext(tail), hasRecovery = mentionsRecovery(tail);
+        if (!hasNext && !hasRecovery) return work ? new Event(Type.TURN_COMPLETED, timestamp, raw, cursor) : null;
         Fields fields = fields(tail);
         if (!fields.valid) return invalidCompletion(timestamp, raw, cursor, fields.error);
         if (hasUnknown(fields.values, work)) return invalidCompletion(timestamp, raw, cursor, "TURN_COMPLETED_UNKNOWN_FIELD");
+        String recovery = fields.values.get(RECOVERY);
+        if (recovery != null && !SelfRunProtocol.safeRecoveryId(recovery)) return invalidCompletion(timestamp, raw, cursor, "RECOVERY_ID_INVALID");
         NextInputCodec.Decoded next = decodeNext(fields.values);
-        if (!next.present) return invalidCompletion(timestamp, raw, cursor, "NEXT_INPUT_MISSING");
-        if (!next.valid) return invalidCompletion(timestamp, raw, cursor, next.error);
-        return new Event(Type.TURN_COMPLETED, timestamp, raw, cursor, true, next.text, "");
+        if (hasNext && !next.present) return invalidCompletion(timestamp, raw, cursor, "NEXT_INPUT_MISSING");
+        if (next.present && !next.valid) return invalidCompletion(timestamp, raw, cursor, next.error);
+        return new Event(Type.TURN_COMPLETED, timestamp, raw, cursor, next.present, next.present ? next.text : "", "");
     }
 
     private static Fields fields(String tail) {
@@ -184,7 +190,7 @@ final class DriveSignalParser {
 
     private static boolean hasUnknown(Map<String, String> values, boolean work) {
         for (String key : values.keySet()) {
-  if (NEXT.equals(key)) continue;
+  if (NEXT.equals(key) || RECOVERY.equals(key)) continue;
   if (work && ("MODEL".equals(key) || "REASONING".equals(key))) continue;
   return true;
         }
@@ -201,6 +207,10 @@ final class DriveSignalParser {
 
     private static boolean mentionsNext(String tail) {
         return tail != null && tail.toUpperCase(Locale.ROOT).contains(NEXT);
+    }
+
+    private static boolean mentionsRecovery(String tail) {
+        return tail != null && tail.toUpperCase(Locale.ROOT).contains(RECOVERY);
     }
 
     private static WorkProfile invalidProfile() { return new WorkProfile("", "", false); }
