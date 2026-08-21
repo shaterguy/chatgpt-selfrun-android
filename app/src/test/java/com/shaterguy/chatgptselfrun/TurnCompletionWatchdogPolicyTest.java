@@ -35,7 +35,7 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertFalse(SelfRunService.watchdogCanRecoverFromButton(SelfRunContinuationDom.UNKNOWN));
     }
 
-    @Test public void timeoutUsesDriveRecheckBeforePlainContinuation() throws Exception {
+    @Test public void timeoutUsesDriveRecheckBeforeCorrelatedRecoveryContinuation() throws Exception {
         String service = source("SelfRunService.java");
         assertTrue(service.contains("PHASE_WATCHDOG_BUTTON"));
         assertTrue(service.contains("PHASE_WATCHDOG_RECHECK"));
@@ -44,7 +44,9 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertTrue(service.contains("transition(PHASE_WATCHDOG_RECHECK"));
         assertTrue(service.contains("watchdogRecheck=PHASE_WATCHDOG_RECHECK.equals(snapshot.phase)"));
         assertTrue(service.contains("transition(PHASE_WATCHDOG_SEND_CONTINUE"));
-        assertTrue(service.contains("isWatchdogRecoverySubmissionPhase(store.phase())?SelfRunProtocol.driveContinuation(store.runId())"));
+        assertTrue(service.contains("SelfRunProtocol.driveRecoveryContinuation(store.runId(),SelfRunProtocol.watchdogRecoveryId(store.watchdogClaimAttempt()))"));
+        assertFalse(section(service, "private String continuationPrompt", "private String continuationMarkerId")
+                .contains("?SelfRunProtocol.driveContinuation(store.runId())"));
     }
 
     @Test public void stopRestartsThirtyMinuteWindowWithoutComposerMutation() throws Exception {
