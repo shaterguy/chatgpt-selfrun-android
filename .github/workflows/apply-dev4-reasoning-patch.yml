@@ -1,0 +1,438 @@
+name: Apply dev4 chat reasoning patch
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.4.2-dev4'
+    paths:
+      - '.github/workflows/apply-dev4-reasoning-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - name: Apply bounded semantic reasoning patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" == 'selfrun-drive/v1.4.2-dev4' ]]
+          [[ "$(git rev-parse HEAD^)" == 'b4fbccb6585abdd8204849d1d1d3cb02647f7e76' ]]
+          cat > app/src/main/java/com/shaterguy/chatgptselfrun/ChatReasoningDom.java <<'JAVA'
+          package com.shaterguy.chatgptselfrun;
+
+          /** Chat bootstrap adapter for the one-tap model menu and horizontal reasoning slider. */
+          final class ChatReasoningDom {
+              private ChatReasoningDom() {}
+
+              static String inline(String selection, String runId) {
+                  String wanted = ChatReasoningPreferenceStore.normalize(selection);
+                  int ordinal = ChatReasoningPreferenceStore.ordinal(wanted);
+                  if (ordinal < 0) return "";
+                  String stateKey = "selfrun-drive:chat-reasoning:" + runId;
+                  String script = """
+                          const __srcWanted=__WANTED__,__srcWantedOrdinal=__ORDINAL__,__srcStateKey=__STATE_KEY__;
+                          const __srcLevels=['instant','medium','high','xhigh','pro'];
+                          const __srcIndex=value=>__srcLevels.indexOf(value);
+                          const __srcLevel=source=>{
+                            const v=exactText(source);
+                            if(v.includes('extra high')||v.includes('very high')||v.includes('xhigh')||v.includes('maximum')||v.includes('매우 높음')||v.includes('최대'))return'xhigh';
+                            if(v==='pro'||v.startsWith('pro ')||v.endsWith(' pro')||v.includes('프로'))return'pro';
+                            if(v.includes('medium')||v.includes('중간')||v.includes('표준')||v.includes('standard'))return'medium';
+                            if(v.includes('high')||v.includes('extended')||v.includes('높음')||v.includes('확장'))return'high';
+                            if(v.includes('instant')||v.includes('flash')||v.includes('빠른')||v.includes('즉시'))return'instant';
+                            return'';
+                          };
+                          const __srcElementLevel=element=>__srcLevel([
+                            labelOf(element),element?.getAttribute?.('aria-valuetext')||'',element?.getAttribute?.('data-value')||'',
+                            element?.getAttribute?.('data-level')||'',element?.getAttribute?.('value')||'',element?.title||''
+                          ].join(' '));
+                          const __srcPopupSelector='[role="menu"],[role="listbox"],[role="dialog"],[data-radix-popper-content-wrapper],[data-slot*="popover-content"],[data-slot*="menu-content"]';
+                          const __srcForbidden=element=>/(send|submit|보내기|stop|중지|microphone|마이크|voice|음성|attach|첨부|upload|업로드|new chat|new conversation|새 채팅|새 대화)/.test(labelOf(element)+' '+exactText(element?.dataset?.testid||''));
+                          const __srcTriggerScore=element=>{
+                            const label=labelOf(element),testid=exactText(element?.dataset?.testid||''),popup=element.getAttribute('aria-haspopup')||'';
+                            let score=0;
+                            if(__srcLevel(label))score+=120;
+                            if(/reason|thinking|추론/.test(label+' '+testid))score+=70;
+                            if(/model|모델|gpt|flash/.test(label+' '+testid))score+=45;
+                            if(popup&&popup!=='false')score+=35;
+                            if(element.hasAttribute('aria-expanded'))score+=30;
+                            if(element.hasAttribute('aria-controls')||element.hasAttribute('aria-owns'))score+=25;
+                            if(element.closest('header'))score+=10;
+                            return score;
+                          };
+                          const __srcTriggerEntries=[...document.querySelectorAll('button,[role="button"],[role="combobox"],[aria-haspopup],[aria-expanded],[data-testid*="model"],[data-testid*="reason"]')]
+                            .filter(visible).filter(element=>!element.closest(__srcPopupSelector)).filter(element=>!__srcForbidden(element))
+                            .map((element,index)=>({element,index,score:__srcTriggerScore(element)})).filter(entry=>entry.score>0)
+                            .sort((a,b)=>b.score-a.score||a.index-b.index);
+                          const __srcTriggerEntry=__srcTriggerEntries[0]||null;
+                          const __srcTrigger=__srcTriggerEntry?.element||null;
+                          const __srcTriggerLevel=__srcTrigger?__srcLevel(labelOf(__srcTrigger)):'';
+                          const __srcControlledIds=__srcTrigger?String(__srcTrigger.getAttribute('aria-controls')||__srcTrigger.getAttribute('aria-owns')||'').split(/\s+/).filter(Boolean):[];
+                          const __srcControlled=__srcControlledIds.map(id=>document.getElementById(id)).find(visible)||null;
+                          const __srcRawSliders=[...document.querySelectorAll('[role="slider"],input[type="range"]')].filter(visible).filter(element=>element.getAttribute('aria-orientation')!=='vertical');
+                          const __srcOpenPopups=[...document.querySelectorAll(__srcPopupSelector)].filter(visible);
+                          const __srcPopup=__srcControlled||__srcOpenPopups.find(popup=>__srcRawSliders.some(slider=>popup.contains(slider)))||null;
+                          const __srcSliderScore=element=>{
+                            let score=0;
+                            if(__srcControlled&&__srcControlled.contains(element))score+=140;
+                            if(__srcPopup&&__srcPopup.contains(element))score+=100;
+                            if(element.closest(__srcPopupSelector))score+=60;
+                            if(__srcLevel(element.getAttribute('aria-valuetext')||''))score+=35;
+                            if(element.matches('input[type="range"]'))score+=20;
+                            return score;
+                          };
+                          const __srcSliderEntries=__srcRawSliders.map((element,index)=>({element,index,score:__srcSliderScore(element)})).sort((a,b)=>b.score-a.score||a.index-b.index);
+                          const __srcSlider=__srcSliderEntries[0]?.element||null;
+                          const __srcExpanded=!!__srcTrigger&&(__srcTrigger.getAttribute('aria-expanded')==='true'||!!__srcControlled||!!__srcPopup);
+                          let __srcState={menuClicks:0,findAttempts:0,moveAttempts:0,closeAttempts:0,readAttempts:0,readbackWaits:0,pendingReadback:false,pendingSemantic:'',pendingDirection:0,pendingNumeric:null,applied:false,verifiedBySemantic:false,at:0};
+                          try{const saved=sessionStorage.getItem(__srcStateKey);if(saved)__srcState={...__srcState,...JSON.parse(saved)};}catch(_){}
+                          const __srcSave=()=>{try{sessionStorage.setItem(__srcStateKey,JSON.stringify(__srcState));}catch(_){}};
+                          const __srcDiagnostics=extra=>({requested:__srcWanted,requestedOrdinal:__srcWantedOrdinal,sliderFound:!!__srcSlider,sliderCandidates:__srcRawSliders.length,triggerFound:!!__srcTrigger,triggerCandidates:__srcTriggerEntries.length,triggerScore:__srcTriggerEntry?.score||0,triggerLabel:__srcTrigger?labelOf(__srcTrigger):'',triggerLevel:__srcTriggerLevel,triggerExpanded:__srcExpanded,controlledPopup:!!__srcControlled,popupFound:!!__srcPopup,menuClicks:__srcState.menuClicks,findAttempts:__srcState.findAttempts,moveAttempts:__srcState.moveAttempts,closeAttempts:__srcState.closeAttempts,readAttempts:__srcState.readAttempts,readbackWaits:__srcState.readbackWaits,pendingReadback:!!__srcState.pendingReadback,applied:!!__srcState.applied,...extra});
+                          const __srcFail=(status,detail,extra={})=>{__srcState.at=Date.now();__srcSave();return result(status,detail,__srcDiagnostics(extra));};
+                          if(!__srcSlider){
+                            __srcState.findAttempts++;__srcState.at=Date.now();__srcSave();
+                            if(__srcState.applied){
+                              if(!__srcState.verifiedBySemantic&&__srcTriggerLevel&&__srcTriggerLevel!==__srcWanted)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 적용 후 선택기 의미값이 요청과 다릅니다.',{observed:__srcTriggerLevel});
+                              try{sessionStorage.removeItem(__srcStateKey);}catch(_){}
+                              return result('READY','Chat 추론 의미값 적용 확인',__srcDiagnostics({menuClosed:true}));
+                            }
+                            if(!__srcTrigger){
+                              if(__srcState.findAttempts>=8)return __srcFail('CHAT_REASONING_TRIGGER_NOT_FOUND','Chat 추론 선택기를 찾지 못했습니다.');
+                              return result('UI_WAIT','Chat 추론 선택기 탐색 대기',__srcDiagnostics({action:'wait-trigger'}));
+                            }
+                            if(!__srcExpanded&&__srcState.menuClicks<1){
+                              __srcState.menuClicks++;__srcState.at=Date.now();__srcSave();__srcTrigger.focus?.();__srcTrigger.click();
+                              return result('UI_WAIT','Chat 모델 메뉴 1회 열기 반영 대기',__srcDiagnostics({action:'open-menu'}));
+                            }
+                            if(__srcState.findAttempts>=8)return __srcFail('CHAT_REASONING_SLIDER_NOT_FOUND','Chat 추론 메뉴에서 슬라이더를 찾지 못했습니다.');
+                            return result('UI_WAIT','Chat 추론 슬라이더 탐색 대기',__srcDiagnostics({action:'wait-slider'}));
+                          }
+                          const __srcInput=typeof HTMLInputElement!=='undefined'&&__srcSlider instanceof HTMLInputElement&&__srcSlider.type==='range';
+                          const __srcNum=(value,fallback)=>{if(value==null||String(value).trim()==='')return fallback;const number=Number(value);return Number.isFinite(number)?number:fallback;};
+                          const __srcMin=__srcNum(__srcSlider.getAttribute('aria-valuemin'),__srcInput?__srcNum(__srcSlider.min,0):0);
+                          const __srcMax=__srcNum(__srcSlider.getAttribute('aria-valuemax'),__srcInput?__srcNum(__srcSlider.max,100):100);
+                          const __srcRange=__srcMax-__srcMin;
+                          if(!Number.isFinite(__srcMin)||!Number.isFinite(__srcMax)||!(__srcRange>0)){
+                            __srcState.readAttempts++;__srcSave();
+                            if(__srcState.readAttempts>=3)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 범위를 확인할 수 없습니다.',{min:__srcMin,max:__srcMax});
+                            return result('UI_WAIT','Chat 추론 슬라이더 범위 정보 대기',__srcDiagnostics({min:__srcMin,max:__srcMax}));
+                          }
+                          const __srcDeclaredStep=__srcNum(__srcSlider.getAttribute('aria-valuestep'),__srcInput?__srcNum(__srcSlider.step,NaN):NaN);
+                          const __srcRawCount=Number.isFinite(__srcDeclaredStep)&&__srcDeclaredStep>0?Math.round(__srcRange/__srcDeclaredStep)+1:0;
+                          const __srcExactCount=__srcRawCount>=2&&__srcRawCount<=101&&Math.abs(__srcMin+(__srcRawCount-1)*__srcDeclaredStep-__srcMax)<=Math.max(0.0001,__srcDeclaredStep/100)?__srcRawCount:0;
+                          const __srcCurrent=__srcNum(__srcSlider.getAttribute('aria-valuenow'),__srcInput?__srcNum(__srcSlider.value,NaN):NaN);
+                          const __srcSliderLevel=__srcLevel(__srcSlider.getAttribute('aria-valuetext')||'');
+                          const __srcSemanticCurrent=__srcSliderLevel||__srcTriggerLevel;
+                          const __srcPopupNodes=__srcPopup?[...__srcPopup.querySelectorAll('[role="option"],[role="radio"],[data-value],[data-level],[aria-label],[aria-valuetext],datalist option,label,button,span')]:[];
+                          const __srcExplicitNodes=__srcPopup?[...__srcPopup.querySelectorAll('[role="option"],[role="radio"],[data-value],[data-level],datalist option')]:[];
+                          const __srcCollectLevels=nodes=>[...new Set(nodes.map(__srcElementLevel).filter(level=>__srcIndex(level)>=0))].sort((a,b)=>__srcIndex(a)-__srcIndex(b));
+                          const __srcAllLevels=__srcCollectLevels(__srcPopupNodes);
+                          const __srcExplicitLevels=__srcCollectLevels(__srcExplicitNodes);
+                          const __srcAvailableLevels=__srcExplicitLevels.length>=2?__srcExplicitLevels:__srcAllLevels;
+                          const __srcAvailableComplete=__srcExplicitLevels.length>=2||(__srcAllLevels.length>=2&&__srcExactCount===__srcAllLevels.length);
+                          if(__srcAvailableComplete&&!__srcAvailableLevels.includes(__srcWanted))return __srcFail('CHAT_REASONING_OPTION_UNAVAILABLE','선택한 Chat 추론 단계가 현재 계정 또는 워크스페이스에서 제공되지 않습니다.',{available:__srcAvailableLevels});
+                          let __srcMappingLevels=[];
+                          if(__srcAvailableComplete)__srcMappingLevels=__srcAvailableLevels;
+                          else if(__srcExactCount===5)__srcMappingLevels=__srcLevels;
+                          const __srcNumericLevelFor=levels=>{
+                            if(!Number.isFinite(__srcCurrent)||levels.length<2)return'';
+                            const step=__srcRange/(levels.length-1),index=Math.round((__srcCurrent-__srcMin)/step);
+                            if(index<0||index>=levels.length||Math.abs(__srcMin+index*step-__srcCurrent)>Math.max(0.0001,step/3))return'';
+                            return levels[index];
+                          };
+                          const __srcNumericLevel=__srcNumericLevelFor(__srcMappingLevels);
+                          const __srcNumericTrusted=!__srcSemanticCurrent&&!!__srcNumericLevel;
+                          const __srcEffectiveCurrent=__srcSemanticCurrent||__srcNumericLevel;
+                          if(__srcState.pendingReadback){
+                            const observed=__srcSemanticCurrent||(__srcNumericTrusted?__srcNumericLevel:'');
+                            if(observed&&observed!==__srcState.pendingSemantic){
+                              const delta=__srcIndex(observed)-__srcIndex(__srcState.pendingSemantic);
+                              if(delta===0||Math.sign(delta)!==Math.sign(__srcState.pendingDirection))return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더가 요청 방향과 다른 의미값을 반환했습니다.',{observed,previous:__srcState.pendingSemantic});
+                              __srcState.pendingReadback=false;__srcState.readbackWaits=0;__srcState.pendingSemantic='';__srcState.pendingDirection=0;__srcState.pendingNumeric=null;__srcSave();
+                            }else{
+                              __srcState.readbackWaits++;__srcState.at=Date.now();__srcSave();
+                              if(__srcState.readbackWaits>=2)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 숫자값은 변했지만 의미값이 갱신되지 않았습니다.',{observed,current:__srcCurrent,pendingTarget:__srcState.pendingNumeric});
+                              return result('UI_WAIT','Chat 추론 의미값 readback 대기',__srcDiagnostics({action:'wait-semantic-readback',observed,current:__srcCurrent,pendingTarget:__srcState.pendingNumeric}));
+                            }
+                          }
+                          if(!__srcEffectiveCurrent){
+                            __srcState.readAttempts++;__srcState.at=Date.now();__srcSave();
+                            if(__srcState.readAttempts>=3)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더의 현재 의미값을 확인할 수 없습니다.',{current:__srcCurrent,available:__srcAvailableLevels,exactCount:__srcExactCount});
+                            return result('UI_WAIT','Chat 추론 현재 의미값 readback 대기',__srcDiagnostics({action:'wait-current-readback',current:__srcCurrent,available:__srcAvailableLevels,exactCount:__srcExactCount}));
+                          }
+                          const __srcAtTarget=__srcSemanticCurrent?__srcSemanticCurrent===__srcWanted:(__srcNumericTrusted&&__srcNumericLevel===__srcWanted);
+                          if(__srcAtTarget){
+                            __srcState.applied=true;__srcState.verifiedBySemantic=!!__srcSemanticCurrent;__srcState.at=Date.now();__srcSave();
+                            if(__srcState.closeAttempts>=2)return __srcFail('CHAT_REASONING_MENU_CLOSE_FAILED','Chat 추론 적용 후 모델 메뉴를 닫지 못했습니다.',{current:__srcCurrent,observed:__srcEffectiveCurrent});
+                            __srcState.closeAttempts++;__srcSave();
+                            if(__srcTrigger){__srcTrigger.focus?.();__srcTrigger.click();}
+                            else{
+                              __srcSlider.focus?.();
+                              try{__srcSlider.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true,composed:true}));__srcSlider.dispatchEvent(new KeyboardEvent('keyup',{key:'Escape',code:'Escape',bubbles:true,cancelable:true,composed:true}));}catch(_){}
+                            }
+                            return result('UI_WAIT','Chat 추론 적용 완료 · 메뉴 닫힘 확인',__srcDiagnostics({action:'close-menu',current:__srcCurrent,observed:__srcEffectiveCurrent}));
+                          }
+                          const __srcCurrentOrdinal=__srcIndex(__srcEffectiveCurrent),__srcWantedIndex=__srcIndex(__srcWanted);
+                          if(__srcCurrentOrdinal<0||__srcWantedIndex<0)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 의미값 순서를 판정할 수 없습니다.',{observed:__srcEffectiveCurrent});
+                          const __srcDirection=Math.sign(__srcWantedIndex-__srcCurrentOrdinal);
+                          const __srcTolerance=Math.max(0.0001,Number.isFinite(__srcDeclaredStep)&&__srcDeclaredStep>0?__srcDeclaredStep/3:__srcRange/400);
+                          if(!Number.isFinite(__srcCurrent))return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 숫자값을 확인할 수 없습니다.',{observed:__srcEffectiveCurrent});
+                          if((__srcDirection>0&&__srcCurrent>=__srcMax-__srcTolerance)||(__srcDirection<0&&__srcCurrent<=__srcMin+__srcTolerance))return __srcFail('CHAT_REASONING_OPTION_UNAVAILABLE','선택한 Chat 추론 단계가 현재 슬라이더 범위에 없습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent,min:__srcMin,max:__srcMax,available:__srcAvailableLevels});
+                          if(__srcState.moveAttempts>=8)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 의미값이 제한된 이동 횟수 안에 요청값에 도달하지 못했습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent});
+                          const __srcNavStep=__srcMappingLevels.length>=2?__srcRange/(__srcMappingLevels.length-1):(__srcExactCount>=2&&__srcExactCount<=9?__srcDeclaredStep:__srcRange/4);
+                          const __srcTarget=Math.max(__srcMin,Math.min(__srcMax,__srcCurrent+__srcDirection*__srcNavStep));
+                          let __srcChanged=false;
+                          if(__srcInput){
+                            const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+                            if(setter)setter.call(__srcSlider,String(__srcTarget));else __srcSlider.value=String(__srcTarget);
+                            __srcSlider.dispatchEvent(new Event('input',{bubbles:true,composed:true}));__srcSlider.dispatchEvent(new Event('change',{bubbles:true}));__srcChanged=true;
+                          }else{
+                            const thumb=__srcSlider.getBoundingClientRect();let node=__srcSlider.parentElement,track=null;
+                            for(let depth=0;node&&depth<6;depth++,node=node.parentElement){const rect=node.getBoundingClientRect();if(rect.width>=120&&rect.width>=Math.max(thumb.width*2,120)&&rect.height<=96){track=node;break;}}
+                            if(track){
+                              const rect=track.getBoundingClientRect(),ratio=Math.max(0.01,Math.min(0.99,(__srcTarget-__srcMin)/__srcRange)),x=rect.left+rect.width*ratio,y=rect.top+rect.height/2,hit=document.elementFromPoint?.(x,y)||track;
+                              const common={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,button:0};
+                              try{if(typeof PointerEvent==='function'){hit.dispatchEvent(new PointerEvent('pointerdown',{...common,buttons:1,pointerId:1,pointerType:'touch',isPrimary:true}));hit.dispatchEvent(new PointerEvent('pointermove',{...common,buttons:1,pointerId:1,pointerType:'touch',isPrimary:true}));hit.dispatchEvent(new PointerEvent('pointerup',{...common,buttons:0,pointerId:1,pointerType:'touch',isPrimary:true}));}}catch(_){}
+                              hit.dispatchEvent(new MouseEvent('mousedown',{...common,buttons:1}));hit.dispatchEvent(new MouseEvent('mousemove',{...common,buttons:1}));hit.dispatchEvent(new MouseEvent('mouseup',{...common,buttons:0}));hit.dispatchEvent(new MouseEvent('click',{...common,buttons:0}));__srcChanged=true;
+                            }
+                          }
+                          __srcState.moveAttempts++;__srcState.at=Date.now();
+                          if(__srcChanged){__srcState.pendingReadback=true;__srcState.pendingSemantic=__srcEffectiveCurrent;__srcState.pendingDirection=__srcDirection;__srcState.pendingNumeric=__srcTarget;__srcState.readbackWaits=0;}
+                          __srcSave();
+                          if(!__srcChanged&&__srcState.moveAttempts>=4)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 입력 이벤트를 적용하지 못했습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent,target:__srcTarget});
+                          return result('UI_WAIT','Chat 추론 슬라이더 이동 후 의미값 확인 대기',__srcDiagnostics({action:'set-slider',observed:__srcEffectiveCurrent,current:__srcCurrent,target:__srcTarget,changed:__srcChanged}));
+                          """;
+                  return script.replace("__WANTED__", q(wanted))
+                          .replace("__ORDINAL__", String.valueOf(ordinal))
+                          .replace("__STATE_KEY__", q(stateKey));
+              }
+
+              private static String q(String value) { return SelfRunScript.quote(value); }
+          }
+          JAVA
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new):
+              source = path.read_text(encoding='utf-8')
+              if source.count(old) != 1:
+                  raise SystemExit(f'exact replacement mismatch: {path} count={source.count(old)}')
+              path.write_text(source.replace(old, new, 1), encoding='utf-8')
+
+          service = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          status_anchor = '''static boolean isWatchdogRecoverySubmissionPhase(String phase){return PHASE_WATCHDOG_SEND_CONTINUE.equals(phase)||PHASE_WATCHDOG_CLICK_CONTINUE.equals(phase);}\n'''
+          status_replacement = status_anchor + '''static boolean isChatReasoningFailureStatus(String status){return switch(status){case "CHAT_REASONING_TRIGGER_NOT_FOUND","CHAT_REASONING_SLIDER_NOT_FOUND","CHAT_REASONING_OPTION_UNAVAILABLE","CHAT_REASONING_READBACK_MISMATCH","CHAT_REASONING_MENU_CLOSE_FAILED"->true;default->false;};}\nstatic String chatReasoningFailureMessage(String status){return switch(status){case "CHAT_REASONING_TRIGGER_NOT_FOUND"->"Chat 추론 선택기를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_SLIDER_NOT_FOUND"->"Chat 추론 메뉴에서 슬라이더를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_OPTION_UNAVAILABLE"->"선택한 Chat 추론 단계가 현재 계정 또는 워크스페이스에서 제공되지 않습니다.";case "CHAT_REASONING_READBACK_MISMATCH"->"Chat 추론 적용 결과가 요청한 의미값과 일치하지 않습니다.";case "CHAT_REASONING_MENU_CLOSE_FAILED"->"Chat 추론 적용 후 모델 메뉴를 닫지 못했습니다.";default->"Chat 추론 설정을 적용하지 못했습니다.";};}\n'''
+          replace_exact(service, status_anchor, status_replacement)
+          auth_anchor = '''if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase))'''
+          auth_replacement = '''if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&isChatReasoningFailureStatus(status)){String message=chatReasoningFailureMessage(status);store.setLastError(status,message);runLog.record(store,"DOM_RESULT","phase=BOOTSTRAP;status="+status);enterPreservedPause(status,status+" · "+message,false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase))'''
+          replace_exact(service, auth_anchor, auth_replacement)
+
+          policy = Path('app/src/test/java/com/shaterguy/chatgptselfrun/ChatReasoningPolicyTest.java')
+          source = policy.read_text(encoding='utf-8')
+          start = source.index('    @Test public void chatSliderScriptUsesOneMenuOpenAndNeverTraversesAdvanced()')
+          end = source.index('    @Test public void newTaskAndBootstrapAreWiredWithoutChangingWorkContinuation()', start)
+          replacement = '''    @Test public void chatSliderScriptUsesSemanticReadbackAndFiniteFailures() {
+              String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-TEST");
+              assertTrue(script.contains("aria-valuetext"));
+              assertTrue(script.contains("pendingReadback"));
+              assertTrue(script.contains("CHAT_REASONING_TRIGGER_NOT_FOUND"));
+              assertTrue(script.contains("CHAT_REASONING_SLIDER_NOT_FOUND"));
+              assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
+              assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
+              assertTrue(script.contains("CHAT_REASONING_MENU_CLOSE_FAILED"));
+              assertTrue(script.contains("menuClicks<1"));
+              assertFalse(script.contains("__srcWantedOrdinal/4"));
+              assertFalse(script.contains("open-advanced"));
+          }
+
+              @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
+              String[] statuses = {
+                      "CHAT_REASONING_TRIGGER_NOT_FOUND", "CHAT_REASONING_SLIDER_NOT_FOUND",
+                      "CHAT_REASONING_OPTION_UNAVAILABLE", "CHAT_REASONING_READBACK_MISMATCH",
+                      "CHAT_REASONING_MENU_CLOSE_FAILED"
+              };
+              for (String status : statuses) {
+                  assertTrue(SelfRunService.isChatReasoningFailureStatus(status));
+                  assertFalse(SelfRunService.chatReasoningFailureMessage(status).isEmpty());
+              }
+              assertFalse(SelfRunService.isChatReasoningFailureStatus("UI_WAIT"));
+          }
+
+          '''
+          policy.write_text(source[:start] + replacement + source[end:], encoding='utf-8')
+
+          test = Path('app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java')
+          source = test.read_text(encoding='utf-8')
+          source = source.replace('''    @Test public void chatReasoningNativeRangeUsesHtmlDefaultsWhenAriaValuesAreAbsent() throws Exception {
+              assertChatReasoningFixture(nativeChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
+                      "document.getElementById('slider').value", "100");
+          }
+
+              @Test public void chatReasoningAriaSliderUsesDefaultBoundsWhenBoundsAreAbsent() throws Exception {
+              assertChatReasoningFixture(ariaChatReasoningFixture(), ChatReasoningPreferenceStore.HIGH,
+                      "document.getElementById('slider').getAttribute('aria-valuenow')", "50");
+          }
+
+          ''','''    @Test public void chatReasoningNativeRangeMovesBySemanticSteps() throws Exception {
+              assertChatReasoningFixture(nativeChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
+                      "document.getElementById('slider').value", "4");
+          }
+
+              @Test public void chatReasoningAriaSliderMovesBySemanticSteps() throws Exception {
+              assertChatReasoningFixture(ariaChatReasoningFixture(), ChatReasoningPreferenceStore.HIGH,
+                      "document.getElementById('slider').getAttribute('aria-valuenow')", "2");
+          }
+
+          ''',1)
+          marker = '    @Test public void v1WorkTargetsPopulateAllScopedV2TargetsWithoutReplacingRecaptures() throws Exception {'
+          if source.count(marker) != 1:
+              raise SystemExit('test insertion marker mismatch')
+          tests = '''    @Test public void chatReasoningReducedRangeAppliesAvailableHigh() throws Exception {
+              assertChatReasoningFixture(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.HIGH,
+                      "document.getElementById('slider').value", "2");
+          }
+
+              @Test public void chatReasoningReducedRangeRejectsUnavailableLevels() throws Exception {
+              assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
+                      "CHAT_REASONING_OPTION_UNAVAILABLE");
+              assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
+                      "CHAT_REASONING_OPTION_UNAVAILABLE");
+          }
+
+              @Test public void chatReasoningSemanticMismatchNeverFallsBackToNumericPosition() throws Exception {
+              assertChatReasoningTerminal(semanticMismatchFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
+                      "CHAT_REASONING_READBACK_MISMATCH");
+          }
+
+              @Test public void chatReasoningMissingTriggerAndSliderTerminate() throws Exception {
+              assertChatReasoningTerminal(missingTriggerFixture(), ChatReasoningPreferenceStore.HIGH,
+                      "CHAT_REASONING_TRIGGER_NOT_FOUND");
+              assertChatReasoningTerminal(missingSliderFixture(), ChatReasoningPreferenceStore.HIGH,
+                      "CHAT_REASONING_SLIDER_NOT_FOUND");
+          }
+
+              @Test public void chatReasoningMenuCloseFailureTerminates() throws Exception {
+              assertChatReasoningTerminal(closeBlockedFixture(), ChatReasoningPreferenceStore.INSTANT,
+                      "CHAT_REASONING_MENU_CLOSE_FAILED");
+          }
+
+          '''
+          source = source.replace(marker, tests + marker, 1)
+          helper_marker = '    private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,'
+          if source.count(helper_marker) != 1:
+              raise SystemExit('helper insertion marker mismatch')
+          helper = '''    private static void assertChatReasoningTerminal(String html, String selection,
+                                                       String expectedStatus) throws Exception {
+              try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+                  AtomicReference<WebView> web = new AtomicReference<>();
+                  loadChatReasoningFixture(scenario, web, html);
+                  JSONObject result = null;
+                  for (int attempt = 0; attempt < 20; attempt++) {
+                      result = evaluate(scenario, web, chatReasoningScript(selection));
+                      if (!"UI_WAIT".equals(result.getString("status"))) break;
+                  }
+                  assertNotNull(result);
+                  assertEquals(expectedStatus, result.getString("status"));
+              }
+          }
+
+          '''
+          source = source.replace(helper_marker, helper + helper_marker, 1)
+          fixture_start = source.index('    private static String nativeChatReasoningFixture()')
+          fixture_end = source.index('    private static String continuationFixture(String controls)', fixture_start)
+          fixtures = '''    private static String fullLevelsMarkup() {
+              return "<span data-level='instant'>Instant</span><span data-level='medium'>Medium</span>"
+                      + "<span data-level='high'>High</span><span data-level='xhigh'>Extra High</span>"
+                      + "<span data-level='pro'>Pro</span>";
+          }
+
+              private static String reducedLevelsMarkup() {
+              return "<span data-level='instant'>Instant</span><span data-level='medium'>Medium</span>"
+                      + "<span data-level='high'>High</span>";
+          }
+
+              private static String nativeChatReasoningFixture() {
+              return chatReasoningFixture("<input id='slider' type='range' min='0' max='4' step='1' value='0' aria-valuetext='Instant'>",
+                      fullLevelsMarkup(), "Flash Instant",
+                      "const labels=['Instant','Medium','High','Extra High','Pro'];const slider=document.getElementById('slider');"
+                              + "function updateNative(){const value=Math.max(0,Math.min(4,Math.round(Number(slider.value))));const text=labels[value];slider.setAttribute('aria-valuetext',text);trigger.textContent=text;}"
+                              + "slider.addEventListener('input',updateNative);slider.addEventListener('change',updateNative);", false);
+          }
+
+              private static String ariaChatReasoningFixture() {
+              return chatReasoningFixture("<div id='track'><div id='slider' role='slider' tabindex='0' aria-valuemin='0' aria-valuemax='4' aria-valuenow='1' aria-valuetext='Medium'></div></div>",
+                      fullLevelsMarkup(), "Flash Standard",
+                      "const labels=['Instant','Medium','High','Extra High','Pro'];const slider=document.getElementById('slider'),track=document.getElementById('track');"
+                              + "function updateAria(event){const rect=track.getBoundingClientRect();const value=Math.round(Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width))*4);const text=labels[value];slider.setAttribute('aria-valuenow',String(value));slider.setAttribute('aria-valuetext',text);trigger.textContent=text;}"
+                              + "for(const type of ['pointerup','mouseup','click']){track.addEventListener(type,updateAria);slider.addEventListener(type,updateAria);}", false);
+          }
+
+              private static String reducedChatReasoningFixture() {
+              return chatReasoningFixture("<input id='slider' type='range' min='0' max='2' step='1' value='0' aria-valuetext='Instant'>",
+                      reducedLevelsMarkup(), "Instant",
+                      "const labels=['Instant','Medium','High'];const slider=document.getElementById('slider');"
+                              + "function updateReduced(){const value=Math.max(0,Math.min(2,Math.round(Number(slider.value))));const text=labels[value];slider.setAttribute('aria-valuetext',text);trigger.textContent=text;}"
+                              + "slider.addEventListener('input',updateReduced);slider.addEventListener('change',updateReduced);", false);
+          }
+
+              private static String semanticMismatchFixture() {
+              return chatReasoningFixture("<input id='slider' type='range' min='0' max='4' step='1' value='2' aria-valuetext='High'>",
+                      fullLevelsMarkup(), "High",
+                      "const slider=document.getElementById('slider');function keepHigh(){slider.setAttribute('aria-valuetext','High');trigger.textContent='High';}"
+                              + "slider.addEventListener('input',keepHigh);slider.addEventListener('change',keepHigh);", false);
+          }
+
+              private static String closeBlockedFixture() {
+              return chatReasoningFixture("<input id='slider' type='range' min='0' max='4' step='1' value='0' aria-valuetext='Instant'>",
+                      fullLevelsMarkup(), "Instant", "", true);
+          }
+
+              private static String missingTriggerFixture() {
+              return "<!doctype html><html><head><style>body{margin:0}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}</style></head>"
+                      + "<body><main><form><textarea id='prompt-textarea'></textarea></form></main></body></html>";
+          }
+
+              private static String missingSliderFixture() {
+              return "<!doctype html><html><head><style>body{margin:0}header{height:64px;padding:8px}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}#reasoning-menu[hidden]{display:none}</style></head>"
+                      + "<body><header><button id='trigger' type='button' aria-haspopup='menu' aria-controls='reasoning-menu' aria-expanded='false'>Instant</button></header>"
+                      + "<main><form><textarea id='prompt-textarea'></textarea></form></main><div id='reasoning-menu' role='menu' hidden><span data-level='instant'>Instant</span><span data-level='high'>High</span></div>"
+                      + "<script>const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');trigger.addEventListener('click',()=>{menu.hidden=false;trigger.setAttribute('aria-expanded','true');});</script></body></html>";
+          }
+
+              private static String chatReasoningFixture(String sliderMarkup, String levelsMarkup,
+                                                       String initialLabel, String sliderScript,
+                                                       boolean refuseClose) {
+              String closeBranch = refuseClose ? "" : "else{menu.hidden=true;window.menuCloseClicks++;trigger.setAttribute('aria-expanded','false');}";
+              return "<!doctype html><html><head><style>body{margin:0}header{height:64px;padding:8px}main{min-height:720px;display:flex;align-items:flex-end}form{height:72px;width:100%}button{display:block;margin:8px}#reasoning-menu[hidden]{display:none}#reasoning-menu{width:320px;min-height:72px}#levels{display:flex;gap:8px}#track{position:relative;width:240px;height:24px;background:#ddd}#slider[role=slider]{position:absolute;left:0;top:3px;width:18px;height:18px;background:#222}</style></head>"
+                      + "<body><header><button id='trigger' type='button' aria-haspopup='menu' aria-controls='reasoning-menu' aria-expanded='false'>" + initialLabel + "</button></header>"
+                      + "<main><form><textarea id='prompt-textarea'></textarea></form></main>"
+                      + "<div id='reasoning-menu' role='menu' hidden><div id='levels'>" + levelsMarkup + "</div>" + sliderMarkup + "</div>"
+                      + "<script>window.menuOpenClicks=0;window.menuCloseClicks=0;const trigger=document.getElementById('trigger'),menu=document.getElementById('reasoning-menu');"
+                      + "trigger.addEventListener('click',()=>{if(menu.hidden){menu.hidden=false;window.menuOpenClicks++;trigger.setAttribute('aria-expanded','true');}" + closeBranch + "});"
+                      + sliderScript + "</script></body></html>";
+          }
+
+          '''
+          source = source[:fixture_start] + fixtures + source[fixture_end:]
+          test.write_text(source, encoding='utf-8')
+          PY
+          rm .github/workflows/apply-dev4-reasoning-patch.yml
+          git diff --check
+          grep -Fq 'CHAT_REASONING_OPTION_UNAVAILABLE' app/src/main/java/com/shaterguy/chatgptselfrun/ChatReasoningDom.java
+          grep -Fq 'isChatReasoningFailureStatus' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/ChatReasoningDom.java \
+                  app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
+                  app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/ChatReasoningPolicyTest.java \
+                  .github/workflows/apply-dev4-reasoning-patch.yml
+          git commit -m 'fix(drive): make chat reasoning selection semantically exact'
+          git push origin HEAD:selfrun-drive/v1.4.2-dev4
