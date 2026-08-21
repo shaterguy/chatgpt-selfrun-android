@@ -36,7 +36,7 @@ public class SelfRunDriveCommandAckPollingTest {
     @Test public void pollingNeverSchedulesFiveMinuteAckRetry() throws Exception {
         String service = src("SelfRunService.java");
         String poll = between(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
-        assertTrue(poll.contains("drive.readDocumentText(accessToken,snapshot.turnDocumentId)"));
+        assertTrue(poll.contains("drive.readDocumentSnapshot(accessToken,snapshot.turnDocumentId)"));
         assertFalse(poll.contains("submissionRetryDue"));
         assertFalse(poll.contains("prepareCommandRetry"));
         assertTrue(service.contains("private static final long NORMAL_POLL_MS = 60_000L"));
