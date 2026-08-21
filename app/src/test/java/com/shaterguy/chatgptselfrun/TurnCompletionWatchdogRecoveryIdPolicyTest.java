@@ -65,6 +65,7 @@ public final class TurnCompletionWatchdogRecoveryIdPolicyTest {
         assertEquals("", DriveSignalParser.recoveryId(normal));
         assertEquals("wd.6", DriveSignalParser.recoveryId(oldRecovery));
         assertNotEquals(SelfRunProtocol.watchdogRecoveryId(7), DriveSignalParser.recoveryId(oldRecovery));
+        assertTrue(DriveSignalParser.hasRecoveryIdField(oldRecovery));
     }
 
     @Test public void malformedRecoveryIdentityCannotMatchOrBecomeLatestNormalCompletion() {
@@ -72,37 +73,35 @@ public final class TurnCompletionWatchdogRecoveryIdPolicyTest {
         String bad = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=bad/id]";
         DriveSignalParser.Scan scan = DriveSignalParser.scan(normal + "\n" + bad, RUN, 0, SelfRunStore.MODE_CHAT);
         assertEquals(2, scan.unseen.size());
+        assertTrue(DriveSignalParser.hasRecoveryIdField(scan.unseen.get(1).raw));
         assertEquals("", DriveSignalParser.recoveryId(scan.unseen.get(1).raw));
         assertFalse(scan.unseen.get(1).protocolError.isEmpty());
         assertEquals(normal, DriveSignalParser.latestCompletion(scan.unseen).raw);
     }
 
-    @Test public void lateLowerRecoveryGenerationIsSuppressedAfterHigherWasConsumed() {
-        String newer = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.2]";
-        String olderLate = "[2026.08.21 | 12:00:01] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.1]";
-        DriveSignalParser.Scan scan = DriveSignalParser.scan(newer + "\n" + olderLate, RUN, 1, SelfRunStore.MODE_CHAT);
-        assertEquals(2, scan.totalCount);
-        assertTrue(scan.unseen.isEmpty());
-        assertTrue(scan.cursorRebased);
-    }
-
-    @Test public void duplicateConsumedRecoveryGenerationIsSuppressed() {
-        String first = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.4]";
-        String duplicate = "[2026.08.21 | 12:00:01] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.4]";
-        DriveSignalParser.Scan scan = DriveSignalParser.scan(first + "\n" + duplicate, RUN, 1, SelfRunStore.MODE_CHAT);
-        assertEquals(2, scan.totalCount);
-        assertTrue(scan.unseen.isEmpty());
-        assertTrue(scan.cursorRebased);
-    }
-
-    @Test public void currentHigherRecoveryStillSurvivesOlderUnseenRecovery() {
+    @Test public void recoveryTaggedEventsStayVisibleForExactRecoveryMatching() {
         String older = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.4]";
         String current = "[2026.08.21 | 12:00:01] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.5]";
         DriveSignalParser.Scan scan = DriveSignalParser.scan(older + "\n" + current, RUN, 0, SelfRunStore.MODE_CHAT);
         assertEquals(2, scan.totalCount);
-        assertEquals(1, scan.unseen.size());
-        assertEquals("wd.5", DriveSignalParser.recoveryId(scan.unseen.get(0).raw));
-        assertTrue(scan.cursorRebased);
+        assertEquals(2, scan.unseen.size());
+        assertEquals("wd.4", DriveSignalParser.recoveryId(scan.unseen.get(0).raw));
+        assertEquals("wd.5", DriveSignalParser.recoveryId(scan.unseen.get(1).raw));
+        assertNull(DriveSignalParser.latestCompletion(scan.unseen));
+    }
+
+    @Test public void sourceQuarantinesEveryRecoveryTaggedCompletionFromNormalApply() throws Exception {
+        String service = source("SelfRunService.java");
+        String gate = section(service, "private static java.util.List<DriveSignalParser.Event> normalDriveEvents", "private void pollDriveNow");
+        assertTrue(gate.contains("DriveSignalParser.hasRecoveryIdField(event.raw)"));
+        assertTrue(gate.contains("continue"));
+
+        String poll = section(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
+        assertTrue(poll.contains("normalUnseen=normalDriveEvents(scan.unseen)"));
+        assertTrue(poll.contains("DriveSignalParser.latestCompletion(normalUnseen)"));
+        assertTrue(poll.contains("normalUnseen.size()!=scan.unseen.size()"));
+        assertTrue(poll.contains("store.baselineDriveSignals(scan.totalCount,scan.latest)"));
+        assertFalse(poll.contains("store.applyDriveSignals(scan.unseen,System.currentTimeMillis())"));
     }
 
     @Test public void sourceWaitsForMatchingIdWithoutPostSubmitBaseline() throws Exception {
