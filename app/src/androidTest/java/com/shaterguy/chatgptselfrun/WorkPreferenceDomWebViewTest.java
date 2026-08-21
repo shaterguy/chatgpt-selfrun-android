@@ -38,14 +38,14 @@ public final class WorkPreferenceDomWebViewTest {
         assertSelection("aria-haspopup=\"dialog\" aria-expanded=\"false\"", "mousedown", true);
     }
 
-    @Test public void chatReasoningNativeRangeUsesHtmlDefaultsWhenAriaValuesAreAbsent() throws Exception {
+    @Test public void chatReasoningNativeRangeMovesBySemanticSteps() throws Exception {
         assertChatReasoningFixture(nativeChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
-                "document.getElementById('slider').value", "100");
+                "document.getElementById('slider').value", "4");
     }
 
-    @Test public void chatReasoningAriaSliderUsesDefaultBoundsWhenBoundsAreAbsent() throws Exception {
+    @Test public void chatReasoningAriaSliderMovesBySemanticSteps() throws Exception {
         assertChatReasoningFixture(ariaChatReasoningFixture(), ChatReasoningPreferenceStore.HIGH,
-                "document.getElementById('slider').getAttribute('aria-valuenow')", "50");
+                "document.getElementById('slider').getAttribute('aria-valuenow')", "2");
     }
 
     @Test public void chatReasoningReducedRangeAppliesAvailableHigh() throws Exception {
