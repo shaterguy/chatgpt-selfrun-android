@@ -26,6 +26,9 @@ public final class BootstrapFiniteStateWiringTest {
         String dom = src("SelfRunDom.java");
         String history = src("SelfRunHistoryStore.java");
         String detail = src("SelfRunDetailActivity.java");
+        String list = src("SelfRunHistoryActivity.java");
+        String application = src("SelfRunApplication.java");
+        String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(dom.contains("modeTimeoutMs=20000"));
         assertTrue(dom.contains("modeMaxAttempts=18"));
         assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
@@ -35,18 +38,22 @@ public final class BootstrapFiniteStateWiringTest {
         assertTrue(dom.contains("newChatFailureMs=10000"));
         assertTrue(history.contains("BootstrapRunStateStore.appendHistory"));
         assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));
+        assertTrue(list.contains("BootstrapRunStateStore.summary(item)"));
+        assertFalse(list.contains("모델 변경 없음"));
         assertFalse(detail.contains("ChatReasoningPreferenceStore.summary(this"));
+        assertTrue(application.contains("ChatReasoningPreferenceStore.initialize(context)"));
+        assertTrue(manifest.contains("android:name=\".SelfRunApplication\""));
     }
 
     @Test public void developmentIdentityAdvancesOnce() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000071"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.2-dev7'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000072"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.2-dev8'"));
     }
 
     private static String src(String file) throws Exception {
         return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
-      "src/main/java/com/shaterguy/chatgptselfrun/" + file);
+                "src/main/java/com/shaterguy/chatgptselfrun/" + file);
     }
 
     private static String read(String first, String fallback) throws Exception {

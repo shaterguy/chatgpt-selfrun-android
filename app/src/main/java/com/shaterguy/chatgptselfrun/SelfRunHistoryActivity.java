@@ -60,7 +60,7 @@ public final class SelfRunHistoryActivity extends Activity {
         root.addView(Ui.section(this, runId));
         String model = SelfRunStore.MODE_WORK.equals(item.optString("mode"))
                 ? item.optString("pendingModel", "-") + " / " + item.optString("pendingReasoning", "-")
-                : "모델 변경 없음";
+                : BootstrapRunStateStore.summary(item);
         TextView summary = Ui.body(this,
                 "모드: " + item.optString("mode", "-")
                         + "\n상태: " + item.optString("status", "-")
