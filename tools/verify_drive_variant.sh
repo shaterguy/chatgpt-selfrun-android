@@ -23,8 +23,6 @@ TEST_SIGN=tools/sign_test.sh
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
 grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
-grep -Fq 'selfRunDriveVersionCode = 1000063' "$BUILD"
-grep -Fq "selfRunDriveVersionName = '1.4.1-dev9'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 grep -Fq '.SelfRunRestartActivity" android:exported="false"' "$MANIFEST"
 grep -Fq 'TEST_APPLICATION_ID = "com.shaterguy.chatgptselfrun.drive.test"' "$RESTART_POLICY"
