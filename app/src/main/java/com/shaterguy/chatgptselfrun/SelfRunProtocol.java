@@ -6,8 +6,7 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 final class SelfRunProtocol {
-    static final String SELF_RUN_SKILL_DOCUMENT_ID =
-            "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
+    static final String SELF_RUN_SKILL_DOCUMENT_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
     private static final SelfRunTurnInfoRewriteGate TURN_INFO_REWRITE_GATE =
             new SelfRunTurnInfoRewriteGate();
 
@@ -41,7 +40,7 @@ final class SelfRunProtocol {
         return "[" + kstTimestamp(new Date()) + "] [SELF_RUN_BOOTSTRAP 0.2.0 " + runId
                 + " MODE=" + mode + "]\n"
                 + "SELF_RUN_CLIENT=DRIVE_V1\n"
-                + "SELF_RUN_SKILL_DOCUMENT_ID=" + SELF_RUN_SKILL_DOCUMENT_ID + "\n"
+                + "SELF_RUN_SKILL_DOCUMENT_ID="+SELF_RUN_SKILL_DOCUMENT_ID+"\n"
                 + "DRIVE_TURN_DOCUMENT_ID=" + documentId + "\n\n"
                 + referenceBlock
                 + "이 실행은 SelfRun이다.\n\n"
