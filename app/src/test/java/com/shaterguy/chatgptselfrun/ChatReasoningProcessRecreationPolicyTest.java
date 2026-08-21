@@ -1,8 +1,8 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.SharedPreferences;
-import android.test.mock.MockContext;
 
 import org.junit.After;
 import org.junit.Test;
@@ -17,6 +17,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import sun.misc.Unsafe;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -27,7 +29,7 @@ public final class ChatReasoningProcessRecreationPolicyTest {
     }
 
     @Test public void processRecreationReloadsDurableRunSelection() throws Exception {
-        FakeContext context = new FakeContext();
+        FakeContext context = FakeContext.create();
         String runId = "SR-PROCESS-RECREATION";
 
         resetProcessCache();
@@ -81,8 +83,19 @@ public final class ChatReasoningProcessRecreationPolicyTest {
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
-    private static final class FakeContext extends MockContext {
-        private final Map<String, SharedPreferences> stores = new HashMap<>();
+    private static final class FakeContext extends ContextWrapper {
+        private Map<String, SharedPreferences> stores;
+
+        private FakeContext() { super(null); }
+
+        static FakeContext create() throws Exception {
+            Field field = Unsafe.class.getDeclaredField("theUnsafe");
+            field.setAccessible(true);
+            Unsafe unsafe = (Unsafe) field.get(null);
+            FakeContext context = (FakeContext) unsafe.allocateInstance(FakeContext.class);
+            context.stores = new HashMap<>();
+            return context;
+        }
 
         @Override public Context getApplicationContext() { return this; }
 
