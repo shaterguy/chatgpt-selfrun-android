@@ -35,7 +35,7 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         assertTrue(claim.contains("return false"));
     }
 
-    @Test public void recoveryClaimIsParserInvisibleAndDoesNotExpandProtocol() throws Exception {
+    @Test public void recoveryClaimIsParserInvisibleAndDoesNotExpandClaimGrammar() throws Exception {
         String parser = sourceMain("DriveCommitParser.java");
         String protocol = sourceMain("SelfRunProtocol.java");
         assertFalse(parser.contains("selfrun_watchdog_"));
@@ -92,18 +92,24 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         assertTrue(method.contains("phaseStartedAt"));
     }
 
-    @Test public void submissionConfirmationMovesToDriveBaselineBeforeNewThirtyMinuteWindow() throws Exception {
+    @Test public void submissionConfirmationStartsCorrelatedThirtyMinuteWaitImmediately() throws Exception {
         String service = sourceMain("SelfRunService.java");
         String submitted = section(service, "private void continuationSubmitted", "private void bootstrapSubmitted");
         assertTrue(submitted.contains("store.watchdogClaimOwned()"));
-        assertTrue(submitted.contains("store.confirmWatchdogSubmission(PHASE_WATCHDOG_POST_SUBMIT_BASELINE"));
-        assertTrue(submitted.contains("authorizeAndRunDrive"));
+        assertTrue(submitted.contains("SelfRunProtocol.watchdogRecoveryId(store.watchdogClaimAttempt())"));
+        assertTrue(submitted.contains("store.confirmWatchdogSubmission(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT"));
+        assertTrue(submitted.contains("scheduleDrivePoll(0L)"));
+        assertFalse(submitted.contains("PHASE_WATCHDOG_POST_SUBMIT_BASELINE"));
+        assertFalse(submitted.contains("authorizeAndRunDrive"));
 
         String poll = section(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
-        String baseline = section(poll, "if(watchdogPostSubmit)", "if(latestCompletion!=null");
-        assertTrue(baseline.contains("latestBlocking"));
-        assertTrue(baseline.contains("store.finishWatchdogRecoveryBaseline(scan.totalCount,scan.latest)"));
-        assertTrue(baseline.contains("post_submit_baseline_cursor"));
+        assertTrue(poll.contains("watchdogRecoveryAwaiting=SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(snapshot.phase)&&store.watchdogClaimSubmitted()"));
+        assertTrue(poll.contains("expectedRecoveryId=SelfRunProtocol.watchdogRecoveryId(store.watchdogClaimAttempt())"));
+        assertTrue(poll.contains("DriveSignalParser.recoveryId(event.raw)"));
+        assertTrue(poll.contains("matching_completion_cursor"));
+        assertTrue(poll.contains("stale_completion_count"));
+        assertFalse(section(poll, "if(watchdogRecoveryAwaiting)", "if(latestCompletion!=null")
+                .contains("finishWatchdogRecoveryBaseline"));
     }
 
     @Test public void claimOutcomeUnknownIsReadbackRetryNotSecondSubmit() throws Exception {
