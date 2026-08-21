@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -140,6 +141,77 @@ public final class ChatReasoningDelayedDomWebViewTest {
                     chatReasoningScriptWithoutHelpers(ChatReasoningPreferenceStore.HIGH, "SR-SCRIPT-ERROR"));
             assertEquals("CHAT_REASONING_READBACK_MISMATCH", failure.getString("status"));
             assertEquals("script-exception", failure.getJSONObject("diagnostics").getString("action"));
+        }
+    }
+
+    @Test public void bootstrapResultPolicyParsesAndClassifiesOnAndroid() {
+        BootstrapResultPolicy.Parsed valid = BootstrapResultPolicy.parse(
+                "\"{\\\"status\\\":\\\"UI_WAIT\\\",\\\"detail\\\":\\\"mode\\\"}\"");
+        assertTrue(valid.valid);
+        assertEquals("UI_WAIT", valid.status);
+        assertEquals("", BootstrapResultPolicy.fatalStatus(valid, 20_000L, 10_000L));
+
+        BootstrapResultPolicy.Parsed malformed = BootstrapResultPolicy.parse(null);
+        assertFalse(malformed.valid);
+        assertEquals(BootstrapResultPolicy.CALLBACK_INVALID,
+                BootstrapResultPolicy.fatalStatus(malformed, 20_000L, 10_000L));
+
+        BootstrapResultPolicy.Parsed scriptError = BootstrapResultPolicy.parse(
+                "{\"status\":\"SCRIPT_ERROR\"}");
+        assertEquals(BootstrapResultPolicy.SCRIPT_ERROR,
+                BootstrapResultPolicy.fatalStatus(scriptError, 20_000L, 10_000L));
+
+        BootstrapResultPolicy.Parsed unknown = BootstrapResultPolicy.parse(
+                "{\"status\":\"SURPRISE\"}");
+        assertEquals(BootstrapResultPolicy.UNKNOWN_STATUS,
+                BootstrapResultPolicy.fatalStatus(unknown, 20_000L, 10_000L));
+
+        assertEquals(BootstrapResultPolicy.TIMEOUT,
+                BootstrapResultPolicy.fatalStatus(valid, 20_000L, 20_000L));
+
+        BootstrapResultPolicy.Parsed modeFailure = BootstrapResultPolicy.parse(
+                "{\"status\":\"CHAT_BOOTSTRAP_MODE_READBACK_FAILED\"}");
+        assertEquals("CHAT_BOOTSTRAP_MODE_READBACK_FAILED",
+                BootstrapResultPolicy.fatalStatus(modeFailure, 20_000L, 10_000L));
+    }
+
+    @Test public void bootstrapRunStatePersistsDeadlineAndPerRunEvidence() {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            scenario.onActivity(activity -> {
+                String runId = "SR-BOOTSTRAP-STATE-A";
+                assertTrue(BootstrapRunStateStore.startRun(activity, runId,
+                        ChatReasoningPreferenceStore.HIGH));
+                BootstrapRunStateStore.Window first = BootstrapRunStateStore.touchBootstrap(
+                        activity, runId, ChatReasoningPreferenceStore.HIGH, 1_000L);
+                BootstrapRunStateStore.Window recorded = BootstrapRunStateStore.recordBootstrapResult(
+                        activity, runId, "UI_WAIT", "mode", 1_500L);
+                BootstrapRunStateStore.Window second = BootstrapRunStateStore.touchBootstrap(
+                        activity, runId, ChatReasoningPreferenceStore.HIGH, 2_000L);
+                assertTrue(first.persisted);
+                assertTrue(recorded.persisted);
+                assertTrue(second.persisted);
+                assertEquals(first.deadlineAt, second.deadlineAt);
+                assertEquals(2, second.attempts);
+                assertTrue(BootstrapRunStateStore.markReasoningApplied(activity, runId,
+                        ChatReasoningPreferenceStore.HIGH));
+                assertTrue(BootstrapRunStateStore.markBootstrapCompleted(activity, runId, "READY"));
+
+                JSONObject history = new JSONObject();
+                BootstrapRunStateStore.appendHistory(activity, runId, history);
+                assertEquals(ChatReasoningPreferenceStore.HIGH,
+                        history.optString("chatReasoningRequested"));
+                assertEquals(BootstrapRunStateStore.REASONING_APPLIED,
+                        history.optString("chatReasoningStatus"));
+                assertEquals(ChatReasoningPreferenceStore.HIGH,
+                        history.optString("chatReasoningVerified"));
+                assertEquals("요청: High / 적용: 확인 완료 / 확인: High",
+                        BootstrapRunStateStore.summary(history));
+
+                String firstSummary = BootstrapRunStateStore.summary(activity, runId);
+                assertTrue(BootstrapRunStateStore.startRun(activity, "SR-BOOTSTRAP-STATE-B",
+                        ChatReasoningPreferenceStore.PRO));
+                assertEquals(firstSummary, BootstrapRunStateStore.summary(activity, runId));
+            });
         }
     }
 

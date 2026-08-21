@@ -77,13 +77,18 @@ public final class ChatReasoningPolicyTest {
         assertTrue(activity.contains("ChatReasoningPreferenceStore.save"));
         assertTrue(dom.contains("ChatReasoningPreferenceStore.selectionForRun"));
         assertTrue(dom.contains("ChatReasoningDom.inline"));
-        assertTrue(service.contains("SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&isChatReasoningFailureStatus(status)"));
-        assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\",\"phase=BOOTSTRAP;status=\"+status)"));
-        assertTrue(service.contains("enterPreservedPause(status,status+\" · \"+message,false)"));
+        assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
+        assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
+        assertTrue(service.contains("scheduleBootstrapCallbackDeadline"));
+        assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\",BootstrapResultPolicy.logDetail"));
+        assertTrue(service.contains("failBootstrap(BootstrapResultPolicy.TIMEOUT"));
         assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE"));
         assertTrue(main.contains("ChatReasoningPreferenceStore.summary"));
-        assertTrue(detail.contains("ChatReasoningPreferenceStore.summary"));
+        assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));
         assertFalse(service.contains("ChatReasoningDom"));
+        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
+        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
+        assertTrue(dom.contains("modeTimeoutMs=20000"));
     }
 
     private static String read(String first, String second) throws Exception {

@@ -3,7 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Durable run-scoped selection for the one-tap Chat reasoning slider. */
+/** Durable current-run selection plus per-run bootstrap evidence. */
 final class ChatReasoningPreferenceStore {
     static final String KEEP = "keep";
     static final String INSTANT = "instant";
@@ -16,15 +16,15 @@ final class ChatReasoningPreferenceStore {
     private static final String KEY_RUN_ID = "runId";
     private static final String KEY_SELECTION = "selection";
     private static volatile SharedPreferences preferences;
+    private static volatile Context appContext;
 
     private ChatReasoningPreferenceStore() {}
 
     static void initialize(Context context) {
-        if (context == null || preferences != null) return;
+        if (context == null || (preferences != null && appContext != null)) return;
         synchronized (ChatReasoningPreferenceStore.class) {
-            if (preferences == null) {
-                preferences = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            }
+  if (appContext == null) appContext = context.getApplicationContext();
+  if (preferences == null) preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         }
     }
 
@@ -32,38 +32,28 @@ final class ChatReasoningPreferenceStore {
         initialize(context);
         SharedPreferences current = preferences;
         if (current == null || runId == null || runId.isEmpty()) return false;
+        String normalized = normalize(selection);
+        if (!BootstrapRunStateStore.startRun(context, runId, normalized)) return false;
         return current.edit().putString(KEY_RUN_ID, runId)
-                .putString(KEY_SELECTION, normalize(selection)).commit();
+      .putString(KEY_SELECTION, normalized).commit();
     }
 
     static String selectionForRun(String runId) {
+        Context context = appContext;
+        if (context != null) {
+  String durable = BootstrapRunStateStore.requested(context, runId);
+  if (!durable.isEmpty()) return normalize(durable);
+        }
         SharedPreferences current = preferences;
         if (current == null || runId == null || !runId.equals(current.getString(KEY_RUN_ID, ""))) {
-            return KEEP;
+  return KEEP;
         }
         return normalize(current.getString(KEY_SELECTION, KEEP));
     }
 
     static String summary(Context context, String runId, String phase, String lastErrorCode) {
         initialize(context);
-        SharedPreferences current = preferences;
-        if (current == null || runId == null || runId.isEmpty()
-                || !runId.equals(current.getString(KEY_RUN_ID, ""))) {
-            return "요청값 기록 없음";
-        }
-        String selection = normalize(current.getString(KEY_SELECTION, KEEP));
-        if (KEEP.equals(selection)) return "현재 Chat 설정 유지";
-        String requested = label(selection);
-        if (reasoningFailure(lastErrorCode)) {
-            return "요청: " + requested + " / 적용: 실패 / 확인: -";
-        }
-        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)) {
-            return "요청: " + requested + " / 적용: 진행 중 / 확인: -";
-        }
-        if (reasoningVerifiedPhase(phase)) {
-            return "요청: " + requested + " / 적용: 확인 완료 / 확인: " + requested;
-        }
-        return "요청: " + requested + " / 적용: 대기 / 확인: -";
+        return BootstrapRunStateStore.summary(context, runId);
     }
 
     static boolean shouldApply(String selection) {
@@ -72,44 +62,31 @@ final class ChatReasoningPreferenceStore {
 
     static int ordinal(String selection) {
         return switch (normalize(selection)) {
-            case INSTANT -> 0;
-            case MEDIUM -> 1;
-            case HIGH -> 2;
-            case EXTRA_HIGH -> 3;
-            case PRO -> 4;
-            default -> -1;
+  case INSTANT -> 0;
+  case MEDIUM -> 1;
+  case HIGH -> 2;
+  case EXTRA_HIGH -> 3;
+  case PRO -> 4;
+  default -> -1;
         };
     }
 
     static String label(String selection) {
         return switch (normalize(selection)) {
-            case INSTANT -> "Instant";
-            case MEDIUM -> "Medium";
-            case HIGH -> "High";
-            case EXTRA_HIGH -> "Extra High";
-            case PRO -> "Pro";
-            default -> "현재 Chat 설정 유지";
+  case INSTANT -> "Instant";
+  case MEDIUM -> "Medium";
+  case HIGH -> "High";
+  case EXTRA_HIGH -> "Extra High";
+  case PRO -> "Pro";
+  default -> "현재 Chat 설정 유지";
         };
     }
 
     static String normalize(String selection) {
         if (selection == null) return KEEP;
         return switch (selection) {
-            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO -> selection;
-            default -> KEEP;
+  case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO -> selection;
+  default -> KEEP;
         };
-    }
-
-    private static boolean reasoningFailure(String code) {
-        if (code == null) return false;
-        return code.startsWith("CHAT_REASONING_") || code.startsWith("CHAT_BOOTSTRAP_");
-    }
-
-    private static boolean reasoningVerifiedPhase(String phase) {
-        if (phase == null || phase.isEmpty()) return false;
-        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)
-                || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
-                || phase.startsWith("DRIVE_")) return false;
-        return true;
     }
 }
