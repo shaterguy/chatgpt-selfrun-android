@@ -1,0 +1,979 @@
+name: Apply dev7 bootstrap hardening
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/staging-v1.4.2-dev7'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-dev7-bootstrap-hardening
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/staging-v1.4.2-dev7
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Apply finite bootstrap and run-state patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          def replace_between(path: str, start: str, end: str, replacement: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              a = text.find(start)
+              b = text.find(end, a + len(start))
+              if a < 0 or b < 0 or b <= a:
+                  raise SystemExit(f'{path}: replacement boundaries not found')
+              p.write_text(text[:a] + replacement + text[b:], encoding='utf-8')
+
+          root = Path('app/src/main/java/com/shaterguy/chatgptselfrun')
+          tests = Path('app/src/test/java/com/shaterguy/chatgptselfrun')
+
+          bootstrap_result_policy = r'''package com.shaterguy.chatgptselfrun;
+
+import org.json.JSONObject;
+import org.json.JSONTokener;
+
+import java.util.Locale;
+import java.util.Set;
+
+/** Pure parsing and classification for the initial ChatGPT bootstrap callback. */
+final class BootstrapResultPolicy {
+    static final String CALLBACK_INVALID = "CHAT_BOOTSTRAP_CALLBACK_INVALID";
+    static final String SCRIPT_ERROR = "CHAT_BOOTSTRAP_SCRIPT_ERROR";
+    static final String UNKNOWN_STATUS = "CHAT_BOOTSTRAP_UNKNOWN_STATUS";
+    static final String TIMEOUT = "CHAT_BOOTSTRAP_TIMEOUT";
+    static final String STATE_PERSIST_FAILED = "CHAT_BOOTSTRAP_STATE_PERSIST_FAILED";
+    static final String READBACK_MISSING = "CHAT_BOOTSTRAP_READBACK_MISSING";
+
+    private static final Set<String> NON_FATAL = Set.of(
+            "READY", "UI_WAIT", "WAIT", "TARGET_ERROR", "AUTH_REQUIRED");
+    private static final String[] DIAGNOSTIC_KEYS = {
+            "action", "requested", "observed", "verifiedValue", "currentMode",
+            "targetFound", "targetSelected", "targetSource", "modeAttempts",
+            "modeClickAttempts", "modeElapsedMs", "sliderFound", "sliderKind",
+            "triggerFound", "searchElapsedMs", "errorName", "errorMessage"
+    };
+
+    private BootstrapResultPolicy() {}
+
+    static final class Parsed {
+        final JSONObject result;
+        final String status;
+        final String detail;
+        final boolean valid;
+        final String parseError;
+
+        Parsed(JSONObject result, String status, String detail, boolean valid, String parseError) {
+            this.result = result == null ? new JSONObject() : result;
+            this.status = safe(status, 80);
+            this.detail = safe(detail, 240);
+            this.valid = valid;
+            this.parseError = safe(parseError, 120);
+        }
+    }
+
+    static Parsed parse(String raw) {
+        if (raw == null || raw.trim().isEmpty() || "null".equals(raw.trim())) {
+            return invalid("empty-callback");
+        }
+        try {
+            Object outer = new JSONTokener(raw).nextValue();
+            Object payload = outer instanceof String
+                    ? new JSONTokener((String) outer).nextValue() : outer;
+            if (!(payload instanceof JSONObject object)) return invalid("non-object-callback");
+            JSONObject result = new JSONObject(object.toString());
+            String status = result.optString("status", "").trim();
+            if (status.isEmpty()) return invalid("missing-status");
+            return new Parsed(result, status, result.optString("detail", ""), true, "");
+        } catch (Throwable error) {
+            return invalid(error.getClass().getSimpleName());
+        }
+    }
+
+    private static Parsed invalid(String reason) {
+        JSONObject result = new JSONObject();
+        try {
+            result.put("status", "SCRIPT_ERROR");
+            result.put("detail", "WebView callback parse failed");
+        } catch (Throwable ignored) {}
+        return new Parsed(result, "SCRIPT_ERROR", "WebView callback parse failed", false, reason);
+    }
+
+    static String fatalStatus(Parsed parsed, long deadlineAt, long now) {
+        if (deadlineAt > 0L && now >= deadlineAt) return TIMEOUT;
+        if (parsed == null || !parsed.valid) return CALLBACK_INVALID;
+        if ("SCRIPT_ERROR".equals(parsed.status)) return SCRIPT_ERROR;
+        if (isExplicitFailure(parsed.status)) return parsed.status;
+        return NON_FATAL.contains(parsed.status) ? "" : UNKNOWN_STATUS;
+    }
+
+    static boolean isExplicitFailure(String status) {
+        if (status == null) return false;
+        return status.startsWith("CHAT_REASONING_") || status.startsWith("CHAT_BOOTSTRAP_");
+    }
+
+    static String observedReasoning(JSONObject result) {
+        JSONObject diagnostics = result == null ? null : result.optJSONObject("diagnostics");
+        if (diagnostics == null) return "";
+        String observed = diagnostics.optString("observed", "").trim();
+        if (observed.isEmpty()) observed = diagnostics.optString("verifiedValue", "").trim();
+        return observed.toLowerCase(Locale.ROOT);
+    }
+
+    static String logDetail(Parsed parsed, BootstrapRunStateStore.Window window,
+                            int generation, String scope) {
+        StringBuilder out = new StringBuilder("phase=BOOTSTRAP;status=")
+                .append(safe(parsed == null ? "" : parsed.status, 80))
+                .append(";valid=").append(parsed != null && parsed.valid ? 1 : 0)
+                .append(";attempt=").append(window == null ? 0 : window.attempts)
+                .append(";elapsedMs=").append(window == null ? 0L : window.elapsedMs(System.currentTimeMillis()))
+                .append(";generation=").append(Math.max(0, generation))
+                .append(";scope=").append(safe(scope, 24));
+        if (parsed != null && !parsed.detail.isEmpty()) out.append(";detail=").append(safe(parsed.detail, 180));
+        if (parsed != null && !parsed.parseError.isEmpty()) out.append(";parseError=").append(parsed.parseError);
+        if (parsed != null) out.append(compactDiagnostics(parsed.result.optJSONObject("diagnostics")));
+        return out.toString();
+    }
+
+    static String compactDiagnostics(JSONObject diagnostics) {
+        if (diagnostics == null) return "";
+        StringBuilder out = new StringBuilder();
+        for (String key : DIAGNOSTIC_KEYS) {
+            if (!diagnostics.has(key)) continue;
+            Object value = diagnostics.opt(key);
+            if (value == null || value == JSONObject.NULL) continue;
+            String text = safe(String.valueOf(value), 120);
+            if (!text.isEmpty()) out.append(';').append(key).append('=').append(text);
+        }
+        return out.toString();
+    }
+
+    static String safe(String value, int max) {
+        String text = value == null ? "" : value.replace('\n', ' ').replace('\r', ' ')
+                .replace(';', ',').trim();
+        return text.length() <= max ? text : text.substring(0, max);
+    }
+}
+'''
+          (root / 'BootstrapResultPolicy.java').write_text(bootstrap_result_policy, encoding='utf-8')
+
+          bootstrap_run_state = r'''package com.shaterguy.chatgptselfrun;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/** Durable per-run bootstrap deadline and Chat reasoning evidence. */
+final class BootstrapRunStateStore {
+    static final long BOOTSTRAP_TIMEOUT_MS = 60_000L;
+    static final String BOOTSTRAP_PENDING = "PENDING";
+    static final String BOOTSTRAP_RUNNING = "RUNNING";
+    static final String BOOTSTRAP_COMPLETED = "COMPLETED";
+    static final String BOOTSTRAP_FAILED = "FAILED";
+    static final String REASONING_KEEP = "KEEP";
+    static final String REASONING_PENDING = "PENDING";
+    static final String REASONING_APPLIED = "APPLIED";
+    static final String REASONING_FAILED = "FAILED";
+
+    private static final String PREFS = "selfrun_drive_bootstrap_runs";
+    private static final String KEY_INDEX = "runIds";
+    private static final String KEY_PREFIX = "run:";
+    private static final int MAX_RUNS = 120;
+
+    private BootstrapRunStateStore() {}
+
+    static final class Window {
+        final long startedAt;
+        final long deadlineAt;
+        final int attempts;
+        final String status;
+        final boolean persisted;
+
+        Window(long startedAt, long deadlineAt, int attempts, String status, boolean persisted) {
+            this.startedAt = Math.max(0L, startedAt);
+            this.deadlineAt = Math.max(0L, deadlineAt);
+            this.attempts = Math.max(0, attempts);
+            this.status = safe(status, 32);
+            this.persisted = persisted;
+        }
+
+        boolean expired(long now) { return deadlineAt > 0L && now >= deadlineAt; }
+        long elapsedMs(long now) { return startedAt > 0L && now >= startedAt ? now - startedAt : 0L; }
+    }
+
+    static final class Snapshot {
+        final boolean exists;
+        final String requested;
+        final String reasoningStatus;
+        final String verified;
+        final String reasoningFailureCode;
+        final long reasoningUpdatedAt;
+        final String bootstrapStatus;
+        final long bootstrapStartedAt;
+        final long bootstrapDeadlineAt;
+        final int bootstrapAttempts;
+        final String bootstrapLastStatus;
+        final String bootstrapFailureCode;
+
+        Snapshot(JSONObject state) {
+            exists = state != null && state.length() > 0;
+            requested = state == null ? "" : state.optString("requested", "");
+            reasoningStatus = state == null ? "" : state.optString("reasoningStatus", "");
+            verified = state == null ? "" : state.optString("verified", "");
+            reasoningFailureCode = state == null ? "" : state.optString("reasoningFailureCode", "");
+            reasoningUpdatedAt = state == null ? 0L : state.optLong("reasoningUpdatedAt", 0L);
+            bootstrapStatus = state == null ? "" : state.optString("bootstrapStatus", "");
+            bootstrapStartedAt = state == null ? 0L : state.optLong("bootstrapStartedAt", 0L);
+            bootstrapDeadlineAt = state == null ? 0L : state.optLong("bootstrapDeadlineAt", 0L);
+            bootstrapAttempts = state == null ? 0 : state.optInt("bootstrapAttempts", 0);
+            bootstrapLastStatus = state == null ? "" : state.optString("bootstrapLastStatus", "");
+            bootstrapFailureCode = state == null ? "" : state.optString("bootstrapFailureCode", "");
+        }
+    }
+
+    static synchronized boolean startRun(Context context, String runId, String selection) {
+        if (context == null || runId == null || runId.isEmpty()) return false;
+        String requested = ChatReasoningPreferenceStore.normalize(selection);
+        JSONObject state = new JSONObject();
+        try {
+            state.put("runId", runId);
+            state.put("requested", requested);
+            state.put("reasoningStatus", ChatReasoningPreferenceStore.KEEP.equals(requested)
+                    ? REASONING_KEEP : REASONING_PENDING);
+            state.put("verified", "");
+            state.put("reasoningFailureCode", "");
+            state.put("reasoningUpdatedAt", System.currentTimeMillis());
+            state.put("bootstrapStatus", BOOTSTRAP_PENDING);
+            state.put("bootstrapStartedAt", 0L);
+            state.put("bootstrapDeadlineAt", 0L);
+            state.put("bootstrapAttempts", 0);
+            state.put("bootstrapLastStatus", "");
+            state.put("bootstrapLastDetail", "");
+            state.put("bootstrapFailureCode", "");
+            state.put("updatedAt", System.currentTimeMillis());
+        } catch (Throwable error) { return false; }
+        return write(context, runId, state);
+    }
+
+    static synchronized Window touchBootstrap(Context context, String runId, String selection, long now) {
+        long current = now > 0L ? now : System.currentTimeMillis();
+        JSONObject state = ensureState(context, runId, selection);
+        if (state == null) return new Window(0L, 0L, 0, BOOTSTRAP_FAILED, false);
+        try {
+            long startedAt = state.optLong("bootstrapStartedAt", 0L);
+            if (startedAt <= 0L) {
+                startedAt = current;
+                state.put("bootstrapStartedAt", startedAt);
+                state.put("bootstrapDeadlineAt", safeAdd(startedAt, BOOTSTRAP_TIMEOUT_MS));
+            }
+            int attempts = state.optInt("bootstrapAttempts", 0);
+            attempts = attempts == Integer.MAX_VALUE ? attempts : attempts + 1;
+            state.put("bootstrapAttempts", attempts);
+            state.put("bootstrapStatus", BOOTSTRAP_RUNNING);
+            state.put("updatedAt", current);
+            boolean persisted = write(context, runId, state);
+            return window(state, persisted);
+        } catch (Throwable error) {
+            return new Window(0L, 0L, 0, BOOTSTRAP_FAILED, false);
+        }
+    }
+
+    static synchronized Window recordBootstrapResult(Context context, String runId,
+                                                      String status, String detail, long now) {
+        JSONObject state = read(context, runId);
+        if (state == null) return new Window(0L, 0L, 0, BOOTSTRAP_FAILED, false);
+        try {
+            state.put("bootstrapLastStatus", safe(status, 80));
+            state.put("bootstrapLastDetail", safe(detail, 240));
+            state.put("updatedAt", now > 0L ? now : System.currentTimeMillis());
+            boolean persisted = write(context, runId, state);
+            return window(state, persisted);
+        } catch (Throwable error) {
+            return window(state, false);
+        }
+    }
+
+    static synchronized boolean markReasoningApplied(Context context, String runId, String observed) {
+        JSONObject state = read(context, runId);
+        if (state == null) return false;
+        String requested = ChatReasoningPreferenceStore.normalize(state.optString("requested", ""));
+        String verified = ChatReasoningPreferenceStore.normalize(observed);
+        if (ChatReasoningPreferenceStore.KEEP.equals(requested) || !requested.equals(verified)) return false;
+        try {
+            state.put("reasoningStatus", REASONING_APPLIED);
+            state.put("verified", verified);
+            state.put("reasoningFailureCode", "");
+            state.put("reasoningUpdatedAt", System.currentTimeMillis());
+            state.put("updatedAt", System.currentTimeMillis());
+        } catch (Throwable error) { return false; }
+        return write(context, runId, state);
+    }
+
+    static synchronized boolean markBootstrapCompleted(Context context, String runId, String status) {
+        JSONObject state = read(context, runId);
+        if (state == null) return false;
+        try {
+            state.put("bootstrapStatus", BOOTSTRAP_COMPLETED);
+            state.put("bootstrapLastStatus", safe(status, 80));
+            state.put("bootstrapFailureCode", "");
+            state.put("updatedAt", System.currentTimeMillis());
+        } catch (Throwable error) { return false; }
+        return write(context, runId, state);
+    }
+
+    static synchronized boolean markBootstrapFailed(Context context, String runId,
+                                                     String code, String detail) {
+        JSONObject state = read(context, runId);
+        if (state == null) state = ensureState(context, runId, ChatReasoningPreferenceStore.KEEP);
+        if (state == null) return false;
+        try {
+            state.put("bootstrapStatus", BOOTSTRAP_FAILED);
+            state.put("bootstrapFailureCode", safe(code, 80));
+            state.put("bootstrapLastStatus", safe(code, 80));
+            state.put("bootstrapLastDetail", safe(detail, 240));
+            String requested = ChatReasoningPreferenceStore.normalize(state.optString("requested", ""));
+            if (!ChatReasoningPreferenceStore.KEEP.equals(requested)
+                    && !REASONING_APPLIED.equals(state.optString("reasoningStatus", ""))) {
+                state.put("reasoningStatus", REASONING_FAILED);
+                state.put("reasoningFailureCode", safe(code, 80));
+                state.put("reasoningUpdatedAt", System.currentTimeMillis());
+            }
+            state.put("updatedAt", System.currentTimeMillis());
+        } catch (Throwable error) { return false; }
+        return write(context, runId, state);
+    }
+
+    static synchronized String requested(Context context, String runId) {
+        JSONObject state = read(context, runId);
+        return state == null ? "" : ChatReasoningPreferenceStore.normalize(
+                state.optString("requested", ChatReasoningPreferenceStore.KEEP));
+    }
+
+    static synchronized Snapshot snapshot(Context context, String runId) {
+        return new Snapshot(read(context, runId));
+    }
+
+    static void appendHistory(Context context, String runId, JSONObject item) {
+        if (item == null) return;
+        Snapshot value = snapshot(context, runId);
+        if (!value.exists) return;
+        try {
+            item.put("chatReasoningRequested", value.requested);
+            item.put("chatReasoningStatus", value.reasoningStatus);
+            item.put("chatReasoningVerified", value.verified);
+            item.put("chatReasoningFailureCode", value.reasoningFailureCode);
+            item.put("chatReasoningUpdatedAt", value.reasoningUpdatedAt);
+            item.put("bootstrapStatus", value.bootstrapStatus);
+            item.put("bootstrapStartedAt", value.bootstrapStartedAt);
+            item.put("bootstrapDeadlineAt", value.bootstrapDeadlineAt);
+            item.put("bootstrapAttempts", value.bootstrapAttempts);
+            item.put("bootstrapLastStatus", value.bootstrapLastStatus);
+            item.put("bootstrapFailureCode", value.bootstrapFailureCode);
+        } catch (Throwable ignored) {}
+    }
+
+    static String summary(Context context, String runId) {
+        Snapshot value = snapshot(context, runId);
+        if (!value.exists) return "요청값 기록 없음";
+        return summary(value.requested, value.reasoningStatus, value.verified,
+                value.reasoningFailureCode);
+    }
+
+    static String summary(JSONObject historyItem) {
+        if (historyItem == null || !historyItem.has("chatReasoningRequested")) return "요청값 기록 없음";
+        return summary(historyItem.optString("chatReasoningRequested", ""),
+                historyItem.optString("chatReasoningStatus", ""),
+                historyItem.optString("chatReasoningVerified", ""),
+                historyItem.optString("chatReasoningFailureCode", ""));
+    }
+
+    private static String summary(String requestedValue, String status, String verifiedValue, String failureCode) {
+        String requested = ChatReasoningPreferenceStore.normalize(requestedValue);
+        if (ChatReasoningPreferenceStore.KEEP.equals(requested)) return "현재 Chat 설정 유지";
+        String requestedLabel = ChatReasoningPreferenceStore.label(requested);
+        if (REASONING_APPLIED.equals(status)) {
+            String verified = ChatReasoningPreferenceStore.normalize(verifiedValue);
+            String verifiedLabel = ChatReasoningPreferenceStore.KEEP.equals(verified)
+                    ? "-" : ChatReasoningPreferenceStore.label(verified);
+            return "요청: " + requestedLabel + " / 적용: 확인 완료 / 확인: " + verifiedLabel;
+        }
+        if (REASONING_FAILED.equals(status)) {
+            return "요청: " + requestedLabel + " / 적용: 실패 / 확인: -"
+                    + (failureCode == null || failureCode.isEmpty() ? "" : " / 오류: " + failureCode);
+        }
+        return "요청: " + requestedLabel + " / 적용: 진행 중 / 확인: -";
+    }
+
+    private static JSONObject ensureState(Context context, String runId, String selection) {
+        if (context == null || runId == null || runId.isEmpty()) return null;
+        JSONObject current = read(context, runId);
+        if (current != null) return current;
+        String requested = ChatReasoningPreferenceStore.normalize(selection);
+        JSONObject state = new JSONObject();
+        try {
+            state.put("runId", runId);
+            state.put("requested", requested);
+            state.put("reasoningStatus", ChatReasoningPreferenceStore.KEEP.equals(requested)
+                    ? REASONING_KEEP : REASONING_PENDING);
+            state.put("verified", "");
+            state.put("reasoningFailureCode", "");
+            state.put("reasoningUpdatedAt", System.currentTimeMillis());
+            state.put("bootstrapStatus", BOOTSTRAP_PENDING);
+            state.put("bootstrapStartedAt", 0L);
+            state.put("bootstrapDeadlineAt", 0L);
+            state.put("bootstrapAttempts", 0);
+            state.put("bootstrapLastStatus", "");
+            state.put("bootstrapLastDetail", "");
+            state.put("bootstrapFailureCode", "");
+            state.put("updatedAt", System.currentTimeMillis());
+        } catch (Throwable error) { return null; }
+        return state;
+    }
+
+    private static Window window(JSONObject state, boolean persisted) {
+        if (state == null) return new Window(0L, 0L, 0, BOOTSTRAP_FAILED, false);
+        return new Window(state.optLong("bootstrapStartedAt", 0L),
+                state.optLong("bootstrapDeadlineAt", 0L),
+                state.optInt("bootstrapAttempts", 0),
+                state.optString("bootstrapStatus", ""), persisted);
+    }
+
+    private static JSONObject read(Context context, String runId) {
+        if (context == null || runId == null || runId.isEmpty()) return null;
+        try {
+            String raw = prefs(context).getString(key(runId), "");
+            return raw == null || raw.isEmpty() ? null : new JSONObject(raw);
+        } catch (Throwable error) { return null; }
+    }
+
+    private static boolean write(Context context, String runId, JSONObject state) {
+        if (context == null || runId == null || runId.isEmpty() || state == null) return false;
+        SharedPreferences preferences = prefs(context);
+        SharedPreferences.Editor editor = preferences.edit();
+        List<String> ids = readIndex(preferences);
+        ids.remove(runId);
+        ids.add(0, runId);
+        while (ids.size() > MAX_RUNS) editor.remove(key(ids.remove(ids.size() - 1)));
+        JSONArray index = new JSONArray();
+        for (String id : ids) index.put(id);
+        return editor.putString(key(runId), state.toString())
+                .putString(KEY_INDEX, index.toString()).commit();
+    }
+
+    private static List<String> readIndex(SharedPreferences preferences) {
+        ArrayList<String> result = new ArrayList<>();
+        try {
+            JSONArray array = new JSONArray(preferences.getString(KEY_INDEX, "[]"));
+            for (int index = 0; index < array.length(); index++) {
+                String id = array.optString(index, "");
+                if (!id.isEmpty() && !result.contains(id)) result.add(id);
+            }
+        } catch (Throwable ignored) {}
+        return result;
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static String key(String runId) { return KEY_PREFIX + runId; }
+    private static long safeAdd(long value, long delta) {
+        return value > Long.MAX_VALUE - delta ? Long.MAX_VALUE : value + delta;
+    }
+    private static String safe(String value, int max) {
+        String text = value == null ? "" : value.replace('\n', ' ').replace('\r', ' ').trim();
+        return text.length() <= max ? text : text.substring(0, max);
+    }
+}
+'''
+          (root / 'BootstrapRunStateStore.java').write_text(bootstrap_run_state, encoding='utf-8')
+
+          preference_store = r'''package com.shaterguy.chatgptselfrun;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+/** Durable current-run selection plus per-run bootstrap evidence. */
+final class ChatReasoningPreferenceStore {
+    static final String KEEP = "keep";
+    static final String INSTANT = "instant";
+    static final String MEDIUM = "medium";
+    static final String HIGH = "high";
+    static final String EXTRA_HIGH = "xhigh";
+    static final String PRO = "pro";
+
+    private static final String PREFS = "selfrun_drive_chat_reasoning";
+    private static final String KEY_RUN_ID = "runId";
+    private static final String KEY_SELECTION = "selection";
+    private static volatile SharedPreferences preferences;
+    private static volatile Context appContext;
+
+    private ChatReasoningPreferenceStore() {}
+
+    static void initialize(Context context) {
+        if (context == null || (preferences != null && appContext != null)) return;
+        synchronized (ChatReasoningPreferenceStore.class) {
+            if (appContext == null) appContext = context.getApplicationContext();
+            if (preferences == null) preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        }
+    }
+
+    static boolean save(Context context, String runId, String selection) {
+        initialize(context);
+        SharedPreferences current = preferences;
+        if (current == null || runId == null || runId.isEmpty()) return false;
+        String normalized = normalize(selection);
+        if (!BootstrapRunStateStore.startRun(context, runId, normalized)) return false;
+        return current.edit().putString(KEY_RUN_ID, runId)
+                .putString(KEY_SELECTION, normalized).commit();
+    }
+
+    static String selectionForRun(String runId) {
+        Context context = appContext;
+        if (context != null) {
+            String durable = BootstrapRunStateStore.requested(context, runId);
+            if (!durable.isEmpty()) return normalize(durable);
+        }
+        SharedPreferences current = preferences;
+        if (current == null || runId == null || !runId.equals(current.getString(KEY_RUN_ID, ""))) {
+            return KEEP;
+        }
+        return normalize(current.getString(KEY_SELECTION, KEEP));
+    }
+
+    static String summary(Context context, String runId, String phase, String lastErrorCode) {
+        initialize(context);
+        return BootstrapRunStateStore.summary(context, runId);
+    }
+
+    static boolean shouldApply(String selection) {
+        return !KEEP.equals(normalize(selection));
+    }
+
+    static int ordinal(String selection) {
+        return switch (normalize(selection)) {
+            case INSTANT -> 0;
+            case MEDIUM -> 1;
+            case HIGH -> 2;
+            case EXTRA_HIGH -> 3;
+            case PRO -> 4;
+            default -> -1;
+        };
+    }
+
+    static String label(String selection) {
+        return switch (normalize(selection)) {
+            case INSTANT -> "Instant";
+            case MEDIUM -> "Medium";
+            case HIGH -> "High";
+            case EXTRA_HIGH -> "Extra High";
+            case PRO -> "Pro";
+            default -> "현재 Chat 설정 유지";
+        };
+    }
+
+    static String normalize(String selection) {
+        if (selection == null) return KEEP;
+        return switch (selection) {
+            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO -> selection;
+            default -> KEEP;
+        };
+    }
+}
+'''
+          (root / 'ChatReasoningPreferenceStore.java').write_text(preference_store, encoding='utf-8')
+
+          # Finite mode gate and explicit new-chat failure inside the initial DOM adapter.
+          dom_path = root / 'SelfRunDom.java'
+          dom = dom_path.read_text(encoding='utf-8')
+          dom = dom.replace("return result('EXISTING_CONVERSATION','새 대화 화면 대신 기존 conversation이 열렸습니다.'",
+                            "return result('CHAT_BOOTSTRAP_NEW_CHAT_FAILED','새 대화 화면 대신 기존 conversation이 열렸습니다.'", 1)
+          mode_start = '                + "const modeKey=\'chatgpt-selfrun:mode:'
+          mode_end = '                + ChatReasoningDom.inline(chatReasoning, runId)'
+          a = dom.find(mode_start)
+          b = dom.find(mode_end, a)
+          if a < 0 or b < 0:
+              raise SystemExit('SelfRunDom.java: mode gate boundaries missing')
+          mode_block = r'''                + "const modeKey='chatgpt-selfrun:mode:" + esc(runId) + "';const modeTimeoutMs=20000,modeMaxAttempts=18;let modeState={startedAt:0,attempts:0,clickAttempts:0,lastClickAt:0,lastAction:'',requested:''};try{const raw=sessionStorage.getItem(modeKey)||localStorage.getItem(modeKey)||'';if(raw)modeState={...modeState,...JSON.parse(raw)};}catch(_){}const modeNow=Date.now();if(!(Number(modeState.startedAt)>0))modeState.startedAt=modeNow;modeState.attempts=Math.max(0,Number(modeState.attempts)||0)+1;modeState.requested=requestedMode;const modeElapsedMs=Math.max(0,modeNow-Number(modeState.startedAt||modeNow));const saveMode=()=>{const value=JSON.stringify(modeState);try{sessionStorage.setItem(modeKey,value);}catch(_){}try{localStorage.setItem(modeKey,value);}catch(_){}};const clearMode=()=>{try{sessionStorage.removeItem(modeKey);}catch(_){}try{localStorage.removeItem(modeKey);}catch(_){}};const recentClick=Number(modeState.lastClickAt)>0&&modeNow-Number(modeState.lastClickAt)<1200;"
+                + "let action='';const calibratedImplicit=modeState.lastAction==='select-mode-calibrated'&&modeState.requested===requestedMode&&Number(modeState.lastClickAt)>0&&modeNow-Number(modeState.lastClickAt)<5000&&!!composer;const heuristicReadback=targetFound&&targetSelected&&currentMode===requestedMode&&selectedModes.length===1;let modeReadback=calibratedImplicit||(targetSource==='calibrated'?targetSelected:heuristicReadback);if(!modeReadback&&targetFound&&!recentClick&&Number(modeState.clickAttempts)<2){action=targetSource==='calibrated'?'select-mode-calibrated':'select-mode';modeState.clickAttempts=Math.max(0,Number(modeState.clickAttempts)||0)+1;modeState.lastClickAt=modeNow;modeState.lastAction=action;saveMode();target.focus?.();target.click();modeReadback=false;}"
+                + "const diagnostics={requested:requestedMode,currentMode,modeCandidates:rawModeControls.length,groupFound:!!modeGroup,targetFound,targetSelected,targetSource,selectedModes,recentClick,action,calibratedImplicit,composer:!!composer,finalReadback:modeReadback,modeAttempts:modeState.attempts,modeClickAttempts:modeState.clickAttempts,modeElapsedMs,modeTimeoutMs};const modeDiag=()=>('requested='+requestedMode+';source='+targetSource+';current='+currentMode+';targetFound='+(targetFound?1:0)+';targetSelected='+(targetSelected?1:0)+';attempt='+(action||'none')+';readback='+(modeReadback?1:0)+';elapsedMs='+modeElapsedMs);"
+                + "if(action)return result('UI_WAIT','모드 전환 반영 대기 · '+modeDiag(),diagnostics);if(!modeReadback){saveMode();if(!targetFound&&(modeElapsedMs>=modeTimeoutMs||modeState.attempts>=modeMaxAttempts))return result('CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND','실행 모드 선택기를 제한시간 안에 찾지 못했습니다.',diagnostics);if(targetFound&&modeState.clickAttempts>=2&&(modeElapsedMs>=4800||modeState.attempts>=8))return result('CHAT_BOOTSTRAP_MODE_READBACK_FAILED','실행 모드 선택 후 실제 상태를 확인하지 못했습니다.',diagnostics);if(modeElapsedMs>=modeTimeoutMs||modeState.attempts>=modeMaxAttempts)return result('CHAT_BOOTSTRAP_MODE_READBACK_FAILED','실행 모드 실제 상태 확인이 제한시간을 초과했습니다.',diagnostics);return result('UI_WAIT','실행 모드 실제 상태 대기 · '+modeDiag(),diagnostics);}"
+                + "if(!composer){saveMode();if(modeElapsedMs>=modeTimeoutMs||modeState.attempts>=modeMaxAttempts)return result('CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND','새 대화 입력창을 제한시간 안에 찾지 못했습니다.',diagnostics);return result('UI_WAIT','새 대화 입력창 대기 · '+modeDiag(),diagnostics);}clearMode();"
+'''
+          dom_path.write_text(dom[:a] + mode_block + dom[b:], encoding='utf-8')
+
+          # Service-level callback parsing, persistent deadline, complete-result logging, and finite failure.
+          service_path = root / 'SelfRunService.java'
+          service = service_path.read_text(encoding='utf-8')
+          service = service.replace('    private int generation;\n',
+                                    '    private int generation;\n    private int webEvaluationId;\n', 1)
+          service = service.replace(
+              'static String chatReasoningFailureMessage(String status){return switch(status){case "CHAT_REASONING_TRIGGER_NOT_FOUND"->"Chat 추론 선택기를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_SLIDER_NOT_FOUND"->"Chat 추론 메뉴에서 슬라이더를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_OPTION_UNAVAILABLE"->"선택한 Chat 추론 단계가 현재 계정 또는 워크스페이스에서 제공되지 않습니다.";case "CHAT_REASONING_READBACK_MISMATCH"->"Chat 추론 적용 결과가 요청한 의미값과 일치하지 않습니다.";case "CHAT_REASONING_MENU_CLOSE_FAILED"->"Chat 추론 적용 후 모델 메뉴를 닫지 못했습니다.";default->"Chat 추론 설정을 적용하지 못했습니다.";};}\n',
+              'static String chatReasoningFailureMessage(String status){return switch(status){case "CHAT_REASONING_TRIGGER_NOT_FOUND"->"Chat 추론 선택기를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_SLIDER_NOT_FOUND"->"Chat 추론 메뉴에서 슬라이더를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_OPTION_UNAVAILABLE"->"선택한 Chat 추론 단계가 현재 계정 또는 워크스페이스에서 제공되지 않습니다.";case "CHAT_REASONING_READBACK_MISMATCH"->"Chat 추론 적용 결과가 요청한 의미값과 일치하지 않습니다.";case "CHAT_REASONING_MENU_CLOSE_FAILED"->"Chat 추론 적용 후 모델 메뉴를 닫지 못했습니다.";default->"Chat 추론 설정을 적용하지 못했습니다.";};}\nstatic boolean isBootstrapFailureStatus(String status){return BootstrapResultPolicy.isExplicitFailure(status);}\nstatic String bootstrapFailureMessage(String status){if(isChatReasoningFailureStatus(status))return chatReasoningFailureMessage(status);return switch(status){case BootstrapResultPolicy.CALLBACK_INVALID->"ChatGPT bootstrap 콜백을 해석하지 못했습니다.";case BootstrapResultPolicy.SCRIPT_ERROR->"ChatGPT bootstrap 스크립트 실행에 실패했습니다.";case BootstrapResultPolicy.UNKNOWN_STATUS->"ChatGPT bootstrap이 알 수 없는 상태를 반환했습니다.";case BootstrapResultPolicy.TIMEOUT->"ChatGPT bootstrap 전체 제한시간을 초과했습니다.";case BootstrapResultPolicy.STATE_PERSIST_FAILED->"ChatGPT bootstrap 상태를 기기에 저장하지 못했습니다.";case BootstrapResultPolicy.READBACK_MISSING->"Chat 추론 적용 확인값을 얻지 못했습니다.";case "CHAT_BOOTSTRAP_NEW_CHAT_FAILED"->"ChatGPT 새 대화 화면으로 전환하지 못했습니다.";case "CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"->"Chat·Work 모드 선택기를 찾지 못했습니다.";case "CHAT_BOOTSTRAP_MODE_READBACK_FAILED"->"Chat·Work 모드 전환 결과를 확인하지 못했습니다.";case "CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"->"ChatGPT 새 대화 입력창을 찾지 못했습니다.";default->"ChatGPT bootstrap을 완료하지 못했습니다.";};}\n', 1)
+
+          eval_start = service.find('private void evaluate(String phase,String script)')
+          eval_end = service.find('\n\nprivate void recordContinuationWait', eval_start)
+          if eval_start < 0 or eval_end < 0:
+              raise SystemExit('SelfRunService.java: evaluate boundaries missing')
+          evaluate_method = r'''private void evaluate(String phase,String script){
+    WebView active=webView;int webGeneration=generation;String runId=store.runId();int evaluationId=++webEvaluationId;
+    BootstrapRunStateStore.Window initialWindow=null;
+    if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
+        long now=System.currentTimeMillis();
+        initialWindow=BootstrapRunStateStore.touchBootstrap(this,runId,ChatReasoningPreferenceStore.selectionForRun(runId),now);
+        if(!initialWindow.persisted){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap window persistence failed",null);return;}
+        if(initialWindow.expired(now)){failBootstrap(BootstrapResultPolicy.TIMEOUT,"bootstrap deadline reached before evaluation",null);return;}
+    }
+    domInFlight=true;
+    if(initialWindow!=null)scheduleBootstrapCallbackDeadline(active,webGeneration,runId,evaluationId,initialWindow.deadlineAt);
+    try{
+        active.evaluateJavascript(script,raw->{
+            if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId)return;
+            domInFlight=false;if(!canRun())return;
+            BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
+            JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
+            if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
+                BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
+                runLog.record(store,"DOM_RESULT",BootstrapResultPolicy.logDetail(parsed,current,webGeneration,bootstrapScope()));
+                if(!current.persisted){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap result persistence failed",result.optJSONObject("diagnostics"));return;}
+                String fatal=BootstrapResultPolicy.fatalStatus(parsed,current.deadlineAt,System.currentTimeMillis());
+                if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
+            }
+            if("TARGET_ERROR".equals(status)){recordContinuationTargetError(phase);if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+            if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}
+            if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){
+                if("SUBMISSION_CONFIRMED".equals(status)){bootstrapSubmitted(detail);return;}
+                if("VERIFY_REQUIRED".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);evaluate(phase,SelfRunContinuationDom.verifyBootstrapSubmission(store.projectUrl(),prompt,store.commandMarkerId(),CONTINUATION_FAILURE_MS));return;}
+                if("BOOTSTRAP_CLICKED".equals(status)||"SUBMISSION_PENDING".equals(status)||"SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+            }
+            if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)||PHASE_WATCHDOG_SEND_CONTINUE.equals(phase)||PHASE_WATCHDOG_CLICK_CONTINUE.equals(phase)){
+                if("SUBMISSION_CONFIRMED".equals(status)){continuationSubmitted(detail);return;}
+                if("VERIFY_REQUIRED".equals(status)){String prompt=continuationPrompt();evaluate(phase,SelfRunContinuationDom.verifyDriveTurnSubmission(store.conversationUrl(),prompt,continuationMarkerId(),CONTINUATION_FAILURE_MS));return;}
+                if(PHASE_WATCHDOG_CLICK_CONTINUE.equals(phase)&&SelfRunContinuationDom.STOP.equals(status)){clearContinuationAttempt();String prior=store.phase();store.abandonWatchdogClaimAndWait("응답 생성 감지 · 턴완료 신호 30분 재대기");runLog.record(store,"TURN_COMPLETION_WATCHDOG","final_click_button=STOP;action=wait_30m");runLog.record(store,"STATE_TRANSITION","from="+prior+";to="+SelfRunStore.PHASE_WAIT_DRIVE_COMMIT+";reason=watchdog_final_click_stop");releaseWakeLock();scheduleDrivePoll(NORMAL_POLL_MS);return;}
+                if(PHASE_WATCHDOG_CLICK_CONTINUE.equals(phase)&&("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status))){clearContinuationAttempt();transition(PHASE_WATCHDOG_SEND_CONTINUE,"복구 CONTINUE 제출 상태 변경 · 동일 claim으로 재준비","watchdog_final_click_reprepare");scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+                if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_PENDING".equals(status)||"SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+            }
+            if("UI_WAIT".equals(status)||"WAIT".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb("WAIT".equals(status)?2000L:1200L);return;}
+            handleWebResult(phase,status,result);
+        });
+    }catch(Throwable error){
+        if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId)return;
+        domInFlight=false;
+        if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase))failBootstrap(BootstrapResultPolicy.SCRIPT_ERROR,error.getClass().getSimpleName(),null);
+        else scheduleWeb(2000L);
+    }
+}
+
+private void scheduleBootstrapCallbackDeadline(WebView active,int webGeneration,String runId,int evaluationId,long deadlineAt){
+    long delay=Math.max(1L,deadlineAt-System.currentTimeMillis());
+    handler.postDelayed(()->{
+        if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId||!domInFlight||!canRun()||!SelfRunStore.PHASE_BOOTSTRAP.equals(store.phase()))return;
+        domInFlight=false;webEvaluationId++;
+        failBootstrap(BootstrapResultPolicy.TIMEOUT,"evaluateJavascript callback did not return before bootstrap deadline",null);
+    },delay);
+}
+
+private void failBootstrap(String code,String detail,JSONObject diagnostics){
+    if(!canRun()||!SelfRunStore.PHASE_BOOTSTRAP.equals(store.phase()))return;
+    String message=bootstrapFailureMessage(code);
+    BootstrapRunStateStore.markBootstrapFailed(this,store.runId(),code,detail);
+    store.setLastError(code,message);
+    runLog.record(store,"BOOTSTRAP_FAILURE","code="+BootstrapResultPolicy.safe(code,80)+";detail="+BootstrapResultPolicy.safe(detail,180)+BootstrapResultPolicy.compactDiagnostics(diagnostics));
+    enterPreservedPause(code,code+" · "+message,false);
+    NotificationHelper.notifyUser(this,"확인 필요",store.status());
+}
+
+private String bootstrapScope(){return SelfRunScript.isGeneralChatUrl(store.projectUrl())?"general":"project";}
+'''
+          service = service[:eval_start] + evaluate_method + service[eval_end:]
+          service = service.replace(
+              'if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND,"ChatGPT bootstrap 설정 준비","context_ready");scheduleWeb(250L);return;}',
+              'if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){if(!completeBootstrap(result))return;transition(SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND,"ChatGPT bootstrap 설정 준비","context_ready");scheduleWeb(250L);return;}', 1)
+          handle_marker = 'private void handleWebResult(String phase,String status,JSONObject result)'
+          handle_index = service.find(handle_marker)
+          if handle_index < 0:
+              raise SystemExit('SelfRunService.java: handle marker missing')
+          complete_method = r'''private boolean completeBootstrap(JSONObject result){
+    String runId=store.runId();String requested=ChatReasoningPreferenceStore.selectionForRun(runId);
+    if(SelfRunStore.MODE_CHAT.equals(store.mode())&&ChatReasoningPreferenceStore.shouldApply(requested)){
+        String observed=BootstrapResultPolicy.observedReasoning(result);
+        if(!requested.equals(ChatReasoningPreferenceStore.normalize(observed))){failBootstrap(BootstrapResultPolicy.READBACK_MISSING,"requested="+requested+";observed="+observed,result==null?null:result.optJSONObject("diagnostics"));return false;}
+        if(!BootstrapRunStateStore.markReasoningApplied(this,runId,observed)){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"reasoning applied state persistence failed",result==null?null:result.optJSONObject("diagnostics"));return false;}
+    }
+    if(!BootstrapRunStateStore.markBootstrapCompleted(this,runId,"READY")){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap completion persistence failed",result==null?null:result.optJSONObject("diagnostics"));return false;}
+    new SelfRunHistoryStore(this).sync(store);
+    return true;
+}
+
+'''
+          service = service[:handle_index] + complete_method + service[handle_index:]
+          service = service.replace(
+              'private void stopAutomationCallbacks() {removeAutomationCallbacks();clearContinuationAttempt();synchronized (automationStateLock) {automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;}}',
+              'private void stopAutomationCallbacks() {removeAutomationCallbacks();clearContinuationAttempt();synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}', 1)
+          service = service.replace(
+              'private void cleanupWebView() {handler.removeCallbacks(webRunnable); generation++; domInFlight = false;if (host != null) { host.destroy(); host = null; } webView = null;}',
+              'private void cleanupWebView() {handler.removeCallbacks(webRunnable); generation++; webEvaluationId++; domInFlight = false;if (host != null) { host.destroy(); host = null; } webView = null;}', 1)
+          service_path.write_text(service, encoding='utf-8')
+
+          # Run history stores immutable per-run evidence; detail reads the snapshot, not the latest global setting.
+          history_path = root / 'SelfRunHistoryStore.java'
+          history = history_path.read_text(encoding='utf-8')
+          history = history.replace('    private final SharedPreferences prefs;\n',
+                                    '    private final Context app;\n    private final SharedPreferences prefs;\n', 1)
+          history = history.replace(
+              '    SelfRunHistoryStore(Context context) {\n        prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);\n    }',
+              '    SelfRunHistoryStore(Context context) {\n        app = context.getApplicationContext();\n        prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);\n    }', 1)
+          history = history.replace('    private static JSONObject snapshot(SelfRunStore store) {',
+                                    '    private JSONObject snapshot(SelfRunStore store) {', 1)
+          history = history.replace(
+              '            item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || store.userStopped());\n',
+              '            item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || store.userStopped());\n            BootstrapRunStateStore.appendHistory(app, store.runId(), item);\n', 1)
+          history_path.write_text(history, encoding='utf-8')
+
+          detail_path = root / 'SelfRunDetailActivity.java'
+          detail = detail_path.read_text(encoding='utf-8')
+          old_model = '''    private String model(JSONObject item) {
+        return SelfRunStore.MODE_WORK.equals(item.optString("mode"))
+                ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
+                : ChatReasoningPreferenceStore.summary(this, item.optString("runId"),
+                        item.optString("phase"), item.optString("lastErrorCode"));
+    }
+'''
+          new_model = '''    private String model(JSONObject item) {
+        return SelfRunStore.MODE_WORK.equals(item.optString("mode"))
+                ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
+                : BootstrapRunStateStore.summary(item);
+    }
+'''
+          if old_model not in detail:
+              raise SystemExit('SelfRunDetailActivity.java: model block missing')
+          detail_path.write_text(detail.replace(old_model, new_model, 1), encoding='utf-8')
+
+          # Version identity and all exact policy expectations advance together.
+          replace_once('app/build.gradle', 'def selfRunDriveVersionCode = 1000070', 'def selfRunDriveVersionCode = 1000071')
+          replace_once('app/build.gradle', "def selfRunDriveVersionName = '1.4.2-dev6'", "def selfRunDriveVersionName = '1.4.2-dev7'")
+          for path in [
+              tests / 'AttachmentUploadPolicyTest.java',
+              tests / 'TestAppVariantPolicyTest.java',
+              tests / 'WebUiCalibrationBackupPolicyTest.java']:
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('1000070', '1000071').replace('1.4.2-dev6', '1.4.2-dev7')
+              path.write_text(text, encoding='utf-8')
+
+          # Update the existing wiring assertions to the service-level finite-state contract.
+          policy_path = tests / 'ChatReasoningPolicyTest.java'
+          policy = policy_path.read_text(encoding='utf-8')
+          policy = policy.replace(
+              '        assertTrue(service.contains("SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&isChatReasoningFailureStatus(status)"));\n        assertTrue(service.contains("runLog.record(store,\\"DOM_RESULT\\",\\"phase=BOOTSTRAP;status=\\"+status)"));\n        assertTrue(service.contains("enterPreservedPause(status,status+\\" · \\"+message,false)"));\n',
+              '        assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));\n        assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));\n        assertTrue(service.contains("scheduleBootstrapCallbackDeadline"));\n        assertTrue(service.contains("runLog.record(store,\\"DOM_RESULT\\",BootstrapResultPolicy.logDetail"));\n        assertTrue(service.contains("failBootstrap(BootstrapResultPolicy.TIMEOUT"));\n', 1)
+          policy = policy.replace(
+              '        assertTrue(detail.contains("ChatReasoningPreferenceStore.summary"));\n',
+              '        assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));\n', 1)
+          policy = policy.replace(
+              '        assertFalse(service.contains("ChatReasoningDom"));\n',
+              '        assertFalse(service.contains("ChatReasoningDom"));\n        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));\n        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));\n        assertTrue(dom.contains("modeTimeoutMs=20000"));\n', 1)
+          policy_path.write_text(policy, encoding='utf-8')
+
+          bootstrap_result_test = r'''package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+
+public final class BootstrapResultPolicyTest {
+    @Test public void escapedWebViewJsonIsParsedAsAValidStatus() {
+        BootstrapResultPolicy.Parsed parsed = BootstrapResultPolicy.parse(
+                "\"{\\\"status\\\":\\\"UI_WAIT\\\",\\\"detail\\\":\\\"mode\\\"}\"");
+        assertTrue(parsed.valid);
+        assertEquals("UI_WAIT", parsed.status);
+        assertEquals("", BootstrapResultPolicy.fatalStatus(parsed, 20_000L, 10_000L));
+    }
+
+    @Test public void nullMalformedAndMissingStatusCallbacksFailImmediately() {
+        assertEquals(BootstrapResultPolicy.CALLBACK_INVALID,
+                BootstrapResultPolicy.fatalStatus(BootstrapResultPolicy.parse(null), 20_000L, 10_000L));
+        assertEquals(BootstrapResultPolicy.CALLBACK_INVALID,
+                BootstrapResultPolicy.fatalStatus(BootstrapResultPolicy.parse("not-json"), 20_000L, 10_000L));
+        assertEquals(BootstrapResultPolicy.CALLBACK_INVALID,
+                BootstrapResultPolicy.fatalStatus(BootstrapResultPolicy.parse("{}"), 20_000L, 10_000L));
+    }
+
+    @Test public void scriptUnknownAndDeadlineStatusesAreFinite() {
+        assertEquals(BootstrapResultPolicy.SCRIPT_ERROR,
+                BootstrapResultPolicy.fatalStatus(BootstrapResultPolicy.parse(
+                        "{\"status\":\"SCRIPT_ERROR\"}"), 20_000L, 10_000L));
+        assertEquals(BootstrapResultPolicy.UNKNOWN_STATUS,
+                BootstrapResultPolicy.fatalStatus(BootstrapResultPolicy.parse(
+                        "{\"status\":\"SURPRISE\"}"), 20_000L, 10_000L));
+        assertEquals(BootstrapResultPolicy.TIMEOUT,
+                BootstrapResultPolicy.fatalStatus(BootstrapResultPolicy.parse(
+                        "{\"status\":\"UI_WAIT\"}"), 20_000L, 20_000L));
+    }
+
+    @Test public void explicitModeAndReasoningFailuresRemainSpecific() {
+        String mode = "CHAT_BOOTSTRAP_MODE_READBACK_FAILED";
+        String reasoning = "CHAT_REASONING_READBACK_MISMATCH";
+        assertEquals(mode, BootstrapResultPolicy.fatalStatus(
+                BootstrapResultPolicy.parse("{\"status\":\"" + mode + "\"}"), 20_000L, 10_000L));
+        assertEquals(reasoning, BootstrapResultPolicy.fatalStatus(
+                BootstrapResultPolicy.parse("{\"status\":\"" + reasoning + "\"}"), 20_000L, 10_000L));
+    }
+}
+'''
+          (tests / 'BootstrapResultPolicyTest.java').write_text(bootstrap_result_test, encoding='utf-8')
+
+          bootstrap_summary_test = r'''package com.shaterguy.chatgptselfrun;
+
+import org.json.JSONObject;
+import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
+
+public final class BootstrapRunStateSummaryTest {
+    @Test public void historySummaryUsesPerRunEvidenceInsteadOfPhaseGuessing() throws Exception {
+        JSONObject applied = new JSONObject()
+                .put("chatReasoningRequested", "instant")
+                .put("chatReasoningStatus", BootstrapRunStateStore.REASONING_APPLIED)
+                .put("chatReasoningVerified", "instant");
+        assertEquals("요청: Instant / 적용: 확인 완료 / 확인: Instant",
+                BootstrapRunStateStore.summary(applied));
+
+        JSONObject pending = new JSONObject()
+                .put("chatReasoningRequested", "high")
+                .put("chatReasoningStatus", BootstrapRunStateStore.REASONING_PENDING);
+        assertEquals("요청: High / 적용: 진행 중 / 확인: -",
+                BootstrapRunStateStore.summary(pending));
+
+        JSONObject failed = new JSONObject()
+                .put("chatReasoningRequested", "pro")
+                .put("chatReasoningStatus", BootstrapRunStateStore.REASONING_FAILED)
+                .put("chatReasoningFailureCode", BootstrapResultPolicy.TIMEOUT);
+        assertEquals("요청: Pro / 적용: 실패 / 확인: - / 오류: " + BootstrapResultPolicy.TIMEOUT,
+                BootstrapRunStateStore.summary(failed));
+    }
+
+    @Test public void keepAndMissingRecordsStayDistinct() throws Exception {
+        JSONObject keep = new JSONObject()
+                .put("chatReasoningRequested", "keep")
+                .put("chatReasoningStatus", BootstrapRunStateStore.REASONING_KEEP);
+        assertEquals("현재 Chat 설정 유지", BootstrapRunStateStore.summary(keep));
+        assertEquals("요청값 기록 없음", BootstrapRunStateStore.summary(new JSONObject()));
+    }
+}
+'''
+          (tests / 'BootstrapRunStateSummaryTest.java').write_text(bootstrap_summary_test, encoding='utf-8')
+
+          wiring_test = r'''package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.junit.Assert.*;
+
+public final class BootstrapFiniteStateWiringTest {
+    @Test public void serviceOwnsPersistentDeadlineAndMalformedCallbackFailure() throws Exception {
+        String service = src("SelfRunService.java");
+        assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
+        assertTrue(service.contains("BootstrapRunStateStore.recordBootstrapResult"));
+        assertTrue(service.contains("BootstrapResultPolicy.parse(raw)"));
+        assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
+        assertTrue(service.contains("scheduleBootstrapCallbackDeadline"));
+        assertTrue(service.contains("CHAT_BOOTSTRAP_TIMEOUT"));
+        assertTrue(service.contains("webEvaluationId++"));
+        assertFalse(service.contains("JSONObject result=parse(raw);String status=result.optString(\"status\",\"SCRIPT_ERROR\")"));
+    }
+
+    @Test public void domModeGateAndRunHistoryAreFiniteAndRunScoped() throws Exception {
+        String dom = src("SelfRunDom.java");
+        String history = src("SelfRunHistoryStore.java");
+        String detail = src("SelfRunDetailActivity.java");
+        assertTrue(dom.contains("modeTimeoutMs=20000"));
+        assertTrue(dom.contains("modeMaxAttempts=18"));
+        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
+        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
+        assertTrue(dom.contains("CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"));
+        assertTrue(history.contains("BootstrapRunStateStore.appendHistory"));
+        assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));
+        assertFalse(detail.contains("ChatReasoningPreferenceStore.summary(this"));
+    }
+
+    @Test public void developmentIdentityAdvancesOnce() throws Exception {
+        String gradle = read("app/build.gradle", "build.gradle");
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000071"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.2-dev7'"));
+    }
+
+    private static String src(String file) throws Exception {
+        return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
+                "src/main/java/com/shaterguy/chatgptselfrun/" + file);
+    }
+
+    private static String read(String first, String fallback) throws Exception {
+        Path path = Paths.get(first);
+        if (!Files.exists(path)) path = Paths.get(fallback);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+}
+'''
+          (tests / 'BootstrapFiniteStateWiringTest.java').write_text(wiring_test, encoding='utf-8')
+          PY
+      - name: Verify policy and unit tests before staging commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/verify_drive_variant.sh
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Commit staged dev7 source without the temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-dev7-bootstrap-hardening.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(drive): make Chat bootstrap finite and durable'
+          git push origin HEAD:selfrun-drive/staging-v1.4.2-dev7
