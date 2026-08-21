@@ -67,12 +67,42 @@ public final class TurnCompletionWatchdogRecoveryIdPolicyTest {
         assertNotEquals(SelfRunProtocol.watchdogRecoveryId(7), DriveSignalParser.recoveryId(oldRecovery));
     }
 
-    @Test public void malformedRecoveryIdentityCannotMatch() {
-        String raw = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=bad/id]";
-        DriveSignalParser.Scan scan = DriveSignalParser.scan(raw, RUN, 0, SelfRunStore.MODE_CHAT);
+    @Test public void malformedRecoveryIdentityCannotMatchOrBecomeLatestNormalCompletion() {
+        String normal = "[2026.08.21 | 11:59:59] [SELF_RUN_TURN_COMPLETED " + RUN + "]";
+        String bad = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=bad/id]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(normal + "\n" + bad, RUN, 0, SelfRunStore.MODE_CHAT);
+        assertEquals(2, scan.unseen.size());
+        assertEquals("", DriveSignalParser.recoveryId(scan.unseen.get(1).raw));
+        assertFalse(scan.unseen.get(1).protocolError.isEmpty());
+        assertEquals(normal, DriveSignalParser.latestCompletion(scan.unseen).raw);
+    }
+
+    @Test public void lateLowerRecoveryGenerationIsSuppressedAfterHigherWasConsumed() {
+        String newer = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.2]";
+        String olderLate = "[2026.08.21 | 12:00:01] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.1]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(newer + "\n" + olderLate, RUN, 1, SelfRunStore.MODE_CHAT);
+        assertEquals(2, scan.totalCount);
+        assertTrue(scan.unseen.isEmpty());
+        assertTrue(scan.cursorRebased);
+    }
+
+    @Test public void duplicateConsumedRecoveryGenerationIsSuppressed() {
+        String first = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.4]";
+        String duplicate = "[2026.08.21 | 12:00:01] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.4]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(first + "\n" + duplicate, RUN, 1, SelfRunStore.MODE_CHAT);
+        assertEquals(2, scan.totalCount);
+        assertTrue(scan.unseen.isEmpty());
+        assertTrue(scan.cursorRebased);
+    }
+
+    @Test public void currentHigherRecoveryStillSurvivesOlderUnseenRecovery() {
+        String older = "[2026.08.21 | 12:00:00] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.4]";
+        String current = "[2026.08.21 | 12:00:01] [SELF_RUN_TURN_COMPLETED " + RUN + " RECOVERY_ID=wd.5]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(older + "\n" + current, RUN, 0, SelfRunStore.MODE_CHAT);
+        assertEquals(2, scan.totalCount);
         assertEquals(1, scan.unseen.size());
-        assertEquals("", DriveSignalParser.recoveryId(scan.unseen.get(0).raw));
-        assertFalse(scan.unseen.get(0).protocolError.isEmpty());
+        assertEquals("wd.5", DriveSignalParser.recoveryId(scan.unseen.get(0).raw));
+        assertTrue(scan.cursorRebased);
     }
 
     @Test public void sourceWaitsForMatchingIdWithoutPostSubmitBaseline() throws Exception {
