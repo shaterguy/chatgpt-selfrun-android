@@ -1,0 +1,46 @@
+name: Apply dev4 fixture expectation fix
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.4.2-dev4'
+    paths:
+      - '.github/workflows/apply-dev4-test-expectation-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Align semantic fixture expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java')
+          source = path.read_text(encoding='utf-8')
+          replacements = {
+              'chatReasoningNativeRangeUsesHtmlDefaultsWhenAriaValuesAreAbsent': 'chatReasoningNativeRangeMovesBySemanticSteps',
+              '"document.getElementById(\'slider\').value", "100"': '"document.getElementById(\'slider\').value", "4"',
+              'chatReasoningAriaSliderUsesDefaultBoundsWhenBoundsAreAbsent': 'chatReasoningAriaSliderMovesBySemanticSteps',
+              '"document.getElementById(\'slider\').getAttribute(\'aria-valuenow\')", "50"': '"document.getElementById(\'slider\').getAttribute(\'aria-valuenow\')", "2"',
+          }
+          for old, new in replacements.items():
+              if source.count(old) != 1:
+                  raise SystemExit(f'replacement mismatch for {old}: {source.count(old)}')
+              source = source.replace(old, new, 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+          rm .github/workflows/apply-dev4-test-expectation-fix.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java \
+                  .github/workflows/apply-dev4-test-expectation-fix.yml
+          git commit -m 'test(drive): align semantic slider fixture expectations'
+          git push origin HEAD:selfrun-drive/v1.4.2-dev4
