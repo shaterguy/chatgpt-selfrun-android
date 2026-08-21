@@ -44,7 +44,7 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertTrue(service.contains("transition(PHASE_WATCHDOG_RECHECK"));
         assertTrue(service.contains("watchdogRecheck=PHASE_WATCHDOG_RECHECK.equals(snapshot.phase)"));
         assertTrue(service.contains("transition(PHASE_WATCHDOG_SEND_CONTINUE"));
-        assertTrue(service.contains("PHASE_WATCHDOG_SEND_CONTINUE.equals(store.phase())?SelfRunProtocol.driveContinuation(store.runId())"));
+        assertTrue(service.contains("isWatchdogRecoverySubmissionPhase(store.phase())?SelfRunProtocol.driveContinuation(store.runId())"));
     }
 
     @Test public void stopRestartsThirtyMinuteWindowWithoutComposerMutation() throws Exception {

@@ -34,11 +34,16 @@ public final class TurnCompletionWatchdogFencePolicyTest {
         assertFalse(drivePhases.contains("PHASE_WATCHDOG_CLICK_CONTINUE"));
 
         String poll = section(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
-        String finalFence = section(poll, "if(watchdogFinalRecheck)", "if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)");
-        assertTrue(finalFence.contains("store.applyDriveSignals(scan.unseen,System.currentTimeMillis())"));
-        assertTrue(finalFence.contains("if(PHASE_WATCHDOG_FINAL_RECHECK.equals(store.phase()))"));
-        assertTrue(finalFence.contains("transition(PHASE_WATCHDOG_CLICK_CONTINUE"));
-        assertTrue(finalFence.contains("clearContinuationAttempt"));
+        int fence = poll.indexOf("if(watchdogFinalRecheck)");
+        int applySignals = poll.indexOf("store.applyDriveSignals(scan.unseen,System.currentTimeMillis())", fence);
+        int stillFence = poll.indexOf("if(PHASE_WATCHDOG_FINAL_RECHECK.equals(store.phase()))", fence);
+        int openClick = poll.indexOf("transition(PHASE_WATCHDOG_CLICK_CONTINUE", fence);
+        int clearAttempt = poll.indexOf("clearContinuationAttempt", fence);
+        assertTrue(fence >= 0);
+        assertTrue(applySignals > fence);
+        assertTrue(stillFence > applySignals);
+        assertTrue(openClick > stillFence);
+        assertTrue(clearAttempt > openClick);
     }
 
     @Test public void clickPhaseUsesOnlyPreparedClickAndRestartsFenceIfStateChanges() throws Exception {
