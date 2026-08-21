@@ -23,7 +23,7 @@ public final class ChatReasoningPolicyTest {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
     }
 
-    @Test public void chatSliderScriptUsesSemanticReadbackAndFiniteFailures() {
+    @Test public void chatSliderScriptUsesSemanticReadbackAndPhaseSpecificFiniteFailures() {
         String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-TEST");
         assertTrue(script.contains("aria-valuetext"));
         assertTrue(script.contains("pendingReadback"));
@@ -32,7 +32,13 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
         assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
         assertTrue(script.contains("CHAT_REASONING_MENU_CLOSE_FAILED"));
-        assertTrue(script.contains("menuClicks<1"));
+        assertTrue(script.contains("triggerAttempts"));
+        assertTrue(script.contains("sliderAttempts"));
+        assertTrue(script.contains("sliderWaitStartedAt"));
+        assertTrue(script.contains("menuClickAttempts<2"));
+        assertTrue(script.contains("__srcSliderTimeoutMs=24000"));
+        assertTrue(script.contains("__srcMenuRetryMs=4800"));
+        assertFalse(script.contains("menuClicks<1"));
         assertFalse(script.contains("__srcWantedOrdinal/4"));
         assertFalse(script.contains("open-advanced"));
     }

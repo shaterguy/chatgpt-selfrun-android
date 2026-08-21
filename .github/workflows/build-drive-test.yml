@@ -327,7 +327,7 @@ jobs:
             bash -o pipefail -c
             'set -euo pipefail;
             gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest;
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest;
             adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
             FORMAL_EXPECTED_VERSION="1.4.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"
