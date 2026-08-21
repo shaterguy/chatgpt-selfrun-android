@@ -145,7 +145,7 @@ public class AttachmentUploadPolicyTest {
         if (!Files.exists(p)) p = Paths.get("build.gradle");
         String gradle = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
         assertTrue(gradle.contains("selfRunDriveVersionCode = 1000064"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.1-dev10'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.1'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
     }
 
