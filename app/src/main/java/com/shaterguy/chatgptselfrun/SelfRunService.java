@@ -465,6 +465,8 @@ private boolean startTurnCompletionWatchdog(int epoch){if(!applyDriveResult(epoc
 
 private void postDriveOutcome(){handler.post(()->{String phase=store.phase();if(SelfRunStore.PHASE_WAIT_INTERNAL_SEND.equals(phase)||PHASE_WATCHDOG_SEND_CONTINUE.equals(phase))ensureWebView();else if(PHASE_WATCHDOG_CLICK_CONTINUE.equals(phase)){if(webView!=null)scheduleWeb(0L);else ensureWebView();}else if(SelfRunStore.PHASE_PAUSED.equals(phase)||SelfRunStore.PHASE_DONE.equals(phase)){if(store.terminalSideEffectPending())replayTerminalSideEffect();}else if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(phase))scheduleDrivePoll();});}
 
+private static java.util.List<DriveSignalParser.Event> normalDriveEvents(java.util.List<DriveSignalParser.Event> events){java.util.ArrayList<DriveSignalParser.Event> result=new java.util.ArrayList<>();if(events!=null)for(DriveSignalParser.Event event:events){if(event.type==DriveSignalParser.Type.TURN_COMPLETED&&DriveSignalParser.hasRecoveryIdField(event.raw))continue;result.add(event);}return result;}
+
 private void pollDriveNow(int epoch)throws Exception{
     DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;
     DriveApiClient.Metadata metadata=drive.getPollMetadata(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;
@@ -477,7 +479,8 @@ private void pollDriveNow(int epoch)throws Exception{
     if(!changed&&!resume&&!watchdogRecheck&&!watchdogFinalRecheck&&!watchdogPostSubmit){if(turnCompletionWatchdogDue(snapshot.phase,store.phaseStartedAt(),System.currentTimeMillis()))startTurnCompletionWatchdog(epoch);else applyDriveResult(epoch,this::scheduleDrivePoll);return;}
     DriveApiClient.DocumentSnapshot document=drive.readDocumentSnapshot(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;
     DriveSignalParser.Scan scan=DriveSignalParser.scan(document.text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode);
-    DriveSignalParser.Event latestCompletion=DriveSignalParser.latestCompletion(scan.unseen),latestBlocking=DriveSignalParser.latestBlocking(scan.unseen);
+    java.util.List<DriveSignalParser.Event> normalUnseen=normalDriveEvents(scan.unseen);
+    DriveSignalParser.Event latestCompletion=DriveSignalParser.latestCompletion(normalUnseen),latestBlocking=DriveSignalParser.latestBlocking(scan.unseen);
     if(watchdogPostSubmit){
         if(!applyDriveResult(epoch,()->{String prior=store.phase();store.setPhase(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT);store.setStatus("복구 CONTINUE 제출 확인 · RECOVERY_ID completion 대기");runLog.record(store,"STATE_TRANSITION","from="+prior+";to="+SelfRunStore.PHASE_WAIT_DRIVE_COMMIT+";reason=watchdog_post_submit_migration");}))return;
         postDriveOutcome();return;
@@ -498,11 +501,11 @@ private void pollDriveNow(int epoch)throws Exception{
     if(latestCompletion!=null&&!latestCompletion.protocolError.isEmpty()&&(latestBlocking==null||latestCompletion.cursor>latestBlocking.cursor)){pauseError("DRIVE_NEXT_INPUT_PROTOCOL_ERROR",latestCompletion.protocolError,epoch,snapshot.runId,snapshot.phase);return;}
     if(resume){if(applyDriveResult(epoch,()->{store.baselineManualResume(scan.totalCount,scan.latest,latestCompletion);store.updateDriveSeen(metadata.version,metadata.modifiedTime);}))handler.post(this::ensureWebView);return;}
     if(watchdogRecheck){
-        if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else if(!scan.unseen.isEmpty())store.applyDriveSignals(scan.unseen,System.currentTimeMillis());store.updateDriveSeen(metadata.version,metadata.modifiedTime);if(PHASE_WATCHDOG_RECHECK.equals(store.phase())){String claim=store.beginWatchdogClaim(scan.totalCount);runLog.record(store,"TURN_COMPLETION_WATCHDOG","drive_recheck=no_completion;claim="+claim+";action=prepare_recovery_continue");transition(PHASE_WATCHDOG_SEND_CONTINUE,"Drive 재확인 완료 · 복구 CONTINUE 입력 준비","watchdog_drive_recheck_clear");}}))return;
+        if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else{if(!normalUnseen.isEmpty())store.applyDriveSignals(normalUnseen,System.currentTimeMillis());if(normalUnseen.size()!=scan.unseen.size())store.baselineDriveSignals(scan.totalCount,scan.latest);}store.updateDriveSeen(metadata.version,metadata.modifiedTime);if(PHASE_WATCHDOG_RECHECK.equals(store.phase())){String claim=store.beginWatchdogClaim(scan.totalCount);runLog.record(store,"TURN_COMPLETION_WATCHDOG","drive_recheck=no_completion;claim="+claim+";action=prepare_recovery_continue");transition(PHASE_WATCHDOG_SEND_CONTINUE,"Drive 재확인 완료 · 복구 CONTINUE 입력 준비","watchdog_drive_recheck_clear");}}))return;
         postDriveOutcome();return;
     }
     if(watchdogFinalRecheck){
-        if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else if(!scan.unseen.isEmpty())store.applyDriveSignals(scan.unseen,System.currentTimeMillis());store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
+        if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else{if(!normalUnseen.isEmpty())store.applyDriveSignals(normalUnseen,System.currentTimeMillis());if(normalUnseen.size()!=scan.unseen.size())store.baselineDriveSignals(scan.totalCount,scan.latest);}store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
         if(!PHASE_WATCHDOG_FINAL_RECHECK.equals(store.phase())){store.abandonWatchdogClaim();handler.post(this::clearContinuationAttempt);postDriveOutcome();return;}
         final String[] claim={""};if(!applyDriveResult(epoch,()->claim[0]=store.beginWatchdogClaim(scan.totalCount)))return;
         boolean acquired=drive.createNamedRangeClaim(accessToken,snapshot.turnDocumentId,document,claim[0]);
@@ -510,7 +513,7 @@ private void pollDriveNow(int epoch)throws Exception{
         if(!applyDriveResult(epoch,()->{String prior=store.phase();store.ownWatchdogClaimAndEnterClick(PHASE_WATCHDOG_CLICK_CONTINUE,"Drive CAS claim 획득 · 준비된 복구 CONTINUE 제출");runLog.record(store,"TURN_COMPLETION_WATCHDOG","claim="+claim[0]+";recovery_id="+SelfRunProtocol.watchdogRecoveryId(store.watchdogClaimAttempt())+";action=click_prepared_continue");runLog.record(store,"STATE_TRANSITION","from="+prior+";to="+PHASE_WATCHDOG_CLICK_CONTINUE+";reason=watchdog_drive_claim_owned");}))return;
         postDriveOutcome();return;
     }
-    if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else if(!scan.unseen.isEmpty())store.applyDriveSignals(scan.unseen,System.currentTimeMillis());store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
+    if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else{if(!normalUnseen.isEmpty())store.applyDriveSignals(normalUnseen,System.currentTimeMillis());if(normalUnseen.size()!=scan.unseen.size())store.baselineDriveSignals(scan.totalCount,scan.latest);}store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
     if(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT.equals(store.phase())&&turnCompletionWatchdogDue(store.phase(),store.phaseStartedAt(),System.currentTimeMillis())){startTurnCompletionWatchdog(epoch);return;}
     postDriveOutcome();
 }
