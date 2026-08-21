@@ -12,7 +12,7 @@ final class ChatReasoningDom {
         String script = """
                 const __srcWanted=__WANTED__,__srcWantedOrdinal=__ORDINAL__,__srcStateKey=__STATE_KEY__;
                 const __srcLevels=['instant','medium','high','xhigh','pro'];
-                const __srcTriggerTimeoutMs=20000,__srcSliderTimeoutMs=24000,__srcMenuRetryMs=4800,__srcTriggerMaxAttempts=20,__srcSliderMaxAttempts=19;
+                const __srcTriggerTimeoutMs=20000,__srcSliderTimeoutMs=24000,__srcMenuRetryMs=4800,__srcOverallTimeoutMs=60000,__srcTriggerMaxAttempts=20,__srcSliderMaxAttempts=19;
                 const __srcIndex=value=>__srcLevels.indexOf(value);
                 const __srcLevel=source=>{
                   const v=exactText(source);
@@ -23,6 +23,7 @@ final class ChatReasoningDom {
                   if(v.includes('instant')||v.includes('flash')||v.includes('빠른')||v.includes('즉시'))return'instant';
                   return'';
                 };
+                try{
                 const __srcElementLevel=element=>__srcLevel([
                   labelOf(element),element?.getAttribute?.('aria-valuetext')||'',element?.getAttribute?.('data-value')||'',
                   element?.getAttribute?.('data-level')||'',element?.getAttribute?.('value')||'',element?.title||''
@@ -65,22 +66,25 @@ final class ChatReasoningDom {
                 const __srcSliderEntries=__srcRawSliders.map((element,index)=>({element,index,score:__srcSliderScore(element)})).sort((a,b)=>b.score-a.score||a.index-b.index);
                 const __srcSlider=__srcSliderEntries[0]?.element||null;
                 const __srcNow=Date.now();
-                let __srcState={searchStartedAt:0,triggerFirstSeenAt:0,menuClickAttempts:0,menuClickedAt:0,menuAcknowledgedAt:0,sliderWaitStartedAt:0,findAttempts:0,triggerAttempts:0,sliderAttempts:0,moveAttempts:0,closeAttempts:0,readAttempts:0,readbackWaits:0,pendingReadback:false,pendingSemantic:'',pendingDirection:0,pendingNumeric:null,applied:false,verifiedBySemantic:false,at:0};
-                try{const saved=sessionStorage.getItem(__srcStateKey);if(saved)__srcState={...__srcState,...JSON.parse(saved)};}catch(_){}
+                let __srcState={searchStartedAt:0,triggerFirstSeenAt:0,menuClickAttempts:0,menuClickedAt:0,menuAcknowledgedAt:0,sliderWaitStartedAt:0,findAttempts:0,triggerAttempts:0,sliderAttempts:0,moveAttempts:0,optionClickAttempts:0,closeAttempts:0,readAttempts:0,readbackWaits:0,pendingReadback:false,pendingSemantic:'',pendingDirection:0,pendingNumeric:null,pendingStrategy:'',applied:false,verifiedBySemantic:false,verifiedValue:'',at:0};
+                try{const saved=sessionStorage.getItem(__srcStateKey)||localStorage.getItem(__srcStateKey);if(saved)__srcState={...__srcState,...JSON.parse(saved)};}catch(_){}
                 if(!(Number(__srcState.searchStartedAt)>0))__srcState.searchStartedAt=__srcNow;
-                const __srcSave=()=>{try{sessionStorage.setItem(__srcStateKey,JSON.stringify(__srcState));}catch(_){}};
+                const __srcSave=()=>{const value=JSON.stringify(__srcState);try{sessionStorage.setItem(__srcStateKey,value);}catch(_){}try{localStorage.setItem(__srcStateKey,value);}catch(_){}};
+                const __srcClear=()=>{try{sessionStorage.removeItem(__srcStateKey);}catch(_){}try{localStorage.removeItem(__srcStateKey);}catch(_){}};
                 const __srcElapsed=at=>{const value=Number(at)||0;return value>0?Math.max(0,__srcNow-value):0;};
                 const __srcExpanded=!!__srcTrigger&&(__srcTrigger.getAttribute('aria-expanded')==='true'||!!__srcControlled||!!__srcPopup||(__srcState.menuClickAttempts>0&&__srcOpenPopups.length===1));
                 const __srcSliderKind=__srcSlider?[__srcSlider.tagName||'',__srcSlider.getAttribute('role')||'',__srcSlider.getAttribute('type')||''].filter(Boolean).join(':'):'';
-                const __srcDiagnostics=extra=>({requested:__srcWanted,requestedOrdinal:__srcWantedOrdinal,sliderFound:!!__srcSlider,sliderCandidates:__srcRawSliders.length,sliderKind:__srcSliderKind,triggerFound:!!__srcTrigger,triggerCandidates:__srcTriggerEntries.length,triggerScore:__srcTriggerEntry?.score||0,triggerLabel:__srcTrigger?labelOf(__srcTrigger):'',triggerLevel:__srcTriggerLevel,triggerExpanded:__srcExpanded,controlledPopup:!!__srcControlled,popupFound:!!__srcPopup,openPopupCandidates:__srcOpenPopups.length,menuClickAttempts:__srcState.menuClickAttempts,findAttempts:__srcState.findAttempts,triggerAttempts:__srcState.triggerAttempts,sliderAttempts:__srcState.sliderAttempts,moveAttempts:__srcState.moveAttempts,closeAttempts:__srcState.closeAttempts,readAttempts:__srcState.readAttempts,readbackWaits:__srcState.readbackWaits,pendingReadback:!!__srcState.pendingReadback,applied:!!__srcState.applied,searchElapsedMs:__srcElapsed(__srcState.searchStartedAt),menuElapsedMs:__srcElapsed(__srcState.menuClickedAt),sliderWaitElapsedMs:__srcElapsed(__srcState.sliderWaitStartedAt),triggerTimeoutMs:__srcTriggerTimeoutMs,sliderTimeoutMs:__srcSliderTimeoutMs,menuRetryMs:__srcMenuRetryMs,...extra});
+                const __srcDiagnostics=extra=>({requested:__srcWanted,requestedOrdinal:__srcWantedOrdinal,sliderFound:!!__srcSlider,sliderCandidates:__srcRawSliders.length,sliderKind:__srcSliderKind,triggerFound:!!__srcTrigger,triggerCandidates:__srcTriggerEntries.length,triggerScore:__srcTriggerEntry?.score||0,triggerLabel:__srcTrigger?labelOf(__srcTrigger):'',triggerLevel:__srcTriggerLevel,triggerExpanded:__srcExpanded,controlledPopup:!!__srcControlled,popupFound:!!__srcPopup,openPopupCandidates:__srcOpenPopups.length,menuClickAttempts:__srcState.menuClickAttempts,findAttempts:__srcState.findAttempts,triggerAttempts:__srcState.triggerAttempts,sliderAttempts:__srcState.sliderAttempts,moveAttempts:__srcState.moveAttempts,optionClickAttempts:__srcState.optionClickAttempts,closeAttempts:__srcState.closeAttempts,readAttempts:__srcState.readAttempts,readbackWaits:__srcState.readbackWaits,pendingReadback:!!__srcState.pendingReadback,pendingStrategy:__srcState.pendingStrategy||'',applied:!!__srcState.applied,verifiedValue:__srcState.verifiedValue||'',searchElapsedMs:__srcElapsed(__srcState.searchStartedAt),menuElapsedMs:__srcElapsed(__srcState.menuClickedAt),sliderWaitElapsedMs:__srcElapsed(__srcState.sliderWaitStartedAt),triggerTimeoutMs:__srcTriggerTimeoutMs,sliderTimeoutMs:__srcSliderTimeoutMs,overallTimeoutMs:__srcOverallTimeoutMs,menuRetryMs:__srcMenuRetryMs,...extra});
                 const __srcFail=(status,detail,extra={})=>{__srcState.at=__srcNow;__srcSave();return result(status,detail,__srcDiagnostics(extra));};
+                if(__srcElapsed(__srcState.searchStartedAt)>=__srcOverallTimeoutMs)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 적용 전체 제한시간을 초과했습니다.',{action:'overall-timeout'});
                 if(!__srcSlider){
                   __srcState.findAttempts++;__srcState.at=__srcNow;
                   if(__srcState.applied){
                     __srcSave();
+                    const verified=__srcState.verifiedValue||__srcTriggerLevel;
                     if(!__srcState.verifiedBySemantic&&__srcTriggerLevel&&__srcTriggerLevel!==__srcWanted)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 적용 후 선택기 의미값이 요청과 다릅니다.',{observed:__srcTriggerLevel});
-                    try{sessionStorage.removeItem(__srcStateKey);}catch(_){}
-                    return result('READY','Chat 추론 의미값 적용 확인',__srcDiagnostics({menuClosed:true}));
+                    __srcClear();
+                    return result('READY','Chat 추론 의미값 적용 확인',__srcDiagnostics({menuClosed:true,observed:verified}));
                   }
                   if(!__srcTrigger){
                     if(__srcState.menuClickAttempts>0||Number(__srcState.sliderWaitStartedAt)>0){
@@ -164,11 +168,16 @@ final class ChatReasoningDom {
                   if(observed&&observed!==__srcState.pendingSemantic){
                     const delta=__srcIndex(observed)-__srcIndex(__srcState.pendingSemantic);
                     if(delta===0||Math.sign(delta)!==Math.sign(__srcState.pendingDirection))return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더가 요청 방향과 다른 의미값을 반환했습니다.',{observed,previous:__srcState.pendingSemantic});
-                    __srcState.pendingReadback=false;__srcState.readbackWaits=0;__srcState.pendingSemantic='';__srcState.pendingDirection=0;__srcState.pendingNumeric=null;__srcSave();
+                    __srcState.pendingReadback=false;__srcState.readbackWaits=0;__srcState.pendingSemantic='';__srcState.pendingDirection=0;__srcState.pendingNumeric=null;__srcState.pendingStrategy='';__srcSave();
                   }else{
-                    __srcState.readbackWaits++;__srcState.at=__srcNow;__srcSave();
-                    if(__srcState.readbackWaits>=2)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 숫자값은 변했지만 의미값이 갱신되지 않았습니다.',{observed,current:__srcCurrent,pendingTarget:__srcState.pendingNumeric});
-                    return result('UI_WAIT','Chat 추론 의미값 readback 대기',__srcDiagnostics({action:'wait-semantic-readback',observed,current:__srcCurrent,pendingTarget:__srcState.pendingNumeric}));
+                    __srcState.readbackWaits++;__srcState.at=__srcNow;
+                    if(__srcState.readbackWaits>=2&&__srcState.pendingStrategy==='option'){
+                      __srcState.pendingReadback=false;__srcState.readbackWaits=0;__srcState.pendingSemantic='';__srcState.pendingDirection=0;__srcState.pendingNumeric=null;__srcState.pendingStrategy='';__srcState.optionClickAttempts=2;__srcSave();
+                      return result('UI_WAIT','Chat 추론 직접 옵션 클릭 미반영 · 슬라이더 입력으로 전환',__srcDiagnostics({action:'option-fallback',observed,current:__srcCurrent}));
+                    }
+                    __srcSave();
+                    if(__srcState.readbackWaits>=2)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 입력 후 의미값이 갱신되지 않았습니다.',{observed,current:__srcCurrent,pendingTarget:__srcState.pendingNumeric,pendingStrategy:__srcState.pendingStrategy});
+                    return result('UI_WAIT','Chat 추론 의미값 readback 대기',__srcDiagnostics({action:'wait-semantic-readback',observed,current:__srcCurrent,pendingTarget:__srcState.pendingNumeric,pendingStrategy:__srcState.pendingStrategy}));
                   }
                 }
                 if(!__srcEffectiveCurrent){
@@ -178,7 +187,7 @@ final class ChatReasoningDom {
                 }
                 const __srcAtTarget=__srcSemanticCurrent?__srcSemanticCurrent===__srcWanted:(__srcNumericTrusted&&__srcNumericLevel===__srcWanted);
                 if(__srcAtTarget){
-                  __srcState.applied=true;__srcState.verifiedBySemantic=!!__srcSemanticCurrent;__srcState.at=__srcNow;__srcSave();
+                  __srcState.applied=true;__srcState.verifiedBySemantic=!!__srcSemanticCurrent;__srcState.verifiedValue=__srcEffectiveCurrent;__srcState.at=__srcNow;__srcSave();
                   if(__srcState.closeAttempts>=2)return __srcFail('CHAT_REASONING_MENU_CLOSE_FAILED','Chat 추론 적용 후 모델 메뉴를 닫지 못했습니다.',{current:__srcCurrent,observed:__srcEffectiveCurrent});
                   __srcState.closeAttempts++;__srcSave();
                   if(__srcTrigger){__srcTrigger.focus?.();__srcTrigger.click();}
@@ -194,29 +203,50 @@ final class ChatReasoningDom {
                 const __srcTolerance=Math.max(0.0001,Number.isFinite(__srcDeclaredStep)&&__srcDeclaredStep>0?__srcDeclaredStep/3:__srcRange/400);
                 if(!Number.isFinite(__srcCurrent))return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 숫자값을 확인할 수 없습니다.',{observed:__srcEffectiveCurrent});
                 if((__srcDirection>0&&__srcCurrent>=__srcMax-__srcTolerance)||(__srcDirection<0&&__srcCurrent<=__srcMin+__srcTolerance))return __srcFail('CHAT_REASONING_OPTION_UNAVAILABLE','선택한 Chat 추론 단계가 현재 슬라이더 범위에 없습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent,min:__srcMin,max:__srcMax,available:__srcAvailableLevels});
-                if(__srcState.moveAttempts>=8)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 의미값이 제한된 이동 횟수 안에 요청값에 도달하지 못했습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent});
+                if(__srcState.moveAttempts>=10)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 의미값이 제한된 이동 횟수 안에 요청값에 도달하지 못했습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent});
+                const __srcTargetNode=__srcPopupNodes.find(node=>__srcElementLevel(node)===__srcWanted&&(node.matches?.('button,[role="option"],[role="radio"],label[for]')||node.closest?.('button,[role="option"],[role="radio"],label[for]')))||null;
+                const __srcTargetControl=__srcTargetNode?(__srcTargetNode.matches?.('button,[role="option"],[role="radio"],label[for]')?__srcTargetNode:__srcTargetNode.closest?.('button,[role="option"],[role="radio"],label[for]')):null;
+                if(__srcTargetControl&&__srcState.optionClickAttempts<1){
+                  __srcState.optionClickAttempts++;__srcState.pendingReadback=true;__srcState.pendingSemantic=__srcEffectiveCurrent;__srcState.pendingDirection=__srcDirection;__srcState.pendingNumeric=null;__srcState.pendingStrategy='option';__srcState.readbackWaits=0;__srcState.at=__srcNow;__srcSave();
+                  __srcTargetControl.focus?.();__srcTargetControl.click();
+                  return result('UI_WAIT','Chat 추론 명시 옵션 클릭 후 의미값 확인 대기',__srcDiagnostics({action:'target-option',observed:__srcEffectiveCurrent,target:__srcWanted}));
+                }
                 const __srcNavStep=__srcMappingLevels.length>=2?__srcRange/(__srcMappingLevels.length-1):(__srcExactCount>=2&&__srcExactCount<=9?__srcDeclaredStep:__srcRange/4);
                 const __srcTarget=Math.max(__srcMin,Math.min(__srcMax,__srcCurrent+__srcDirection*__srcNavStep));
-                let __srcChanged=false;
+                let __srcChanged=false,__srcInputMethod='none';
                 if(__srcInput){
                   const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
                   if(setter)setter.call(__srcSlider,String(__srcTarget));else __srcSlider.value=String(__srcTarget);
-                  __srcSlider.dispatchEvent(new Event('input',{bubbles:true,composed:true}));__srcSlider.dispatchEvent(new Event('change',{bubbles:true}));__srcChanged=true;
+                  __srcSlider.dispatchEvent(new Event('input',{bubbles:true,composed:true}));__srcSlider.dispatchEvent(new Event('change',{bubbles:true}));__srcChanged=true;__srcInputMethod='native-range';
                 }else{
-                  const thumb=__srcSlider.getBoundingClientRect();let node=__srcSlider.parentElement,track=null;
-                  for(let depth=0;node&&depth<6;depth++,node=node.parentElement){const rect=node.getBoundingClientRect();if(rect.width>=120&&rect.width>=Math.max(thumb.width*2,120)&&rect.height<=96){track=node;break;}}
+                  __srcSlider.focus?.();
+                  const key=__srcDirection>0?'ArrowRight':'ArrowLeft',code=key;
+                  try{
+                    __srcSlider.dispatchEvent(new KeyboardEvent('keydown',{key,code,bubbles:true,cancelable:true,composed:true}));
+                    __srcSlider.dispatchEvent(new KeyboardEvent('keyup',{key,code,bubbles:true,cancelable:true,composed:true}));
+                    __srcChanged=true;__srcInputMethod='aria-keyboard';
+                  }catch(_){}
+                  const sliderRect=__srcSlider.getBoundingClientRect();let track=sliderRect.width>=120?__srcSlider:null,node=__srcSlider.parentElement;
+                  for(let depth=0;!track&&node&&depth<6;depth++,node=node.parentElement){const rect=node.getBoundingClientRect();if(rect.width>=120&&rect.height<=96){track=node;break;}}
                   if(track){
                     const rect=track.getBoundingClientRect(),ratio=Math.max(0.01,Math.min(0.99,(__srcTarget-__srcMin)/__srcRange)),x=rect.left+rect.width*ratio,y=rect.top+rect.height/2,hit=document.elementFromPoint?.(x,y)||track;
-                    const common={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,button:0};
-                    try{if(typeof PointerEvent==='function'){hit.dispatchEvent(new PointerEvent('pointerdown',{...common,buttons:1,pointerId:1,pointerType:'touch',isPrimary:true}));hit.dispatchEvent(new PointerEvent('pointermove',{...common,buttons:1,pointerId:1,pointerType:'touch',isPrimary:true}));hit.dispatchEvent(new PointerEvent('pointerup',{...common,buttons:0,pointerId:1,pointerType:'touch',isPrimary:true}));}}catch(_){}
-                    hit.dispatchEvent(new MouseEvent('mousedown',{...common,buttons:1}));hit.dispatchEvent(new MouseEvent('mousemove',{...common,buttons:1}));hit.dispatchEvent(new MouseEvent('mouseup',{...common,buttons:0}));hit.dispatchEvent(new MouseEvent('click',{...common,buttons:0}));__srcChanged=true;
+                    const targets=[__srcSlider,hit].filter((item,index,array)=>item&&array.indexOf(item)===index),common={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,button:0};
+                    for(const target of targets){
+                      try{if(typeof PointerEvent==='function'){target.dispatchEvent(new PointerEvent('pointerdown',{...common,buttons:1,pointerId:1,pointerType:'touch',isPrimary:true}));target.dispatchEvent(new PointerEvent('pointermove',{...common,buttons:1,pointerId:1,pointerType:'touch',isPrimary:true}));target.dispatchEvent(new PointerEvent('pointerup',{...common,buttons:0,pointerId:1,pointerType:'touch',isPrimary:true}));}}catch(_){}
+                      target.dispatchEvent(new MouseEvent('mousedown',{...common,buttons:1}));target.dispatchEvent(new MouseEvent('mousemove',{...common,buttons:1}));target.dispatchEvent(new MouseEvent('mouseup',{...common,buttons:0}));target.dispatchEvent(new MouseEvent('click',{...common,buttons:0}));
+                    }
+                    __srcChanged=true;__srcInputMethod=__srcInputMethod==='aria-keyboard'?'aria-keyboard+pointer':'aria-pointer';
                   }
                 }
                 __srcState.moveAttempts++;__srcState.at=__srcNow;
-                if(__srcChanged){__srcState.pendingReadback=true;__srcState.pendingSemantic=__srcEffectiveCurrent;__srcState.pendingDirection=__srcDirection;__srcState.pendingNumeric=__srcTarget;__srcState.readbackWaits=0;}
+                if(__srcChanged){__srcState.pendingReadback=true;__srcState.pendingSemantic=__srcEffectiveCurrent;__srcState.pendingDirection=__srcDirection;__srcState.pendingNumeric=__srcTarget;__srcState.pendingStrategy=__srcInputMethod;__srcState.readbackWaits=0;}
                 __srcSave();
                 if(!__srcChanged&&__srcState.moveAttempts>=4)return __srcFail('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 슬라이더 입력 이벤트를 적용하지 못했습니다.',{observed:__srcEffectiveCurrent,current:__srcCurrent,target:__srcTarget});
-                return result('UI_WAIT','Chat 추론 슬라이더 이동 후 의미값 확인 대기',__srcDiagnostics({action:'set-slider',observed:__srcEffectiveCurrent,current:__srcCurrent,target:__srcTarget,changed:__srcChanged}));
+                return result('UI_WAIT','Chat 추론 슬라이더 이동 후 의미값 확인 대기',__srcDiagnostics({action:'set-slider',observed:__srcEffectiveCurrent,current:__srcCurrent,target:__srcTarget,changed:__srcChanged,inputMethod:__srcInputMethod}));
+                }catch(__srcError){
+                  const name=String(__srcError?.name||'Error').slice(0,80),message=String(__srcError?.message||__srcError||'').slice(0,160);
+                  return result('CHAT_REASONING_READBACK_MISMATCH','Chat 추론 DOM 스크립트 예외',{requested:__srcWanted,requestedOrdinal:__srcWantedOrdinal,action:'script-exception',errorName:name,errorMessage:message});
+                }
                 """;
         return script.replace("__WANTED__", q(wanted))
                 .replace("__ORDINAL__", String.valueOf(ordinal))

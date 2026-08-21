@@ -23,7 +23,7 @@ public final class ChatReasoningPolicyTest {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
     }
 
-    @Test public void chatSliderScriptUsesSemanticReadbackAndPhaseSpecificFiniteFailures() {
+    @Test public void chatSliderScriptUsesSemanticReadbackAndFiniteFallbacks() {
         String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-TEST");
         assertTrue(script.contains("aria-valuetext"));
         assertTrue(script.contains("pendingReadback"));
@@ -37,7 +37,13 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("sliderWaitStartedAt"));
         assertTrue(script.contains("menuClickAttempts<2"));
         assertTrue(script.contains("__srcSliderTimeoutMs=24000"));
+        assertTrue(script.contains("__srcOverallTimeoutMs=60000"));
         assertTrue(script.contains("__srcMenuRetryMs=4800"));
+        assertTrue(script.contains("localStorage.setItem(__srcStateKey"));
+        assertTrue(script.contains("action:'script-exception'"));
+        assertTrue(script.contains("action:'target-option'"));
+        assertTrue(script.contains("action:'option-fallback'"));
+        assertTrue(script.contains("aria-keyboard"));
         assertFalse(script.contains("menuClicks<1"));
         assertFalse(script.contains("__srcWantedOrdinal/4"));
         assertFalse(script.contains("open-advanced"));
@@ -56,13 +62,17 @@ public final class ChatReasoningPolicyTest {
         assertFalse(SelfRunService.isChatReasoningFailureStatus("UI_WAIT"));
     }
 
-    @Test public void newTaskAndBootstrapAreWiredWithoutChangingWorkContinuation() throws Exception {
+    @Test public void newTaskBootstrapAndStatusUiAreWiredWithoutChangingWorkContinuation() throws Exception {
         String activity = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java");
         String dom = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java");
         String service = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
+        String main = read("app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java");
+        String detail = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDetailActivity.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDetailActivity.java");
         assertTrue(activity.contains("일반 Chat 추론 정도"));
         assertTrue(activity.contains("ChatReasoningPreferenceStore.save"));
         assertTrue(dom.contains("ChatReasoningPreferenceStore.selectionForRun"));
@@ -71,6 +81,8 @@ public final class ChatReasoningPolicyTest {
         assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\",\"phase=BOOTSTRAP;status=\"+status)"));
         assertTrue(service.contains("enterPreservedPause(status,status+\" · \"+message,false)"));
         assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE"));
+        assertTrue(main.contains("ChatReasoningPreferenceStore.summary"));
+        assertTrue(detail.contains("ChatReasoningPreferenceStore.summary"));
         assertFalse(service.contains("ChatReasoningDom"));
     }
 

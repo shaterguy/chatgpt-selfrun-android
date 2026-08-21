@@ -122,7 +122,8 @@ public final class MainActivity extends Activity {
             return;
         }
         String prefs = SelfRunStore.MODE_WORK.equals(store.mode())
-                ? store.pendingModel() + " / " + store.pendingReasoning() : "모델 변경 없음";
+                ? store.pendingModel() + " / " + store.pendingReasoning()
+                : ChatReasoningPreferenceStore.summary(this, runId, store.phase(), store.lastErrorCode());
         currentStatus.setText("Run ID: " + runId
                 + "\n모드: " + store.mode()
                 + "\n상태: " + store.status()

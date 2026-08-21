@@ -44,6 +44,28 @@ final class ChatReasoningPreferenceStore {
         return normalize(current.getString(KEY_SELECTION, KEEP));
     }
 
+    static String summary(Context context, String runId, String phase, String lastErrorCode) {
+        initialize(context);
+        SharedPreferences current = preferences;
+        if (current == null || runId == null || runId.isEmpty()
+                || !runId.equals(current.getString(KEY_RUN_ID, ""))) {
+            return "요청값 기록 없음";
+        }
+        String selection = normalize(current.getString(KEY_SELECTION, KEEP));
+        if (KEEP.equals(selection)) return "현재 Chat 설정 유지";
+        String requested = label(selection);
+        if (reasoningFailure(lastErrorCode)) {
+            return "요청: " + requested + " / 적용: 실패 / 확인: -";
+        }
+        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)) {
+            return "요청: " + requested + " / 적용: 진행 중 / 확인: -";
+        }
+        if (reasoningVerifiedPhase(phase)) {
+            return "요청: " + requested + " / 적용: 확인 완료 / 확인: " + requested;
+        }
+        return "요청: " + requested + " / 적용: 대기 / 확인: -";
+    }
+
     static boolean shouldApply(String selection) {
         return !KEEP.equals(normalize(selection));
     }
@@ -76,5 +98,18 @@ final class ChatReasoningPreferenceStore {
             case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO -> selection;
             default -> KEEP;
         };
+    }
+
+    private static boolean reasoningFailure(String code) {
+        if (code == null) return false;
+        return code.startsWith("CHAT_REASONING_") || code.startsWith("CHAT_BOOTSTRAP_");
+    }
+
+    private static boolean reasoningVerifiedPhase(String phase) {
+        if (phase == null || phase.isEmpty()) return false;
+        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)
+                || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
+                || phase.startsWith("DRIVE_")) return false;
+        return true;
     }
 }
