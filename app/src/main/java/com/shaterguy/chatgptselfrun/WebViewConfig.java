@@ -10,6 +10,7 @@ final class WebViewConfig {
     /** Shared by the visible calibration WebView and the background automation WebView. */
     @SuppressWarnings("SetJavaScriptEnabled")
     static void applyAutomation(WebView webView) {
+        ChatReasoningPreferenceStore.initialize(webView.getContext());
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);

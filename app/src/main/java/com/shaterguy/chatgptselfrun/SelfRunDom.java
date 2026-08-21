@@ -10,6 +10,8 @@ final class SelfRunDom {
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
         boolean general = SelfRunScript.GENERAL_CHAT_SCOPE.equals(projectId);
         String requested = work ? "work" : "chat";
+        String chatReasoning = work ? ChatReasoningPreferenceStore.KEEP
+                : ChatReasoningPreferenceStore.selectionForRun(runId);
         String newChatTarget = general ? WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT : WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT;
         String composerTarget = general ? WebUiCalibrationStore.TARGET_GENERAL_COMPOSER : WebUiCalibrationStore.TARGET_PROJECT_COMPOSER;
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,url:location.href,diagnostics});"
@@ -33,7 +35,8 @@ final class SelfRunDom {
                 + "const diagnostics={requested:requestedMode,currentMode,modeCandidates:rawModeControls.length,groupFound:!!modeGroup,targetFound,targetSelected,targetSource,selectedModes,recentClick,action,calibratedImplicit,composer:!!composer,finalReadback:modeReadback};const modeDiag=()=>('requested='+requestedMode+';source='+targetSource+';current='+currentMode+';targetFound='+(targetFound?1:0)+';targetSelected='+(targetSelected?1:0)+';attempt='+(action||'none')+';readback='+(modeReadback?1:0));"
                 + "if(action)return result('UI_WAIT','모드 전환 반영 대기 · '+modeDiag(),diagnostics);if(!modeReadback)return result('UI_WAIT','실행 모드 실제 상태 대기 · '+modeDiag(),diagnostics);try{sessionStorage.removeItem(modeKey);}catch(_){}"
                 + "if(!composer)return result('UI_WAIT','새 대화 입력창 대기 · '+modeDiag(),diagnostics);"
-                + "return result('READY','새 대화 화면 확인 · '+modeDiag(),{...diagnostics,composer:true});})()";
+                + ChatReasoningDom.inline(chatReasoning, runId)
+                + "return result('READY','새 대화 화면 확인 · '+modeDiag(),{...diagnostics,composer:true,chatReasoning:" + q(ChatReasoningPreferenceStore.label(chatReasoning)) + "});})()";
     }
 
     /** Stage the continuation line while keeping the Drive commit ID internal. */

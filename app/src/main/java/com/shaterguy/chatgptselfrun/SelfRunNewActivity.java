@@ -15,6 +15,7 @@ import android.text.TextWatcher;
 import android.view.View;
 import android.view.ViewParent;
 import android.view.WindowManager;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -34,8 +35,17 @@ import java.util.Set;
 import java.util.TimeZone;
 
 public final class SelfRunNewActivity extends Activity {
-    private static final String[] MODE_LABELS = {"일반 Chat · 모델 변경 없음", "Work · 모델/추론 동적 전환"};
+    private static final String[] MODE_LABELS = {"일반 Chat · 추론 정도 선택", "Work · 모델/추론 동적 전환"};
     private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK};
+    private static final String[] CHAT_REASONING_LABELS = {
+            "현재 Chat 설정 유지", "Instant · 빠른 응답", "Medium · 표준 추론",
+            "High · 확장 추론", "Extra High · 최대 추론", "Pro · 최고 성능"
+    };
+    private static final String[] CHAT_REASONING_VALUES = {
+            ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.INSTANT,
+            ChatReasoningPreferenceStore.MEDIUM, ChatReasoningPreferenceStore.HIGH,
+            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO
+    };
     private static final SecureRandom RUN_RANDOM = new SecureRandom();
     private static final char[] RUN_SUFFIX_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
     private static final int RUN_SUFFIX_LENGTH = 6;
@@ -44,6 +54,7 @@ public final class SelfRunNewActivity extends Activity {
     private static final String STATE_MODE = "mode";
     private static final String STATE_PROJECT = "project";
     private static final String STATE_ATTACHMENTS = "attachments";
+    private static final String STATE_CHAT_REASONING = "chatReasoning";
 
     private SelfRunStore store;
     private SelfRunHistoryStore history;
@@ -53,6 +64,8 @@ public final class SelfRunNewActivity extends Activity {
     private List<ProjectUrlPolicy.ProjectRef> projectEntries;
     private EditText requirement;
     private Spinner mode;
+    private Spinner chatReasoning;
+    private TextView chatReasoningHelp;
     private LinearLayout attachmentListView;
     private TextView attachmentSummary;
     private final ArrayList<SelfRunStore.Attachment> selectedAttachments = new ArrayList<>();
@@ -73,6 +86,8 @@ public final class SelfRunNewActivity extends Activity {
         root.addView(Ui.title(this,"새 SelfRun Drive 작업")); root.addView(Ui.button(this,"작업 목록",v->finish())); root.addView(Ui.body(this,"새 작업은 빈 요구사항에서 시작합니다. 이전 Run의 입력 내용·신호·오류는 이 화면에 불러오지 않습니다."));
         root.addView(Ui.section(this,"프로젝트 선택")); project=new Spinner(this); root.addView(project); root.addView(Ui.body(this,"등록할 프로젝트를 직접 열면 목록에 추가됩니다. 전체 목록을 자동 탐색하거나 메뉴를 자동 클릭하지 않습니다.")); root.addView(Ui.row(this,Ui.button(this,"프로젝트 등록/업데이트",v->startActivity(new Intent(this,LoginActivity.class))),Ui.button(this,"등록 목록 지우기",v->{catalog.clear();store.setDefaultProjectUrl("");reloadProjects();Toast.makeText(this,"등록 프로젝트 목록을 지웠습니다.",Toast.LENGTH_SHORT).show();}))); reloadProjects();
         root.addView(Ui.section(this,"실행 모드")); mode=new Spinner(this); mode.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,MODE_LABELS)); root.addView(mode);
+        root.addView(Ui.section(this,"일반 Chat 추론 정도")); chatReasoning=new Spinner(this); chatReasoning.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,CHAT_REASONING_LABELS)); root.addView(chatReasoning); chatReasoningHelp=Ui.body(this,""); root.addView(chatReasoningHelp);
+        mode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){@Override public void onItemSelected(AdapterView<?> parent,View view,int position,long id){updateChatReasoningAvailability();}@Override public void onNothingSelected(AdapterView<?> parent){updateChatReasoningAvailability();}}); updateChatReasoningAvailability();
         root.addView(Ui.section(this,"셀프런 명령")); requirement=new EditText(this); requirement.setHint("작업 요구사항"); requirement.setSingleLine(false); requirement.setMinLines(8); requirement.setGravity(android.view.Gravity.TOP|android.view.Gravity.START); requirement.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); requirement.setVerticalScrollBarEnabled(false); requirement.setHorizontalScrollBarEnabled(false); requirement.setHorizontallyScrolling(false); installCommandVisibilityTracking(requirement); root.addView(requirement);
 
         root.addView(Ui.section(this,"첨부파일 (선택)"));
@@ -82,6 +97,22 @@ public final class SelfRunNewActivity extends Activity {
         attachmentListView=new LinearLayout(this); attachmentListView.setOrientation(LinearLayout.VERTICAL); root.addView(attachmentListView);
 
         root.addView(Ui.section(this,"시작")); root.addView(Ui.button(this,"SelfRun Drive 시작",v->startSelfRun())); Ui.setContent(this,scroll); project.clearFocus(); requirement.clearFocus(); root.requestFocus();
+    }
+
+    private void updateChatReasoningAvailability() {
+        if (mode == null || chatReasoning == null || chatReasoningHelp == null) return;
+        boolean chat = mode.getSelectedItemPosition() <= 0;
+        chatReasoning.setEnabled(chat);
+        chatReasoning.setAlpha(chat ? 1f : 0.5f);
+        chatReasoningHelp.setText(chat
+                ? "선택값이 있으면 모델 메뉴를 한 번 연 뒤 가로 슬라이더로 적용하고 첫 요청을 전송합니다. ‘현재 Chat 설정 유지’는 기존 동작을 보존합니다."
+                : "Work 모드는 기존처럼 다음 턴마다 모델과 추론 정도를 동적으로 적용합니다.");
+    }
+
+    private String selectedChatReasoning() {
+        if (chatReasoning == null) return ChatReasoningPreferenceStore.KEEP;
+        int position = Math.max(0, Math.min(CHAT_REASONING_VALUES.length - 1, chatReasoning.getSelectedItemPosition()));
+        return CHAT_REASONING_VALUES[position];
     }
 
     private void openAttachmentPicker() {
@@ -277,6 +308,10 @@ public final class SelfRunNewActivity extends Activity {
         String project=selectedProjectUrl(),request=requirement.getText().toString().trim();
         if(request.isEmpty()){Toast.makeText(this,"셀프런 명령을 입력하세요.",Toast.LENGTH_LONG).show();return;}
         if(!DriveApiClient.validFileId(store.driveRunsBaseFolderId())||!DriveApiClient.validOpaqueAccountId(store.driveAccountId())){Toast.makeText(this,"먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.",Toast.LENGTH_LONG).show();return;}
+        String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()];
+        String selectedReasoning=SelfRunStore.MODE_CHAT.equals(selectedMode)?selectedChatReasoning():ChatReasoningPreferenceStore.KEEP;
+        String runId=newRunId();
+        if(!ChatReasoningPreferenceStore.save(this,runId,selectedReasoning)){Toast.makeText(this,"Chat 추론 정도 설정을 저장하지 못했습니다.",Toast.LENGTH_LONG).show();return;}
         Set<String> persistedBefore;
         try {
             persistedBefore = persistedReadGrantUris();
@@ -290,7 +325,7 @@ public final class SelfRunNewActivity extends Activity {
             Toast.makeText(this,"첨부파일의 지속 읽기 권한을 확보할 수 없습니다. 해당 파일을 다시 선택하세요.",Toast.LENGTH_LONG).show();
             return;
         }
-        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class)); String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()]; String runId=newRunId();
+        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class));
         try {
             store.start(runId,selectedMode,project,request,new ArrayList<>(selectedAttachments));
             attachmentsHandedOff=true;
@@ -298,7 +333,7 @@ public final class SelfRunNewActivity extends Activity {
             store.cancelAttachmentGrantHandoff();
             throw error;
         }
-        runLog.record(store,"UI_START","mode="+selectedMode+";attachments="+selectedAttachments.size());
+        runLog.record(store,"UI_START","mode="+selectedMode+";chatReasoning="+selectedReasoning+";attachments="+selectedAttachments.size());
         startRunner(); Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show(); finish();
     }
 
@@ -310,17 +345,19 @@ public final class SelfRunNewActivity extends Activity {
         super.onSaveInstanceState(outState);
         outState.putString(STATE_REQUIREMENT,requirement==null?"":requirement.getText().toString());
         outState.putInt(STATE_MODE,mode==null?0:mode.getSelectedItemPosition());
+        outState.putInt(STATE_CHAT_REASONING,chatReasoning==null?0:chatReasoning.getSelectedItemPosition());
         outState.putString(STATE_PROJECT,project==null?SelfRunScript.GENERAL_CHAT_URL:selectedProjectUrl());
         outState.putString(STATE_ATTACHMENTS,SelfRunStore.encodeAttachmentDrafts(selectedAttachments));
     }
 
     private void restoreDraftState(Bundle state) {
-        if (state == null) { renderAttachments(); return; }
+        if (state == null) { renderAttachments(); updateChatReasoningAvailability(); return; }
         requirement.setText(state.getString(STATE_REQUIREMENT,""));
         int modePosition=Math.max(0,Math.min(MODE_VALUES.length-1,state.getInt(STATE_MODE,0))); mode.setSelection(modePosition);
+        int reasoningPosition=Math.max(0,Math.min(CHAT_REASONING_VALUES.length-1,state.getInt(STATE_CHAT_REASONING,0))); chatReasoning.setSelection(reasoningPosition);
         selectedAttachments.clear(); selectedAttachments.addAll(SelfRunStore.decodeAttachmentDrafts(state.getString(STATE_ATTACHMENTS,"")));
         selectProjectUrl(state.getString(STATE_PROJECT,SelfRunScript.GENERAL_CHAT_URL));
-        renderAttachments();
+        renderAttachments(); updateChatReasoningAvailability();
     }
 
     private void selectProjectUrl(String url) {
