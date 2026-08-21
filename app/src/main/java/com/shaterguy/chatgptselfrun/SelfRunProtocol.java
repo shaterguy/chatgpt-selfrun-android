@@ -39,6 +39,8 @@ final class SelfRunProtocol {
                 +originalRequirement;
     }
     static String continuation(String runId){return "[SELF_RUN_CONTINUE "+runId+"]";}
+    static String recoveryContinuation(String runId,String recoveryId){if(!safeCode(runId)||!safeRecoveryId(recoveryId))throw new IllegalArgumentException("valid recovery continuation required");return "[SELF_RUN_CONTINUE "+runId+" RECOVERY_ID="+recoveryId+"]";}
+    static String watchdogRecoveryId(int attempt){if(attempt<1)throw new IllegalArgumentException("watchdog recovery attempt required");return "wd."+attempt;}
     static String turnInfoRewrite(String runId){return "[SELF_RUN_TURN_INFO_REWRITE "+runId+"]";}
     static synchronized void requestTurnInfoRewrite(String runId){if(safeCode(runId))turnInfoRewriteRunId=runId;}
     private static synchronized boolean consumeTurnInfoRewrite(String runId){if(!safeCode(runId)||!runId.equals(turnInfoRewriteRunId))return false;turnInfoRewriteRunId="";return true;}
@@ -48,7 +50,9 @@ final class SelfRunProtocol {
         String base="["+kstTimestamp(new Date())+"] "+continuation(runId);
         return nextInput==null||nextInput.isEmpty()?base:base+"\n"+nextInput;
     }
+    static String driveRecoveryContinuation(String runId,String recoveryId){return "["+kstTimestamp(new Date())+"] "+recoveryContinuation(runId,recoveryId);}
     static String signalRecovery(String runId){return "[SELF_RUN_SIGNAL_RECOVERY "+runId+"]";}
     static String kstTimestamp(Date date){SimpleDateFormat f=new SimpleDateFormat("yyyy.MM.dd | HH:mm:ss",Locale.US);f.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));return f.format(date);}
     private static boolean safeCode(String v){return v!=null&&v.matches("[A-Za-z0-9._:-]{1,80}");}
+    static boolean safeRecoveryId(String v){return v!=null&&v.matches("[A-Za-z0-9._:-]{1,128}");}
 }
