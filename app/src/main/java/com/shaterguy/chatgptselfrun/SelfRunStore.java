@@ -395,13 +395,20 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
 
     String beginWatchdogClaim(int cursor) {
         synchronized (RUN_STATE_LOCK) {
+            int normalizedCursor = Math.max(0, cursor);
             String state = watchdogClaimState(), existing = watchdogClaimName();
             if ((WATCHDOG_CLAIMING.equals(state) || WATCHDOG_CLAIM_OWNED.equals(state))
-                    && !existing.isEmpty() && watchdogClaimCursor() == Math.max(0, cursor)) return existing;
+                    && !existing.isEmpty()) {
+                if (watchdogClaimCursor() != normalizedCursor) {
+                    commitOrThrow(prefs.edit().putInt("watchdogClaimCursor", normalizedCursor));
+                    syncHistory();
+                }
+                return existing;
+            }
             int next = watchdogClaimAttempt() == Integer.MAX_VALUE ? Integer.MAX_VALUE : watchdogClaimAttempt() + 1;
             String name = watchdogClaimNameFor(runId(), next);
             commitOrThrow(prefs.edit().putInt("watchdogClaimAttempt", next).putString("watchdogClaimName", name)
-                    .putString("watchdogClaimState", WATCHDOG_CLAIMING).putInt("watchdogClaimCursor", Math.max(0, cursor)));
+                    .putString("watchdogClaimState", WATCHDOG_CLAIMING).putInt("watchdogClaimCursor", normalizedCursor));
             syncHistory();
             return name;
         }

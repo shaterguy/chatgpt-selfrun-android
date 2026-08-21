@@ -19,6 +19,31 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         assertTrue(first.matches("[A-Za-z0-9._-]{1,256}"));
     }
 
+    @Test public void preparedRecoveryIdentitySurvivesCursorAdvanceBeforeFinalFence() throws Exception {
+        String store = sourceMain("SelfRunStore.java");
+        String method = section(store, "String beginWatchdogClaim", "static String watchdogClaimNameFor");
+        int reuse = method.indexOf("if ((WATCHDOG_CLAIMING.equals(state) || WATCHDOG_CLAIM_OWNED.equals(state))");
+        int cursorUpdate = method.indexOf("watchdogClaimCursor() != normalizedCursor", reuse);
+        int returnExisting = method.indexOf("return existing", reuse);
+        int increment = method.indexOf("watchdogClaimAttempt() + 1");
+        assertTrue(method.contains("int normalizedCursor = Math.max(0, cursor)"));
+        assertTrue(reuse >= 0);
+        assertTrue(cursorUpdate > reuse);
+        assertTrue(returnExisting > cursorUpdate);
+        assertTrue(increment > returnExisting);
+        assertFalse(method.substring(reuse, returnExisting).contains("watchdogClaimAttempt"));
+        assertTrue(method.substring(reuse, returnExisting).contains("watchdogClaimCursor"));
+
+        String service = sourceMain("SelfRunService.java");
+        String poll = section(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
+        int fence = poll.indexOf("if(watchdogFinalRecheck)");
+        int quarantine = poll.indexOf("store.baselineDriveSignals(scan.totalCount,scan.latest)", fence);
+        int reclaim = poll.indexOf("store.beginWatchdogClaim(scan.totalCount)", fence);
+        assertTrue(fence >= 0);
+        assertTrue(quarantine > fence);
+        assertTrue(reclaim > quarantine);
+    }
+
     @Test public void docsClaimUsesSnapshotRevisionAndNamedRangeCas() throws Exception {
         String drive = sourceMain("DriveApiClient.java");
         String snapshot = section(drive, "static final class DocumentSnapshot", "String getAccountPermissionId");
