@@ -56,7 +56,6 @@ final class DriveSignalParser {
           + "\\[(SELF_RUN_TURN_COMPLETED|SELF_RUN_USER_ACTION_REQUIRED|SELF_RUN_PAUSED|SELF_RUN_DONE) "
           + "([A-Za-z0-9._-]{1,128})(?:\\s+([^\\]]*))?]$");
     private static final Pattern RECOVERY_FIELD = Pattern.compile("(?:^|\\s)RECOVERY_ID=", Pattern.CASE_INSENSITIVE);
-    private static final Pattern WATCHDOG_RECOVERY_ID = Pattern.compile("^wd\\.([1-9][0-9]*)$");
     // Older documents may contain a retired acknowledgement line. It is not an
     // event, but still occupies its historical cursor position so an in-place
     // update cannot replay an already-consumed completion.
@@ -101,27 +100,8 @@ final class DriveSignalParser {
         }
         int requested = Math.max(0, consumed);
         boolean rebased = requested > absoluteCursor;
-        int highestWatchdogRecovery = 0;
-        Set<String> consumedRecoveryIds = new HashSet<>();
-        for (Event event : all) {
-            String id = recoveryId(event.raw);
-            int attempt = watchdogRecoveryAttempt(id);
-            if (attempt > highestWatchdogRecovery) highestWatchdogRecovery = attempt;
-            if (event.cursor <= requested && !id.isEmpty()) consumedRecoveryIds.add(id);
-        }
         List<Event> unseen = new ArrayList<>();
-        if (!rebased) for (Event event : all) if (event.cursor > requested) {
-            String id = recoveryId(event.raw);
-            if (!id.isEmpty()) {
-                int attempt = watchdogRecoveryAttempt(id);
-                if (consumedRecoveryIds.contains(id)
-                        || (attempt > 0 && highestWatchdogRecovery > attempt)) {
-                    rebased = true;
-                    continue;
-                }
-            }
-            unseen.add(event);
-        }
+        if (!rebased) for (Event event : all) if (event.cursor > requested) unseen.add(event);
         return new Scan(Collections.unmodifiableList(unseen), absoluteCursor,
       all.isEmpty() ? null : all.get(all.size() - 1), rebased);
     }
@@ -183,15 +163,6 @@ final class DriveSignalParser {
         if (!fields.valid || hasUnknown(fields.values, true)) return "";
         String value = fields.values.get(RECOVERY);
         return SelfRunProtocol.safeRecoveryId(value) ? value : "";
-    }
-
-    static int watchdogRecoveryAttempt(String recoveryId) {
-        Matcher matcher = WATCHDOG_RECOVERY_ID.matcher(recoveryId == null ? "" : recoveryId);
-        if (!matcher.matches()) return 0;
-        try {
-            long value = Long.parseLong(matcher.group(1));
-            return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
-        } catch (NumberFormatException ignored) { return 0; }
     }
 
     static String historySafeRaw(String raw) {
