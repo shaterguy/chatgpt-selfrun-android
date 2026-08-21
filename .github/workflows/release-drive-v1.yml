@@ -7,262 +7,18 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: selfrun-drive-release
   cancel-in-progress: false
 
 jobs:
-  verify-coinstall-emulator:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Check out exact legacy baseline
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: 526a9f604fc6e2b3d785293d7ce056bfc5efa5af
-          path: legacy-baseline
-          persist-credentials: false
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
-      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
-        with:
-          gradle-version: '9.5.0'
-      - name: Install Android build SDK
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build both application lines
-        run: |
-          gradle --no-daemon --console=plain :app:assembleDebug
-          gradle --no-daemon --console=plain --project-dir legacy-baseline :app:assembleDebug
-      - name: Enable hardware acceleration
-        run: |
-          test -c /dev/kvm
-          sudo chmod 0666 /dev/kvm
-      - name: Verify full co-install isolation
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          emulator-boot-timeout: 600
-          emulator-options: >-
-            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
-            -camera-back none -camera-front none -memory 2048
-          disable-animations: true
-          script: >-
-            bash -o pipefail -c
-            'VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
-            sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$VERSION\"/" tools/verify_coinstall_emulator.sh;
-            timeout --foreground 8m tools/verify_coinstall_emulator.sh
-            legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/app-debug.apk'
-
-  verify-formal-update-emulator:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Check out exact formal 1.3.0 baseline
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: a1d41d849c4c59fcd1fd319293246161e720c2dc
-          path: formal-baseline
-          persist-credentials: false
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
-      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
-        with:
-          gradle-version: '9.5.0'
-      - name: Install Android build SDK
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build release APKs for formal update verification
-        shell: bash
-        run: |
-          set -euo pipefail
-          tools/verify_drive_variant.sh
-          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleRelease
-          gradle --no-daemon --console=plain --stacktrace --project-dir formal-baseline :app:assembleRelease
-      - name: Install hash-locked signing dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$(uname -s)" == 'Linux' ]]
-          [[ "$(uname -m)" == 'x86_64' ]]
-          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-          [[ "$PYTHON_VERSION" == '3.12' ]]
-          python3 -m pip install --disable-pip-version-check \
-            --require-hashes --only-binary=:all: \
-            -r tools/signing-requirements-linux-x86_64-py312.txt
-      - name: Prepare stable-signed formal update pair
-        shell: bash
-        env:
-          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          test -n "$SIGNING_PASSPHRASE"
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          CURRENT_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
-          CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          BASE_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" formal-baseline/app/build.gradle | head -1)"
-          BASE_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' formal-baseline/app/build.gradle | head -1)"
-          [[ "$CURRENT_VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test -n "$CURRENT_VERSION_CODE"
-          [[ "$BASE_VERSION_NAME" == '1.3.0' ]]
-          [[ "$BASE_VERSION_CODE" == '1000050' ]]
-          (( CURRENT_VERSION_CODE > BASE_VERSION_CODE ))
-
-          mkdir -p formal-update
-          BASE_UNSIGNED=formal-baseline/app/build/outputs/apk/release/app-release-unsigned.apk
-          CURRENT_UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
-          BASE_ALIGNED=formal-update/selfrun-drive-v1.3.0-aligned-unsigned.apk
-          CURRENT_ALIGNED="formal-update/selfrun-drive-v${CURRENT_VERSION_NAME}-aligned-unsigned.apk"
-          BASE_APK=formal-update/selfrun-drive-v1.3.0.apk
-          CURRENT_APK="formal-update/selfrun-drive-v${CURRENT_VERSION_NAME}.apk"
-          test -s "$BASE_UNSIGNED"
-          test -s "$CURRENT_UNSIGNED"
-          "$BT/zipalign" -p -f 4 "$BASE_UNSIGNED" "$BASE_ALIGNED"
-          "$BT/zipalign" -p -f 4 "$CURRENT_UNSIGNED" "$CURRENT_ALIGNED"
-          "$BT/zipalign" -c -v 4 "$BASE_ALIGNED" >/dev/null
-          "$BT/zipalign" -c -v 4 "$CURRENT_ALIGNED" >/dev/null
-
-          PASS_FILE="$RUNNER_TEMP/selfrun-drive-formal-update-pass"
-          trap 'rm -f "$PASS_FILE"' EXIT
-          umask 077
-          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$BASE_ALIGNED" "$PASS_FILE" "$BASE_APK" >/dev/null
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$CURRENT_ALIGNED" "$PASS_FILE" "$CURRENT_APK" >/dev/null
-          "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-update/base-cert.txt
-          "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > formal-update/current-cert.txt
-          BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-update/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          CURRENT_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-update/current-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          [[ "$BASE_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]]
-          [[ "$CURRENT_CERT" == "$BASE_CERT" ]]
-
-          BASE_BADGING="$($BT/aapt dump badging "$BASE_APK")"
-          CURRENT_BADGING="$($BT/aapt dump badging "$CURRENT_APK")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$CURRENT_BADGING"
-          grep -Fq "versionCode='1000050'" <<<"$BASE_BADGING"
-          grep -Fq "versionName='1.3.0'" <<<"$BASE_BADGING"
-          grep -Fq "versionCode='$CURRENT_VERSION_CODE'" <<<"$CURRENT_BADGING"
-          grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING"
-
-          cat > formal-update/verify-formal-update.sh <<SH
-          #!/usr/bin/env bash
-          set -euo pipefail
-          PKG='com.shaterguy.chatgptselfrun.drive'
-          BASE_APK='formal-update/selfrun-drive-v1.3.0.apk'
-          CURRENT_APK='formal-update/selfrun-drive-v${CURRENT_VERSION_NAME}.apk'
-          CURRENT_VERSION_NAME='${CURRENT_VERSION_NAME}'
-          CURRENT_VERSION_CODE='${CURRENT_VERSION_CODE}'
-
-          fail() {
-            echo "[formal-update] FAIL: \$*" >&2
-            exit 1
-          }
-
-          package_version() {
-            adb shell dumpsys package "\$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1
-          }
-
-          package_version_code() {
-            adb shell dumpsys package "\$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -1
-          }
-
-          package_uid_line() {
-            adb shell pm list packages -U "\$PKG" | tr -d '\r' | grep -F "package:\$PKG" | head -1 || true
-          }
-
-          uid_from_line() {
-            sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' <<<"\$1"
-          }
-
-          adb uninstall "\$PKG" >/dev/null 2>&1 || true
-          echo '[formal-update] install 1.3.0 baseline'
-          adb install --no-incremental "\$BASE_APK"
-          BASE_VERSION="\$(package_version)"
-          BASE_CODE="\$(package_version_code)"
-          [[ "\$BASE_VERSION" == '1.3.0' ]] || fail "unexpected baseline versionName: \$BASE_VERSION"
-          [[ "\$BASE_CODE" == '1000050' ]] || fail "unexpected baseline versionCode: \$BASE_CODE"
-          BEFORE_UID_RAW="\$(package_uid_line)"
-          BEFORE_UID="\$(uid_from_line "\$BEFORE_UID_RAW")"
-          [[ -n "\$BEFORE_UID" ]] || fail "baseline UID unavailable: \$BEFORE_UID_RAW"
-          echo "[formal-update] baseline version=\$BASE_VERSION versionCode=\$BASE_CODE uid=\$BEFORE_UID"
-
-          echo "[formal-update] update in place to \$CURRENT_VERSION_NAME"
-          adb install -r --no-incremental "\$CURRENT_APK" || fail 'adb install -r failed'
-          UPDATED_VERSION="\$(package_version)"
-          UPDATED_CODE="\$(package_version_code)"
-          [[ "\$UPDATED_VERSION" == "\$CURRENT_VERSION_NAME" ]] || fail "unexpected updated versionName: \$UPDATED_VERSION"
-          [[ "\$UPDATED_CODE" == "\$CURRENT_VERSION_CODE" ]] || fail "unexpected updated versionCode: \$UPDATED_CODE"
-          AFTER_UID_RAW="\$(package_uid_line)"
-          AFTER_UID="\$(uid_from_line "\$AFTER_UID_RAW")"
-          [[ -n "\$AFTER_UID" ]] || fail "updated UID unavailable: \$AFTER_UID_RAW"
-          [[ "\$BEFORE_UID" == "\$AFTER_UID" ]] || fail "UID changed across update: before=\$BEFORE_UID after=\$AFTER_UID"
-          adb shell pm path "\$PKG" >/dev/null || fail 'updated package path unavailable'
-          echo "[formal-update] updated version=\$UPDATED_VERSION versionCode=\$UPDATED_CODE uid=\$AFTER_UID"
-          echo '[formal-update] PASS'
-          SH
-          chmod +x formal-update/verify-formal-update.sh
-      - name: Enable hardware acceleration
-        run: |
-          test -c /dev/kvm
-          sudo chmod 0666 /dev/kvm
-      - name: Verify formal in-place update
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
-        with:
-          api-level: 36
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          emulator-boot-timeout: 600
-          emulator-options: >-
-            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
-            -camera-back none -camera-front none -memory 2048
-          disable-animations: true
-          script: >-
-            bash -o pipefail -c
-            'set -e;
-            bash formal-update/verify-formal-update.sh 2>&1 |
-            tee formal-update/formal-update-evidence.txt;
-            grep -Fxq "[formal-update] PASS" formal-update/formal-update-evidence.txt'
-      - name: Upload formal update evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: selfrun-drive-formal-update-evidence
-          path: |
-            formal-update/base-cert.txt
-            formal-update/current-cert.txt
-            formal-update/formal-update-evidence.txt
-            formal-update/verify-formal-update.sh
-          if-no-files-found: warn
-          retention-days: 30
-
-  release-drive:
-    needs: [verify-coinstall-emulator, verify-formal-update-emulator]
+  build-release-candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -275,6 +31,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
         with:
           gradle-version: '9.5.0'
+          cache-read-only: false
       - name: Resolve stable Drive identity
         shell: bash
         run: |
@@ -286,13 +43,24 @@ jobs:
           test -n "$VERSION_CODE"
           echo "DRIVE_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "DRIVE_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-          echo "DRIVE_TAG=drive-v${VERSION_NAME}" >> "$GITHUB_ENV"
-      - name: Policy and unit tests
+      - name: Policy, unit tests, and canonical current artifacts
+        shell: bash
         run: |
+          set -euo pipefail
           tools/verify_drive_variant.sh
-          gradle --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
-      - name: Build unsigned release
-        run: gradle --no-daemon --console=plain --stacktrace :app:assembleRelease
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          DEBUG_APK=app/build/outputs/apk/debug/app-debug.apk
+          UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$DEBUG_APK"
+          test -s "$UNSIGNED"
+          for APK in "$DEBUG_APK" "$UNSIGNED"; do
+            BADGING="$($BT/aapt dump badging "$APK")"
+            grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+            grep -Fq "versionCode='$DRIVE_VERSION_CODE'" <<<"$BADGING"
+            grep -Fq "versionName='$DRIVE_VERSION_NAME'" <<<"$BADGING"
+            grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
+          done
       - name: Install hash-locked signing dependencies
         shell: bash
         run: |
@@ -312,15 +80,15 @@ jobs:
           assert cffi.__version__ == '1.17.1'
           assert pycparser.__version__ == '2.22'
           PY
-      - name: Sign and verify formal APK
+      - name: Sign and verify canonical formal APK
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
           PASS_FILE="$RUNNER_TEMP/selfrun-drive-signing-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
-          test -n "$SIGNING_PASSPHRASE"
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
           BT="$ANDROID_HOME/build-tools/36.0.0"
@@ -329,6 +97,7 @@ jobs:
           ALIGNED="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}-aligned-unsigned.apk"
           APK="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
           "$BT/zipalign" -p -f 4 "$SRC" "$ALIGNED"
+          "$BT/zipalign" -c -v 4 "$ALIGNED" >/dev/null
           APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$ALIGNED" "$PASS_FILE" "$APK" > release-output/APKSIGNER_VERIFY.txt
           "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/APK_CERT.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/APK_CERT.txt
@@ -338,14 +107,314 @@ jobs:
           grep -Fq "versionName='$DRIVE_VERSION_NAME'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
           sha256sum "$APK" > release-output/SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
+          cp app/build/outputs/apk/debug/app-debug.apk release-output/selfrun-drive-current-debug.apk
           cat > release-output/RELEASE_NOTES.md <<EOF
           SelfRun Drive v${DRIVE_VERSION_NAME} 정식 릴리스입니다.
 
-          - 저장소 기본 브랜치 main을 SelfRun Drive 정식 계보로 전환했습니다.
-          - 기존 WebView SelfRun 소스 계보는 selfrun-webview/main에 분리 보존하며 Drive와 병합하지 않습니다.
-          - application ID com.shaterguy.chatgptselfrun.drive와 기존 SelfRun Drive 고정 서명 인증서를 유지합니다.
-          - global SelfRun 운영문서 기반 bootstrap, 일반 Chat/Project 라우팅과 Drive signal event continuation을 포함한 최신 검증 상태를 정식 승격했습니다.
+          - 기존 SelfRun Drive 정식 앱의 application ID와 서명 계보를 유지합니다.
+          - 검증된 main 커밋에서 만든 canonical 정식 APK를 업데이트 검증과 GitHub Release에 동일하게 사용합니다.
+          - 정식 앱과 TEST 앱은 별도 설치 계보를 유지합니다.
           EOF
+      - name: Upload canonical release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-release-candidate
+          path: |
+            release-output/chatgpt-selfrun-drive-v*.apk
+            !release-output/*unsigned*
+            release-output/selfrun-drive-current-debug.apk
+            release-output/SHA256SUMS.txt
+            release-output/APKSIGNER_VERIFY.txt
+            release-output/APK_CERT.txt
+            release-output/SOURCE_COMMIT.txt
+            release-output/RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 30
+
+  verify-coinstall-emulator:
+    needs: build-release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out exact legacy baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 526a9f604fc6e2b3d785293d7ce056bfc5efa5af
+          path: legacy-baseline
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Install Android build SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build immutable legacy fixture only
+        run: gradle --build-cache --no-daemon --console=plain --project-dir legacy-baseline :app:assembleDebug
+      - name: Download canonical current debug artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-candidate
+          ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name == "selfrun-drive-release-candidate" and (.expired | not))][0].id // empty')"
+          test -n "$ARTIFACT_ID"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/release-candidate.zip"
+          unzip -q "$RUNNER_TEMP/release-candidate.zip" -d current-candidate
+          DEBUG_APK="$(find current-candidate -type f -name 'selfrun-drive-current-debug.apk' -print -quit)"
+          SOURCE_FILE="$(find current-candidate -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          test -s "$DEBUG_APK"
+          test -s "$SOURCE_FILE"
+          [[ "$(cat "$SOURCE_FILE" | tr -d '[:space:]')" == "$GITHUB_SHA" ]]
+          cp "$DEBUG_APK" current-candidate/current-debug.apk
+      - name: Enable hardware acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Verify full co-install isolation using canonical current debug
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: >-
+            bash -o pipefail -c
+            'set -euo pipefail;
+            VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
+            sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$VERSION\"/" tools/verify_coinstall_emulator.sh;
+            timeout --foreground 8m tools/verify_coinstall_emulator.sh
+            legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
+            current-candidate/current-debug.apk 2>&1 |
+            tee coinstall-evidence.txt;
+            grep -Fq "COINSTALL_VERIFY_PASS" coinstall-evidence.txt'
+      - name: Upload co-install evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-coinstall-evidence
+          path: coinstall-evidence.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  verify-formal-update-emulator:
+    needs: build-release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install Android build SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Download canonical formal candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-candidate
+          ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name == "selfrun-drive-release-candidate" and (.expired | not))][0].id // empty')"
+          test -n "$ARTIFACT_ID"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/release-candidate.zip"
+          unzip -q "$RUNNER_TEMP/release-candidate.zip" -d current-candidate
+          CURRENT_APK="$(find current-candidate -type f -name 'chatgpt-selfrun-drive-v*.apk' ! -name '*unsigned*' -print -quit)"
+          SUM_FILE="$(find current-candidate -type f -name 'SHA256SUMS.txt' -print -quit)"
+          SOURCE_FILE="$(find current-candidate -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          test -s "$CURRENT_APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          [[ "$(cat "$SOURCE_FILE" | tr -d '[:space:]')" == "$GITHUB_SHA" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_SHA="$(sha256sum "$CURRENT_APK" | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          cp "$CURRENT_APK" current-candidate/current-formal.apk
+      - name: Download immutable formal 1.4.0 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p formal-baseline
+          gh release download drive-v1.4.0 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chatgpt-selfrun-drive-v1.4.0.apk' \
+            --dir formal-baseline
+          test -s formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+      - name: Validate formal update pair and prepare test
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          CURRENT_APK=current-candidate/current-formal.apk
+          BASE_APK=formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+          CURRENT_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          [[ "$CURRENT_VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          (( CURRENT_VERSION_CODE > 1000054 ))
+          "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-baseline/base-cert.txt
+          "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > current-candidate/current-cert.txt
+          BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-baseline/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          CURRENT_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' current-candidate/current-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$BASE_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]]
+          [[ "$CURRENT_CERT" == "$BASE_CERT" ]]
+          BASE_BADGING="$($BT/aapt dump badging "$BASE_APK")"
+          CURRENT_BADGING="$($BT/aapt dump badging "$CURRENT_APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$CURRENT_BADGING"
+          grep -Fq "versionCode='1000054'" <<<"$BASE_BADGING"
+          grep -Fq "versionName='1.4.0'" <<<"$BASE_BADGING"
+          grep -Fq "versionCode='$CURRENT_VERSION_CODE'" <<<"$CURRENT_BADGING"
+          grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING"
+          cat > verify-formal-update.sh <<SH
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PKG='com.shaterguy.chatgptselfrun.drive'
+          BASE_APK='formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk'
+          CURRENT_APK='current-candidate/current-formal.apk'
+          CURRENT_VERSION_NAME='${CURRENT_VERSION_NAME}'
+          CURRENT_VERSION_CODE='${CURRENT_VERSION_CODE}'
+          fail() { echo "[formal-update] FAIL: \$*" >&2; exit 1; }
+          package_version() { adb shell dumpsys package "\$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1; }
+          package_version_code() { adb shell dumpsys package "\$PKG" | tr -d '\r' | sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -1; }
+          package_uid_line() { adb shell pm list packages -U "\$PKG" | tr -d '\r' | grep -F "package:\$PKG" | head -1 || true; }
+          uid_from_line() { sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' <<<"\$1"; }
+          adb uninstall "\$PKG" >/dev/null 2>&1 || true
+          adb install --no-incremental "\$BASE_APK"
+          [[ "\$(package_version)" == '1.4.0' ]] || fail 'unexpected baseline version'
+          [[ "\$(package_version_code)" == '1000054' ]] || fail 'unexpected baseline versionCode'
+          BEFORE_UID="\$(uid_from_line "\$(package_uid_line)")"
+          [[ -n "\$BEFORE_UID" ]] || fail 'baseline UID unavailable'
+          adb install -r --no-incremental "\$CURRENT_APK" || fail 'adb install -r failed'
+          [[ "\$(package_version)" == "\$CURRENT_VERSION_NAME" ]] || fail 'unexpected updated version'
+          [[ "\$(package_version_code)" == "\$CURRENT_VERSION_CODE" ]] || fail 'unexpected updated versionCode'
+          AFTER_UID="\$(uid_from_line "\$(package_uid_line)")"
+          [[ -n "\$AFTER_UID" ]] || fail 'updated UID unavailable'
+          [[ "\$BEFORE_UID" == "\$AFTER_UID" ]] || fail 'UID changed across update'
+          echo '[formal-update] PASS'
+          SH
+          chmod +x verify-formal-update.sh
+      - name: Enable hardware acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Verify formal in-place update using canonical candidate
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: >-
+            bash -o pipefail -c
+            'set -e;
+            bash verify-formal-update.sh 2>&1 | tee formal-update-evidence.txt;
+            grep -Fxq "[formal-update] PASS" formal-update-evidence.txt'
+      - name: Upload formal update evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-formal-update-evidence
+          path: |
+            formal-baseline/base-cert.txt
+            current-candidate/current-cert.txt
+            formal-update-evidence.txt
+            verify-formal-update.sh
+          if-no-files-found: warn
+          retention-days: 30
+
+  release-drive:
+    needs: [build-release-candidate, verify-coinstall-emulator, verify-formal-update-emulator]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Ensure Android build tools are available
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'build-tools;36.0.0'
+      - name: Download exact verified release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-output
+          ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name == "selfrun-drive-release-candidate" and (.expired | not))][0].id // empty')"
+          test -n "$ARTIFACT_ID"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/release-candidate.zip"
+          unzip -q "$RUNNER_TEMP/release-candidate.zip" -d release-output
+      - name: Verify exact candidate identity before publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$VERSION_CODE"
+          APK="$(find release-output -type f -name "chatgpt-selfrun-drive-v${VERSION_NAME}.apk" -print -quit)"
+          SUM_FILE="$(find release-output -type f -name 'SHA256SUMS.txt' -print -quit)"
+          SOURCE_FILE="$(find release-output -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          NOTES_FILE="$(find release-output -type f -name 'RELEASE_NOTES.md' -print -quit)"
+          test -s "$APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          test -s "$NOTES_FILE"
+          [[ "$(cat "$SOURCE_FILE" | tr -d '[:space:]')" == "$GITHUB_SHA" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/PUBLISH_CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/PUBLISH_CERT.txt
+          BADGING="$($BT/aapt dump badging "$APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+          grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
+          grep -Fq "versionName='$VERSION_NAME'" <<<"$BADGING"
+          echo "DRIVE_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "DRIVE_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "DRIVE_TAG=drive-v${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "RELEASE_APK=$APK" >> "$GITHUB_ENV"
+          echo "RELEASE_SUM=$SUM_FILE" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES=$NOTES_FILE" >> "$GITHUB_ENV"
       - name: Create or verify Drive tag and GitHub Release
         shell: bash
         run: |
@@ -361,14 +430,13 @@ jobs:
             git tag "$DRIVE_TAG" "$GITHUB_SHA"
             git push origin "refs/tags/${DRIVE_TAG}"
           fi
-          APK="release-output/chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk"
           if ! gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$DRIVE_TAG" "$APK" release-output/SHA256SUMS.txt \
+            gh release create "$DRIVE_TAG" "$RELEASE_APK" "$RELEASE_SUM" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --target "$GITHUB_SHA" \
               --title "SelfRun Drive v${DRIVE_VERSION_NAME}" \
-              --notes-file release-output/RELEASE_NOTES.md
+              --notes-file "$RELEASE_NOTES"
           fi
           ASSETS="$(gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           grep -Fxq "chatgpt-selfrun-drive-v${DRIVE_VERSION_NAME}.apk" <<<"$ASSETS"
@@ -380,6 +448,8 @@ jobs:
           path: |
             release-output/APKSIGNER_VERIFY.txt
             release-output/APK_CERT.txt
+            release-output/PUBLISH_CERT.txt
             release-output/SHA256SUMS.txt
+            release-output/SOURCE_COMMIT.txt
           if-no-files-found: error
           retention-days: 30
