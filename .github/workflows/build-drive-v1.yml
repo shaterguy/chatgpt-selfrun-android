@@ -54,7 +54,7 @@ jobs:
           "$BT/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
           "$BT/zipalign" -c -v 4 "$ALIGNED" >/dev/null
           sha256sum "$ALIGNED" > app/build/outputs/selfrun-drive/UNSIGNED_SHA256SUMS.txt
-      - name: Upload aligned unsigned candidate
+      - name: Upload aligned unsigned APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chatgpt-selfrun-drive-unsigned
@@ -62,6 +62,7 @@ jobs:
             app/build/outputs/selfrun-drive/*-aligned-unsigned.apk
             app/build/outputs/selfrun-drive/UNSIGNED_SHA256SUMS.txt
           if-no-files-found: error
+          compression-level: 0
           retention-days: 30
       - name: Install hash-locked signing dependencies
         shell: bash
@@ -115,11 +116,13 @@ jobs:
           name: chatgpt-selfrun-drive-build
           path: |
             app/build/outputs/selfrun-drive/chatgpt-selfrun-drive-v*.apk
+            !app/build/outputs/selfrun-drive/*unsigned*
             app/build/outputs/selfrun-drive/SHA256SUMS.txt
             app/build/outputs/selfrun-drive/APKSIGNER_VERIFY.txt
             app/build/outputs/selfrun-drive/APK_CERT.txt
             app/build/outputs/selfrun-drive/SOURCE_COMMIT.txt
           if-no-files-found: error
+          compression-level: 0
           retention-days: 30
 
   verify-formal-update-emulator:
@@ -130,6 +133,26 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Download canonical current candidate from this run
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: chatgpt-selfrun-drive-build
+          path: current-candidate
+      - name: Verify canonical current artifact identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_APK="$(find current-candidate -type f -name 'chatgpt-selfrun-drive-v*.apk' ! -name '*unsigned*' -print -quit)"
+          SUM_FILE="$(find current-candidate -type f -name 'SHA256SUMS.txt' -print -quit)"
+          SOURCE_FILE="$(find current-candidate -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          test -s "$CURRENT_APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$GITHUB_SHA" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_SHA="$(sha256sum "$CURRENT_APK" | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          cp "$CURRENT_APK" current-candidate/current-formal.apk
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -139,27 +162,6 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Download canonical current candidate from this run
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p current-candidate
-          ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
-            --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-build" and (.expired | not))][0].id // empty')"
-          test -n "$ARTIFACT_ID"
-          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/formal-candidate.zip"
-          unzip -q "$RUNNER_TEMP/formal-candidate.zip" -d current-candidate
-          CURRENT_APK="$(find current-candidate -type f -name 'chatgpt-selfrun-drive-v*.apk' ! -name '*unsigned*' -print -quit)"
-          SUM_FILE="$(find current-candidate -type f -name 'SHA256SUMS.txt' -print -quit)"
-          SOURCE_FILE="$(find current-candidate -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
-          test -s "$CURRENT_APK"
-          test -s "$SUM_FILE"
-          test -s "$SOURCE_FILE"
-          [[ "$(cat "$SOURCE_FILE" | tr -d '[:space:]')" == "$GITHUB_SHA" ]]
-          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
-          ACTUAL_SHA="$(sha256sum "$CURRENT_APK" | awk '{print $1}')"
-          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
-          cp "$CURRENT_APK" current-candidate/current-formal.apk
       - name: Download immutable formal 1.4.0 baseline
         shell: bash
         run: |
@@ -181,14 +183,12 @@ jobs:
           CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           [[ "$CURRENT_VERSION_NAME" =~ ^1\.4\.1-rc[0-9]+$ ]] || { echo "unexpected RC versionName: $CURRENT_VERSION_NAME" >&2; exit 1; }
           (( CURRENT_VERSION_CODE > 1000054 ))
-
           "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-baseline/base-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > current-candidate/current-cert.txt
           BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-baseline/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           CURRENT_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' current-candidate/current-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           [[ "$BASE_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]]
           [[ "$CURRENT_CERT" == "$BASE_CERT" ]]
-
           BASE_BADGING="$($BT/aapt dump badging "$BASE_APK")"
           CURRENT_BADGING="$($BT/aapt dump badging "$CURRENT_APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
@@ -197,7 +197,6 @@ jobs:
           grep -Fq "versionName='1.4.0'" <<<"$BASE_BADGING"
           grep -Fq "versionCode='$CURRENT_VERSION_CODE'" <<<"$CURRENT_BADGING"
           grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING"
-
           cat > verify-formal-update.sh <<SH
           #!/usr/bin/env bash
           set -euo pipefail
