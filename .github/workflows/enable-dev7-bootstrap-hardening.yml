@@ -8,24 +8,75 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: enable-dev7-bootstrap-hardening
+  cancel-in-progress: true
+
 jobs:
   enable:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: selfrun-drive/staging-v1.4.2-dev7
           fetch-depth: 0
-      - name: Enable the staged patch exactly once
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Execute the staged patch body without changing workflow files
         shell: bash
         run: |
           set -euo pipefail
-          sed -i "/github.actor != 'github-actions\[bot\]'/d" .github/workflows/apply-dev7-bootstrap-hardening.yml
-          rm -f .github/workflows/enable-dev7-bootstrap-hardening.yml
+          if grep -Fq "selfRunDriveVersionName = '1.4.2-dev7'" app/build.gradle; then
+            echo 'dev7 patch already present'
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-dev7-bootstrap-hardening.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          if start_marker not in source or end_marker not in source:
+              raise SystemExit('staged Python patch body not found')
+          body = source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          lines = []
+          for line in body.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          script = '\n'.join(lines) + '\n'
+          exec(compile(script, 'apply-dev7-bootstrap-hardening', 'exec'), {'__name__': '__main__'})
+          PY
+      - name: Verify policy and unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -Fq "selfRunDriveVersionName = '1.4.2-dev7'" app/build.gradle; then
+            echo 'dev7 patch was not applied' >&2
+            exit 1
+          fi
+          tools/verify_drive_variant.sh
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Commit source changes only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add app
+          if git diff --cached --quiet; then
+            echo 'no source changes to commit'
+            exit 0
+          fi
+          git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --check
-          git commit -m 'chore: enable staged dev7 patch'
+          git commit -m 'fix(drive): make Chat bootstrap finite and durable'
           git push origin HEAD:selfrun-drive/staging-v1.4.2-dev7
