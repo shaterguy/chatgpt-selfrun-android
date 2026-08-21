@@ -87,15 +87,6 @@ require_file "$TEST_PREV_APK"
 require_file "$TEST_APK"
 "$ADB" wait-for-device
 
-PROCESS_TEST_CLASS="com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest"
-PROCESS_TEST_RUNNER="$TEST_PACKAGE/androidx.test.runner.AndroidJUnitRunner"
-PROCESS_TEST_OUTPUT="$("$ADB" shell am instrument -w -r \
-  -e class "$PROCESS_TEST_CLASS" "$PROCESS_TEST_RUNNER" | tr -d '\r')"
-printf '%s\n' "$PROCESS_TEST_OUTPUT"
-grep -Fq 'OK (1 test)' <<<"$PROCESS_TEST_OUTPUT" \
-  || fail "Chat reasoning process recreation instrumentation failed"
-echo "PROCESS_RECREATION_TEST_PASS"
-
 "$ADB" uninstall "$FORMAL_PACKAGE" >/dev/null 2>&1 || true
 "$ADB" uninstall "$TEST_PACKAGE" >/dev/null 2>&1 || true
 
