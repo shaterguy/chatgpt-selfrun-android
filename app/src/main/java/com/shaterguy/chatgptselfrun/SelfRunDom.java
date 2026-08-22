@@ -23,7 +23,6 @@ final class SelfRunDom {
                 + composer(composerTarget)
                 + BootstrapModeDom.inline(requested, runId)
                 + ChatReasoningOptionDom.inline(chatReasoning, runId)
-                + ChatReasoningDom.inline(chatReasoning, runId)
                 + "return result('READY','새 대화 화면 확인 · '+modeDiag(),{...diagnostics,composer:true,chatReasoning:" + q(ChatReasoningPreferenceStore.label(chatReasoning)) + "});})()";
     }
 

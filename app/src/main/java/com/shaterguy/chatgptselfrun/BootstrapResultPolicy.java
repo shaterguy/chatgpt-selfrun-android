@@ -21,7 +21,10 @@ final class BootstrapResultPolicy {
   "action", "requested", "observed", "verifiedValue", "currentMode",
   "targetFound", "targetSelected", "targetSource", "modeAttempts",
   "modeClickAttempts", "modeElapsedMs", "sliderFound", "sliderKind",
-  "triggerFound", "searchElapsedMs", "errorName", "errorMessage"
+  "triggerFound", "searchElapsedMs", "stage", "sliderObserved",
+  "advancedButtonFound", "calibratedTargetValid", "current", "source",
+  "levelFound", "optionFound", "attempts", "elapsedMs", "timeoutMs",
+  "errorName", "errorMessage"
     };
 
     private BootstrapResultPolicy() {}

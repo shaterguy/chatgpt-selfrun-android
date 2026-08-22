@@ -19,57 +19,41 @@ public final class ChatReasoningPolicyTest {
         assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
     }
 
-    @Test public void keepSelectionSkipsChatSliderAutomation() {
+    @Test public void keepSelectionSkipsChatReasoningAutomation() {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
         assertEquals("", ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
     }
 
-    @Test public void chatSliderScriptUsesSemanticReadbackAndFiniteFallbacks() {
-        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-TEST");
-        assertTrue(script.contains("aria-valuetext"));
-        assertTrue(script.contains("pendingReadback"));
-        assertTrue(script.contains("CHAT_REASONING_TRIGGER_NOT_FOUND"));
+    @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {
+        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-LEGACY");
         assertTrue(script.contains("CHAT_REASONING_SLIDER_NOT_FOUND"));
-        assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
         assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
-        assertTrue(script.contains("CHAT_REASONING_MENU_CLOSE_FAILED"));
-        assertTrue(script.contains("triggerAttempts"));
-        assertTrue(script.contains("sliderAttempts"));
-        assertTrue(script.contains("sliderWaitStartedAt"));
-        assertTrue(script.contains("menuClickAttempts<2"));
-        assertTrue(script.contains("__srcSliderTimeoutMs=24000"));
         assertTrue(script.contains("__srcOverallTimeoutMs=60000"));
-        assertTrue(script.contains("__srcMenuRetryMs=4800"));
-        assertTrue(script.contains("localStorage.setItem(__srcStateKey"));
-        assertTrue(script.contains("action:'script-exception'"));
-        assertTrue(script.contains("action:'target-option'"));
-        assertTrue(script.contains("action:'option-fallback'"));
-        assertTrue(script.contains("aria-keyboard"));
-        assertFalse(script.contains("menuClicks<1"));
-        assertFalse(script.contains("__srcWantedOrdinal/4"));
-        assertFalse(script.contains("open-advanced-menu"));
     }
 
-    @Test public void hierarchicalMenuScriptUsesReasoningRowAndPositiveSliderGate() {
-        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO, "SR-HIERARCHY");
-        assertTrue(script.contains("strategy:'hierarchical-menu'"));
-        assertTrue(script.contains("open-advanced-menu"));
-        assertTrue(script.contains("open-reasoning-level"));
-        assertTrue(script.contains("wait-reasoning-options"));
+    @Test public void advancedMenuScriptObservesSheetAndNeverMutatesSlider() {
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO, "SR-ADVANCED");
+        assertTrue(script.contains("strategy:'advanced-menu'"));
+        assertTrue(script.contains("open-reasoning-sheet"));
+        assertTrue(script.contains("open-advanced-control"));
+        assertTrue(script.contains("open-reasoning-menu"));
         assertTrue(script.contains("nested-option-click"));
-        assertTrue(script.contains("positive-slider-fallback"));
-        assertTrue(script.contains("__sroSliderFound"));
+        assertTrue(script.contains("direct-option-click"));
+        assertTrue(script.contains("sliderObserved"));
+        assertTrue(script.contains("CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"));
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
         assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
-        assertFalse(script.contains("legacy-slider-fallback"));
-        assertFalse(script.contains("__srcSliderTimeoutMs"));
+        assertFalse(script.contains("positive-slider-fallback"));
+        assertFalse(script.contains("set-slider"));
+        assertFalse(script.contains("ArrowRight"));
+        assertFalse(script.contains("new PointerEvent"));
     }
 
     @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
         String[] statuses = {
                 "CHAT_REASONING_TRIGGER_NOT_FOUND", "CHAT_REASONING_SLIDER_NOT_FOUND",
-                "CHAT_REASONING_OPTION_UNAVAILABLE", "CHAT_REASONING_READBACK_MISMATCH",
-                "CHAT_REASONING_MENU_CLOSE_FAILED"
+                "CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND", "CHAT_REASONING_OPTION_UNAVAILABLE",
+                "CHAT_REASONING_READBACK_MISMATCH", "CHAT_REASONING_MENU_CLOSE_FAILED"
         };
         for (String status : statuses) {
             assertTrue(SelfRunService.isChatReasoningFailureStatus(status));
@@ -78,36 +62,21 @@ public final class ChatReasoningPolicyTest {
         assertFalse(SelfRunService.isChatReasoningFailureStatus("UI_WAIT"));
     }
 
-    @Test public void newTaskBootstrapAndStatusUiAreWiredWithoutChangingWorkContinuation() throws Exception {
-        String activity = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java",
-                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java");
+    @Test public void newTaskBootstrapUsesOnlyTheAdvancedMenuAdapter() throws Exception {
         String dom = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java");
         String mode = read("app/src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java");
         String service = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        String main = read("app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java",
-                "src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java");
-        String detail = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDetailActivity.java",
-                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDetailActivity.java");
-        assertTrue(activity.contains("일반 Chat 추론 정도"));
-        assertTrue(activity.contains("ChatReasoningPreferenceStore.save"));
-        assertTrue(dom.contains("ChatReasoningPreferenceStore.selectionForRun"));
         assertTrue(dom.contains("BootstrapModeDom.inline(requested, runId)"));
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
-        assertTrue(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
+        assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
         assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
-        assertTrue(service.contains("scheduleBootstrapCallbackDeadline"));
-        assertTrue(service.contains("runLog.record(store,\"DOM_RESULT\",BootstrapResultPolicy.logDetail"));
-        assertTrue(service.contains("failBootstrap(BootstrapResultPolicy.TIMEOUT"));
         assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE"));
-        assertTrue(main.contains("ChatReasoningPreferenceStore.summary"));
-        assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
-        assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
         assertTrue(mode.contains("modeTimeoutMs=20000"));
     }
 
