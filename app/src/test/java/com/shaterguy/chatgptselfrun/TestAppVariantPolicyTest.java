@@ -7,7 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public final class TestAppVariantPolicyTest {
     @Test public void testAppHasFixedSeparateInstallIdentity() throws Exception {
@@ -34,7 +35,7 @@ public final class TestAppVariantPolicyTest {
 
     @Test public void developmentVersionAdvancesPastDev1() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3-dev2'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3'"));
         assertTrue(gradle.contains("selfRunDriveVersionCode = 1000076"));
     }
 
