@@ -90,9 +90,8 @@ final class ChatReasoningOptionDom {
                 const __sroReady=(observed,extra={})=>{const diagnostics=__sroDiagnostics({observed,...extra});__sroClear();return result('READY','Chat 추론 고급 메뉴 의미값 적용 확인',diagnostics);};
                 const __sroDesired=element=>element?.getAttribute?.('aria-expanded');
                 const __sroReached=(element,want)=>__sroDesired(element)!==null&&__sroDesired(element)===String(want);
-                const __sroPointer=element=>{if(typeof PointerEvent!=='function')return false;element.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,composed:true,button:0,buttons:1,pointerId:1,pointerType:'mouse',isPrimary:true}));return true;};
                 const __sroMouse=element=>element.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,composed:true,button:0,buttons:1}));
-                const __sroToggleMenu=(element,want)=>{if(!element)return;element.focus?.();const tracked=__sroDesired(element)!==null;element.click?.();if(!tracked||__sroReached(element,want))return;if(__sroPointer(element)&&__sroReached(element,want))return;__sroMouse(element);};
+                const __sroToggleMenu=(element,want)=>{if(!element)return;element.focus?.();const tracked=__sroDesired(element)!==null;element.click?.();if(!tracked||__sroReached(element,want))return;__sroMouse(element);};
                 const __sroActivate=element=>{const target=__sroOwner(element)||element;if(!target)return;if(target.getAttribute?.('aria-expanded')!==null||target.hasAttribute?.('aria-haspopup'))__sroToggleMenu(target,true);else{target.focus?.();target.click?.();}};
                 const __sroClose=()=>{if(__sroTrigger&&__sroTrigger.getAttribute?.('aria-expanded')==='true'){__sroActivate(__sroTrigger);return'trigger';}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));return'escape';};
                 const __sroMayClick=(count,max)=>Number(count)<1||(__sroSinceActionMs>=__sroRetryMs&&Number(count)<max);
