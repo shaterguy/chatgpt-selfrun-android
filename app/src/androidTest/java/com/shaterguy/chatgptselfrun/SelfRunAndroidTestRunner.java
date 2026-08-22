@@ -10,20 +10,22 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest";
     private static final String BOOTSTRAP_STAGE_TEST =
             "com.shaterguy.chatgptselfrun.BootstrapStageAndDirectPickerAndroidTest";
+    private static final String HIERARCHICAL_REASONING_TEST =
+            "com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest";
 
     @Override public void onCreate(Bundle arguments) {
         Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
-        String selected = effective.getString("class", "").trim();
-        if (!containsClass(selected, PROCESS_RECREATION_TEST)) {
-            effective.putString("class", selected.isEmpty()
-                    ? PROCESS_RECREATION_TEST : selected + "," + PROCESS_RECREATION_TEST);
-        }
-        selected = effective.getString("class", "").trim();
-        if (!containsClass(selected, BOOTSTRAP_STAGE_TEST)) {
-            effective.putString("class", selected.isEmpty()
-                    ? BOOTSTRAP_STAGE_TEST : selected + "," + BOOTSTRAP_STAGE_TEST);
-        }
+        appendRequiredClass(effective, PROCESS_RECREATION_TEST);
+        appendRequiredClass(effective, BOOTSTRAP_STAGE_TEST);
+        appendRequiredClass(effective, HIERARCHICAL_REASONING_TEST);
         super.onCreate(effective);
+    }
+
+    private static void appendRequiredClass(Bundle arguments, String required) {
+        String selected = arguments.getString("class", "").trim();
+        if (!containsClass(selected, required)) {
+            arguments.putString("class", selected.isEmpty() ? required : selected + "," + required);
+        }
     }
 
     static boolean containsClass(String selected, String required) {

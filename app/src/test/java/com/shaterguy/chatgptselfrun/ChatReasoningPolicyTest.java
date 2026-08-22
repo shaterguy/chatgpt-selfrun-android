@@ -21,6 +21,7 @@ public final class ChatReasoningPolicyTest {
 
     @Test public void keepSelectionSkipsChatSliderAutomation() {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
+        assertEquals("", ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
     }
 
     @Test public void chatSliderScriptUsesSemanticReadbackAndFiniteFallbacks() {
@@ -46,7 +47,22 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("aria-keyboard"));
         assertFalse(script.contains("menuClicks<1"));
         assertFalse(script.contains("__srcWantedOrdinal/4"));
-        assertFalse(script.contains("open-advanced"));
+        assertFalse(script.contains("open-advanced-menu"));
+    }
+
+    @Test public void hierarchicalMenuScriptUsesReasoningRowAndPositiveSliderGate() {
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO, "SR-HIERARCHY");
+        assertTrue(script.contains("strategy:'hierarchical-menu'"));
+        assertTrue(script.contains("open-advanced-menu"));
+        assertTrue(script.contains("open-reasoning-level"));
+        assertTrue(script.contains("wait-reasoning-options"));
+        assertTrue(script.contains("nested-option-click"));
+        assertTrue(script.contains("positive-slider-fallback"));
+        assertTrue(script.contains("__sroSliderFound"));
+        assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
+        assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
+        assertFalse(script.contains("legacy-slider-fallback"));
+        assertFalse(script.contains("__srcSliderTimeoutMs"));
     }
 
     @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
@@ -79,7 +95,8 @@ public final class ChatReasoningPolicyTest {
         assertTrue(activity.contains("ChatReasoningPreferenceStore.save"));
         assertTrue(dom.contains("ChatReasoningPreferenceStore.selectionForRun"));
         assertTrue(dom.contains("BootstrapModeDom.inline(requested, runId)"));
-        assertTrue(dom.contains("ChatReasoningDom.inline"));
+        assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
+        assertTrue(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
         assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
         assertTrue(service.contains("scheduleBootstrapCallbackDeadline"));
