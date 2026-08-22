@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+# One-shot remote patch runner for the dev10 semantic calibration follow-up.
 ROOT = Path(__file__).resolve().parents[1]
 
 
