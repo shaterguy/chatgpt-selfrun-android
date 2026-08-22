@@ -14,6 +14,7 @@ public class ContinuationDiagnosticsPolicyTest {
         assertTrue(service.contains("recordContinuationRouteMismatch(webView.getUrl())"));
         assertTrue(service.contains("recordContinuationRouteMismatch(requested)"));
         assertTrue(service.contains("recordContinuationWait(phase,status,detail)"));
+        assertTrue(service.contains("recordContinuationState(phase,status)"));
         assertTrue(service.contains("recordContinuationTargetError(phase)"));
         assertTrue(service.contains("isContinuationDiagnosticPhase(phase)"));
         assertTrue(service.contains("PHASE_WAIT_INTERNAL_SEND.equals(phase)"));
@@ -31,6 +32,19 @@ public class ContinuationDiagnosticsPolicyTest {
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_APPLY_REASONING, "WAIT", "private detail"));
         assertEquals("status=UI_WAIT;phase=send_continue;reason=composer_wait",
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "continuation 입력창 대기"));
+    }
+
+    @Test public void waitInternalSendAndCallbackTimeoutDiagnosticsArePrivacySafe() {
+        assertEquals("status=UNKNOWN;phase=wait_internal_send;reason=state_wait",
+                SelfRunWebDiagnostics.stateDetail(SelfRunStore.PHASE_WAIT_INTERNAL_SEND,
+                        SelfRunContinuationDom.UNKNOWN));
+        assertEquals("status=SEND_DISABLED;phase=wait_internal_send;reason=state_wait",
+                SelfRunWebDiagnostics.stateDetail(SelfRunStore.PHASE_WAIT_INTERNAL_SEND,
+                        SelfRunContinuationDom.SEND_DISABLED));
+        assertEquals("status=CALLBACK_TIMEOUT;phase=wait_internal_send;reason=evaluate_javascript",
+                SelfRunWebDiagnostics.callbackTimeoutDetail(SelfRunStore.PHASE_WAIT_INTERNAL_SEND));
+        assertEquals("status=CALLBACK_TIMEOUT;phase=send_continue;reason=evaluate_javascript",
+                SelfRunWebDiagnostics.callbackTimeoutDetail(SelfRunStore.PHASE_SEND_CONTINUE));
     }
 
     private static String src(String file) throws Exception {
