@@ -24,10 +24,13 @@ public final class TurnCompletionWatchdogFencePolicyTest {
                 "private boolean isTurnCompletionCallback", "private void maybeCaptureConversationUrl");
         int run = callback.indexOf("launchedRunId.equals(run)");
         int activeRun = callback.indexOf("launchedRunId.equals(store.runId())");
-        int phase = callback.indexOf("PHASE_WAIT_TURN_COMPLETION.equals(store.phase())");
-        int token = callback.indexOf("token.equals(store.turnObserverToken())");
+        int activePhase = callback.indexOf("isActiveTurnObserverCallbackPhase(store.phase())");
+        int stopToken = callback.indexOf("token.equals(store.turnObserverToken())", activePhase);
+        int waitPhase = callback.indexOf("PHASE_WAIT_TURN_COMPLETION.equals(store.phase())", stopToken);
+        int completionToken = callback.indexOf("token.equals(store.turnObserverToken())", waitPhase);
         int transition = callback.indexOf("store.beginPostDomDriveSync(token)");
-        assertTrue(run >= 0 && activeRun > run && phase > activeRun && token > phase && transition > token);
+        assertTrue(run >= 0 && activeRun > run && activePhase > activeRun && stopToken > activePhase);
+        assertTrue(waitPhase > stopToken && completionToken > waitPhase && transition > completionToken);
     }
 
     @Test public void observerDisconnectPrecedesNativeCompletionCallback() throws Exception {
