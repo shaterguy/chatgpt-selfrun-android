@@ -27,11 +27,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           target = Path('.github/workflows/apply-v1.4.2-dev10-chat-work-fix.yml')
-          text = target.read_text(encoding='utf-8')
-          gate = "    if: ${{ github.actor != 'github-actions[bot]' }}\n"
-          if text.count(gate) != 1:
-              raise SystemExit(f'expected one actor gate, found {text.count(gate)}')
-          target.write_text(text.replace(gate, '', 1), encoding='utf-8')
+          lines = target.read_text(encoding='utf-8').splitlines(keepends=True)
+          matches = [line for line in lines if line.startswith('    if:') and 'github.actor' in line]
+          if len(matches) != 1:
+              raise SystemExit(f'expected one actor gate, found {len(matches)}')
+          target.write_text(''.join(line for line in lines if line is not matches[0]), encoding='utf-8')
           Path('.github/workflows/enable-v1.4.2-dev10-fix.yml').unlink()
           PY
           git diff --check
