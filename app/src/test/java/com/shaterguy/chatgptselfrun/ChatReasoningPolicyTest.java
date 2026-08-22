@@ -67,6 +67,8 @@ public final class ChatReasoningPolicyTest {
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java");
         String dom = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java");
+        String mode = read("app/src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java");
         String service = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
         String main = read("app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java",
@@ -76,6 +78,7 @@ public final class ChatReasoningPolicyTest {
         assertTrue(activity.contains("일반 Chat 추론 정도"));
         assertTrue(activity.contains("ChatReasoningPreferenceStore.save"));
         assertTrue(dom.contains("ChatReasoningPreferenceStore.selectionForRun"));
+        assertTrue(dom.contains("BootstrapModeDom.inline(requested, runId)"));
         assertTrue(dom.contains("ChatReasoningDom.inline"));
         assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
         assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
@@ -86,9 +89,9 @@ public final class ChatReasoningPolicyTest {
         assertTrue(main.contains("ChatReasoningPreferenceStore.summary"));
         assertTrue(detail.contains("BootstrapRunStateStore.summary(item)"));
         assertFalse(service.contains("ChatReasoningDom"));
-        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
-        assertTrue(dom.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
-        assertTrue(dom.contains("modeTimeoutMs=20000"));
+        assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
+        assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
+        assertTrue(mode.contains("modeTimeoutMs=20000"));
     }
 
     private static String read(String first, String second) throws Exception {
