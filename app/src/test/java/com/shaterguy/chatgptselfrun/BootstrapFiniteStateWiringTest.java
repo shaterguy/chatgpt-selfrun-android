@@ -49,8 +49,8 @@ public final class BootstrapFiniteStateWiringTest {
 
     @Test public void developmentIdentityAdvancesOnce() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000075"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000076"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3-dev2'"));
     }
 
     private static String src(String file) throws Exception {
