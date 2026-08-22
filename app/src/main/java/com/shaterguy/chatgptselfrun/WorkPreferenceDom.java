@@ -72,11 +72,12 @@ final class WorkPreferenceDom {
                 const __wpCalibratedRaw=__srFind(__wpPurpose),__wpCalibrated=__wpOwner(__wpCalibratedRaw);
                 const __wpCalibratedLabel=__wpLabel(__wpCalibrated),__wpCalibratedMeaning=__wpParse(__wpCalibratedLabel);
                 const __wpCalibratedOptionValid=!!__wpCalibrated&&__wpOptionRole(__wpCalibrated)&&__wpCalibratedMeaning===__wpWanted;
-                const __wpCalibratedTriggerValid=!!__wpCalibrated&&__wpMenuTrigger(__wpCalibrated)&&__wpNear(__wpCalibrated)&&(!!__wpCalibratedMeaning||__wpRowLabel(__wpCalibratedLabel));
+                const __wpCalibratedTriggerValid=!!__wpCalibrated&&__wpMenuTrigger(__wpCalibrated)&&(!!__wpCalibratedMeaning||__wpRowLabel(__wpCalibratedLabel));
                 const __wpCalibratedValid=__wpCalibratedOptionValid||__wpCalibratedTriggerValid;
                 const __wpCalibratedOption=__wpCalibratedOptionValid?__wpCalibrated:null;
                 const __wpCalibratedTrigger=__wpCalibratedTriggerValid?__wpCalibrated:null;
-                const __wpHeuristicTrigger=[...document.querySelectorAll('button,[role="button"],[aria-haspopup],[aria-expanded]')].filter(__wpVisible).filter(__wpNear).find(e=>__wpMenuTrigger(e)&&!!__wpParse(__wpLabel(e)))||null;
+                const __wpHeuristicTriggers=[...document.querySelectorAll('button,[role="button"],[aria-haspopup],[aria-expanded]')].filter(__wpVisible).filter(e=>__wpMenuTrigger(e)&&!!__wpParse(__wpLabel(e)));
+                const __wpHeuristicTrigger=__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]||null;
                 const __wpTrigger=__wpCalibratedTrigger||__wpHeuristicTrigger;
                 const __wpSource=__wpCalibratedTrigger?'calibrated-trigger':(__wpHeuristicTrigger?'heuristic-trigger':(__wpCalibratedOption?'calibrated-option':'none'));
                 const __wpOption=__wpSemanticOption||__wpCalibratedOption;

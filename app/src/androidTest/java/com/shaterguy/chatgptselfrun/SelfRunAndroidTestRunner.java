@@ -12,12 +12,15 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.BootstrapStageAndDirectPickerAndroidTest";
     private static final String HIERARCHICAL_REASONING_TEST =
             "com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest";
+    private static final String WORK_HEADER_CONTINUATION_TEST =
+            "com.shaterguy.chatgptselfrun.WorkPreferenceHeaderContinuationAndroidTest";
 
     @Override public void onCreate(Bundle arguments) {
         Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
         appendRequiredClass(effective, PROCESS_RECREATION_TEST);
         appendRequiredClass(effective, BOOTSTRAP_STAGE_TEST);
         appendRequiredClass(effective, HIERARCHICAL_REASONING_TEST);
+        appendRequiredClass(effective, WORK_HEADER_CONTINUATION_TEST);
         super.onCreate(effective);
     }
 
