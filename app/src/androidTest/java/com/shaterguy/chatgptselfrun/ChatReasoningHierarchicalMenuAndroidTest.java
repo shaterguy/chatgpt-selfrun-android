@@ -54,6 +54,7 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
             assertEquals("1", read(scenario, web, "String(window.advancedClicks)"));
             assertEquals("1", read(scenario, web, "String(window.reasoningClicks)"));
             assertEquals("1", read(scenario, web, "String(window.optionClicks)"));
+            assertEquals("0", read(scenario, web, "String(window.inertReasoningClicks)"));
             assertEquals("0", read(scenario, web, "String(window.sliderEvents)"));
             assertEquals("Pro", read(scenario, web, "document.getElementById('reasoning-trigger').textContent"));
         }
@@ -114,25 +115,24 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
                 <!doctype html><html><head><style>[hidden]{display:none!important}body{min-height:800px}form{margin-top:500px}</style></head><body>
                 <div><button id="chat" aria-selected="true">Chat</button><button id="work" aria-selected="false">Work</button></div>
                 <form><textarea id="prompt-textarea"></textarea><button id="reasoning-trigger" type="button" aria-haspopup="menu" aria-controls="sheet" aria-expanded="false">Extra high</button></form>
-                <div id="sheet" role="menu" hidden>
-                  <div role="menuitem" aria-label="Performance"><div id="slider" role="slider" aria-hidden="true" tabindex="-1" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3"></div></div>
-                  <button id="advanced" type="button" role="menuitem">Show advanced options</button>
-                  <button type="button" role="menuitem">Model GPT-5.6 Sol</button>
-                  <button id="reasoning-row-compact" type="button" role="menuitem">Reasoning level Extra high</button>
-                </div>
-                <div id="advanced-menu" role="menu" hidden>
-                  <button type="button" role="menuitem">Show fewer options</button>
-                  <button type="button" role="menuitem">Model GPT-5.6 Sol</button>
-                  <button id="reasoning-row" type="button" role="menuitem" aria-haspopup="menu">Reasoning level Extra high</button>
+                <div id="sheet" role="menu" hidden data-testid="composer-intelligence-picker-content">
+                  <div id="simple-view" data-testid="composer-model-picker-slider-simple-view" data-active="true">
+                    <div role="menuitem" aria-label="Performance"><div id="slider" role="slider" aria-hidden="true" tabindex="-1" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3"></div></div>
+                  </div>
+                  <div id="advanced" role="menuitem" aria-label="Show advanced options" aria-expanded="false">Advanced</div>
+                  <div id="advanced-view" data-testid="composer-model-picker-slider-advanced-view" data-active="false" inert>
+                    <div type="button" role="menuitem">Model GPT-5.6 Sol</div>
+                    <div id="reasoning-row" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Reasoning level Extra high</div>
+                  </div>
                 </div>
                 <div id="submenu" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="false">Instant</button><button type="button" role="menuitemradio" aria-checked="false">Medium</button><button type="button" role="menuitemradio" aria-checked="false">High</button><button type="button" role="menuitemradio" aria-checked="true">Extra high</button><button id="pro" type="button" role="menuitemradio" aria-checked="false">Pro</button></div>
                 <script>
-                window.triggerClicks=0;window.advancedClicks=0;window.reasoningClicks=0;window.optionClicks=0;window.sliderEvents=0;
-                const trigger=document.getElementById('reasoning-trigger'),sheet=document.getElementById('sheet'),advanced=document.getElementById('advanced'),menu=document.getElementById('advanced-menu'),row=document.getElementById('reasoning-row'),submenu=document.getElementById('submenu'),slider=document.getElementById('slider');
+                window.triggerClicks=0;window.advancedClicks=0;window.reasoningClicks=0;window.inertReasoningClicks=0;window.optionClicks=0;window.sliderEvents=0;
+                const trigger=document.getElementById('reasoning-trigger'),sheet=document.getElementById('sheet'),advanced=document.getElementById('advanced'),simpleView=document.getElementById('simple-view'),advancedView=document.getElementById('advanced-view'),row=document.getElementById('reasoning-row'),submenu=document.getElementById('submenu'),slider=document.getElementById('slider');
                 trigger.onclick=()=>{window.triggerClicks++;const opening=sheet.hidden;sheet.hidden=!opening;trigger.setAttribute('aria-expanded',opening?'true':'false');};
-                advanced.onclick=()=>{window.advancedClicks++;sheet.hidden=true;menu.hidden=false;trigger.setAttribute('aria-expanded','true');};
-                row.onclick=()=>{window.reasoningClicks++;submenu.hidden=false;};
-                document.getElementById('pro').onclick=event=>{window.optionClicks++;for(const option of submenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent='Pro';trigger.setAttribute('aria-expanded','false');sheet.hidden=true;menu.hidden=true;submenu.hidden=true;};
+                advanced.onclick=()=>{window.advancedClicks++;simpleView.dataset.active='false';simpleView.setAttribute('inert','');advancedView.dataset.active='true';advancedView.removeAttribute('inert');advanced.setAttribute('aria-label','Show fewer options');advanced.setAttribute('aria-expanded','true');};
+                row.onclick=()=>{if(row.closest('[inert]')){window.inertReasoningClicks++;return;}window.reasoningClicks++;row.setAttribute('aria-expanded','true');submenu.hidden=false;};
+                document.getElementById('pro').onclick=event=>{window.optionClicks++;for(const option of submenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent='Pro';trigger.setAttribute('aria-expanded','false');sheet.hidden=true;submenu.hidden=true;};
                 for(const type of ['input','change','keydown','pointerdown','mousedown','click'])slider.addEventListener(type,()=>window.sliderEvents++);
                 </script></body></html>
                 """;

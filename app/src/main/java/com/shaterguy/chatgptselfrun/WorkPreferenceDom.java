@@ -58,6 +58,7 @@ final class WorkPreferenceDom {
                 const __wpDirect=label=>__wpKind==='model'?/^(?:(?:gpt-?)?5(?:\\.6)?\\s+)?(?:sol|terra|luna)(?:\\s|$)/.test(label):/^(ultra|울트라|very high|extra high|xhigh|매우 높음|maximum|max|최대|medium|중간|light|가벼움|high|높음)(?:\\s|$)/.test(label);
                 const __wpPopupSelector='[role="menu"],[role="listbox"],[role="dialog"],[data-radix-popper-content-wrapper],[data-slot*="popover-content"],[data-slot*="menu-content"]';
                 const __wpOwner=e=>e?.closest?.('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"],[aria-haspopup],[aria-expanded]')||e||null;
+                const __wpActiveView=e=>!!e&&!e.closest?.('[inert],[aria-hidden="true"],[data-active="false"]');
                 const __wpOptionRole=e=>/^(menuitemradio|radio|option|menuitem)$/.test(__wpText(e?.getAttribute?.('role')||''));
                 const __wpInsideChoice=e=>!!e?.closest?.(__wpPopupSelector);
                 const __wpSelected=e=>!!e&&(e.getAttribute?.('aria-checked')==='true'||e.getAttribute?.('aria-pressed')==='true'||e.getAttribute?.('aria-selected')==='true'||/^(checked|selected|active|on)$/.test(__wpText(e.dataset?.state||'')));
@@ -66,7 +67,7 @@ final class WorkPreferenceDom {
                 const __wpForm=__wpInput?.closest?.('form')||null;
                 const __wpNear=e=>{if(!e||!__wpInput)return false;if(__wpForm?.contains?.(e))return true;const a=e.getBoundingClientRect?.(),b=__wpInput.getBoundingClientRect?.();return !!a&&!!b&&a.bottom>=b.top-260&&a.top<=b.bottom+260&&a.right>=b.left-360&&a.left<=b.right+360;};
                 const __wpOpenPopups=[...document.querySelectorAll(__wpPopupSelector)].filter(__wpVisible);
-                const __wpPopupElements=[];for(const popup of __wpOpenPopups)for(const raw of popup.querySelectorAll('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"]')){const owner=__wpOwner(raw);if(owner&&__wpVisible(owner)&&!__wpPopupElements.includes(owner))__wpPopupElements.push(owner);}
+                const __wpPopupElements=[];for(const popup of __wpOpenPopups)for(const raw of popup.querySelectorAll('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"]')){const owner=__wpOwner(raw);if(owner&&__wpVisible(owner)&&__wpActiveView(owner)&&!__wpPopupElements.includes(owner))__wpPopupElements.push(owner);}
                 const __wpOptions=__wpPopupElements.filter(e=>{const label=__wpLabel(e);return !!__wpParse(label)&&(__wpOptionRole(e)?__wpDirect(label):false);});
                 const __wpSemanticOption=__wpOptions.find(e=>__wpParse(__wpLabel(e))===__wpWanted)||null;
                 const __wpLevel=__wpPopupElements.find(e=>__wpRowLabel(__wpLabel(e)))||null;

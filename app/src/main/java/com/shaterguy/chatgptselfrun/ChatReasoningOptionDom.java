@@ -28,6 +28,7 @@ final class ChatReasoningOptionDom {
                 const __sroForbidden=element=>/(send|submit|보내기|stop|중지|microphone|마이크|voice|음성|attach|첨부|upload|업로드|new chat|new conversation|새 채팅|새 대화)/.test(labelOf(element)+' '+exactText(element?.dataset?.testid||''));
                 const __sroOwner=element=>element?.closest?.(__sroInteractive)||element||null;
                 const __sroLabel=element=>labelOf(__sroOwner(element)||element);
+                const __sroActiveView=element=>!!element&&!element.closest?.('[inert],[aria-hidden="true"],[data-active="false"]');
                 const __sroReasoningRowLabel=label=>/^(reasoning(?:\\s+(?:level|effort))?|추론(?:\\s*(?:수준|강도|정도)))(?:\\s|$)/.test(label);
                 const __sroShowAdvancedLabel=label=>/^(?:show\\s+advanced(?:\\s+options)?|advanced(?:\\s+options)?|고급(?:\\s+옵션)?(?:\\s+표시)?)(?:\\s|$)/.test(label);
                 const __sroDirectLevel=element=>{
@@ -62,7 +63,7 @@ final class ChatReasoningOptionDom {
                 const __sroOpenPopups=[...document.querySelectorAll(__sroPopupSelector)].filter(visible);
                 const __sroPopups=[__sroControlled,...__sroOpenPopups].filter((popup,index,all)=>popup&&all.indexOf(popup)===index);
                 const __sroPopupElements=[];
-                for(const popup of __sroPopups)for(const raw of popup.querySelectorAll(__sroInteractive)){const owner=__sroOwner(raw);if(owner&&visible(owner)&&!__sroPopupElements.includes(owner))__sroPopupElements.push(owner);}
+                for(const popup of __sroPopups)for(const raw of popup.querySelectorAll(__sroInteractive)){const owner=__sroOwner(raw);if(owner&&visible(owner)&&__sroActiveView(owner)&&!__sroPopupElements.includes(owner))__sroPopupElements.push(owner);}
                 const __sroSliders=[...document.querySelectorAll('[role="slider"],input[type="range"]')].filter(visible);
                 const __sroSliderObserved=__sroSliders.some(slider=>__sroPopups.some(popup=>popup.contains(slider)));
                 const __sroAdvancedButtons=__sroPopupElements.filter(element=>__sroShowAdvancedLabel(__sroLabel(element))&&!__sroDirectLevel(element));
@@ -87,7 +88,12 @@ final class ChatReasoningOptionDom {
                 const __sroDiagnostics=extra=>({strategy:'advanced-menu',stage:__sroStage,requested:__sroWanted,requestedOrdinal:__sroWantedOrdinal,triggerFound:!!__sroTrigger,triggerCandidates:__sroTriggerEntries.length,triggerLevel:__sroTriggerLevel,popupCandidates:__sroPopups.length,sliderObserved:__sroSliderObserved,advancedButtonFound:!!__sroAdvancedButton,reasoningRowFound:!!__sroReasoningRow,directOptionCandidates:__sroDirectEntries.length,wantedOptionFound:!!__sroWantedOption,selectedLevels:__sroSelectedLevels,attempts:__sroState.attempts,triggerClicks:__sroState.triggerClicks,advancedClicks:__sroState.advancedClicks,reasoningClicks:__sroState.reasoningClicks,optionClicks:__sroState.optionClicks,closeAttempts:__sroState.closeAttempts,pending:!!__sroState.pending,lastAction:__sroState.lastAction||'',elapsedMs:__sroElapsedMs,overallTimeoutMs:__sroOverallTimeoutMs,...extra});
                 const __sroResult=(status,detail,extra={})=>{__sroSave();return result(status,detail,__sroDiagnostics(extra));};
                 const __sroReady=(observed,extra={})=>{const diagnostics=__sroDiagnostics({observed,...extra});__sroClear();return result('READY','Chat 추론 고급 메뉴 의미값 적용 확인',diagnostics);};
-                const __sroActivate=element=>{const target=__sroOwner(element)||element;if(!target)return;target.focus?.();target.click?.();};
+                const __sroDesired=element=>element?.getAttribute?.('aria-expanded');
+                const __sroReached=(element,want)=>__sroDesired(element)!==null&&__sroDesired(element)===String(want);
+                const __sroPointer=element=>{if(typeof PointerEvent!=='function')return false;element.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,composed:true,button:0,buttons:1,pointerId:1,pointerType:'mouse',isPrimary:true}));return true;};
+                const __sroMouse=element=>element.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,composed:true,button:0,buttons:1}));
+                const __sroToggleMenu=(element,want)=>{if(!element)return;element.focus?.();const tracked=__sroDesired(element)!==null;element.click?.();if(!tracked||__sroReached(element,want))return;if(__sroPointer(element)&&__sroReached(element,want))return;__sroMouse(element);};
+                const __sroActivate=element=>{const target=__sroOwner(element)||element;if(!target)return;if(target.getAttribute?.('aria-expanded')!==null||target.hasAttribute?.('aria-haspopup'))__sroToggleMenu(target,true);else{target.focus?.();target.click?.();}};
                 const __sroClose=()=>{if(__sroTrigger&&__sroTrigger.getAttribute?.('aria-expanded')==='true'){__sroActivate(__sroTrigger);return'trigger';}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));return'escape';};
                 const __sroMayClick=(count,max)=>Number(count)<1||(__sroSinceActionMs>=__sroRetryMs&&Number(count)<max);
                 if(__sroTriggerLevel===__sroWanted){
