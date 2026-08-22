@@ -15,13 +15,13 @@ public final class SelfRunContinuationSubmissionVerificationTest {
     private static final String PROMPT = "[2026.08.20 | 19:14:40] [SELF_RUN_CONTINUE SR-TEST]";
 
     @Test public void buttonClassifierSeparatesStopSendComposerIdleAndUnknown() {
-        String js = SelfRunContinuationDom.buttonState(URL);
+        String js = SelfRunContinuationDom.observeTurnCompletion(URL, "SR-TEST", "classifier-token", 5000L, false);
         assertTrue(js.contains("SEND_ENABLED"));
         assertTrue(js.contains("STOP"));
         assertTrue(js.contains("SEND_DISABLED"));
         assertTrue(js.contains("COMPOSER_IDLE"));
         assertTrue(js.contains("UNKNOWN"));
-        assertTrue(js.contains("continuation composer unavailable"));
+        assertTrue(js.contains("completion composer unavailable"));
         assertTrue(js.contains("button,[role=\"button\"]"));
         assertTrue(js.contains("generating|streaming|responding"));
         assertTrue(js.indexOf("const stop=controls.find(isStop)") < js.indexOf("const send=calibrated"));
@@ -63,24 +63,10 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertFalse(js.contains("SUBMISSION_CONFIRMED"));
     }
 
-    @Test public void postClickVerifierUsesRequiredSuccessAndFailureProofs() {
-        String js = SelfRunContinuationDom.verifyDriveTurnSubmission(URL, PROMPT, "marker-3", 2500L);
-        assertTrue(js.contains("c.state==='STOP'"));
-        assertTrue(js.contains("proof:'STOP'"));
-        assertTrue(js.contains("users>baseline&&isEmpty"));
-        assertTrue(js.contains("proof:'USER_MESSAGE'"));
-        assertTrue(js.contains("elapsed>=2500"));
-        assertTrue(js.contains("c.state==='SEND_ENABLED'&&stillSame&&users<=baseline"));
-        assertTrue(js.contains("state:'failed'"));
-        assertTrue(js.contains("SUBMISSION_FAILED"));
-        assertTrue(js.contains("SUBMISSION_PENDING"));
-    }
-
     @Test public void bootstrapUsesTheSameVerifiedSendStopAndFullRetryProtocol() {
         String project = "https://chatgpt.com/g/g-p-test";
         String prepare = SelfRunContinuationDom.prepareBootstrap(project, PROMPT, "bootstrap-marker");
         String click = SelfRunContinuationDom.clickPreparedBootstrap(project, PROMPT, "bootstrap-marker", "SR-TEST", "bootstrap-token", 5000L);
-        String verify = SelfRunContinuationDom.verifyBootstrapSubmission(project, PROMPT, "bootstrap-marker", 2500L);
         assertTrue(prepare.contains("c0.state!=='SEND_ENABLED'"));
         assertTrue(prepare.contains("c0.state!=='SEND_DISABLED'"));
         assertTrue(prepare.contains("c0.state!=='COMPOSER_IDLE'"));
@@ -90,10 +76,6 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(prepare.contains("window.__selfRunDriveMarkers"));
         assertTrue(click.contains("BOOTSTRAP_CLICKED"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
-        assertTrue(verify.contains("c.state==='STOP'"));
-        assertTrue(verify.contains("users>baseline&&isEmpty"));
-        assertTrue(verify.contains("elapsed>=2500"));
-        assertTrue(verify.contains("state:'failed'"));
     }
 
     @Test public void serviceDoesNotUseCommandReceivedAsContinuationAck() throws Exception {
@@ -104,7 +86,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertFalse(continuationSubmitted.contains("markCommandSubmitted"));
         assertFalse(continuationSubmitted.contains("SUBMISSION_RETRY_MS"));
         assertTrue(service.contains("CONTINUATION_VERIFY_INTERVAL_MS = 250L"));
-        assertTrue(service.contains("CONTINUATION_FAILURE_MS = 2_500L"));
+        assertFalse(service.contains("CONTINUATION_FAILURE_MS"));
         assertTrue(service.contains("TURN_COMPLETION_STABILITY_MS = 5_000L"));
     }
 

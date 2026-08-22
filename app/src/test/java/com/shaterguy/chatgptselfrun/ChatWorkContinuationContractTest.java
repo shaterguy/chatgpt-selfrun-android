@@ -42,8 +42,9 @@ public final class ChatWorkContinuationContractTest {
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_SEND_CONTINUE));
         assertTrue(continuation.contains("writeMarker({state:'clicked'"));
         assertTrue(continuation.contains("if(m.state==='clicked')return result('VERIFY_REQUIRED'"));
-        assertTrue(continuation.contains("verifyDriveTurnSubmission"));
-        assertTrue(service.contains("SelfRunContinuationDom.verifyDriveTurnSubmission"));
+        assertFalse(continuation.contains("verifyDriveTurnSubmission"));
+        assertFalse(service.contains("SelfRunContinuationDom.verifyDriveTurnSubmission"));
+        assertTrue(service.contains("\"CONTINUE_CLICKED\".equals(status)"));
         assertTrue(service.contains("store.beginTurnCompletionWait"));
     }
 

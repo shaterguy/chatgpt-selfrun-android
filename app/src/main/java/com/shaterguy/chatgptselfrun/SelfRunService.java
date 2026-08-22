@@ -47,7 +47,6 @@ public final class SelfRunService extends Service {
     static final long POST_DOM_DRIVE_MAX_WAIT_MS = 5 * 60_000L;
     private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
     static final long CONTINUATION_VERIFY_INTERVAL_MS = 250L;
-    static final long CONTINUATION_FAILURE_MS = 2_500L;
     static final long CONTINUATION_CALLBACK_TIMEOUT_MS = 5_000L;
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
     private static final int ATTACHMENT_COUNT_BUFFER = 64 * 1024;
@@ -580,14 +579,12 @@ private void evaluate(String phase,String script){
   if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}
   if(isWorkPreferenceFailureStatus(status)){runLog.record(store,"WORK_PREFERENCE_FAILURE","status="+BootstrapResultPolicy.safe(status,80)+";detail="+BootstrapResultPolicy.safe(detail,180)+BootstrapResultPolicy.compactDiagnostics(result.optJSONObject("diagnostics")));pauseError(status,workPreferenceFailureMessage(status));return;}
   if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){
-      if("SUBMISSION_CONFIRMED".equals(status)){bootstrapSubmitted(detail);return;}
-      if("VERIFY_REQUIRED".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);evaluate(phase,SelfRunContinuationDom.verifyBootstrapSubmission(store.projectUrl(),prompt,store.commandMarkerId(),CONTINUATION_FAILURE_MS));return;}
-      if("BOOTSTRAP_CLICKED".equals(status)||"SUBMISSION_PENDING".equals(status)||"SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+      if("BOOTSTRAP_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){bootstrapSubmitted(detail);return;}
+      if("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
   }
   if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){
-      if("SUBMISSION_CONFIRMED".equals(status)){continuationSubmitted(detail);return;}
-      if("VERIFY_REQUIRED".equals(status)){String prompt=continuationPrompt();evaluate(phase,SelfRunContinuationDom.verifyDriveTurnSubmission(store.conversationUrl(),prompt,continuationMarkerId(),CONTINUATION_FAILURE_MS));return;}
-      if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_PENDING".equals(status)||"SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+      if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){continuationSubmitted(detail);return;}
+      if("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
   }
   if("UI_WAIT".equals(status)||"WAIT".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb("WAIT".equals(status)?2000L:1200L);return;}
   handleWebResult(phase,status,result);
@@ -665,8 +662,8 @@ private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRA
 private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
 private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
-private void continuationSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_CONFIRMED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
-private void bootstrapSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_CONFIRMED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void continuationSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void bootstrapSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
 
 private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?SelfRunProtocol.bootstrapDrive(store.runId(),store.mode(),store.requirement(),store.turnDocumentId(),store.jobFolderId(),store.hasAttachments()):SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
 private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}

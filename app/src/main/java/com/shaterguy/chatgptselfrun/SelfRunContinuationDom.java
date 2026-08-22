@@ -17,16 +17,6 @@ final class SelfRunContinuationDom {
 
     private SelfRunContinuationDom() {}
 
-    static String buttonState(String conversationUrl) {
-        String conversation = q(SelfRunScript.conversationId(conversationUrl));
-        String composerKey = composerKey(conversationUrl);
-        String sendKey = sendKey(conversationUrl);
-        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + conversationGuard(conversation) + authGuard() + calibration()
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','continuation composer unavailable');" + controls(sendKey)
-                + "const c=controlState();return result(c.state,'continuation button state');})()";
-    }
-
     /** Uses the same verified SEND/STOP protocol for the very first Drive request. */
     static String prepareBootstrap(String projectUrl, String prompt, String markerId) {
         String project = q(SelfRunScript.projectId(projectUrl));
@@ -64,23 +54,6 @@ final class SelfRunContinuationDom {
                 + "if(!same())return result('COMPOSER_CLEARING','exact bootstrap readback lost before click');"
                 + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'SEND no longer enabled for bootstrap');"
                 + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});c.send.focus?.();c.send.click();armCompletionObserver(false);return result('BOOTSTRAP_CLICKED','SEND clicked; completion observer armed; bootstrap verification required');})()";
-    }
-
-    static String verifyBootstrapSubmission(String projectUrl, String prompt, String markerId, long failureMs) {
-        String project = q(SelfRunScript.projectId(projectUrl));
-        String expected = q(prompt);
-        String marker = q("selfrun-drive:verified-bootstrap:" + markerId);
-        String composerKey = composerKey(projectUrl);
-        String sendKey = sendKey(projectUrl);
-        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + projectGuard(project) + authGuard() + calibration() + textHelpers(expected)
-                + composer(composerKey) + composerOpsNullable() + controls(sendKey) + markerOps(marker)
-                + "const m=readMarker();if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','bootstrap submission already confirmed');if(m.state!=='clicked')return result('SUBMISSION_FAILED','bootstrap clicked marker unavailable');"
-                + "const c=controlState(),users=userMessageCount(),baseline=Math.max(0,Number(m.baselineUserCount)||0),isEmpty=empty(),stillSame=same(),elapsed=Math.max(0,Date.now()-Math.max(0,Number(m.clickedAt)||0));"
-                + "if(c.state==='" + STOP + "'){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'STOP'});return result('SUBMISSION_CONFIRMED','SEND changed to STOP');}"
-                + "if(users>baseline&&isEmpty){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'USER_MESSAGE'});return result('SUBMISSION_CONFIRMED','new user message exists and composer is empty');}"
-                + "if(elapsed>=" + failureMs + "&&c.state==='" + SEND_ENABLED + "'&&stillSame&&users<=baseline){writeMarker({state:'failed',failedAt:Date.now()});return result('SUBMISSION_FAILED','SEND remained enabled; bootstrap remained; no new user message');}"
-                + "return result('SUBMISSION_PENDING','bootstrap submission verification pending; state='+c.state+';empty='+(isEmpty?1:0)+';users='+users+';baseline='+baseline+';elapsed='+elapsed);})()";
     }
 
     static String prepareDriveTurn(String conversationUrl, String prompt, String markerId) {
@@ -140,24 +113,6 @@ final class SelfRunContinuationDom {
                 + "if(state.timer)clearTimeout(state.timer);window.__selfRunDriveTurnObserver=null;}"
                 + "return JSON.stringify({status:'OBSERVER_DISCONNECTED'});})()";
     }
-
-    static String verifyDriveTurnSubmission(String conversationUrl, String prompt, String markerId, long failureMs) {
-        String conversation = q(SelfRunScript.conversationId(conversationUrl));
-        String expected = q(prompt);
-        String marker = q("selfrun-drive:verified-continuation:" + markerId);
-        String composerKey = composerKey(conversationUrl);
-        String sendKey = sendKey(conversationUrl);
-        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
-                + composer(composerKey) + composerOpsNullable() + controls(sendKey) + markerOps(marker)
-                + "const m=readMarker();if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','submission already confirmed');if(m.state!=='clicked')return result('SUBMISSION_FAILED','clicked marker unavailable');"
-                + "const c=controlState(),users=userMessageCount(),baseline=Math.max(0,Number(m.baselineUserCount)||0),isEmpty=empty(),stillSame=same(),elapsed=Math.max(0,Date.now()-Math.max(0,Number(m.clickedAt)||0));"
-                + "if(c.state==='" + STOP + "'){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'STOP'});return result('SUBMISSION_CONFIRMED','SEND changed to STOP');}"
-                + "if(users>baseline&&isEmpty){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'USER_MESSAGE'});return result('SUBMISSION_CONFIRMED','new user message exists and composer is empty');}"
-                + "if(elapsed>=" + failureMs + "&&c.state==='" + SEND_ENABLED + "'&&stillSame&&users<=baseline){writeMarker({state:'failed',failedAt:Date.now()});return result('SUBMISSION_FAILED','SEND remained enabled; continuation remained; no new user message');}"
-                + "return result('SUBMISSION_PENDING','submission verification pending; state='+c.state+';empty='+(isEmpty?1:0)+';users='+users+';baseline='+baseline+';elapsed='+elapsed);})()";
-    }
-
 
     private static String completionObserver(String runId, String observerToken, long stabilityMs) {
         long stable = Math.max(1L, stabilityMs);

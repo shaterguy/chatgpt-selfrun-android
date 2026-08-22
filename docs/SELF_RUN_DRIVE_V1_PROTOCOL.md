@@ -42,7 +42,7 @@ Drive 작업문서는 append-only 실행 채널입니다. 활성 제어신호는
 
 ## Android 진행 기준
 
-앱은 명령 클릭 직후 STOP 전환 또는 새 user message와 composer 비움으로 실제 제출을 확인합니다. 제출 클릭과 같은 JavaScript 실행에서 STOP/SEND 영역에 `MutationObserver`를 설치합니다. STOP을 본 뒤 완료 상태가 나타나면 5초를 기다리고 버튼 상태를 한 번 더 확인하며, 여전히 완료 상태일 때만 native 완료 콜백을 보냅니다. STOP이 돌아오면 타이머를 취소하고 관찰을 계속합니다.
+앱은 composer의 정확한 전문 readback과 활성 SEND를 확인한 뒤 명령을 클릭합니다. 제출 클릭과 같은 JavaScript 실행에서 STOP/SEND 영역에 `MutationObserver`를 설치하고, 클릭 결과를 곧바로 완료 관찰 상태로 전이합니다. 전송 이후 별도 STOP/SEND polling으로 제출을 재확인하지 않습니다. STOP을 본 뒤 완료 상태가 나타나면 5초를 기다리고 버튼 상태를 한 번 더 확인하며, 여전히 완료 상태일 때만 native 완료 콜백을 보냅니다. STOP이 돌아오면 타이머를 취소하고 관찰을 계속합니다.
 
 native 완료 콜백 직후 Drive 작업문서를 즉시 한 번 읽습니다. 마지막으로 소비한 실제 SelfRun signal의 cursor 이후 `TURN_COMPLETED`가 있으면 `NEXT_INPUT`과 Work profile을 적용합니다. 없으면 5초 간격으로 최대 5분 재확인하고, 제한시간이 지나면 현재 영속 모델·추론 설정을 유지한 plain CONTINUE로 다음 턴을 진행합니다. `modifiedTime`은 읽기 최적화 힌트일 뿐 상태신호가 아닙니다.
 
