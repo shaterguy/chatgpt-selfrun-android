@@ -3,6 +3,7 @@ name: Build SelfRun Drive
 on:
   push:
     branches:
+      - 'selfrun-drive/v1.4.3-dev1'
       - 'selfrun-drive/v*-rc*'
   workflow_dispatch:
 
@@ -161,31 +162,57 @@ jobs:
         with:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
-          packages: 'platform-tools build-tools;36.0.0'
-      - name: Download immutable formal 1.4.0 baseline
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Install hash-locked signing dependencies
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p formal-baseline
-          gh release download drive-v1.4.0 \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v1.4.0.apk' \
-            --dir formal-baseline
-          test -s formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Rebuild immutable 1.4.2-dev10 update baseline
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          DEV10_SHA='afd0600f808f081ca68c924273015d8a8913a5e1'
+          DEV10_SRC="$RUNNER_TEMP/selfrun-drive-v1.4.2-dev10"
+          PASS_FILE="$RUNNER_TEMP/selfrun-dev10-signing-pass"
+          trap 'rm -f "$PASS_FILE"; git worktree remove --force "$DEV10_SRC" >/dev/null 2>&1 || true' EXIT
+          git fetch origin selfrun-drive/v1.4.2-dev10 --depth=2
+          git worktree add --detach "$DEV10_SRC" "$DEV10_SHA"
+          gradle --build-cache --no-daemon --console=plain --stacktrace --project-dir "$DEV10_SRC" :app:assembleRelease
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          UNSIGNED="$DEV10_SRC/app/build/outputs/apk/release/app-release-unsigned.apk"
+          mkdir -p dev10-baseline
+          ALIGNED=dev10-baseline/chatgpt-selfrun-drive-v1.4.2-dev10-aligned-unsigned.apk
+          APK=dev10-baseline/chatgpt-selfrun-drive-v1.4.2-dev10.apk
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$BT/zipalign" -c -v 4 "$ALIGNED" >/dev/null
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$ALIGNED" "$PASS_FILE" "$APK" > dev10-baseline/APKSIGNER_VERIFY.txt
+          test -s "$APK"
       - name: Validate formal update pair and prepare test
         shell: bash
         run: |
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           CURRENT_APK=current-candidate/current-formal.apk
-          BASE_APK=formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+          BASE_APK=dev10-baseline/chatgpt-selfrun-drive-v1.4.2-dev10.apk
           CURRENT_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$CURRENT_VERSION_NAME" =~ ^1\.4\.1-rc[0-9]+$ ]] || { echo "unexpected RC versionName: $CURRENT_VERSION_NAME" >&2; exit 1; }
-          (( CURRENT_VERSION_CODE > 1000054 ))
-          "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-baseline/base-cert.txt
+          [[ "$CURRENT_VERSION_NAME" == '1.4.3-dev1' ]] || { echo "unexpected development versionName: $CURRENT_VERSION_NAME" >&2; exit 1; }
+          (( CURRENT_VERSION_CODE > 1000074 ))
+          "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > dev10-baseline/base-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > current-candidate/current-cert.txt
-          BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-baseline/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' dev10-baseline/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           CURRENT_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' current-candidate/current-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           [[ "$BASE_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]]
           [[ "$CURRENT_CERT" == "$BASE_CERT" ]]
@@ -193,15 +220,15 @@ jobs:
           CURRENT_BADGING="$($BT/aapt dump badging "$CURRENT_APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$CURRENT_BADGING"
-          grep -Fq "versionCode='1000054'" <<<"$BASE_BADGING"
-          grep -Fq "versionName='1.4.0'" <<<"$BASE_BADGING"
+          grep -Fq "versionCode='1000074'" <<<"$BASE_BADGING"
+          grep -Fq "versionName='1.4.2-dev10'" <<<"$BASE_BADGING"
           grep -Fq "versionCode='$CURRENT_VERSION_CODE'" <<<"$CURRENT_BADGING"
           grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING"
           cat > verify-formal-update.sh <<SH
           #!/usr/bin/env bash
           set -euo pipefail
           PKG='com.shaterguy.chatgptselfrun.drive'
-          BASE_APK='formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk'
+          BASE_APK='dev10-baseline/chatgpt-selfrun-drive-v1.4.2-dev10.apk'
           CURRENT_APK='current-candidate/current-formal.apk'
           CURRENT_VERSION_NAME='${CURRENT_VERSION_NAME}'
           CURRENT_VERSION_CODE='${CURRENT_VERSION_CODE}'
@@ -212,8 +239,8 @@ jobs:
           uid_from_line() { sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' <<<"\$1"; }
           adb uninstall "\$PKG" >/dev/null 2>&1 || true
           adb install --no-incremental "\$BASE_APK"
-          [[ "\$(package_version)" == '1.4.0' ]] || fail 'unexpected baseline version'
-          [[ "\$(package_version_code)" == '1000054' ]] || fail 'unexpected baseline versionCode'
+          [[ "\$(package_version)" == '1.4.2-dev10' ]] || fail 'unexpected baseline version'
+          [[ "\$(package_version_code)" == '1000074' ]] || fail 'unexpected baseline versionCode'
           BEFORE_UID="\$(uid_from_line "\$(package_uid_line)")"
           [[ -n "\$BEFORE_UID" ]] || fail 'baseline UID unavailable'
           adb install -r --no-incremental "\$CURRENT_APK" || fail 'adb install -r failed'
@@ -252,7 +279,8 @@ jobs:
         with:
           name: selfrun-drive-formal-update-evidence
           path: |
-            formal-baseline/base-cert.txt
+            dev10-baseline/base-cert.txt
+            dev10-baseline/APKSIGNER_VERIFY.txt
             current-candidate/current-cert.txt
             formal-update-evidence.txt
             verify-formal-update.sh

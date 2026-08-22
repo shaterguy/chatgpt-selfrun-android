@@ -30,6 +30,9 @@ public final class ChatWorkContinuationContractTest {
         String preference = src("WorkPreferenceDom.java");
         String service = src("SelfRunService.java");
         assertTrue(preference.contains("calibratedTargetValid"));
+        assertTrue(preference.contains("__wpShowAdvancedLabel"));
+        assertTrue(preference.contains("open-advanced-control"));
+        assertTrue(preference.contains("close-current-match"));
         assertTrue(preference.contains("__wpTimeoutMs=20000"));
         assertTrue(preference.contains("'SELECTION_TIMEOUT'"));
         assertTrue(preference.contains("'READBACK_MISMATCH'"));

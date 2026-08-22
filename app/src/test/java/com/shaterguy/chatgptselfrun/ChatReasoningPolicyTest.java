@@ -36,6 +36,8 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("strategy:'advanced-menu'"));
         assertTrue(script.contains("open-reasoning-sheet"));
         assertTrue(script.contains("open-advanced-control"));
+        assertTrue(script.contains("__sroShowAdvancedLabel"));
+        assertTrue(script.contains("close-current-match"));
         assertTrue(script.contains("open-reasoning-menu"));
         assertTrue(script.contains("nested-option-click"));
         assertTrue(script.contains("direct-option-click"));
