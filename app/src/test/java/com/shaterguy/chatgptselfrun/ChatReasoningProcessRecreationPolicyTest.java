@@ -34,7 +34,9 @@ public final class ChatReasoningProcessRecreationPolicyTest {
         assertTrue(instrumentation.contains("resetProcessCache()"));
         assertTrue(gradle.contains("testInstrumentationRunner 'com.shaterguy.chatgptselfrun.SelfRunAndroidTestRunner'"));
         assertTrue(runner.contains("ChatReasoningProcessRecreationAndroidTest"));
-        assertTrue(runner.contains("selected + \",\" + PROCESS_RECREATION_TEST"));
+        assertTrue(runner.contains("appendRequiredClass(effective, PROCESS_RECREATION_TEST)"));
+        assertTrue(runner.contains("private static void appendRequiredClass"));
+        assertTrue(runner.contains("if (!containsClass(selected, required))"));
         assertTrue(history.contains("BootstrapRunStateStore.summary(item)"));
         assertFalse(history.contains("모델 변경 없음"));
     }
