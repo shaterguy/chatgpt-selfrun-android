@@ -18,7 +18,23 @@ final class SelfRunWebDiagnostics {
         return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=" + reason;
     }
 
+    static String stateDetail(String phase, String status) {
+        String safeStatus;
+        if (SelfRunContinuationDom.UNKNOWN.equals(status)) safeStatus = "UNKNOWN";
+        else if (SelfRunContinuationDom.STOP.equals(status)) safeStatus = "STOP";
+        else if (SelfRunContinuationDom.SEND_DISABLED.equals(status)) safeStatus = "SEND_DISABLED";
+        else if (SelfRunContinuationDom.SEND_ENABLED.equals(status)) safeStatus = "SEND_ENABLED";
+        else if (SelfRunContinuationDom.COMPOSER_IDLE.equals(status)) safeStatus = "COMPOSER_IDLE";
+        else safeStatus = "OTHER";
+        return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=state_wait";
+    }
+
+    static String callbackTimeoutDetail(String phase) {
+        return "status=CALLBACK_TIMEOUT;phase=" + phaseKind(phase) + ";reason=evaluate_javascript";
+    }
+
     private static String phaseKind(String phase) {
+        if (SelfRunStore.PHASE_WAIT_INTERNAL_SEND.equals(phase)) return "wait_internal_send";
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) return "apply_model";
         if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "apply_reasoning";
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "send_continue";
