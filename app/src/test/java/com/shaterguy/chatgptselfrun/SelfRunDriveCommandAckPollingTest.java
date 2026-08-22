@@ -23,7 +23,7 @@ public final class SelfRunDriveCommandAckPollingTest {
 
     @Test public void legacyDriveWaitMigratesToObserverWaitWithoutResubmitting() throws Exception {
         String store = source("SelfRunStore.java");
-        String migration = section(store, "private void migrateLegacyTurnCompletionFlow", "String newJobId");
+        String migration = section(store, "private void migrateLegacyTurnCompletionFlow", "private void migrateRetiredSignalDisplay");
         assertTrue(migration.contains("LEGACY_PHASE_WAIT_DRIVE_COMMIT"));
         assertTrue(migration.contains("PHASE_WAIT_INTERNAL_SEND"));
         assertTrue(migration.contains("PHASE_WAIT_TURN_COMPLETION"));
