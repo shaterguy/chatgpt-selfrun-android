@@ -78,7 +78,7 @@ public final class ChatReasoningPolicyTest {
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
         assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
-        assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE"));
+        assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND"));
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
         assertTrue(mode.contains("modeTimeoutMs=20000"));
