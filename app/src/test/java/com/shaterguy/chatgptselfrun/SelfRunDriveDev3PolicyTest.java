@@ -54,7 +54,8 @@ public final class SelfRunDriveDev3PolicyTest {
         String store = source("SelfRunStore.java");
         assertTrue(service.contains("turnObserverNeedsIdleBaseline=store!=null"));
         assertTrue(service.contains("store.turnObserverSawStop()"));
-        assertTrue(service.contains("turn-stop-seen"));
+        String dom = source("SelfRunContinuationDom.java");
+        assertTrue(dom.contains("stopSeenCallback"));
         assertTrue(store.contains("PHASE_WAIT_TURN_COMPLETION.equals(phase())"));
         assertTrue(store.contains("token.equals(turnObserverToken())"));
     }
