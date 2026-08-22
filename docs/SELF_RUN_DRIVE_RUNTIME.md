@@ -4,7 +4,7 @@
 
 ## 책임 경계
 
-Android 앱은 Run ID·실행턴 문서를 만들고 같은 ChatGPT conversation의 composer에 bootstrap/CONTINUE를 제출하며 Drive signal을 polling합니다. 앱은 SelfRun 운영문서의 내용을 읽거나 파싱하지 않고, `SelfRunProtocol.SELF_RUN_SKILL_DOCUMENT_ID` 값을 prompt metadata로 전달하기만 합니다. Project 판정·Project SKILL 탐색·규칙 충돌 해석도 수행하지 않습니다.
+Android 앱은 Run ID·실행턴 문서를 만들고 같은 ChatGPT conversation의 composer에 bootstrap/CONTINUE를 제출하며 STOP/SEND DOM 변화로 답변 완료를 감지한 뒤 Drive signal을 동기화합니다. 앱은 SelfRun 운영문서의 내용을 읽거나 파싱하지 않고, `SelfRunProtocol.SELF_RUN_SKILL_DOCUMENT_ID` 값을 prompt metadata로 전달하기만 합니다. Project 판정·Project SKILL 탐색·규칙 충돌 해석도 수행하지 않습니다.
 
 ## WebView host와 UI 보정
 
@@ -14,24 +14,27 @@ Drive V1은 background WebView를 private virtual display에 호스팅하는 구
 
 보정 프로파일은 app-private SharedPreferences를 내구 원본으로 유지하고 같은 ChatGPT origin의 Web Storage에도 주입합니다. 런타임 DOM 코드는 보정 target을 우선 사용하되 매칭하지 못하면 v1.2.2의 기존 semantic/testid/role 휴리스틱으로 후퇴합니다. 보정 로그는 purpose별 arm/candidate/confirm/save/reset 상태만 기록하며 사용자가 테스트로 입력한 문구 내용은 기록하지 않습니다. `addJavascriptInterface`는 사용하지 않습니다.
 
-WebView는 assistant completion을 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer 탐색과 명령 제출입니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.
+WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer·STOP/SEND 영역 탐색, 명령 제출과 완료 상태 감지입니다. 제출 클릭과 같은 JavaScript 실행에서 `MutationObserver`를 설치하고, STOP을 관찰한 뒤 SEND/비활성 SEND/idle composer 상태가 나타나면 5초 단발 타이머를 시작합니다. 타이머 종료 시 `controlState()`를 한 번 더 호출해 여전히 완료 상태인 경우에만 Observer를 해제하고 native callback을 보냅니다. STOP이 돌아오면 타이머를 취소하고 계속 관찰합니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.
 
 ## Foreground Service와 WakeLock
 
 실행 중 Job은 Android Foreground Service로 유지합니다. WakeLock은 Drive 요청, WebView 복구, 명령 제출처럼 실제 작업이 필요한 짧은 구간에만 사용하고 단순 polling 대기·guard 대기에는 유지하지 않는 것을 원칙으로 합니다. 알림 채널, pause/resume 동작과 서비스 상태는 `SelfRunService`와 `NotificationHelper`가 소유합니다.
 
-## Drive polling state machine
+## 완료 감지와 Drive 동기화 state machine
 
 현재 구현의 주요 값은 다음과 같습니다.
 
-- 정상 Drive polling 기본 주기: 60초
-- TURN_COMPLETED 후 내부 버튼 재확인: 250ms
+- 답변 완료 안정성 재확인: 5초 단발 타이머
+- DOM 완료 뒤 Drive 첫 확인: 즉시 1회
+- signal 부재 시 Drive 재확인: 5초
+- signal 대기 제한시간: 5분
 - 제출 클릭 실패 판정: 2.5초 후 전문 삭제·재입력
-- 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
-- `modifiedTime`: 읽기 최적화 힌트
+- 네트워크 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
 - authoritative progress: append-only SelfRun signal cursor
 
-Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. TURN_COMPLETED 뒤에는 STOP을 클릭하지 않고, SEND 버튼이 존재하는 idle 상태에서 composer 입력을 시작하며, 전문 readback 후 SEND 활성 상태에서만 클릭합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
+정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback이 `WAIT_TURN_COMPLETION`의 현재 run/token과 일치할 때만 `POST_DOM_DRIVE_SYNC`로 전이합니다. 즉시 전체 문서를 읽어 새 `TURN_COMPLETED`·`NEXT_INPUT`·Work profile을 적용하고, 문구가 없으면 5초 간격으로 최대 5분 재확인합니다. 제한시간이 지나면 현재 영속 profile을 유지한 채 다음 턴을 제출합니다. STOP/SEND 완료 감지에 짧은 주기의 반복 polling은 사용하지 않습니다.
+
+Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
 
 ## 로컬 영속 상태
 

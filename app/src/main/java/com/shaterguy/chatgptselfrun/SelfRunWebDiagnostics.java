@@ -34,7 +34,7 @@ final class SelfRunWebDiagnostics {
     }
 
     private static String phaseKind(String phase) {
-        if (SelfRunStore.PHASE_WAIT_INTERNAL_SEND.equals(phase)) return "wait_internal_send";
+        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) return "wait_turn_completion";
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) return "apply_model";
         if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "apply_reasoning";
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "send_continue";

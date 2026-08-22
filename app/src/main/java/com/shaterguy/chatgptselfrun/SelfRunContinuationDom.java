@@ -12,6 +12,8 @@ final class SelfRunContinuationDom {
     static final String SEND_DISABLED = "SEND_DISABLED";
     static final String COMPOSER_IDLE = "COMPOSER_IDLE";
     static final String UNKNOWN = "UNKNOWN";
+    static final String TURN_COMPLETION_SCHEME = "selfrun-drive";
+    static final String TURN_COMPLETION_HOST = "turn-completed";
 
     private SelfRunContinuationDom() {}
 
@@ -46,7 +48,8 @@ final class SelfRunContinuationDom {
                 + "writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','unknown bootstrap marker state reset');})()";
     }
 
-    static String clickPreparedBootstrap(String projectUrl, String prompt, String markerId) {
+    static String clickPreparedBootstrap(String projectUrl, String prompt, String markerId,
+                                           String runId, String observerToken, long stabilityMs) {
         String project = q(SelfRunScript.projectId(projectUrl));
         String expected = q(prompt);
         String marker = q("selfrun-drive:verified-bootstrap:" + markerId);
@@ -56,10 +59,11 @@ final class SelfRunContinuationDom {
                 + projectGuard(project) + authGuard() + calibration() + textHelpers(expected)
                 + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','bootstrap composer unavailable before click');"
                 + composerOps() + controls(sendKey) + markerOps(marker)
+                + completionObserver(runId, observerToken, stabilityMs)
                 + "const m=readMarker();if(m.state!=='prepared')return result('VERIFY_REQUIRED','bootstrap prepared marker changed before click');"
                 + "if(!same())return result('COMPOSER_CLEARING','exact bootstrap readback lost before click');"
                 + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'SEND no longer enabled for bootstrap');"
-                + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});c.send.focus?.();c.send.click();return result('BOOTSTRAP_CLICKED','SEND clicked; bootstrap verification required');})()";
+                + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});c.send.focus?.();c.send.click();armCompletionObserver(false);return result('BOOTSTRAP_CLICKED','SEND clicked; completion observer armed; bootstrap verification required');})()";
     }
 
     static String verifyBootstrapSubmission(String projectUrl, String prompt, String markerId, long failureMs) {
@@ -99,7 +103,8 @@ final class SelfRunContinuationDom {
                 + "writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','unknown marker state reset');})()";
     }
 
-    static String clickPreparedDriveTurn(String conversationUrl, String prompt, String markerId) {
+    static String clickPreparedDriveTurn(String conversationUrl, String prompt, String markerId,
+                                           String runId, String observerToken, long stabilityMs) {
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(prompt);
         String marker = q("selfrun-drive:verified-continuation:" + markerId);
@@ -109,10 +114,31 @@ final class SelfRunContinuationDom {
                 + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
                 + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before click');"
                 + composerOps() + controls(sendKey) + markerOps(marker)
+                + completionObserver(runId, observerToken, stabilityMs)
                 + "const m=readMarker();if(m.state!=='prepared')return result('VERIFY_REQUIRED','prepared marker changed before click');"
                 + "if(!same())return result('COMPOSER_CLEARING','exact continuation readback lost before click');"
                 + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "')return result(c.state,'SEND no longer enabled');"
-                + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});c.send.focus?.();c.send.click();return result('CONTINUE_CLICKED','SEND clicked; verification required');})()";
+                + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});c.send.focus?.();c.send.click();armCompletionObserver(false);return result('CONTINUE_CLICKED','SEND clicked; completion observer armed; verification required');})()";
+    }
+
+
+    static String observeTurnCompletion(String conversationUrl, String runId, String observerToken,
+                                        long stabilityMs, boolean allowIdleBaseline) {
+        String conversation = q(SelfRunScript.conversationId(conversationUrl));
+        String composerKey = composerKey(conversationUrl);
+        String sendKey = sendKey(conversationUrl);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + conversationGuard(conversation) + authGuard() + calibration()
+                + composer(composerKey) + "if(!composer)return result('OBSERVER_UNAVAILABLE','completion composer unavailable');"
+                + controls(sendKey) + completionObserver(runId, observerToken, stabilityMs)
+                + "return armCompletionObserver(" + allowIdleBaseline + ");})()";
+    }
+
+    static String cancelTurnCompletionObserver(String observerToken) {
+        return "(() =>{const state=window.__selfRunDriveTurnObserver;"
+                + "if(state&&state.token===" + q(observerToken) + "){try{state.observer?.disconnect();}catch(_){}"
+                + "if(state.timer)clearTimeout(state.timer);window.__selfRunDriveTurnObserver=null;}"
+                + "return JSON.stringify({status:'OBSERVER_DISCONNECTED'});})()";
     }
 
     static String verifyDriveTurnSubmission(String conversationUrl, String prompt, String markerId, long failureMs) {
@@ -130,6 +156,36 @@ final class SelfRunContinuationDom {
                 + "if(users>baseline&&isEmpty){writeMarker({...m,state:'confirmed',confirmedAt:Date.now(),proof:'USER_MESSAGE'});return result('SUBMISSION_CONFIRMED','new user message exists and composer is empty');}"
                 + "if(elapsed>=" + failureMs + "&&c.state==='" + SEND_ENABLED + "'&&stillSame&&users<=baseline){writeMarker({state:'failed',failedAt:Date.now()});return result('SUBMISSION_FAILED','SEND remained enabled; continuation remained; no new user message');}"
                 + "return result('SUBMISSION_PENDING','submission verification pending; state='+c.state+';empty='+(isEmpty?1:0)+';users='+users+';baseline='+baseline+';elapsed='+elapsed);})()";
+    }
+
+
+    private static String completionObserver(String runId, String observerToken, long stabilityMs) {
+        long stable = Math.max(1L, stabilityMs);
+        return "const observerToken=" + q(observerToken) + ",observerRun=" + q(runId)
+                + ",observerStableMs=" + stable + ";"
+                + "const observerCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_COMPLETION_HOST
+                + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
+                + "const observerIdle=s=>s==='" + SEND_ENABLED + "'||s==='" + SEND_DISABLED + "'||s==='" + COMPOSER_IDLE + "';"
+                + "const cancelObserverState=s=>{if(!s)return;try{s.observer?.disconnect();}catch(_){}if(s.timer)clearTimeout(s.timer);s.timer=0;};"
+                + "const armCompletionObserver=allowIdleBaseline=>{let state=window.__selfRunDriveTurnObserver;"
+                + "if(state&&state.token!==observerToken){cancelObserverState(state);state=null;window.__selfRunDriveTurnObserver=null;}"
+                + "const observeRoot=composerRoot?.parentElement||composerRoot||document.querySelector('main')||document.body;"
+                + "if(!observeRoot)return result('OBSERVER_UNAVAILABLE','STOP/SEND observation root unavailable');"
+                + "if(!state){state={token:observerToken,sawStop:false,allowIdleBaseline:false,timer:0,fired:false,observer:null};"
+                + "const cancelTimer=()=>{if(state.timer)clearTimeout(state.timer);state.timer=0;};"
+                + "const evaluate=()=>{if(state.fired)return;const current=controlState();"
+                + "if(current.state==='" + STOP + "'){state.sawStop=true;cancelTimer();return;}"
+                + "if(!observerIdle(current.state)||!(state.sawStop||state.allowIdleBaseline)){cancelTimer();return;}"
+                + "if(state.timer)return;state.timer=setTimeout(()=>{state.timer=0;if(state.fired)return;"
+                + "const confirmed=controlState();if(confirmed.state==='" + STOP + "'){state.sawStop=true;return;}"
+                + "if(!observerIdle(confirmed.state)||!(state.sawStop||state.allowIdleBaseline))return;"
+                + "state.fired=true;try{state.observer?.disconnect();}catch(_){}window.__selfRunDriveTurnObserver=null;"
+                + "location.href=observerCallback;},observerStableMs);};"
+                + "state.evaluate=evaluate;state.observer=new MutationObserver(evaluate);"
+                + "state.observer.observe(observeRoot,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','aria-disabled','aria-label','data-testid','title','class']});"
+                + "window.__selfRunDriveTurnObserver=state;}"
+                + "state.allowIdleBaseline=state.allowIdleBaseline||!!allowIdleBaseline;state.evaluate();"
+                + "return result('OBSERVER_ARMED','STOP/SEND observer armed;stableMs='+observerStableMs+';baseline='+(state.allowIdleBaseline?1:0));};";
     }
 
     private static String conversationGuard(String conversation) {
