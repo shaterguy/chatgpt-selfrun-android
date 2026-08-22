@@ -29,6 +29,8 @@ public final class BootstrapStageAndDirectPickerAndroidTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web, fixture(false));
             String runId = "SR-MODE-LATCH-DIRECT";
+            scenario.onActivity(activity -> assertTrue(ChatReasoningPreferenceStore.save(
+                    activity, runId, ChatReasoningPreferenceStore.INSTANT)));
             String script = SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_CHAT, runId);
 
             JSONObject menuOpened = evaluate(scenario, web, script);
@@ -59,8 +61,10 @@ public final class BootstrapStageAndDirectPickerAndroidTest {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web, fixture(true));
-            String script = SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_CHAT,
-                    "SR-WORK-TO-CHAT-DIRECT");
+            String runId = "SR-WORK-TO-CHAT-DIRECT";
+            scenario.onActivity(activity -> assertTrue(ChatReasoningPreferenceStore.save(
+                    activity, runId, ChatReasoningPreferenceStore.INSTANT)));
+            String script = SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_CHAT, runId);
 
             JSONObject modeClicked = evaluate(scenario, web, script);
             assertEquals("UI_WAIT", modeClicked.getString("status"));
