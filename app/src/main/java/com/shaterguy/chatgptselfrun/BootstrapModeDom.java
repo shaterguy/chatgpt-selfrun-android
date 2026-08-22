@@ -21,10 +21,12 @@ final class BootstrapModeDom {
                 const selectedState=e=>{
                   if(!e)return false;
                   const owner=interactiveOwner(e);
-                  const nodes=[e,owner,e.parentElement,owner?.parentElement].filter((node,index,all)=>node&&all.indexOf(node)===index);
-                  if(nodes.some(selectedDirect))return true;
+                  const owned=[e,owner].filter((node,index,all)=>node&&all.indexOf(node)===index);
+                  if(owned.some(selectedDirect))return true;
                   const selector='[aria-checked="true"],[aria-pressed="true"],[aria-selected="true"],[aria-current]:not([aria-current="false"]),[data-active="true"],[data-selected="true"],[data-state="checked"],[data-state="selected"],[data-state="active"],[data-state="on"],input[type="radio"]:checked';
-                  return nodes.some(node=>!!node.querySelector?.(selector));
+                  if(owned.some(node=>!!node.querySelector?.(selector)))return true;
+                  const parents=[e.parentElement,owner?.parentElement].filter((node,index,all)=>node&&all.indexOf(node)===index);
+                  return parents.some(selectedDirect);
                 };
                 const modeOf=s=>{const v=exactText(s);if(forbiddenMode.test(v))return'';const tokens=v.split(/[^a-z0-9가-힣]+/).filter(Boolean);if(tokens.includes('chat')||tokens.includes('채팅'))return'chat';if(tokens.includes('work')||tokens.includes('작업'))return'work';return''};
                 const rawModeControls=[...document.querySelectorAll('button,[role="button"],[role="radio"],[role="tab"],input[type="radio"]')].filter(visible).filter(e=>{if(e.closest('[role="menu"],[role="listbox"]'))return false;const m=modeOf(labelOf(e));if(!m)return false;const role=e.getAttribute('role')||'';const testId=exactText(e.dataset?.testid||'');return e.hasAttribute('aria-pressed')||e.hasAttribute('aria-checked')||e.hasAttribute('aria-selected')||role==='radio'||role==='tab'||e.matches('input[type="radio"]')||/mode|experience/.test(testId)||e.tagName==='BUTTON';});
