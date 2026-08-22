@@ -27,7 +27,7 @@ final class ChatReasoningOptionDom {
                 const __sroInteractive='button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"],[aria-haspopup],[aria-expanded],[data-value]';
                 const __sroForbidden=element=>/(send|submit|보내기|stop|중지|microphone|마이크|voice|음성|attach|첨부|upload|업로드|new chat|new conversation|새 채팅|새 대화)/.test(labelOf(element)+' '+exactText(element?.dataset?.testid||''));
                 const __sroOwner=element=>element?.closest?.(__sroInteractive)||element||null;
-                const __sroLabel=element=>labelOf(__sroOwner(element)||element);
+                const __sroLabel=element=>{const owner=__sroOwner(element)||element;return exactText(owner?.getAttribute?.('aria-label')||'')||labelOf(owner);};
                 const __sroActiveView=element=>!!element&&!element.closest?.('[inert],[aria-hidden="true"],[data-active="false"]');
                 const __sroReasoningRowLabel=label=>/^(reasoning(?:\\s+(?:level|effort))?|추론(?:\\s*(?:수준|강도|정도)))(?:\\s|$)/.test(label);
                 const __sroShowAdvancedLabel=label=>/^(?:show\\s+advanced(?:\\s+options)?|advanced(?:\\s+options)?|고급(?:\\s+옵션)?(?:\\s+표시)?)(?:\\s|$)/.test(label);

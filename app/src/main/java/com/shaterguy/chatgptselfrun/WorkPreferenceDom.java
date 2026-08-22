@@ -40,7 +40,7 @@ final class WorkPreferenceDom {
         String body = """
                 const __wpKind=__KIND__,__wpWanted=__WANTED__,__wpPurpose=__PURPOSE__;
                 const __wpText=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();
-                const __wpLabel=e=>__wpText(e?.innerText||'')||__wpText(e?.getAttribute?.('aria-label')||'');
+                const __wpLabel=e=>__wpText(e?.getAttribute?.('aria-label')||'')||__wpText(e?.innerText||'');
                 const __wpVisible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
                 const __wpParse=source=>{
                   const v=__wpText(source);

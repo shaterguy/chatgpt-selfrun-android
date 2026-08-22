@@ -100,12 +100,12 @@ public final class WorkAdvancedMenuAndroidTest {
                 </form>
                 <div id="compact-menu" role="menu" hidden>
                   <div role="menuitem" aria-label="Performance"><div id="slider" role="slider" aria-hidden="true" tabindex="-1" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3"></div></div>
-                  <button id="advanced" type="button" role="menuitem">Show advanced options</button>
+                  <button id="advanced" type="button" role="menuitem" aria-label="Show advanced options">Advanced</button>
                   <button type="button" role="menuitem">Model GPT-5.6 Terra</button>
                   <button type="button" role="menuitem">Reasoning level High</button>
                 </div>
                 <div id="advanced-menu" role="menu" hidden>
-                  <button type="button" role="menuitem">Show fewer options</button>
+                  <button type="button" role="menuitem" aria-label="Show fewer options">Advanced</button>
                   <button id="reset" type="button" role="menuitem">Reset to default</button>
                   <button id="model-row" type="button" role="menuitem" aria-haspopup="menu">Model GPT-5.6 Terra</button>
                   <button id="reasoning-row" type="button" role="menuitem" aria-haspopup="menu">Reasoning level High</button>
