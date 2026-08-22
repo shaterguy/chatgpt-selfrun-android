@@ -8,6 +8,8 @@ import androidx.test.runner.AndroidJUnitRunner;
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
     private static final String PROCESS_RECREATION_TEST =
             "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest";
+    private static final String BOOTSTRAP_STAGE_TEST =
+            "com.shaterguy.chatgptselfrun.BootstrapStageAndDirectPickerAndroidTest";
 
     @Override public void onCreate(Bundle arguments) {
         Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
@@ -15,6 +17,11 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         if (!containsClass(selected, PROCESS_RECREATION_TEST)) {
             effective.putString("class", selected.isEmpty()
                     ? PROCESS_RECREATION_TEST : selected + "," + PROCESS_RECREATION_TEST);
+        }
+        selected = effective.getString("class", "").trim();
+        if (!containsClass(selected, BOOTSTRAP_STAGE_TEST)) {
+            effective.putString("class", selected.isEmpty()
+                    ? BOOTSTRAP_STAGE_TEST : selected + "," + BOOTSTRAP_STAGE_TEST);
         }
         super.onCreate(effective);
     }
