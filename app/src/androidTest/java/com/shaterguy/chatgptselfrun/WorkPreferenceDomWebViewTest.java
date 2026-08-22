@@ -25,6 +25,9 @@ public final class WorkPreferenceDomWebViewTest {
     private static final String PROJECT_URL = "https://chatgpt.com/g/g-p-test";
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
     private static final String CONTINUE_PROMPT = "SELF_RUN_CONTINUE_PROBE";
+    private static final String OBSERVER_RUN_ID = "SR-WEBVIEW-TEST";
+    private static final String OBSERVER_TOKEN = "observer-token";
+    private static final long OBSERVER_STABILITY_MS = 5_000L;
 
     @Test public void modelSelectorCompletesForClickPointerAndMouseTriggersUsingLunaProfile() throws Exception {
         assertSelection("", "click", false);
@@ -103,9 +106,6 @@ public final class WorkPreferenceDomWebViewTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadContinuationFixture(scenario, web, "<div id='stop' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
 
-            JSONObject state = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
-            assertEquals(SelfRunContinuationDom.STOP, state.getString("status"));
-
             JSONObject prepare = evaluate(scenario, web,
                     SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-before-input-probe"));
             assertEquals(SelfRunContinuationDom.STOP, prepare.getString("status"));
@@ -114,7 +114,8 @@ public final class WorkPreferenceDomWebViewTest {
 
             evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:stop-probe':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
             JSONObject click = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe"));
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe",
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
             assertEquals(SelfRunContinuationDom.STOP, click.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
         }
@@ -134,9 +135,6 @@ public final class WorkPreferenceDomWebViewTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadVoiceIdleFixture(scenario, web, CONVERSATION_URL);
 
-            JSONObject idle = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
-            assertEquals(SelfRunContinuationDom.COMPOSER_IDLE, idle.getString("status"));
-
             JSONObject prepared = null;
             for (int attempt = 0; attempt < 8; attempt++) {
                 prepared = evaluate(scenario, web,
@@ -148,7 +146,8 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
 
             JSONObject clicked = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe"));
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe",
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
             assertEquals("CONTINUE_CLICKED", clicked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
             assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
@@ -171,7 +170,8 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
 
             JSONObject clicked = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
+                    SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe",
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
             assertEquals("BOOTSTRAP_CLICKED", clicked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
             assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
@@ -181,9 +181,17 @@ public final class WorkPreferenceDomWebViewTest {
     private static void assertContinuationState(String controls, String expected) throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
+            String markerId = "classifier-" + expected.toLowerCase();
             loadContinuationFixture(scenario, web, controls);
-            assertEquals(expected, evaluate(scenario, web,
-                    SelfRunContinuationDom.buttonState(CONVERSATION_URL)).getString("status"));
+            evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:"
+                    + markerId + "':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='"
+                    + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
+            JSONObject result = evaluate(scenario, web,
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, markerId,
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+            String expectedResult = SelfRunContinuationDom.SEND_ENABLED.equals(expected)
+                    ? "CONTINUE_CLICKED" : expected;
+            assertEquals(expectedResult, result.getString("status"));
         }
     }
 
@@ -459,7 +467,7 @@ public final class WorkPreferenceDomWebViewTest {
         return "<!doctype html><html><head><style>body{margin:20px}button,[role=button]{display:block;margin:8px}</style></head>"
                 + "<body><main><div id='composer-shell'><form><textarea id='prompt-textarea'></textarea>"
                 + formControls + "</form><div id='continuation-controls'>" + controls + "</div></div></main>"
-                + "<script>window.stopClicks=0;const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
+                + "<script>window.stopClicks=0;document.querySelector('form')?.addEventListener('submit',event=>event.preventDefault());const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
                 + "</body></html>";
     }
 
