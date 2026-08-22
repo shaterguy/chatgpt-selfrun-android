@@ -46,6 +46,38 @@ public final class ChatWorkContinuationContractTest {
         assertTrue(service.contains("WORK_PREFERENCE_FAILURE"));
     }
 
+    @Test public void normalContinuationDomCallbacksHaveFiniteRecoveryWithoutBlindResubmit() throws Exception {
+        String service = src("SelfRunService.java");
+        String continuation = src("SelfRunContinuationDom.java");
+
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_INTERNAL_SEND));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_PREFS));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_REASONING));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_SEND_CONTINUE));
+        assertFalse(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_BOOTSTRAP));
+        assertTrue(service.contains("CONTINUATION_CALLBACK_TIMEOUT_MS = 5_000L"));
+        assertTrue(service.contains("scheduleContinuationCallbackDeadline"));
+        assertTrue(service.contains("domInFlight=false;webEvaluationId++"));
+        assertTrue(service.contains("SelfRunWebDiagnostics.callbackTimeoutDetail(phase)"));
+        assertTrue(service.contains("restoreCanonical();"));
+
+        assertTrue(continuation.contains("writeMarker({state:'clicked'"));
+        assertTrue(continuation.contains("if(m.state==='clicked')return result('VERIFY_REQUIRED'"));
+        assertTrue(continuation.contains("verifyDriveTurnSubmission"));
+        assertTrue(service.contains("if(\"VERIFY_REQUIRED\".equals(status)){String prompt=continuationPrompt();evaluate(phase,SelfRunContinuationDom.verifyDriveTurnSubmission"));
+    }
+
+    @Test public void waitInternalSendUnknownRecoveryIsBoundedWithoutChangingIdleContract() {
+        assertFalse(SelfRunService.shouldRecoverWaitInternalSend(
+                SelfRunContinuationDom.UNKNOWN, 1_000L, 5_999L));
+        assertTrue(SelfRunService.shouldRecoverWaitInternalSend(
+                SelfRunContinuationDom.UNKNOWN, 1_000L, 6_000L));
+        assertFalse(SelfRunService.shouldRecoverWaitInternalSend(
+                SelfRunContinuationDom.SEND_DISABLED, 1_000L, 10_000L));
+        assertFalse(SelfRunService.shouldRecoverWaitInternalSend(
+                SelfRunContinuationDom.COMPOSER_IDLE, 1_000L, 10_000L));
+    }
+
     private static String src(String file) throws Exception {
         return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
                 "src/main/java/com/shaterguy/chatgptselfrun/" + file);
