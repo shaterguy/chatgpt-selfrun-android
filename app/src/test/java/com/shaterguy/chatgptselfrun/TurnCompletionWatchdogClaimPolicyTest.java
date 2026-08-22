@@ -40,7 +40,7 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         assertTrue(callback.contains("handler.post(this::authorizeAndRunDrive)"));
         assertTrue(poll.contains("drive.readDocumentSnapshot"));
         assertTrue(poll.contains("schedulePostDomDriveSync(POST_DOM_DRIVE_RETRY_MS)"));
-        assertTrue(poll.contains("store.continueAfterPostDomDriveTimeout"));
+        assertTrue(poll.contains("store::continueAfterPostDomDriveTimeout"));
         assertFalse(service.contains("NORMAL_POLL_MS"));
         assertFalse(service.contains("TURN_COMPLETION_WATCHDOG_MS"));
         assertFalse(service.contains("scheduleDrivePoll"));
@@ -59,7 +59,7 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         String pageStarted = section(service, "onPageStarted", "onPageFinished");
         assertFalse(pageStarted.contains("turnObserverNeedsIdleBaseline=true"));
         assertTrue(service.contains("onRenderProcessGone"));
-        assertTrue(service.contains("turnObserverNeedsIdleBaseline=true;cleanupWebView()"));
+        assertTrue(service.contains("turnObserverNeedsIdleBaseline=store!=null&&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())&&store.turnObserverSawStop()"));
     }
 
     private static String source(String name) throws Exception {
