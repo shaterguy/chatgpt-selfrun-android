@@ -1,5 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
+# Dev4 policy gate verification trigger
 
 on:
   push:
