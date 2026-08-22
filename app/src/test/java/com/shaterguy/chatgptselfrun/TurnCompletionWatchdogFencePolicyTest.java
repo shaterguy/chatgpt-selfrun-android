@@ -38,6 +38,18 @@ public final class TurnCompletionWatchdogFencePolicyTest {
         assertTrue(disconnect >= 0 && callback > disconnect);
     }
 
+    @Test public void recoveryIdleBaselineRequiresDurableStopProof() throws Exception {
+        String service = source("SelfRunService.java");
+        String store = source("SelfRunStore.java");
+        assertTrue(service.contains("private boolean turnObserverNeedsIdleBaseline = false;"));
+        assertTrue(service.contains("store.turnObserverSawStop()"));
+        assertTrue(service.contains("TURN_STOP_SEEN_HOST"));
+        assertTrue(service.contains("store.markTurnObserverStopSeen(token)"));
+        assertTrue(store.contains("boolean turnObserverSawStop()"));
+        assertTrue(store.contains("boolean markTurnObserverStopSeen(String observerToken)"));
+        assertTrue(store.contains("putBoolean(\"turnObserverSawStop\",false)"));
+    }
+
     private static String source(String name) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);

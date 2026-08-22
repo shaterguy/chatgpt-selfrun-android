@@ -49,6 +49,16 @@ public final class SelfRunDriveDev3PolicyTest {
         assertFalse(resume.contains("event.type"));
     }
 
+    @Test public void recoveryIdleBaselineNeedsStopEvidenceForThisRunAndToken() throws Exception {
+        String service = source("SelfRunService.java");
+        String store = source("SelfRunStore.java");
+        assertTrue(service.contains("turnObserverNeedsIdleBaseline=store!=null"));
+        assertTrue(service.contains("store.turnObserverSawStop()"));
+        assertTrue(service.contains("turn-stop-seen"));
+        assertTrue(store.contains("PHASE_WAIT_TURN_COMPLETION.equals(phase())"));
+        assertTrue(store.contains("token.equals(turnObserverToken())"));
+    }
+
     private static String source(String name) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);

@@ -14,6 +14,7 @@ final class SelfRunContinuationDom {
     static final String UNKNOWN = "UNKNOWN";
     static final String TURN_COMPLETION_SCHEME = "selfrun-drive";
     static final String TURN_COMPLETION_HOST = "turn-completed";
+    static final String TURN_STOP_SEEN_HOST = "turn-stop-seen";
 
     private SelfRunContinuationDom() {}
 
@@ -120,19 +121,22 @@ final class SelfRunContinuationDom {
                 + ",observerStableMs=" + stable + ";"
                 + "const observerCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_COMPLETION_HOST
                 + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
+                + "const stopSeenCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_STOP_SEEN_HOST
+                + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
                 + "const observerIdle=s=>s==='" + SEND_ENABLED + "'||s==='" + SEND_DISABLED + "'||s==='" + COMPOSER_IDLE + "';"
                 + "const cancelObserverState=s=>{if(!s)return;try{s.observer?.disconnect();}catch(_){}if(s.timer)clearTimeout(s.timer);s.timer=0;};"
                 + "const armCompletionObserver=allowIdleBaseline=>{let state=window.__selfRunDriveTurnObserver;"
                 + "if(state&&state.token!==observerToken){cancelObserverState(state);state=null;window.__selfRunDriveTurnObserver=null;}"
                 + "const observeRoot=composerRoot?.parentElement||composerRoot||document.querySelector('main')||document.body;"
                 + "if(!observeRoot)return result('OBSERVER_UNAVAILABLE','STOP/SEND observation root unavailable');"
-                + "if(!state){state={token:observerToken,sawStop:false,allowIdleBaseline:false,timer:0,fired:false,observer:null};"
+                + "if(!state){state={token:observerToken,sawStop:false,stopNotified:false,allowIdleBaseline:false,timer:0,fired:false,observer:null};"
                 + "const cancelTimer=()=>{if(state.timer)clearTimeout(state.timer);state.timer=0;};"
+                + "const noteStop=()=>{const first=!state.sawStop;state.sawStop=true;cancelTimer();if(first&&!state.stopNotified){state.stopNotified=true;location.href=stopSeenCallback;}};"
                 + "const evaluate=()=>{if(state.fired)return;const current=controlState();"
-                + "if(current.state==='" + STOP + "'){state.sawStop=true;cancelTimer();return;}"
+                + "if(current.state==='" + STOP + "'){noteStop();return;}"
                 + "if(!observerIdle(current.state)||!(state.sawStop||state.allowIdleBaseline)){cancelTimer();return;}"
                 + "if(state.timer)return;state.timer=setTimeout(()=>{state.timer=0;if(state.fired)return;"
-                + "const confirmed=controlState();if(confirmed.state==='" + STOP + "'){state.sawStop=true;return;}"
+                + "const confirmed=controlState();if(confirmed.state==='" + STOP + "'){noteStop();return;}"
                 + "if(!observerIdle(confirmed.state)||!(state.sawStop||state.allowIdleBaseline))return;"
                 + "state.fired=true;try{state.observer?.disconnect();}catch(_){}window.__selfRunDriveTurnObserver=null;"
                 + "location.href=observerCallback;},observerStableMs);};"

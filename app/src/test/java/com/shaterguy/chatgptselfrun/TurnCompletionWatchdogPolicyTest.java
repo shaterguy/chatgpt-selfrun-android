@@ -27,8 +27,9 @@ public final class TurnCompletionWatchdogPolicyTest {
     @Test public void stopReturningDuringStabilityWindowCancelsCompletion() throws Exception {
         String observer = section(source("SelfRunContinuationDom.java"),
                 "private static String completionObserver", "private static String conversationGuard");
-        assertTrue(observer.contains("if(current.state==='\" + STOP + \"'){state.sawStop=true;cancelTimer();return;}"));
-        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"'){state.sawStop=true;return;}"));
+        assertTrue(observer.contains("const noteStop="));
+        assertTrue(observer.contains("if(current.state==='\" + STOP + \"'){noteStop();return;}"));
+        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"'){noteStop();return;}"));
         assertTrue(observer.indexOf("const confirmed=controlState()")
                 < observer.indexOf("location.href=observerCallback"));
     }

@@ -108,7 +108,9 @@ public final class SelfRunContinuationSubmissionVerificationTest {
                 URL, "SR-TEST", "observer-token", 5000L, false);
         assertTrue(js.contains("new MutationObserver"));
         assertTrue(js.contains("observerStableMs=5000"));
+        assertTrue(js.contains("const noteStop="));
         assertTrue(js.contains("state.sawStop=true"));
+        assertTrue(js.contains("stopSeenCallback"));
         assertTrue(js.contains("const confirmed=controlState()"));
         assertFalse(js.contains("setInterval"));
         assertFalse(js.contains("c.stop.click"));

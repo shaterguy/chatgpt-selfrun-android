@@ -82,7 +82,7 @@ public final class SelfRunService extends Service {
     private volatile String runtimeRunId = "";
     private String continuationAttemptPrompt = "";
     private String continuationAttemptMarkerId = "";
-    private boolean turnObserverNeedsIdleBaseline = true;
+    private boolean turnObserverNeedsIdleBaseline = false;
     private volatile boolean destroyed;
     /** Serializes pause/stop epoch changes with application of Drive results to durable state. */
     private final Object automationStateLock = new Object();
@@ -518,7 +518,7 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
                 @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse s) {if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && s.getStatusCode() == 429) scheduleWeb(30_000L);}
                 @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {if (launchedRunId.equals(store.runId()) && r.isForMainFrame() && canRun() && isWebAutomationPhase(store.phase())) postWebCallback(() -> { if (v == webView) v.loadUrl(canonicalUrl()); }, 3_000L);}
                 @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}
-                @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {turnObserverNeedsIdleBaseline=true;cleanupWebView();if (launchedRunId.equals(store.runId()) && !store.paused() && isWebAutomationPhase(store.phase())) postWebCallback(SelfRunService.this::ensureWebView, 2_000L);return true;}
+                @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {cleanupWebView();if (launchedRunId.equals(store.runId()) && !store.paused() && isWebAutomationPhase(store.phase())) postWebCallback(SelfRunService.this::ensureWebView, 2_000L);return true;}
             });
             webView.loadUrl(target);
         } catch (Throwable error) {cleanupWebView(); postWebCallback(this::ensureWebView, 2_500L);}
@@ -526,8 +526,16 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
 
 private boolean isTurnCompletionCallback(String requested,String launchedRunId){
     Uri uri;try{uri=Uri.parse(requested);}catch(Throwable ignored){return false;}
-    if(!SelfRunContinuationDom.TURN_COMPLETION_SCHEME.equals(uri.getScheme())||!SelfRunContinuationDom.TURN_COMPLETION_HOST.equals(uri.getHost()))return false;
-    String run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");
+    if(!SelfRunContinuationDom.TURN_COMPLETION_SCHEME.equals(uri.getScheme()))return false;
+    String host=uri.getHost(),run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");
+    if(SelfRunContinuationDom.TURN_STOP_SEEN_HOST.equals(host)){
+        if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())||token==null||!token.equals(store.turnObserverToken())){
+            runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stop_callback_rejected");return true;
+        }
+        if(store.markTurnObserverStopSeen(token))runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stop_seen");
+        return true;
+    }
+    if(!SelfRunContinuationDom.TURN_COMPLETION_HOST.equals(host))return false;
     if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())||token==null||!token.equals(store.turnObserverToken())){
         runLog.record(store,"TURN_COMPLETION_OBSERVER","result=callback_rejected");return true;
     }
@@ -733,7 +741,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     }
 
     private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);handler.removeCallbacks(driveRetryRunnable);}
-    private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();turnObserverNeedsIdleBaseline=true;synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
+    private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();turnObserverNeedsIdleBaseline=false;synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
     private void disconnectTurnObserver(){String token=store==null?"":store.turnObserverToken();WebView active=webView;if(active==null||token.isEmpty())return;try{active.evaluateJavascript(SelfRunContinuationDom.cancelTurnCompletionObserver(token),null);}catch(Throwable ignored){}}
     private void pauseWebView() { if (webView != null) try { webView.onPause(); } catch (Throwable ignored) {} }
     private void resumeWebView() { if (webView != null) try { webView.onResume(); } catch (Throwable ignored) {} }
@@ -747,7 +755,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private JSONObject parse(String raw) {try { Object outer = new JSONTokener(raw == null ? "" : raw).nextValue(); return new JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer)); }catch (Throwable error) { return new JSONObject(); }}
     private void acquireWakeLock() { if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(2 * 60_000L); }
     private void releaseWakeLock() { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); }
-    private void cleanupWebView() {handler.removeCallbacks(webRunnable);if(store!=null&&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))turnObserverNeedsIdleBaseline=true;generation++; webEvaluationId++; domInFlight = false;if (host != null) { host.destroy(); host = null; } webView = null;}
+    private void cleanupWebView() {handler.removeCallbacks(webRunnable);turnObserverNeedsIdleBaseline=store!=null&&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())&&store.turnObserverSawStop();generation++; webEvaluationId++; domInFlight = false;if (host != null) { host.destroy(); host = null; } webView = null;}
     private void stopRuntime() {stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock();stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();}
 
     @Override public void onDestroy() {destroyed = true;stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock(); io.shutdownNow();super.onDestroy();}

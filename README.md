@@ -35,7 +35,7 @@ Drive Runs의 canonical 안내 경로는 `/GPT/Self Run/Runs/`입니다. 이미 
 1. 앱이 Run과 Google Docs 실행턴 문서를 생성하고 정확한 `documentId`를 저장합니다.
 2. bootstrap에는 Drive V1 식별자, global SelfRun Skill document ID와 turn document ID가 들어가며 사용자의 원본 요구사항이 뒤에 그대로 유지됩니다.
 3. ChatGPT는 global SelfRun 운영문서를 읽고 명령 수신 전·턴 종료 전 Drive signal 계약을 수행합니다.
-4. 프롬프트 제출과 같은 JavaScript 실행에서 STOP/SEND 영역에 `MutationObserver`를 설치합니다. STOP을 본 뒤 완료 상태가 처음 나타나면 5초 단발 타이머를 시작하고, 타이머 종료 시에도 여전히 완료 상태인 경우에만 Observer를 해제합니다.
+4. 프롬프트 제출과 같은 JavaScript 실행에서 STOP/SEND 영역에 `MutationObserver`를 설치합니다. STOP 관측 사실을 현재 run/token에 내구 기록한 뒤 완료 상태가 처음 나타나면 5초 단발 타이머를 시작하고, 타이머 종료 시에도 여전히 완료 상태인 경우에만 Observer를 해제합니다. WebView·renderer 복구 뒤의 idle baseline은 이 STOP 증거가 있을 때만 허용합니다.
 5. 안정된 완료 콜백 직후 Drive 문서를 한 번 읽습니다. `TURN_COMPLETED`가 없으면 5초 간격으로 최대 5분 재확인하고, 제한시간이 지나면 현재 모델·추론 설정과 plain CONTINUE로 다음 턴을 진행합니다. 짧은 주기의 전송버튼 polling은 사용하지 않습니다.
 6. Drive에서 새 `TURN_COMPLETED`를 찾으면 마지막 cursor 이후 이벤트만 소비하고 `NEXT_INPUT`과 Work profile을 적용합니다. USER_ACTION_REQUIRED와 PAUSED는 보존형 일시정지이며 DONE만 정상 종료입니다.
 

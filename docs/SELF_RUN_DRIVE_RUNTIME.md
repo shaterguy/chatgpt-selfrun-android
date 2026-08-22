@@ -14,7 +14,7 @@ Drive V1은 background WebView를 private virtual display에 호스팅하는 구
 
 보정 프로파일은 app-private SharedPreferences를 내구 원본으로 유지하고 같은 ChatGPT origin의 Web Storage에도 주입합니다. 런타임 DOM 코드는 보정 target을 우선 사용하되 매칭하지 못하면 v1.2.2의 기존 semantic/testid/role 휴리스틱으로 후퇴합니다. 보정 로그는 purpose별 arm/candidate/confirm/save/reset 상태만 기록하며 사용자가 테스트로 입력한 문구 내용은 기록하지 않습니다. `addJavascriptInterface`는 사용하지 않습니다.
 
-WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer·STOP/SEND 영역 탐색, 명령 제출과 완료 상태 감지입니다. 정확한 전문 readback과 활성 SEND를 확인한 제출 클릭과 같은 JavaScript 실행에서 `MutationObserver`를 설치하고, 클릭 결과를 곧바로 완료 관찰 상태로 전이합니다. 전송 뒤 별도 버튼 polling은 하지 않습니다. STOP을 관찰한 뒤 SEND/비활성 SEND/idle composer 상태가 나타나면 5초 단발 타이머를 시작합니다. 타이머 종료 시 `controlState()`를 한 번 더 호출해 여전히 완료 상태인 경우에만 Observer를 해제하고 native callback을 보냅니다. STOP이 돌아오면 타이머를 취소하고 계속 관찰합니다. renderer 소실이나 composer 재획득 실패는 저장된 conversation URL을 이용한 복구 대상으로 처리합니다.
+WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer·STOP/SEND 영역 탐색, 명령 제출과 완료 상태 감지입니다. 정확한 전문 readback과 활성 SEND를 확인한 제출 클릭과 같은 JavaScript 실행에서 `MutationObserver`를 설치하고, 클릭 결과를 곧바로 완료 관찰 상태로 전이합니다. 전송 뒤 별도 버튼 polling은 하지 않습니다. STOP을 처음 관찰하면 현재 run/token에만 유효한 native callback으로 내구 증거를 기록하고, 그 뒤 SEND/비활성 SEND/idle composer 상태가 나타나면 5초 단발 타이머를 시작합니다. 타이머 종료 시 `controlState()`를 한 번 더 호출해 여전히 완료 상태인 경우에만 Observer를 해제하고 native callback을 보냅니다. STOP이 돌아오면 타이머를 취소하고 계속 관찰합니다. renderer 소실이나 composer 재획득 실패 뒤 idle baseline은 이 내구 STOP 증거가 있을 때만 허용합니다.
 
 ## Foreground Service와 WakeLock
 
