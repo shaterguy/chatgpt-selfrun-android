@@ -26,13 +26,16 @@ public class SelfRunContinuationSubmissionTest {
     @Test public void verifiedContinuationUsesNewUserMessageOnlyAsPostClickProof() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
         String prepare = between(dom, "static String prepareDriveTurn", "static String clickPreparedDriveTurn");
-        String click = between(dom, "static String clickPreparedDriveTurn", "static String verifyDriveTurnSubmission");
-        String verify = between(dom, "static String verifyDriveTurnSubmission", "private static String conversationGuard");
+        String click = between(dom, "static String clickPreparedDriveTurn", "static String observeTurnCompletion");
+        String observer = between(dom, "static String observeTurnCompletion", "static String cancelTurnCompletionObserver");
+        String completion = between(dom, "private static String completionObserver", "private static String conversationGuard");
         assertFalse(prepare.contains("users>baseline"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertTrue(click.contains("baselineUserCount=userMessageCount()"));
-        assertTrue(verify.contains("users>baseline&&isEmpty"));
-        assertTrue(verify.contains("proof:'USER_MESSAGE'"));
+        assertTrue(click.contains("armCompletionObserver(false)"));
+        assertTrue(observer.contains("completionObserver(runId, observerToken, stabilityMs)"));
+        assertTrue(completion.contains("new MutationObserver"));
+        assertTrue(completion.contains("state.observer?.disconnect()"));
     }
 
     private static String src(String f) throws Exception { Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f); if(!Files.exists(p)) p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f); return new String(Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8); }
