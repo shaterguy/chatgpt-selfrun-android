@@ -27,6 +27,8 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(mode.contains("chatgpt-selfrun:bootstrap-stage:"));
         assertTrue(mode.contains("MODE_CONFIRMED"));
         assertTrue(mode.contains("stageRegressionBlocked"));
+        assertTrue(mode.contains("data-tpp-toggle-value"));
+        assertTrue(mode.contains("dispatchModeMouse(element,'pointerdown'"));
         assertTrue(options.contains("[role=\"slider\"]"));
         assertTrue(options.contains("open-reasoning-sheet"));
         assertTrue(options.contains("open-advanced-control"));

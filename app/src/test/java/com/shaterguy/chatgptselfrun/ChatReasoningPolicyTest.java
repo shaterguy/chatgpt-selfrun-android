@@ -41,6 +41,8 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("open-reasoning-menu"));
         assertTrue(script.contains("nested-option-click"));
         assertTrue(script.contains("direct-option-click"));
+        assertTrue(script.contains("data-animated-slider-trigger"));
+        assertTrue(script.contains("__sroMouse(element,'pointerdown'"));
         assertTrue(script.contains("sliderObserved"));
         assertTrue(script.contains("CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"));
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));

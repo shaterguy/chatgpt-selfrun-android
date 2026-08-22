@@ -33,6 +33,8 @@ public final class ChatWorkContinuationContractTest {
         assertTrue(preference.contains("__wpShowAdvancedLabel"));
         assertTrue(preference.contains("open-advanced-control"));
         assertTrue(preference.contains("close-current-match"));
+        assertTrue(preference.contains("data-animated-slider-trigger"));
+        assertTrue(preference.contains("__wpMouse(e,'pointerdown'"));
         assertTrue(preference.contains("__wpTimeoutMs=20000"));
         assertTrue(preference.contains("'SELECTION_TIMEOUT'"));
         assertTrue(preference.contains("'READBACK_MISMATCH'"));

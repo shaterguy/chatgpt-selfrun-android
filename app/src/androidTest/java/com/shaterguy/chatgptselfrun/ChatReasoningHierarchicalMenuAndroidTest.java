@@ -94,7 +94,7 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
         return """
                 <!doctype html><html><head><style>[hidden]{display:none!important}body{min-height:800px}form{margin-top:500px}#sheet,#advanced-menu,#submenu{position:absolute;width:280px;min-height:120px}</style></head><body>
                 <div><button id="chat" aria-selected="true">Chat</button><button id="work" aria-selected="false">Work</button></div>
-                <form><textarea id="prompt-textarea"></textarea><button id="reasoning-trigger" type="button" aria-haspopup="dialog" aria-controls="sheet" aria-expanded="false">매우 높음</button></form>
+                <form><textarea id="prompt-textarea"></textarea><button id="reasoning-trigger" type="button" aria-haspopup="dialog" aria-controls="sheet" aria-expanded="false"><span data-animated-slider-trigger="true">매우 높음</span></button></form>
                 <div id="sheet" role="dialog" hidden><input id="slider" type="range" min="0" max="4" value="3" aria-valuetext="매우 높음"><button id="advanced" type="button">고급</button></div>
                 <div id="advanced-menu" role="menu" hidden><button type="button" role="menuitem">모델 GPT-5.6 Sol</button><button id="reasoning-row" type="button" role="menuitem" aria-haspopup="menu">추론 수준 매우 높음</button></div>
                 <div id="submenu" role="menu" hidden><button id="instant" type="button" role="menuitemradio" aria-checked="false">즉시</button><button type="button" role="menuitemradio" aria-checked="false">중간</button><button type="button" role="menuitemradio" aria-checked="false">높음</button><button type="button" role="menuitemradio" aria-checked="true">매우 높음</button><button type="button" role="menuitemradio" aria-checked="false">Pro</button></div>
@@ -114,7 +114,7 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
         return """
                 <!doctype html><html><head><style>[hidden]{display:none!important}body{min-height:800px}form{margin-top:500px}</style></head><body>
                 <div><button id="chat" aria-selected="true">Chat</button><button id="work" aria-selected="false">Work</button></div>
-                <form><textarea id="prompt-textarea"></textarea><button id="reasoning-trigger" type="button" aria-haspopup="menu" aria-controls="sheet" aria-expanded="false">Extra high</button></form>
+                <form><textarea id="prompt-textarea"></textarea><button id="reasoning-trigger" type="button" aria-haspopup="menu" aria-controls="sheet" aria-expanded="false"><span data-animated-slider-trigger="true">Extra high</span></button></form>
                 <div id="sheet" role="menu" hidden data-testid="composer-intelligence-picker-content">
                   <div id="simple-view" data-testid="composer-model-picker-slider-simple-view" data-active="true">
                     <div role="menuitem" aria-label="Performance"><div id="slider" role="slider" aria-hidden="true" tabindex="-1" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3"></div></div>
@@ -129,7 +129,7 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
                 <script>
                 window.triggerClicks=0;window.advancedClicks=0;window.reasoningClicks=0;window.inertReasoningClicks=0;window.optionClicks=0;window.sliderEvents=0;
                 const trigger=document.getElementById('reasoning-trigger'),sheet=document.getElementById('sheet'),advanced=document.getElementById('advanced'),simpleView=document.getElementById('simple-view'),advancedView=document.getElementById('advanced-view'),row=document.getElementById('reasoning-row'),submenu=document.getElementById('submenu'),slider=document.getElementById('slider');
-                trigger.onclick=()=>{window.triggerClicks++;const opening=sheet.hidden;sheet.hidden=!opening;trigger.setAttribute('aria-expanded',opening?'true':'false');};
+                trigger.onpointerdown=()=>{window.triggerClicks++;const opening=sheet.hidden;sheet.hidden=!opening;trigger.setAttribute('aria-expanded',opening?'true':'false');};
                 advanced.onclick=()=>{window.advancedClicks++;simpleView.dataset.active='false';simpleView.setAttribute('inert','');advancedView.dataset.active='true';advancedView.removeAttribute('inert');advanced.setAttribute('aria-label','Show fewer options');advanced.setAttribute('aria-expanded','true');};
                 row.onclick=()=>{if(row.closest('[inert]')){window.inertReasoningClicks++;return;}window.reasoningClicks++;row.setAttribute('aria-expanded','true');submenu.hidden=false;};
                 document.getElementById('pro').onclick=event=>{window.optionClicks++;for(const option of submenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent='Pro';trigger.setAttribute('aria-expanded','false');sheet.hidden=true;submenu.hidden=true;};
