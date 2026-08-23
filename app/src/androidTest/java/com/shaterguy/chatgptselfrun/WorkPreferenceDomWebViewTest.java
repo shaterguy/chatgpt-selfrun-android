@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
 
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -178,8 +179,11 @@ public final class WorkPreferenceDomWebViewTest {
     @Test public void turnObserverRebindPreservesCumulativeIdleAgeInCurrentDocument() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrl = new AtomicReference<>();
+            CountDownLatch callbackSeen = new CountDownLatch(1);
             loadContinuationFixture(scenario, web,
-                    "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>");
+                    "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>",
+                    callbackUrl, callbackSeen);
 
             JSONObject armed = evaluate(scenario, web,
                     SelfRunContinuationDom.observeTurnCompletion(
@@ -196,6 +200,18 @@ public final class WorkPreferenceDomWebViewTest {
             assertTrue(rebound.getString("detail").contains("bindingChanged=1"));
             assertEquals("true", read(scenario, web,
                     "String(window.__selfRunDriveTurnObserver.idleSince===window.fixtureIdleSince)"));
+
+            evaluate(scenario, web, "(()=>{window.__selfRunDriveTurnObserver.idleSince=Date.now()-6000;"
+                    + "return JSON.stringify({status:'AGED'});})()");
+            JSONObject completed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, true));
+            assertEquals("OBSERVER_ARMED", completed.getString("status"));
+            assertTrue("Cumulative idle healthcheck did not emit completion callback",
+                    callbackSeen.await(5, TimeUnit.SECONDS));
+            assertTrue(callbackUrl.get().startsWith("selfrun-drive://turn-completed"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver===null)"));
             assertEquals(CONVERSATION_URL, read(scenario, web, "location.href"));
         }
     }
@@ -384,6 +400,12 @@ public final class WorkPreferenceDomWebViewTest {
 
     private static void loadContinuationFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                                 String controls) throws Exception {
+        loadContinuationFixture(scenario, web, controls, null, null);
+    }
+
+    private static void loadContinuationFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
+                                                String controls, AtomicReference<String> callbackUrl,
+                                                CountDownLatch callbackSeen) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
@@ -391,6 +413,13 @@ public final class WorkPreferenceDomWebViewTest {
             view.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView ignored, String url) {
                     if (CONVERSATION_URL.equals(url)) loaded.countDown();
+                }
+                @Override public boolean shouldOverrideUrlLoading(WebView ignored, WebResourceRequest request) {
+                    String requested = String.valueOf(request.getUrl());
+                    if (!requested.startsWith("selfrun-drive://")) return false;
+                    if (callbackUrl != null) callbackUrl.set(requested);
+                    if (callbackSeen != null) callbackSeen.countDown();
+                    return true;
                 }
             });
             activity.setContentView(view);
