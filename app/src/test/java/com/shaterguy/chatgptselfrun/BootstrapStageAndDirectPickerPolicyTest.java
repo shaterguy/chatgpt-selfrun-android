@@ -49,7 +49,7 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
     @Test public void dev7IdentityRemainsStableWithoutDependencyChange() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("selfRunDriveVersionCode = 1000085"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3-dev11'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
     }
 
