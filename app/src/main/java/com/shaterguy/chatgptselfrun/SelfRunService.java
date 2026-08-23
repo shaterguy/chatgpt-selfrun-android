@@ -590,7 +590,7 @@ private void evaluate(String phase,String script){
       if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
   }
   if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
-      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 관찰 중 · 답변 완료 후 5초 재확인");runLog.record(store,"TURN_COMPLETION_OBSERVER","result=armed");releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
+      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 관찰 중 · 답변 완료 후 5초 재확인");runLog.record(store,"TURN_COMPLETION_OBSERVER","result=armed;detail="+BootstrapResultPolicy.safe(detail,180));releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
       if("OBSERVER_UNAVAILABLE".equals(status)){runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
   }
   if("TARGET_ERROR".equals(status)){recordContinuationTargetError(phase);if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}

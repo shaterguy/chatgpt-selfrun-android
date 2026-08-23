@@ -54,11 +54,27 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertTrue(observer.contains("!state.composer?.isConnected"));
         assertTrue(observer.contains("state.observer?.disconnect()"));
         assertTrue(observer.contains("state.observer=new MutationObserver(evaluate)"));
+        assertTrue(observer.contains("idleSince:0"));
+        assertTrue(observer.contains("Date.now()-state.idleSince"));
+        assertTrue(observer.contains("if(bindingChanged)cancelTimer()"));
+        assertFalse(observer.contains("if(bindingChanged)resetIdle()"));
         assertTrue(service.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS)"));
+        assertTrue(service.contains("result=armed;detail="));
         assertFalse(observer.contains("location.reload"));
         assertFalse(observer.contains("location.assign"));
         assertFalse(observer.contains("history.go"));
         assertFalse(observer.contains("window.open"));
+    }
+
+    @Test public void composerRebindMustPreserveTheCumulativeIdleWindow() throws Exception {
+        String observer = section(source("SelfRunContinuationDom.java"),
+                "private static String completionObserver", "private static String conversationGuard");
+
+        assertTrue(observer.contains("const resetIdle=()=>{state.idleSince=0;cancelTimer();}"));
+        assertTrue(observer.contains("if(!state.idleSince)state.idleSince=Date.now()"));
+        assertTrue(observer.contains("observerStableMs-(Date.now()-state.idleSince)"));
+        assertTrue(observer.contains("if(Date.now()-state.idleSince>=observerStableMs)fireStable()"));
+        assertTrue(observer.contains(";idleMs='+idleMs"));
     }
 
     @Test public void fiveMinutePostDomDriveWindowHasExactBoundary() {

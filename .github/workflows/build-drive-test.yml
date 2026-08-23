@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# Dev9 in-place observer rebind verification
+# Dev10 cumulative idle stability verification
 
 on:
   push:
