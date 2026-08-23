@@ -34,6 +34,7 @@ final class SelfRunWebDiagnostics {
     }
 
     private static String phaseKind(String phase) {
+        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) return "bootstrap_send";
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) return "wait_turn_completion";
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) return "apply_model";
         if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "apply_reasoning";
@@ -41,11 +42,11 @@ final class SelfRunWebDiagnostics {
         return "other";
     }
 
-    static String routeMismatchDetail(String expected, String actual) {
+    static String routeMismatchDetail(String phase, String expected, String actual) {
         String expectedId = SelfRunScript.conversationId(expected);
         String actualId = SelfRunScript.conversationId(actual);
         boolean sameConversation = !expectedId.isEmpty() && expectedId.equals(actualId);
-        return "status=ROUTE_MISMATCH;expected=" + routeKind(expected)
+        return "status=ROUTE_MISMATCH;phase=" + phaseKind(phase) + ";expected=" + routeKind(expected)
                 + ";actual=" + routeKind(actual)
                 + ";conversation_match=" + (sameConversation ? "1" : "0");
     }

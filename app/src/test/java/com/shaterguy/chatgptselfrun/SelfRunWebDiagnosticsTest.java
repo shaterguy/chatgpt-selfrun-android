@@ -19,10 +19,19 @@ public class SelfRunWebDiagnosticsTest {
         assertFalse(future.contains("user text"));
     }
 
+    @Test public void bootstrapSendDiagnosticsArePhaseScopedAndPrivacySafe() {
+        String wait = SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
+                "UI_WAIT", "future detail containing secret prompt");
+        assertEquals("status=UI_WAIT;phase=bootstrap_send;reason=ui_wait", wait);
+        assertEquals("status=CALLBACK_TIMEOUT;phase=bootstrap_send;reason=evaluate_javascript",
+                SelfRunWebDiagnostics.callbackTimeoutDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND));
+        assertFalse(wait.contains("secret prompt"));
+    }
+
     @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {
-        String detail = SelfRunWebDiagnostics.routeMismatchDetail(
+        String detail = SelfRunWebDiagnostics.routeMismatchDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
                 "https://chatgpt.com/c/conversation123", "https://chatgpt.com/settings");
-        assertEquals("status=ROUTE_MISMATCH;expected=general_conversation;actual=other;conversation_match=0", detail);
+        assertEquals("status=ROUTE_MISMATCH;phase=bootstrap_send;expected=general_conversation;actual=other;conversation_match=0", detail);
         assertFalse(detail.contains("chatgpt.com"));
         assertFalse(detail.contains("conversation123"));
     }

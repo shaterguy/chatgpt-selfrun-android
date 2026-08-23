@@ -31,6 +31,8 @@ public final class ContinuationDiagnosticsPolicyTest {
                         SelfRunContinuationDom.UNKNOWN));
         assertEquals("status=CALLBACK_TIMEOUT;phase=send_continue;reason=evaluate_javascript",
                 SelfRunWebDiagnostics.callbackTimeoutDetail(SelfRunStore.PHASE_SEND_CONTINUE));
+        assertEquals("status=CALLBACK_TIMEOUT;phase=bootstrap_send;reason=evaluate_javascript",
+                SelfRunWebDiagnostics.callbackTimeoutDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND));
     }
 
     private static String source(String name) throws Exception {
