@@ -81,7 +81,8 @@ final class SelfRunProtocol {
     static String driveContinuation(String runId, String nextInput) {
         if (TURN_INFO_REWRITE_GATE.consume(runId)) return turnInfoRewrite(runId);
         String base = "[" + kstTimestamp(new Date()) + "] " + continuation(runId);
-        return nextInput == null || nextInput.isEmpty() ? base : base + "\n" + nextInput;
+        String merged = UserNextInputStore.merge(runId, nextInput);
+        return merged.isEmpty() ? base : base + "\n" + merged;
     }
 
     static String driveRecoveryContinuation(String runId, String recoveryId) {
