@@ -24,7 +24,7 @@ final class UserNextInputStore {
         ensureInitialized();
         if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return "";
         int currentTurn = runPrefs.getInt("turn", 0);
-        if (prefs.getInt(TARGET_TURN, -1) != currentTurn + 1) return "";
+        if (!appliesToNextTurn(prefs.getInt(TARGET_TURN, -1), currentTurn)) return "";
         return safe(prefs.getString(TEXT, ""));
     }
 
@@ -55,8 +55,16 @@ final class UserNextInputStore {
     }
 
     static synchronized String merge(String runId, String driveNextInput) {
+        return mergeText(driveNextInput, current(runId));
+    }
+
+    static boolean appliesToNextTurn(int targetTurn, int currentTurn) {
+        return targetTurn == currentTurn + 1;
+    }
+
+    static String mergeText(String driveNextInput, String userInput) {
         String drive = safe(driveNextInput);
-        String user = current(runId);
+        String user = safe(userInput);
         if (drive.isEmpty()) return user;
         if (user.isEmpty()) return drive;
         return drive + "\n\n" + user;
