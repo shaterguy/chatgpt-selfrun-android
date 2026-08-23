@@ -93,12 +93,27 @@ public class WebUiCalibrationBackupPolicyTest {
         }
 
         @Override public Map<String, ?> getAll() { return new HashMap<>(values); }
-        @Override public String getString(String key, String defValue) { Object value = values.get(key); return value instanceof String ? (String) value : defValue; }
-        @SuppressWarnings("unchecked") @Override public Set<String> getStringSet(String key, Set<String> defValues) { Object value = values.get(key); return value instanceof Set ? new HashSet<>((Set<String>) value) : defValues; }
-        @Override public int getInt(String key, int defValue) { Object value = values.get(key); return value instanceof Integer ? (Integer) value : defValue; }
-        @Override public long getLong(String key, long defValue) { Object value = values.get(key); return value instanceof Long ? (Long) value : defValue; }
-        @Override public float getFloat(String key, float defValue) { Object value = values.get(key); return value instanceof Float ? (Float) value : defValue; }
-        @Override public boolean getBoolean(String key, boolean defValue) { Object value = values.get(key); return value instanceof Boolean ? (Boolean) value : defValue; }
+        @Override public String getString(String key, String defValue) {
+            Object value = values.get(key);
+            return value instanceof String ? (String) value : defValue;
+        }
+        @SuppressWarnings("unchecked")
+        @Override public Set<String> getStringSet(String key, Set<String> defValues) {
+            Object value = values.get(key);
+            return value instanceof Set ? new HashSet<>((Set<String>) value) : defValues;
+        }
+        @Override public int getInt(String key, int defValue) {
+            Object value = values.get(key); return value instanceof Integer ? (Integer) value : defValue;
+        }
+        @Override public long getLong(String key, long defValue) {
+            Object value = values.get(key); return value instanceof Long ? (Long) value : defValue;
+        }
+        @Override public float getFloat(String key, float defValue) {
+            Object value = values.get(key); return value instanceof Float ? (Float) value : defValue;
+        }
+        @Override public boolean getBoolean(String key, boolean defValue) {
+            Object value = values.get(key); return value instanceof Boolean ? (Boolean) value : defValue;
+        }
         @Override public boolean contains(String key) { return values.containsKey(key); }
         @Override public Editor edit() { return new MemoryEditor(); }
         @Override public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener listener) { }
@@ -117,13 +132,38 @@ public class WebUiCalibrationBackupPolicyTest {
             @Override public Editor putBoolean(String key, boolean value) { pending.put(key, value); removals.remove(key); return this; }
             @Override public Editor remove(String key) { removals.add(key); pending.remove(key); return this; }
             @Override public Editor clear() { clear = true; pending.clear(); removals.clear(); return this; }
-            @Override public boolean commit() { applyChanges(); commitCount++; return commitCount > 1; }
+            @Override public boolean commit() {
+                applyChanges();
+                commitCount++;
+                return commitCount > 1;
+            }
             @Override public void apply() { applyChanges(); }
-            private void applyChanges() { if (clear) values.clear(); for (String key : removals) values.remove(key); for (Map.Entry<String, Object> entry : pending.entrySet()) { if (entry.getValue() == null) values.remove(entry.getKey()); else values.put(entry.getKey(), entry.getValue()); } }
+
+            private void applyChanges() {
+                if (clear) values.clear();
+                for (String key : removals) values.remove(key);
+                for (Map.Entry<String, Object> entry : pending.entrySet()) {
+                    if (entry.getValue() == null) values.remove(entry.getKey());
+                    else values.put(entry.getKey(), entry.getValue());
+                }
+            }
         }
     }
 
-    private static String section(String value, String start, String end) { int a = value.indexOf(start), b = value.indexOf(end, a); assertTrue(a >= 0 && b > a); return value.substring(a, b); }
-    private static String src(String file) throws Exception { return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file, "src/main/java/com/shaterguy/chatgptselfrun/" + file); }
-    private static String read(String first, String fallback) throws Exception { Path path = Paths.get(first); if (!Files.exists(path)) path = Paths.get(fallback); return new String(Files.readAllBytes(path), StandardCharsets.UTF_8); }
+    private static String section(String value, String start, String end) {
+        int a = value.indexOf(start), b = value.indexOf(end, a);
+        assertTrue(a >= 0 && b > a);
+        return value.substring(a, b);
+    }
+
+    private static String src(String file) throws Exception {
+        return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
+                "src/main/java/com/shaterguy/chatgptselfrun/" + file);
+    }
+
+    private static String read(String first, String fallback) throws Exception {
+        Path path = Paths.get(first);
+        if (!Files.exists(path)) path = Paths.get(fallback);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
 }
