@@ -37,6 +37,15 @@ public final class BootstrapSendFallbackPolicyTest {
         assertTrue(click.contains("writeMarker({state:'prepared',at:Date.now()})"));
     }
 
+    @Test public void stopDetectionIsScopedToTheActiveComposer() {
+        String prepare = SelfRunContinuationDom.prepareBootstrap(
+                "https://chatgpt.com/", "private bootstrap text", "marker-scope");
+
+        assertTrue(prepare.contains("const inComposer=e=>"));
+        assertTrue(prepare.contains("if(!buttonLike(e)||!inComposer(e))return false"));
+        assertTrue(prepare.contains("const stop=controls.find(isStop)"));
+    }
+
     @Test public void diagnosticsNeverIncludePromptMaterial() {
         String detail = SelfRunWebDiagnostics.waitDetail(
                 SelfRunStore.PHASE_BOOTSTRAP_SEND, "COMPOSER_INPUTTING",

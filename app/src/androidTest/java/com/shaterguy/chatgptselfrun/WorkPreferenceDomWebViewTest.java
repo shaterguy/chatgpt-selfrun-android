@@ -101,22 +101,34 @@ public final class WorkPreferenceDomWebViewTest {
         assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING).getString("aria"));
     }
 
-    @Test public void continuationClassifierPrioritizesAStopOutsideTheComposerForm() throws Exception {
+    @Test public void continuationClassifierIgnoresAStopOutsideTheComposerForm() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadContinuationFixture(scenario, web, "<div id='stop' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
 
             JSONObject prepare = evaluate(scenario, web,
-                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-before-input-probe"));
-            assertEquals(SelfRunContinuationDom.STOP, prepare.getString("status"));
-            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
+                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe"));
+            assertEquals("READY_TO_SUBMIT", prepare.getString("status"));
+            assertEquals(CONTINUE_PROMPT, read(scenario, web, "document.getElementById('prompt-textarea').value"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
 
-            evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:stop-probe':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
             JSONObject click = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe",
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe",
                             OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
-            assertEquals(SelfRunContinuationDom.STOP, click.getString("status"));
+            assertEquals("CONTINUE_CLICKED", click.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
+        }
+    }
+
+    @Test public void continuationClassifierStillBlocksAStopInsideTheComposerForm() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadContinuationFixture(scenario, web, "<div id='stop' data-selfrun-scope='composer' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
+
+            JSONObject prepare = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "composer-stop-probe"));
+            assertEquals(SelfRunContinuationDom.STOP, prepare.getString("status"));
+            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
         }
     }
@@ -468,12 +480,16 @@ public final class WorkPreferenceDomWebViewTest {
 }
 
     private static String continuationFixture(String controls) {
-        String formControls = controls.contains("stop-stream-action")
-                ? "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>"
-                : controls;
+        boolean composerScopedStop = controls.contains("data-selfrun-scope='composer'");
+        String formControls = composerScopedStop
+                ? controls
+                : controls.contains("stop-stream-action")
+                        ? "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>"
+                        : controls;
+        String outsideControls = composerScopedStop ? "" : controls;
         return "<!doctype html><html><head><style>body{margin:20px}button,[role=button]{display:block;margin:8px}</style></head>"
                 + "<body><main><div id='composer-shell'><form><textarea id='prompt-textarea'></textarea>"
-                + formControls + "</form><div id='continuation-controls'>" + controls + "</div></div></main>"
+                + formControls + "</form><div id='continuation-controls'>" + outsideControls + "</div></div></main>"
                 + "<script>window.stopClicks=0;document.querySelector('form')?.addEventListener('submit',event=>event.preventDefault());const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
                 + "</body></html>";
     }
