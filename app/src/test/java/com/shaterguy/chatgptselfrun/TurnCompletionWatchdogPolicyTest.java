@@ -47,7 +47,7 @@ public final class TurnCompletionWatchdogPolicyTest {
                 "private static String completionObserver", "private static String conversationGuard");
         String service = source("SelfRunService.java");
 
-        assertEquals(2_000L, SelfRunService.TURN_OBSERVER_HEALTHCHECK_MS);
+        assertEquals(15_000L, SelfRunService.TURN_OBSERVER_HEALTHCHECK_MS);
         assertTrue(observer.contains("state.root!==observeRoot"));
         assertTrue(observer.contains("state.composer!==composer"));
         assertTrue(observer.contains("!state.root?.isConnected"));
@@ -59,7 +59,10 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertTrue(observer.contains("if(bindingChanged)cancelTimer()"));
         assertFalse(observer.contains("if(bindingChanged)resetIdle()"));
         assertTrue(service.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS)"));
-        assertTrue(service.contains("result=armed;detail="));
+        assertTrue(service.contains("boolean firstArm="));
+        assertTrue(service.contains("boolean rebound=detail.contains(\"bindingChanged=1\")"));
+        assertTrue(service.contains("if(firstArm||rebound)"));
+        assertTrue(service.contains("rebound&&!firstArm?\"rebound\":\"armed\""));
         assertFalse(observer.contains("location.reload"));
         assertFalse(observer.contains("location.assign"));
         assertFalse(observer.contains("history.go"));
