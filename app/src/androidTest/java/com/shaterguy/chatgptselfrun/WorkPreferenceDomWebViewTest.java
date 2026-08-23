@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
 
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -25,6 +26,9 @@ public final class WorkPreferenceDomWebViewTest {
     private static final String PROJECT_URL = "https://chatgpt.com/g/g-p-test";
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
     private static final String CONTINUE_PROMPT = "SELF_RUN_CONTINUE_PROBE";
+    private static final String OBSERVER_RUN_ID = "SR-WEBVIEW-TEST";
+    private static final String OBSERVER_TOKEN = "observer-token";
+    private static final long OBSERVER_STABILITY_MS = 5_000L;
 
     @Test public void modelSelectorCompletesForClickPointerAndMouseTriggersUsingLunaProfile() throws Exception {
         assertSelection("", "click", false);
@@ -98,24 +102,39 @@ public final class WorkPreferenceDomWebViewTest {
         assertEquals("legacy-reasoning", targets.getJSONObject(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING).getString("aria"));
     }
 
-    @Test public void continuationClassifierPrioritizesAStopOutsideTheComposerForm() throws Exception {
+    @Test public void continuationClassifierIgnoresAStopOutsideTheComposerForm() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadContinuationFixture(scenario, web, "<div id='stop' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
 
-            JSONObject state = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
-            assertEquals(SelfRunContinuationDom.STOP, state.getString("status"));
-
-            JSONObject prepare = evaluate(scenario, web,
-                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-before-input-probe"));
-            assertEquals(SelfRunContinuationDom.STOP, prepare.getString("status"));
-            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
+            JSONObject prepare = null;
+            for (int attempt = 0; attempt < 8; attempt++) {
+                prepare = evaluate(scenario, web,
+                        SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe"));
+                if ("READY_TO_SUBMIT".equals(prepare.getString("status"))) break;
+            }
+            assertNotNull(prepare);
+            assertEquals("READY_TO_SUBMIT", prepare.getString("status"));
+            assertEquals(CONTINUE_PROMPT, read(scenario, web, "document.getElementById('prompt-textarea').value"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
 
-            evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:stop-probe':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='" + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
             JSONObject click = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "stop-probe"));
-            assertEquals(SelfRunContinuationDom.STOP, click.getString("status"));
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe",
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+            assertEquals("CONTINUE_CLICKED", click.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
+        }
+    }
+
+    @Test public void continuationClassifierStillBlocksAStopInsideTheComposerForm() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadContinuationFixture(scenario, web, "<div id='stop' data-selfrun-scope='composer' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
+
+            JSONObject prepare = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "composer-stop-probe"));
+            assertEquals(SelfRunContinuationDom.STOP, prepare.getString("status"));
+            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
         }
     }
@@ -129,13 +148,78 @@ public final class WorkPreferenceDomWebViewTest {
                 SelfRunContinuationDom.COMPOSER_IDLE);
     }
 
+    @Test public void turnObserverRebindsInPlaceAfterComposerDomReplacement() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadContinuationFixture(scenario, web,
+                    "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>");
+
+            JSONObject armed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+            evaluate(scenario, web, "(()=>{window.fixtureOldObserverRoot=window.__selfRunDriveTurnObserver.root;"
+                    + "document.querySelector('main').innerHTML=\"<div id='replacement-shell'><form><textarea id='prompt-textarea'></textarea><button type='submit' data-testid='send-button' aria-label='Send'>Send</button></form></div>\";"
+                    + "return JSON.stringify({status:'REPLACED'});})()");
+
+            JSONObject rebound = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, false));
+            assertEquals("OBSERVER_ARMED", rebound.getString("status"));
+            assertTrue(rebound.getString("detail").contains("bindingChanged=1"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver.root===document.getElementById('replacement-shell'))"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver.root!==window.fixtureOldObserverRoot)"));
+            assertEquals("false", read(scenario, web, "String(window.fixtureOldObserverRoot.isConnected)"));
+            assertEquals(CONVERSATION_URL, read(scenario, web, "location.href"));
+        }
+    }
+
+    @Test public void turnObserverRebindPreservesCumulativeIdleAgeInCurrentDocument() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrl = new AtomicReference<>();
+            CountDownLatch callbackSeen = new CountDownLatch(1);
+            loadContinuationFixture(scenario, web,
+                    "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>",
+                    callbackUrl, callbackSeen);
+
+            JSONObject armed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, true));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+            evaluate(scenario, web, "(()=>{const state=window.__selfRunDriveTurnObserver;window.fixtureIdleSince=Date.now()-3000;state.idleSince=window.fixtureIdleSince;"
+                    + "document.querySelector('main').innerHTML=\"<div id='replacement-shell'><form><textarea id='prompt-textarea'></textarea><button type='submit' data-testid='send-button' aria-label='Send'>Send</button></form></div>\";"
+                    + "return JSON.stringify({status:'REPLACED'});})()");
+
+            JSONObject rebound = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, true));
+            assertEquals("OBSERVER_ARMED", rebound.getString("status"));
+            assertTrue(rebound.getString("detail").contains("bindingChanged=1"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver.idleSince===window.fixtureIdleSince)"));
+
+            evaluate(scenario, web, "(()=>{window.__selfRunDriveTurnObserver.idleSince=Date.now()-6000;"
+                    + "return JSON.stringify({status:'AGED'});})()");
+            JSONObject completed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, true));
+            assertEquals("OBSERVER_ARMED", completed.getString("status"));
+            assertTrue("Cumulative idle healthcheck did not emit completion callback",
+                    callbackSeen.await(5, TimeUnit.SECONDS));
+            assertTrue(callbackUrl.get().startsWith("selfrun-drive://turn-completed"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver===null)"));
+            assertEquals(CONVERSATION_URL, read(scenario, web, "location.href"));
+        }
+    }
+
     @Test public void voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadVoiceIdleFixture(scenario, web, CONVERSATION_URL);
-
-            JSONObject idle = evaluate(scenario, web, SelfRunContinuationDom.buttonState(CONVERSATION_URL));
-            assertEquals(SelfRunContinuationDom.COMPOSER_IDLE, idle.getString("status"));
 
             JSONObject prepared = null;
             for (int attempt = 0; attempt < 8; attempt++) {
@@ -148,7 +232,8 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
 
             JSONObject clicked = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe"));
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe",
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
             assertEquals("CONTINUE_CLICKED", clicked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
             assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
@@ -171,7 +256,8 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
 
             JSONObject clicked = evaluate(scenario, web,
-                    SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
+                    SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe",
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
             assertEquals("BOOTSTRAP_CLICKED", clicked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
             assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
@@ -181,9 +267,24 @@ public final class WorkPreferenceDomWebViewTest {
     private static void assertContinuationState(String controls, String expected) throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
+            String markerId = "classifier-" + expected.toLowerCase();
             loadContinuationFixture(scenario, web, controls);
-            assertEquals(expected, evaluate(scenario, web,
-                    SelfRunContinuationDom.buttonState(CONVERSATION_URL)).getString("status"));
+            evaluate(scenario, web, "(()=>{window.__selfRunDriveMarkers={'selfrun-drive:verified-continuation:"
+                    + markerId + "':JSON.stringify({state:'prepared'})};document.getElementById('prompt-textarea').value='"
+                    + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
+            JSONObject result = evaluate(scenario, web,
+                    SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, markerId,
+                            OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+            boolean formFallback = SelfRunContinuationDom.COMPOSER_IDLE.equals(expected);
+            String expectedResult = SelfRunContinuationDom.SEND_ENABLED.equals(expected) || formFallback
+                    ? "CONTINUE_CLICKED" : expected;
+            assertEquals(expectedResult, result.getString("status"));
+            if (formFallback) {
+                assertTrue(result.getString("detail").contains("submit=form_request_submit"));
+                assertEquals("clicked", read(scenario, web,
+                        "JSON.parse(window.__selfRunDriveMarkers['selfrun-drive:verified-continuation:"
+                                + markerId + "']).state"));
+            }
         }
     }
 
@@ -299,6 +400,12 @@ public final class WorkPreferenceDomWebViewTest {
 
     private static void loadContinuationFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
                                                 String controls) throws Exception {
+        loadContinuationFixture(scenario, web, controls, null, null);
+    }
+
+    private static void loadContinuationFixture(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
+                                                String controls, AtomicReference<String> callbackUrl,
+                                                CountDownLatch callbackSeen) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
@@ -306,6 +413,13 @@ public final class WorkPreferenceDomWebViewTest {
             view.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView ignored, String url) {
                     if (CONVERSATION_URL.equals(url)) loaded.countDown();
+                }
+                @Override public boolean shouldOverrideUrlLoading(WebView ignored, WebResourceRequest request) {
+                    String requested = String.valueOf(request.getUrl());
+                    if (!requested.startsWith("selfrun-drive://")) return false;
+                    if (callbackUrl != null) callbackUrl.set(requested);
+                    if (callbackSeen != null) callbackSeen.countDown();
+                    return true;
                 }
             });
             activity.setContentView(view);
@@ -453,13 +567,17 @@ public final class WorkPreferenceDomWebViewTest {
 }
 
     private static String continuationFixture(String controls) {
-        String formControls = controls.contains("stop-stream-action")
-                ? "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>"
-                : controls;
+        boolean composerScopedStop = controls.contains("data-selfrun-scope='composer'");
+        String formControls = composerScopedStop
+                ? controls
+                : controls.contains("stop-stream-action")
+                        ? "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>"
+                        : controls;
+        String outsideControls = composerScopedStop ? "" : controls;
         return "<!doctype html><html><head><style>body{margin:20px}button,[role=button]{display:block;margin:8px}</style></head>"
                 + "<body><main><div id='composer-shell'><form><textarea id='prompt-textarea'></textarea>"
-                + formControls + "</form><div id='continuation-controls'>" + controls + "</div></div></main>"
-                + "<script>window.stopClicks=0;const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
+                + formControls + "</form><div id='continuation-controls'>" + outsideControls + "</div></div></main>"
+                + "<script>window.stopClicks=0;document.querySelector('form')?.addEventListener('submit',event=>event.preventDefault());const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
                 + "</body></html>";
     }
 

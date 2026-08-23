@@ -36,9 +36,13 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("strategy:'advanced-menu'"));
         assertTrue(script.contains("open-reasoning-sheet"));
         assertTrue(script.contains("open-advanced-control"));
+        assertTrue(script.contains("__sroShowAdvancedLabel"));
+        assertTrue(script.contains("close-current-match"));
         assertTrue(script.contains("open-reasoning-menu"));
         assertTrue(script.contains("nested-option-click"));
         assertTrue(script.contains("direct-option-click"));
+        assertTrue(script.contains("data-animated-slider-trigger"));
+        assertTrue(script.contains("__sroMouse(element,'pointerdown'"));
         assertTrue(script.contains("sliderObserved"));
         assertTrue(script.contains("CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"));
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
@@ -74,7 +78,7 @@ public final class ChatReasoningPolicyTest {
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
         assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
-        assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_APPLY_PREFS:SelfRunStore.PHASE_SEND_CONTINUE"));
+        assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND"));
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
         assertTrue(mode.contains("modeTimeoutMs=20000"));

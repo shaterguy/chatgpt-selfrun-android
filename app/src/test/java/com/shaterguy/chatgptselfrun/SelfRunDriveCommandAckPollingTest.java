@@ -9,61 +9,47 @@ import java.nio.file.Paths;
 
 import static org.junit.Assert.*;
 
-public class SelfRunDriveCommandAckPollingTest {
-    @Test public void bootstrapSubmissionWaitsForDriveResultsNotCommandReceived() throws Exception {
-        String service = src("SelfRunService.java");
-        String store = src("SelfRunStore.java");
-        String submitted = between(service, "private void bootstrapSubmitted", "private String commandPrompt");
-
-        assertTrue(submitted.contains("store.bootstrapSubmissionConfirmed()"));
+public final class SelfRunDriveCommandAckPollingTest {
+    @Test public void bootstrapSubmissionStartsDomCompletionObservation() throws Exception {
+        String service = source("SelfRunService.java");
+        String store = source("SelfRunStore.java");
+        String submitted = section(service, "private void bootstrapSubmitted", "private String commandPrompt");
+        assertTrue(submitted.contains("store.bootstrapSubmissionConfirmed(token)"));
+        assertTrue(store.contains("void bootstrapSubmissionConfirmed(String observerToken)"));
+        assertTrue(store.contains("첫 요청 제출 확인 · 답변 완료 감지 중"));
+        assertFalse(submitted.contains("authorizeAndRunDrive"));
         assertFalse(submitted.contains("command_received_ack"));
-        assertTrue(store.contains("void bootstrapSubmissionConfirmed"));
-        assertTrue(store.contains("첫 요청 제출 확인 · Drive 턴 결과 신호 대기"));
-        assertFalse(service.contains("BOOTSTRAP_COMMAND_ACK_RETRY_MS"));
-        assertFalse(service.contains("prepareCommandRetry"));
     }
 
-    @Test public void installedDev5AckWaitIsMigratedWithoutResubmitting() throws Exception {
-        String store = src("SelfRunStore.java");
-        String migration = between(store, "void migrateLegacyBootstrapAckWait", "void migrateLegacyDriveCommitGuard");
-        assertTrue(migration.contains("RETRY_BOOTSTRAP"));
-        assertTrue(migration.contains("PHASE_WAIT_DRIVE_COMMIT"));
-        assertTrue(migration.contains("clearCommandWait"));
-        assertTrue(migration.contains("업데이트된 bootstrap · Drive 턴 결과 신호 대기"));
+    @Test public void legacyDriveWaitMigratesToObserverWaitWithoutResubmitting() throws Exception {
+        String store = source("SelfRunStore.java");
+        String migration = section(store, "private void migrateLegacyTurnCompletionFlow", "private void migrateRetiredSignalDisplay");
+        assertTrue(migration.contains("LEGACY_PHASE_WAIT_DRIVE_COMMIT"));
+        assertTrue(migration.contains("PHASE_WAIT_INTERNAL_SEND"));
+        assertTrue(migration.contains("PHASE_WAIT_TURN_COMPLETION"));
         assertFalse(migration.contains("PHASE_BOOTSTRAP_SEND"));
     }
 
-    @Test public void pollingNeverSchedulesFiveMinuteAckRetry() throws Exception {
-        String service = src("SelfRunService.java");
-        String poll = between(service, "private void pollDriveNow", "private void replayTerminalSideEffect");
-        assertTrue(poll.contains("drive.readDocumentSnapshot(accessToken,snapshot.turnDocumentId)"));
-        assertFalse(poll.contains("submissionRetryDue"));
-        assertFalse(poll.contains("prepareCommandRetry"));
-        assertTrue(service.contains("private static final long NORMAL_POLL_MS = 60_000L"));
+    @Test public void normalCompletionHasNoDriveOrButtonPollingClock() throws Exception {
+        String service = source("SelfRunService.java");
+        assertFalse(service.contains("NORMAL_POLL_MS"));
+        assertFalse(service.contains("scheduleDrivePoll"));
+        assertFalse(service.contains("SelfRunContinuationDom.buttonState("));
+        assertTrue(service.contains("POST_DOM_DRIVE_RETRY_MS = 5_000L"));
+        assertTrue(service.contains("POST_DOM_DRIVE_MAX_WAIT_MS = 5 * 60_000L"));
     }
 
-    @Test public void retiredAckDisplayMigrationClearsOnlyPresentationState() throws Exception {
-        String store = src("SelfRunStore.java");
-        String migration = between(store, "private void migrateRetiredSignalDisplay", "private static void putLatest");
-        assertTrue(migration.contains("lastDriveSignalType()"));
-        assertTrue(migration.contains("lastDriveSignalRaw"));
-        assertTrue(migration.contains("lastDriveSignalTimestamp"));
-        assertTrue(migration.contains("lastDriveSignalType"));
-        assertTrue(migration.contains("Drive 턴 결과 신호 대기"));
-        assertFalse(migration.contains("driveSignalCursor"));
-        assertFalse(migration.contains("putString(\"phase\""));
-    }
-
-    private static String src(String file) throws Exception {
-        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
-        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
+    private static String source(String name) throws Exception {
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
-    private static String between(String source, String start, String end) {
-        int from = source.indexOf(start);
-        int to = source.indexOf(end, from);
-        assertTrue(from >= 0 && to > from);
-        return source.substring(from, to);
+    private static String section(String text, String start, String end) {
+        int a = text.indexOf(start);
+        int b = text.indexOf(end, a + start.length());
+        assertTrue("missing start: " + start, a >= 0);
+        assertTrue("missing end: " + end, b > a);
+        return text.substring(a, b);
     }
 }

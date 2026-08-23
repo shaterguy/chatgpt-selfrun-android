@@ -42,11 +42,11 @@ Drive 작업문서는 append-only 실행 채널입니다. 활성 제어신호는
 
 ## Android 진행 기준
 
-앱은 명령 클릭 직후 STOP 전환 또는 새 user message와 composer 비움으로 실제 제출을 확인한 뒤 Drive polling으로 복귀합니다. 마지막으로 소비한 실제 SelfRun signal의 cursor를 영속하고 이후 추가된 signal만 새 이벤트로 처리합니다. `modifiedTime`은 읽기 최적화 힌트일 뿐 상태신호가 아닙니다.
+앱은 composer의 정확한 전문 readback과 활성 SEND를 확인한 뒤 명령을 클릭합니다. 제출 클릭과 같은 JavaScript 실행에서 STOP/SEND 영역에 `MutationObserver`를 설치하고, 클릭 결과를 곧바로 완료 관찰 상태로 전이합니다. 전송 이후 별도 STOP/SEND polling으로 제출을 재확인하지 않습니다. STOP을 처음 관찰하면 현재 run/token 범위의 내구 증거를 기록합니다. 그 증거가 있는 경우에만 WebView·renderer 복구 뒤의 idle baseline을 허용합니다. STOP을 본 뒤 완료 상태가 나타나면 5초를 기다리고 버튼 상태를 한 번 더 확인하며, 여전히 완료 상태일 때만 native 완료 콜백을 보냅니다. STOP이 돌아오면 타이머를 취소하고 관찰을 계속합니다.
 
-제출 성공은 내부 WebView DOM으로 확정하며 Drive의 별도 수신확인 신호를 기다리거나 재제출 게이트로 사용하지 않습니다. 과거 실행문서에 남은 폐기 신호는 상태 이벤트로 내보내지 않고 기존 cursor 호환성만 유지합니다.
+native 완료 콜백 직후 Drive 작업문서를 즉시 한 번 읽습니다. 마지막으로 소비한 실제 SelfRun signal의 cursor 이후 `TURN_COMPLETED`가 있으면 `NEXT_INPUT`과 Work profile을 적용합니다. 없으면 5초 간격으로 최대 5분 재확인하고, 제한시간이 지나면 현재 영속 모델·추론 설정을 유지한 plain CONTINUE로 다음 턴을 진행합니다. `modifiedTime`은 읽기 최적화 힌트일 뿐 상태신호가 아닙니다.
 
-TURN_COMPLETED를 소비하면 고정 guard 없이 같은 WebView의 버튼 상태를 반복 확인합니다. STOP이면 대기하고, SEND 버튼이 존재하는 idle 상태는 composer가 비어 있어 비활성인 경우까지 포함하여 CONTINUE 입력을 시작합니다. 입력 전문 readback 뒤 SEND가 활성화된 경우에만 클릭합니다.
+제출 성공과 답변 완료는 내부 WebView DOM으로 확정하며 Drive의 별도 수신확인 신호를 기다리거나 재제출 게이트로 사용하지 않습니다. STOP/SEND 완료 판정에 짧은 주기의 반복 polling을 사용하지 않습니다. 과거 실행문서에 남은 폐기 신호는 상태 이벤트로 내보내지 않고 기존 cursor 호환성만 유지합니다. 입력 전문 readback 뒤 SEND가 활성화된 경우에만 다음 프롬프트를 클릭합니다.
 
 ## Runs folder binding
 
@@ -56,9 +56,9 @@ OAuth scope는 `https://www.googleapis.com/auth/drive.file` 하나를 유지합�
 
 ## WebView 책임
 
-Drive V1의 WebView 책임은 assistant 완료 감시가 아니라 canonical conversation의 composer 제어권 확보와 명령 제출입니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
+Drive V1의 WebView 책임은 canonical conversation의 composer 제어권 확보, 명령 제출, STOP/SEND 영역의 완료 상태 감지입니다. assistant 메시지 본문이나 SELF_RUN 제어문구는 완료 판정에 사용하지 않습니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
 
-WORK 모드에서는 TURN_COMPLETED 뒤 최신 assistant의 SELF_RUN_NEXT를 한 번 best-effort로 읽어 role/model/reasoning을 적용할 수 있습니다. 이 read는 completion 판정이 아니며 읽지 못해도 현재 안전한 설정으로 CONTINUE를 진행합니다.
+WORK 모드의 다음 모델·추론 설정은 DOM에서 assistant 제어문구를 읽어 결정하지 않습니다. 5분 동기화 창 안에 Drive `TURN_COMPLETED`가 있으면 해당 profile을 적용하고, 없으면 현재 영속 설정을 유지합니다.
 
 ## 일시정지와 재개
 

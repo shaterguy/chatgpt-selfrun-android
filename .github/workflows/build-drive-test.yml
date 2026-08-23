@@ -1,4 +1,6 @@
 name: Build SelfRun Drive TEST
+run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
+# Dev11 event-driven completion observer efficiency verification
 
 on:
   push:
@@ -167,6 +169,15 @@ jobs:
         run: |
           set -euo pipefail
           echo 'available=false' >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_NAME" == 'selfrun-drive/v1.4.3-dev1' ]]; then
+            PREV_RUN_ID='32557162906'
+            PREV_ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-test-build" and (.expired | not))][0].id // empty')"
+            [[ -n "$PREV_ARTIFACT_ID" ]] || { echo 'immutable 1.4.2-dev10 TEST artifact unavailable' >&2; exit 1; }
+            echo "run_id=$PREV_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ ! "$GITHUB_REF_NAME" =~ ^(.+)-dev([0-9]+)$ ]]; then
             exit 0
           fi
@@ -327,7 +338,7 @@ jobs:
             bash -o pipefail -c
             'set -euo pipefail;
             gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest;
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest;
             adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
             FORMAL_EXPECTED_VERSION="1.4.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"

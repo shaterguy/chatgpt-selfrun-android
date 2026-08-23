@@ -11,7 +11,7 @@ final class BootstrapModeDom {
                 const forbiddenMode=/new chat|새 채팅|새 대화|new conversation/i;
                 const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
                 const exactText=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();
-                const labelOf=e=>exactText(e?.innerText||'')||exactText(e?.getAttribute?.('aria-label')||'');
+                const labelOf=e=>exactText(e?.getAttribute?.('aria-label')||'')||exactText(e?.innerText||'');
                 const interactiveOwner=e=>e?.closest?.('button,[role="button"],[role="radio"],[role="tab"],input[type="radio"],[aria-checked],[aria-selected],[aria-pressed]')||e||null;
                 const selectedDirect=e=>{
                   if(!e)return false;
@@ -39,10 +39,12 @@ final class BootstrapModeDom {
                 const calibratedRaw=__srFind(calibratedKey);
                 const calibratedTarget=interactiveOwner(calibratedRaw);
                 const heuristicTarget=requestedMode==='work'?workControl:chatControl;
-                const target=calibratedTarget||heuristicTarget;
-                const targetSource=calibratedTarget?'calibrated':'heuristic';
+                const exactToggleValue=requestedMode==='work'?'work':'chatgpt';
+                const exactTarget=interactiveOwner(document.querySelector('[data-tpp-toggle-value="'+exactToggleValue+'"]'));
+                const target=exactTarget||calibratedTarget||heuristicTarget;
+                const targetSource=exactTarget?'tpp-toggle':(calibratedTarget?'calibrated':'heuristic');
                 const targetFound=!!target;
-                const targetSelected=selectedState(calibratedRaw||target);
+                const targetSelected=selectedState(target);
                 const selectedModes=[...new Set(modeControls.filter(selectedState).map(e=>modeOf(labelOf(e))).filter(Boolean))];
                 const currentMode=selectedModes.length===1?selectedModes[0]:(selectedModes.length>1?'ambiguous':'unknown');
                 const modeKey='chatgpt-selfrun:mode:'+modeRunId;
@@ -72,20 +74,31 @@ final class BootstrapModeDom {
                 const modeElapsedMs=Math.max(0,modeNow-Number(modeState.startedAt||modeNow));
                 const recentClick=Number(modeState.lastClickAt)>0&&modeNow-Number(modeState.lastClickAt)<1200;
                 let action='';
+                const dispatchModeMouse=(element,type,buttons)=>{try{return element.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,composed:true,button:0,buttons,view:window}));}catch(_){return false;}};
+                const activateModeTarget=element=>{
+                  if(!element)return;
+                  element.focus?.();
+                  dispatchModeMouse(element,'pointerdown',1);
+                  if(selectedState(element))return;
+                  dispatchModeMouse(element,'mousedown',1);
+                  if(selectedState(element))return;
+                  dispatchModeMouse(element,'pointerup',0);dispatchModeMouse(element,'mouseup',0);
+                  if(!selectedState(element))element.click?.();
+                };
                 const calibratedImplicit=modeState.lastAction==='select-mode-calibrated'&&modeState.requested===requestedMode&&Number(modeState.lastClickAt)>0&&modeNow-Number(modeState.lastClickAt)<5000&&!!composer;
                 const heuristicReadback=targetFound&&targetSelected&&currentMode===requestedMode&&selectedModes.length===1;
                 let modeReadback=modeLatched||calibratedImplicit||(targetSource==='calibrated'?targetSelected:heuristicReadback);
                 if(!modeReadback&&targetFound&&!recentClick&&Number(modeState.clickAttempts)<2){
                   action=targetSource==='calibrated'?'select-mode-calibrated':'select-mode';
                   modeState.clickAttempts=Math.max(0,Number(modeState.clickAttempts)||0)+1;
-                  modeState.lastClickAt=modeNow;modeState.lastAction=action;saveMode();target.focus?.();target.click();modeReadback=false;
+                  modeState.lastClickAt=modeNow;modeState.lastAction=action;saveMode();activateModeTarget(target);modeReadback=false;
                 }
                 if(modeReadback&&!modeLatched){
                   stageState.stage='MODE_CONFIRMED';stageState.confirmedMode=requestedMode;stageState.confirmedAt=modeNow;saveStage();modeLatched=true;
                 }
                 const stageRegressionBlocked=modeLatched&&(currentMode==='unknown'||currentMode==='ambiguous');
                 if(stageRegressionBlocked){stageState.regressionsBlocked=Math.max(0,Number(stageState.regressionsBlocked)||0)+1;saveStage();}
-                const diagnostics={bootstrapStage:stageState.stage,requested:requestedMode,currentMode,confirmedMode:stageState.confirmedMode,modeLatched,stageRegressionBlocked,explicitContradiction,modeCandidates:rawModeControls.length,groupFound:!!modeGroup,targetFound,targetSelected,targetSource,selectedModes,recentClick,action,calibratedImplicit,composer:!!composer,finalReadback:modeReadback,modeAttempts:modeState.attempts,modeClickAttempts:modeState.clickAttempts,modeElapsedMs,modeTimeoutMs};
+                const diagnostics={bootstrapStage:stageState.stage,requested:requestedMode,currentMode,confirmedMode:stageState.confirmedMode,modeLatched,stageRegressionBlocked,explicitContradiction,modeCandidates:rawModeControls.length,groupFound:!!modeGroup,targetFound,targetSelected,targetSource,targetTag:target?.tagName||'',targetRole:target?.getAttribute?.('role')||'',targetToggleValue:target?.getAttribute?.('data-tpp-toggle-value')||'',targetDisabled:!!target?.disabled,targetAriaDisabled:target?.getAttribute?.('aria-disabled')||'',selectedModes,recentClick,action,calibratedImplicit,composer:!!composer,finalReadback:modeReadback,modeAttempts:modeState.attempts,modeClickAttempts:modeState.clickAttempts,modeElapsedMs,modeTimeoutMs};
                 const modeDiag=()=>('stage='+stageState.stage+';requested='+requestedMode+';confirmed='+(stageState.confirmedMode||'none')+';current='+currentMode+';latched='+(modeLatched?1:0)+';blocked='+(stageRegressionBlocked?1:0)+';source='+targetSource+';targetFound='+(targetFound?1:0)+';targetSelected='+(targetSelected?1:0)+';attempt='+(action||'none')+';readback='+(modeReadback?1:0)+';elapsedMs='+modeElapsedMs);
                 if(action)return result('UI_WAIT','모드 전환 반영 대기 · '+modeDiag(),diagnostics);
                 if(!modeReadback){

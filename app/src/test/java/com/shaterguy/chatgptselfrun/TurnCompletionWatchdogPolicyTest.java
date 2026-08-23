@@ -9,65 +9,92 @@ import java.nio.file.Paths;
 
 import static org.junit.Assert.*;
 
+/** Regression policy for MutationObserver-based turn completion. */
 public final class TurnCompletionWatchdogPolicyTest {
-    @Test public void watchdogTriggersOnlyAfterThirtyMinutesOfDriveWait() {
+    @Test public void completedStateMustRemainStableForFiveSeconds() throws Exception {
+        assertEquals(5_000L, SelfRunService.TURN_COMPLETION_STABILITY_MS);
+        String dom = source("SelfRunContinuationDom.java");
+        String observer = section(dom, "private static String completionObserver", "private static String conversationGuard");
+        assertEquals(1, count(observer, "new MutationObserver"));
+        assertEquals(1, count(observer, "setTimeout"));
+        assertEquals(0, count(observer, "setInterval"));
+        assertTrue(observer.contains("const confirmed=controlState()"));
+        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"')"));
+        assertTrue(observer.contains("state.observer?.disconnect()"));
+        assertTrue(observer.contains("location.href=observerCallback"));
+    }
+
+    @Test public void stopReturningDuringStabilityWindowCancelsCompletion() throws Exception {
+        String observer = section(source("SelfRunContinuationDom.java"),
+                "private static String completionObserver", "private static String conversationGuard");
+        assertTrue(observer.contains("const noteStop="));
+        assertTrue(observer.contains("if(current.state==='\" + STOP + \"'){noteStop();return;}"));
+        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"'){noteStop();return;}"));
+        assertTrue(observer.indexOf("const confirmed=controlState()")
+                < observer.indexOf("location.href=observerCallback"));
+    }
+
+    @Test public void observerTargetsStopSendAreaAndNotAssistantMessages() throws Exception {
+        String observer = section(source("SelfRunContinuationDom.java"),
+                "private static String completionObserver", "private static String conversationGuard");
+        assertTrue(observer.contains("composerRoot?.parentElement"));
+        assertTrue(observer.contains("childList:true,subtree:true,attributes:true"));
+        assertFalse(observer.contains("assistant"));
+    }
+
+    @Test public void observerRebindsInPlaceAndNativeHealthcheckDoesNotReloadChat() throws Exception {
+        String observer = section(source("SelfRunContinuationDom.java"),
+                "private static String completionObserver", "private static String conversationGuard");
+        String service = source("SelfRunService.java");
+
+        assertEquals(15_000L, SelfRunService.TURN_OBSERVER_HEALTHCHECK_MS);
+        assertTrue(observer.contains("state.root!==observeRoot"));
+        assertTrue(observer.contains("state.composer!==composer"));
+        assertTrue(observer.contains("!state.root?.isConnected"));
+        assertTrue(observer.contains("!state.composer?.isConnected"));
+        assertTrue(observer.contains("state.observer?.disconnect()"));
+        assertTrue(observer.contains("state.observer=new MutationObserver(evaluate)"));
+        assertTrue(observer.contains("idleSince:0"));
+        assertTrue(observer.contains("Date.now()-state.idleSince"));
+        assertTrue(observer.contains("if(bindingChanged)cancelTimer()"));
+        assertFalse(observer.contains("if(bindingChanged)resetIdle()"));
+        assertTrue(service.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS)"));
+        assertTrue(service.contains("boolean firstArm="));
+        assertTrue(service.contains("boolean rebound=detail.contains(\"bindingChanged=1\")"));
+        assertTrue(service.contains("if(firstArm||rebound)"));
+        assertTrue(service.contains("rebound&&!firstArm?\"rebound\":\"armed\""));
+        assertFalse(observer.contains("location.reload"));
+        assertFalse(observer.contains("location.assign"));
+        assertFalse(observer.contains("history.go"));
+        assertFalse(observer.contains("window.open"));
+    }
+
+    @Test public void composerRebindMustPreserveTheCumulativeIdleWindow() throws Exception {
+        String observer = section(source("SelfRunContinuationDom.java"),
+                "private static String completionObserver", "private static String conversationGuard");
+
+        assertTrue(observer.contains("const resetIdle=()=>{state.idleSince=0;cancelTimer();}"));
+        assertTrue(observer.contains("if(!state.idleSince)state.idleSince=Date.now()"));
+        assertTrue(observer.contains("observerStableMs-(Date.now()-state.idleSince)"));
+        assertTrue(observer.contains("if(Date.now()-state.idleSince>=observerStableMs)fireStable()"));
+        assertTrue(observer.contains(";idleMs='+idleMs"));
+    }
+
+    @Test public void fiveMinutePostDomDriveWindowHasExactBoundary() {
         long start = 1_000_000L;
-        assertFalse(SelfRunService.turnCompletionWatchdogDue(
-                SelfRunStore.PHASE_WAIT_DRIVE_COMMIT, start,
-                start + SelfRunService.TURN_COMPLETION_WATCHDOG_MS - 1L));
-        assertTrue(SelfRunService.turnCompletionWatchdogDue(
-                SelfRunStore.PHASE_WAIT_DRIVE_COMMIT, start,
-                start + SelfRunService.TURN_COMPLETION_WATCHDOG_MS));
-        assertFalse(SelfRunService.turnCompletionWatchdogDue(
-                SelfRunStore.PHASE_WAIT_INTERNAL_SEND, start,
-                start + SelfRunService.TURN_COMPLETION_WATCHDOG_MS));
-        assertFalse(SelfRunService.turnCompletionWatchdogDue(
-                SelfRunStore.PHASE_WAIT_DRIVE_COMMIT, 0L, Long.MAX_VALUE));
-        assertFalse(SelfRunService.turnCompletionWatchdogDue(
-                SelfRunStore.PHASE_WAIT_DRIVE_COMMIT, start, start - 1L));
+        assertFalse(SelfRunService.postDomDriveSyncTimedOut(start,
+                start + SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS - 1L));
+        assertTrue(SelfRunService.postDomDriveSyncTimedOut(start,
+                start + SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS));
+        assertFalse(SelfRunService.postDomDriveSyncTimedOut(0L, Long.MAX_VALUE));
+        assertEquals(5_000L, SelfRunService.POST_DOM_DRIVE_RETRY_MS);
+        assertEquals(5 * 60_000L, SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS);
     }
 
-    @Test public void onlyKnownNonStopComposerStatesMayStartRecovery() {
-        assertTrue(SelfRunService.watchdogCanRecoverFromButton(SelfRunContinuationDom.SEND_ENABLED));
-        assertTrue(SelfRunService.watchdogCanRecoverFromButton(SelfRunContinuationDom.SEND_DISABLED));
-        assertTrue(SelfRunService.watchdogCanRecoverFromButton(SelfRunContinuationDom.COMPOSER_IDLE));
-        assertFalse(SelfRunService.watchdogCanRecoverFromButton(SelfRunContinuationDom.STOP));
-        assertFalse(SelfRunService.watchdogCanRecoverFromButton(SelfRunContinuationDom.UNKNOWN));
-    }
-
-    @Test public void timeoutUsesDriveRecheckBeforeCorrelatedRecoveryContinuation() throws Exception {
-        String service = source("SelfRunService.java");
-        assertTrue(service.contains("PHASE_WATCHDOG_BUTTON"));
-        assertTrue(service.contains("PHASE_WATCHDOG_RECHECK"));
-        assertTrue(service.contains("PHASE_WATCHDOG_SEND_CONTINUE"));
-        assertTrue(service.contains("turnCompletionWatchdogDue(snapshot.phase,store.phaseStartedAt(),System.currentTimeMillis())"));
-        assertTrue(service.contains("transition(PHASE_WATCHDOG_RECHECK"));
-        assertTrue(service.contains("watchdogRecheck=PHASE_WATCHDOG_RECHECK.equals(snapshot.phase)"));
-        assertTrue(service.contains("transition(PHASE_WATCHDOG_SEND_CONTINUE"));
-        assertTrue(service.contains("SelfRunProtocol.driveRecoveryContinuation(store.runId(),SelfRunProtocol.watchdogRecoveryId(store.watchdogClaimAttempt()))"));
-        assertFalse(section(service, "private String continuationPrompt", "private String continuationMarkerId")
-                .contains("?SelfRunProtocol.driveContinuation(store.runId())"));
-    }
-
-    @Test public void stopRestartsThirtyMinuteWindowWithoutComposerMutation() throws Exception {
-        String service = source("SelfRunService.java");
-        String handler = section(service, "private void handleWebResult", "private String driveBootstrap");
-        assertTrue(handler.contains("PHASE_WATCHDOG_BUTTON.equals(phase)"));
-        assertTrue(handler.contains("SelfRunContinuationDom.STOP.equals(status)"));
-        assertTrue(handler.contains("transition(SelfRunStore.PHASE_WAIT_DRIVE_COMMIT"));
-        assertTrue(handler.contains("watchdog_stop_still_generating"));
-        assertTrue(handler.contains("watchdogCanRecoverFromButton(status)"));
-        assertFalse(section(handler, "if(PHASE_WATCHDOG_BUTTON.equals(phase))", "if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)")
-                .contains("clickPreparedDriveTurn"));
-    }
-
-    @Test public void watchdogSendSkipsWorkPreferenceReplay() throws Exception {
-        String service = source("SelfRunService.java");
-        String handler = section(service, "private void handleWebResult", "private String driveBootstrap");
-        String watchdog = section(handler, "if(PHASE_WATCHDOG_BUTTON.equals(phase))", "if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)");
-        assertTrue(watchdog.contains("PHASE_WATCHDOG_RECHECK"));
-        assertFalse(watchdog.contains("PHASE_APPLY_PREFS"));
-        assertFalse(watchdog.contains("PHASE_APPLY_REASONING"));
+    private static int count(String text, String value) {
+        int n = 0, at = 0;
+        while ((at = text.indexOf(value, at)) >= 0) { n++; at += value.length(); }
+        return n;
     }
 
     private static String source(String name) throws Exception {
@@ -79,7 +106,8 @@ public final class TurnCompletionWatchdogPolicyTest {
     private static String section(String text, String start, String end) {
         int a = text.indexOf(start);
         int b = text.indexOf(end, a + start.length());
-        assertTrue(a >= 0 && b > a);
+        assertTrue("missing start: " + start, a >= 0);
+        assertTrue("missing end: " + end, b > a);
         return text.substring(a, b);
     }
 }

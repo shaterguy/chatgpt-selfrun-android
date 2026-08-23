@@ -40,7 +40,7 @@ final class WorkPreferenceDom {
         String body = """
                 const __wpKind=__KIND__,__wpWanted=__WANTED__,__wpPurpose=__PURPOSE__;
                 const __wpText=s=>String(s??'').replace(/\\s+/g,' ').trim().toLowerCase();
-                const __wpLabel=e=>__wpText(e?.innerText||'')||__wpText(e?.getAttribute?.('aria-label')||'');
+                const __wpLabel=e=>__wpText(e?.getAttribute?.('aria-label')||'')||__wpText(e?.innerText||'');
                 const __wpVisible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
                 const __wpParse=source=>{
                   const v=__wpText(source);
@@ -54,9 +54,11 @@ final class WorkPreferenceDom {
                   return'';
                 };
                 const __wpRowLabel=label=>__wpKind==='model'?/^(model|모델)(?:\\s|$)/.test(label):/^(reasoning(?:\\s+(?:level|effort))?|추론(?:\\s*(?:수준|강도|정도)))(?:\\s|$)/.test(label);
+                const __wpShowAdvancedLabel=label=>/^(?:show\\s+advanced(?:\\s+options)?|advanced(?:\\s+options)?|고급(?:\\s+옵션)?(?:\\s+표시)?)(?:\\s|$)/.test(label);
                 const __wpDirect=label=>__wpKind==='model'?/^(?:(?:gpt-?)?5(?:\\.6)?\\s+)?(?:sol|terra|luna)(?:\\s|$)/.test(label):/^(ultra|울트라|very high|extra high|xhigh|매우 높음|maximum|max|최대|medium|중간|light|가벼움|high|높음)(?:\\s|$)/.test(label);
                 const __wpPopupSelector='[role="menu"],[role="listbox"],[role="dialog"],[data-radix-popper-content-wrapper],[data-slot*="popover-content"],[data-slot*="menu-content"]';
                 const __wpOwner=e=>e?.closest?.('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"],[aria-haspopup],[aria-expanded]')||e||null;
+                const __wpActiveView=e=>!!e&&!e.closest?.('[inert],[aria-hidden="true"],[data-active="false"]');
                 const __wpOptionRole=e=>/^(menuitemradio|radio|option|menuitem)$/.test(__wpText(e?.getAttribute?.('role')||''));
                 const __wpInsideChoice=e=>!!e?.closest?.(__wpPopupSelector);
                 const __wpSelected=e=>!!e&&(e.getAttribute?.('aria-checked')==='true'||e.getAttribute?.('aria-pressed')==='true'||e.getAttribute?.('aria-selected')==='true'||/^(checked|selected|active|on)$/.test(__wpText(e.dataset?.state||'')));
@@ -65,10 +67,11 @@ final class WorkPreferenceDom {
                 const __wpForm=__wpInput?.closest?.('form')||null;
                 const __wpNear=e=>{if(!e||!__wpInput)return false;if(__wpForm?.contains?.(e))return true;const a=e.getBoundingClientRect?.(),b=__wpInput.getBoundingClientRect?.();return !!a&&!!b&&a.bottom>=b.top-260&&a.top<=b.bottom+260&&a.right>=b.left-360&&a.left<=b.right+360;};
                 const __wpOpenPopups=[...document.querySelectorAll(__wpPopupSelector)].filter(__wpVisible);
-                const __wpPopupElements=[];for(const popup of __wpOpenPopups)for(const raw of popup.querySelectorAll('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"]')){const owner=__wpOwner(raw);if(owner&&__wpVisible(owner)&&!__wpPopupElements.includes(owner))__wpPopupElements.push(owner);}
+                const __wpPopupElements=[];for(const popup of __wpOpenPopups)for(const raw of popup.querySelectorAll('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"]')){const owner=__wpOwner(raw);if(owner&&__wpVisible(owner)&&__wpActiveView(owner)&&!__wpPopupElements.includes(owner))__wpPopupElements.push(owner);}
                 const __wpOptions=__wpPopupElements.filter(e=>{const label=__wpLabel(e);return !!__wpParse(label)&&(__wpOptionRole(e)?__wpDirect(label):false);});
                 const __wpSemanticOption=__wpOptions.find(e=>__wpParse(__wpLabel(e))===__wpWanted)||null;
                 const __wpLevel=__wpPopupElements.find(e=>__wpRowLabel(__wpLabel(e)))||null;
+                const __wpShowAdvanced=__wpPopupElements.find(e=>__wpShowAdvancedLabel(__wpLabel(e)))||null;
                 const __wpCalibratedRaw=__srFind(__wpPurpose),__wpCalibrated=__wpOwner(__wpCalibratedRaw);
                 const __wpCalibratedLabel=__wpLabel(__wpCalibrated),__wpCalibratedMeaning=__wpParse(__wpCalibratedLabel);
                 const __wpCalibratedOptionValid=!!__wpCalibrated&&__wpOptionRole(__wpCalibrated)&&__wpCalibratedMeaning===__wpWanted;
@@ -76,19 +79,22 @@ final class WorkPreferenceDom {
                 const __wpCalibratedValid=__wpCalibratedOptionValid||__wpCalibratedTriggerValid;
                 const __wpCalibratedOption=__wpCalibratedOptionValid?__wpCalibrated:null;
                 const __wpCalibratedTrigger=__wpCalibratedTriggerValid?__wpCalibrated:null;
+                const __wpAnimatedMark=[...document.querySelectorAll('[data-animated-slider-trigger="true"]')].find(__wpVisible)||null;
+                const __wpAnimatedTrigger=__wpOwner(__wpAnimatedMark);
+                const __wpExactTrigger=__wpAnimatedTrigger&&__wpVisible(__wpAnimatedTrigger)&&__wpNear(__wpAnimatedTrigger)&&__wpMenuTrigger(__wpAnimatedTrigger)&&!!__wpParse(__wpLabel(__wpAnimatedTrigger))?__wpAnimatedTrigger:null;
                 const __wpHeuristicTriggers=[...document.querySelectorAll('button,[role="button"],[aria-haspopup],[aria-expanded]')].filter(__wpVisible).filter(e=>__wpMenuTrigger(e)&&!!__wpParse(__wpLabel(e)));
-                const __wpHeuristicTrigger=__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]||null;
-                const __wpTrigger=__wpCalibratedTrigger||__wpHeuristicTrigger;
-                const __wpSource=__wpCalibratedTrigger?'calibrated-trigger':(__wpHeuristicTrigger?'heuristic-trigger':(__wpCalibratedOption?'calibrated-option':'none'));
+                const __wpHeuristicTrigger=__wpExactTrigger||__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]||null;
+                const __wpTrigger=__wpExactTrigger||__wpCalibratedTrigger||__wpHeuristicTrigger;
+                const __wpSource=__wpExactTrigger?'animated-trigger':(__wpCalibratedTrigger?'calibrated-trigger':(__wpHeuristicTrigger?'heuristic-trigger':(__wpCalibratedOption?'calibrated-option':'none')));
                 const __wpOption=__wpSemanticOption||__wpCalibratedOption;
                 const __wpCurrent=__wpTrigger?__wpParse(__wpLabel(__wpTrigger)):'';
                 const __wpSelectedLevels=[...new Set(__wpOptions.filter(__wpSelected).map(e=>__wpParse(__wpLabel(e))).filter(Boolean))];
                 const __wpWorkFallback=[...document.querySelectorAll('button,[role="button"],[role="radio"],[role="tab"]')].filter(__wpVisible).filter(__wpNear).find(e=>/^(work|작업)(?:\\s|$)/.test(__wpLabel(e)))||__srFind('MODE_WORK');
                 const __wpStateKey='selfrun-drive:work-preference:'+__wpKind+':'+__wpPurpose+':'+location.pathname;
                 const __wpNow=Date.now(),__wpTimeoutMs=20000,__wpRetryMs=3500,__wpMaxAttempts=24;
-                let __wpState={startedAt:0,requested:'',attempts:0,triggerClicks:0,rowClicks:0,optionClicks:0,fallbackClicks:0,closeAttempts:0,pending:false,lastAction:'',lastActionAt:0};
+                let __wpState={startedAt:0,requested:'',attempts:0,triggerClicks:0,advancedClicks:0,rowClicks:0,optionClicks:0,fallbackClicks:0,closeAttempts:0,pending:false,lastAction:'',lastActionAt:0};
                 try{const raw=sessionStorage.getItem(__wpStateKey)||localStorage.getItem(__wpStateKey)||'';if(raw)__wpState={...__wpState,...JSON.parse(raw)};}catch(_){}
-                if(__wpState.requested&&__wpState.requested!==__wpWanted)__wpState={startedAt:0,requested:__wpWanted,attempts:0,triggerClicks:0,rowClicks:0,optionClicks:0,fallbackClicks:0,closeAttempts:0,pending:false,lastAction:'',lastActionAt:0};
+                if(__wpState.requested&&__wpState.requested!==__wpWanted)__wpState={startedAt:0,requested:__wpWanted,attempts:0,triggerClicks:0,advancedClicks:0,rowClicks:0,optionClicks:0,fallbackClicks:0,closeAttempts:0,pending:false,lastAction:'',lastActionAt:0};
                 if(!(Number(__wpState.startedAt)>0))__wpState.startedAt=__wpNow;
                 __wpState.requested=__wpWanted;__wpState.attempts=Math.max(0,Number(__wpState.attempts)||0)+1;
                 const __wpElapsedMs=Math.max(0,__wpNow-Number(__wpState.startedAt||__wpNow));
@@ -98,16 +104,20 @@ final class WorkPreferenceDom {
                 const __wpMayClick=(count,max)=>Number(count)<1||(__wpSinceActionMs>=__wpRetryMs&&Number(count)<max);
                 const __wpDesired=e=>e?.getAttribute?.('aria-expanded');
                 const __wpReached=(e,want)=>__wpDesired(e)!==null&&__wpDesired(e)===String(want);
-                const __wpPointer=e=>{if(typeof PointerEvent!=='function')return false;e.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,composed:true,button:0,buttons:1,pointerId:1,pointerType:'mouse',isPrimary:true}));return true;};
-                const __wpMouse=e=>e.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,composed:true,button:0,buttons:1}));
-                const __wpToggleMenu=(e,want)=>{if(!e)return;e.focus?.();const tracked=__wpDesired(e)!==null;e.click?.();if(!tracked||__wpReached(e,want))return;if(__wpPointer(e)&&__wpReached(e,want))return;__wpMouse(e);};
+                const __wpMouse=(e,type,buttons)=>{try{return e.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,composed:true,button:0,buttons,view:window}));}catch(_){return false;}};
+                const __wpToggleMenu=(e,want)=>{if(!e)return;e.focus?.();const tracked=__wpDesired(e)!==null;if(tracked&&__wpReached(e,want))return;__wpMouse(e,'pointerdown',1);if(tracked&&__wpReached(e,want))return;__wpMouse(e,'mousedown',1);if(tracked&&__wpReached(e,want))return;__wpMouse(e,'pointerup',0);__wpMouse(e,'mouseup',0);if(!tracked||!__wpReached(e,want))e.click?.();};
                 const __wpActivate=e=>{if(!e)return;if(__wpMenuTrigger(e))__wpToggleMenu(e,true);else{e.focus?.();e.click?.();}};
                 const __wpClose=()=>{const expanded=__wpTrigger?.getAttribute?.('aria-expanded');if(__wpTrigger&&(expanded==='true'||(expanded===null&&__wpOpenPopups.length>0))){__wpToggleMenu(__wpTrigger,false);return expanded===null?'trigger-untracked':'trigger';}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));return'escape';};
-                const __wpDiagnostics=()=>({kind:__wpKind,requested:__wpWanted,calibrationPurpose:__wpPurpose,current:__wpCurrent,source:__wpSource,calibratedTargetFound:!!__wpCalibrated,calibratedTargetValid:__wpCalibratedValid,calibratedMeaning:__wpCalibratedMeaning,triggerFound:!!__wpTrigger,triggerExpanded:__wpTrigger?.getAttribute?.('aria-expanded')==='true',levelFound:!!__wpLevel,optionFound:!!__wpOption,openPopupCandidates:__wpOpenPopups.length,selectedLevels:__wpSelectedLevels,attempts:__wpState.attempts,triggerClicks:__wpState.triggerClicks,rowClicks:__wpState.rowClicks,optionClicks:__wpState.optionClicks,fallbackClicks:__wpState.fallbackClicks,closeAttempts:__wpState.closeAttempts,pending:!!__wpState.pending,lastAction:__wpState.lastAction||'',elapsedMs:__wpElapsedMs,timeoutMs:__wpTimeoutMs});
+                const __wpDiagnostics=()=>({kind:__wpKind,requested:__wpWanted,calibrationPurpose:__wpPurpose,current:__wpCurrent,source:__wpSource,exactAnimatedTrigger:!!__wpExactTrigger,calibratedTargetFound:!!__wpCalibrated,calibratedTargetValid:__wpCalibratedValid,calibratedMeaning:__wpCalibratedMeaning,triggerFound:!!__wpTrigger,triggerLabel:__wpTrigger?__wpLabel(__wpTrigger):'',triggerExpanded:__wpTrigger?.getAttribute?.('aria-expanded')==='true',triggerState:__wpTrigger?.getAttribute?.('data-state')||'',showAdvancedFound:!!__wpShowAdvanced,levelFound:!!__wpLevel,optionFound:!!__wpOption,openPopupCandidates:__wpOpenPopups.length,selectedLevels:__wpSelectedLevels,attempts:__wpState.attempts,triggerClicks:__wpState.triggerClicks,advancedClicks:__wpState.advancedClicks,rowClicks:__wpState.rowClicks,optionClicks:__wpState.optionClicks,fallbackClicks:__wpState.fallbackClicks,closeAttempts:__wpState.closeAttempts,pending:!!__wpState.pending,lastAction:__wpState.lastAction||'',elapsedMs:__wpElapsedMs,timeoutMs:__wpTimeoutMs});
                 const __wpFailure=(suffix,detail,extra={})=>{__wpSave();return result('WORK_'+(__wpKind==='model'?'MODEL':'REASONING')+'_'+suffix,detail,{...__wpDiagnostics(),...extra});};
                 const __wpResult=(status,detail,extra={})=>{__wpSave();return result(status,detail,{...__wpDiagnostics(),...extra});};
                 const __wpReady=(extra={})=>{const diagnostics={...__wpDiagnostics(),...extra};__wpClear();return result('READY',__wpKind==='model'?'모델 적용 확인':'추론 적용 확인',diagnostics);};
-                if((__wpCurrent===__wpWanted||__wpSelectedLevels.includes(__wpWanted))&&__wpOpenPopups.length===0)return __wpReady({action:'already-selected'});
+                if(__wpCurrent===__wpWanted){
+                  if(__wpOpenPopups.length===0)return __wpReady({action:'already-selected'});
+                  if(__wpMayClick(__wpState.closeAttempts,3)){__wpState.closeAttempts++;__wpState.lastAction='close-current-match';__wpState.lastActionAt=__wpNow;__wpSave();const method=__wpClose();return result('UI_WAIT','현재 WORK 값이 목표와 같아 열린 메뉴 닫힘 확인 대기',{...__wpDiagnostics(),action:'close-current-match',closeMethod:method});}
+                  if(__wpElapsedMs>=__wpTimeoutMs||__wpState.attempts>=__wpMaxAttempts)return __wpFailure('READBACK_MISMATCH','현재 WORK 값 확인 후 메뉴가 닫히지 않았습니다.',{action:'current-match-close-timeout'});
+                  return __wpResult('UI_WAIT','현재 WORK 값 확인 후 메뉴 닫힘 대기',{action:'wait-current-match-close'});
+                }
                 if(__wpOption&&__wpSelected(__wpOption)){
                   if(__wpOpenPopups.length===0)return __wpReady({action:'selected-option-readback'});
                   if(__wpMayClick(__wpState.closeAttempts,3)){__wpState.closeAttempts++;__wpState.lastAction='close-menu';__wpState.lastActionAt=__wpNow;__wpSave();const method=__wpClose();return result('UI_WAIT','WORK 선택 메뉴 닫힘 확인 대기',{...__wpDiagnostics(),action:'close-menu',closeMethod:method});}
@@ -123,6 +133,11 @@ final class WorkPreferenceDom {
                   if(__wpCurrent===__wpWanted&&__wpOpenPopups.length===0)return __wpReady({action:'trigger-readback'});
                   if(__wpElapsedMs>=__wpTimeoutMs||__wpState.attempts>=__wpMaxAttempts)return __wpFailure('READBACK_MISMATCH','WORK 옵션 적용 후 의미값을 확인하지 못했습니다.',{action:'pending-readback-timeout'});
                   return __wpResult('UI_WAIT','WORK 옵션 의미값 readback 대기',{action:'wait-pending-readback'});
+                }
+                if(__wpShowAdvanced){
+                  if(__wpMayClick(__wpState.advancedClicks,2)){__wpState.advancedClicks++;__wpState.lastAction='open-advanced-control';__wpState.lastActionAt=__wpNow;__wpSave();__wpActivate(__wpShowAdvanced);return result('UI_WAIT','WORK 고급 메뉴 전환 반영 대기',{...__wpDiagnostics(),action:'open-advanced-control'});}
+                  if(__wpElapsedMs>=__wpTimeoutMs||__wpState.attempts>=__wpMaxAttempts)return __wpFailure('SELECTION_TIMEOUT','WORK 고급 메뉴 전환 후 선택 행을 찾지 못했습니다.',{action:'advanced-transition-timeout'});
+                  return __wpResult('UI_WAIT','WORK 고급 메뉴 전환 확인 대기',{action:'wait-advanced-transition'});
                 }
                 if(__wpLevel){
                   if(__wpMayClick(__wpState.rowClicks,2)){__wpState.rowClicks++;__wpState.lastAction='open-level-menu';__wpState.lastActionAt=__wpNow;__wpSave();__wpActivate(__wpLevel);return result('UI_WAIT','WORK 하위 선택 메뉴 열기 반영 대기',{...__wpDiagnostics(),action:'open-level-menu'});}

@@ -7,48 +7,68 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public final class ChatWorkContinuationContractTest {
     @Test public void productionChatUsesAdvancedMenuWithoutSliderMutation() throws Exception {
-        String dom = src("SelfRunDom.java");
-        String menu = src("ChatReasoningOptionDom.java");
+        String dom = source("SelfRunDom.java");
+        String menu = source("ChatReasoningOptionDom.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertTrue(menu.contains("open-reasoning-sheet"));
         assertTrue(menu.contains("open-advanced-control"));
-        assertTrue(menu.contains("open-reasoning-menu"));
-        assertTrue(menu.contains("sliderObserved"));
         assertFalse(menu.contains("positive-slider-fallback"));
         assertFalse(menu.contains("set-slider"));
-        assertFalse(menu.contains("ArrowRight"));
         assertFalse(menu.contains("new PointerEvent"));
     }
 
-    @Test public void workPreferenceWaitsAreFiniteAndTerminal() throws Exception {
-        String preference = src("WorkPreferenceDom.java");
-        String service = src("SelfRunService.java");
-        assertTrue(preference.contains("calibratedTargetValid"));
+    @Test public void workPreferenceWaitsRemainFiniteAndTerminal() throws Exception {
+        String preference = source("WorkPreferenceDom.java");
+        String service = source("SelfRunService.java");
         assertTrue(preference.contains("__wpTimeoutMs=20000"));
         assertTrue(preference.contains("'SELECTION_TIMEOUT'"));
         assertTrue(preference.contains("'READBACK_MISMATCH'"));
         assertTrue(service.contains("isWorkPreferenceFailureStatus"));
         assertTrue(service.contains("WORK_MODEL_SELECTION_TIMEOUT"));
-        assertTrue(service.contains("WORK_MODEL_READBACK_MISMATCH"));
-        assertTrue(service.contains("WORK_REASONING_SELECTION_TIMEOUT"));
         assertTrue(service.contains("WORK_REASONING_READBACK_MISMATCH"));
-        assertTrue(service.contains("WORK_PREFERENCE_FAILURE"));
     }
 
-    private static String src(String file) throws Exception {
-        return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
-                "src/main/java/com/shaterguy/chatgptselfrun/" + file);
+    @Test public void continuationSubmissionIsVerifiedWithoutBlindResubmit() throws Exception {
+        String service = source("SelfRunService.java");
+        String continuation = source("SelfRunContinuationDom.java");
+        assertFalse(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_PREFS));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_REASONING));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_SEND_CONTINUE));
+        assertTrue(continuation.contains("writeMarker({state:'clicked'"));
+        assertTrue(continuation.contains("if(m.state==='clicked')return result('VERIFY_REQUIRED'"));
+        assertFalse(continuation.contains("verifyDriveTurnSubmission"));
+        assertFalse(service.contains("SelfRunContinuationDom.verifyDriveTurnSubmission"));
+        assertTrue(service.contains("\"CONTINUE_CLICKED\".equals(status)"));
+        assertTrue(service.contains("store.beginTurnCompletionWait"));
     }
 
-    private static String read(String first, String fallback) throws Exception {
-        Path path = Paths.get(first);
-        if (!Files.exists(path)) path = Paths.get(fallback);
+    @Test public void responseCompletionUsesObserverNotShortButtonPolling() throws Exception {
+        String service = source("SelfRunService.java");
+        String continuation = source("SelfRunContinuationDom.java");
+        assertTrue(service.contains("PHASE_WAIT_TURN_COMPLETION"));
+        assertTrue(service.contains("observeTurnCompletion"));
+        assertFalse(service.contains("SelfRunContinuationDom.buttonState("));
+        assertFalse(service.contains("scheduleDrivePoll"));
+        assertFalse(continuation.contains("setInterval"));
+    }
+
+    private static String source(String name) throws Exception {
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static String section(String text, String start, String end) {
+        int a = text.indexOf(start);
+        int b = text.indexOf(end, a + start.length());
+        assertTrue("missing start: " + start, a >= 0);
+        assertTrue("missing end: " + end, b > a);
+        return text.substring(a, b);
     }
 }

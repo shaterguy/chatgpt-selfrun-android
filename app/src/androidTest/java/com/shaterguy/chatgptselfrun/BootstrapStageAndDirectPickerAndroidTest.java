@@ -85,12 +85,31 @@ public final class BootstrapStageAndDirectPickerAndroidTest {
         }
     }
 
+    @Test public void chatToWorkTransitionUsesExactToggleAndPointerDown() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web, fixture(false));
+            String runId = "SR-CHAT-TO-WORK-POINTER";
+            String script = SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_WORK, runId);
+
+            JSONObject modeClicked = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", modeClicked.getString("status"));
+            assertEquals("tpp-toggle", modeClicked.getJSONObject("diagnostics").getString("targetSource"));
+            assertEquals("1", read(scenario, web, "String(window.workClicks)"));
+
+            JSONObject ready = evaluate(scenario, web, script);
+            assertEquals(ready.toString(), "READY", ready.getString("status"));
+            assertEquals("work", ready.getJSONObject("diagnostics").getString("currentMode"));
+            assertEquals("1", read(scenario, web, "String(window.workClicks)"));
+        }
+    }
+
     private static String fixture(boolean initialWork) {
         return """
                 <!doctype html><html><body>
                 <div id="mode-group">
-                  <button id="chat"><span id="chat-state" aria-selected="__CHAT__">Chat</span></button>
-                  <button id="work"><span id="work-state" aria-selected="__WORK__">Work</span></button>
+                  <button id="chat" role="radio" aria-checked="__CHAT__" data-state="__CHATMODESTATE__" data-tpp-toggle-value="chatgpt"><span id="chat-state" aria-selected="__CHAT__">Chat</span></button>
+                  <button id="work" role="radio" aria-checked="__WORK__" data-state="__WORKMODESTATE__" data-tpp-toggle-value="work"><span id="work-state" aria-selected="__WORK__">Work</span></button>
                 </div>
                 <button id="model" aria-haspopup="menu" aria-expanded="false">Model</button>
                 <textarea id="prompt-textarea"></textarea>
@@ -100,16 +119,19 @@ public final class BootstrapStageAndDirectPickerAndroidTest {
                   <button id="high" role="menuitemradio" aria-checked="false">High</button>
                 </div>
                 <script>
-                window.chatClicks=0;window.modelMenuClicks=0;window.instantClicks=0;
+                window.chatClicks=0;window.workClicks=0;window.modelMenuClicks=0;window.instantClicks=0;
                 const chat=document.getElementById('chat'),work=document.getElementById('work');
                 const chatState=document.getElementById('chat-state'),workState=document.getElementById('work-state');
                 const model=document.getElementById('model'),popup=document.getElementById('model-popup');
-                chat.onclick=()=>{window.chatClicks++;chatState.setAttribute('aria-selected','true');workState.setAttribute('aria-selected','false');};
-                work.onclick=()=>{chatState.setAttribute('aria-selected','false');workState.setAttribute('aria-selected','true');};
+                function selectMode(selected,other,value){selected.setAttribute('aria-checked','true');selected.dataset.state='on';other.setAttribute('aria-checked','false');other.dataset.state='off';chatState.setAttribute('aria-selected',String(value==='chat'));workState.setAttribute('aria-selected',String(value==='work'));}
+                chat.onclick=()=>{window.chatClicks++;selectMode(chat,work,'chat');};
+                work.onpointerdown=()=>{window.workClicks++;selectMode(work,chat,'work');};
                 model.onclick=()=>{window.modelMenuClicks++;const opening=popup.hidden;popup.hidden=!opening;model.setAttribute('aria-expanded',opening?'true':'false');if(opening){chatState.removeAttribute('aria-selected');workState.removeAttribute('aria-selected');}};
                 document.getElementById('instant').onclick=event=>{window.instantClicks++;for(const option of popup.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');model.textContent='Instant';model.setAttribute('aria-expanded','false');popup.hidden=true;};
                 </script></body></html>
-                """.replace("__CHAT__", initialWork ? "false" : "true")
+                """.replace("__CHATMODESTATE__", initialWork ? "off" : "on")
+                .replace("__WORKMODESTATE__", initialWork ? "on" : "off")
+                .replace("__CHAT__", initialWork ? "false" : "true")
                 .replace("__WORK__", initialWork ? "true" : "false");
     }
 
