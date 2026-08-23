@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# Dev8 composer-scoped stop regression verification
+# Dev9 in-place observer rebind verification
 
 on:
   push:
