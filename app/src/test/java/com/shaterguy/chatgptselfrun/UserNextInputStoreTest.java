@@ -57,4 +57,19 @@ public final class UserNextInputStoreTest {
         assertTrue(UserNextInputStore.shouldConsumeBoundReservation(
                 SelfRunStore.PHASE_SEND_CONTINUE, "", bound, "8:223456"));
     }
+
+    @Test public void staleUnsubmittedTextIsDiscardedOnlyWhenRunIsAbandonedOrSuperseded() {
+        assertFalse(UserNextInputStore.shouldDiscardStaleReservation(
+                "run-a", "run-a", true, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
+        assertFalse(UserNextInputStore.shouldDiscardStaleReservation(
+                "run-a", "run-a", true, false, SelfRunStore.PHASE_PAUSED));
+        assertTrue(UserNextInputStore.shouldDiscardStaleReservation(
+                "run-a", "run-a", false, true, SelfRunStore.PHASE_IDLE));
+        assertTrue(UserNextInputStore.shouldDiscardStaleReservation(
+                "run-a", "run-a", false, false, SelfRunStore.PHASE_DONE));
+        assertTrue(UserNextInputStore.shouldDiscardStaleReservation(
+                "run-a", "run-b", true, false, SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK));
+        assertFalse(UserNextInputStore.shouldDiscardStaleReservation(
+                "", "run-b", true, false, SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK));
+    }
 }
