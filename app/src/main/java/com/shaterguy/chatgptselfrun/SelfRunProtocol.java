@@ -81,7 +81,10 @@ final class SelfRunProtocol {
     static String driveContinuation(String runId, String nextInput) {
         if (TURN_INFO_REWRITE_GATE.consume(runId)) return turnInfoRewrite(runId);
         String base = "[" + kstTimestamp(new Date()) + "] " + continuation(runId);
-        return nextInput == null || nextInput.isEmpty() ? base : base + "\n" + nextInput;
+        String merged = UserNextInputStore.initialized()
+                ? UserNextInputStore.merge(runId, nextInput)
+                : safeText(nextInput);
+        return merged.isEmpty() ? base : base + "\n" + merged;
     }
 
     static String driveRecoveryContinuation(String runId, String recoveryId) {
@@ -100,6 +103,10 @@ final class SelfRunProtocol {
 
     private static boolean safeCode(String value) {
         return SelfRunProtocolRules.validRunId(value);
+    }
+
+    private static String safeText(String value) {
+        return value == null ? "" : value;
     }
 
     /** Compatibility facade for existing callers while validation lives in the policy class. */

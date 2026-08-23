@@ -115,6 +115,13 @@ public final class SelfRunNewActivity extends Activity {
         return CHAT_REASONING_VALUES[position];
     }
 
+    private static int chatReasoningPosition(String value) {
+        for (int i = 0; i < CHAT_REASONING_VALUES.length; i++) {
+            if (CHAT_REASONING_VALUES[i].equals(value)) return i;
+        }
+        return 0;
+    }
+
     private void openAttachmentPicker() {
         Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         picker.addCategory(Intent.CATEGORY_OPENABLE);
@@ -351,7 +358,10 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void restoreDraftState(Bundle state) {
-        if (state == null) { renderAttachments(); updateChatReasoningAvailability(); return; }
+        if (state == null) {
+            chatReasoning.setSelection(chatReasoningPosition(ChatReasoningPreferenceStore.EXTRA_HIGH));
+            renderAttachments(); updateChatReasoningAvailability(); return;
+        }
         requirement.setText(state.getString(STATE_REQUIREMENT,""));
         int modePosition=Math.max(0,Math.min(MODE_VALUES.length-1,state.getInt(STATE_MODE,0))); mode.setSelection(modePosition);
         int reasoningPosition=Math.max(0,Math.min(CHAT_REASONING_VALUES.length-1,state.getInt(STATE_CHAT_REASONING,0))); chatReasoning.setSelection(reasoningPosition);
