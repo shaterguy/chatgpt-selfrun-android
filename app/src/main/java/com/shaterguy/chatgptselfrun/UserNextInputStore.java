@@ -36,6 +36,10 @@ final class UserNextInputStore {
         cleanupReservation();
     }
 
+    static synchronized boolean initialized() {
+        return prefs != null && runPrefs != null;
+    }
+
     static synchronized String current(String runId) {
         ensureInitialized();
         cleanupReservation();
@@ -174,7 +178,7 @@ final class UserNextInputStore {
     }
 
     private static void ensureInitialized() {
-        if (prefs == null || runPrefs == null) throw new IllegalStateException("UserNextInputStore not initialized");
+        if (!initialized()) throw new IllegalStateException("UserNextInputStore not initialized");
     }
 
     private static String safe(String value) { return value == null ? "" : value; }
