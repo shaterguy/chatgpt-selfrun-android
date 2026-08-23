@@ -46,7 +46,7 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProWithoutSliderMutation"));
     }
 
-    @Test public void dev10IdentityRemainsStableWithoutDependencyChange() throws Exception {
+    @Test public void dev7IdentityRemainsStableWithoutDependencyChange() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("selfRunDriveVersionCode = 1000081"));
         assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3-dev7'"));
