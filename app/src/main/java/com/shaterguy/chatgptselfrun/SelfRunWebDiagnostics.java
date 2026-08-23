@@ -5,16 +5,29 @@ final class SelfRunWebDiagnostics {
     private SelfRunWebDiagnostics() {}
 
     static String waitDetail(String phase, String status, String detail) {
-        String value = detail == null ? "" : detail;
+        String safeStatus = switch (status == null ? "" : status) {
+            case "WAIT", "UI_WAIT", "COMPOSER_CLEARING", "COMPOSER_INPUTTING",
+                    "SEND_DISABLED", "STOP", "UNKNOWN", "SCRIPT_ERROR", "SUBMISSION_FAILED" -> status;
+            default -> "OTHER";
+        };
         String reason;
-        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) reason = "model_wait";
+        if ("COMPOSER_CLEARING".equals(safeStatus)) reason = "composer_clearing";
+        else if ("COMPOSER_INPUTTING".equals(safeStatus)) reason = "composer_inputting";
+        else if ("SEND_DISABLED".equals(safeStatus)) reason = "send_disabled";
+        else if ("STOP".equals(safeStatus)) reason = "stop_visible";
+        else if ("UNKNOWN".equals(safeStatus)) reason = "control_unknown";
+        else if ("SCRIPT_ERROR".equals(safeStatus)) reason = "script_error";
+        else if ("SUBMISSION_FAILED".equals(safeStatus)) reason = "submission_failed";
+        else if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) reason = "model_wait";
         else if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) reason = "reasoning_wait";
-        else if (value.contains("continuation 입력창 대기")) reason = "composer_wait";
-        else if (value.contains("continuation 전송 버튼 대기")) reason = "send_wait";
-        else if (value.contains("입력 반영 확인 대기")) reason = "input_reflection_wait";
-        else if (value.contains("continuation 입력 대기")) reason = "input_wait";
-        else reason = "ui_wait";
-        String safeStatus = "WAIT".equals(status) ? "WAIT" : "UI_WAIT";
+        else {
+            String value = detail == null ? "" : detail;
+            if (value.contains("continuation 입력창 대기")) reason = "composer_wait";
+            else if (value.contains("continuation 전송 버튼 대기")) reason = "send_wait";
+            else if (value.contains("입력 반영 확인 대기")) reason = "input_reflection_wait";
+            else if (value.contains("continuation 입력 대기")) reason = "input_wait";
+            else reason = "ui_wait";
+        }
         return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=" + reason;
     }
 

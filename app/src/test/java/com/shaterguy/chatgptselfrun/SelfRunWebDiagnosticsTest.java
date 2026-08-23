@@ -25,6 +25,15 @@ public class SelfRunWebDiagnosticsTest {
         assertEquals("status=UI_WAIT;phase=bootstrap_send;reason=ui_wait", wait);
         assertEquals("status=CALLBACK_TIMEOUT;phase=bootstrap_send;reason=evaluate_javascript",
                 SelfRunWebDiagnostics.callbackTimeoutDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND));
+        assertEquals("status=COMPOSER_CLEARING;phase=bootstrap_send;reason=composer_clearing",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
+                        "COMPOSER_CLEARING", "secret prompt must not leak"));
+        assertEquals("status=COMPOSER_INPUTTING;phase=bootstrap_send;reason=composer_inputting",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
+                        "COMPOSER_INPUTTING", "secret prompt must not leak"));
+        assertEquals("status=SEND_DISABLED;phase=bootstrap_send;reason=send_disabled",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
+                        "SEND_DISABLED", "secret prompt must not leak"));
         assertFalse(wait.contains("secret prompt"));
     }
 
