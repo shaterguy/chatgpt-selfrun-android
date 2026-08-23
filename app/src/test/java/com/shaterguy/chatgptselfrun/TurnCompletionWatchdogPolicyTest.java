@@ -42,6 +42,25 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertFalse(observer.contains("assistant"));
     }
 
+    @Test public void observerRebindsInPlaceAndNativeHealthcheckDoesNotReloadChat() throws Exception {
+        String observer = section(source("SelfRunContinuationDom.java"),
+                "private static String completionObserver", "private static String conversationGuard");
+        String service = source("SelfRunService.java");
+
+        assertEquals(2_000L, SelfRunService.TURN_OBSERVER_HEALTHCHECK_MS);
+        assertTrue(observer.contains("state.root!==observeRoot"));
+        assertTrue(observer.contains("state.composer!==composer"));
+        assertTrue(observer.contains("!state.root?.isConnected"));
+        assertTrue(observer.contains("!state.composer?.isConnected"));
+        assertTrue(observer.contains("state.observer?.disconnect()"));
+        assertTrue(observer.contains("state.observer=new MutationObserver(evaluate)"));
+        assertTrue(service.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS)"));
+        assertFalse(observer.contains("location.reload"));
+        assertFalse(observer.contains("location.assign"));
+        assertFalse(observer.contains("history.go"));
+        assertFalse(observer.contains("window.open"));
+    }
+
     @Test public void fiveMinutePostDomDriveWindowHasExactBoundary() {
         long start = 1_000_000L;
         assertFalse(SelfRunService.postDomDriveSyncTimedOut(start,

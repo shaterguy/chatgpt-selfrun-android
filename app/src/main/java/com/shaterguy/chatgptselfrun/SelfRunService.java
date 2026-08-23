@@ -43,6 +43,7 @@ public final class SelfRunService extends Service {
     static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME";
     private static final int NOTIFICATION_ID = 17021;
     static final long TURN_COMPLETION_STABILITY_MS = 5_000L;
+    static final long TURN_OBSERVER_HEALTHCHECK_MS = 2_000L;
     static final long POST_DOM_DRIVE_RETRY_MS = 5_000L;
     static final long POST_DOM_DRIVE_MAX_WAIT_MS = 5 * 60_000L;
     private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
@@ -589,7 +590,7 @@ private void evaluate(String phase,String script){
       if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
   }
   if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
-      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 관찰 중 · 답변 완료 후 5초 재확인");runLog.record(store,"TURN_COMPLETION_OBSERVER","result=armed");releaseWakeLock();return;}
+      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 관찰 중 · 답변 완료 후 5초 재확인");runLog.record(store,"TURN_COMPLETION_OBSERVER","result=armed");releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
       if("OBSERVER_UNAVAILABLE".equals(status)){runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
   }
   if("TARGET_ERROR".equals(status)){recordContinuationTargetError(phase);if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}

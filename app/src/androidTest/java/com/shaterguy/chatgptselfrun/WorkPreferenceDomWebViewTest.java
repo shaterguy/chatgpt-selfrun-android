@@ -147,6 +147,34 @@ public final class WorkPreferenceDomWebViewTest {
                 SelfRunContinuationDom.COMPOSER_IDLE);
     }
 
+    @Test public void turnObserverRebindsInPlaceAfterComposerDomReplacement() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadContinuationFixture(scenario, web,
+                    "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button>");
+
+            JSONObject armed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+            evaluate(scenario, web, "(()=>{window.fixtureOldObserverRoot=window.__selfRunDriveTurnObserver.root;"
+                    + "document.querySelector('main').innerHTML=\"<div id='replacement-shell'><form><textarea id='prompt-textarea'></textarea><button type='submit' data-testid='send-button' aria-label='Send'>Send</button></form></div>\";"
+                    + "return JSON.stringify({status:'REPLACED'});})()");
+
+            JSONObject rebound = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS, false));
+            assertEquals("OBSERVER_ARMED", rebound.getString("status"));
+            assertTrue(rebound.getString("detail").contains("bindingChanged=1"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver.root===document.getElementById('replacement-shell'))"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunDriveTurnObserver.root!==window.fixtureOldObserverRoot)"));
+            assertEquals("false", read(scenario, web, "String(window.fixtureOldObserverRoot.isConnected)"));
+            assertEquals(CONVERSATION_URL, read(scenario, web, "location.href"));
+        }
+    }
+
     @Test public void voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
