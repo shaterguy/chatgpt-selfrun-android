@@ -17,9 +17,14 @@ public final class UserNextInputStoreTest {
         assertEquals("GPT\n\n  user text  ", UserNextInputStore.mergeText("GPT", "  user text  "));
     }
 
-    @Test public void reservationAppliesOnlyToImmediatelyNextTurn() {
-        assertTrue(UserNextInputStore.appliesToNextTurn(4, 3));
-        assertFalse(UserNextInputStore.appliesToNextTurn(4, 4));
-        assertFalse(UserNextInputStore.appliesToNextTurn(4, 2));
+    @Test public void reservationIsBoundToOneContinuationIdentity() {
+        String first = UserNextInputStore.continuationIdentity(7, 123456L);
+        String retry = UserNextInputStore.continuationIdentity(7, 123456L);
+        String later = UserNextInputStore.continuationIdentity(7, 123457L);
+        assertEquals("7:123456", first);
+        assertTrue(UserNextInputStore.reservationApplies(first, retry));
+        assertFalse(UserNextInputStore.reservationApplies(first, later));
+        assertFalse(UserNextInputStore.reservationApplies("", first));
+        assertEquals("", UserNextInputStore.continuationIdentity(7, 0L));
     }
 }
