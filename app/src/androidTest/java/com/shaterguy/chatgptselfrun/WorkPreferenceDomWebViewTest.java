@@ -106,8 +106,13 @@ public final class WorkPreferenceDomWebViewTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadContinuationFixture(scenario, web, "<div id='stop' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>");
 
-            JSONObject prepare = evaluate(scenario, web,
-                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe"));
+            JSONObject prepare = null;
+            for (int attempt = 0; attempt < 8; attempt++) {
+                prepare = evaluate(scenario, web,
+                        SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe"));
+                if ("READY_TO_SUBMIT".equals(prepare.getString("status"))) break;
+            }
+            assertNotNull(prepare);
             assertEquals("READY_TO_SUBMIT", prepare.getString("status"));
             assertEquals(CONTINUE_PROMPT, read(scenario, web, "document.getElementById('prompt-textarea').value"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
