@@ -172,21 +172,23 @@ public final class MainActivity extends Activity {
         if (nextInputEditor == null) return;
         boolean editable = !runId.isEmpty() && UserNextInputStore.editable(runId);
         String stored = runId.isEmpty() ? "" : UserNextInputStore.current(runId);
+        boolean locked = !runId.isEmpty() && UserNextInputStore.submissionLocked(runId);
         if (!nextInputEditor.hasFocus()) nextInputEditor.setText(stored);
         nextInputEditor.setEnabled(editable);
         nextInputSaveButton.setEnabled(editable);
         nextInputDeleteButton.setEnabled(editable && !stored.isEmpty());
         if (runId.isEmpty()) nextInputStatus.setText("실행 중인 SelfRun이 없습니다.");
         else if (editable) nextInputStatus.setText(stored.isEmpty()
-                ? "차기 턴 전송 준비가 시작되기 전까지 입력·수정·삭제할 수 있습니다."
-                : "차기 턴에 사용자 문구가 예약되어 있습니다. 전송 준비 전까지 수정·삭제할 수 있습니다.");
-        else nextInputStatus.setText("차기 턴 전송 준비가 시작되어 현재 예약 문구는 잠겼습니다.");
+                ? "차기 턴 실제 제출이 시작되기 전까지 입력·수정·삭제할 수 있습니다."
+                : "차기 턴에 사용자 문구가 예약되어 있습니다. 실제 제출 시작 전까지 수정·삭제할 수 있습니다.");
+        else if (locked) nextInputStatus.setText("차기 턴 제출이 시작되어 현재 예약 문구는 잠겼습니다.");
+        else nextInputStatus.setText("현재 단계에서는 차기 턴 입력을 예약할 수 없습니다.");
     }
 
     private void saveNextInput() {
         String runId = store.runId();
         if (!UserNextInputStore.save(runId, nextInputEditor.getText().toString())) {
-            Toast.makeText(this, "차기 턴 입력을 저장할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "차기 턴 제출이 이미 시작되었거나 현재 입력할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
             refreshCurrent();
             return;
         }
@@ -198,7 +200,7 @@ public final class MainActivity extends Activity {
     private void deleteNextInput() {
         String runId = store.runId();
         if (!UserNextInputStore.delete(runId)) {
-            Toast.makeText(this, "차기 턴 입력을 삭제할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "차기 턴 제출이 이미 시작되었거나 현재 삭제할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
             refreshCurrent();
             return;
         }

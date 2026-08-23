@@ -58,8 +58,13 @@ final class SelfRunContinuationDom {
     }
 
     static String prepareDriveTurn(String conversationUrl, String prompt, String markerId) {
+        String effectivePrompt = prompt;
+        if (UserNextInputStore.initialized()) {
+            String runId = runIdFromContinuationMarker(markerId);
+            if (!runId.isEmpty()) effectivePrompt = UserNextInputStore.promptForPreparation(runId, prompt);
+        }
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
-        String expected = q(prompt);
+        String expected = q(effectivePrompt);
         String marker = q("selfrun-drive:verified-continuation:" + markerId);
         String composerKey = composerKey(conversationUrl);
         String sendKey = sendKey(conversationUrl);
@@ -79,8 +84,15 @@ final class SelfRunContinuationDom {
 
     static String clickPreparedDriveTurn(String conversationUrl, String prompt, String markerId,
                                            String runId, String observerToken, long stabilityMs) {
+        String effectivePrompt = prompt;
+        if (UserNextInputStore.initialized()) {
+            UserNextInputStore.ClickPlan plan = UserNextInputStore.nextClickPlan(
+                    runId, continuationIdentityFromMarker(markerId), prompt);
+            effectivePrompt = plan.prompt;
+            if (!plan.clickAllowed) return preflightPreparedDriveTurn(conversationUrl, effectivePrompt, markerId);
+        }
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
-        String expected = q(prompt);
+        String expected = q(effectivePrompt);
         String marker = q("selfrun-drive:verified-continuation:" + markerId);
         String composerKey = composerKey(conversationUrl);
         String sendKey = sendKey(conversationUrl);
@@ -95,6 +107,22 @@ final class SelfRunContinuationDom {
                 + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}armCompletionObserver(false);return result('CONTINUE_CLICKED','submit='+submitPath+';observer=armed;verification=required');})()";
     }
 
+    private static String preflightPreparedDriveTurn(String conversationUrl, String prompt, String markerId) {
+        String conversation = q(SelfRunScript.conversationId(conversationUrl));
+        String expected = q(prompt);
+        String marker = q("selfrun-drive:verified-continuation:" + markerId);
+        String composerKey = composerKey(conversationUrl);
+        String sendKey = sendKey(conversationUrl);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
+                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before submission preflight');"
+                + composerOps() + controls(sendKey) + markerOps(marker)
+                + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('VERIFY_REQUIRED','prior click requires submission verification');"
+                + "if(m.state!=='prepared')return result('COMPOSER_INPUTTING','submission preflight waits for prepared continuation');"
+                + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','user next-input changed before submission; rebuilding composer');}"
+                + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'submission preflight waits for enabled SEND');"
+                + "return result('READY_TO_SUBMIT','latest continuation verified before submission lock');})()";
+    }
 
     static String observeTurnCompletion(String conversationUrl, String runId, String observerToken,
                                         long stabilityMs, boolean allowIdleBaseline) {
@@ -206,6 +234,19 @@ final class SelfRunContinuationDom {
 
     private static String markerOps(String marker) {
         return "const markerKey=" + marker + ";const markerCache=window.__selfRunDriveMarkers||(window.__selfRunDriveMarkers={});const readMarker=()=>{let raw='';try{raw=localStorage.getItem(markerKey)||'';}catch(_){}if(!raw){try{raw=sessionStorage.getItem(markerKey)||'';}catch(_){}}if(!raw)raw=markerCache[markerKey]||'';try{return raw?JSON.parse(raw):{};}catch(_){return{};}};const writeMarker=data=>{const raw=JSON.stringify(data);markerCache[markerKey]=raw;let ok=false;try{localStorage.setItem(markerKey,raw);ok=localStorage.getItem(markerKey)===raw;}catch(_){}if(!ok){try{sessionStorage.setItem(markerKey,raw);}catch(_){}}};";
+    }
+
+    private static String runIdFromContinuationMarker(String markerId) {
+        String marker = markerId == null ? "" : markerId;
+        int split = marker.indexOf(":continue:");
+        return split <= 0 ? "" : marker.substring(0, split);
+    }
+
+    private static String continuationIdentityFromMarker(String markerId) {
+        String marker = markerId == null ? "" : markerId;
+        String delimiter = ":continue:";
+        int split = marker.indexOf(delimiter);
+        return split < 0 ? "" : marker.substring(split + delimiter.length());
     }
 
     private static String composerKey(String url) {

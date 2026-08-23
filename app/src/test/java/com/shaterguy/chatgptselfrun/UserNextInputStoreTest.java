@@ -28,6 +28,33 @@ public final class UserNextInputStoreTest {
         assertEquals("", UserNextInputStore.continuationIdentity(7, 0L));
     }
 
+    @Test public void sendContinueStaysEditableUntilSubmissionSnapshotLocks() {
+        assertTrue(UserNextInputStore.phaseAllowsEditing(SelfRunStore.PHASE_SEND_CONTINUE, false));
+        assertTrue(UserNextInputStore.phaseAllowsEditing(SelfRunStore.PHASE_PAUSED, false));
+        assertFalse(UserNextInputStore.phaseAllowsEditing(SelfRunStore.PHASE_SEND_CONTINUE, true));
+        assertFalse(UserNextInputStore.phaseAllowsEditing(SelfRunStore.PHASE_DONE, false));
+        assertFalse(UserNextInputStore.phaseAllowsEditing(SelfRunStore.PHASE_IDLE, false));
+    }
+
+    @Test public void submissionPreflightRequiresSameIdentityAndRevision() {
+        String identity = UserNextInputStore.continuationIdentity(7, 123456L);
+        assertTrue(UserNextInputStore.preflightMatches(identity, 4L, identity, 4L));
+        assertFalse(UserNextInputStore.preflightMatches(identity, 4L, identity, 5L));
+        assertFalse(UserNextInputStore.preflightMatches(identity, 4L,
+                UserNextInputStore.continuationIdentity(8, 123456L), 4L));
+        assertFalse(UserNextInputStore.preflightMatches("", 4L, identity, 4L));
+    }
+
+    @Test public void staleCachedPayloadIsReplacedWithoutChangingContinuationHeader() {
+        String header = "[2026.08.23 | 22:00:00] [SELF_RUN_CONTINUE SR-EXAMPLE]";
+        String stale = header + "\nstale user text";
+        assertEquals(header + "\nGPT next input\n\nlatest user text",
+                UserNextInputStore.composePrompt(stale, "GPT next input\n\nlatest user text"));
+        assertEquals(header, UserNextInputStore.composePrompt(stale, ""));
+        String recovery = "[2026.08.23 | 22:00:00] [SELF_RUN_CONTINUE SR-EXAMPLE RECOVERY_ID=wd.1]";
+        assertEquals(recovery, UserNextInputStore.composePrompt(recovery, "must not append"));
+    }
+
     @Test public void userAndCombinedInputsHaveFiniteUtf8Bounds() {
         String exactUser = "a".repeat(UserNextInputStore.MAX_USER_UTF8_BYTES);
         String oversizedUser = exactUser + "a";
@@ -42,7 +69,7 @@ public final class UserNextInputStoreTest {
         assertFalse(UserNextInputStore.withinUtf8Limit(merged + "x", UserNextInputStore.MAX_COMBINED_UTF8_BYTES));
     }
 
-    @Test public void boundTextIsConsumedOnlyAfterConfirmedSubmissionPath() {
+    @Test public void lockedTextIsConsumedOnlyAfterConfirmedSubmissionPath() {
         String bound = "7:123456";
         assertFalse(UserNextInputStore.shouldConsumeBoundReservation(
                 SelfRunStore.PHASE_SEND_CONTINUE, "", bound, bound));
