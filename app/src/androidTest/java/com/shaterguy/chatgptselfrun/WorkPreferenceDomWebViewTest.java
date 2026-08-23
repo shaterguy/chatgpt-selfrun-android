@@ -189,9 +189,16 @@ public final class WorkPreferenceDomWebViewTest {
             JSONObject result = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, markerId,
                             OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
-            String expectedResult = SelfRunContinuationDom.SEND_ENABLED.equals(expected)
+            boolean formFallback = SelfRunContinuationDom.COMPOSER_IDLE.equals(expected);
+            String expectedResult = SelfRunContinuationDom.SEND_ENABLED.equals(expected) || formFallback
                     ? "CONTINUE_CLICKED" : expected;
             assertEquals(expectedResult, result.getString("status"));
+            if (formFallback) {
+                assertTrue(result.getString("detail").contains("submit=form_request_submit"));
+                assertEquals("clicked", read(scenario, web,
+                        "JSON.parse(window.__selfRunDriveMarkers['selfrun-drive:verified-continuation:"
+                                + markerId + "']).state"));
+            }
         }
     }
 
