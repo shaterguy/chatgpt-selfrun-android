@@ -26,16 +26,19 @@ final class UserNextInputStore {
         runPrefs = app.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE);
         if (runListener == null) {
             runListener = (sharedPreferences, key) -> {
-                if ("phase".equals(key) || "pausedFromPhase".equals(key)) cleanupConsumedReservation();
+                if ("phase".equals(key) || "pausedFromPhase".equals(key)
+                        || "runId".equals(key) || "active".equals(key) || "userStopped".equals(key)) {
+                    cleanupReservation();
+                }
             };
             runPrefs.registerOnSharedPreferenceChangeListener(runListener);
         }
-        cleanupConsumedReservation();
+        cleanupReservation();
     }
 
     static synchronized String current(String runId) {
         ensureInitialized();
-        cleanupConsumedReservation();
+        cleanupReservation();
         if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return "";
         String bound = safe(prefs.getString(BOUND_CONTINUATION, ""));
         if (!bound.isEmpty() && !bound.equals(currentContinuationIdentity())) return "";
@@ -44,7 +47,7 @@ final class UserNextInputStore {
 
     static synchronized boolean editable(String runId) {
         ensureInitialized();
-        cleanupConsumedReservation();
+        cleanupReservation();
         if (runId == null || runId.isEmpty() || !runId.equals(runPrefs.getString("runId", ""))) return false;
         if (!runPrefs.getBoolean("active", false) || runPrefs.getBoolean("userStopped", false)) return false;
         String phase = safe(runPrefs.getString("phase", SelfRunStore.PHASE_IDLE));
@@ -71,7 +74,7 @@ final class UserNextInputStore {
 
     static synchronized String merge(String runId, String driveNextInput) {
         ensureInitialized();
-        cleanupConsumedReservation();
+        cleanupReservation();
         String drive = safe(driveNextInput);
         if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return drive;
         String identity = currentContinuationIdentity();
@@ -117,6 +120,17 @@ final class UserNextInputStore {
         return safe(value).getBytes(StandardCharsets.UTF_8).length <= limit;
     }
 
+    static boolean shouldDiscardStaleReservation(String storedRunId, String currentRunId,
+                                                  boolean active, boolean userStopped, String phase) {
+        String stored = safe(storedRunId);
+        if (stored.isEmpty()) return false;
+        String current = safe(currentRunId);
+        if (!stored.equals(current)) return true;
+        if (userStopped) return true;
+        if (SelfRunStore.PHASE_IDLE.equals(phase) || SelfRunStore.PHASE_DONE.equals(phase)) return true;
+        return !active && !SelfRunStore.PHASE_PAUSED.equals(phase);
+    }
+
     static boolean shouldConsumeBoundReservation(String phase, String pausedFromPhase,
                                                   String boundIdentity, String currentIdentity) {
         String bound = safe(boundIdentity);
@@ -133,11 +147,20 @@ final class UserNextInputStore {
                 && !current.isEmpty() && !bound.equals(current);
     }
 
-    private static synchronized void cleanupConsumedReservation() {
+    private static synchronized void cleanupReservation() {
         if (prefs == null || runPrefs == null) return;
+        String storedRunId = safe(prefs.getString(RUN_ID, ""));
+        if (storedRunId.isEmpty()) return;
+        String phase = safe(runPrefs.getString("phase", SelfRunStore.PHASE_IDLE));
+        String currentRunId = safe(runPrefs.getString("runId", ""));
+        boolean active = runPrefs.getBoolean("active", false);
+        boolean userStopped = runPrefs.getBoolean("userStopped", false);
+        if (shouldDiscardStaleReservation(storedRunId, currentRunId, active, userStopped, phase)) {
+            prefs.edit().clear().commit();
+            return;
+        }
         String bound = safe(prefs.getString(BOUND_CONTINUATION, ""));
         if (bound.isEmpty()) return;
-        String phase = safe(runPrefs.getString("phase", SelfRunStore.PHASE_IDLE));
         String pausedFromPhase = safe(runPrefs.getString("pausedFromPhase", ""));
         String currentIdentity = currentContinuationIdentity();
         if (shouldConsumeBoundReservation(phase, pausedFromPhase, bound, currentIdentity)) {
