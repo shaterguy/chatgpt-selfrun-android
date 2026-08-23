@@ -44,13 +44,14 @@ public final class BootstrapFiniteStateWiringTest {
         assertFalse(list.contains("모델 변경 없음"));
         assertFalse(detail.contains("ChatReasoningPreferenceStore.summary(this"));
         assertTrue(application.contains("ChatReasoningPreferenceStore.initialize(context)"));
+        assertTrue(application.contains("UserNextInputStore.initialize(context)"));
         assertTrue(manifest.contains("android:name=\".SelfRunApplication\""));
     }
 
     @Test public void developmentIdentityAdvancesOnce() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000085"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.4.3'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000086"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.5.0-dev1'"));
     }
 
     private static String src(String file) throws Exception {
