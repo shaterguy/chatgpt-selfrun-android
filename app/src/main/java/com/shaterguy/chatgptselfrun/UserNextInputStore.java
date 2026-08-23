@@ -3,14 +3,20 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.nio.charset.StandardCharsets;
+
 /** Durable user-authored text to append to exactly the next SelfRun continuation. */
 final class UserNextInputStore {
+    static final int MAX_USER_UTF8_BYTES = NextInputCodec.MAX_UTF8_BYTES;
+    static final int MAX_COMBINED_UTF8_BYTES = NextInputCodec.MAX_UTF8_BYTES * 2 + 2;
+
     private static final String PREFS = "selfrun_drive_user_next_input";
     private static final String RUN_ID = "runId";
     private static final String TEXT = "text";
     private static final String BOUND_CONTINUATION = "boundContinuation";
     private static SharedPreferences prefs;
     private static SharedPreferences runPrefs;
+    private static SharedPreferences.OnSharedPreferenceChangeListener runListener;
 
     private UserNextInputStore() {}
 
@@ -18,10 +24,18 @@ final class UserNextInputStore {
         Context app = context.getApplicationContext();
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         runPrefs = app.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE);
+        if (runListener == null) {
+            runListener = (sharedPreferences, key) -> {
+                if ("phase".equals(key) || "pausedFromPhase".equals(key)) cleanupConsumedReservation();
+            };
+            runPrefs.registerOnSharedPreferenceChangeListener(runListener);
+        }
+        cleanupConsumedReservation();
     }
 
     static synchronized String current(String runId) {
         ensureInitialized();
+        cleanupConsumedReservation();
         if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return "";
         String bound = safe(prefs.getString(BOUND_CONTINUATION, ""));
         if (!bound.isEmpty() && !bound.equals(currentContinuationIdentity())) return "";
@@ -30,6 +44,7 @@ final class UserNextInputStore {
 
     static synchronized boolean editable(String runId) {
         ensureInitialized();
+        cleanupConsumedReservation();
         if (runId == null || runId.isEmpty() || !runId.equals(runPrefs.getString("runId", ""))) return false;
         if (!runPrefs.getBoolean("active", false) || runPrefs.getBoolean("userStopped", false)) return false;
         String phase = safe(runPrefs.getString("phase", SelfRunStore.PHASE_IDLE));
@@ -43,6 +58,7 @@ final class UserNextInputStore {
         if (!editable(runId)) return false;
         String value = safe(text);
         if (value.isEmpty()) return delete(runId);
+        if (!withinUtf8Limit(value, MAX_USER_UTF8_BYTES)) return false;
         return prefs.edit().putString(RUN_ID, runId).putString(TEXT, value).remove(BOUND_CONTINUATION).commit();
     }
 
@@ -55,9 +71,13 @@ final class UserNextInputStore {
 
     static synchronized String merge(String runId, String driveNextInput) {
         ensureInitialized();
-        if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return safe(driveNextInput);
+        cleanupConsumedReservation();
+        String drive = safe(driveNextInput);
+        if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return drive;
         String identity = currentContinuationIdentity();
-        if (identity.isEmpty()) return safe(driveNextInput);
+        if (identity.isEmpty()) return drive;
+        String user = safe(prefs.getString(TEXT, ""));
+        if (user.isEmpty()) return drive;
         String bound = safe(prefs.getString(BOUND_CONTINUATION, ""));
         if (bound.isEmpty()) {
             if (!prefs.edit().putString(BOUND_CONTINUATION, identity).commit()) {
@@ -65,8 +85,12 @@ final class UserNextInputStore {
             }
             bound = identity;
         }
-        if (!identity.equals(bound)) return safe(driveNextInput);
-        return mergeText(driveNextInput, prefs.getString(TEXT, ""));
+        if (!identity.equals(bound)) return drive;
+        String merged = mergeText(drive, user);
+        if (!withinUtf8Limit(merged, MAX_COMBINED_UTF8_BYTES)) {
+            throw new IllegalArgumentException("USER_NEXT_INPUT_COMBINED_TOO_LARGE");
+        }
+        return merged;
     }
 
     static String continuationIdentity(int driveSignalCursor, long phaseStartedAt) {
@@ -86,6 +110,39 @@ final class UserNextInputStore {
         if (drive.isEmpty()) return user;
         if (user.isEmpty()) return drive;
         return drive + "\n\n" + user;
+    }
+
+    static boolean withinUtf8Limit(String value, int limit) {
+        if (limit < 0) return false;
+        return safe(value).getBytes(StandardCharsets.UTF_8).length <= limit;
+    }
+
+    static boolean shouldConsumeBoundReservation(String phase, String pausedFromPhase,
+                                                  String boundIdentity, String currentIdentity) {
+        String bound = safe(boundIdentity);
+        if (bound.isEmpty()) return false;
+        String current = safe(currentIdentity);
+        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
+                || SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)
+                || SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
+                || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)
+                || SelfRunStore.PHASE_DONE.equals(phase)) return true;
+        if (SelfRunStore.PHASE_PAUSED.equals(phase)
+                && SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(pausedFromPhase)) return true;
+        return SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
+                && !current.isEmpty() && !bound.equals(current);
+    }
+
+    private static synchronized void cleanupConsumedReservation() {
+        if (prefs == null || runPrefs == null) return;
+        String bound = safe(prefs.getString(BOUND_CONTINUATION, ""));
+        if (bound.isEmpty()) return;
+        String phase = safe(runPrefs.getString("phase", SelfRunStore.PHASE_IDLE));
+        String pausedFromPhase = safe(runPrefs.getString("pausedFromPhase", ""));
+        String currentIdentity = currentContinuationIdentity();
+        if (shouldConsumeBoundReservation(phase, pausedFromPhase, bound, currentIdentity)) {
+            prefs.edit().clear().commit();
+        }
     }
 
     private static String currentContinuationIdentity() {
