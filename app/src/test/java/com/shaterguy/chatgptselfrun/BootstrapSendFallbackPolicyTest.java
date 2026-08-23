@@ -37,7 +37,7 @@ public final class BootstrapSendFallbackPolicyTest {
         assertTrue(click.contains("writeMarker({state:'prepared',at:Date.now()})"));
     }
 
-    @Test public void stopDetectionIsScopedToTheActiveComposer() {
+    @Test public void stopDetectionIsScopedToTheActiveComposerAndIgnoresGlobalControls() {
         String prepare = SelfRunContinuationDom.prepareBootstrap(
                 "https://chatgpt.com/", "private bootstrap text", "marker-scope");
 
