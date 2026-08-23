@@ -45,6 +45,15 @@ public final class UserNextInputStoreTest {
         assertFalse(UserNextInputStore.preflightMatches("", 4L, identity, 4L));
     }
 
+    @Test public void lockedRetryProbeRequiresSameContinuationAndRevision() {
+        String identity = UserNextInputStore.continuationIdentity(7, 123456L);
+        assertTrue(UserNextInputStore.lockProbeMatches(identity, 9L, identity, 9L));
+        assertFalse(UserNextInputStore.lockProbeMatches(identity, 9L, identity, 10L));
+        assertFalse(UserNextInputStore.lockProbeMatches(identity, 9L,
+                UserNextInputStore.continuationIdentity(7, 123457L), 9L));
+        assertFalse(UserNextInputStore.lockProbeMatches("", 9L, identity, 9L));
+    }
+
     @Test public void staleCachedPayloadIsReplacedWithoutChangingContinuationHeader() {
         String header = "[2026.08.23 | 22:00:00] [SELF_RUN_CONTINUE SR-EXAMPLE]";
         String stale = header + "\nstale user text";

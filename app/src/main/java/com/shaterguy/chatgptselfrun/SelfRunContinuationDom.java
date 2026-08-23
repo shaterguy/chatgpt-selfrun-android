@@ -61,7 +61,14 @@ final class SelfRunContinuationDom {
         String effectivePrompt = prompt;
         if (UserNextInputStore.initialized()) {
             String runId = runIdFromContinuationMarker(markerId);
-            if (!runId.isEmpty()) effectivePrompt = UserNextInputStore.promptForPreparation(runId, prompt);
+            String identity = continuationIdentityFromMarker(markerId);
+            if (!runId.isEmpty() && UserNextInputStore.managesContinuation(runId)) {
+                effectivePrompt = UserNextInputStore.promptForPreparation(runId, prompt);
+                if (UserNextInputStore.submissionLocked(runId)
+                        && UserNextInputStore.beginLockedRetryProbe(runId, identity)) {
+                    return probeLockedDriveTurn(conversationUrl, markerId);
+                }
+            }
         }
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(effectivePrompt);
@@ -85,7 +92,7 @@ final class SelfRunContinuationDom {
     static String clickPreparedDriveTurn(String conversationUrl, String prompt, String markerId,
                                            String runId, String observerToken, long stabilityMs) {
         String effectivePrompt = prompt;
-        if (UserNextInputStore.initialized()) {
+        if (UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)) {
             UserNextInputStore.ClickPlan plan = UserNextInputStore.nextClickPlan(
                     runId, continuationIdentityFromMarker(markerId), prompt);
             effectivePrompt = plan.prompt;
@@ -101,10 +108,21 @@ final class SelfRunContinuationDom {
                 + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before click');"
                 + composerOps() + controls(sendKey) + markerOps(marker)
                 + completionObserver(runId, observerToken, stabilityMs)
-                + "const m=readMarker();if(m.state!=='prepared')return result('VERIFY_REQUIRED','prepared marker changed before click');"
-                + "if(!same())return result('COMPOSER_CLEARING','exact continuation readback lost before click');"
+                + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('VERIFY_REQUIRED','prior click requires submission verification');"
+                + "if(m.state!=='prepared'){if(!m.state)writeMarker({state:'clearing',at:Date.now()});return result('COMPOSER_INPUTTING','prepared marker unavailable before click');}"
+                + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','exact continuation readback lost before click');}"
                 + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled');"
                 + "const baselineUserCount=userMessageCount();writeMarker({state:'clicked',clickedAt:Date.now(),baselineUserCount});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}armCompletionObserver(false);return result('CONTINUE_CLICKED','submit='+submitPath+';observer=armed;verification=required');})()";
+    }
+
+    private static String probeLockedDriveTurn(String conversationUrl, String markerId) {
+        String conversation = q(SelfRunScript.conversationId(conversationUrl));
+        String marker = q("selfrun-drive:verified-continuation:" + markerId);
+        return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
+                + conversationGuard(conversation) + authGuard() + markerOps(marker)
+                + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('VERIFY_REQUIRED','locked continuation has dispatch evidence');"
+                + "if(m.state==='prepared'||m.state==='clearing'||m.state==='inputting'||m.state==='failed')return result('READY_TO_SUBMIT','locked continuation has definite no-dispatch evidence;state='+m.state);"
+                + "return result('" + UNKNOWN + "','locked continuation marker has no safe no-dispatch proof');})()";
     }
 
     private static String preflightPreparedDriveTurn(String conversationUrl, String prompt, String markerId) {

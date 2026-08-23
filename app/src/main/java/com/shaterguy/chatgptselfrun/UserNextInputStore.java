@@ -17,6 +17,8 @@ final class UserNextInputStore {
     private static final String REVISION = "revision";
     private static final String LOCKED_CONTINUATION = "lockedContinuation";
     private static final String LOCKED_REVISION = "lockedRevision";
+    private static final String LOCK_PROBE_CONTINUATION = "lockProbeContinuation";
+    private static final String LOCK_PROBE_REVISION = "lockProbeRevision";
     private static final String PREFLIGHT_CONTINUATION = "preflightContinuation";
     private static final String PREFLIGHT_REVISION = "preflightRevision";
     private static final String LEGACY_BOUND_CONTINUATION = "boundContinuation";
@@ -81,6 +83,28 @@ final class UserNextInputStore {
                 && !safe(prefs.getString(LOCKED_CONTINUATION, "")).isEmpty();
     }
 
+    static synchronized boolean managesContinuation(String runId) {
+        ensureInitialized();
+        cleanupReservation();
+        return currentSendContext(runId);
+    }
+
+    static synchronized boolean beginLockedRetryProbe(String runId, String continuationIdentity) {
+        ensureInitialized();
+        cleanupReservation();
+        String identity = safe(continuationIdentity);
+        if (!currentSendContext(runId) || identity.isEmpty() || !identity.equals(currentContinuationIdentity())) return false;
+        if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return false;
+        String locked = safe(prefs.getString(LOCKED_CONTINUATION, ""));
+        long revision = prefs.getLong(REVISION, 0L);
+        long lockedRevision = prefs.getLong(LOCKED_REVISION, -1L);
+        if (!identity.equals(locked) || revision != lockedRevision) return false;
+        boolean committed = prefs.edit().putString(LOCK_PROBE_CONTINUATION, identity)
+                .putLong(LOCK_PROBE_REVISION, revision).commit();
+        if (!committed) throw new IllegalStateException("user next-input lock retry probe failed");
+        return true;
+    }
+
     static synchronized boolean save(String runId, String text) {
         ensureInitialized();
         if (!editable(runId)) return false;
@@ -93,7 +117,8 @@ final class UserNextInputStore {
         SharedPreferences.Editor edit = prefs.edit();
         if (!storedRunId.equals(runId)) edit.clear();
         return edit.putString(RUN_ID, runId).putString(TEXT, value).putLong(REVISION, revision + 1L)
-                .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION).commit();
+                .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION)
+                .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION).commit();
     }
 
     static synchronized boolean delete(String runId) {
@@ -103,7 +128,8 @@ final class UserNextInputStore {
         if (safe(prefs.getString(TEXT, "")).isEmpty()) return true;
         long revision = prefs.getLong(REVISION, 0L);
         return prefs.edit().putString(TEXT, "").putLong(REVISION, revision + 1L)
-                .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION).commit();
+                .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION)
+                .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION).commit();
     }
 
     static synchronized String merge(String runId, String driveNextInput) {
@@ -143,8 +169,21 @@ final class UserNextInputStore {
         if (!locked.isEmpty()) {
             long currentRevision = prefs.getLong(REVISION, 0L);
             long lockedRevision = prefs.getLong(LOCKED_REVISION, -1L);
-            return new ClickPlan(latestPrompt,
-                    identity.equals(locked) && currentRevision == lockedRevision);
+            if (!identity.equals(locked) || currentRevision != lockedRevision) {
+                return new ClickPlan(latestPrompt, false);
+            }
+            String probe = safe(prefs.getString(LOCK_PROBE_CONTINUATION, ""));
+            long probeRevision = prefs.getLong(LOCK_PROBE_REVISION, -1L);
+            if (lockProbeMatches(probe, probeRevision, identity, currentRevision)) {
+                boolean reopened = prefs.edit()
+                        .remove(LOCKED_CONTINUATION).remove(LOCKED_REVISION)
+                        .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION)
+                        .putString(PREFLIGHT_CONTINUATION, identity)
+                        .putLong(PREFLIGHT_REVISION, currentRevision).commit();
+                if (!reopened) throw new IllegalStateException("user next-input retry reopen failed");
+                return new ClickPlan(latestPrompt, false);
+            }
+            return new ClickPlan(latestPrompt, true);
         }
 
         long revision = prefs.getLong(REVISION, 0L);
@@ -153,12 +192,14 @@ final class UserNextInputStore {
         if (preflightMatches(preflight, preflightRevision, identity, revision)) {
             boolean committed = prefs.edit().putString(LOCKED_CONTINUATION, identity)
                     .putLong(LOCKED_REVISION, revision)
-                    .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION).commit();
+                    .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION)
+                    .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION).commit();
             if (!committed) throw new IllegalStateException("user next-input submission lock failed");
             return new ClickPlan(latestPrompt, true);
         }
         boolean committed = prefs.edit().putString(PREFLIGHT_CONTINUATION, identity)
-                .putLong(PREFLIGHT_REVISION, revision).commit();
+                .putLong(PREFLIGHT_REVISION, revision)
+                .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION).commit();
         if (!committed) throw new IllegalStateException("user next-input preflight state failed");
         return new ClickPlan(latestPrompt, false);
     }
@@ -184,6 +225,13 @@ final class UserNextInputStore {
         String preflight = safe(preflightIdentity);
         String current = safe(currentIdentity);
         return !preflight.isEmpty() && preflight.equals(current) && preflightRevision == currentRevision;
+    }
+
+    static boolean lockProbeMatches(String probeIdentity, long probeRevision,
+                                    String currentIdentity, long currentRevision) {
+        String probe = safe(probeIdentity);
+        String current = safe(currentIdentity);
+        return !probe.isEmpty() && probe.equals(current) && probeRevision == currentRevision;
     }
 
     static String mergeText(String driveNextInput, String userInput) {
@@ -267,7 +315,8 @@ final class UserNextInputStore {
         }
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase) && !currentIdentity.isEmpty()
                 && !preflight.equals(currentIdentity)) {
-            prefs.edit().remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION).commit();
+            prefs.edit().remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION)
+                    .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION).commit();
         }
     }
 
@@ -293,7 +342,8 @@ final class UserNextInputStore {
         }
         long revision = prefs.getLong(REVISION, 0L);
         boolean committed = prefs.edit().putString(DRIVE_TEXT, drive).putLong(REVISION, revision + 1L)
-                .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION).commit();
+                .remove(PREFLIGHT_CONTINUATION).remove(PREFLIGHT_REVISION)
+                .remove(LOCK_PROBE_CONTINUATION).remove(LOCK_PROBE_REVISION).commit();
         if (!committed) throw new IllegalStateException("user next-input drive payload update failed");
     }
 

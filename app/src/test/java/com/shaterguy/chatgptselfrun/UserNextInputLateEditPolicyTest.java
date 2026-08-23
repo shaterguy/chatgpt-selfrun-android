@@ -15,25 +15,54 @@ public final class UserNextInputLateEditPolicyTest {
         String dom = src("SelfRunContinuationDom.java");
         assertTrue(store.contains("PREFLIGHT_CONTINUATION"));
         assertTrue(store.contains("LOCKED_CONTINUATION"));
+        assertTrue(store.contains("LOCK_PROBE_CONTINUATION"));
         assertTrue(store.contains("preflightMatches"));
+        assertTrue(store.contains("lockProbeMatches"));
         assertTrue(store.contains("phaseAllowsEditing"));
+        assertTrue(store.contains("beginLockedRetryProbe"));
         assertTrue(dom.contains("UserNextInputStore.promptForPreparation"));
         assertTrue(dom.contains("UserNextInputStore.nextClickPlan"));
         assertTrue(dom.contains("preflightPreparedDriveTurn"));
+        assertTrue(dom.contains("probeLockedDriveTurn"));
         assertTrue(dom.contains("latest continuation verified before submission lock"));
+        assertTrue(dom.contains("locked continuation has definite no-dispatch evidence"));
     }
 
     @Test public void actualSendScriptStillOwnsTheIrreversibleBoundary() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
-        String click = between(dom, "static String clickPreparedDriveTurn", "private static String preflightPreparedDriveTurn");
+        String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
+        String probe = between(dom, "private static String probeLockedDriveTurn", "private static String preflightPreparedDriveTurn");
         String preflight = between(dom, "private static String preflightPreparedDriveTurn", "static String observeTurnCompletion");
         assertTrue(click.contains("c.send.click()"));
         assertTrue(click.contains("requestComposerSubmit()"));
         assertTrue(click.contains("armCompletionObserver(false)"));
+        assertFalse(probe.contains("c.send.click()"));
+        assertFalse(probe.contains("requestComposerSubmit()"));
+        assertFalse(probe.contains("armCompletionObserver(false)"));
+        assertTrue(probe.contains("m.state==='clicked'||m.state==='confirmed'"));
+        assertTrue(probe.contains("definite no-dispatch evidence"));
         assertFalse(preflight.contains("c.send.click()"));
         assertFalse(preflight.contains("requestComposerSubmit()"));
         assertFalse(preflight.contains("armCompletionObserver(false)"));
         assertTrue(preflight.contains("READY_TO_SUBMIT"));
+    }
+
+    @Test public void unmanagedDomAdapterKeepsLegacyDirectClickContract() throws Exception {
+        String dom = src("SelfRunContinuationDom.java");
+        String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
+        assertTrue(click.contains("UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)"));
+        assertTrue(click.contains("if (!plan.clickAllowed) return preflightPreparedDriveTurn"));
+        assertTrue(click.contains("c.send.click()"));
+        assertTrue(click.contains("return result('CONTINUE_CLICKED'"));
+    }
+
+    @Test public void missingPreparedMarkerNeverClaimsSubmission() throws Exception {
+        String dom = src("SelfRunContinuationDom.java");
+        String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
+        assertTrue(click.contains("m.state==='clicked'||m.state==='confirmed'"));
+        assertTrue(click.contains("if(!m.state)writeMarker({state:'clearing'"));
+        assertTrue(click.contains("prepared marker unavailable before click"));
+        assertFalse(click.contains("if(m.state!=='prepared')return result('VERIFY_REQUIRED'"));
     }
 
     private static String src(String file) throws Exception {
