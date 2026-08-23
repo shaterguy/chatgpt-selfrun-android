@@ -11,8 +11,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -33,6 +35,10 @@ public final class MainActivity extends Activity {
     private SelfRunRunLog runLog;
     private TextView currentStatus;
     private TextView backgroundStatus;
+    private TextView nextInputStatus;
+    private EditText nextInputEditor;
+    private Button nextInputSaveButton;
+    private Button nextInputDeleteButton;
     private Button pauseButton;
     private Button resumeButton;
     private Button stopButton;
@@ -98,6 +104,21 @@ public final class MainActivity extends Activity {
         currentLogsButton = Ui.button(this, "현재 작업 로그", v -> openCurrentLogs());
         root.addView(currentLogsButton);
 
+        root.addView(Ui.section(this, "차기 턴 사용자 입력"));
+        nextInputStatus = Ui.body(this, "");
+        root.addView(nextInputStatus);
+        nextInputEditor = new EditText(this);
+        nextInputEditor.setHint("차기 턴에 함께 보낼 문구");
+        nextInputEditor.setMinLines(2);
+        nextInputEditor.setMaxLines(8);
+        nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        root.addView(nextInputEditor, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        nextInputSaveButton = Ui.button(this, "저장/수정", v -> saveNextInput());
+        nextInputDeleteButton = Ui.button(this, "삭제", v -> deleteNextInput());
+        root.addView(Ui.row(this, nextInputSaveButton, nextInputDeleteButton));
+        root.addView(Ui.body(this, "저장한 문구는 정확히 다음 SelfRun continuation에만 적용됩니다. Drive NEXT_INPUT이 있으면 그 뒤에 함께 전달됩니다."));
+
         root.addView(Ui.section(this, "백그라운드 실행"));
         backgroundStatus = Ui.body(this, "");
         root.addView(backgroundStatus);
@@ -119,6 +140,7 @@ public final class MainActivity extends Activity {
             resumeButton.setEnabled(false);
             stopButton.setEnabled(false);
             currentLogsButton.setEnabled(false);
+            refreshNextInput("");
             return;
         }
         String prefs = SelfRunStore.MODE_WORK.equals(store.mode())
@@ -143,6 +165,47 @@ public final class MainActivity extends Activity {
         resumeButton.setEnabled(paused);
         stopButton.setEnabled(running || paused);
         currentLogsButton.setEnabled(true);
+        refreshNextInput(runId);
+    }
+
+    private void refreshNextInput(String runId) {
+        if (nextInputEditor == null) return;
+        boolean editable = !runId.isEmpty() && UserNextInputStore.editable(runId);
+        String stored = runId.isEmpty() ? "" : UserNextInputStore.current(runId);
+        if (!nextInputEditor.hasFocus()) nextInputEditor.setText(stored);
+        nextInputEditor.setEnabled(editable);
+        nextInputSaveButton.setEnabled(editable);
+        nextInputDeleteButton.setEnabled(editable && !stored.isEmpty());
+        if (runId.isEmpty()) nextInputStatus.setText("실행 중인 SelfRun이 없습니다.");
+        else if (editable) nextInputStatus.setText(stored.isEmpty()
+                ? "차기 턴 전송 준비가 시작되기 전까지 입력·수정·삭제할 수 있습니다."
+                : "차기 턴에 사용자 문구가 예약되어 있습니다. 전송 준비 전까지 수정·삭제할 수 있습니다.");
+        else nextInputStatus.setText("차기 턴 전송 준비가 시작되어 현재 예약 문구는 잠겼습니다.");
+    }
+
+    private void saveNextInput() {
+        String runId = store.runId();
+        if (!UserNextInputStore.save(runId, nextInputEditor.getText().toString())) {
+            Toast.makeText(this, "차기 턴 입력을 저장할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            refreshCurrent();
+            return;
+        }
+        nextInputEditor.clearFocus();
+        Toast.makeText(this, "차기 턴 입력을 저장했습니다.", Toast.LENGTH_SHORT).show();
+        refreshCurrent();
+    }
+
+    private void deleteNextInput() {
+        String runId = store.runId();
+        if (!UserNextInputStore.delete(runId)) {
+            Toast.makeText(this, "차기 턴 입력을 삭제할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            refreshCurrent();
+            return;
+        }
+        nextInputEditor.setText("");
+        nextInputEditor.clearFocus();
+        Toast.makeText(this, "차기 턴 입력을 삭제했습니다.", Toast.LENGTH_SHORT).show();
+        refreshCurrent();
     }
 
     private String errorSummary() {
