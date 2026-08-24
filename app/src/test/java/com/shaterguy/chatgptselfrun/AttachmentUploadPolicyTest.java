@@ -51,7 +51,7 @@ public class AttachmentUploadPolicyTest {
 
     @Test public void attachmentPickerResumePreservesCurrentProjectDraft() throws Exception {
         String activity = src("SelfRunNewActivity.java");
-        String resume = between(activity, "@Override protected void onResume", "@Override protected void onSaveInstanceState");
+        String resume = between(activity, "protected void onResume", "protected void onSaveInstanceState");
         String reload = between(activity, "private void reloadProjects()", "private String selectedProjectUrl()");
         assertTrue(resume.contains("reloadProjects(selectedProjectUrl())"));
         assertTrue(reload.contains("reloadProjects(store.defaultProjectUrl())"));
@@ -115,7 +115,7 @@ public class AttachmentUploadPolicyTest {
         String activity = src("SelfRunNewActivity.java");
         String pickerResult = between(activity, "onActivityResult", "readAttachmentDraft");
         String removeMethod = between(activity, "private void removeAttachment", "private void releaseReadGrant");
-        String destroyMethod = between(activity, "@Override protected void onDestroy", "private void reloadProjects");
+        String destroyMethod = between(activity, "protected void onDestroy", "private void reloadProjects");
         String startGrant = between(activity, "persistSelectedAttachmentGrants", "persistedReadGrantUris");
         String startMethod = between(activity, "private void startSelfRun", "private void startRunner");
 
@@ -144,8 +144,8 @@ public class AttachmentUploadPolicyTest {
         Path p = Paths.get("app/build.gradle");
         if (!Files.exists(p)) p = Paths.get("build.gradle");
         String gradle = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000088"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.0-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000089"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.0-dev2'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
     }
