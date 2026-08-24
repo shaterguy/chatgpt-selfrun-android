@@ -52,17 +52,18 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         int freshDefault = activity.indexOf(
                 "chatReasoning.setSelection(chatReasoningPosition(ChatReasoningPreferenceStore.EXTRA_HIGH));",
                 restoreMethod);
-        int restoredSelection = activity.indexOf("state.getInt(STATE_CHAT_REASONING,0)", restoreMethod);
+        int restoredSelection = activity.indexOf("state.getInt(STATE_CHAT_REASONING, 0)", restoreMethod);
         assertTrue(restoreMethod >= 0 && freshDefault > restoreMethod);
         assertTrue(restoredSelection > freshDefault);
         assertTrue(activity.contains("private static int chatReasoningPosition(String value)"));
         assertTrue(activity.contains("CHAT_REASONING_VALUES[i].equals(value)"));
+        assertTrue(activity.contains("chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE)"));
     }
 
-    @Test public void currentDevIdentityPinsOnlyTheApprovedUiDependencyChange() throws Exception {
+    @Test public void currentDevIdentityKeepsApprovedUiDependenciesPinned() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000088"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.0-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000089"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.0-dev2'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
     }
