@@ -58,6 +58,12 @@ public final class TestAppVariantPolicyTest {
         assertTrue(activity.contains("requireClaimOwnership();"));
     }
 
+    @Test public void authDependencyVersionMustRemainIndependentFromAppVersion() throws Exception {
+        String gradle = read("app/build.gradle", "build.gradle");
+        assertTrue(gradle.contains("play-services-auth:21.6.0"));
+        assertFalse(gradle.contains("play-services-auth:21.6.1-dev1"));
+    }
+
     private static String read(String first, String second) throws Exception {
         Path path = Paths.get(first);
         if (!Files.exists(path)) path = Paths.get(second);
