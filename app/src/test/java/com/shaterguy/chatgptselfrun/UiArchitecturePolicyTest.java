@@ -18,7 +18,8 @@ public final class UiArchitecturePolicyTest {
         assertTrue(main.contains("pauseButton.setVisibility(running ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("resumeButton.setVisibility(paused ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("if (Ui.isExpanded(this))"));
-        assertTrue(main.contains("supportingPane.addView(composerPanel"));
+        assertTrue(main.contains("pane.addView(composerPanel"));
+        assertTrue(main.contains("supportingPane = pane"));
         assertTrue(main.contains("workspace.setOrientation(LinearLayout.HORIZONTAL)"));
         assertFalse(main.contains("빠른 실행"));
         assertFalse(main.contains("백그라운드 실행 준비"));
