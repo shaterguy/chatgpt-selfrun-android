@@ -187,7 +187,7 @@ static String bootstrapFailureMessage(String status){if(isChatReasoningFailureSt
             @Override public void onResolutionRequired(PendingIntent ignored) {
                 authorizationInFlight = false;
                 if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())) return;
-                if (SelfRunStore.PHASE_RESUME_BASELINE.equals(requestedPhase)) scheduleAuthorizationRetry("DRIVE_RESUME_BASELINE_AUTH_RETRY", "사용자 재개 baseline의 Drive 승인을 자동 재시도합니다.", epoch, requestedRunId, requestedPhase);
+                if (SelfRunStore.PHASE_RESUME_BASELINE.equals(requestedPhase)) scheduleAuthorizationRetry("DRIVE_RESUME_BASELINE_AUTH_RETRY", "사용자 재개 baseline의 Drive 계정을 자동 재확인합니다.", epoch, requestedRunId, requestedPhase);
                 else pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "앱 설정에서 Drive 저장 위치를 다시 연결하세요.", epoch, requestedRunId, requestedPhase);
             }
             @Override public void onFailure(Throwable error) {
@@ -607,7 +607,7 @@ private void evaluate(String phase,String script){
       if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
   }
   if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
-      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 이벤트 관찰 중 · 답변 완료 후 5초 재확인");String observerToken=store.turnObserverToken();boolean firstArm=!observerToken.isEmpty()&&!observerToken.equals(loggedTurnObserverToken);boolean rebound=detail.contains("bindingChanged=1");if(firstArm||rebound){runLog.record(store,"TURN_COMPLETION_OBSERVER","result="+(rebound&&!firstArm?"rebound":"armed")+";detail="+BootstrapResultPolicy.safe(detail,180));loggedTurnObserverToken=observerToken;}pauseWebView();releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
+      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 이벤트 관찰 중 · 답변 완료 후 5초 재확인");String observerToken=store.turnObserverToken();boolean firstArm=!observerToken.isEmpty()&&!observerToken.equals(loggedTurnObserverToken);boolean rebound=detail.contains("bindingChanged=1");if(firstArm||rebound){runLog.record(store,"TURN_COMPLETION_OBSERVER","result="+(rebound&&!firstArm?"rebound":"armed")+";detail="+BootstrapResultPolicy.safe(detail,180));loggedTurnObserverToken=observerToken;}releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
       if("OBSERVER_UNAVAILABLE".equals(status)){runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
   }
   if("TARGET_ERROR".equals(status)){recordContinuationTargetError(phase);if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
