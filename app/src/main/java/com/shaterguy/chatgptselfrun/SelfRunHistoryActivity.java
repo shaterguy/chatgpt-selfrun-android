@@ -78,8 +78,10 @@ public final class SelfRunHistoryActivity extends Activity {
             }
             LinearLayout panes = new LinearLayout(this);
             panes.setOrientation(LinearLayout.HORIZONTAL);
-            panes.addView(listScroll, new LinearLayout.LayoutParams(0, 0, 0.92f));
-            LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(0, 0, 1.08f);
+            panes.addView(listScroll, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 0.92f));
+            LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1.08f);
             detailParams.setMarginStart(Ui.dp(this, 20));
             panes.addView(detailPane, detailParams);
             LinearLayout.LayoutParams panesParams = new LinearLayout.LayoutParams(
