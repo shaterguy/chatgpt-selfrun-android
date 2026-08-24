@@ -77,7 +77,7 @@ public class SelfRunGeneralChatPolicyTest {
 
     @Test public void generalChatIsSelectedFromTheFixedSafeOption() throws Exception {
         String activity = src("SelfRunNewActivity.java");
-        assertTrue(activity.contains("position<=0?SelfRunScript.GENERAL_CHAT_URL"));
+        assertTrue(activity.contains("return position <= 0 ? SelfRunScript.GENERAL_CHAT_URL"));
         assertTrue(activity.contains("store.setDefaultProjectUrl(project);"));
         assertFalse(activity.contains("EditText project"));
     }
