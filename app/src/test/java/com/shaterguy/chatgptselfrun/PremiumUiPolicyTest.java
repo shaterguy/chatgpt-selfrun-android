@@ -27,12 +27,42 @@ public final class PremiumUiPolicyTest {
         String ui = src("Ui.java");
         assertTrue(ui.contains("MaterialButton"));
         assertTrue(ui.contains("MaterialCardView"));
+        assertTrue(ui.contains("MaterialAutoCompleteTextView"));
+        assertTrue(ui.contains("TextInputLayout"));
+        assertTrue(ui.contains("textInputOutlinedExposedDropdownMenuStyle"));
         assertTrue(ui.contains("materialButtonTonalStyle"));
         assertTrue(ui.contains("materialButtonOutlinedStyle"));
         assertTrue(ui.contains("setMinimumHeight(dp(context, 48))"));
         assertTrue(ui.contains("WindowInsets.Type.systemBars()"));
         assertTrue(ui.contains("WindowInsets.Type.displayCutout()"));
         assertTrue(ui.contains("WindowInsets.Type.ime()"));
+    }
+
+    @Test public void selectionInputsUseMaterialDropdownsAndPreserveIndexState() throws Exception {
+        String ui = src("Ui.java");
+        String task = src("SelfRunNewActivity.java");
+        assertTrue(task.contains("Ui.SelectionField project"));
+        assertTrue(task.contains("Ui.SelectionField mode"));
+        assertTrue(task.contains("Ui.SelectionField chatReasoning"));
+        assertTrue(task.contains("mode.setOnSelectionChangedListener"));
+        assertTrue(task.contains("outState.putInt(STATE_MODE,mode==null?0:mode.getSelectedItemPosition())"));
+        assertTrue(task.contains("mode.setSelection(modePosition)"));
+        assertTrue(task.contains("chatReasoning.setSelection(reasoningPosition)"));
+        assertTrue(task.contains("project.setSelection(selected)"));
+        assertTrue(ui.contains("int getSelectedItemPosition()"));
+        assertTrue(ui.contains("void setSelection(int position)"));
+        assertFalse(task.contains("android.widget.Spinner"));
+        assertFalse(task.contains("simple_spinner_dropdown_item"));
+    }
+
+    @Test public void commonContentAdaptsAcrossWindowWidthClasses() throws Exception {
+        String ui = src("Ui.java");
+        assertTrue(ui.contains("WIDTH_MEDIUM_DP = 600"));
+        assertTrue(ui.contains("WIDTH_EXPANDED_DP = 840"));
+        assertTrue(ui.contains("EXPANDED_CONTENT_MAX_DP = 760"));
+        assertTrue(ui.contains("applyAdaptiveContentWidth"));
+        assertTrue(ui.contains("FrameLayout"));
+        assertTrue(ui.contains("Gravity.TOP | Gravity.CENTER_HORIZONTAL"));
     }
 
     @Test public void mainDashboardKeepsExistingActionsWhileUsingCards() throws Exception {

@@ -15,12 +15,9 @@ import android.text.TextWatcher;
 import android.view.View;
 import android.view.ViewParent;
 import android.view.WindowManager;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -59,12 +56,12 @@ public final class SelfRunNewActivity extends Activity {
     private SelfRunStore store;
     private SelfRunHistoryStore history;
     private SelfRunRunLog runLog;
-    private Spinner project;
+    private Ui.SelectionField project;
     private ProjectCatalog catalog;
     private List<ProjectUrlPolicy.ProjectRef> projectEntries;
     private EditText requirement;
-    private Spinner mode;
-    private Spinner chatReasoning;
+    private Ui.SelectionField mode;
+    private Ui.SelectionField chatReasoning;
     private TextView chatReasoningHelp;
     private LinearLayout attachmentListView;
     private TextView attachmentSummary;
@@ -84,10 +81,10 @@ public final class SelfRunNewActivity extends Activity {
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL); root.setFocusableInTouchMode(true); root.setPadding(Ui.dp(this,18),Ui.dp(this,14),Ui.dp(this,18),Ui.dp(this,24)); scroll.addView(root);
         root.addView(Ui.title(this,"새 SelfRun Drive 작업")); root.addView(Ui.button(this,"작업 목록",v->finish())); root.addView(Ui.body(this,"새 작업은 빈 요구사항에서 시작합니다. 이전 Run의 입력 내용·신호·오류는 이 화면에 불러오지 않습니다."));
-        root.addView(Ui.section(this,"프로젝트 선택")); project=new Spinner(this); root.addView(project); root.addView(Ui.body(this,"등록할 프로젝트를 직접 열면 목록에 추가됩니다. 전체 목록을 자동 탐색하거나 메뉴를 자동 클릭하지 않습니다.")); root.addView(Ui.row(this,Ui.button(this,"프로젝트 등록/업데이트",v->startActivity(new Intent(this,LoginActivity.class))),Ui.button(this,"등록 목록 지우기",v->{catalog.clear();store.setDefaultProjectUrl("");reloadProjects();Toast.makeText(this,"등록 프로젝트 목록을 지웠습니다.",Toast.LENGTH_SHORT).show();}))); reloadProjects();
-        root.addView(Ui.section(this,"실행 모드")); mode=new Spinner(this); mode.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,MODE_LABELS)); root.addView(mode);
-        root.addView(Ui.section(this,"일반 Chat 추론 정도")); chatReasoning=new Spinner(this); chatReasoning.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,CHAT_REASONING_LABELS)); root.addView(chatReasoning); chatReasoningHelp=Ui.body(this,""); root.addView(chatReasoningHelp);
-        mode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){@Override public void onItemSelected(AdapterView<?> parent,View view,int position,long id){updateChatReasoningAvailability();}@Override public void onNothingSelected(AdapterView<?> parent){updateChatReasoningAvailability();}}); updateChatReasoningAvailability();
+        root.addView(Ui.section(this,"프로젝트 선택")); project=Ui.selection(this,"프로젝트"); root.addView(project); root.addView(Ui.body(this,"등록할 프로젝트를 직접 열면 목록에 추가됩니다. 전체 목록을 자동 탐색하거나 메뉴를 자동 클릭하지 않습니다.")); root.addView(Ui.row(this,Ui.button(this,"프로젝트 등록/업데이트",v->startActivity(new Intent(this,LoginActivity.class))),Ui.button(this,"등록 목록 지우기",v->{catalog.clear();store.setDefaultProjectUrl("");reloadProjects();Toast.makeText(this,"등록 프로젝트 목록을 지웠습니다.",Toast.LENGTH_SHORT).show();}))); reloadProjects();
+        root.addView(Ui.section(this,"실행 모드")); mode=Ui.selection(this,"실행 모드"); mode.setItems(MODE_LABELS); root.addView(mode);
+        root.addView(Ui.section(this,"일반 Chat 추론 정도")); chatReasoning=Ui.selection(this,"Chat 추론 정도"); chatReasoning.setItems(CHAT_REASONING_LABELS); root.addView(chatReasoning); chatReasoningHelp=Ui.body(this,""); root.addView(chatReasoningHelp);
+        mode.setOnSelectionChangedListener(position->updateChatReasoningAvailability()); updateChatReasoningAvailability();
         root.addView(Ui.section(this,"셀프런 명령")); requirement=new EditText(this); requirement.setHint("작업 요구사항"); requirement.setSingleLine(false); requirement.setMinLines(8); requirement.setGravity(android.view.Gravity.TOP|android.view.Gravity.START); requirement.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); requirement.setVerticalScrollBarEnabled(false); requirement.setHorizontalScrollBarEnabled(false); requirement.setHorizontallyScrolling(false); installCommandVisibilityTracking(requirement); root.addView(requirement);
 
         root.addView(Ui.section(this,"첨부파일 (선택)"));
@@ -384,7 +381,7 @@ public final class SelfRunNewActivity extends Activity {
     private void reloadProjects(String preferredUrl) {
         String previous=preferredUrl==null?"":preferredUrl; projectEntries=catalog.entries(); ArrayList<String> labels=new ArrayList<>(); labels.add("일반채팅"); int selected=0;
         for(int i=0;i<projectEntries.size();i++){ProjectUrlPolicy.ProjectRef entry=projectEntries.get(i);labels.add(catalog.displayName(entry));if(entry.canonicalUrl.equals(previous))selected=i+1;}
-        project.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels)); project.setSelection(selected);
+        project.setItems(labels.toArray(new String[0])); project.setSelection(selected);
     }
 
     private String selectedProjectUrl() { int position=project.getSelectedItemPosition(); return position<=0?SelfRunScript.GENERAL_CHAT_URL:projectEntries.get(position-1).canonicalUrl; }

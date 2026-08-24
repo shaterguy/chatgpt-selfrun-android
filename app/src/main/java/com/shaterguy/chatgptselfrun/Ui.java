@@ -15,18 +15,96 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.textfield.MaterialAutoCompleteTextView;
+import com.google.android.material.textfield.TextInputLayout;
 
 final class Ui {
+    private static final int WIDTH_MEDIUM_DP = 600;
+    private static final int WIDTH_EXPANDED_DP = 840;
+    private static final int EXPANDED_CONTENT_MAX_DP = 760;
+
     private Ui() {}
+
+    interface OnSelectionChangedListener {
+        void onSelectionChanged(int position);
+    }
+
+    static final class SelectionField extends TextInputLayout {
+        private final MaterialAutoCompleteTextView input;
+        private String[] items = new String[0];
+        private int selectedPosition;
+        private OnSelectionChangedListener selectionChangedListener;
+
+        SelectionField(Context context, String label) {
+            super(context, null, com.google.android.material.R.attr.textInputOutlinedExposedDropdownMenuStyle);
+            setHint(label);
+            setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+            float radius = dp(context, 16);
+            setBoxCornerRadii(radius, radius, radius, radius);
+            setMinimumHeight(dp(context, 56));
+
+            input = new MaterialAutoCompleteTextView(getContext());
+            input.setRawInputType(android.text.InputType.TYPE_NULL);
+            input.setSingleLine(true);
+            input.setMinHeight(dp(context, 56));
+            input.setOnItemClickListener((parent, view, position, id) -> {
+                if (items.length == 0) return;
+                selectedPosition = Math.max(0, Math.min(items.length - 1, position));
+                if (selectionChangedListener != null) {
+                    selectionChangedListener.onSelectionChanged(selectedPosition);
+                }
+            });
+            addView(input, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        void setItems(String[] values) {
+            items = values == null ? new String[0] : values.clone();
+            input.setSimpleItems(items);
+            setSelection(Math.min(selectedPosition, Math.max(0, items.length - 1)));
+        }
+
+        void setSelection(int position) {
+            if (items.length == 0) {
+                selectedPosition = 0;
+                input.setText("", false);
+                return;
+            }
+            selectedPosition = Math.max(0, Math.min(items.length - 1, position));
+            input.setText(items[selectedPosition], false);
+        }
+
+        int getSelectedItemPosition() {
+            return selectedPosition;
+        }
+
+        void setOnSelectionChangedListener(OnSelectionChangedListener listener) {
+            selectionChangedListener = listener;
+        }
+
+        @Override public void setEnabled(boolean enabled) {
+            super.setEnabled(enabled);
+            if (input != null) input.setEnabled(enabled);
+        }
+
+        @Override public void clearFocus() {
+            super.clearFocus();
+            if (input != null) input.clearFocus();
+        }
+    }
 
     static int dp(Context context, int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    static SelectionField selection(Context context, String label) {
+        return new SelectionField(context, label);
     }
 
     static TextView title(Context context, String text) {
@@ -179,18 +257,24 @@ final class Ui {
 
     static void setContent(Activity activity, View content) {
         decorateTree(activity, content);
-        content.setBackgroundColor(themeColor(activity, com.google.android.material.R.attr.colorSurface, Color.WHITE));
+        int surface = themeColor(activity, com.google.android.material.R.attr.colorSurface, Color.WHITE);
+        content.setBackgroundColor(surface);
+
+        FrameLayout shell = new FrameLayout(activity);
+        shell.setBackgroundColor(surface);
+        shell.setClipToPadding(false);
+        shell.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+
         Window window = activity.getWindow();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false);
             window.setStatusBarColor(Color.TRANSPARENT);
             window.setNavigationBarColor(Color.TRANSPARENT);
         }
-        final int left = content.getPaddingLeft();
-        final int top = content.getPaddingTop();
-        final int right = content.getPaddingRight();
-        final int bottom = content.getPaddingBottom();
-        content.setOnApplyWindowInsetsListener((view, insets) -> {
+        shell.setOnApplyWindowInsetsListener((view, insets) -> {
             int insetLeft;
             int insetTop;
             int insetRight;
@@ -208,19 +292,39 @@ final class Ui {
                 insetRight = insets.getSystemWindowInsetRight();
                 insetBottom = insets.getSystemWindowInsetBottom();
             }
-            view.setPadding(left + insetLeft, top + insetTop, right + insetRight, bottom + insetBottom);
+            view.setPadding(insetLeft, insetTop, insetRight, insetBottom);
+            applyAdaptiveContentWidth(activity, shell, content);
             return insets;
         });
-        activity.setContentView(content);
-        content.requestApplyInsets();
+        shell.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                applyAdaptiveContentWidth(activity, shell, content));
+        activity.setContentView(shell);
+        shell.requestApplyInsets();
+    }
+
+    private static void applyAdaptiveContentWidth(Context context, FrameLayout shell, View content) {
+        int availableWidth = Math.max(0, shell.getWidth() - shell.getPaddingLeft() - shell.getPaddingRight());
+        if (availableWidth <= 0) return;
+        float density = context.getResources().getDisplayMetrics().density;
+        int widthDp = Math.round(availableWidth / Math.max(0.1f, density));
+        int targetWidth = ViewGroup.LayoutParams.MATCH_PARENT;
+        if (widthDp >= WIDTH_EXPANDED_DP) {
+            targetWidth = Math.min(availableWidth - dp(context, 64), dp(context, EXPANDED_CONTENT_MAX_DP));
+        } else if (widthDp >= WIDTH_MEDIUM_DP) {
+            targetWidth = availableWidth - dp(context, 48);
+        }
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) content.getLayoutParams();
+        if (params.width == targetWidth && params.gravity == (Gravity.TOP | Gravity.CENTER_HORIZONTAL)) return;
+        params.width = targetWidth;
+        params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        content.setLayoutParams(params);
     }
 
     private static void decorateTree(Context context, View view) {
-        if (view instanceof EditText) {
-            styleInput(context, (EditText) view);
-        } else if (view instanceof Spinner) {
+        if (view instanceof MaterialAutoCompleteTextView) {
             view.setMinimumHeight(dp(context, 56));
-            view.setPadding(dp(context, 12), dp(context, 4), dp(context, 12), dp(context, 4));
+        } else if (view instanceof EditText) {
+            styleInput(context, (EditText) view);
         } else if (view instanceof Button) {
             view.setMinimumHeight(dp(context, 48));
         }
