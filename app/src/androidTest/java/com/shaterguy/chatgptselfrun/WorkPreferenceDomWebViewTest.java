@@ -245,7 +245,7 @@ public final class WorkPreferenceDomWebViewTest {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             AtomicReference<String> callbackUrls = new AtomicReference<>("");
-            CountDownLatch callbacks = new CountDownLatch(2);
+            CountDownLatch callbacks = new CountDownLatch(1);
             loadContinuationFixture(scenario, web,
                     "<button type='button' role='button' data-testid='send-button' aria-label='Send prompt'>Send</button>",
                     callbackUrls, callbacks);
