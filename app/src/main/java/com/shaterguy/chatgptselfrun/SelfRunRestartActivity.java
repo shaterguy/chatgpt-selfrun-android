@@ -220,7 +220,7 @@ public final class SelfRunRestartActivity extends Activity {
             return;
         }
         recoveryStarted = true;
-        showRecoveryStage("RECOVERING", "실행 리소스 복구", "기존 Job 폴더와 실행턴 문서를 확인하고 필요한 경우 안전하게 복구합니다.", 2);
+        showRecoveryStage("RECOVERING", "실행 리소스 복구", "기존 작업과 Drive 리소스를 확인하고 필요한 경우 안전하게 복구합니다.", 2);
         io.execute(() -> recover(accessToken));
     }
 
@@ -255,14 +255,16 @@ public final class SelfRunRestartActivity extends Activity {
             if (document == null) document = createOrRecoverTurnDocument(api, accessToken, jobFolder.id);
             verifyTurnDocument(document, jobFolder.id);
 
+            String mode = snapshot.optString("mode", SelfRunStore.MODE_CHAT);
+            int stoppedCursor = Math.max(0, snapshot.optInt("driveSignalCursor", 0));
             String body = api.readDocumentText(accessToken, document.id);
-            DriveSignalParser.Scan baseline = DriveSignalParser.scan(body, runId, 0,
-                    snapshot.optString("mode", SelfRunStore.MODE_CHAT));
+            DriveSignalParser.Scan baseline = DriveSignalParser.scan(body, runId, stoppedCursor, mode);
+            DriveSignalParser.Event restartCompletion = SelfRunRestartPolicy.restartCompletion(baseline, snapshot);
             boolean documentChanged = !document.id.equals(oldDocumentId);
             String prompt = SelfRunRestartPolicy.continuationPrompt(runId,
                     documentChanged ? document.id : "");
             showRecoveryStage("RESTORING", "실행 상태 복원", "Drive 문서와 signal 기준선을 확인했습니다. CONTINUE 상태를 복원합니다.", 2);
-            restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, prompt);
+            restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, restartCompletion, prompt);
             runOnUiThread(this::startRecoveredService);
         } catch (Throwable error) {
             failure("작업 재시작 준비에 실패했습니다. 기존 작업과 Drive 리소스는 변경하지 않았습니다.");
@@ -364,13 +366,21 @@ public final class SelfRunRestartActivity extends Activity {
 
     private void restoreRun(String baseFolderId, String accountId,
                             DriveApiClient.Metadata jobFolder, DriveApiClient.Metadata document,
-                            DriveSignalParser.Scan baseline, String prompt) {
+                            DriveSignalParser.Scan baseline, DriveSignalParser.Event restartCompletion,
+                            String prompt) {
         synchronized (SelfRunStore.RUN_STATE_LOCK) {
             requireClaimOwnership();
             if (store.active()) throw new IllegalStateException("another SelfRun became active during restart");
             String mode = snapshot.optString("mode", SelfRunStore.MODE_CHAT);
             String model = snapshot.optString("pendingModel", "");
             String reasoning = snapshot.optString("pendingReasoning", "");
+            if (SelfRunStore.MODE_WORK.equals(mode) && restartCompletion != null) {
+                DriveSignalParser.WorkProfile profile = DriveSignalParser.workProfile(restartCompletion.raw);
+                if (profile.valid) {
+                    model = profile.model;
+                    reasoning = profile.reasoning;
+                }
+            }
             if (SelfRunStore.MODE_WORK.equals(mode) && !SelfRunProtocol.validWorkProfile(model, reasoning)) {
                 model = "sol";
                 reasoning = "xhigh";
@@ -382,6 +392,9 @@ public final class SelfRunRestartActivity extends Activity {
             long now = System.currentTimeMillis();
             long createdAt = snapshot.optLong("createdAt", now);
             DriveSignalParser.Event latest = baseline.latest;
+            String pendingRaw = restartCompletion == null ? "" : restartCompletion.raw;
+            String pendingTimestamp = restartCompletion == null ? "" : restartCompletion.timestamp;
+            String pendingType = restartCompletion == null ? "" : restartCompletion.type.name();
             SharedPreferences prefs = getSharedPreferences("selfrun_drive", MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit()
                     .putString("runId", runId)
@@ -411,10 +424,10 @@ public final class SelfRunRestartActivity extends Activity {
                     .putString("lastDriveSignalRaw", latest == null ? "" : latest.raw)
                     .putString("lastDriveSignalTimestamp", latest == null ? "" : latest.timestamp)
                     .putString("lastDriveSignalType", latest == null ? "" : latest.type.name())
-                    .putString("pendingDriveSignalRaw", "")
-                    .putString("pendingDriveSignalTimestamp", "")
-                    .putString("pendingDriveSignalType", "")
-                    .putLong("commitDetectedAt", 0L)
+                    .putString("pendingDriveSignalRaw", pendingRaw)
+                    .putString("pendingDriveSignalTimestamp", pendingTimestamp)
+                    .putString("pendingDriveSignalType", pendingType)
+                    .putLong("commitDetectedAt", restartCompletion == null ? 0L : now)
                     .putString("activeCommandPrompt", prompt)
                     .putString("activeCommandKind", SelfRunStore.RETRY_CONTINUE)
                     .putInt("commandAttempt", 0)
@@ -426,6 +439,7 @@ public final class SelfRunRestartActivity extends Activity {
                     .putBoolean("submissionRetryReady", false)
                     .putString("creationStage", SelfRunStore.CREATION_DOCUMENT_CREATED)
                     .putString("pausedFromPhase", "")
+                    .putLong("pausedFromPhaseStartedAt", 0L)
                     .putBoolean("resumeNeedsContinuation", false)
                     .putBoolean("terminalSideEffectPending", false)
                     .putString("terminalSideEffectType", "")
