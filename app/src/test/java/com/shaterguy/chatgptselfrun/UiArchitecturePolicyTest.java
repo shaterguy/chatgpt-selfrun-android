@@ -69,15 +69,23 @@ public final class UiArchitecturePolicyTest {
         assertFalse(main.contains("requestBatteryExemption"));
     }
 
-    @Test public void logsAndLoginArePurposeSpecificFullHeightViews() throws Exception {
+    @Test public void logsLoginCalibrationAndDriveUsePurposeSpecificLayouts() throws Exception {
         String logs = src("SelfRunLogsActivity.java");
         String login = src("LoginActivity.java");
+        String calibration = src("WebUiCalibrationActivity.java");
+        String drive = src("DriveSetupActivity.java");
         assertTrue(logs.contains("root.addView(viewer, new LinearLayout.LayoutParams("));
         assertTrue(logs.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
         assertTrue(login.contains("ChatGPT 세션 · 프로젝트"));
         assertTrue(login.contains("root.addView(webView, new LinearLayout.LayoutParams("));
         assertTrue(login.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
         assertFalse(login.contains("Ui.row(this,"));
+        assertTrue(calibration.contains("Ui.topBar(this, \"웹 UI 보정\""));
+        assertTrue(calibration.contains("Ui.actionStrip(this, selectButton, cancelButton, confirmButton)"));
+        assertTrue(calibration.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
+        assertFalse(calibration.contains("controls.addView(status"));
+        assertTrue(drive.contains("Ui.statusPill(this, store.driveRunsBaseFolderId().isEmpty() ? \"NOT CONNECTED\" : \"CONNECTED\")"));
+        assertFalse(drive.contains("Ui.row(this, Ui.button(this, \"Drive 실행문서 저장 위치 연결\""));
     }
 
     private static String src(String file) throws Exception {
