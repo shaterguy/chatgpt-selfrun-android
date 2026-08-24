@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 
@@ -19,52 +20,80 @@ public final class SelfRunDetailActivity extends Activity {
         super.onCreate(savedInstanceState);
         String runId = getIntent().getStringExtra(EXTRA_RUN_ID);
         JSONObject item = new SelfRunHistoryStore(this).get(runId);
+
         ScrollView scroll = new ScrollView(this);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
-        scroll.addView(root);
-        root.addView(Ui.title(this, "SelfRun Drive 작업 상세"));
-        root.addView(Ui.button(this, "뒤로", v -> finish()));
+        LinearLayout page = Ui.page(this);
+        scroll.addView(page);
+        page.addView(Ui.topBar(this, "Run Inspector", "실행 상태와 원본 요청",
+                Ui.textButton(this, "뒤로", v -> finish())));
+
         if (item == null) {
-            root.addView(Ui.body(this, "저장된 작업을 찾을 수 없습니다."));
+            page.addView(Ui.heroSurface(this,
+                    Ui.statusPill(this, "NOT FOUND"),
+                    Ui.headline(this, "저장된 작업을 찾을 수 없습니다"),
+                    Ui.body(this, "작업 이력이 삭제되었거나 현재 Run ID와 일치하지 않습니다.")));
             Ui.setContent(this, scroll);
             return;
         }
-        root.addView(Ui.section(this, item.optString("runId")));
-        root.addView(Ui.body(this,
-                "생성: " + time(item.optLong("createdAt"))
-                        + "\n갱신: " + time(item.optLong("updatedAt"))
-                        + "\n모드: " + item.optString("mode", "-")
-                        + "\n상태: " + item.optString("status", "-")
-                        + "\n단계: " + item.optString("phase", "-")
-                        + "\n턴: " + item.optInt("turn")
-                        + "\n모델/추론: " + model(item)
-                        + "\n프로젝트: " + empty(item.optString("projectUrl"))
-                        + "\nconversation: " + empty(item.optString("conversationUrl"))
-                        + "\n오류: " + error(item)));
-        root.addView(Ui.section(this, "원본 요청"));
-        root.addView(Ui.body(this, empty(item.optString("requirement"))));
-        root.addView(Ui.section(this, "로그"));
-        root.addView(Ui.row(this,
-                Ui.button(this, "실행 로그", v -> openLogs(item.optString("runId"), SelfRunLogsActivity.KIND_EXECUTION)),
-                Ui.button(this, "디버그 로그", v -> openLogs(item.optString("runId"), SelfRunLogsActivity.KIND_DEBUG))));
+
+        String status = item.optString("status", "STATE");
+        page.addView(Ui.heroSurface(this,
+                Ui.statusPill(this, status),
+                Ui.headline(this, preview(item.optString("requirement"))),
+                Ui.muted(this, item.optString("runId"))));
+
+        page.addView(Ui.section(this, "EXECUTION SNAPSHOT"));
+        LinearLayout snapshot = new LinearLayout(this);
+        snapshot.setOrientation(LinearLayout.VERTICAL);
+        snapshot.addView(Ui.keyValue(this, "Created", time(item.optLong("createdAt"))));
+        snapshot.addView(Ui.keyValue(this, "Updated", time(item.optLong("updatedAt"))));
+        snapshot.addView(Ui.keyValue(this, "Mode", item.optString("mode", "-")));
+        snapshot.addView(Ui.keyValue(this, "Phase", item.optString("phase", "-")));
+        snapshot.addView(Ui.keyValue(this, "Turn", String.valueOf(item.optInt("turn"))));
+        snapshot.addView(Ui.keyValue(this, "Profile", model(item)));
+        page.addView(snapshot);
+
+        page.addView(Ui.section(this, "SOURCE & DIAGNOSTIC"));
+        LinearLayout source = new LinearLayout(this);
+        source.setOrientation(LinearLayout.VERTICAL);
+        source.addView(Ui.keyValue(this, "Project", empty(item.optString("projectUrl"))));
+        source.addView(Ui.keyValue(this, "Conversation", empty(item.optString("conversationUrl"))));
+        source.addView(Ui.keyValue(this, "Error", error(item)));
+        page.addView(source);
+
+        page.addView(Ui.section(this, "ORIGINAL MISSION"));
+        page.addView(Ui.card(this, Ui.body(this, empty(item.optString("requirement")))));
+
+        String resolvedRunId = item.optString("runId");
+        page.addView(Ui.section(this, "RELATED ACTIONS"));
+        page.addView(Ui.actionStrip(this,
+                Ui.outlinedButton(this, "실행 로그", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)),
+                Ui.outlinedButton(this, "디버그 로그", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG))));
+        if (SelfRunRestartPolicy.restartable(item)) {
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.topMargin = Ui.dp(this, 10);
+            page.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(resolvedRunId)), params);
+        }
         Ui.setContent(this, scroll);
     }
 
     private void openLogs(String runId, String kind) {
-        Intent intent = new Intent(this, SelfRunLogsActivity.class);
-        intent.putExtra(SelfRunLogsActivity.EXTRA_RUN_ID, runId);
-        intent.putExtra(SelfRunLogsActivity.EXTRA_KIND, kind);
-        startActivity(intent);
+        startActivity(new Intent(this, SelfRunLogsActivity.class)
+                .putExtra(SelfRunLogsActivity.EXTRA_RUN_ID, runId)
+                .putExtra(SelfRunLogsActivity.EXTRA_KIND, kind));
+    }
+
+    private void openRestart(String runId) {
+        startActivity(new Intent(this, SelfRunRestartActivity.class)
+                .putExtra(SelfRunRestartActivity.EXTRA_RUN_ID, runId));
     }
 
     private String model(JSONObject item) {
         return SelfRunStore.MODE_WORK.equals(item.optString("mode"))
-      ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
-      : BootstrapRunStateStore.summary(item);
+                ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
+                : BootstrapRunStateStore.summary(item);
     }
-
 
     private static String error(JSONObject item) {
         String code = item.optString("lastErrorCode");
@@ -72,7 +101,16 @@ public final class SelfRunDetailActivity extends Activity {
         return code + " · " + empty(item.optString("lastErrorMessage"));
     }
 
-    private static String empty(String value) { return value == null || value.isEmpty() ? "-" : value; }
+    private static String preview(String text) {
+        if (text == null || text.trim().isEmpty()) return "요청 내용 없음";
+        String oneLine = text.replace('\n', ' ').replace('\r', ' ').trim();
+        return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 120) + "…";
+    }
+
+    private static String empty(String value) {
+        return value == null || value.isEmpty() ? "-" : value;
+    }
+
     private static String time(long value) {
         return value <= 0L ? "-" : DateFormat.getDateTimeInstance().format(new Date(value));
     }
