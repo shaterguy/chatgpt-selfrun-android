@@ -29,8 +29,12 @@ jobs:
         with:
           gradle-version: '9.5.0'
           cache-read-only: false
-      - name: Apply patch
-        run: python3 tools/apply_selfrun_drive_v161_dev2.py
+      - name: Apply patch and contract updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_selfrun_drive_v161_dev2.py
+          python3 tools/apply_selfrun_drive_v161_dev2_test_contracts.py
       - name: Verify source and tests
         shell: bash
         run: |
@@ -47,7 +51,8 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/selfrun-drive-dev2-apply.yml \
-                 tools/apply_selfrun_drive_v161_dev2.py
+                 tools/apply_selfrun_drive_v161_dev2.py \
+                 tools/apply_selfrun_drive_v161_dev2_test_contracts.py
           git add app/build.gradle \
                   app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunContinuationDom.java \
                   app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
@@ -56,6 +61,12 @@ jobs:
                   app/src/test/java/com/shaterguy/chatgptselfrun/ChatWorkContinuationContractTest.java \
                   app/src/test/java/com/shaterguy/chatgptselfrun/AttachmentUploadPolicyTest.java \
                   app/src/test/java/com/shaterguy/chatgptselfrun/BootstrapStageAndDirectPickerPolicyTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/BootstrapFiniteStateWiringTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/TestAppVariantPolicyTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/WebUiCalibrationBackupPolicyTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/BootstrapSendFallbackPolicyTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/BootstrapSendLivenessPolicyTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunContinuationSubmissionVerificationTest.java \
                   app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java
           git diff --cached --check
           git commit -m 'fix(drive): align Work with common completion observer'
