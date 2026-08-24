@@ -36,6 +36,8 @@ public final class PremiumUiPolicyTest {
         assertTrue(ui.contains("WindowInsets.Type.systemBars()"));
         assertTrue(ui.contains("WindowInsets.Type.displayCutout()"));
         assertTrue(ui.contains("WindowInsets.Type.ime()"));
+        assertTrue(ui.contains("fontScale >= 1.6f"));
+        assertTrue(ui.contains("stack ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL"));
     }
 
     @Test public void selectionInputsUseMaterialDropdownsAndPreserveIndexState() throws Exception {
