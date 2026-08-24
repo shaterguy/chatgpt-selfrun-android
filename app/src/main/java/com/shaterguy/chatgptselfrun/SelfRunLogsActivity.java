@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -41,32 +42,48 @@ public final class SelfRunLogsActivity extends Activity {
     }
 
     private void render() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
+        boolean debug = KIND_DEBUG.equals(kind);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
-        boolean debug = KIND_DEBUG.equals(kind);
-        root.addView(Ui.title(this, debug ? "SelfRun Drive 디버그 로그" : "SelfRun Drive 실행 로그"));
-        root.addView(Ui.body(this, "Run ID: " + (runId.isEmpty() ? "-" : runId)
-                + (debug
-                ? "\n진단용 redacted JSONL입니다. 프롬프트 원문·URL·쿠키·토큰·비밀번호는 기록하지 않습니다."
-                : "\n사용자에게 의미 있는 실행 단계와 상태 전이를 표시합니다.")));
-        root.addView(Ui.row(this,
-                Ui.button(this, "새로고침", v -> render()),
-                Ui.button(this, "로그 저장", v -> exportLogs()),
-                Ui.button(this, "닫기", v -> finish())));
+        int horizontal = Ui.isMedium(this) ? Ui.dp(this, 24) : Ui.dp(this, 14);
+        root.setPadding(horizontal, Ui.dp(this, 10), horizontal, Ui.dp(this, 14));
+
+        root.addView(Ui.topBar(this,
+                debug ? "디버그 로그" : "실행 로그",
+                runId.isEmpty() ? "Run ID 없음" : runId,
+                Ui.textButton(this, "닫기", v -> finish())));
+
+        TextView note = Ui.muted(this, debug
+                ? "진단용 redacted JSONL · 프롬프트 원문, URL, 쿠키, 토큰, 비밀번호는 기록하지 않습니다."
+                : "사용자에게 의미 있는 실행 단계와 상태 전이를 표시합니다.");
+        note.setTextIsSelectable(false);
+        root.addView(note);
+
+        LinearLayout actions = Ui.actionStrip(this,
+                Ui.textButton(this, "새로고침", v -> render()),
+                Ui.outlinedButton(this, "로그 저장", v -> exportLogs()));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionParams.bottomMargin = Ui.dp(this, 8);
+        root.addView(actions, actionParams);
+        root.addView(Ui.divider(this));
 
         SelfRunRunLog log = new SelfRunRunLog(this);
         List<String> lines = debug ? log.readDebug(runId, DISPLAY_LINES) : log.readExecution(runId, DISPLAY_LINES);
         TextView body = Ui.body(this, lines.isEmpty() ? "저장된 로그가 없습니다." : String.join("\n", lines));
         body.setTextIsSelectable(true);
         body.setTextSize(debug ? 11f : 13f);
+        body.setGravity(Gravity.TOP | Gravity.START);
         if (debug) body.setTypeface(Typeface.MONOSPACE);
-        root.addView(body, new LinearLayout.LayoutParams(
+        body.setPadding(Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 18));
+
+        ScrollView viewer = new ScrollView(this);
+        viewer.setFillViewport(true);
+        viewer.addView(body, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        scroll.addView(root);
-        Ui.setContent(this, scroll);
+        root.addView(viewer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        Ui.setContent(this, root);
     }
 
     private void exportLogs() {

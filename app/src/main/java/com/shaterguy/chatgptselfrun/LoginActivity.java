@@ -6,6 +6,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
@@ -50,13 +51,23 @@ public final class LoginActivity extends Activity {
         super.onCreate(savedInstanceState);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.addView(Ui.row(this,
-                Ui.button(this, "뒤로", v -> navigateBack()),
-                Ui.button(this, "새로고침", v -> webView.reload()),
-                Ui.button(this, "ChatGPT 홈", v -> webView.loadUrl("https://chatgpt.com/")),
-                Ui.button(this, "닫기", v -> finish())));
-        root.addView(Ui.body(this, "등록할 프로젝트를 직접 한 번씩 여세요. 앱은 도착한 프로젝트 주소와 화면에서 확인된 프로젝트 이름만 등록하며 웹 화면의 항목을 자동으로 누르지 않습니다."));
-        status = Ui.body(this, "프로젝트 방문 대기"); root.addView(status);
+        int side = Ui.isMedium(this) ? Ui.dp(this, 20) : Ui.dp(this, 10);
+        root.setPadding(side, Ui.dp(this, 6), side, 0);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.VERTICAL);
+        heading.addView(Ui.topBar(this, "ChatGPT 세션 · 프로젝트", "프로젝트를 직접 열어 등록합니다",
+                Ui.textButton(this, "뒤로", v -> navigateBack())));
+        status = Ui.muted(this, "프로젝트 방문 대기");
+        status.setTextIsSelectable(false);
+        heading.addView(status);
+        heading.addView(Ui.actionStrip(this,
+                Ui.textButton(this, "새로고침", v -> webView.reload()),
+                Ui.outlinedButton(this, "ChatGPT 홈", v -> webView.loadUrl("https://chatgpt.com/"))));
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headingParams.bottomMargin = Ui.dp(this, 6);
+        root.addView(heading, headingParams);
 
         webView = new WebView(this);
         catalog = new ProjectCatalog(this);
@@ -68,11 +79,12 @@ public final class LoginActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) { scheduleObservation(100L); }
             @Override public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) { scheduleObservation(100L); }
             @Override public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
-                scheduleObservation(350L); return false;
+                scheduleObservation(350L);
+                return false;
             }
         });
         root.addView(webView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         Ui.setContent(this, root);
         webView.loadUrl("https://chatgpt.com/");
 
@@ -93,19 +105,36 @@ public final class LoginActivity extends Activity {
         if (webView != null && webView.canGoBack()) webView.goBack(); else finish();
     }
 
-    @Override protected void onResume() { super.onResume(); resumed = true; observerGeneration++; scheduleObservation(150L); }
-    @Override protected void onPause() { resumed = false; observerGeneration++; handler.removeCallbacks(observeRunnable); super.onPause(); }
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resumed = true;
+        observerGeneration++;
+        scheduleObservation(150L);
+    }
+
+    @Override
+    protected void onPause() {
+        resumed = false;
+        observerGeneration++;
+        handler.removeCallbacks(observeRunnable);
+        super.onPause();
+    }
 
     private void scheduleObservation(long delayMs) {
         if (!resumed || webView == null) return;
-        handler.removeCallbacks(observeRunnable); handler.postDelayed(observeRunnable, delayMs);
+        handler.removeCallbacks(observeRunnable);
+        handler.postDelayed(observeRunnable, delayMs);
     }
 
     private void observeVisitedProject() {
-        if (!resumed || isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed()) || webView == null) return;
+        if (!resumed || isFinishing()
+                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())
+                || webView == null) return;
         String current = webView.getUrl();
         if (!ProjectUrlPolicy.isTrustedChatgptPage(current)) return;
-        final int epoch = observerGeneration; final WebView observed = webView;
+        final int epoch = observerGeneration;
+        final WebView observed = webView;
         observed.evaluateJavascript(OBSERVE_PROJECT_SCRIPT, raw -> {
             if (!resumed || epoch != observerGeneration || observed != webView || isFinishing()
                     || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) return;
@@ -122,20 +151,28 @@ public final class LoginActivity extends Activity {
     private static ProjectVisit jsonProjectVisit(String raw) {
         try {
             Object outer = new org.json.JSONTokener(raw == null ? "" : raw).nextValue();
-            org.json.JSONObject result = new org.json.JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer));
+            org.json.JSONObject result = new org.json.JSONObject(
+                    outer instanceof String ? (String) outer : String.valueOf(outer));
             return new ProjectVisit(result.optString("href", ""), result.optString("name", ""));
-        } catch (Throwable ignored) { return new ProjectVisit("", ""); }
+        } catch (Throwable ignored) {
+            return new ProjectVisit("", "");
+        }
     }
 
     private static final class ProjectVisit {
         final String href;
         final String name;
-        ProjectVisit(String href, String name) { this.href = href == null ? "" : href; this.name = ProjectCatalog.normalizeDisplayName(name); }
+        ProjectVisit(String href, String name) {
+            this.href = href == null ? "" : href;
+            this.name = ProjectCatalog.normalizeDisplayName(name);
+        }
     }
 
     @Override
     protected void onDestroy() {
-        resumed = false; observerGeneration++; handler.removeCallbacks(observeRunnable);
+        resumed = false;
+        observerGeneration++;
+        handler.removeCallbacks(observeRunnable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
             backCallback = null;

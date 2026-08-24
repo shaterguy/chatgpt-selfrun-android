@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -73,27 +74,26 @@ public final class WebUiCalibrationActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this, 6), Ui.dp(this, 4), Ui.dp(this, 6), Ui.dp(this, 4));
+        int side = Ui.isMedium(this) ? Ui.dp(this, 20) : Ui.dp(this, 10);
+        root.setPadding(side, Ui.dp(this, 6), side, 0);
 
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        status = Ui.body(this, "웹 UI 보정 · 항목을 선택하세요");
+        manageButton = Ui.textButton(this, "관리", v -> showManageDialog());
+        root.addView(Ui.topBar(this, "웹 UI 보정", "ChatGPT 화면에서 목표 컨트롤을 직접 지정합니다", manageButton));
+
+        status = Ui.body(this, "보정 항목을 선택하세요");
         status.setTextIsSelectable(false);
         status.setMaxLines(2);
         status.setEllipsize(TextUtils.TruncateAt.END);
-        controls.addView(status, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(status);
 
-        selectButton = compactButton("항목 선택", v -> showPurposePicker());
-        manageButton = compactButton("관리", v -> showManageDialog());
-        cancelButton = compactButton("취소", v -> cancelPurpose());
-        confirmButton = compactButton("저장", v -> confirmSimple());
-        controls.addView(selectButton);
-        controls.addView(manageButton);
-        controls.addView(cancelButton);
-        controls.addView(confirmButton);
-        root.addView(controls, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        selectButton = Ui.button(this, "보정 항목 선택", v -> showPurposePicker());
+        cancelButton = Ui.textButton(this, "취소", v -> cancelPurpose());
+        confirmButton = Ui.button(this, "이 위치 저장", v -> confirmSimple());
+        LinearLayout controls = Ui.actionStrip(this, selectButton, cancelButton, confirmButton);
+        LinearLayout.LayoutParams controlsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        controlsParams.setMargins(0, Ui.dp(this, 2), 0, Ui.dp(this, 8));
+        root.addView(controls, controlsParams);
 
         webView = new WebView(this);
         WebViewConfig.applyAutomation(webView);
@@ -108,19 +108,10 @@ public final class WebUiCalibrationActivity extends Activity {
             }
         });
         root.addView(webView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         Ui.setContent(this, root);
         updateControls("");
         webView.loadUrl(SelfRunScript.GENERAL_CHAT_URL);
-    }
-
-    private Button compactButton(String label, View.OnClickListener listener) {
-        Button button = Ui.button(this, label, listener);
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
-        button.setMinHeight(Ui.dp(this, 48));
-        button.setPadding(Ui.dp(this, 9), 0, Ui.dp(this, 9), 0);
-        return button;
     }
 
     private void showPurposePicker() {
@@ -218,7 +209,7 @@ public final class WebUiCalibrationActivity extends Activity {
         } else if (active) {
             status.setText(label(activePurpose) + " · " + capturePrompt(activePurpose));
         } else {
-            status.setText("웹 UI 보정 · 항목을 선택하세요");
+            status.setText("보정 항목을 선택하세요");
         }
     }
 

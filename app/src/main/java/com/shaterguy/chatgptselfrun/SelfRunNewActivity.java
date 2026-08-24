@@ -13,14 +13,12 @@ import android.text.InputType;
 import android.text.Layout;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.WindowManager;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -59,12 +57,12 @@ public final class SelfRunNewActivity extends Activity {
     private SelfRunStore store;
     private SelfRunHistoryStore history;
     private SelfRunRunLog runLog;
-    private Spinner project;
+    private Ui.SelectionField project;
     private ProjectCatalog catalog;
     private List<ProjectUrlPolicy.ProjectRef> projectEntries;
     private EditText requirement;
-    private Spinner mode;
-    private Spinner chatReasoning;
+    private Ui.SelectionField mode;
+    private Ui.SelectionField chatReasoning;
     private TextView chatReasoningHelp;
     private LinearLayout attachmentListView;
     private TextView attachmentSummary;
@@ -72,46 +70,138 @@ public final class SelfRunNewActivity extends Activity {
     private boolean attachmentsHandedOff;
     private boolean firstResume = true;
 
-    @Override protected void onCreate(Bundle savedInstanceState) {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        store = new SelfRunStore(this); history = new SelfRunHistoryStore(this); runLog = new SelfRunRunLog(this); catalog = new ProjectCatalog(this);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        store = new SelfRunStore(this);
+        history = new SelfRunHistoryStore(this);
+        runLog = new SelfRunRunLog(this);
+        catalog = new ProjectCatalog(this);
         createViews();
         restoreDraftState(savedInstanceState);
     }
 
     private void createViews() {
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL); root.setFocusableInTouchMode(true); root.setPadding(Ui.dp(this,18),Ui.dp(this,14),Ui.dp(this,18),Ui.dp(this,24)); scroll.addView(root);
-        root.addView(Ui.title(this,"새 SelfRun Drive 작업")); root.addView(Ui.button(this,"작업 목록",v->finish())); root.addView(Ui.body(this,"새 작업은 빈 요구사항에서 시작합니다. 이전 Run의 입력 내용·신호·오류는 이 화면에 불러오지 않습니다."));
-        root.addView(Ui.section(this,"프로젝트 선택")); project=new Spinner(this); root.addView(project); root.addView(Ui.body(this,"등록할 프로젝트를 직접 열면 목록에 추가됩니다. 전체 목록을 자동 탐색하거나 메뉴를 자동 클릭하지 않습니다.")); root.addView(Ui.row(this,Ui.button(this,"프로젝트 등록/업데이트",v->startActivity(new Intent(this,LoginActivity.class))),Ui.button(this,"등록 목록 지우기",v->{catalog.clear();store.setDefaultProjectUrl("");reloadProjects();Toast.makeText(this,"등록 프로젝트 목록을 지웠습니다.",Toast.LENGTH_SHORT).show();}))); reloadProjects();
-        root.addView(Ui.section(this,"실행 모드")); mode=new Spinner(this); mode.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,MODE_LABELS)); root.addView(mode);
-        root.addView(Ui.section(this,"일반 Chat 추론 정도")); chatReasoning=new Spinner(this); chatReasoning.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,CHAT_REASONING_LABELS)); root.addView(chatReasoning); chatReasoningHelp=Ui.body(this,""); root.addView(chatReasoningHelp);
-        mode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){@Override public void onItemSelected(AdapterView<?> parent,View view,int position,long id){updateChatReasoningAvailability();}@Override public void onNothingSelected(AdapterView<?> parent){updateChatReasoningAvailability();}}); updateChatReasoningAvailability();
-        root.addView(Ui.section(this,"셀프런 명령")); requirement=new EditText(this); requirement.setHint("작업 요구사항"); requirement.setSingleLine(false); requirement.setMinLines(8); requirement.setGravity(android.view.Gravity.TOP|android.view.Gravity.START); requirement.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); requirement.setVerticalScrollBarEnabled(false); requirement.setHorizontalScrollBarEnabled(false); requirement.setHorizontallyScrolling(false); installCommandVisibilityTracking(requirement); root.addView(requirement);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout page = Ui.page(this);
+        page.setFocusableInTouchMode(true);
+        scroll.addView(page);
 
-        root.addView(Ui.section(this,"첨부파일 (선택)"));
-        root.addView(Ui.body(this,"선택한 파일은 SelfRun 시작 후 해당 Run의 Drive Job 폴더에 업로드되어 작업 참고/필요 문서로 사용됩니다."));
-        root.addView(Ui.button(this,"파일 첨부",v->openAttachmentPicker()));
-        attachmentSummary=Ui.body(this,"선택된 파일이 없습니다."); root.addView(attachmentSummary);
-        attachmentListView=new LinearLayout(this); attachmentListView.setOrientation(LinearLayout.VERTICAL); root.addView(attachmentListView);
+        page.addView(Ui.topBar(this, "새 SelfRun", "Launch Workspace",
+                Ui.textButton(this, "취소", v -> finish())));
 
-        root.addView(Ui.section(this,"시작")); root.addView(Ui.button(this,"SelfRun Drive 시작",v->startSelfRun())); Ui.setContent(this,scroll); project.clearFocus(); requirement.clearFocus(); root.requestFocus();
+        LinearLayout destinationRuntime = new LinearLayout(this);
+        destinationRuntime.setOrientation(LinearLayout.VERTICAL);
+        destinationRuntime.addView(Ui.section(this, "DESTINATION"));
+        project = Ui.selection(this, "프로젝트");
+        destinationRuntime.addView(project);
+        destinationRuntime.addView(Ui.muted(this,
+                "등록한 프로젝트 또는 일반채팅을 선택합니다. 프로젝트 등록은 실제 ChatGPT 화면을 직접 열어 수행합니다."));
+        destinationRuntime.addView(Ui.actionStrip(this,
+                Ui.outlinedButton(this, "프로젝트 등록 · 업데이트",
+                        v -> startActivity(new Intent(this, LoginActivity.class))),
+                Ui.textButton(this, "등록 목록 지우기", v -> {
+                    catalog.clear();
+                    store.setDefaultProjectUrl("");
+                    reloadProjects();
+                    Toast.makeText(this, "등록 프로젝트 목록을 지웠습니다.", Toast.LENGTH_SHORT).show();
+                })));
+        reloadProjects();
+
+        destinationRuntime.addView(Ui.section(this, "RUNTIME"));
+        mode = Ui.selection(this, "실행 모드");
+        mode.setItems(MODE_LABELS);
+        destinationRuntime.addView(mode);
+        chatReasoning = Ui.selection(this, "Chat 추론 정도");
+        chatReasoning.setItems(CHAT_REASONING_LABELS);
+        LinearLayout.LayoutParams reasoningParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        reasoningParams.topMargin = Ui.dp(this, 10);
+        destinationRuntime.addView(chatReasoning, reasoningParams);
+        chatReasoningHelp = Ui.muted(this, "");
+        destinationRuntime.addView(chatReasoningHelp);
+        mode.setOnSelectionChangedListener(position -> updateChatReasoningAvailability());
+        updateChatReasoningAvailability();
+
+        LinearLayout missionReferences = new LinearLayout(this);
+        missionReferences.setOrientation(LinearLayout.VERTICAL);
+        missionReferences.addView(Ui.section(this, "MISSION"));
+        missionReferences.addView(Ui.headline(this, "SelfRun이 끝까지 수행할 작업"));
+        requirement = new EditText(this);
+        requirement.setHint("작업 요구사항을 입력하세요");
+        requirement.setSingleLine(false);
+        requirement.setMinLines(Ui.isExpanded(this) ? 13 : 9);
+        requirement.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        requirement.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        requirement.setVerticalScrollBarEnabled(false);
+        requirement.setHorizontalScrollBarEnabled(false);
+        requirement.setHorizontallyScrolling(false);
+        installCommandVisibilityTracking(requirement);
+        missionReferences.addView(requirement);
+
+        missionReferences.addView(Ui.section(this, "REFERENCES"));
+        missionReferences.addView(Ui.muted(this,
+                "첨부파일은 SelfRun 시작 후 해당 Run의 Drive Job 폴더로 전달됩니다."));
+        missionReferences.addView(Ui.outlinedButton(this, "파일 첨부", v -> openAttachmentPicker()),
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        attachmentSummary = Ui.muted(this, "선택된 파일이 없습니다.");
+        missionReferences.addView(attachmentSummary);
+        attachmentListView = new LinearLayout(this);
+        attachmentListView.setOrientation(LinearLayout.VERTICAL);
+        missionReferences.addView(attachmentListView);
+
+        LinearLayout workspace = new LinearLayout(this);
+        if (Ui.isExpanded(this)) {
+            workspace.setOrientation(LinearLayout.HORIZONTAL);
+            workspace.addView(destinationRuntime,
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.82f));
+            LinearLayout.LayoutParams missionParams = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.18f);
+            missionParams.setMarginStart(Ui.dp(this, 28));
+            workspace.addView(missionReferences, missionParams);
+        } else {
+            workspace.setOrientation(LinearLayout.VERTICAL);
+            workspace.addView(destinationRuntime,
+                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams missionParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            missionParams.topMargin = Ui.dp(this, 8);
+            workspace.addView(missionReferences, missionParams);
+        }
+        page.addView(workspace, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout.LayoutParams launchParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        launchParams.topMargin = Ui.dp(this, 22);
+        page.addView(Ui.button(this, "SelfRun Drive 시작", v -> startSelfRun()), launchParams);
+        page.addView(Ui.muted(this, "새 작업은 항상 빈 요구사항에서 시작하며 이전 Run의 입력·신호·오류를 재사용하지 않습니다."));
+
+        Ui.setContent(this, scroll);
+        project.clearFocus();
+        requirement.clearFocus();
+        page.requestFocus();
     }
 
     private void updateChatReasoningAvailability() {
         if (mode == null || chatReasoning == null || chatReasoningHelp == null) return;
         boolean chat = mode.getSelectedItemPosition() <= 0;
         chatReasoning.setEnabled(chat);
-        chatReasoning.setAlpha(chat ? 1f : 0.5f);
+        chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE);
         chatReasoningHelp.setText(chat
-                ? "선택값이 있으면 모델 메뉴를 한 번 연 뒤 가로 슬라이더로 적용하고 첫 요청을 전송합니다. ‘현재 Chat 설정 유지’는 기존 동작을 보존합니다."
-                : "Work 모드는 기존처럼 다음 턴마다 모델과 추론 정도를 동적으로 적용합니다.");
+                ? "첫 요청에 사용할 일반 Chat 추론 정도입니다. ‘현재 Chat 설정 유지’는 기존 Chat 설정을 보존합니다."
+                : "Work 모드는 다음 턴마다 모델과 추론 정도를 SelfRun 규칙에 따라 동적으로 적용합니다.");
     }
 
     private String selectedChatReasoning() {
         if (chatReasoning == null) return ChatReasoningPreferenceStore.KEEP;
-        int position = Math.max(0, Math.min(CHAT_REASONING_VALUES.length - 1, chatReasoning.getSelectedItemPosition()));
+        int position = Math.max(0, Math.min(CHAT_REASONING_VALUES.length - 1,
+                chatReasoning.getSelectedItemPosition()));
         return CHAT_REASONING_VALUES[position];
     }
 
@@ -131,19 +221,26 @@ public final class SelfRunNewActivity extends Activity {
         startActivityForResult(picker, REQUEST_ATTACHMENTS);
     }
 
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQUEST_ATTACHMENTS || resultCode != RESULT_OK || data == null) return;
         ArrayList<Uri> uris = new ArrayList<>();
         if (data.getData() != null) uris.add(data.getData());
         ClipData clips = data.getClipData();
-        if (clips != null) for (int i = 0; i < clips.getItemCount(); i++) uris.add(clips.getItemAt(i).getUri());
-        int accepted = 0, rejected = 0;
+        if (clips != null) {
+            for (int i = 0; i < clips.getItemCount(); i++) uris.add(clips.getItemAt(i).getUri());
+        }
+        int accepted = 0;
+        int rejected = 0;
         Set<String> existing = new HashSet<>();
         for (SelfRunStore.Attachment item : selectedAttachments) existing.add(item.uri);
         for (Uri uri : uris) {
             if (uri == null || !"content".equals(uri.getScheme()) || !existing.add(uri.toString())) continue;
-            if (selectedAttachments.size() >= SelfRunStore.MAX_ATTACHMENTS_PER_RUN) { rejected++; continue; }
+            if (selectedAttachments.size() >= SelfRunStore.MAX_ATTACHMENTS_PER_RUN) {
+                rejected++;
+                continue;
+            }
             try {
                 int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
                 if (flags == 0) throw new SecurityException("read grant missing");
@@ -154,8 +251,14 @@ public final class SelfRunNewActivity extends Activity {
             }
         }
         renderAttachments();
-        if (rejected > 0) Toast.makeText(this,"일부 파일은 읽기 권한·형식·크기 제한 때문에 제외했습니다. 첨부는 최대 "+SelfRunStore.MAX_ATTACHMENTS_PER_RUN+"개, 파일당 최대 100 MB입니다.",Toast.LENGTH_LONG).show();
-        else if (accepted > 0) Toast.makeText(this,"첨부파일 "+accepted+"개를 추가했습니다.",Toast.LENGTH_SHORT).show();
+        if (rejected > 0) {
+            Toast.makeText(this,
+                    "일부 파일은 읽기 권한·형식·크기 제한 때문에 제외했습니다. 첨부는 최대 "
+                            + SelfRunStore.MAX_ATTACHMENTS_PER_RUN + "개, 파일당 최대 100 MB입니다.",
+                    Toast.LENGTH_LONG).show();
+        } else if (accepted > 0) {
+            Toast.makeText(this, "첨부파일 " + accepted + "개를 추가했습니다.", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private SelfRunStore.Attachment readAttachmentDraft(Uri uri, int index) {
@@ -203,15 +306,12 @@ public final class SelfRunNewActivity extends Activity {
         }
         attachmentSummary.setText("첨부파일 " + selectedAttachments.size() + "개");
         for (SelfRunStore.Attachment item : new ArrayList<>(selectedAttachments)) {
-            LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            LinearLayout info = new LinearLayout(this); info.setOrientation(LinearLayout.VERTICAL);
-            TextView name = Ui.body(this,item.name); info.addView(name);
-            TextView size = Ui.body(this,item.size < 0 ? "크기 알 수 없음" : formatBytes(item.size)); info.addView(size);
-            row.addView(info,new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f));
-            View remove = Ui.button(this,"제거",v->removeAttachment(item.index));
-            remove.setMinimumWidth(Ui.dp(this,48)); remove.setMinimumHeight(Ui.dp(this,48));
-            row.addView(remove,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,LinearLayout.LayoutParams.WRAP_CONTENT));
+            LinearLayout row = Ui.settingsRow(this,
+                    item.name,
+                    item.size < 0 ? "크기 알 수 없음" : formatBytes(item.size),
+                    Ui.textButton(this, "제거", v -> removeAttachment(item.index)));
             attachmentListView.addView(row);
+            attachmentListView.addView(Ui.divider(this));
         }
     }
 
@@ -247,7 +347,9 @@ public final class SelfRunNewActivity extends Activity {
 
     private List<SelfRunStore.Attachment> attachmentsNeedingPersistableGrant(Set<String> persistedBefore) {
         ArrayList<SelfRunStore.Attachment> result = new ArrayList<>();
-        for (SelfRunStore.Attachment item : selectedAttachments) if (!persistedBefore.contains(item.uri)) result.add(item);
+        for (SelfRunStore.Attachment item : selectedAttachments) {
+            if (!persistedBefore.contains(item.uri)) result.add(item);
+        }
         return result;
     }
 
@@ -263,135 +365,242 @@ public final class SelfRunNewActivity extends Activity {
 
     private void releaseReadGrant(Uri uri) {
         if (uri == null || !"content".equals(uri.getScheme())) return;
-        try { getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
-        catch (Throwable ignored) {}
+        try {
+            getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Throwable ignored) { }
     }
 
     private static String formatBytes(long bytes) {
         if (bytes < 1024L) return bytes + " B";
-        double value = bytes / 1024.0; String unit = "KB";
-        if (value >= 1024.0) { value /= 1024.0; unit = "MB"; }
-        if (value >= 1024.0) { value /= 1024.0; unit = "GB"; }
-        return String.format(Locale.US,"%.1f %s",value,unit);
+        double value = bytes / 1024.0;
+        String unit = "KB";
+        if (value >= 1024.0) {
+            value /= 1024.0;
+            unit = "MB";
+        }
+        if (value >= 1024.0) {
+            value /= 1024.0;
+            unit = "GB";
+        }
+        return String.format(Locale.US, "%.1f %s", value, unit);
     }
 
     private void installCommandVisibilityTracking(EditText editor) {
-        editor.setOnFocusChangeListener((view,hasFocus)->{if(hasFocus){editor.post(this::keepCommandCursorVisible);editor.postDelayed(this::keepCommandCursorVisible,250L);}});
-        editor.setOnClickListener(view->editor.post(this::keepCommandCursorVisible));
-        editor.addTextChangedListener(new TextWatcher(){@Override public void beforeTextChanged(CharSequence s,int start,int count,int after){}@Override public void onTextChanged(CharSequence s,int start,int before,int count){}@Override public void afterTextChanged(Editable s){editor.post(SelfRunNewActivity.this::keepCommandCursorVisible);}});
+        editor.setOnFocusChangeListener((view, hasFocus) -> {
+            if (hasFocus) {
+                editor.post(this::keepCommandCursorVisible);
+                editor.postDelayed(this::keepCommandCursorVisible, 250L);
+            }
+        });
+        editor.setOnClickListener(view -> editor.post(this::keepCommandCursorVisible));
+        editor.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable s) {
+                editor.post(SelfRunNewActivity.this::keepCommandCursorVisible);
+            }
+        });
     }
 
     private void keepCommandCursorVisible() {
-        EditText editor=requirement; if(editor==null||!editor.hasFocus())return;
-        Layout layout=editor.getLayout(); if(layout==null||editor.getWidth()<=0)return;
-        ScrollView outer=findOuterScrollView(editor); if(outer==null||outer.getHeight()<=0)return;
-        int selection=Math.max(0,Math.min(editor.getSelectionStart(),editor.length()));
-        int line=layout.getLineForOffset(selection); int margin=Ui.dp(this,12);
-        int editorTop=descendantTopWithinScrollContent(editor,outer);
-        if(editorTop<0)return;
-        int caretTop=editorTop+editor.getTotalPaddingTop()+layout.getLineTop(line)-margin;
-        int caretBottom=editorTop+editor.getTotalPaddingTop()+layout.getLineBottom(line)+margin;
-        int currentScroll=outer.getScrollY();
-        int visibleTop=currentScroll+outer.getPaddingTop();
-        int visibleBottom=currentScroll+outer.getHeight()-outer.getPaddingBottom();
-        int targetScroll=currentScroll;
-        if(caretBottom>visibleBottom)targetScroll+=caretBottom-visibleBottom;
-        else if(caretTop<visibleTop)targetScroll-=visibleTop-caretTop;
-        if(targetScroll!=currentScroll)outer.scrollTo(outer.getScrollX(),Math.max(0,targetScroll));
+        EditText editor = requirement;
+        if (editor == null || !editor.hasFocus()) return;
+        Layout layout = editor.getLayout();
+        if (layout == null || editor.getWidth() <= 0) return;
+        ScrollView outer = findOuterScrollView(editor);
+        if (outer == null || outer.getHeight() <= 0) return;
+        int selection = Math.max(0, Math.min(editor.getSelectionStart(), editor.length()));
+        int line = layout.getLineForOffset(selection);
+        int margin = Ui.dp(this, 12);
+        int editorTop = descendantTopWithinScrollContent(editor, outer);
+        if (editorTop < 0) return;
+        int caretTop = editorTop + editor.getTotalPaddingTop() + layout.getLineTop(line) - margin;
+        int caretBottom = editorTop + editor.getTotalPaddingTop() + layout.getLineBottom(line) + margin;
+        int currentScroll = outer.getScrollY();
+        int visibleTop = currentScroll + outer.getPaddingTop();
+        int visibleBottom = currentScroll + outer.getHeight() - outer.getPaddingBottom();
+        int targetScroll = currentScroll;
+        if (caretBottom > visibleBottom) targetScroll += caretBottom - visibleBottom;
+        else if (caretTop < visibleTop) targetScroll -= visibleTop - caretTop;
+        if (targetScroll != currentScroll) outer.scrollTo(outer.getScrollX(), Math.max(0, targetScroll));
     }
 
     private static int descendantTopWithinScrollContent(View descendant, ScrollView outer) {
-        int top=0; View current=descendant;
-        while(current!=outer){top+=current.getTop();ViewParent parent=current.getParent();if(!(parent instanceof View))return -1;current=(View)parent;}
+        int top = 0;
+        View current = descendant;
+        while (current != outer) {
+            top += current.getTop();
+            ViewParent parent = current.getParent();
+            if (!(parent instanceof View)) return -1;
+            current = (View) parent;
+        }
         return top;
     }
 
     private static ScrollView findOuterScrollView(View child) {
-        ViewParent parent=child.getParent(); while(parent instanceof View){if(parent instanceof ScrollView)return (ScrollView)parent; parent=((View)parent).getParent();} return null;
+        ViewParent parent = child.getParent();
+        while (parent instanceof View) {
+            if (parent instanceof ScrollView) return (ScrollView) parent;
+            parent = ((View) parent).getParent();
+        }
+        return null;
     }
 
     private void startSelfRun() {
-        if(store.active()&&!store.userStopped()&&!SelfRunStore.PHASE_DONE.equals(store.phase())&&!SelfRunStore.PHASE_IDLE.equals(store.phase())){Toast.makeText(this,"현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.",Toast.LENGTH_LONG).show();return;}
-        String project=selectedProjectUrl(),request=requirement.getText().toString().trim();
-        if(request.isEmpty()){Toast.makeText(this,"셀프런 명령을 입력하세요.",Toast.LENGTH_LONG).show();return;}
-        if(!DriveApiClient.validFileId(store.driveRunsBaseFolderId())||!DriveApiClient.validOpaqueAccountId(store.driveAccountId())){Toast.makeText(this,"먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.",Toast.LENGTH_LONG).show();return;}
-        String selectedMode=MODE_VALUES[mode.getSelectedItemPosition()];
-        String selectedReasoning=SelfRunStore.MODE_CHAT.equals(selectedMode)?selectedChatReasoning():ChatReasoningPreferenceStore.KEEP;
-        String runId=newRunId();
-        if(!ChatReasoningPreferenceStore.save(this,runId,selectedReasoning)){Toast.makeText(this,"Chat 추론 정도 설정을 저장하지 못했습니다.",Toast.LENGTH_LONG).show();return;}
+        if (store.active() && !store.userStopped()
+                && !SelfRunStore.PHASE_DONE.equals(store.phase())
+                && !SelfRunStore.PHASE_IDLE.equals(store.phase())) {
+            Toast.makeText(this, "현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String project = selectedProjectUrl();
+        String request = requirement.getText().toString().trim();
+        if (request.isEmpty()) {
+            Toast.makeText(this, "셀프런 명령을 입력하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!DriveApiClient.validFileId(store.driveRunsBaseFolderId())
+                || !DriveApiClient.validOpaqueAccountId(store.driveAccountId())) {
+            Toast.makeText(this, "먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String selectedMode = MODE_VALUES[mode.getSelectedItemPosition()];
+        String selectedReasoning = SelfRunStore.MODE_CHAT.equals(selectedMode)
+                ? selectedChatReasoning() : ChatReasoningPreferenceStore.KEEP;
+        String runId = newRunId();
+        if (!ChatReasoningPreferenceStore.save(this, runId, selectedReasoning)) {
+            Toast.makeText(this, "Chat 추론 정도 설정을 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
         Set<String> persistedBefore;
         try {
             persistedBefore = persistedReadGrantUris();
             store.prepareAttachmentGrantHandoff(attachmentsNeedingPersistableGrant(persistedBefore));
         } catch (RuntimeException invalid) {
-            Toast.makeText(this,"첨부파일 권한 상태를 확인할 수 없거나 첨부 제한을 초과했습니다.",Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "첨부파일 권한 상태를 확인할 수 없거나 첨부 제한을 초과했습니다.", Toast.LENGTH_LONG).show();
             return;
         }
         if (!persistSelectedAttachmentGrants(persistedBefore)) {
             store.cancelAttachmentGrantHandoff();
-            Toast.makeText(this,"첨부파일의 지속 읽기 권한을 확보할 수 없습니다. 해당 파일을 다시 선택하세요.",Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "첨부파일의 지속 읽기 권한을 확보할 수 없습니다. 해당 파일을 다시 선택하세요.", Toast.LENGTH_LONG).show();
             return;
         }
-        store.setDefaultProjectUrl(project); if(!store.runId().isEmpty())history.sync(store); stopService(new Intent(this,SelfRunService.class));
+        store.setDefaultProjectUrl(project);
+        if (!store.runId().isEmpty()) history.sync(store);
+        stopService(new Intent(this, SelfRunService.class));
         try {
-            store.start(runId,selectedMode,project,request,new ArrayList<>(selectedAttachments));
-            attachmentsHandedOff=true;
+            store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments));
+            attachmentsHandedOff = true;
         } catch (RuntimeException error) {
             store.cancelAttachmentGrantHandoff();
             throw error;
         }
-        runLog.record(store,"UI_START","mode="+selectedMode+";chatReasoning="+selectedReasoning+";attachments="+selectedAttachments.size());
-        startRunner(); Toast.makeText(this,"SelfRun Drive를 시작했습니다: "+runId,Toast.LENGTH_LONG).show(); finish();
+        runLog.record(store, "UI_START",
+                "mode=" + selectedMode + ";chatReasoning=" + selectedReasoning
+                        + ";attachments=" + selectedAttachments.size());
+        startRunner();
+        Toast.makeText(this, "SelfRun Drive를 시작했습니다: " + runId, Toast.LENGTH_LONG).show();
+        finish();
     }
 
-    private void startRunner() { Intent intent=new Intent(this,SelfRunService.class); intent.setAction(SelfRunService.ACTION_RUN); if(Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent); }
+    private void startRunner() {
+        Intent intent = new Intent(this, SelfRunService.class);
+        intent.setAction(SelfRunService.ACTION_RUN);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
+    }
 
-    @Override protected void onResume() { super.onResume(); if (firstResume) { firstResume=false; return; } if(project!=null) reloadProjects(selectedProjectUrl()); }
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (firstResume) {
+            firstResume = false;
+            return;
+        }
+        if (project != null) reloadProjects(selectedProjectUrl());
+    }
 
-    @Override protected void onSaveInstanceState(Bundle outState) {
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        outState.putString(STATE_REQUIREMENT,requirement==null?"":requirement.getText().toString());
-        outState.putInt(STATE_MODE,mode==null?0:mode.getSelectedItemPosition());
-        outState.putInt(STATE_CHAT_REASONING,chatReasoning==null?0:chatReasoning.getSelectedItemPosition());
-        outState.putString(STATE_PROJECT,project==null?SelfRunScript.GENERAL_CHAT_URL:selectedProjectUrl());
-        outState.putString(STATE_ATTACHMENTS,SelfRunStore.encodeAttachmentDrafts(selectedAttachments));
+        outState.putString(STATE_REQUIREMENT, requirement == null ? "" : requirement.getText().toString());
+        outState.putInt(STATE_MODE, mode == null ? 0 : mode.getSelectedItemPosition());
+        outState.putInt(STATE_CHAT_REASONING,
+                chatReasoning == null ? 0 : chatReasoning.getSelectedItemPosition());
+        outState.putString(STATE_PROJECT,
+                project == null ? SelfRunScript.GENERAL_CHAT_URL : selectedProjectUrl());
+        outState.putString(STATE_ATTACHMENTS, SelfRunStore.encodeAttachmentDrafts(selectedAttachments));
     }
 
     private void restoreDraftState(Bundle state) {
         if (state == null) {
             chatReasoning.setSelection(chatReasoningPosition(ChatReasoningPreferenceStore.EXTRA_HIGH));
-            renderAttachments(); updateChatReasoningAvailability(); return;
+            renderAttachments();
+            updateChatReasoningAvailability();
+            return;
         }
-        requirement.setText(state.getString(STATE_REQUIREMENT,""));
-        int modePosition=Math.max(0,Math.min(MODE_VALUES.length-1,state.getInt(STATE_MODE,0))); mode.setSelection(modePosition);
-        int reasoningPosition=Math.max(0,Math.min(CHAT_REASONING_VALUES.length-1,state.getInt(STATE_CHAT_REASONING,0))); chatReasoning.setSelection(reasoningPosition);
-        selectedAttachments.clear(); selectedAttachments.addAll(SelfRunStore.decodeAttachmentDrafts(state.getString(STATE_ATTACHMENTS,"")));
-        selectProjectUrl(state.getString(STATE_PROJECT,SelfRunScript.GENERAL_CHAT_URL));
-        renderAttachments(); updateChatReasoningAvailability();
+        requirement.setText(state.getString(STATE_REQUIREMENT, ""));
+        int modePosition = Math.max(0, Math.min(MODE_VALUES.length - 1, state.getInt(STATE_MODE, 0)));
+        mode.setSelection(modePosition);
+        int reasoningPosition = Math.max(0, Math.min(CHAT_REASONING_VALUES.length - 1,
+                state.getInt(STATE_CHAT_REASONING, 0)));
+        chatReasoning.setSelection(reasoningPosition);
+        selectedAttachments.clear();
+        selectedAttachments.addAll(SelfRunStore.decodeAttachmentDrafts(state.getString(STATE_ATTACHMENTS, "")));
+        selectProjectUrl(state.getString(STATE_PROJECT, SelfRunScript.GENERAL_CHAT_URL));
+        renderAttachments();
+        updateChatReasoningAvailability();
     }
 
     private void selectProjectUrl(String url) {
-        if (SelfRunScript.isGeneralChatUrl(url)) { project.setSelection(0); return; }
-        for (int i=0;i<projectEntries.size();i++) if(projectEntries.get(i).canonicalUrl.equals(url)){project.setSelection(i+1);return;}
+        if (SelfRunScript.isGeneralChatUrl(url)) {
+            project.setSelection(0);
+            return;
+        }
+        for (int i = 0; i < projectEntries.size(); i++) {
+            if (projectEntries.get(i).canonicalUrl.equals(url)) {
+                project.setSelection(i + 1);
+                return;
+            }
+        }
     }
 
-    @Override protected void onDestroy() {
+    @Override
+    protected void onDestroy() {
         super.onDestroy();
     }
 
-    private void reloadProjects() { reloadProjects(store.defaultProjectUrl()); }
-
-    private void reloadProjects(String preferredUrl) {
-        String previous=preferredUrl==null?"":preferredUrl; projectEntries=catalog.entries(); ArrayList<String> labels=new ArrayList<>(); labels.add("일반채팅"); int selected=0;
-        for(int i=0;i<projectEntries.size();i++){ProjectUrlPolicy.ProjectRef entry=projectEntries.get(i);labels.add(catalog.displayName(entry));if(entry.canonicalUrl.equals(previous))selected=i+1;}
-        project.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels)); project.setSelection(selected);
+    private void reloadProjects() {
+        reloadProjects(store.defaultProjectUrl());
     }
 
-    private String selectedProjectUrl() { int position=project.getSelectedItemPosition(); return position<=0?SelfRunScript.GENERAL_CHAT_URL:projectEntries.get(position-1).canonicalUrl; }
+    private void reloadProjects(String preferredUrl) {
+        String previous = preferredUrl == null ? "" : preferredUrl;
+        projectEntries = catalog.entries();
+        ArrayList<String> labels = new ArrayList<>();
+        labels.add("일반채팅");
+        int selected = 0;
+        for (int i = 0; i < projectEntries.size(); i++) {
+            ProjectUrlPolicy.ProjectRef entry = projectEntries.get(i);
+            labels.add(catalog.displayName(entry));
+            if (entry.canonicalUrl.equals(previous)) selected = i + 1;
+        }
+        project.setItems(labels.toArray(new String[0]));
+        project.setSelection(selected);
+    }
+
+    private String selectedProjectUrl() {
+        int position = project.getSelectedItemPosition();
+        return position <= 0 ? SelfRunScript.GENERAL_CHAT_URL
+                : projectEntries.get(position - 1).canonicalUrl;
+    }
 
     private static String newRunId() {
-        SimpleDateFormat format=new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US); format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
-        StringBuilder suffix=new StringBuilder(RUN_SUFFIX_LENGTH); for(int i=0;i<RUN_SUFFIX_LENGTH;i++)suffix.append(RUN_SUFFIX_ALPHABET[RUN_RANDOM.nextInt(RUN_SUFFIX_ALPHABET.length)]);
-        return "SR-"+format.format(new Date())+"-"+suffix;
+        SimpleDateFormat format = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
+        StringBuilder suffix = new StringBuilder(RUN_SUFFIX_LENGTH);
+        for (int i = 0; i < RUN_SUFFIX_LENGTH; i++) {
+            suffix.append(RUN_SUFFIX_ALPHABET[RUN_RANDOM.nextInt(RUN_SUFFIX_ALPHABET.length)]);
+        }
+        return "SR-" + format.format(new Date()) + "-" + suffix;
     }
 }

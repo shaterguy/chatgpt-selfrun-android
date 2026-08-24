@@ -7,7 +7,10 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -33,7 +36,12 @@ public final class SelfRunRestartActivity extends Activity {
     private SelfRunStore store;
     private SelfRunHistoryStore history;
     private JSONObject snapshot;
+    private TextView stagePill;
+    private TextView statusHeadline;
     private TextView status;
+    private TextView progress;
+    private TextView targetSummary;
+    private Button closeButton;
     private String runId = "";
     private String claimToken = "";
     private boolean recoveryStarted;
@@ -46,6 +54,7 @@ public final class SelfRunRestartActivity extends Activity {
         if (runId == null) runId = "";
         render();
         snapshot = history.get(runId);
+        updateTargetSummary();
         if (!SelfRunRestartPolicy.restartable(snapshot)) {
             failure("재시작할 수 있는 중지 작업이 아닙니다.");
             return;
@@ -59,14 +68,83 @@ public final class SelfRunRestartActivity extends Activity {
     }
 
     private void render() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
-        root.addView(Ui.title(this, "중지 작업 재시작"));
-        status = Ui.body(this, "작업 이력과 Drive 리소스를 확인하는 중입니다…");
-        root.addView(status);
-        root.addView(Ui.button(this, "닫기", v -> cancelBeforeRecovery()));
-        Ui.setContent(this, root);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout page = Ui.page(this);
+        scroll.addView(page);
+
+        page.addView(Ui.topBar(this, "작업 재시작", "Recovery Console", null));
+
+        stagePill = Ui.statusPill(this, "CHECK");
+        statusHeadline = Ui.headline(this, "중지 작업 확인 중");
+        status = Ui.body(this, "작업 이력과 Drive 리소스를 확인하고 있습니다.");
+        progress = Ui.body(this, progressText(0));
+        progress.setTextIsSelectable(false);
+        page.addView(Ui.heroSurface(this,
+                stagePill,
+                statusHeadline,
+                status,
+                Ui.divider(this),
+                progress));
+
+        page.addView(Ui.section(this, "RECOVERY TARGET"));
+        targetSummary = Ui.muted(this, "Run ID  " + empty(runId));
+        page.addView(targetSummary);
+
+        page.addView(Ui.section(this, "RECOVERY PATH"));
+        page.addView(Ui.body(this,
+                "기존 작업 이력과 Drive 문서를 검증한 뒤 같은 대화방에서 CONTINUE로 이어갑니다. "
+                        + "복구가 시작된 뒤에는 상태가 중간에 끊기지 않도록 화면 닫기와 뒤로가기를 잠급니다."));
+
+        closeButton = Ui.outlinedButton(this, "재시작 취소", v -> cancelBeforeRecovery());
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeParams.topMargin = Ui.dp(this, 18);
+        page.addView(closeButton, closeParams);
+
+        Ui.setContent(this, scroll);
+    }
+
+    private void updateTargetSummary() {
+        if (targetSummary == null) return;
+        if (snapshot == null) {
+            targetSummary.setText("Run ID  " + empty(runId) + "\n저장된 작업 정보를 찾지 못했습니다.");
+            return;
+        }
+        targetSummary.setText("Run ID  " + empty(runId)
+                + "\n" + snapshot.optString("mode", "-") + " · Turn " + snapshot.optInt("turn", 0)
+                + "\n" + missionPreview(snapshot.optString("requirement", "")));
+    }
+
+    private void showRecoveryStage(String badge, String headline, String message, int step) {
+        runOnUiThread(() -> {
+            if (stagePill != null) stagePill.setText(badge);
+            if (statusHeadline != null) statusHeadline.setText(headline);
+            if (status != null) status.setText(message);
+            if (progress != null) progress.setText(progressText(step));
+            if (closeButton != null) closeButton.setEnabled(!recoveryStarted);
+        });
+    }
+
+    private static String progressText(int currentStep) {
+        String[] steps = {"작업 확인", "Drive 계정", "리소스 복구", "CONTINUE 준비"};
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < steps.length; i++) {
+            if (i > 0) text.append('\n');
+            String mark = currentStep < 0 ? "○" : i < currentStep ? "✓" : i == currentStep ? "●" : "○";
+            text.append(mark).append(' ').append(steps[i]);
+        }
+        return text.toString();
+    }
+
+    private static String missionPreview(String value) {
+        if (value == null || value.trim().isEmpty()) return "요청 내용 없음";
+        String oneLine = value.replace('\n', ' ').replace('\r', ' ').trim();
+        return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 120) + "…";
+    }
+
+    private static String empty(String value) {
+        return value == null || value.isEmpty() ? "-" : value;
     }
 
     private boolean claimRestart() {
@@ -103,7 +181,7 @@ public final class SelfRunRestartActivity extends Activity {
     }
 
     private void requestAuthorization() {
-        status.setText("Drive 계정과 기존 작업 리소스를 확인하는 중입니다…");
+        showRecoveryStage("AUTH", "Drive 계정 확인", "기존 작업과 같은 Drive 계정인지 확인하고 있습니다.", 1);
         DriveAuthorization.requestSilently(this, new DriveAuthorization.Callback() {
             @Override public void onAuthorized(AuthorizationResult result) { startRecovery(result); }
             @Override public void onResolutionRequired(PendingIntent pendingIntent) {
@@ -142,6 +220,7 @@ public final class SelfRunRestartActivity extends Activity {
             return;
         }
         recoveryStarted = true;
+        showRecoveryStage("RECOVERING", "실행 리소스 복구", "기존 Job 폴더와 실행턴 문서를 확인하고 필요한 경우 안전하게 복구합니다.", 2);
         io.execute(() -> recover(accessToken));
     }
 
@@ -182,6 +261,7 @@ public final class SelfRunRestartActivity extends Activity {
             boolean documentChanged = !document.id.equals(oldDocumentId);
             String prompt = SelfRunRestartPolicy.continuationPrompt(runId,
                     documentChanged ? document.id : "");
+            showRecoveryStage("RESTORING", "실행 상태 복원", "Drive 문서와 signal 기준선을 확인했습니다. CONTINUE 상태를 복원합니다.", 2);
             restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, prompt);
             runOnUiThread(this::startRecoveredService);
         } catch (Throwable error) {
@@ -379,11 +459,12 @@ public final class SelfRunRestartActivity extends Activity {
     private void startRecoveredService() {
         try {
             requireClaimOwnership();
+            showRecoveryStage("READY", "CONTINUE 준비 완료", "기존 대화방에서 SelfRun을 이어갈 준비가 완료되었습니다.", 3);
             Intent service = new Intent(this, SelfRunService.class).setAction(SelfRunService.ACTION_RUN);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
             else startService(service);
             releaseClaim(true);
-            status.setText("재시작 준비 완료 · 기존 대화방에 CONTINUE를 전송합니다.");
+            showRecoveryStage("RESUMED", "재시작 완료", "기존 대화방에 CONTINUE를 전송합니다.", 4);
             Toast.makeText(this, "중지 작업을 재시작했습니다.", Toast.LENGTH_LONG).show();
             finish();
         } catch (Throwable error) {
@@ -425,7 +506,7 @@ public final class SelfRunRestartActivity extends Activity {
         releaseClaim(false);
         runOnUiThread(() -> {
             recoveryStarted = false;
-            if (status != null) status.setText(message);
+            showRecoveryStage("FAILED", "재시작을 완료하지 못했습니다", message, -1);
             Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         });
     }

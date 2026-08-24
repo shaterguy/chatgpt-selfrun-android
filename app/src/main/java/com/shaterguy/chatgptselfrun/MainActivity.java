@@ -1,17 +1,14 @@
 package com.shaterguy.chatgptselfrun;
 
-import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
-import android.provider.Settings;
 import android.text.InputType;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -25,7 +22,6 @@ public final class MainActivity extends Activity {
     private final Runnable refreshRunnable = new Runnable() {
         @Override public void run() {
             refreshCurrent();
-            refreshBackgroundStatus();
             refreshHandler.postDelayed(this, 1000L);
         }
     };
@@ -33,8 +29,15 @@ public final class MainActivity extends Activity {
     private SelfRunStore store;
     private SelfRunHistoryStore history;
     private SelfRunRunLog runLog;
+
+    private View emptyStage;
+    private View runStage;
+    private View composerPanel;
+    private View supportingPane;
+    private TextView statusPill;
     private TextView currentStatus;
-    private TextView backgroundStatus;
+    private TextView runMeta;
+    private TextView technicalDetails;
     private TextView nextInputStatus;
     private EditText nextInputEditor;
     private Button nextInputSaveButton;
@@ -62,7 +65,6 @@ public final class MainActivity extends Activity {
         history.sync(store);
         refreshHandler.removeCallbacks(refreshRunnable);
         refreshCurrent();
-        refreshBackgroundStatus();
         refreshHandler.postDelayed(refreshRunnable, 1000L);
     }
 
@@ -73,94 +75,151 @@ public final class MainActivity extends Activity {
     }
 
     private void createViews() {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setFocusableInTouchMode(true);
-        root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
-        scroll.addView(root);
+        LinearLayout console = new LinearLayout(this);
+        console.setOrientation(LinearLayout.VERTICAL);
+        console.setFocusableInTouchMode(true);
 
-        root.addView(Ui.title(this, "SelfRun Drive"));
-        root.addView(Ui.body(this, "v" + BuildConfig.VERSION_NAME + " · Drive SelfRun 신호를 기준으로 다음 턴을 진행합니다."));
+        ScrollView runScroll = new ScrollView(this);
+        runScroll.setFillViewport(true);
+        LinearLayout runPage = Ui.page(this);
+        runScroll.addView(runPage);
 
-        root.addView(Ui.section(this, "메뉴"));
-        root.addView(Ui.row(this,
-                Ui.button(this, "새 작업", v -> startActivity(new Intent(this, SelfRunNewActivity.class))),
-                Ui.button(this, "작업 이력", v -> startActivity(new Intent(this, SelfRunHistoryActivity.class)))));
-        root.addView(Ui.row(this,
-                Ui.button(this, "로그", v -> startActivity(new Intent(this, SelfRunLogMenuActivity.class))),
-                Ui.button(this, "로그인/세션", v -> startActivity(new Intent(this, LoginActivity.class)))));
-        root.addView(Ui.row(this,
-                Ui.button(this, "Drive 실행문서 위치", v -> startActivity(new Intent(this, DriveSetupActivity.class))),
-                Ui.button(this, "웹 UI 보정", v -> startActivity(new Intent(this, WebUiCalibrationActivity.class)))));
+        Button newRun = Ui.button(this, "새 작업", v -> openNewRun());
+        runPage.addView(Ui.topBar(this, "SelfRun Drive", "v" + BuildConfig.VERSION_NAME + " · Run Console", newRun));
 
-        root.addView(Ui.section(this, "현재 SelfRun Drive"));
-        currentStatus = Ui.body(this, "");
-        root.addView(currentStatus);
+        emptyStage = Ui.heroSurface(this,
+                Ui.statusPill(this, "READY"),
+                Ui.headline(this, "현재 실행 중인 SelfRun이 없습니다"),
+                Ui.body(this, "새 작업을 시작하거나 지난 작업을 확인할 수 있습니다."),
+                Ui.actionStrip(this,
+                        Ui.button(this, "새 SelfRun 시작", v -> openNewRun()),
+                        Ui.outlinedButton(this, "작업 이력", v -> startActivity(new Intent(this, SelfRunHistoryActivity.class)))));
+        LinearLayout.LayoutParams emptyParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        emptyParams.topMargin = Ui.dp(this, 10);
+        runPage.addView(emptyStage, emptyParams);
+
+        statusPill = Ui.statusPill(this, "RUN");
+        currentStatus = Ui.headline(this, "");
+        runMeta = Ui.body(this, "");
+        technicalDetails = Ui.muted(this, "");
+        technicalDetails.setVisibility(View.GONE);
+        technicalDetails.setTextIsSelectable(true);
+
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
-        stopButton = Ui.button(this, "중지", v -> stopSelfRun());
-        root.addView(Ui.row(this, pauseButton, resumeButton, stopButton));
-        currentLogsButton = Ui.button(this, "현재 작업 로그", v -> openCurrentLogs());
-        root.addView(currentLogsButton);
+        stopButton = Ui.dangerButton(this, "중지", v -> stopSelfRun());
+        currentLogsButton = Ui.outlinedButton(this, "로그", v -> openCurrentLogs());
+        Button detailsButton = Ui.textButton(this, "실행 정보", v -> {
+            technicalDetails.setVisibility(technicalDetails.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+        });
 
-        root.addView(Ui.section(this, "차기 턴 사용자 입력"));
-        nextInputStatus = Ui.body(this, "");
-        root.addView(nextInputStatus);
+        runStage = Ui.heroSurface(this,
+                statusPill,
+                currentStatus,
+                runMeta,
+                Ui.actionStrip(this, pauseButton, resumeButton, stopButton, currentLogsButton),
+                detailsButton,
+                technicalDetails);
+        LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        stageParams.topMargin = Ui.dp(this, 10);
+        runPage.addView(runStage, stageParams);
+
+        nextInputStatus = Ui.muted(this, "");
         nextInputEditor = new EditText(this);
-        nextInputEditor.setHint("차기 턴에 함께 보낼 문구");
-        nextInputEditor.setMinLines(2);
-        nextInputEditor.setMaxLines(8);
-        nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        root.addView(nextInputEditor, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        nextInputSaveButton = Ui.button(this, "저장/수정", v -> saveNextInput());
-        nextInputDeleteButton = Ui.button(this, "삭제", v -> deleteNextInput());
-        root.addView(Ui.row(this, nextInputSaveButton, nextInputDeleteButton));
-        root.addView(Ui.body(this, "저장한 문구는 정확히 다음 SelfRun continuation에만 적용됩니다. Drive NEXT_INPUT이 있으면 그 뒤에 함께 전달됩니다."));
+        nextInputEditor.setHint("다음 턴에 추가할 사용자 입력");
+        nextInputEditor.setMinLines(Ui.isExpanded(this) ? 6 : 2);
+        nextInputEditor.setMaxLines(Ui.isExpanded(this) ? 14 : 7);
+        nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        nextInputSaveButton = Ui.button(this, "저장", v -> saveNextInput());
+        nextInputDeleteButton = Ui.textButton(this, "예약 삭제", v -> deleteNextInput());
+        composerPanel = Ui.card(this,
+                Ui.section(this, "NEXT TURN"),
+                Ui.headline(this, "다음 턴에 추가할 입력"),
+                nextInputStatus,
+                nextInputEditor,
+                Ui.actionStrip(this, nextInputDeleteButton, nextInputSaveButton));
 
-        root.addView(Ui.section(this, "백그라운드 실행"));
-        backgroundStatus = Ui.body(this, "");
-        root.addView(backgroundStatus);
-        root.addView(Ui.row(this,
-                Ui.button(this, "알림 권한", v -> requestNotificationPermission()),
-                Ui.button(this, "배터리 최적화 제외", v -> requestBatteryExemption())));
-        root.addView(Ui.body(this, "Drive 대기 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
+        if (Ui.isExpanded(this)) {
+            LinearLayout workspace = new LinearLayout(this);
+            workspace.setOrientation(LinearLayout.HORIZONTAL);
+            workspace.addView(runScroll, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1.15f));
 
-        Ui.setContent(this, scroll);
-        root.requestFocus();
+            LinearLayout pane = new LinearLayout(this);
+            pane.setOrientation(LinearLayout.VERTICAL);
+            pane.setPadding(Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 28), Ui.dp(this, 24));
+            pane.addView(composerPanel, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            supportingPane = pane;
+            LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 0.85f);
+            supportParams.setMarginStart(Ui.dp(this, 10));
+            workspace.addView(pane, supportParams);
+            console.addView(workspace, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        } else {
+            console.addView(runScroll, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            LinearLayout.LayoutParams composerParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            int side = Ui.isMedium(this) ? Ui.dp(this, 28) : Ui.dp(this, 18);
+            composerParams.setMargins(side, Ui.dp(this, 4), side, Ui.dp(this, 10));
+            console.addView(composerPanel, composerParams);
+        }
+
+        Ui.setPrimaryContent(this, console, Ui.DEST_RUN);
+        console.requestFocus();
     }
 
     private void refreshCurrent() {
         if (currentStatus == null) return;
         String runId = store.runId();
         if (runId.isEmpty()) {
-            currentStatus.setText("실행 중이거나 선택된 SelfRun이 없습니다.");
-            pauseButton.setEnabled(false);
-            resumeButton.setEnabled(false);
-            stopButton.setEnabled(false);
-            currentLogsButton.setEnabled(false);
+            emptyStage.setVisibility(View.VISIBLE);
+            runStage.setVisibility(View.GONE);
+            composerPanel.setVisibility(View.GONE);
+            if (supportingPane != null) supportingPane.setVisibility(View.GONE);
             refreshNextInput("");
             return;
         }
+
+        emptyStage.setVisibility(View.GONE);
+        runStage.setVisibility(View.VISIBLE);
+        composerPanel.setVisibility(View.VISIBLE);
+        if (supportingPane != null) supportingPane.setVisibility(View.VISIBLE);
+
         String prefs = SelfRunStore.MODE_WORK.equals(store.mode())
                 ? store.pendingModel() + " / " + store.pendingReasoning()
                 : ChatReasoningPreferenceStore.summary(this, runId, store.phase(), store.lastErrorCode());
-        currentStatus.setText("Run ID: " + runId
-                + "\n모드: " + store.mode()
-                + "\n상태: " + store.status()
-                + "\n단계: " + store.phase()
-                + "\n모델/추론: " + prefs
-                + "\n턴: " + store.turn()
-                + "\nconversation: " + dash(store.conversationUrl())
-                + "\nDrive 문서: " + dash(store.turnDocumentUrl())
-                + "\nDrive signal cursor: " + store.driveSignalCursor()
-                + "\n마지막 Drive signal: " + dash(store.lastDriveSignalType())
-                + "\n마지막 오류: " + errorSummary());
         boolean paused = store.paused() && !store.userStopped();
-        boolean running = store.active() && !store.paused() && !store.userStopped()
-                && !SelfRunStore.PHASE_DONE.equals(store.phase())
-                && !SelfRunStore.PHASE_IDLE.equals(store.phase());
+        boolean terminal = store.userStopped()
+                || SelfRunStore.PHASE_DONE.equals(store.phase())
+                || SelfRunStore.PHASE_IDLE.equals(store.phase());
+        boolean running = store.active() && !paused && !terminal;
+
+        statusPill.setText(paused ? "PAUSED" : terminal ? "FINISHED" : running ? "RUNNING" : "STATE");
+        currentStatus.setText(store.status());
+        String meta = store.mode() + " · " + prefs + " · Turn " + store.turn()
+                + "\n현재 단계  " + dash(store.phase());
+        if (!store.lastErrorCode().isEmpty()) {
+            meta += "\n오류  " + errorSummary();
+        }
+        runMeta.setText(meta);
+        technicalDetails.setText("Run ID  " + runId
+                + "\nconversation  " + dash(store.conversationUrl())
+                + "\nDrive 문서  " + dash(store.turnDocumentUrl())
+                + "\nDrive signal cursor  " + store.driveSignalCursor()
+                + "\n마지막 Drive signal  " + dash(store.lastDriveSignalType())
+                + "\n마지막 오류  " + errorSummary());
+
+        pauseButton.setVisibility(running ? View.VISIBLE : View.GONE);
+        resumeButton.setVisibility(paused ? View.VISIBLE : View.GONE);
+        stopButton.setVisibility((running || paused) ? View.VISIBLE : View.GONE);
+        currentLogsButton.setVisibility(View.VISIBLE);
         pauseButton.setEnabled(running);
         resumeButton.setEnabled(paused);
         stopButton.setEnabled(running || paused);
@@ -173,16 +232,26 @@ public final class MainActivity extends Activity {
         boolean editable = !runId.isEmpty() && UserNextInputStore.editable(runId);
         String stored = runId.isEmpty() ? "" : UserNextInputStore.current(runId);
         boolean locked = !runId.isEmpty() && UserNextInputStore.submissionLocked(runId);
+        boolean unavailable = !runId.isEmpty() && !editable && !locked;
         if (!nextInputEditor.hasFocus()) nextInputEditor.setText(stored);
         nextInputEditor.setEnabled(editable);
+        nextInputEditor.setVisibility(unavailable ? View.GONE : View.VISIBLE);
         nextInputSaveButton.setEnabled(editable);
+        nextInputSaveButton.setVisibility(unavailable ? View.GONE : View.VISIBLE);
         nextInputDeleteButton.setEnabled(editable && !stored.isEmpty());
-        if (runId.isEmpty()) nextInputStatus.setText("실행 중인 SelfRun이 없습니다.");
-        else if (editable) nextInputStatus.setText(stored.isEmpty()
-                ? "차기 턴 실제 제출이 시작되기 전까지 입력·수정·삭제할 수 있습니다."
-                : "차기 턴에 사용자 문구가 예약되어 있습니다. 실제 제출 시작 전까지 수정·삭제할 수 있습니다.");
-        else if (locked) nextInputStatus.setText("차기 턴 제출이 시작되어 현재 예약 문구는 잠겼습니다.");
-        else nextInputStatus.setText("현재 단계에서는 차기 턴 입력을 예약할 수 없습니다.");
+        nextInputDeleteButton.setVisibility(!unavailable && !stored.isEmpty() ? View.VISIBLE : View.GONE);
+
+        if (runId.isEmpty()) {
+            nextInputStatus.setText("");
+        } else if (editable && stored.isEmpty()) {
+            nextInputStatus.setText("제출이 시작되기 전까지 다음 턴 입력을 예약할 수 있습니다.");
+        } else if (editable) {
+            nextInputStatus.setText("다음 턴에 예약됨 · 실제 제출 시작 전까지 수정할 수 있습니다.");
+        } else if (locked) {
+            nextInputStatus.setText("다음 턴 제출이 시작되어 현재 예약 입력은 잠겼습니다.");
+        } else {
+            nextInputStatus.setText("현재 단계에서는 다음 턴 입력을 예약할 수 없습니다.");
+        }
     }
 
     private void saveNextInput() {
@@ -240,46 +309,14 @@ public final class MainActivity extends Activity {
                 .putExtra(SelfRunLogsActivity.EXTRA_KIND, SelfRunLogsActivity.KIND_DEBUG));
     }
 
-    private void startRunner() {
-        sendRunnerAction(SelfRunService.ACTION_RUN);
+    private void openNewRun() {
+        startActivity(new Intent(this, SelfRunNewActivity.class));
     }
 
     private void sendRunnerAction(String action) {
         Intent intent = new Intent(this, SelfRunService.class);
         intent.setAction(action);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
-    }
-
-    private void refreshBackgroundStatus() {
-        if (backgroundStatus == null) return;
-        boolean notifications = Build.VERSION.SDK_INT < 33
-                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
-        PowerManager power = getSystemService(PowerManager.class);
-        boolean battery = Build.VERSION.SDK_INT < 23 || power.isIgnoringBatteryOptimizations(getPackageName());
-        backgroundStatus.setText((notifications ? "✓" : "✕") + " 실행 알림 권한"
-                + "\n" + (battery ? "✓" : "△") + " 배터리 최적화 제외");
-    }
-
-    private void requestBatteryExemption() {
-        if (Build.VERSION.SDK_INT < 23) return;
-        PowerManager power = getSystemService(PowerManager.class);
-        if (power.isIgnoringBatteryOptimizations(getPackageName())) {
-            Toast.makeText(this, "이미 배터리 최적화 제외 상태입니다.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        try {
-            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:" + getPackageName())));
-        } catch (Exception error) {
-            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-        }
-    }
-
-    private void requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
-        }
     }
 
     private static String dash(String value) {
