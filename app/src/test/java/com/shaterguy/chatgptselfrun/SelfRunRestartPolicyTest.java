@@ -1,6 +1,5 @@
 package com.shaterguy.chatgptselfrun;
 
-import org.json.JSONObject;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -31,17 +30,15 @@ public final class SelfRunRestartPolicyTest {
                 SelfRunRestartPolicy.restartPhase(SelfRunStore.MODE_WORK));
     }
 
-    @Test public void restartUsesCompletionWrittenAfterStopCursor() throws Exception {
+    @Test public void restartUsesCompletionWrittenAfterStopCursor() {
         String runId = "SR-RESTART-NEW";
         String first = "[2026.08.24 | 21:00:00] [SELF_RUN_TURN_COMPLETED " + runId
                 + " MODEL=sol REASONING=xhigh]";
         String second = "[2026.08.24 | 21:10:00] [SELF_RUN_TURN_COMPLETED " + runId
                 + " MODEL=luna REASONING=max]";
-        JSONObject snapshot = new JSONObject().put("driveSignalCursor", 1)
-                .put("pendingDriveSignalType", "");
         DriveSignalParser.Scan scan = DriveSignalParser.scan(first + "\n" + second, runId, 1,
                 SelfRunStore.MODE_WORK);
-        DriveSignalParser.Event recovered = SelfRunRestartPolicy.restartCompletion(scan, snapshot);
+        DriveSignalParser.Event recovered = SelfRunRestartPolicy.restartCompletion(scan, 1, false);
         assertNotNull(recovered);
         assertEquals(second, recovered.raw);
         DriveSignalParser.WorkProfile profile = DriveSignalParser.workProfile(recovered.raw);
@@ -50,27 +47,23 @@ public final class SelfRunRestartPolicyTest {
         assertEquals("max", profile.reasoning);
     }
 
-    @Test public void restartRecoversAlreadyConsumedPendingCompletionFromDocument() throws Exception {
+    @Test public void restartRecoversAlreadyConsumedPendingCompletionFromDocument() {
         String runId = "SR-RESTART-PENDING";
         String completion = "[2026.08.24 | 21:10:00] [SELF_RUN_TURN_COMPLETED " + runId
                 + " MODEL=terra REASONING=xhigh NEXT_INPUT_B64URL=6rOE7IaN]";
-        JSONObject snapshot = new JSONObject().put("driveSignalCursor", 1)
-                .put("pendingDriveSignalType", DriveSignalParser.Type.TURN_COMPLETED.name());
         DriveSignalParser.Scan scan = DriveSignalParser.scan(completion, runId, 1, SelfRunStore.MODE_WORK);
-        DriveSignalParser.Event recovered = SelfRunRestartPolicy.restartCompletion(scan, snapshot);
+        DriveSignalParser.Event recovered = SelfRunRestartPolicy.restartCompletion(scan, 1, true);
         assertNotNull(recovered);
         assertEquals(completion, recovered.raw);
         assertEquals("계속", DriveSignalParser.nextInput(recovered.raw).text);
     }
 
-    @Test public void restartDoesNotInventCompletionWithoutNewOrPendingSignal() throws Exception {
+    @Test public void restartDoesNotInventCompletionWithoutNewOrPendingSignal() {
         String runId = "SR-RESTART-NONE";
         String completion = "[2026.08.24 | 21:10:00] [SELF_RUN_TURN_COMPLETED " + runId
                 + " MODEL=sol REASONING=xhigh]";
-        JSONObject snapshot = new JSONObject().put("driveSignalCursor", 1)
-                .put("pendingDriveSignalType", "");
         DriveSignalParser.Scan scan = DriveSignalParser.scan(completion, runId, 1, SelfRunStore.MODE_WORK);
-        assertNull(SelfRunRestartPolicy.restartCompletion(scan, snapshot));
+        assertNull(SelfRunRestartPolicy.restartCompletion(scan, 1, false));
     }
 
     @Test public void reusedDocumentUsesPlainContinuation() {
