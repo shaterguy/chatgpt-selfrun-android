@@ -37,6 +37,25 @@ final class SelfRunRestartPolicy {
                 : SelfRunStore.PHASE_SEND_CONTINUE;
     }
 
+    static DriveSignalParser.Event restartCompletion(DriveSignalParser.Scan scan, JSONObject snapshot) {
+        if (scan == null) return null;
+        DriveSignalParser.Event completion = DriveSignalParser.latestCompletion(scan.unseen);
+        DriveSignalParser.Event blocking = DriveSignalParser.latestBlocking(scan.unseen);
+        if (completion != null && completion.protocolError.isEmpty()
+                && (blocking == null || completion.cursor > blocking.cursor)) {
+            return completion;
+        }
+        if (snapshot == null
+                || !DriveSignalParser.Type.TURN_COMPLETED.name().equals(
+                        snapshot.optString("pendingDriveSignalType", ""))) return null;
+        DriveSignalParser.Event latest = scan.latest;
+        int stoppedCursor = Math.max(0, snapshot.optInt("driveSignalCursor", 0));
+        if (latest == null || latest.type != DriveSignalParser.Type.TURN_COMPLETED
+                || latest.cursor != stoppedCursor || !latest.protocolError.isEmpty()
+                || DriveSignalParser.hasRecoveryIdField(latest.raw)) return null;
+        return latest;
+    }
+
     static String continuationPrompt(String runId, String replacementDocumentId) {
         String base = "[" + SelfRunProtocol.kstTimestamp(new Date()) + "] "
                 + SelfRunProtocol.continuation(runId);
