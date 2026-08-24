@@ -100,7 +100,7 @@ final class Ui {
     static Button dangerButton(Context context, String text, View.OnClickListener listener) {
         MaterialButton button = materialButton(context, text, listener,
                 com.google.android.material.R.attr.materialButtonOutlinedStyle);
-        int error = themeColor(context, com.google.android.material.R.attr.colorError, 0xFFBA1A1A);
+        int error = themeColor(context, androidx.appcompat.R.attr.colorError, 0xFFBA1A1A);
         button.setTextColor(error);
         button.setStrokeColor(ColorStateList.valueOf(error));
         return button;
