@@ -1,0 +1,319 @@
+name: Apply SelfRun Drive v1.6.1-dev2 patch
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.6.1-dev2'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: selfrun-drive-v1.6.1-dev2-patch
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.6.1-dev2
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Apply exact Work parity fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, got {count}')
+              return text.replace(old, new, 1)
+
+          def regex_once(text, pattern, replacement, label):
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one regex match, got {count}')
+              return updated
+
+          # AC-01/NR-01: keep one common Chat/Work STOP->idle detector, but recognize a
+          # strongly identified SEND control placed beside (not inside) the composer form.
+          path = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunContinuationDom.java'
+          text = read(path)
+          new_controls = r'''    private static String controls(String sendKey) {
+        return "const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;"
+                + "const label=e=>String((e?.getAttribute?.('aria-label')||'')+' '+(e?.title||'')+' '+(e?.innerText||e?.textContent||'')).replace(/\\s+/g,' ').trim().toLowerCase();"
+                + "const testid=e=>String(e?.dataset?.testid||'').replace(/\\s+/g,' ').trim().toLowerCase();"
+                + "const buttonLike=e=>!!e&&e.matches?.('button,[role=\"button\"]');"
+                + "const composerRoot=composer?.closest?.('form')||composer?.closest?.('[data-type=\"unified-composer\"]')||composer?.closest?.('[class*=\"composer\"]')||composer?.parentElement;"
+                + "const composerScope=composerRoot?.parentElement||composerRoot;"
+                + "const inComposer=e=>!!e&&!!composerRoot&&composerRoot.contains(e);"
+                + "const inComposerScope=e=>!!e&&!!composerScope&&composerScope.contains(e);"
+                + "const composerEditable=()=>visible(composer)&&composer.getAttribute?.('aria-disabled')!=='true'&&!composer.disabled&&!composer.readOnly&&(('value'in composer)||composer.isContentEditable);"
+                + "const stopSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:composer-)?stop(?:[-_:]|$)/.test(id)||/\\bstop(?:\\s+(?:generating|streaming|responding))?\\b/.test(text)||/(?:생성|응답)?\\s*(?:중지|정지)/.test(text);};"
+                + "const isStop=e=>!!e&&buttonLike(e)&&inComposer(e)&&stopSemantic(e);"
+                + "const voiceSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:composer-)?(?:speech|voice|mic|microphone|dictation)(?:-mode|-button)?(?:[-_:]|$)/.test(id)||/\\b(?:start\\s+)?(?:voice(?:\\s+(?:mode|input))?|dictat(?:e|ion)|microphone|mic)\\b/.test(text)||/(?:음성\\s*(?:모드|입력)?|받아쓰기|마이크)/.test(text);};"
+                + "const isVoice=e=>!!e&&buttonLike(e)&&inComposer(e)&&voiceSemantic(e);"
+                + "const sendSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:send-button|composer-submit-button)(?:[-_:]|$)/.test(id)||/\\b(?:send|submit)(?:\\s+(?:message|prompt))?\\b|보내기/.test(text);};"
+                + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
+                + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&sendSemantic(e);"
+                + "const userMessageCount=()=>document.querySelectorAll('[data-message-author-role=\"user\"]').length;"
+                + "const controlState=()=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);if(stop)return{state:'" + STOP + "',send:null};const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};return{state:'" + UNKNOWN + "',send:null};};";
+    }
+'''
+          text = regex_once(
+              text,
+              r'    private static String controls\(String sendKey\) \{.*?\n    \}\n\n    private static String composerOps\(\)',
+              new_controls + '\n    private static String composerOps()',
+              'replace common completion controls')
+          write(path, text)
+
+          # AC-01/AC-02: WAIT healthchecks must be callback-guarded just like the other
+          # Web phases. A lost evaluateJavascript callback retries in-place; it must never
+          # navigate/reload because the prior script may already have mutated/submitted.
+          path = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java'
+          text = read(path)
+          old_guard = 'static boolean shouldGuardContinuationCallback(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}'
+          new_guard = 'static boolean shouldGuardContinuationCallback(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}'
+          text = replace_once(text, old_guard, new_guard, 'guard WAIT callback')
+          new_deadline = r'''private void scheduleContinuationCallbackDeadline(WebView active,int webGeneration,String runId,int evaluationId,String phase){
+    handler.postDelayed(()->{
+        if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId||!domInFlight||!canRun()||!phase.equals(store.phase())||!shouldGuardContinuationCallback(phase))return;
+        domInFlight=false;webEvaluationId++;
+        if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){recoverBootstrapSendCallback();return;}
+        runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.callbackTimeoutDetail(phase));
+        if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
+            releaseWakeLock();
+            scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);
+            return;
+        }
+        scheduleWeb(1200L);
+    },CONTINUATION_CALLBACK_TIMEOUT_MS);
+}
+'''
+          text = regex_once(
+              text,
+              r'private void scheduleContinuationCallbackDeadline\(WebView active,int webGeneration,String runId,int evaluationId,String phase\)\{.*?\n\}\n\nprivate void recoverBootstrapSendCallback\(\)',
+              new_deadline + '\nprivate void recoverBootstrapSendCallback()',
+              'replace continuation callback recovery')
+          write(path, text)
+
+          # AC-02: UI pause/resume of a Web phase resumes that exact phase and durable
+          # submission identity. Drive-baseline recovery remains only for non-Web pauses.
+          path = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java'
+          text = read(path)
+          text = replace_once(
+              text,
+              '.putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putBoolean("resumeNeedsContinuation",false)',
+              '.putString("creationStage",CREATION_NONE).putString("pausedFromPhase","").putLong("pausedFromPhaseStartedAt",0L).putBoolean("resumeNeedsContinuation",false)',
+              'initialize paused phase timestamp')
+          text = replace_once(
+              text,
+              '    String pausedFromPhase() { return get("pausedFromPhase"); }\n    boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }',
+              '    String pausedFromPhase() { return get("pausedFromPhase"); }\n    long pausedFromPhaseStartedAt() { return prefs.getLong("pausedFromPhaseStartedAt", 0L); }\n    boolean resumeNeedsContinuation() { return prefs.getBoolean("resumeNeedsContinuation", false); }',
+              'add paused phase timestamp getter')
+          old_enter = '''    void enterPause(String priorPhase, boolean needsContinuation) {
+        commitOrThrow(prefs.edit().putString("pausedFromPhase", safe(priorPhase)).putBoolean("resumeNeedsContinuation", needsContinuation)
+                .putBoolean("paused", true).putString("phase", PHASE_PAUSED)
+                .putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory();
+    }
+'''
+          new_enter = '''    void enterPause(String priorPhase, boolean needsContinuation) {
+        long priorStartedAt = phaseStartedAt();
+        commitOrThrow(prefs.edit().putString("pausedFromPhase", safe(priorPhase)).putLong("pausedFromPhaseStartedAt", priorStartedAt)
+                .putBoolean("resumeNeedsContinuation", needsContinuation).putBoolean("paused", true).putString("phase", PHASE_PAUSED)
+                .putLong("phaseStartedAt", System.currentTimeMillis())); syncHistory();
+    }
+'''
+          text = replace_once(text, old_enter, new_enter, 'preserve paused phase identity')
+          old_resume = re.search(r'void beginManualResumeOverride\(\)\{.*?\}\nvoid baselineManualResume', text, flags=re.S)
+          if not old_resume:
+              raise SystemExit('manual resume method not found')
+          new_resume = '''static boolean isManualResumeWebPhase(String phase){return PHASE_BOOTSTRAP.equals(phase)||PHASE_BOOTSTRAP_MODEL.equals(phase)||PHASE_BOOTSTRAP_REASONING.equals(phase)||PHASE_BOOTSTRAP_SEND.equals(phase)||PHASE_WAIT_TURN_COMPLETION.equals(phase)||PHASE_APPLY_PREFS.equals(phase)||PHASE_APPLY_REASONING.equals(phase)||PHASE_SEND_CONTINUE.equals(phase);}
+void beginManualResumeOverride(){
+ String prior=pausedFromPhase();
+ if(isManualResumeWebPhase(prior)){
+  long priorStarted=pausedFromPhaseStartedAt(),restoredStarted=priorStarted>0L?priorStarted:System.currentTimeMillis();
+  commitOrThrow(clearWatchdogClaimFields(prefs.edit()).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",prior).putString("status","사용자 재개 · 이전 Web 단계 복원").putLong("phaseStartedAt",restoredStarted).putString("pausedFromPhase","").putLong("pausedFromPhaseStartedAt",0L));syncHistory();return;
+ }
+ if(PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(prior)&&turnDocumentId().isEmpty()){commitOrThrow(clearWatchdogClaimFields(clearCommandWait(prefs.edit())).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_DRIVE_ATTACHMENT_UPLOAD).putString("status","사용자 재개 · 첨부파일 Drive 업로드 재확인").putLong("phaseStartedAt",System.currentTimeMillis()).putString("pausedFromPhase","").putLong("pausedFromPhaseStartedAt",0L));syncHistory();return;}
+ commitOrThrow(clearWatchdogClaimFields(clearCommandWait(prefs.edit())).putBoolean("terminalSideEffectPending",false).putString("terminalSideEffectType","").putString("terminalSideEffectRunId","").putString("terminalSideEffectCommitId","").putString("pendingDriveSignalRaw","").putString("pendingDriveSignalTimestamp","").putString("pendingDriveSignalType","").putLong("commitDetectedAt",0L).putBoolean("paused",false).putBoolean("active",true).putBoolean("userStopped",false).putBoolean("resumeNeedsContinuation",false).putString("phase",PHASE_RESUME_BASELINE).putString("status","사용자 재개 override · Drive 최신 신호 baseline 확인").putLong("phaseStartedAt",System.currentTimeMillis()).putString("pausedFromPhase","").putLong("pausedFromPhaseStartedAt",0L));syncHistory();
+}
+void baselineManualResume'''
+          text = text[:old_resume.start()] + new_resume + text[old_resume.end():]
+          write(path, text)
+
+          # AC-03: reflect a consumed durable NEXT TURN reservation immediately in the app
+          # even if the editor retained focus; do not overwrite unrelated fresh focused text.
+          path = 'app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    private Button stopButton;\n    private Button currentLogsButton;',
+              '    private Button stopButton;\n    private Button currentLogsButton;\n    private String lastNextInputRunId = "";\n    private String lastNextInputStored = "";',
+              'add next-input render state')
+          text = replace_once(
+              text,
+              '        if (!nextInputEditor.hasFocus()) nextInputEditor.setText(stored);',
+              '        boolean runChanged = !runId.equals(lastNextInputRunId);\n        boolean reservationConsumed = runId.equals(lastNextInputRunId) && !lastNextInputStored.isEmpty() && stored.isEmpty();\n        if (runChanged || !nextInputEditor.hasFocus() || reservationConsumed) nextInputEditor.setText(stored);\n        lastNextInputRunId = runId;\n        lastNextInputStored = stored;',
+              'clear consumed next-input UI')
+          write(path, text)
+
+          # Tests: common callback guard/retry must include WAIT and must not navigate.
+          path = 'app/src/test/java/com/shaterguy/chatgptselfrun/ChatWorkContinuationContractTest.java'
+          text = read(path)
+          text = replace_once(
+              text,
+              '        assertFalse(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));',
+              '        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));',
+              'expect WAIT callback guard')
+          marker = '''        assertTrue(service.contains("\\\"CONTINUE_CLICKED\\\".equals(status)"));
+        assertTrue(service.contains("store.beginTurnCompletionWait"));
+'''
+          addition = marker + '''        String callbackRecovery = section(service, "private void scheduleContinuationCallbackDeadline", "private void recoverBootstrapSendCallback");
+        assertTrue(callbackRecovery.contains("PHASE_WAIT_TURN_COMPLETION"));
+        assertTrue(callbackRecovery.contains("TURN_OBSERVER_HEALTHCHECK_MS"));
+        assertFalse(callbackRecovery.contains("restoreCanonical()"));
+'''
+          text = replace_once(text, marker, addition, 'assert non-navigation callback recovery')
+          write(path, text)
+
+          # Android WebView regression: after STOP, Work-like markup may put SEND beside the
+          # form while the editor itself is temporarily disabled. The common observer must finish.
+          path = 'app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java'
+          text = read(path)
+          insertion_point = '    @Test public void turnObserverRebindsInPlaceAfterComposerDomReplacement() throws Exception {'
+          test_case = '''    @Test public void turnObserverCompletesWhenSendMovesBesideComposerForm() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrl = new AtomicReference<>();
+            CountDownLatch completionSeen = new CountDownLatch(1);
+            loadContinuationFixture(scenario, web,
+                    "<div id='stop' data-selfrun-scope='composer' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>",
+                    callbackUrl, completionSeen);
+
+            JSONObject armed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, 200L, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+
+            evaluate(scenario, web, "(()=>{document.getElementById('stop').remove();"
+                    + "const composer=document.getElementById('prompt-textarea');composer.setAttribute('aria-disabled','true');"
+                    + "const send=document.createElement('button');send.id='adjacent-send';send.type='button';send.dataset.testid='send-button';send.setAttribute('aria-label','Send message');send.textContent='Send';"
+                    + "document.getElementById('continuation-controls').appendChild(send);return JSON.stringify({status:'IDLE_READY'});})()");
+
+            assertTrue("Adjacent SEND did not complete the common turn observer",
+                    completionSeen.await(5, TimeUnit.SECONDS));
+            assertTrue(callbackUrl.get().startsWith("selfrun-drive://turn-completed"));
+        }
+    }
+
+'''
+          text = replace_once(text, insertion_point, test_case + insertion_point, 'add adjacent-send observer test')
+          old_callback = '''                    if (callbackUrl != null) callbackUrl.set(requested);
+                    if (callbackSeen != null) callbackSeen.countDown();
+                    return true;
+'''
+          new_callback = '''                    if (callbackUrl != null) callbackUrl.set(requested);
+                    if (callbackSeen != null && requested.startsWith("selfrun-drive://turn-completed")) callbackSeen.countDown();
+                    return true;
+'''
+          text = replace_once(text, old_callback, new_callback, 'count completion callback only')
+          write(path, text)
+
+          # Compact source/policy tests for pause identity and stale NEXT TURN clearing.
+          Path('app/src/test/java/com/shaterguy/chatgptselfrun/WorkModeRecoveryPolicyTest.java').write_text(r'''package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.junit.Assert.*;
+
+public final class WorkModeRecoveryPolicyTest {
+    @Test public void manualPauseResumesTheSameWebPhaseInsteadOfDriveBaseline() {
+        assertTrue(SelfRunStore.isManualResumeWebPhase(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
+        assertTrue(SelfRunStore.isManualResumeWebPhase(SelfRunStore.PHASE_APPLY_PREFS));
+        assertTrue(SelfRunStore.isManualResumeWebPhase(SelfRunStore.PHASE_APPLY_REASONING));
+        assertTrue(SelfRunStore.isManualResumeWebPhase(SelfRunStore.PHASE_SEND_CONTINUE));
+        assertFalse(SelfRunStore.isManualResumeWebPhase(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC));
+        assertFalse(SelfRunStore.isManualResumeWebPhase(SelfRunStore.PHASE_RESUME_BASELINE));
+    }
+
+    @Test public void commonCompletionPathHasNoWorkOnlyDriveFallback() throws Exception {
+        String service = source("SelfRunService.java");
+        String dom = source("SelfRunContinuationDom.java");
+        String wait = section(service, "case SelfRunStore.PHASE_WAIT_TURN_COMPLETION", "case SelfRunStore.PHASE_APPLY_PREFS");
+        assertTrue(wait.contains("SelfRunContinuationDom.observeTurnCompletion"));
+        assertFalse(wait.contains("authorizeAndRunDrive"));
+        String observer = section(dom, "static String observeTurnCompletion", "static String cancelTurnCompletionObserver");
+        assertFalse(observer.contains("MODE_WORK"));
+    }
+
+    @Test public void consumedNextTurnReservationForcesVisibleEditorSync() throws Exception {
+        String activity = source("MainActivity.java");
+        assertTrue(activity.contains("boolean reservationConsumed"));
+        assertTrue(activity.contains("runChanged || !nextInputEditor.hasFocus() || reservationConsumed"));
+    }
+
+    private static String source(String name) throws Exception {
+        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static String section(String text, String start, String end) {
+        int a = text.indexOf(start);
+        int b = text.indexOf(end, a + start.length());
+        assertTrue("missing start: " + start, a >= 0);
+        assertTrue("missing end: " + end, b > a);
+        return text.substring(a, b);
+    }
+}
+''', encoding='utf-8')
+          PY
+      - name: Run focused JVM regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: Commit verified patch and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/selfrun-drive-dev2-patch.yml
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunContinuationDom.java \
+                  app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
+                  app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java \
+                  app/src/main/java/com/shaterguy/chatgptselfrun/MainActivity.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/ChatWorkContinuationContractTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/WorkModeRecoveryPolicyTest.java \
+                  app/src/androidTest/java/com/shaterguy/chatgptselfrun/WorkPreferenceDomWebViewTest.java
+          git diff --cached --check
+          git commit -m 'fix(drive): align Work with common completion observer'
+          git push origin HEAD:selfrun-drive/v1.6.1-dev2
