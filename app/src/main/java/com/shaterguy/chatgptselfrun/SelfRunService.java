@@ -187,7 +187,7 @@ static String bootstrapFailureMessage(String status){if(isChatReasoningFailureSt
             @Override public void onResolutionRequired(PendingIntent ignored) {
                 authorizationInFlight = false;
                 if (!canRun() || epoch != automationEpoch || !requestedRunId.equals(store.runId())) return;
-                if (SelfRunStore.PHASE_RESUME_BASELINE.equals(requestedPhase)) scheduleAuthorizationRetry("DRIVE_RESUME_BASELINE_AUTH_RETRY", "사용자 재개 baseline의 Drive 계정을 자동 재확인합니다.", epoch, requestedRunId, requestedPhase);
+                if (SelfRunStore.PHASE_RESUME_BASELINE.equals(requestedPhase)) scheduleAuthorizationRetry("DRIVE_RESUME_BASELINE_AUTH_RETRY", "사용자 재개 baseline의 Drive 승인을 자동 재시도합니다.", epoch, requestedRunId, requestedPhase);
                 else pauseError("DRIVE_ACCOUNT_REAUTHORIZE_REQUIRED", "앱 설정에서 Drive 저장 위치를 다시 연결하세요.", epoch, requestedRunId, requestedPhase);
             }
             @Override public void onFailure(Throwable error) {
