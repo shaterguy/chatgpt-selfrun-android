@@ -259,14 +259,18 @@ final class Ui {
     }
 
     static LinearLayout actionStrip(Context context, View... children) {
+        boolean stack = context.getResources().getConfiguration().fontScale >= 1.6f && children.length > 1;
         LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        row.setOrientation(stack ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        row.setGravity(stack ? Gravity.END : Gravity.CENTER_VERTICAL | Gravity.END);
         for (int i = 0; i < children.length; i++) {
             View child = children[i];
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (i > 0) params.setMarginStart(dp(context, 8));
+            if (i > 0) {
+                if (stack) params.topMargin = dp(context, 4);
+                else params.setMarginStart(dp(context, 8));
+            }
             row.addView(child, params);
         }
         return row;
