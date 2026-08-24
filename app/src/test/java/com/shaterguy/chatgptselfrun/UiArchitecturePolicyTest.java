@@ -92,6 +92,22 @@ public final class UiArchitecturePolicyTest {
         assertFalse(drive.contains("Ui.row(this, Ui.button(this, \"Drive 실행문서 저장 위치 연결\""));
     }
 
+    @Test public void restartUsesRecoveryConsoleAndKeepsRecoverySemantics() throws Exception {
+        String restart = src("SelfRunRestartActivity.java");
+        assertTrue(restart.contains("Recovery Console"));
+        assertTrue(restart.contains("RECOVERY TARGET"));
+        assertTrue(restart.contains("RECOVERY PATH"));
+        assertTrue(restart.contains("progressText("));
+        assertTrue(restart.contains("showRecoveryStage(\"AUTH\""));
+        assertTrue(restart.contains("showRecoveryStage(\"RECOVERING\""));
+        assertTrue(restart.contains("showRecoveryStage(\"READY\""));
+        assertTrue(restart.contains("closeButton.setEnabled(!recoveryStarted)"));
+        assertTrue(restart.contains("DriveAuthorization.requestSilently"));
+        assertTrue(restart.contains("requireClaimOwnership();"));
+        assertTrue(restart.contains("restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, prompt)"));
+        assertFalse(restart.contains("Ui.title(this, \"중지 작업 재시작\")"));
+    }
+
     private static String src(String file) throws Exception {
         return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
                 "src/main/java/com/shaterguy/chatgptselfrun/" + file);
