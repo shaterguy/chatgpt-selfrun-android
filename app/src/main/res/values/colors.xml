@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="selfrun_icon_background">#0B57D0</color>
+    <color name="selfrun_primary">#0B57D0</color>
+    <color name="selfrun_on_primary">#FFFFFF</color>
+    <color name="selfrun_primary_container">#D9E2FF</color>
+    <color name="selfrun_on_primary_container">#001A41</color>
+    <color name="selfrun_secondary">#535F70</color>
+    <color name="selfrun_on_secondary">#FFFFFF</color>
+    <color name="selfrun_secondary_container">#D7E3F8</color>
+    <color name="selfrun_on_secondary_container">#101C2B</color>
+    <color name="selfrun_background">#F9F9FF</color>
+    <color name="selfrun_on_background">#1A1B20</color>
+    <color name="selfrun_surface">#F9F9FF</color>
+    <color name="selfrun_on_surface">#1A1B20</color>
+    <color name="selfrun_surface_variant">#E1E2EC</color>
+    <color name="selfrun_on_surface_variant">#44474F</color>
+    <color name="selfrun_outline">#74777F</color>
+    <color name="selfrun_outline_variant">#C4C6D0</color>
+    <color name="selfrun_error">#BA1A1A</color>
+    <color name="selfrun_on_error">#FFFFFF</color>
+    <color name="selfrun_error_container">#FFDAD6</color>
+    <color name="selfrun_on_error_container">#410002</color>
 </resources>

@@ -59,11 +59,12 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(activity.contains("CHAT_REASONING_VALUES[i].equals(value)"));
     }
 
-    @Test public void currentDevIdentityRemainsStableWithoutDependencyChange() throws Exception {
+    @Test public void currentDevIdentityPinsOnlyTheApprovedUiDependencyChange() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000087"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.5.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000088"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.0-dev1'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
+        assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
     }
 
     private static String src(String file) throws Exception {

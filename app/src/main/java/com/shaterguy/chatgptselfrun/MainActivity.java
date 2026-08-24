@@ -74,58 +74,61 @@ public final class MainActivity extends Activity {
 
     private void createViews() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setFocusableInTouchMode(true);
-        root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 24));
+        root.setPadding(Ui.dp(this, 20), Ui.dp(this, 16), Ui.dp(this, 20), Ui.dp(this, 28));
         scroll.addView(root);
 
         root.addView(Ui.title(this, "SelfRun Drive"));
-        root.addView(Ui.body(this, "v" + BuildConfig.VERSION_NAME + " · Drive SelfRun 신호를 기준으로 다음 턴을 진행합니다."));
+        root.addView(Ui.subtitle(this, "v" + BuildConfig.VERSION_NAME + " · Drive 신호 기반으로 하나의 대화를 끝까지 이어갑니다."));
 
-        root.addView(Ui.section(this, "메뉴"));
+        root.addView(Ui.section(this, "빠른 실행"));
         root.addView(Ui.row(this,
                 Ui.button(this, "새 작업", v -> startActivity(new Intent(this, SelfRunNewActivity.class))),
-                Ui.button(this, "작업 이력", v -> startActivity(new Intent(this, SelfRunHistoryActivity.class)))));
+                Ui.outlinedButton(this, "작업 이력", v -> startActivity(new Intent(this, SelfRunHistoryActivity.class)))));
         root.addView(Ui.row(this,
-                Ui.button(this, "로그", v -> startActivity(new Intent(this, SelfRunLogMenuActivity.class))),
-                Ui.button(this, "로그인/세션", v -> startActivity(new Intent(this, LoginActivity.class)))));
+                Ui.tonalButton(this, "로그", v -> startActivity(new Intent(this, SelfRunLogMenuActivity.class))),
+                Ui.tonalButton(this, "로그인 · 세션", v -> startActivity(new Intent(this, LoginActivity.class)))));
         root.addView(Ui.row(this,
-                Ui.button(this, "Drive 실행문서 위치", v -> startActivity(new Intent(this, DriveSetupActivity.class))),
-                Ui.button(this, "웹 UI 보정", v -> startActivity(new Intent(this, WebUiCalibrationActivity.class)))));
+                Ui.tonalButton(this, "Drive 실행문서 위치", v -> startActivity(new Intent(this, DriveSetupActivity.class))),
+                Ui.tonalButton(this, "웹 UI 보정", v -> startActivity(new Intent(this, WebUiCalibrationActivity.class)))));
 
-        root.addView(Ui.section(this, "현재 SelfRun Drive"));
         currentStatus = Ui.body(this, "");
-        root.addView(currentStatus);
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
-        stopButton = Ui.button(this, "중지", v -> stopSelfRun());
-        root.addView(Ui.row(this, pauseButton, resumeButton, stopButton));
-        currentLogsButton = Ui.button(this, "현재 작업 로그", v -> openCurrentLogs());
-        root.addView(currentLogsButton);
+        stopButton = Ui.dangerButton(this, "중지", v -> stopSelfRun());
+        currentLogsButton = Ui.outlinedButton(this, "현재 작업 로그", v -> openCurrentLogs());
+        root.addView(Ui.card(this,
+                Ui.cardTitle(this, "현재 SelfRun"),
+                currentStatus,
+                Ui.row(this, pauseButton, resumeButton, stopButton),
+                currentLogsButton));
 
-        root.addView(Ui.section(this, "차기 턴 사용자 입력"));
         nextInputStatus = Ui.body(this, "");
-        root.addView(nextInputStatus);
         nextInputEditor = new EditText(this);
         nextInputEditor.setHint("차기 턴에 함께 보낼 문구");
         nextInputEditor.setMinLines(2);
         nextInputEditor.setMaxLines(8);
         nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        root.addView(nextInputEditor, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        nextInputSaveButton = Ui.button(this, "저장/수정", v -> saveNextInput());
-        nextInputDeleteButton = Ui.button(this, "삭제", v -> deleteNextInput());
-        root.addView(Ui.row(this, nextInputSaveButton, nextInputDeleteButton));
-        root.addView(Ui.body(this, "저장한 문구는 정확히 다음 SelfRun continuation에만 적용됩니다. Drive NEXT_INPUT이 있으면 그 뒤에 함께 전달됩니다."));
+        nextInputSaveButton = Ui.button(this, "저장 · 수정", v -> saveNextInput());
+        nextInputDeleteButton = Ui.dangerButton(this, "삭제", v -> deleteNextInput());
+        root.addView(Ui.card(this,
+                Ui.cardTitle(this, "차기 턴 사용자 입력"),
+                nextInputStatus,
+                nextInputEditor,
+                Ui.row(this, nextInputSaveButton, nextInputDeleteButton),
+                Ui.muted(this, "저장한 문구는 정확히 다음 SelfRun continuation에만 적용됩니다. Drive NEXT_INPUT이 있으면 그 뒤에 함께 전달됩니다.")));
 
-        root.addView(Ui.section(this, "백그라운드 실행"));
         backgroundStatus = Ui.body(this, "");
-        root.addView(backgroundStatus);
-        root.addView(Ui.row(this,
-                Ui.button(this, "알림 권한", v -> requestNotificationPermission()),
-                Ui.button(this, "배터리 최적화 제외", v -> requestBatteryExemption())));
-        root.addView(Ui.body(this, "Drive 대기 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다."));
+        root.addView(Ui.card(this,
+                Ui.cardTitle(this, "백그라운드 실행 준비"),
+                backgroundStatus,
+                Ui.row(this,
+                        Ui.tonalButton(this, "알림 권한", v -> requestNotificationPermission()),
+                        Ui.tonalButton(this, "배터리 최적화 제외", v -> requestBatteryExemption())),
+                Ui.muted(this, "Drive 대기 중에는 WakeLock을 유지하지 않습니다. Drive 요청·WebView 입력 같은 짧은 실행 구간에서만 사용합니다.")));
 
         Ui.setContent(this, scroll);
         root.requestFocus();
@@ -135,7 +138,7 @@ public final class MainActivity extends Activity {
         if (currentStatus == null) return;
         String runId = store.runId();
         if (runId.isEmpty()) {
-            currentStatus.setText("실행 중이거나 선택된 SelfRun이 없습니다.");
+            currentStatus.setText("실행 중이거나 선택된 SelfRun이 없습니다.\n새 작업을 시작하면 현재 상태와 다음 행동이 여기에 표시됩니다.");
             pauseButton.setEnabled(false);
             resumeButton.setEnabled(false);
             stopButton.setEnabled(false);
@@ -146,12 +149,10 @@ public final class MainActivity extends Activity {
         String prefs = SelfRunStore.MODE_WORK.equals(store.mode())
                 ? store.pendingModel() + " / " + store.pendingReasoning()
                 : ChatReasoningPreferenceStore.summary(this, runId, store.phase(), store.lastErrorCode());
-        currentStatus.setText("Run ID: " + runId
-                + "\n모드: " + store.mode()
-                + "\n상태: " + store.status()
+        currentStatus.setText(store.status()
+                + "\n" + store.mode() + " · " + prefs + " · Turn " + store.turn()
                 + "\n단계: " + store.phase()
-                + "\n모델/추론: " + prefs
-                + "\n턴: " + store.turn()
+                + "\nRun ID: " + runId
                 + "\nconversation: " + dash(store.conversationUrl())
                 + "\nDrive 문서: " + dash(store.turnDocumentUrl())
                 + "\nDrive signal cursor: " + store.driveSignalCursor()
@@ -256,8 +257,8 @@ public final class MainActivity extends Activity {
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         PowerManager power = getSystemService(PowerManager.class);
         boolean battery = Build.VERSION.SDK_INT < 23 || power.isIgnoringBatteryOptimizations(getPackageName());
-        backgroundStatus.setText((notifications ? "✓" : "✕") + " 실행 알림 권한"
-                + "\n" + (battery ? "✓" : "△") + " 배터리 최적화 제외");
+        backgroundStatus.setText((notifications ? "✓ 알림 권한 준비됨" : "! 실행 알림 권한 필요")
+                + "\n" + (battery ? "✓ 배터리 최적화 제외됨" : "△ 배터리 최적화 제외 권장"));
     }
 
     private void requestBatteryExemption() {
