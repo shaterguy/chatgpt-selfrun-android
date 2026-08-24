@@ -181,7 +181,7 @@ jobs:
           BASE_APK=formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
           CURRENT_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$CURRENT_VERSION_NAME" =~ ^1\.4\.1-rc[0-9]+$ ]] || { echo "unexpected RC versionName: $CURRENT_VERSION_NAME" >&2; exit 1; }
+          [[ "$CURRENT_VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected formal versionName: $CURRENT_VERSION_NAME" >&2; exit 1; }
           (( CURRENT_VERSION_CODE > 1000054 ))
           "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-baseline/base-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > current-candidate/current-cert.txt
