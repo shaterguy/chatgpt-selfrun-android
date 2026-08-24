@@ -49,7 +49,7 @@ grep -Fq 'DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"' "$AUT
 ! grep -Fq '"https://www.googleapis.com/auth/drive";' "$AUTH"
 ! grep -Fq '"https://www.googleapis.com/auth/drive.readonly";' "$AUTH"
 grep -Fq 'MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}' "$ACTIVITY"
-grep -Fq 'setMinLines(8)' "$ACTIVITY"
+grep -Fq 'requirement.setMinLines(Ui.isExpanded(this) ? 13 : 9)' "$ACTIVITY"
 grep -Fq 'setVerticalScrollBarEnabled(false)' "$ACTIVITY"
 grep -Fq 'descendantTopWithinScrollContent' "$ACTIVITY"
 grep -Fq 'outer.getPaddingBottom()' "$ACTIVITY"
