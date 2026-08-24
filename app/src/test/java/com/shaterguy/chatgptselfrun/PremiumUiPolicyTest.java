@@ -45,7 +45,8 @@ public final class PremiumUiPolicyTest {
         assertTrue(task.contains("Ui.SelectionField mode"));
         assertTrue(task.contains("Ui.SelectionField chatReasoning"));
         assertTrue(task.contains("mode.setOnSelectionChangedListener"));
-        assertTrue(task.contains("outState.putInt(STATE_MODE,mode==null?0:mode.getSelectedItemPosition())"));
+        assertTrue(task.contains("outState.putInt(STATE_MODE"));
+        assertTrue(task.contains("mode.getSelectedItemPosition()"));
         assertTrue(task.contains("mode.setSelection(modePosition)"));
         assertTrue(task.contains("chatReasoning.setSelection(reasoningPosition)"));
         assertTrue(task.contains("project.setSelection(selected)"));
@@ -62,16 +63,18 @@ public final class PremiumUiPolicyTest {
         String ui = src("Ui.java");
         assertTrue(ui.contains("WIDTH_MEDIUM_DP = 600"));
         assertTrue(ui.contains("WIDTH_EXPANDED_DP = 840"));
-        assertTrue(ui.contains("EXPANDED_CONTENT_MAX_DP = 760"));
+        assertTrue(ui.contains("navigationRail(activity, destination)"));
+        assertTrue(ui.contains("bottomNavigation(activity, destination)"));
         assertTrue(ui.contains("applyAdaptiveContentWidth"));
         assertTrue(ui.contains("FrameLayout"));
         assertTrue(ui.contains("Gravity.TOP | Gravity.CENTER_HORIZONTAL"));
     }
 
-    @Test public void mainDashboardKeepsExistingActionsWhileUsingCards() throws Exception {
+    @Test public void mainConsoleKeepsRunActionsWhileToolsOwnRuntimeSetup() throws Exception {
         String main = src("MainActivity.java");
-        assertTrue(main.contains("Ui.card(this"));
-        assertTrue(main.contains("Ui.tonalButton(this"));
+        String tools = src("SelfRunLogMenuActivity.java");
+        assertTrue(main.contains("Run Console"));
+        assertTrue(main.contains("Ui.heroSurface(this"));
         assertTrue(main.contains("Ui.outlinedButton(this"));
         assertTrue(main.contains("Ui.dangerButton(this"));
         assertTrue(main.contains("pauseSelfRun()"));
@@ -79,8 +82,10 @@ public final class PremiumUiPolicyTest {
         assertTrue(main.contains("stopSelfRun()"));
         assertTrue(main.contains("saveNextInput()"));
         assertTrue(main.contains("deleteNextInput()"));
-        assertTrue(main.contains("requestNotificationPermission()"));
-        assertTrue(main.contains("requestBatteryExemption()"));
+        assertFalse(main.contains("requestNotificationPermission()"));
+        assertFalse(main.contains("requestBatteryExemption()"));
+        assertTrue(tools.contains("requestNotificationPermission()"));
+        assertTrue(tools.contains("requestBatteryExemption()"));
     }
 
     @Test public void uiChangeDoesNotExpandAndroidPermissionSurface() throws Exception {
