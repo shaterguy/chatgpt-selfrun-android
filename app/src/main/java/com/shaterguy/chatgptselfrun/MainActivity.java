@@ -78,13 +78,13 @@ public final class MainActivity extends Activity {
         console.setOrientation(LinearLayout.VERTICAL);
         console.setFocusableInTouchMode(true);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        LinearLayout page = Ui.page(this);
-        scroll.addView(page);
+        ScrollView runScroll = new ScrollView(this);
+        runScroll.setFillViewport(true);
+        LinearLayout runPage = Ui.page(this);
+        runScroll.addView(runPage);
 
         Button newRun = Ui.button(this, "새 작업", v -> openNewRun());
-        page.addView(Ui.topBar(this, "SelfRun Drive", "v" + BuildConfig.VERSION_NAME + " · Run Console", newRun));
+        runPage.addView(Ui.topBar(this, "SelfRun Drive", "v" + BuildConfig.VERSION_NAME + " · Run Console", newRun));
 
         emptyStage = Ui.heroSurface(this,
                 Ui.statusPill(this, "READY"),
@@ -96,7 +96,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams emptyParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         emptyParams.topMargin = Ui.dp(this, 10);
-        page.addView(emptyStage, emptyParams);
+        runPage.addView(emptyStage, emptyParams);
 
         statusPill = Ui.statusPill(this, "RUN");
         currentStatus = Ui.headline(this, "");
@@ -123,16 +123,13 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         stageParams.topMargin = Ui.dp(this, 10);
-        page.addView(runStage, stageParams);
-
-        console.addView(scroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        runPage.addView(runStage, stageParams);
 
         nextInputStatus = Ui.muted(this, "");
         nextInputEditor = new EditText(this);
         nextInputEditor.setHint("다음 턴에 추가할 사용자 입력");
-        nextInputEditor.setMinLines(2);
-        nextInputEditor.setMaxLines(7);
+        nextInputEditor.setMinLines(Ui.isExpanded(this) ? 6 : 2);
+        nextInputEditor.setMaxLines(Ui.isExpanded(this) ? 14 : 7);
         nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -140,14 +137,37 @@ public final class MainActivity extends Activity {
         nextInputDeleteButton = Ui.textButton(this, "예약 삭제", v -> deleteNextInput());
         composerPanel = Ui.card(this,
                 Ui.section(this, "NEXT TURN"),
+                Ui.headline(this, "다음 턴에 추가할 입력"),
                 nextInputStatus,
                 nextInputEditor,
                 Ui.actionStrip(this, nextInputDeleteButton, nextInputSaveButton));
-        LinearLayout.LayoutParams composerParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        int side = Ui.isMedium(this) ? Ui.dp(this, 28) : Ui.dp(this, 18);
-        composerParams.setMargins(side, Ui.dp(this, 4), side, Ui.dp(this, 10));
-        console.addView(composerPanel, composerParams);
+
+        if (Ui.isExpanded(this)) {
+            LinearLayout workspace = new LinearLayout(this);
+            workspace.setOrientation(LinearLayout.HORIZONTAL);
+            workspace.addView(runScroll, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1.15f));
+
+            LinearLayout supportingPane = new LinearLayout(this);
+            supportingPane.setOrientation(LinearLayout.VERTICAL);
+            supportingPane.setPadding(Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 28), Ui.dp(this, 24));
+            supportingPane.addView(composerPanel, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 0.85f);
+            supportParams.setMarginStart(Ui.dp(this, 10));
+            workspace.addView(supportingPane, supportParams);
+            console.addView(workspace, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        } else {
+            console.addView(runScroll, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            LinearLayout.LayoutParams composerParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            int side = Ui.isMedium(this) ? Ui.dp(this, 28) : Ui.dp(this, 18);
+            composerParams.setMargins(side, Ui.dp(this, 4), side, Ui.dp(this, 10));
+            console.addView(composerPanel, composerParams);
+        }
 
         Ui.setPrimaryContent(this, console, Ui.DEST_RUN);
         console.requestFocus();
