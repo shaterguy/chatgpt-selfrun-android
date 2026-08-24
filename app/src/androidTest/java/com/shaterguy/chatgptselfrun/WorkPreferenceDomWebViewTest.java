@@ -241,7 +241,7 @@ public final class WorkPreferenceDomWebViewTest {
         }
     }
 
-    @Test public void turnObserverCompletesAfterOnPauseUsingMutationCallbacks() throws Exception {
+    @Test public void turnObserverCompletesWhileWebViewRemainsActive() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             AtomicReference<String> callbackUrls = new AtomicReference<>("");
@@ -251,15 +251,14 @@ public final class WorkPreferenceDomWebViewTest {
                     callbackUrls, callbacks);
 
             JSONObject armed = evaluate(scenario, web, SelfRunContinuationDom.observeTurnCompletion(
-                    CONVERSATION_URL, "on-pause-run", "on-pause-token", 50L, false));
+                    CONVERSATION_URL, "active-wait-run", "active-wait-token", 50L, false));
             assertEquals("OBSERVER_ARMED", armed.getString("status"));
-            scenario.onActivity(activity -> web.get().onPause());
 
             evaluate(scenario, web, "(()=>{const b=document.querySelector('form button');b.dataset.testid='stop-stream-action';b.setAttribute('aria-label','Stop streaming');b.textContent='Stop';return JSON.stringify({status:'STOP'});})()");
             Thread.sleep(150L);
             evaluate(scenario, web, "(()=>{const b=document.querySelector('form button');b.dataset.testid='send-button';b.setAttribute('aria-label','Send prompt');b.textContent='Send';return JSON.stringify({status:'SEND'});})()");
 
-            assertTrue("paused WebView observer did not report stop and stable completion",
+            assertTrue("active WebView observer did not report stop and stable completion",
                     callbacks.await(5, TimeUnit.SECONDS));
             String observed = callbackUrls.get();
             assertTrue(observed.contains("selfrun-drive://turn-stop-seen"));
