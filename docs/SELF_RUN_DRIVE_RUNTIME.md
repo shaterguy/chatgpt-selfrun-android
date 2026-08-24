@@ -18,7 +18,7 @@ WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습�
 
 ## Foreground Service와 WakeLock
 
-실행 중 Job은 Android Foreground Service로 유지합니다. WakeLock은 Drive 요청, WebView 복구, 명령 제출처럼 실제 작업이 필요한 짧은 구간에만 사용하고 단순 polling 대기·guard 대기에는 유지하지 않는 것을 원칙으로 합니다. 알림 채널, pause/resume 동작과 서비스 상태는 `SelfRunService`와 `NotificationHelper`가 소유합니다.
+실행 중 Job은 Android Foreground Service로 유지합니다. WakeLock은 Drive 요청, WebView 복구, 명령 제출처럼 실제 작업이 필요한 짧은 구간에만 사용하고 단순 polling 대기·guard 대기에는 유지하지 않는 것을 원칙으로 합니다. TURN_COMPLETION observer가 arm된 뒤에는 `WebView.onPause()`로 안전한 렌더링·애니메이션 처리를 멈추되 JavaScript observer와 15초 healthcheck는 유지하며, 다음 상호작용·복구 단계에서만 `onResume()`합니다. 알림 채널, pause/resume 동작과 서비스 상태는 `SelfRunService`와 `NotificationHelper`가 소유합니다.
 
 ## 완료 감지와 Drive 동기화 state machine
 
@@ -31,7 +31,7 @@ WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습�
 - 네트워크 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
 - authoritative progress: append-only SelfRun signal cursor
 
-정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback이 `WAIT_TURN_COMPLETION`의 현재 run/token과 일치할 때만 `POST_DOM_DRIVE_SYNC`로 전이합니다. 즉시 전체 문서를 읽어 새 `TURN_COMPLETED`·`NEXT_INPUT`·Work profile을 적용하고, 문구가 없으면 5초 간격으로 최대 5분 재확인합니다. 제한시간이 지나면 현재 영속 profile을 유지한 채 다음 턴을 제출합니다. STOP/SEND 완료 감지에 짧은 주기의 반복 polling은 사용하지 않습니다.
+정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback이 `WAIT_TURN_COMPLETION`의 현재 run/token과 일치할 때만 `POST_DOM_DRIVE_SYNC`로 전이합니다. 즉시 Drive metadata를 확인하고, version이 달라졌거나 비어 있으면 전체 문서를 읽어 새 `TURN_COMPLETED`·`NEXT_INPUT`·Work profile을 적용합니다. version이 같으면 signal cursor를 바꾸지 않은 채 문서 본문 read를 건너뛰고 5초 간격으로 최대 5분 재확인합니다. `RESUME_BASELINE`은 version이 같아도 항상 전체 문서를 읽습니다. 제한시간이 지나면 현재 영속 profile을 유지한 채 다음 턴을 제출합니다. STOP/SEND 완료 감지에 짧은 주기의 반복 polling은 사용하지 않습니다.
 
 Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
 

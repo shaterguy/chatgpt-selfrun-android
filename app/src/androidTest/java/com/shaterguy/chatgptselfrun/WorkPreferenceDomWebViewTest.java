@@ -216,6 +216,32 @@ public final class WorkPreferenceDomWebViewTest {
         }
     }
 
+    @Test public void turnObserverCompletesAfterOnPauseUsingMutationCallbacks() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrls = new AtomicReference<>("");
+            CountDownLatch callbacks = new CountDownLatch(2);
+            loadContinuationFixture(scenario, web,
+                    "<button type='button' role='button' data-testid='send-button' aria-label='Send prompt'>Send</button>",
+                    callbackUrls, callbacks);
+
+            JSONObject armed = evaluate(scenario, web, SelfRunContinuationDom.observeTurnCompletion(
+                    CONVERSATION_URL, "on-pause-run", "on-pause-token", 50L, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+            scenario.onActivity(activity -> web.get().onPause());
+
+            evaluate(scenario, web, "(()=>{const b=document.querySelector('form button');b.dataset.testid='stop-stream-action';b.setAttribute('aria-label','Stop streaming');b.textContent='Stop';return JSON.stringify({status:'STOP'});})()");
+            Thread.sleep(150L);
+            evaluate(scenario, web, "(()=>{const b=document.querySelector('form button');b.dataset.testid='send-button';b.setAttribute('aria-label','Send prompt');b.textContent='Send';return JSON.stringify({status:'SEND'});})()");
+
+            assertTrue("paused WebView observer did not report stop and stable completion",
+                    callbacks.await(5, TimeUnit.SECONDS));
+            String observed = callbackUrls.get();
+            assertTrue(observed.contains("selfrun-drive://turn-stop-seen"));
+            assertTrue(observed.contains("selfrun-drive://turn-completed"));
+        }
+    }
+
     @Test public void voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
@@ -417,7 +443,7 @@ public final class WorkPreferenceDomWebViewTest {
                 @Override public boolean shouldOverrideUrlLoading(WebView ignored, WebResourceRequest request) {
                     String requested = String.valueOf(request.getUrl());
                     if (!requested.startsWith("selfrun-drive://")) return false;
-                    if (callbackUrl != null) callbackUrl.set(requested);
+                    if (callbackUrl != null) callbackUrl.updateAndGet(previous -> previous == null || previous.isEmpty() ? requested : previous + "\n" + requested);
                     if (callbackSeen != null) callbackSeen.countDown();
                     return true;
                 }

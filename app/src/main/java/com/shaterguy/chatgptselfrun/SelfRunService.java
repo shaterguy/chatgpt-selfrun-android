@@ -75,6 +75,7 @@ public final class SelfRunService extends Service {
     private volatile boolean driveInFlight;
     private volatile boolean authorizationInFlight;
     private boolean domInFlight;
+    private boolean webViewPaused;
     private int generation;
     private int webEvaluationId;
     private volatile int automationEpoch;
@@ -479,6 +480,8 @@ private void postDriveOutcome(){handler.post(()->{String phase=store.phase();if(
 
 private static java.util.List<DriveSignalParser.Event> normalDriveEvents(java.util.List<DriveSignalParser.Event> events){java.util.ArrayList<DriveSignalParser.Event> result=new java.util.ArrayList<>();if(events!=null)for(DriveSignalParser.Event event:events){if(event.type==DriveSignalParser.Type.TURN_COMPLETED&&DriveSignalParser.hasRecoveryIdField(event.raw))continue;result.add(event);}return result;}
 
+static boolean shouldReadDriveSnapshot(boolean postDom,boolean resume,String lastSeenVersion,String currentVersion){if(resume||!postDom)return true;return lastSeenVersion==null||lastSeenVersion.isEmpty()||currentVersion==null||currentVersion.isEmpty()||!currentVersion.equals(lastSeenVersion);}
+
 private void pollDriveNow(int epoch)throws Exception{
     DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;
     DriveApiClient.Metadata metadata=drive.getPollMetadata(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;
@@ -486,6 +489,18 @@ private void pollDriveNow(int epoch)throws Exception{
     boolean postDom=SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(snapshot.phase);
     boolean resume=SelfRunStore.PHASE_RESUME_BASELINE.equals(snapshot.phase);
     if(!postDom&&!resume)return;
+    if(!shouldReadDriveSnapshot(postDom,resume,snapshot.lastSeenVersion,metadata.version)){
+        if(!applyDriveResult(epoch,()->store.updateDriveSeen(metadata.version,metadata.modifiedTime)))return;
+        long now=System.currentTimeMillis();
+        if(postDomDriveSyncTimedOut(store.postDomDriveSyncStartedAt(),now)){
+            if(!applyDriveResult(epoch,store::continueAfterPostDomDriveTimeout))return;
+            runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=continue_current_profile");
+            postDriveOutcome();return;
+        }
+        applyDriveResult(epoch,()->store.setStatus("답변 완료 확인 · Drive TURN_COMPLETED 재확인 대기"));
+        runLog.record(store,"POST_DOM_DRIVE_SYNC","result=version_unchanged;retryMs="+POST_DOM_DRIVE_RETRY_MS);
+        schedulePostDomDriveSync(POST_DOM_DRIVE_RETRY_MS);return;
+    }
     DriveApiClient.DocumentSnapshot document=drive.readDocumentSnapshot(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;
     DriveSignalParser.Scan scan=DriveSignalParser.scan(document.text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode);
     java.util.List<DriveSignalParser.Event> normalUnseen=normalDriveEvents(scan.unseen);
@@ -515,7 +530,7 @@ private void replayTerminalSideEffect(){startForegroundCompat();String owner=sto
 
 private void finishPersistedTerminalPause(String cause, String alertTitle, String ownerRunId,String commitId, String type) {if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;stopAutomationCallbacks();releaseWakeLock();pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");NotificationHelper.notifyUser(this, alertTitle, store.status());store.acknowledgeTerminalSideEffect(ownerRunId,commitId,type);}
 
-private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,WEB_RECOVERY_DELAY_MS);return;}acquireWakeLock();if(webView!=null){maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())?0L:250L);return;}launchWebView(target);}
+private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,WEB_RECOVERY_DELAY_MS);return;}acquireWakeLock();if(webView!=null){if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))resumeWebView();maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())?0L:250L);return;}launchWebView(target);}
 
     private void launchWebView(String target) {
         cleanupWebView();
@@ -561,7 +576,7 @@ private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().
 
     private void postWebCallback(Runnable callback, long delay) {int epoch = automationEpoch;String runId=store.runId();handler.postDelayed(() -> {if (epoch == automationEpoch && runId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) callback.run();}, delay);}
 
-private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;maybeCaptureConversationUrl(webView.getUrl());String phase=store.phase();if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;}if((SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))&&store.conversationUrl().isEmpty()){scheduleWeb(2000L);return;}if(!routeAcceptable(webView.getUrl())){recordContinuationRouteMismatch(webView.getUrl());scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}String script;switch(phase){case SelfRunStore.PHASE_BOOTSTRAP->script=SelfRunDom.prepareInitialContext(store.projectUrl(),store.mode(),store.runId());case SelfRunStore.PHASE_BOOTSTRAP_MODEL->script=WorkPreferenceDom.modelForProject(store.projectUrl(),"sol");case SelfRunStore.PHASE_BOOTSTRAP_REASONING->script=WorkPreferenceDom.reasoningForProject(store.projectUrl(),"xhigh");case SelfRunStore.PHASE_BOOTSTRAP_SEND->{String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);script=SelfRunContinuationDom.prepareBootstrap(store.projectUrl(),prompt,store.commandMarkerId());}case SelfRunStore.PHASE_WAIT_TURN_COMPLETION->{String token=ensureTurnObserverToken();script=SelfRunContinuationDom.observeTurnCompletion(store.conversationUrl(),store.runId(),token,TURN_COMPLETION_STABILITY_MS,turnObserverNeedsIdleBaseline || store.turnObserverSawStop());}case SelfRunStore.PHASE_APPLY_PREFS->script=WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel());case SelfRunStore.PHASE_APPLY_REASONING->script=WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning());case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());}default->{store.setLastError("WEB_STATE_RETRY","Drive V1 WebView 단계를 자동 재확인합니다: "+phase);scheduleWeb(2000L);return;}}evaluate(phase,script);}
+private void runWebStep(){if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;String phase=store.phase();if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase))resumeWebView();maybeCaptureConversationUrl(webView.getUrl());if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;}if((SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))&&store.conversationUrl().isEmpty()){scheduleWeb(2000L);return;}if(!routeAcceptable(webView.getUrl())){recordContinuationRouteMismatch(webView.getUrl());scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}String script;switch(phase){case SelfRunStore.PHASE_BOOTSTRAP->script=SelfRunDom.prepareInitialContext(store.projectUrl(),store.mode(),store.runId());case SelfRunStore.PHASE_BOOTSTRAP_MODEL->script=WorkPreferenceDom.modelForProject(store.projectUrl(),"sol");case SelfRunStore.PHASE_BOOTSTRAP_REASONING->script=WorkPreferenceDom.reasoningForProject(store.projectUrl(),"xhigh");case SelfRunStore.PHASE_BOOTSTRAP_SEND->{String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);script=SelfRunContinuationDom.prepareBootstrap(store.projectUrl(),prompt,store.commandMarkerId());}case SelfRunStore.PHASE_WAIT_TURN_COMPLETION->{String token=ensureTurnObserverToken();script=SelfRunContinuationDom.observeTurnCompletion(store.conversationUrl(),store.runId(),token,TURN_COMPLETION_STABILITY_MS,turnObserverNeedsIdleBaseline || store.turnObserverSawStop());}case SelfRunStore.PHASE_APPLY_PREFS->script=WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel());case SelfRunStore.PHASE_APPLY_REASONING->script=WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning());case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());}default->{store.setLastError("WEB_STATE_RETRY","Drive V1 WebView 단계를 자동 재확인합니다: "+phase);scheduleWeb(2000L);return;}}evaluate(phase,script);}
 
 private String ensureTurnObserverToken(){String token=store.turnObserverToken();if(token.isEmpty()){token=UUID.randomUUID().toString().replace("-","");store.prepareTurnObserver(token);}return token;}
 
@@ -592,7 +607,7 @@ private void evaluate(String phase,String script){
       if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
   }
   if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
-      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 이벤트 관찰 중 · 답변 완료 후 5초 재확인");String observerToken=store.turnObserverToken();boolean firstArm=!observerToken.isEmpty()&&!observerToken.equals(loggedTurnObserverToken);boolean rebound=detail.contains("bindingChanged=1");if(firstArm||rebound){runLog.record(store,"TURN_COMPLETION_OBSERVER","result="+(rebound&&!firstArm?"rebound":"armed")+";detail="+BootstrapResultPolicy.safe(detail,180));loggedTurnObserverToken=observerToken;}releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
+      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 이벤트 관찰 중 · 답변 완료 후 5초 재확인");String observerToken=store.turnObserverToken();boolean firstArm=!observerToken.isEmpty()&&!observerToken.equals(loggedTurnObserverToken);boolean rebound=detail.contains("bindingChanged=1");if(firstArm||rebound){runLog.record(store,"TURN_COMPLETION_OBSERVER","result="+(rebound&&!firstArm?"rebound":"armed")+";detail="+BootstrapResultPolicy.safe(detail,180));loggedTurnObserverToken=observerToken;}pauseWebView();releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
       if("OBSERVER_UNAVAILABLE".equals(status)){runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
   }
   if("TARGET_ERROR".equals(status)){recordContinuationTargetError(phase);if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
@@ -775,9 +790,9 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);handler.removeCallbacks(driveRetryRunnable);}
     private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();turnObserverNeedsIdleBaseline=false;synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
     private void disconnectTurnObserver(){String token=store==null?"":store.turnObserverToken();WebView active=webView;if(active==null||token.isEmpty())return;try{active.evaluateJavascript(SelfRunContinuationDom.cancelTurnCompletionObserver(token),null);}catch(Throwable ignored){}}
-    private void pauseWebView() { if (webView != null) try { webView.onPause(); } catch (Throwable ignored) {} }
-    private void resumeWebView() { if (webView != null) try { webView.onResume(); } catch (Throwable ignored) {} }
-    private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target)) webView.loadUrl(target); }
+    private void pauseWebView() { if (webView==null||webViewPaused)return;try{webView.onPause();webViewPaused=true;}catch(Throwable ignored){} }
+    private void resumeWebView() { if (webView==null||!webViewPaused)return;try{webView.onResume();}catch(Throwable ignored){}finally{webViewPaused=false;} }
+    private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target)) { resumeWebView(); webView.loadUrl(target); } }
     private String canonicalUrl() { return store.conversationUrl().isEmpty() ? store.projectUrl() : store.conversationUrl(); }
     private boolean routeAcceptable(String actual) { return store.conversationUrl().isEmpty() ? sameProject(store.projectUrl(), actual) : sameConversation(store.conversationUrl(), actual); }
     private static boolean sameProject(String a, String b) { return SelfRunScript.isGeneralChatUrl(a) ? SelfRunScript.isGeneralChatUrl(b) : ProjectUrlPolicy.sameProject(a,b); }
@@ -787,7 +802,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private JSONObject parse(String raw) {try { Object outer = new JSONTokener(raw == null ? "" : raw).nextValue(); return new JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer)); }catch (Throwable error) { return new JSONObject(); }}
     private void acquireWakeLock() { if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(2 * 60_000L); }
     private void releaseWakeLock() { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); }
-    private void cleanupWebView() {handler.removeCallbacks(webRunnable);turnObserverNeedsIdleBaseline=store!=null&&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())&&store.turnObserverSawStop();generation++; webEvaluationId++; domInFlight = false;if (host != null) { host.destroy(); host = null; } webView = null;}
+    private void cleanupWebView() {handler.removeCallbacks(webRunnable);turnObserverNeedsIdleBaseline=store!=null&&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())&&store.turnObserverSawStop();generation++; webEvaluationId++; domInFlight = false;webViewPaused=false;if (host != null) { host.destroy(); host = null; } webView = null;}
     private void stopRuntime() {stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock();stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();}
 
     @Override public void onDestroy() {destroyed = true;stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock(); io.shutdownNow();super.onDestroy();}

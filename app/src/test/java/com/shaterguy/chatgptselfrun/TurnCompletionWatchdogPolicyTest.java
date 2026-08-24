@@ -39,6 +39,7 @@ public final class TurnCompletionWatchdogPolicyTest {
                 "private static String completionObserver", "private static String conversationGuard");
         assertTrue(observer.contains("composerRoot?.parentElement"));
         assertTrue(observer.contains("childList:true,subtree:true,attributes:true"));
+        assertTrue(source("SelfRunContinuationDom.java").contains("const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\\\"button\\\"]')].filter(visible):[];"));
         assertFalse(observer.contains("assistant"));
     }
 
