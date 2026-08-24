@@ -36,7 +36,7 @@ public final class ChatWorkContinuationContractTest {
     @Test public void continuationSubmissionIsVerifiedWithoutBlindResubmit() throws Exception {
         String service = source("SelfRunService.java");
         String continuation = source("SelfRunContinuationDom.java");
-        assertFalse(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_PREFS));
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_REASONING));
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_SEND_CONTINUE));
@@ -46,6 +46,10 @@ public final class ChatWorkContinuationContractTest {
         assertFalse(service.contains("SelfRunContinuationDom.verifyDriveTurnSubmission"));
         assertTrue(service.contains("\"CONTINUE_CLICKED\".equals(status)"));
         assertTrue(service.contains("store.beginTurnCompletionWait"));
+        String callbackRecovery = section(service, "private void scheduleContinuationCallbackDeadline", "private void recoverBootstrapSendCallback");
+        assertTrue(callbackRecovery.contains("PHASE_WAIT_TURN_COMPLETION"));
+        assertTrue(callbackRecovery.contains("TURN_OBSERVER_HEALTHCHECK_MS"));
+        assertFalse(callbackRecovery.contains("restoreCanonical()"));
     }
 
     @Test public void responseCompletionUsesObserverNotShortButtonPolling() throws Exception {

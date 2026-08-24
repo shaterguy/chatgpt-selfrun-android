@@ -154,7 +154,7 @@ static boolean shouldContinueSamePhaseDriveStep(String phase, boolean hasUncommi
     return SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase) && hasUncommittedAttachment;
 }
 
-static boolean shouldGuardContinuationCallback(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
+static boolean shouldGuardContinuationCallback(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 static boolean bootstrapSendTimedOut(long startedAt,long now){return startedAt<=0L||now<=0L||now<startedAt||now-startedAt>=BOOTSTRAP_SEND_MAX_WAIT_MS;}
 static boolean bootstrapSendCallbackRecoveryExhausted(int recoveries){return recoveries>=BOOTSTRAP_SEND_MAX_CALLBACK_RECOVERIES;}
 static boolean postDomDriveSyncTimedOut(long startedAt,long now){return startedAt>0L&&now>=startedAt&&now-startedAt>=POST_DOM_DRIVE_MAX_WAIT_MS;}
@@ -648,8 +648,8 @@ private void scheduleContinuationCallbackDeadline(WebView active,int webGenerati
         domInFlight=false;webEvaluationId++;
         if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){recoverBootstrapSendCallback();return;}
         runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.callbackTimeoutDetail(phase));
-        restoreCanonical();
-        scheduleWeb(1200L);
+        releaseWakeLock();
+        scheduleWeb(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)?TURN_OBSERVER_HEALTHCHECK_MS:1200L);
     },CONTINUATION_CALLBACK_TIMEOUT_MS);
 }
 

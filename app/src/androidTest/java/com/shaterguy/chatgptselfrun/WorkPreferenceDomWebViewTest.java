@@ -148,6 +148,31 @@ public final class WorkPreferenceDomWebViewTest {
                 SelfRunContinuationDom.COMPOSER_IDLE);
     }
 
+    @Test public void turnObserverCompletesWhenSendMovesBesideComposerForm() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrl = new AtomicReference<>();
+            CountDownLatch completionSeen = new CountDownLatch(1);
+            loadContinuationFixture(scenario, web,
+                    "<div id='stop' data-selfrun-scope='composer' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>",
+                    callbackUrl, completionSeen);
+
+            JSONObject armed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, 200L, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+
+            evaluate(scenario, web, "(()=>{document.getElementById('stop').remove();"
+                    + "const composer=document.getElementById('prompt-textarea');composer.setAttribute('aria-disabled','true');"
+                    + "const send=document.createElement('button');send.id='adjacent-send';send.type='button';send.dataset.testid='send-button';send.setAttribute('aria-label','Send message');send.textContent='Send';"
+                    + "document.getElementById('continuation-controls').appendChild(send);return JSON.stringify({status:'IDLE_READY'});})()");
+
+            assertTrue("Adjacent SEND did not complete the common turn observer",
+                    completionSeen.await(5, TimeUnit.SECONDS));
+            assertTrue(callbackUrl.get().contains("selfrun-drive://turn-completed"));
+        }
+    }
+
     @Test public void turnObserverRebindsInPlaceAfterComposerDomReplacement() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
@@ -444,7 +469,7 @@ public final class WorkPreferenceDomWebViewTest {
                     String requested = String.valueOf(request.getUrl());
                     if (!requested.startsWith("selfrun-drive://")) return false;
                     if (callbackUrl != null) callbackUrl.updateAndGet(previous -> previous == null || previous.isEmpty() ? requested : previous + "\n" + requested);
-                    if (callbackSeen != null) callbackSeen.countDown();
+                    if (callbackSeen != null && requested.startsWith("selfrun-drive://turn-completed")) callbackSeen.countDown();
                     return true;
                 }
             });

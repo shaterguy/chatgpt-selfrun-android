@@ -46,6 +46,8 @@ public final class MainActivity extends Activity {
     private Button resumeButton;
     private Button stopButton;
     private Button currentLogsButton;
+    private String lastNextInputRunId = "";
+    private String lastNextInputStored = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -233,7 +235,11 @@ public final class MainActivity extends Activity {
         String stored = runId.isEmpty() ? "" : UserNextInputStore.current(runId);
         boolean locked = !runId.isEmpty() && UserNextInputStore.submissionLocked(runId);
         boolean unavailable = !runId.isEmpty() && !editable && !locked;
-        if (!nextInputEditor.hasFocus()) nextInputEditor.setText(stored);
+        boolean runChanged = !runId.equals(lastNextInputRunId);
+        boolean reservationConsumed = runId.equals(lastNextInputRunId) && !lastNextInputStored.isEmpty() && stored.isEmpty();
+        if (runChanged || !nextInputEditor.hasFocus() || reservationConsumed) nextInputEditor.setText(stored);
+        lastNextInputRunId = runId;
+        lastNextInputStored = stored;
         nextInputEditor.setEnabled(editable);
         nextInputEditor.setVisibility(unavailable ? View.GONE : View.VISIBLE);
         nextInputSaveButton.setEnabled(editable);

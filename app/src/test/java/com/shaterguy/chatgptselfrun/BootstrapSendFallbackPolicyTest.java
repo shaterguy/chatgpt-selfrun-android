@@ -42,7 +42,9 @@ public final class BootstrapSendFallbackPolicyTest {
                 "https://chatgpt.com/", "private bootstrap text", "marker-scope");
 
         assertTrue(prepare.contains("const inComposer=e=>"));
-        assertTrue(prepare.contains("if(!buttonLike(e)||!inComposer(e))return false"));
+        assertTrue(prepare.contains("const isStop=e=>!!e&&buttonLike(e)&&inComposer(e)&&stopSemantic(e)"));
+        assertTrue(prepare.contains("const isAdjacentSend=e=>"));
+        assertTrue(prepare.contains("inComposerScope(e)"));
         assertTrue(prepare.contains("const stop=controls.find(isStop)"));
     }
 
