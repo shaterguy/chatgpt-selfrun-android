@@ -33,6 +33,7 @@ public final class MainActivity extends Activity {
     private View emptyStage;
     private View runStage;
     private View composerPanel;
+    private View supportingPane;
     private TextView statusPill;
     private TextView currentStatus;
     private TextView runMeta;
@@ -148,15 +149,16 @@ public final class MainActivity extends Activity {
             workspace.addView(runScroll, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1.15f));
 
-            LinearLayout supportingPane = new LinearLayout(this);
-            supportingPane.setOrientation(LinearLayout.VERTICAL);
-            supportingPane.setPadding(Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 28), Ui.dp(this, 24));
-            supportingPane.addView(composerPanel, new LinearLayout.LayoutParams(
+            LinearLayout pane = new LinearLayout(this);
+            pane.setOrientation(LinearLayout.VERTICAL);
+            pane.setPadding(Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 28), Ui.dp(this, 24));
+            pane.addView(composerPanel, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            supportingPane = pane;
             LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 0.85f);
             supportParams.setMarginStart(Ui.dp(this, 10));
-            workspace.addView(supportingPane, supportParams);
+            workspace.addView(pane, supportParams);
             console.addView(workspace, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         } else {
@@ -180,6 +182,7 @@ public final class MainActivity extends Activity {
             emptyStage.setVisibility(View.VISIBLE);
             runStage.setVisibility(View.GONE);
             composerPanel.setVisibility(View.GONE);
+            if (supportingPane != null) supportingPane.setVisibility(View.GONE);
             refreshNextInput("");
             return;
         }
@@ -187,6 +190,7 @@ public final class MainActivity extends Activity {
         emptyStage.setVisibility(View.GONE);
         runStage.setVisibility(View.VISIBLE);
         composerPanel.setVisibility(View.VISIBLE);
+        if (supportingPane != null) supportingPane.setVisibility(View.VISIBLE);
 
         String prefs = SelfRunStore.MODE_WORK.equals(store.mode())
                 ? store.pendingModel() + " / " + store.pendingReasoning()
@@ -228,11 +232,14 @@ public final class MainActivity extends Activity {
         boolean editable = !runId.isEmpty() && UserNextInputStore.editable(runId);
         String stored = runId.isEmpty() ? "" : UserNextInputStore.current(runId);
         boolean locked = !runId.isEmpty() && UserNextInputStore.submissionLocked(runId);
+        boolean unavailable = !runId.isEmpty() && !editable && !locked;
         if (!nextInputEditor.hasFocus()) nextInputEditor.setText(stored);
         nextInputEditor.setEnabled(editable);
+        nextInputEditor.setVisibility(unavailable ? View.GONE : View.VISIBLE);
         nextInputSaveButton.setEnabled(editable);
+        nextInputSaveButton.setVisibility(unavailable ? View.GONE : View.VISIBLE);
         nextInputDeleteButton.setEnabled(editable && !stored.isEmpty());
-        nextInputDeleteButton.setVisibility(stored.isEmpty() ? View.GONE : View.VISIBLE);
+        nextInputDeleteButton.setVisibility(!unavailable && !stored.isEmpty() ? View.VISIBLE : View.GONE);
 
         if (runId.isEmpty()) {
             nextInputStatus.setText("");
