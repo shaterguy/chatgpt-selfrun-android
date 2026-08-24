@@ -51,6 +51,9 @@ public final class PremiumUiPolicyTest {
         assertTrue(task.contains("project.setSelection(selected)"));
         assertTrue(ui.contains("int getSelectedItemPosition()"));
         assertTrue(ui.contains("void setSelection(int position)"));
+        assertTrue(ui.contains("input.setKeyListener(null)"));
+        assertTrue(ui.contains("addView(input, new LinearLayout.LayoutParams("));
+        assertFalse(ui.contains("addView(input, new ViewGroup.LayoutParams("));
         assertFalse(task.contains("android.widget.Spinner"));
         assertFalse(task.contains("simple_spinner_dropdown_item"));
     }

@@ -51,6 +51,7 @@ final class Ui {
 
             input = new MaterialAutoCompleteTextView(getContext());
             input.setRawInputType(android.text.InputType.TYPE_NULL);
+            input.setKeyListener(null);
             input.setSingleLine(true);
             input.setMinHeight(dp(context, 56));
             input.setOnItemClickListener((parent, view, position, id) -> {
@@ -60,7 +61,7 @@ final class Ui {
                     selectionChangedListener.onSelectionChanged(selectedPosition);
                 }
             });
-            addView(input, new ViewGroup.LayoutParams(
+            addView(input, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
 
