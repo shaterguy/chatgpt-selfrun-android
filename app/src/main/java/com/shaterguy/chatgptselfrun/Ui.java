@@ -503,7 +503,10 @@ final class Ui {
                         ? com.google.android.material.R.attr.materialButtonTonalStyle
                         : com.google.android.material.R.attr.materialButtonOutlinedStyle);
         if (destination != selected) button.setStrokeWidth(0);
-        button.setEnabled(destination != selected);
+        button.setEnabled(true);
+        button.setClickable(destination != selected);
+        button.setFocusable(destination != selected);
+        button.setSelected(destination == selected);
         button.setMinWidth(0);
         button.setMinimumWidth(0);
         return button;
