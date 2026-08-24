@@ -34,7 +34,6 @@ final class Ui {
     private static final int WIDTH_MEDIUM_DP = 600;
     private static final int WIDTH_EXPANDED_DP = 840;
     private static final int PAGE_MAX_DP = 1120;
-    private static final int READING_MAX_DP = 760;
 
     private Ui() {}
 
@@ -577,7 +576,7 @@ final class Ui {
         int widthDp = windowWidthDp(context);
         int targetWidth = ViewGroup.LayoutParams.MATCH_PARENT;
         if (widthDp >= WIDTH_EXPANDED_DP) {
-            targetWidth = Math.min(availableWidth - dp(context, 64), dp(context, READING_MAX_DP));
+            targetWidth = Math.min(availableWidth - dp(context, 64), dp(context, PAGE_MAX_DP));
         } else if (widthDp >= WIDTH_MEDIUM_DP) {
             targetWidth = Math.min(availableWidth - dp(context, 48), dp(context, PAGE_MAX_DP));
         }
