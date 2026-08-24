@@ -207,7 +207,8 @@ drive_uid="$(package_uid "$DRIVE_PACKAGE")"
   || fail "packages do not have distinct UIDs"
 assert_sentinel "$LEGACY_PACKAGE" "legacy-private-data"
 
-launch_and_tap "$DRIVE_MAIN" "로그인/세션"
+launch_and_tap "$DRIVE_MAIN" "새 작업"
+launch_and_tap "$DRIVE_PACKAGE/com.shaterguy.chatgptselfrun.SelfRunNewActivity" "프로젝트 등록 · 업데이트"
 sleep 4
 "$ADB" shell am force-stop "$DRIVE_PACKAGE"
 run_as "$DRIVE_PACKAGE" test -d app_webview || fail "Drive WebView store not created"
