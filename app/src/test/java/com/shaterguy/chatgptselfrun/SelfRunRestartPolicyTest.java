@@ -53,7 +53,7 @@ public final class SelfRunRestartPolicyTest {
     @Test public void restartRecoversAlreadyConsumedPendingCompletionFromDocument() throws Exception {
         String runId = "SR-RESTART-PENDING";
         String completion = "[2026.08.24 | 21:10:00] [SELF_RUN_TURN_COMPLETED " + runId
-                + " MODEL=terra REASONING=xhigh NEXT_INPUT_B64URL=7YWM7J207ZWc]";
+                + " MODEL=terra REASONING=xhigh NEXT_INPUT_B64URL=6rOE7IaN]";
         JSONObject snapshot = new JSONObject().put("driveSignalCursor", 1)
                 .put("pendingDriveSignalType", DriveSignalParser.Type.TURN_COMPLETED.name());
         DriveSignalParser.Scan scan = DriveSignalParser.scan(completion, runId, 1, SelfRunStore.MODE_WORK);
