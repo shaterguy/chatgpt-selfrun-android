@@ -33,23 +33,27 @@ final class DriveAuthorization {
 
     private DriveAuthorization() {}
 
-    private static List<Scope> requiredScopes() {
+    private static List<Scope> runtimeScopes() {
         return Arrays.asList(
                 new Scope(DRIVE_FILE_SCOPE),
                 new Scope(DRIVE_METADATA_READONLY_SCOPE),
                 new Scope(DOCUMENTS_READONLY_SCOPE));
     }
 
+    private static List<Scope> pickerScopes() {
+        return Collections.singletonList(new Scope(DRIVE_FILE_SCOPE));
+    }
+
     static AuthorizationRequest silentRequest() {
         return AuthorizationRequest.builder()
-                .setRequestedScopes(requiredScopes())
+                .setRequestedScopes(runtimeScopes())
                 .setOptOutIncludingGrantedScopes(true)
                 .build();
     }
 
     static AuthorizationRequest folderPickerRequest() {
         return AuthorizationRequest.builder()
-                .setRequestedScopes(requiredScopes())
+                .setRequestedScopes(pickerScopes())
                 .setOptOutIncludingGrantedScopes(true)
                 .setPrompt(AuthorizationRequest.Prompt.CONSENT)
                 .addResourceParameter(AuthorizationRequest.ResourceParameter.PICKER_OAUTH_TRIGGER, "true")
