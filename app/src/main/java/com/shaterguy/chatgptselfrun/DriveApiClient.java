@@ -174,7 +174,9 @@ final class DriveApiClient {
         stageSignalDocuments(fileId, turnDocument.name, signals);
         if (signals.isEmpty()) return turnDocument;
         Metadata latest = signals.get(signals.size() - 1);
-        return new Metadata(turnDocument, "signal:" + latest.id, latest.createdTime);
+        return new Metadata(turnDocument,
+                "signal:" + latest.id + ":" + latest.modifiedTime,
+                latest.modifiedTime);
     }
 
     private List<Metadata> listSignalDocuments(String accessToken, String runId, String parentId) throws Exception {
@@ -401,7 +403,11 @@ final class DriveApiClient {
             String logical;
             if (DriveSignalDocumentTransport.needsBodyRead(metadata.name)) {
                 String body = readNativeDocumentSnapshot(accessToken, metadata.id).text;
-                logical = DriveSignalDocumentTransport.materialize(metadata.name, body, batch.runId);
+                try {
+                    logical = DriveSignalDocumentTransport.materialize(metadata.name, body, batch.runId);
+                } catch (IllegalArgumentException malformedSignal) {
+                    continue;
+                }
             } else {
                 logical = DriveSignalDocumentTransport.materialize(metadata.name, "", batch.runId);
             }
