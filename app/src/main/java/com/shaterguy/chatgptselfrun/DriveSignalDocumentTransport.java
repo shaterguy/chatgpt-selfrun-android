@@ -57,6 +57,10 @@ final class DriveSignalDocumentTransport {
                 || canonicalInMode(logical, runId, SelfRunStore.MODE_WORK))) {
             throw new IllegalArgumentException("materialized signal document is not canonical");
         }
+        NextInputCodec.Decoded decoded = DriveSignalParser.nextInput(logical);
+        if (!decoded.present || !decoded.valid) {
+            throw new IllegalArgumentException("signal document NEXT_INPUT payload is not canonical UTF-8 Base64URL");
+        }
         return logical;
     }
 
@@ -105,8 +109,8 @@ final class DriveSignalDocumentTransport {
 
     private static String normalizeBody(String body) {
         String value = body == null ? "" : body.replace("\r\n", "\n").replace('\r', '\n');
-        while (value.endsWith("\n")) value = value.substring(0, value.length() - 1);
-        if (value.indexOf('\n') >= 0) throw new IllegalArgumentException("signal document body must contain one line");
+        if (value.endsWith("\n")) value = value.substring(0, value.length() - 1);
+        if (value.indexOf('\n') >= 0) throw new IllegalArgumentException("signal document body must contain exactly one line");
         return value;
     }
 
