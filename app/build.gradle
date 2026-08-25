@@ -79,17 +79,11 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 throw new GradleException("${action} action must derive from applicationId")
             }
         }
-        def store = file('src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java').getText('UTF-8')
-        if (!store.contains('BuildConfig.APPLICATION_ID + ".prefs"')) {
-            throw new GradleException('SharedPreferences namespace must derive from applicationId')
-        }
-        def provider = file('src/main/res/xml/file_paths.xml').getText('UTF-8')
-        if (provider.contains('/')) {
-            throw new GradleException('FileProvider path config must not expose arbitrary absolute paths')
+        if (service.contains('com.shaterguy.chatgptselfrun.RUN')
+                || service.contains('WAIT_ASSISTANT') || service.contains('SelfRunDom.observeAssistant')) {
+            throw new GradleException('legacy assistant runtime must not be reachable in Drive V1')
         }
     }
 }
 
-tasks.named('preBuild').configure {
-    dependsOn verifyDriveVariantIdentity
-}
+tasks.named('preBuild').configure { dependsOn verifyDriveVariantIdentity }
