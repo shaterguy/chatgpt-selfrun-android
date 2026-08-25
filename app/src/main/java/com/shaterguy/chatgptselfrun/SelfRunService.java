@@ -279,7 +279,7 @@ static String bootstrapFailureMessage(String status){if(isChatReasoningFailureSt
         }
     }
 
-private DriveStateSnapshot driveState(int expectedEpoch){synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(destroyed||expectedEpoch!=automationEpoch||!canRun()||!driveOperationRunId.equals(store.runId())||!drivePhase(store.phase()))return null;return new DriveStateSnapshot(store.phase(),store.runId(),store.runBaseFolderId(),store.jobFolderId(),store.turnDocumentId(),store.creationStage(),store.driveSignalCursor(),store.mode(),store.lastSeenDriveVersion(),store.lastSeenModifiedTime());}}}
+private DriveStateSnapshot driveState(int expectedEpoch){synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(destroyed||expectedEpoch!=automationEpoch||!canRun()||!driveOperationRunId.equals(store.runId())||!drivePhase(store.phase()))return null;return new DriveStateSnapshot(store.phase(),store.runId(),store.runBaseFolderId(),store.jobFolderId(),store.turnDocumentId(),store.creationStage(),store.driveSignalCursor(),store.driveSignalCursorSchemaVersion(),store.lastDriveSignalRaw(),store.lastDriveSignalTimestamp(),store.lastDriveSignalType(),store.mode(),store.lastSeenDriveVersion(),store.lastSeenModifiedTime());}}}
 
 private void runDriveStep(int epoch)throws Exception{if(!canApplyDriveResult(epoch))return;switch(store.phase()){case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK,"Drive 기준 폴더 확인 중","account_authorized"));case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK->checkBaseFolder(epoch);case SelfRunStore.PHASE_JOB_ID_CREATE->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE,"Drive Job 폴더 생성 중","job_id_persisted"));case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE->createOrRecoverJobFolder(epoch);case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch);case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT->initializeDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK->verifyInitialDocument(epoch);case SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC,SelfRunStore.PHASE_RESUME_BASELINE->pollDriveNow(epoch);default->scheduleDriveRecovery("DRIVE_STATE_RECHECK","알 수 없는 Drive 단계를 자동 재확인합니다: "+store.phase(),epoch);}}
 
@@ -481,6 +481,8 @@ private void postDriveOutcome(){handler.post(()->{String phase=store.phase();if(
 private static java.util.List<DriveSignalParser.Event> normalDriveEvents(java.util.List<DriveSignalParser.Event> events){java.util.ArrayList<DriveSignalParser.Event> result=new java.util.ArrayList<>();if(events!=null)for(DriveSignalParser.Event event:events){if(event.type==DriveSignalParser.Type.TURN_COMPLETED&&DriveSignalParser.hasRecoveryIdField(event.raw))continue;result.add(event);}return result;}
 
 static boolean shouldReadDriveSnapshot(boolean postDom,boolean resume,String lastSeenVersion,String currentVersion){if(resume||!postDom)return true;return lastSeenVersion==null||lastSeenVersion.isEmpty()||currentVersion==null||currentVersion.isEmpty()||!currentVersion.equals(lastSeenVersion);}
+static boolean shouldReadDriveSnapshot(boolean postDom,boolean resume,String lastSeenVersion,String currentVersion,boolean cursorMigrationRequired){return cursorMigrationRequired||shouldReadDriveSnapshot(postDom,resume,lastSeenVersion,currentVersion);}
+static boolean isDominantCanonicalControl(DriveSignalParser.Event event){return event!=null&&(event.type==DriveSignalParser.Type.DONE||event.type==DriveSignalParser.Type.PAUSED||event.type==DriveSignalParser.Type.USER_ACTION_REQUIRED);}
 
 private void pollDriveNow(int epoch)throws Exception{
     DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;
@@ -489,31 +491,51 @@ private void pollDriveNow(int epoch)throws Exception{
     boolean postDom=SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(snapshot.phase);
     boolean resume=SelfRunStore.PHASE_RESUME_BASELINE.equals(snapshot.phase);
     if(!postDom&&!resume)return;
-    if(!shouldReadDriveSnapshot(postDom,resume,snapshot.lastSeenVersion,metadata.version)){
+    boolean migrationRequired=snapshot.driveSignalCursorSchemaVersion!=SelfRunStore.DRIVE_SIGNAL_CURSOR_SCHEMA_PHYSICAL;
+    if(migrationRequired&&snapshot.driveSignalCursorSchemaVersion!=SelfRunStore.DRIVE_SIGNAL_CURSOR_SCHEMA_LEGACY){pauseError("DRIVE_SIGNAL_CURSOR_SCHEMA_UNSUPPORTED","저장된 Drive signal cursor schema를 안전하게 해석할 수 없습니다.",epoch,snapshot.runId,snapshot.phase);return;}
+    if(!shouldReadDriveSnapshot(postDom,resume,snapshot.lastSeenVersion,metadata.version,migrationRequired)){
         if(!applyDriveResult(epoch,()->store.updateDriveSeen(metadata.version,metadata.modifiedTime)))return;
         long now=System.currentTimeMillis();
         if(postDomDriveSyncTimedOut(store.postDomDriveSyncStartedAt(),now)){
-            if(!applyDriveResult(epoch,store::continueAfterPostDomDriveTimeout))return;
-            runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=continue_current_profile");
-            postDriveOutcome();return;
+            runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=pause_fail_closed");
+            pauseError("POST_DOM_DRIVE_SYNC_TIMEOUT","Drive 완료 신호를 제한시간 내 확정하지 못해 자동 CONTINUE를 차단했습니다.",epoch,snapshot.runId,snapshot.phase);return;
         }
         applyDriveResult(epoch,()->store.setStatus("답변 완료 확인 · Drive TURN_COMPLETED 재확인 대기"));
         runLog.record(store,"POST_DOM_DRIVE_SYNC","result=version_unchanged;retryMs="+POST_DOM_DRIVE_RETRY_MS);
         schedulePostDomDriveSync(POST_DOM_DRIVE_RETRY_MS);return;
     }
     DriveApiClient.DocumentSnapshot document=drive.readDocumentSnapshot(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;
-    DriveSignalParser.Scan scan=DriveSignalParser.scan(document.text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode);
+    DriveSignalParser.Scan documentScan=DriveSignalParser.scan(document.text,snapshot.runId,0,snapshot.mode);
+    DriveSignalParser.Event latestCanonical=documentScan.latestCanonical;
+    if(isDominantCanonicalControl(latestCanonical)&&(postDom||latestCanonical.type==DriveSignalParser.Type.DONE)){
+        DriveSignalParser.Event dominant=latestCanonical;
+        if(!applyDriveResult(epoch,()->{store.applyDriveSignals(Collections.singletonList(dominant),System.currentTimeMillis());store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
+        runLog.record(store,"DRIVE_SIGNAL_DOMINANCE","type="+dominant.type.name()+";cursor="+dominant.cursor+";consumed="+snapshot.driveSignalCursor);
+        postDriveOutcome();return;
+    }
+    int consumed=snapshot.driveSignalCursor;
+    if(migrationRequired){
+        DriveSignalParser.CursorMigration migration=DriveSignalParser.migrateCursor(document.text,snapshot.runId,snapshot.driveSignalCursor,snapshot.lastDriveSignalRaw,snapshot.lastDriveSignalTimestamp,snapshot.lastDriveSignalType);
+        if(!migration.resolved){
+            pauseError("DRIVE_SIGNAL_CURSOR_MIGRATION_UNRESOLVED","기존 Drive signal cursor를 현재 문서의 물리적 위치에 안전하게 연결할 수 없습니다.",epoch,snapshot.runId,snapshot.phase);return;
+        }
+        int migrated=migration.cursor;
+        if(!applyDriveResult(epoch,()->store.migrateDriveSignalCursor(migrated)))return;
+        consumed=migrated;
+        runLog.record(store,"DRIVE_SIGNAL_CURSOR_MIGRATION","from="+snapshot.driveSignalCursor+";to="+migrated+";method="+migration.method);
+    }
+    DriveSignalParser.Scan scan=DriveSignalParser.scan(document.text,snapshot.runId,consumed,snapshot.mode);
+    if(scan.cursorRebased){pauseError("DRIVE_SIGNAL_CURSOR_OUT_OF_RANGE","저장된 Drive signal cursor가 현재 실행턴 문서의 물리적 범위를 벗어났습니다.",epoch,snapshot.runId,snapshot.phase);return;}
     java.util.List<DriveSignalParser.Event> normalUnseen=normalDriveEvents(scan.unseen);
     DriveSignalParser.Event latestCompletion=DriveSignalParser.latestCompletion(normalUnseen),latestBlocking=DriveSignalParser.latestBlocking(scan.unseen);
     if(latestCompletion!=null&&!latestCompletion.protocolError.isEmpty()&&(latestBlocking==null||latestCompletion.cursor>latestBlocking.cursor)){pauseError("DRIVE_NEXT_INPUT_PROTOCOL_ERROR",latestCompletion.protocolError,epoch,snapshot.runId,snapshot.phase);return;}
     if(resume){if(applyDriveResult(epoch,()->{store.baselineManualResume(scan.totalCount,scan.latest,latestCompletion);store.updateDriveSeen(metadata.version,metadata.modifiedTime);}))handler.post(this::ensureWebView);return;}
-    if(!applyDriveResult(epoch,()->{if(scan.cursorRebased)store.baselineDriveSignals(scan.totalCount,scan.latest);else{if(!normalUnseen.isEmpty())store.applyDriveSignals(normalUnseen,System.currentTimeMillis());if(normalUnseen.size()!=scan.unseen.size())store.baselineDriveSignals(scan.totalCount,scan.latest);}store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
+    if(!applyDriveResult(epoch,()->{if(!normalUnseen.isEmpty())store.applyDriveSignals(normalUnseen,System.currentTimeMillis());if(normalUnseen.size()!=scan.unseen.size())store.baselineDriveSignals(scan.totalCount,scan.latest);store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
     if(!SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(store.phase())){postDriveOutcome();return;}
     long now=System.currentTimeMillis();
     if(postDomDriveSyncTimedOut(store.postDomDriveSyncStartedAt(),now)){
-        if(!applyDriveResult(epoch,store::continueAfterPostDomDriveTimeout))return;
-        runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=continue_current_profile");
-        postDriveOutcome();return;
+        runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=pause_fail_closed");
+        pauseError("POST_DOM_DRIVE_SYNC_TIMEOUT","Drive 완료 신호를 제한시간 내 확정하지 못해 자동 CONTINUE를 차단했습니다.",epoch,snapshot.runId,snapshot.phase);return;
     }
     applyDriveResult(epoch,()->store.setStatus("답변 완료 확인 · Drive TURN_COMPLETED 재확인 대기"));
     runLog.record(store,"POST_DOM_DRIVE_SYNC","result=signal_missing;retryMs="+POST_DOM_DRIVE_RETRY_MS);
@@ -808,5 +830,5 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     @Override public void onDestroy() {destroyed = true;stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock(); io.shutdownNow();super.onDestroy();}
     @Override public IBinder onBind(Intent intent) { return null; }
 
-private static final class DriveStateSnapshot{final String phase,runId,baseFolderId,jobFolderId,turnDocumentId,creationStage,mode,lastSeenVersion,lastSeenModifiedTime;final int driveSignalCursor;DriveStateSnapshot(String phase,String runId,String baseFolderId,String jobFolderId,String turnDocumentId,String creationStage,int cursor,String mode,String lastSeenVersion,String lastSeenModifiedTime){this.phase=phase;this.runId=runId;this.baseFolderId=baseFolderId;this.jobFolderId=jobFolderId;this.turnDocumentId=turnDocumentId;this.creationStage=creationStage;this.driveSignalCursor=cursor;this.mode=mode;this.lastSeenVersion=lastSeenVersion;this.lastSeenModifiedTime=lastSeenModifiedTime;}}
+private static final class DriveStateSnapshot{final String phase,runId,baseFolderId,jobFolderId,turnDocumentId,creationStage,lastDriveSignalRaw,lastDriveSignalTimestamp,lastDriveSignalType,mode,lastSeenVersion,lastSeenModifiedTime;final int driveSignalCursor,driveSignalCursorSchemaVersion;DriveStateSnapshot(String phase,String runId,String baseFolderId,String jobFolderId,String turnDocumentId,String creationStage,int cursor,int cursorSchemaVersion,String lastRaw,String lastTimestamp,String lastType,String mode,String lastSeenVersion,String lastSeenModifiedTime){this.phase=phase;this.runId=runId;this.baseFolderId=baseFolderId;this.jobFolderId=jobFolderId;this.turnDocumentId=turnDocumentId;this.creationStage=creationStage;this.driveSignalCursor=cursor;this.driveSignalCursorSchemaVersion=cursorSchemaVersion;this.lastDriveSignalRaw=lastRaw;this.lastDriveSignalTimestamp=lastTimestamp;this.lastDriveSignalType=lastType;this.mode=mode;this.lastSeenVersion=lastSeenVersion;this.lastSeenModifiedTime=lastSeenModifiedTime;}}
 }

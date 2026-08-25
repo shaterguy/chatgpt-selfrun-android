@@ -37,7 +37,7 @@ public class DriveSignalParserTest {
     @Test public void chatCompletionGrammarRemainsBareOnly() {
         String extended = "[2026.08.13 | 22:09:42] [SELF_RUN_TURN_COMPLETED " + JOB + " MODEL=sol REASONING=xhigh]";
         DriveSignalParser.Scan scan = DriveSignalParser.scan(extended, JOB, 0, SelfRunStore.MODE_CHAT);
-        assertEquals(0, scan.totalCount);
+        assertEquals(1, scan.totalCount);
         assertTrue(scan.unseen.isEmpty());
         assertNull(scan.latest);
     }
@@ -77,8 +77,9 @@ public class DriveSignalParserTest {
                 + "[2026.08.13 | 22:19:05] [SELF_RUN_COMMAND_RECEIVED " + JOB + " EXTRA=x]\n"
                 + "[2026.08.13 | 22:20:05] [SELF_RUN_PAUSED " + JOB + "]";
         DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 0, SelfRunStore.MODE_CHAT);
-        assertEquals(1, scan.totalCount);
+        assertEquals(6, scan.totalCount);
         assertEquals(DriveSignalParser.Type.PAUSED, scan.latest.type);
+        assertEquals(6, scan.latest.cursor);
     }
 
     @Test public void cursorOnlyReturnsAppendedSignals() {
@@ -104,6 +105,74 @@ public class DriveSignalParserTest {
         assertTrue(scan.unseen.isEmpty());
         assertEquals(2, scan.totalCount);
         assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.latest.type);
+    }
+
+
+    @Test public void actualIncidentKeepsPhysicalCursorSlotsAndDoneAtNine() {
+        String text = "[2026.08.24 | 23:04:44] [SELF_RUN_TURN_COMPLETED " + JOB + "]\n"
+                + "[2026.08.24 | 23:20:07] [SELF_RUN_TURN_COMPLETED " + JOB + "]\n"
+                + "[2026.08.25 | 00:38:14] [SELF_RUN_TURN_COMPLETED " + JOB + "\n"
+                + "[2026.08.25 | 00:52:43] [SELF_RUN_TURN_COMPLETED " + JOB + "]\n"
+                + "[2026.08.25 | 00:52:43] [SELF_RUN_TURN_COMPLETED " + JOB + "]]\n"
+                + "[2026.08.25 | 01:23:53] [SELF_RUN_TURN_COMPLETED " + JOB + "]\n"
+                + "[2026.08.25 | 02:52:06] [SELF_RUN_TURN_COMPLETED " + JOB + "\n"
+                + "[2026.08.25 | 02:56:25] [SELF_RUN_DONE " + JOB + "]]\n"
+                + "[2026.08.25 | 02:57:04] [SELF_RUN_DONE " + JOB + "]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 5, SelfRunStore.MODE_CHAT);
+        assertEquals(9, scan.totalCount);
+        assertEquals(2, scan.unseen.size());
+        assertNotNull(scan.latestCanonical);
+        assertEquals(DriveSignalParser.Type.DONE, scan.latestCanonical.type);
+        assertEquals(9, scan.latestCanonical.cursor);
+    }
+
+    @Test public void legacyCursorMigrationPrefersExactRawThenUniqueMalformedIdentity() {
+        String exactRaw = "[2026.08.25 | 00:52:43] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
+        String text = "junk\n"
+                + "[2026.08.25 | 00:38:14] [SELF_RUN_TURN_COMPLETED " + JOB + "\n"
+                + exactRaw + "\n"
+                + "[2026.08.25 | 02:52:06] [SELF_RUN_TURN_COMPLETED " + JOB;
+        DriveSignalParser.CursorMigration exact = DriveSignalParser.migrateCursor(
+                text, JOB, 2, exactRaw, "2026.08.25 | 00:52:43", "TURN_COMPLETED");
+        assertTrue(exact.resolved);
+        assertEquals(3, exact.cursor);
+        assertEquals("EXACT_RAW", exact.method);
+
+        String formerlyValid = "[2026.08.25 | 02:52:06] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
+        DriveSignalParser.CursorMigration fallback = DriveSignalParser.migrateCursor(
+                text, JOB, 3, formerlyValid, "2026.08.25 | 02:52:06", "TURN_COMPLETED");
+        assertTrue(fallback.resolved);
+        assertEquals(4, fallback.cursor);
+        assertEquals("IDENTITY", fallback.method);
+    }
+
+    @Test public void ambiguousLegacyIdentityFailsClosedInsteadOfGuessing() {
+        String timestamp = "2026.08.25 | 02:52:06";
+        String formerlyValid = "[" + timestamp + "] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
+        String text = "[" + timestamp + "] [SELF_RUN_TURN_COMPLETED " + JOB + "\n"
+                + "[" + timestamp + "] [SELF_RUN_TURN_COMPLETED " + JOB + "]]";
+        DriveSignalParser.CursorMigration migration = DriveSignalParser.migrateCursor(
+                text, JOB, 1, formerlyValid, timestamp, "TURN_COMPLETED");
+        assertFalse(migration.resolved);
+        assertEquals("UNRESOLVED", migration.method);
+    }
+
+    @Test public void latestCanonicalDoesNotResurrectOlderPause() {
+        String text = "[2026.08.25 | 01:00:00] [SELF_RUN_PAUSED " + JOB + "]\n"
+                + "[2026.08.25 | 01:01:00] [SELF_RUN_DONE " + JOB + "]]\n"
+                + "[2026.08.25 | 01:02:00] [SELF_RUN_TURN_COMPLETED " + JOB + "]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 3, SelfRunStore.MODE_CHAT);
+        assertTrue(scan.unseen.isEmpty());
+        assertEquals(DriveSignalParser.Type.TURN_COMPLETED, scan.latestCanonical.type);
+        assertEquals(3, scan.latestCanonical.cursor);
+    }
+
+    @Test public void consumedDoneStillRemainsLatestCanonicalForDominance() {
+        String text = "[2026.08.25 | 02:57:04] [SELF_RUN_DONE " + JOB + "]";
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(text, JOB, 1, SelfRunStore.MODE_CHAT);
+        assertTrue(scan.unseen.isEmpty());
+        assertEquals(DriveSignalParser.Type.DONE, scan.latestCanonical.type);
+        assertEquals(1, scan.latestCanonical.cursor);
     }
 
     private static DriveSignalParser.WorkProfile profile(String model, String reasoning) {
