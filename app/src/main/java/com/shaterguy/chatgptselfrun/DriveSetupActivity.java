@@ -20,6 +20,7 @@ import java.util.concurrent.Executors;
 
 /** One-time Drive binding: app-owned writes plus read-only discovery of ChatGPT-created signal docs. */
 public final class DriveSetupActivity extends Activity {
+    private static final int REQUEST_RUNTIME_AUTH = 5100;
     private static final int REQUEST_PICK_FOLDER = 5101;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private SelfRunStore store;
@@ -84,6 +85,28 @@ public final class DriveSetupActivity extends Activity {
     }
 
     private void startPicker() {
+        statusHeadline.setText("Drive 권한 확인 중…");
+        statusDetails.setText("신호 문서 읽기 권한을 확인한 뒤 Google Picker를 엽니다.");
+        DriveAuthorization.requestSilently(this, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) {
+                if (DriveAuthorization.accessToken(result).isEmpty()) {
+                    failure("Drive 읽기 권한 토큰을 얻지 못했습니다.");
+                    return;
+                }
+                launchFolderPicker();
+            }
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                try {
+                    startIntentSenderForResult(pendingIntent.getIntentSender(), REQUEST_RUNTIME_AUTH, null, 0, 0, 0);
+                } catch (Exception error) {
+                    failure("Drive 읽기 권한 승인 화면을 열지 못했습니다.");
+                }
+            }
+            @Override public void onFailure(Throwable error) { failure("Drive 읽기 권한 요청에 실패했습니다."); }
+        });
+    }
+
+    private void launchFolderPicker() {
         statusHeadline.setText("Drive 폴더 선택 준비 중…");
         statusDetails.setText("Google Picker를 여는 중입니다.");
         DriveAuthorization.requestFolderPicker(this, new DriveAuthorization.Callback() {
@@ -95,13 +118,30 @@ public final class DriveSetupActivity extends Activity {
                     failure("Google Picker를 열지 못했습니다.");
                 }
             }
-            @Override public void onFailure(Throwable error) { failure("Drive 권한 요청에 실패했습니다."); }
+            @Override public void onFailure(Throwable error) { failure("Drive 폴더 선택 권한 요청에 실패했습니다."); }
         });
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_RUNTIME_AUTH) {
+            if (resultCode != RESULT_OK || data == null) {
+                failure("Drive 읽기 권한 승인이 취소되었습니다.");
+                return;
+            }
+            try {
+                AuthorizationResult result = DriveAuthorization.fromIntent(this, data);
+                if (DriveAuthorization.accessToken(result).isEmpty()) {
+                    failure("Drive 읽기 권한 토큰을 얻지 못했습니다.");
+                    return;
+                }
+                launchFolderPicker();
+            } catch (ApiException error) {
+                failure("Drive 읽기 권한 승인 결과를 확인하지 못했습니다.");
+            }
+            return;
+        }
         if (requestCode != REQUEST_PICK_FOLDER) return;
         if (resultCode != RESULT_OK || data == null) {
             failure("Drive 폴더 선택이 취소되었습니다.");
