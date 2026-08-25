@@ -1,0 +1,38 @@
+package com.shaterguy.chatgptselfrun;
+
+import org.junit.Test;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import static org.junit.Assert.*;
+
+public final class SelfRunRolloverWiringTest {
+    @Test public void conversationLocalRoutesUseRollover() throws Exception {
+        String service=src("SelfRunService.java");
+        String launch=between(service,"private void launchWebView","private boolean isTurnCompletionCallback");
+        assertTrue(launch.contains("rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH)"));
+        assertTrue(launch.contains("rolloverConversation(SelfRunRolloverPolicy.RENDERER_CRASH)"));
+        assertTrue(launch.contains("detail.didCrash()"));
+        String step=between(service,"private void runWebStep","private String ensureTurnObserverToken");
+        assertTrue(step.contains("rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH)"));
+        assertFalse(step.contains("restoreCanonical()"));
+    }
+    @Test public void predecessorLateCallbacksAreFencedByRunAndEpoch() throws Exception {
+        String service=src("SelfRunService.java");
+        assertTrue(service.contains("epoch != automationEpoch"));
+        assertTrue(service.contains("runId.equals(store.runId())"));
+        assertTrue(service.contains("driveOperationRunId.equals(store.runId())"));
+        assertTrue(service.contains("stopAutomationCallbacks();"));
+        assertTrue(service.contains("cleanupWebView();"));
+    }
+    @Test public void successorBootstrapCarriesPredecessorReferences() throws Exception {
+        String coordinator=src("SelfRunRolloverCoordinator.java");
+        assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_RUN_ID="));
+        assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_JOB_FOLDER_ID="));
+        assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_TURN_DOCUMENT_ID="));
+        assertTrue(coordinator.contains("특정 마지막 HANDOFF 하나의 존재를 전제로 하지 말고"));
+    }
+    private static String src(String f)throws Exception{Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);if(!Files.exists(p))p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);}
+    private static String between(String s,String a,String b){int x=s.indexOf(a),y=s.indexOf(b,x+a.length());assertTrue(x>=0);assertTrue(y>x);return s.substring(x,y);}
+}

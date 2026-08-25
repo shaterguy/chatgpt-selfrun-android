@@ -94,7 +94,7 @@ final class SelfRunHistoryStore {
             item.put("userStopped", store.userStopped());
             item.put("lastErrorCode", store.lastErrorCode());
             item.put("lastErrorMessage", bounded(store.lastErrorMessage(), 1_000));
-            item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || store.userStopped());
+            item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || SelfRunRolloverCoordinator.PHASE_ROLLED_OVER.equals(store.phase()) || store.userStopped());
             BootstrapRunStateStore.appendHistory(app, store.runId(), item);
         } catch (Exception ignored) {
         }
