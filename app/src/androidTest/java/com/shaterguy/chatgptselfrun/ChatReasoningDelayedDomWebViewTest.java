@@ -116,19 +116,22 @@ public final class ChatReasoningDelayedDomWebViewTest {
                     ChatReasoningPreferenceStore.MEDIUM,
                     ChatReasoningPreferenceStore.HIGH,
                     ChatReasoningPreferenceStore.EXTRA_HIGH,
+                    ChatReasoningPreferenceStore.PRO_STANDARD,
                     ChatReasoningPreferenceStore.INSTANT
             };
-            int[] expected = {1, 2, 3, 0};
+            int[] expected = {1, 2, 3, 4, 0};
             for (int index = 0; index < selections.length; index++) {
                 JSONObject ready = runToReady(scenario, web,
                         chatReasoningScript(selections[index], "SR-CUSTOM-" + index));
                 assertEquals(String.valueOf(expected[index]), read(scenario, web,
                         "document.getElementById('slider').getAttribute('aria-valuenow')"));
-                assertEquals(selections[index], ready.getJSONObject("diagnostics").getString("observed"));
+                String expectedObserved = ChatReasoningPreferenceStore.PRO_STANDARD.equals(selections[index])
+                        ? "pro" : selections[index];
+                assertEquals(expectedObserved, ready.getJSONObject("diagnostics").getString("observed"));
             }
             assertTrue(Integer.parseInt(read(scenario, web, "String(window.keyboardEvents)")) >= 8);
-            assertEquals("4", read(scenario, web, "String(window.menuOpenClicks)"));
-            assertEquals("4", read(scenario, web, "String(window.menuCloseClicks)"));
+            assertEquals("5", read(scenario, web, "String(window.menuOpenClicks)"));
+            assertEquals("5", read(scenario, web, "String(window.menuCloseClicks)"));
         }
     }
 

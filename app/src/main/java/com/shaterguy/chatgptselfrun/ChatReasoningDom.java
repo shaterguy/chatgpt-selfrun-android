@@ -5,8 +5,10 @@ final class ChatReasoningDom {
     private ChatReasoningDom() {}
 
     static String inline(String selection, String runId) {
-        String wanted = ChatReasoningPreferenceStore.normalize(selection);
-        int ordinal = ChatReasoningPreferenceStore.ordinal(wanted);
+        String requested = ChatReasoningPreferenceStore.normalize(selection);
+        String wanted = ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested) ? "pro" : requested;
+        int ordinal = ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested)
+                ? 4 : ChatReasoningPreferenceStore.ordinal(requested);
         if (ordinal < 0) return "";
         String stateKey = "selfrun-drive:chat-reasoning:" + runId;
         String script = """
