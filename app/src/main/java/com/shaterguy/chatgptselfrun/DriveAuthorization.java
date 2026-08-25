@@ -13,13 +13,16 @@ import com.google.android.gms.auth.api.identity.Identity;
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.Scope;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Google Identity Services authorization limited to Drive per-file access. */
+/** Google Identity Services authorization: app-owned Drive writes plus read-only cross-app signal discovery. */
 final class DriveAuthorization {
     static final String DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+    static final String DRIVE_METADATA_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly";
+    static final String DOCUMENTS_READONLY_SCOPE = "https://www.googleapis.com/auth/documents.readonly";
     static final String PICKED_FILE_IDS = "picked_file_ids";
 
     interface Callback {
@@ -30,16 +33,23 @@ final class DriveAuthorization {
 
     private DriveAuthorization() {}
 
+    private static List<Scope> requiredScopes() {
+        return Arrays.asList(
+                new Scope(DRIVE_FILE_SCOPE),
+                new Scope(DRIVE_METADATA_READONLY_SCOPE),
+                new Scope(DOCUMENTS_READONLY_SCOPE));
+    }
+
     static AuthorizationRequest silentRequest() {
         return AuthorizationRequest.builder()
-                .setRequestedScopes(Collections.singletonList(new Scope(DRIVE_FILE_SCOPE)))
+                .setRequestedScopes(requiredScopes())
                 .setOptOutIncludingGrantedScopes(true)
                 .build();
     }
 
     static AuthorizationRequest folderPickerRequest() {
         return AuthorizationRequest.builder()
-                .setRequestedScopes(Collections.singletonList(new Scope(DRIVE_FILE_SCOPE)))
+                .setRequestedScopes(requiredScopes())
                 .setOptOutIncludingGrantedScopes(true)
                 .setPrompt(AuthorizationRequest.Prompt.CONSENT)
                 .addResourceParameter(AuthorizationRequest.ResourceParameter.PICKER_OAUTH_TRIGGER, "true")
