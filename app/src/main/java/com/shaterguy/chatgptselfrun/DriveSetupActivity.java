@@ -18,7 +18,7 @@ import com.google.android.gms.common.api.ApiException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** One-time drive.file + Google Picker binding for the canonical global Runs folder. */
+/** One-time Drive binding: app-owned writes plus read-only discovery of ChatGPT-created signal docs. */
 public final class DriveSetupActivity extends Activity {
     private static final int REQUEST_PICK_FOLDER = 5101;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -50,7 +50,7 @@ public final class DriveSetupActivity extends Activity {
 
         page.addView(Ui.section(this, "CONNECTION"));
         page.addView(Ui.body(this,
-                "Google Picker에서 /GPT/Self Run/Runs/ 폴더를 직접 선택합니다. 앱은 drive.file 범위로 선택한 폴더와 앱이 그 아래에 만드는 항목만 사용합니다."));
+                "Google Picker에서 /GPT/Self Run/Runs/ 폴더를 직접 선택합니다. 앱이 생성·수정하는 항목은 drive.file 범위에 한정하고, ChatGPT가 각 Run 폴더에 생성하는 신호 문서는 읽기 전용 메타데이터·Docs 권한으로만 확인합니다."));
         View connect = Ui.button(this,
                 store.driveRunsBaseFolderId().isEmpty() ? "Drive 저장 위치 연결" : "다른 저장 위치 선택",
                 v -> startPicker());
@@ -138,7 +138,7 @@ public final class DriveSetupActivity extends Activity {
                     Toast.makeText(this, "Drive 실행문서 저장 위치를 연결했습니다.", Toast.LENGTH_LONG).show();
                 });
             } catch (Throwable error) {
-                failure("선택한 폴더를 drive.file 권한으로 확인하지 못했습니다.");
+                failure("선택한 폴더의 쓰기·신호 읽기 권한을 확인하지 못했습니다.");
             }
         });
     }
