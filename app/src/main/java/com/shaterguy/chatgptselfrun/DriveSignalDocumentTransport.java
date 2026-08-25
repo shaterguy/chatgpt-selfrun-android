@@ -52,14 +52,15 @@ final class DriveSignalDocumentTransport {
         String normalized = normalizeBody(body);
         Matcher matcher = BODY_LINE.matcher(normalized);
         if (!matcher.matches()) throw new IllegalArgumentException("invalid signal document NEXT_INPUT body");
-        String logical = title.replace(NEXT_INPUT_BODY_MARKER, NEXT_INPUT_FIELD_PREFIX + matcher.group(1));
+        String token = matcher.group(1);
+        NextInputCodec.Decoded decoded = NextInputCodec.decodeToken(token);
+        if (!decoded.present || !decoded.valid) {
+            throw new IllegalArgumentException("signal document NEXT_INPUT payload is not canonical UTF-8 Base64URL");
+        }
+        String logical = title.replace(NEXT_INPUT_BODY_MARKER, NEXT_INPUT_FIELD_PREFIX + token);
         if (!(canonicalInMode(logical, runId, SelfRunStore.MODE_CHAT)
                 || canonicalInMode(logical, runId, SelfRunStore.MODE_WORK))) {
             throw new IllegalArgumentException("materialized signal document is not canonical");
-        }
-        NextInputCodec.Decoded decoded = DriveSignalParser.nextInput(logical);
-        if (!decoded.present || !decoded.valid) {
-            throw new IllegalArgumentException("signal document NEXT_INPUT payload is not canonical UTF-8 Base64URL");
         }
         return logical;
     }
