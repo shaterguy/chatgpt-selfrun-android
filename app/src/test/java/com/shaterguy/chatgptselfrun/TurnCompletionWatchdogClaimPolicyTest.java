@@ -40,7 +40,9 @@ public final class TurnCompletionWatchdogClaimPolicyTest {
         assertTrue(callback.contains("handler.post(this::authorizeAndRunDrive)"));
         assertTrue(poll.contains("drive.readDocumentSnapshot"));
         assertTrue(poll.contains("schedulePostDomDriveSync(POST_DOM_DRIVE_RETRY_MS)"));
-        assertTrue(poll.contains("store::continueAfterPostDomDriveTimeout"));
+        assertTrue(poll.contains("POST_DOM_DRIVE_SYNC_TIMEOUT"));
+        assertTrue(poll.contains("action=pause_fail_closed"));
+        assertFalse(poll.contains("continueAfterPostDomDriveTimeout"));
         assertFalse(service.contains("NORMAL_POLL_MS"));
         assertFalse(service.contains("TURN_COMPLETION_WATCHDOG_MS"));
         assertFalse(service.contains("scheduleDrivePoll"));
