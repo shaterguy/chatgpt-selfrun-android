@@ -117,6 +117,20 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertFalse(coordinator.hasPendingClaim());
     }
 
+    @Test public void alternatingNoProgressStatusesShareOneBoundedFailureClass() {
+        SelfRunStore store = predecessor();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        String runId = store.runId();
+        assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
+        assertEquals(2, coordinator.recordLocalFailure(runId, "SUBMISSION_FAILED"));
+        assertEquals(3, coordinator.recordLocalFailure(runId, "SCRIPT_ERROR"));
+        assertTrue(SelfRunRolloverPolicy.localFailureBudgetExhausted(3));
+        assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.STOP));
+        assertEquals(2, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.SEND_DISABLED));
+        coordinator.clearLocalFailures(runId);
+        assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
+    }
+
     private SelfRunStore predecessor() {
         SelfRunStore store = new SelfRunStore(context);
         store.bindBaseFolder(ACCOUNT, BASE, "Runs", "https://drive.google.com/drive/folders/" + BASE,
