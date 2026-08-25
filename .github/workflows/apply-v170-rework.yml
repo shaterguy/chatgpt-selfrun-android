@@ -39,7 +39,11 @@ jobs:
           old="    if 'ChatReasoningPreferenceStore.PRO' in p.read_text():"
           new="    if re.search(r'ChatReasoningPreferenceStore\\.PRO(?!_)', p.read_text()):"
           assert t.count(old)==1
-          p.write_text(t.replace(old,new))
+          t=t.replace(old,new)
+          marker="dt = delayed.read_text()\n"
+          addition=marker+"dt = dt.replace('                        ChatReasoningPreferenceStore.PRO));\\n', '                        ChatReasoningPreferenceStore.EXTRA_HIGH));\\n')\n"
+          assert t.count(marker)==1
+          p.write_text(t.replace(marker,addition,1))
           PY
           python3 .github/apply_v170_rework.py
           git diff --check
