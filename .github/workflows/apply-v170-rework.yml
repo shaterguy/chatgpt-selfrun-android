@@ -43,7 +43,11 @@ jobs:
           marker="dt = delayed.read_text()\n"
           addition=marker+"dt = dt.replace('                        ChatReasoningPreferenceStore.PRO));\\n', '                        ChatReasoningPreferenceStore.EXTRA_HIGH));\\n')\n"
           assert t.count(marker)==1
-          p.write_text(t.replace(marker,addition,1))
+          t=t.replace(marker,addition,1)
+          marker2="\nfor p in Path('app').rglob('*.java'):\n"
+          extra="\nstage = Path('app/src/test/java/com/shaterguy/chatgptselfrun/BootstrapStageAndDirectPickerPolicyTest.java')\nst = stage.read_text()\nold_stage = '        assertTrue(hierarchicalInstrumentation.contains(\"englishAdvancedButtonReplacementMenuAppliesProWithoutSliderMutation\"));\\n'\nnew_stage = '        assertTrue(hierarchicalInstrumentation.contains(\"englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation\"));\\n        assertTrue(hierarchicalInstrumentation.contains(\"englishAdvancedButtonReplacementMenuAppliesProStandardWithoutSliderMutation\"));\\n'\nif st.count(old_stage) != 1: raise SystemExit('picker contract assertion not found exactly once')\nstage.write_text(st.replace(old_stage,new_stage))\n"
+          assert t.count(marker2)==1
+          p.write_text(t.replace(marker2,extra+marker2,1))
           PY
           python3 .github/apply_v170_rework.py
           git diff --check
