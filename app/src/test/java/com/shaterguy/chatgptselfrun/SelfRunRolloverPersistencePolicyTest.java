@@ -38,6 +38,15 @@ public final class SelfRunRolloverPersistencePolicyTest {
         assertTrue(start.contains("RESULT_ALREADY_STARTED"));
     }
 
+    @Test public void userStopCancelsThePendingPredecessorClaimInsteadOfStartingSuccessor() throws Exception {
+        String source = src("SelfRunRolloverCoordinator.java");
+        String resume = section(source, "synchronized Result resumePending", "private Result startClaimedSuccessor");
+        int stopped = resume.indexOf("store.userStopped() && store.runId().equals(pred)");
+        int clear = resume.indexOf("prefs.edit().remove(CURRENT).commit()", stopped);
+        int start = resume.indexOf("return startClaimedSuccessor(store, existing)");
+        assertTrue(stopped >= 0 && clear > stopped && start > clear);
+    }
+
     @Test public void rolloverJournalStoresReferencesAndNotRawRequirement() throws Exception {
         String source = src("SelfRunRolloverCoordinator.java");
         String claim = section(source, "String successorRunId = SelfRunRunId.create()", "return startClaimedSuccessor(store, next)");
