@@ -10,19 +10,20 @@ final class SelfRunNetworkState {
     private final ConnectivityManager connectivity;
     private final ConnectivityManager.NetworkCallback callback;
     private volatile boolean validated;
+    private volatile long validatedSince;
     private boolean registered;
 
     SelfRunNetworkState(Context context) {
         connectivity = context.getApplicationContext().getSystemService(ConnectivityManager.class);
         callback = new ConnectivityManager.NetworkCallback() {
             @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
-                validated = isValidated(capabilities);
+                updateValidated(isValidated(capabilities));
             }
             @Override public void onLost(Network network) {
-                validated = false;
+                updateValidated(false);
             }
             @Override public void onUnavailable() {
-                validated = false;
+                updateValidated(false);
             }
         };
     }
@@ -31,11 +32,11 @@ final class SelfRunNetworkState {
         if (registered || connectivity == null) return;
         try {
             Network active = connectivity.getActiveNetwork();
-            validated = active != null && isValidated(connectivity.getNetworkCapabilities(active));
+            updateValidated(active != null && isValidated(connectivity.getNetworkCapabilities(active)));
             connectivity.registerDefaultNetworkCallback(callback);
             registered = true;
         } catch (Throwable ignored) {
-            validated = false;
+            updateValidated(false);
             registered = false;
         }
     }
@@ -45,10 +46,24 @@ final class SelfRunNetworkState {
         try { connectivity.unregisterNetworkCallback(callback); }
         catch (Throwable ignored) { }
         registered = false;
+        updateValidated(false);
     }
 
     boolean isValidated() {
         return validated;
+    }
+
+    long validatedSince() {
+        return validated ? validatedSince : 0L;
+    }
+
+    private void updateValidated(boolean next) {
+        if (next) {
+            if (!validated || validatedSince <= 0L) validatedSince = System.currentTimeMillis();
+        } else {
+            validatedSince = 0L;
+        }
+        validated = next;
     }
 
     static boolean isValidated(NetworkCapabilities capabilities) {

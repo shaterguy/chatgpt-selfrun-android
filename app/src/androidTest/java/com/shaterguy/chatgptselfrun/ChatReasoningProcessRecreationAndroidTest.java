@@ -23,15 +23,15 @@ public final class ChatReasoningProcessRecreationAndroidTest {
         try {
             resetProcessCache();
             assertTrue(ChatReasoningPreferenceStore.save(
-                    context, runId, ChatReasoningPreferenceStore.PRO));
+                    context, runId, ChatReasoningPreferenceStore.PRO_EXTENDED));
 
             resetProcessCache();
-            assertEquals(ChatReasoningPreferenceStore.PRO,
+            assertEquals(ChatReasoningPreferenceStore.PRO_EXTENDED,
                     ChatReasoningPreferenceStore.selectionForRun(context, runId));
 
             resetProcessCache();
             SelfRunApplication.initializeProcess(context);
-            assertEquals(ChatReasoningPreferenceStore.PRO,
+            assertEquals(ChatReasoningPreferenceStore.PRO_EXTENDED,
                     ChatReasoningPreferenceStore.selectionForRun(runId));
         } finally {
             clearPersistentState(context);

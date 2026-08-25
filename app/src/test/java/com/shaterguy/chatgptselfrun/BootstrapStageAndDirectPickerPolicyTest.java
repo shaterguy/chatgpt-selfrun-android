@@ -43,7 +43,8 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(flatInstrumentation.contains("confirmedChatStageSurvivesPickerRenderAndAppliesInstantDirectly"));
         assertTrue(flatInstrumentation.contains("workToChatTransitionClicksExactlyOnceBeforeDirectPicker"));
         assertTrue(hierarchicalInstrumentation.contains("koreanAdvancedButtonPathAppliesInstantWithoutSliderMutation"));
-        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProWithoutSliderMutation"));
+        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation"));
+        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProStandardWithoutSliderMutation"));
     }
 
     @Test public void newChatRunDefaultsToExtraHighWithoutOverridingRestoredDraft() throws Exception {

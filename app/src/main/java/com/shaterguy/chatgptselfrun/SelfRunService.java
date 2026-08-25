@@ -736,6 +736,12 @@ private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().
 private void runWebStep(){
     if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;
     String phase=store.phase();
+    if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
+            && SelfRunRolloverPolicy.knownConversation(store.conversationUrl())
+            && SelfRunRolloverPolicy.postDispatchNoStartTimedOut(store.phaseStartedAt(),
+                    store.turnObserverSawStop(), networkState.validatedSince(), System.currentTimeMillis())){
+        rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);return;
+    }
     if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase))resumeWebView();
     maybeCaptureConversationUrl(webView.getUrl());
     if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;}

@@ -10,12 +10,14 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatReasoningPolicyTest {
-    @Test public void fiveChatReasoningSelectionsMapLeftToRight() {
+    @Test public void sixChatReasoningSelectionsMapLeftToRight() {
         assertEquals(0, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.INSTANT));
         assertEquals(1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.MEDIUM));
         assertEquals(2, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.HIGH));
         assertEquals(3, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.EXTRA_HIGH));
-        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO));
+        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));
+        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));
+        assertEquals(ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.normalize("pro"));
         assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
     }
 
@@ -30,14 +32,14 @@ public final class ChatReasoningPolicyTest {
     }
 
     @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {
-        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-LEGACY");
+        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-LEGACY");
         assertTrue(script.contains("CHAT_REASONING_SLIDER_NOT_FOUND"));
         assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
         assertTrue(script.contains("__srcOverallTimeoutMs=60000"));
     }
 
     @Test public void advancedMenuScriptObservesSheetAndNeverMutatesSlider() {
-        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO, "SR-ADVANCED");
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO_EXTENDED, "SR-ADVANCED");
         assertTrue(script.contains("strategy:'advanced-menu'"));
         assertTrue(script.contains("open-reasoning-sheet"));
         assertTrue(script.contains("open-advanced-control"));

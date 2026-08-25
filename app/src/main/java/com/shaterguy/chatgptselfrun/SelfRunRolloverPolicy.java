@@ -14,11 +14,13 @@ final class SelfRunRolloverPolicy {
     static final String TURN_COMPLETION_SIGNAL_TIMEOUT = "TURN_COMPLETION_SIGNAL_TIMEOUT";
     static final String CONTINUATION_CALLBACK_TIMEOUT = "CONTINUATION_CALLBACK_TIMEOUT";
     static final String CONTINUATION_NO_PROGRESS = "CONTINUATION_NO_PROGRESS";
+    static final String CONTINUATION_NO_START_TIMEOUT = "CONTINUATION_NO_START_TIMEOUT";
     static final String WEBVIEW_CREATE_FAILURE = "WEBVIEW_CREATE_FAILURE";
     static final String BOOTSTRAP_SUBMISSION_TIMEOUT = "BOOTSTRAP_SUBMISSION_TIMEOUT";
     static final int MAX_LOCAL_FAILURES = 3;
     static final long CONTINUATION_HARD_FAILURE_GRACE_MS = 5_000L;
     static final long CONTINUATION_SOFT_STALL_GRACE_MS = 15_000L;
+    static final long CONTINUATION_NO_START_MAX_WAIT_MS = 60_000L;
 
     private SelfRunRolloverPolicy() {}
 
@@ -73,6 +75,14 @@ final class SelfRunRolloverPolicy {
         long elapsed = now - phaseStartedAt;
         if (hardContinuationFailureStatus(status)) return elapsed >= CONTINUATION_HARD_FAILURE_GRACE_MS;
         return softContinuationStallStatus(status) && elapsed >= CONTINUATION_SOFT_STALL_GRACE_MS;
+    }
+
+    static boolean postDispatchNoStartTimedOut(long phaseStartedAt, boolean sawStop,
+                                                      long validatedSince, long now) {
+        if (sawStop || phaseStartedAt <= 0L || validatedSince <= 0L
+                || now < phaseStartedAt || now < validatedSince) return false;
+        long continuouslyValidatedStart = Math.max(phaseStartedAt, validatedSince);
+        return now - continuouslyValidatedStart >= CONTINUATION_NO_START_MAX_WAIT_MS;
     }
 
     static boolean continuationProgressStatus(String status) {

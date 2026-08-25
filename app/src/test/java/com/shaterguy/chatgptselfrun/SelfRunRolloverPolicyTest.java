@@ -36,6 +36,18 @@ public final class SelfRunRolloverPolicyTest {
                 SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP));
     }
 
+    @Test public void postDispatchNoStartNeedsAContinuousValidatedWindowAndStopsTimingAfterGenerationStarts() {
+        long phaseStarted=10_000L;
+        long deadline=phaseStarted+SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS;
+        assertTrue(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,false,phaseStarted,deadline));
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,true,phaseStarted,deadline+60_000L));
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,false,0L,deadline+60_000L));
+        long revalidated=deadline-1_000L;
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,false,revalidated,deadline));
+        assertTrue(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,false,revalidated,
+                revalidated+SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS));
+    }
+
     @Test public void lineageCauseSetBlocksSameCauseFromRecurring() {
         String causes=SelfRunRolloverPolicy.appendCause("",SelfRunRolloverPolicy.ROUTE_MISMATCH);
         assertTrue(SelfRunRolloverPolicy.containsCause(causes,SelfRunRolloverPolicy.ROUTE_MISMATCH));

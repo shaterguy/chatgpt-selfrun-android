@@ -131,6 +131,26 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
     }
 
+    @Test public void proStandardAndExtendedRemainDistinctAcrossRollover() {
+        for (String selection : new String[]{ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {
+            clearAll();
+            SelfRunStore store = predecessor();
+            assertTrue(ChatPickerStateStore.saveObserved(context, store.runId(), selection));
+            SelfRunRolloverCoordinator.Result result = new SelfRunRolloverCoordinator(context)
+                    .beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+            assertTrue(result.started());
+            assertEquals(selection, ChatReasoningPreferenceStore.selectionForRun(context, result.successorRunId));
+        }
+    }
+
+    @Test public void postDispatchNoStartPolicyDoesNotCountUnvalidatedOrStartedGeneration() {
+        long start = 1_000L;
+        long deadline = start + SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS;
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, false, 0L, deadline + 1L));
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, true, start, deadline + 1L));
+        assertTrue(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, false, start, deadline));
+    }
+
     private SelfRunStore predecessor() {
         SelfRunStore store = new SelfRunStore(context);
         store.bindBaseFolder(ACCOUNT, BASE, "Runs", "https://drive.google.com/drive/folders/" + BASE,
