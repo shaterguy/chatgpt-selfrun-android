@@ -28,6 +28,12 @@ public final class SelfRunRolloverPolicyTest {
         assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,16_000L));
         assertTrue(SelfRunRolloverPolicy.hardContinuationFailureStatus("SUBMISSION_FAILED"));
         assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("READY_TO_SUBMIT"));
+        assertEquals(SelfRunRolloverPolicy.continuationFailureBucket("UNKNOWN"),
+                SelfRunRolloverPolicy.continuationFailureBucket("SUBMISSION_FAILED"));
+        assertEquals(SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP),
+                SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.SEND_DISABLED));
+        assertNotEquals(SelfRunRolloverPolicy.continuationFailureBucket("UNKNOWN"),
+                SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP));
     }
 
     @Test public void lineageCauseSetBlocksSameCauseFromRecurring() {
