@@ -32,6 +32,15 @@ jobs:
       - name: Apply exact source patch
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/apply_v170_rework.py')
+          t=p.read_text()
+          old="    if 'ChatReasoningPreferenceStore.PRO' in p.read_text():"
+          new="    if re.search(r'ChatReasoningPreferenceStore\\.PRO(?!_)', p.read_text()):"
+          assert t.count(old)==1
+          p.write_text(t.replace(old,new))
+          PY
           python3 .github/apply_v170_rework.py
           git diff --check
           git status --short
