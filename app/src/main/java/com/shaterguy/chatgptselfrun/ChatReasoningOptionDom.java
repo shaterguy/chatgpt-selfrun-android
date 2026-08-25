@@ -15,6 +15,7 @@ final class ChatReasoningOptionDom {
         if (ordinal < 0 && !captureOnly) return "";
         return """
                 const __sroWanted=__WANTED__,__sroWantedOrdinal=__ORDINAL__,__sroRunId=__RUN_ID__,__sroCaptureOnly=__CAPTURE_ONLY__;
+                if(__sroCaptureOnly&&typeof requestedMode!=='undefined'&&requestedMode==='work')return result('READY','WORK 모드에서는 Chat picker 현재값 캡처를 생략합니다.',{strategy:'advanced-menu',action:'skip-chat-picker-work'});
                 const __sroLevel=source=>{
                   let v=exactText(source).replace(/^[✓✔☑●•·\\s]+/,'');
                   if(/^(extra high|very high|xhigh|maximum|매우\\s*높음|최대)(?:\\s|$)/.test(v))return'xhigh';
