@@ -19,9 +19,14 @@ public final class ChatReasoningPolicyTest {
         assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
     }
 
-    @Test public void keepSelectionSkipsChatReasoningAutomation() {
+    @Test public void keepSelectionCapturesCurrentProductionPickerWithoutSelectingAnotherOption() {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
-        assertEquals("", ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST");
+        assertFalse(script.isEmpty());
+        assertTrue(script.contains("__sroCaptureOnly=true"));
+        assertTrue(script.contains("capture-current"));
+        assertTrue(script.contains("open-picker-for-capture"));
+        assertTrue(script.contains("wait-capture-readback"));
     }
 
     @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {
