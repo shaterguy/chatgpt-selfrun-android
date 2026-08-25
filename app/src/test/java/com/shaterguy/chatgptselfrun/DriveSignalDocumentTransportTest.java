@@ -50,17 +50,27 @@ public class DriveSignalDocumentTransportTest {
         assertFalse(DriveSignalDocumentTransport.isCanonicalTitle(
                 "[2026.08.25 | 10:48:01] [SELF_RUN_DONE SR-OTHER-RUN]", RUN));
         String title = signal("2026.08.25 | 10:48:02", "NEXT_INPUT_B64URL=BODY");
-        try {
-            DriveSignalDocumentTransport.materialize(title, "NEXT_INPUT_B64URL=QQ\nEXTRA", RUN);
-            fail("multi-line signal body must be rejected");
-        } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("one line"));
+        for (String body : new String[]{
+                "NEXT_INPUT_B64URL=QQ\nEXTRA",
+                "NEXT_INPUT_B64URL=QQ\n\n"}) {
+            try {
+                DriveSignalDocumentTransport.materialize(title, body, RUN);
+                fail("multi-line signal body must be rejected");
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("one line"));
+            }
         }
         try {
             DriveSignalDocumentTransport.materialize(title, "NEXT_INPUT_B64URL=QQ==", RUN);
             fail("padded Base64URL must be rejected");
         } catch (IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("NEXT_INPUT body"));
+        }
+        try {
+            DriveSignalDocumentTransport.materialize(title, "NEXT_INPUT_B64URL=__8", RUN);
+            fail("invalid UTF-8 payload must be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("UTF-8 Base64URL"));
         }
     }
 
