@@ -197,6 +197,12 @@ public final class SelfRunService extends Service {
                 && !SelfRunStore.PHASE_IDLE.equals(store.phase());
     }
 
+static boolean ownsRendererCallback(Object callbackView, Object currentView,
+                                     String launchedRunId, String currentRunId) {
+    return callbackView != null && callbackView == currentView
+            && launchedRunId != null && launchedRunId.equals(currentRunId);
+}
+
 private void resumeStateMachine(){if(!canRun())return;String phase=store.phase();if(drivePhase(phase))authorizeAndRunDrive();else ensureWebView();}
 
 private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)||SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)||SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)||SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)||SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)||SelfRunStore.PHASE_RESUME_BASELINE.equals(phase);}
@@ -700,9 +706,10 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
                 }
                 @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {if(postDispatchWindowActive()&&trustedChatgptServiceUrl(e==null?"":e.getUrl()))markPostDispatchTransient("SSL");runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}
                 @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
+                    if(!ownsRendererCallback(v,webView,launchedRunId,store.runId()))return true;
                     if(!detail.didCrash()&&postDispatchWindowActive())markPostDispatchTransient("RENDERER_KILLED");
                     cleanupWebView();
-                    if(launchedRunId.equals(store.runId())&&!store.paused()&&isWebAutomationPhase(store.phase())){
+                    if(!store.paused()&&isWebAutomationPhase(store.phase())){
                         if(SelfRunRolloverPolicy.rolloverRenderer(store.conversationUrl(),detail.didCrash())) rolloverConversation(SelfRunRolloverPolicy.RENDERER_CRASH);
                         else postWebCallback(SelfRunService.this::ensureWebView,2_000L);
                     }
