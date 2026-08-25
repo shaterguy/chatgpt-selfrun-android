@@ -15,12 +15,17 @@ final class DriveSignalDocumentTransport {
     private DriveSignalDocumentTransport() {}
 
     static boolean isCandidate(DriveApiClient.Metadata metadata, String runId, String parentId) {
-        if (metadata == null || metadata.trashed || metadata.shared
-                || !DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
-                || !parentId.equals(metadata.parentId)
-                || !DriveApiClient.validFileId(metadata.id)
-                || createdMillis(metadata.createdTime) < 0L) return false;
-        return isCanonicalTitle(metadata.name, runId);
+        return metadata != null && isCandidateFields(metadata.id, metadata.name, metadata.mimeType,
+                metadata.parentId, metadata.trashed, metadata.shared, metadata.createdTime, runId, parentId);
+    }
+
+    static boolean isCandidateFields(String id, String name, String mimeType, String parentId,
+                                     boolean trashed, boolean shared, String createdTime,
+                                     String runId, String expectedParentId) {
+        if (trashed || shared || !DriveApiClient.MIME_DOCUMENT.equals(mimeType)
+                || expectedParentId == null || !expectedParentId.equals(parentId)
+                || !DriveApiClient.validFileId(id) || createdMillis(createdTime) < 0L) return false;
+        return isCanonicalTitle(name, runId);
     }
 
     static boolean isCanonicalTitle(String title, String runId) {
@@ -66,10 +71,19 @@ final class DriveSignalDocumentTransport {
     }
 
     static Comparator<DriveApiClient.Metadata> comparator(String runId) {
-        return Comparator
-                .comparingLong((DriveApiClient.Metadata metadata) -> createdMillis(metadata.createdTime))
-                .thenComparing(metadata -> titleTimestamp(metadata.name, runId))
-                .thenComparing(metadata -> metadata.id);
+        return (left, right) -> compareFields(left.createdTime, left.name, left.id,
+                right.createdTime, right.name, right.id, runId);
+    }
+
+    static int compareFields(String leftCreatedTime, String leftTitle, String leftId,
+                             String rightCreatedTime, String rightTitle, String rightId, String runId) {
+        int created = Long.compare(createdMillis(leftCreatedTime), createdMillis(rightCreatedTime));
+        if (created != 0) return created;
+        int title = titleTimestamp(leftTitle, runId).compareTo(titleTimestamp(rightTitle, runId));
+        if (title != 0) return title;
+        String safeLeftId = leftId == null ? "" : leftId;
+        String safeRightId = rightId == null ? "" : rightId;
+        return safeLeftId.compareTo(safeRightId);
     }
 
     static long createdMillis(String value) {
