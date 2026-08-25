@@ -1,0 +1,187 @@
+name: Apply SelfRun Drive v1.7.0 final rework
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.7.0-dev1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'chore(drive): stage v1.7.0 final rework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Patch exact rollover boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def sub(path, old, new, count=1):
+              p=Path(path); s=p.read_text()
+              actual=s.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: expected {count} match(es), got {actual}: {old[:100]!r}')
+              p.write_text(s.replace(old,new,count))
+
+          pref='app/src/main/java/com/shaterguy/chatgptselfrun/ChatReasoningPreferenceStore.java'
+          sub(pref, '    static final String EXTRA_HIGH = "xhigh";\n    static final String PRO_STANDARD = "pro_standard";',
+                    '    static final String EXTRA_HIGH = "xhigh";\n    static final String PRO = "pro";\n    static final String PRO_STANDARD = "pro_standard";')
+          sub(pref, '            case EXTRA_HIGH -> 3;\n            case PRO_STANDARD -> 4;\n            case PRO_EXTENDED -> 5;',
+                    '            case EXTRA_HIGH -> 3;\n            case PRO -> 4;\n            case PRO_STANDARD -> 5;\n            case PRO_EXTENDED -> 6;')
+          sub(pref, '            case EXTRA_HIGH -> "Extra High";\n            case PRO_STANDARD -> "Pro Standard";',
+                    '            case EXTRA_HIGH -> "Extra High";\n            case PRO -> "Pro";\n            case PRO_STANDARD -> "Pro Standard";')
+          sub(pref, '            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO_STANDARD, PRO_EXTENDED -> selection;',
+                    '            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO, PRO_STANDARD, PRO_EXTENDED -> selection;')
+
+          option='app/src/main/java/com/shaterguy/chatgptselfrun/ChatReasoningOptionDom.java'
+          sub(option,
+              "                  if(/^(?:pro[\\\\s·:—-]*extended|프로[\\\\s·:—-]*확장)(?:\\\\s|$)/.test(v))return'pro_extended';\n                  if(/^(medium|중간|표준|standard)(?:\\\\s|$)/.test(v))return'medium';",
+              "                  if(/^(?:pro[\\\\s·:—-]*extended|프로[\\\\s·:—-]*확장)(?:\\\\s|$)/.test(v))return'pro_extended';\n                  if(/^(?:pro|프로)(?:\\\\s|$)/.test(v))return'pro';\n                  if(/^(medium|중간|표준|standard)(?:\\\\s|$)/.test(v))return'medium';")
+
+          legacy='app/src/main/java/com/shaterguy/chatgptselfrun/ChatReasoningDom.java'
+          sub(legacy,
+              '        String requested = ChatReasoningPreferenceStore.normalize(selection);\n        String wanted = ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested) ? "pro" : requested;\n        int ordinal = ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested)\n                ? 4 : ChatReasoningPreferenceStore.ordinal(requested);',
+              '        String requested = ChatReasoningPreferenceStore.normalize(selection);\n        boolean legacyPro = ChatReasoningPreferenceStore.PRO.equals(requested)\n                || ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested);\n        String wanted = legacyPro ? "pro" : requested;\n        int ordinal = legacyPro ? 4 : ChatReasoningPreferenceStore.ordinal(requested);')
+
+          activity='app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java'
+          sub(activity,
+              '            "High · 확장 추론", "Extra High · 최대 추론", "Pro Extended · 최고 성능"\n    };\n    private static final String[] CHAT_REASONING_VALUES = {\n            ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.INSTANT,\n            ChatReasoningPreferenceStore.MEDIUM, ChatReasoningPreferenceStore.HIGH,\n            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO_EXTENDED\n    };',
+              '            "High · 확장 추론", "Extra High · 최대 추론", "Pro · 최고 성능",\n            "Pro Standard", "Pro Extended"\n    };\n    private static final String[] CHAT_REASONING_VALUES = {\n            ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.INSTANT,\n            ChatReasoningPreferenceStore.MEDIUM, ChatReasoningPreferenceStore.HIGH,\n            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO,\n            ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED\n    };')
+
+          net=Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNetworkState.java')
+          net.write_text('''package com.shaterguy.chatgptselfrun;\n\nimport android.content.Context;\nimport android.net.ConnectivityManager;\nimport android.net.Network;\nimport android.net.NetworkCapabilities;\nimport android.os.SystemClock;\n\n/** Event-driven default-network validation state. No periodic network polling. */\nfinal class SelfRunNetworkState {\n    private final ConnectivityManager connectivity;\n    private final ConnectivityManager.NetworkCallback callback;\n    private volatile boolean validated;\n    private volatile long validatedSinceElapsed;\n    private boolean registered;\n\n    SelfRunNetworkState(Context context) {\n        connectivity = context.getApplicationContext().getSystemService(ConnectivityManager.class);\n        callback = new ConnectivityManager.NetworkCallback() {\n            @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {\n                updateValidated(isValidated(capabilities));\n            }\n            @Override public void onLost(Network network) {\n                updateValidated(false);\n            }\n            @Override public void onUnavailable() {\n                updateValidated(false);\n            }\n        };\n    }\n\n    void start() {\n        if (registered || connectivity == null) return;\n        try {\n            Network active = connectivity.getActiveNetwork();\n            updateValidated(active != null && isValidated(connectivity.getNetworkCapabilities(active)));\n            connectivity.registerDefaultNetworkCallback(callback);\n            registered = true;\n        } catch (Throwable ignored) {\n            updateValidated(false);\n            registered = false;\n        }\n    }\n\n    void stop() {\n        if (!registered || connectivity == null) return;\n        try { connectivity.unregisterNetworkCallback(callback); }\n        catch (Throwable ignored) { }\n        registered = false;\n        updateValidated(false);\n    }\n\n    boolean isValidated() { return validated; }\n\n    long validatedSinceElapsed() {\n        return validated ? validatedSinceElapsed : 0L;\n    }\n\n    private void updateValidated(boolean next) {\n        if (next) {\n            if (!validated || validatedSinceElapsed <= 0L) validatedSinceElapsed = SystemClock.elapsedRealtime();\n        } else {\n            validatedSinceElapsed = 0L;\n        }\n        validated = next;\n    }\n\n    static boolean isValidated(NetworkCapabilities capabilities) {\n        return capabilities != null\n                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)\n                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);\n    }\n}\n''')
+
+          policy='app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRolloverPolicy.java'
+          sub(policy,
+              '    static final long CONTINUATION_NO_START_MAX_WAIT_MS = 60_000L;\n',
+              '    static final long CONTINUATION_NO_START_MAX_WAIT_MS = 60_000L;\n    static final int NO_START_WAIT = 0;\n    static final int NO_START_ROLLOVER = 1;\n    static final int NO_START_PAUSE_TRANSIENT = 2;\n')
+          sub(policy,
+              '    static boolean retryHttpStatus(int status) {\n        return status == 408 || status == 429 || status >= 500;\n    }\n',
+              '    static boolean retryHttpStatus(int status) {\n        return status == 408 || status == 429 || status >= 500;\n    }\n\n    static boolean trustedChatgptServiceHost(String host) {\n        if (host == null) return false;\n        String normalized = host.trim().toLowerCase(java.util.Locale.ROOT);\n        return "chatgpt.com".equals(normalized) || normalized.endsWith(".chatgpt.com");\n    }\n')
+          sub(policy,
+              '    static boolean postDispatchNoStartTimedOut(long phaseStartedAt, boolean sawStop,\n                                                      long validatedSince, long now) {\n        if (sawStop || phaseStartedAt <= 0L || validatedSince <= 0L\n                || now < phaseStartedAt || now < validatedSince) return false;\n        long continuouslyValidatedStart = Math.max(phaseStartedAt, validatedSince);\n        return now - continuouslyValidatedStart >= CONTINUATION_NO_START_MAX_WAIT_MS;\n    }',
+              '    static int postDispatchNoStartAction(long dispatchStartedElapsed, boolean sawStop,\n                                                        long validatedSinceElapsed, long nowElapsed,\n                                                        boolean transientSeen) {\n        if (sawStop || dispatchStartedElapsed <= 0L || validatedSinceElapsed <= 0L\n                || nowElapsed < dispatchStartedElapsed || nowElapsed < validatedSinceElapsed) return NO_START_WAIT;\n        long continuouslyValidatedStart = Math.max(dispatchStartedElapsed, validatedSinceElapsed);\n        if (nowElapsed - continuouslyValidatedStart < CONTINUATION_NO_START_MAX_WAIT_MS) return NO_START_WAIT;\n        return transientSeen ? NO_START_PAUSE_TRANSIENT : NO_START_ROLLOVER;\n    }\n\n    static boolean postDispatchNoStartTimedOut(long dispatchStartedElapsed, boolean sawStop,\n                                                long validatedSinceElapsed, long nowElapsed) {\n        return postDispatchNoStartAction(dispatchStartedElapsed, sawStop, validatedSinceElapsed,\n                nowElapsed, false) == NO_START_ROLLOVER;\n    }')
+
+          service='app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java'
+          sub(service, 'import android.os.PowerManager;\n', 'import android.os.PowerManager;\nimport android.os.SystemClock;\n')
+          sub(service,
+              '    private String continuationAttemptMarkerId = "";\n    private boolean turnObserverNeedsIdleBaseline = false;',
+              '    private String continuationAttemptMarkerId = "";\n    private long postDispatchStartedElapsed;\n    private String postDispatchRunId = "";\n    private boolean postDispatchTransientSeen;\n    private String postDispatchTransientKind = "";\n    private boolean turnObserverNeedsIdleBaseline = false;')
+          sub(service, '        bootstrapSendCallbackRecoveries = 0;\n        clearContinuationAttempt();\n    }',
+                       '        bootstrapSendCallbackRecoveries = 0;\n        clearContinuationAttempt();\n        resetPostDispatchNoStartState();\n    }')
+          old_http='''                @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {\n                    if(!launchedRunId.equals(store.runId())||!r.isForMainFrame())return;\n                    int status=response.getStatusCode();\n                    if(SelfRunRolloverPolicy.rolloverHttpStatus(store.conversationUrl(),networkState.isValidated(),status)){\n                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_HTTP_GONE);return;\n                    }\n                    if(SelfRunRolloverPolicy.retryHttpStatus(status)) scheduleWeb(30_000L);\n                }\n                @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {\n                    if(!launchedRunId.equals(store.runId())||!r.isForMainFrame()||!canRun()||!isWebAutomationPhase(store.phase()))return;\n                    int code=e.getErrorCode();\n                    if(SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){\n                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);return;\n                    }\n                    postWebCallback(()->{\n                        if(v!=webView)return;\n                        if(!SelfRunRolloverPolicy.transientWebError(code)&&SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)) rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);\n                        else v.loadUrl(canonicalUrl());\n                    },3_000L);\n                }\n                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}\n                @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {\n                    cleanupWebView();'''
+          new_http='''                @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {\n                    if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;\n                    int status=response.getStatusCode();\n                    if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive())\n                        markPostDispatchTransient("HTTP_"+status);\n                    if(!r.isForMainFrame())return;\n                    if(SelfRunRolloverPolicy.rolloverHttpStatus(store.conversationUrl(),networkState.isValidated(),status)){\n                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_HTTP_GONE);return;\n                    }\n                    if(SelfRunRolloverPolicy.retryHttpStatus(status)) scheduleWeb(30_000L);\n                }\n                @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {\n                    if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;\n                    int code=e.getErrorCode();\n                    if(SelfRunRolloverPolicy.transientWebError(code)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive())\n                        markPostDispatchTransient("WEB_"+code);\n                    if(!r.isForMainFrame())return;\n                    if(SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){\n                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);return;\n                    }\n                    postWebCallback(()->{\n                        if(v!=webView)return;\n                        if(!SelfRunRolloverPolicy.transientWebError(code)&&SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)) rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);\n                        else v.loadUrl(canonicalUrl());\n                    },3_000L);\n                }\n                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {if(postDispatchWindowActive()&&trustedChatgptServiceUrl(e==null?"":e.getUrl()))markPostDispatchTransient("SSL");runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}\n                @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {\n                    if(!detail.didCrash()&&postDispatchWindowActive())markPostDispatchTransient("RENDERER_KILLED");\n                    cleanupWebView();'''
+          sub(service, old_http, new_http)
+          sub(service,
+              '    if(!store.beginPostDomDriveSync(token))return true;\n    turnObserverNeedsIdleBaseline=false;',
+              '    if(!store.beginPostDomDriveSync(token))return true;\n    resetPostDispatchNoStartState();\n    turnObserverNeedsIdleBaseline=false;')
+          helpers='''\nprivate void beginPostDispatchNoStartWindow(){postDispatchRunId=store.runId();postDispatchStartedElapsed=SystemClock.elapsedRealtime();postDispatchTransientSeen=false;postDispatchTransientKind="";}\nprivate boolean postDispatchWindowActive(){return postDispatchStartedElapsed>0L&&store.runId().equals(postDispatchRunId);}\nprivate long ensurePostDispatchNoStartWindow(){if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();return postDispatchStartedElapsed;}\nprivate void resetPostDispatchNoStartState(){postDispatchStartedElapsed=0L;postDispatchRunId="";postDispatchTransientSeen=false;postDispatchTransientKind="";}\nprivate boolean trustedChatgptServiceResource(WebResourceRequest request){if(request==null||request.getUrl()==null)return false;return "https".equalsIgnoreCase(request.getUrl().getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(request.getUrl().getHost());}\nprivate boolean trustedChatgptServiceUrl(String raw){try{Uri uri=Uri.parse(raw);return "https".equalsIgnoreCase(uri.getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(uri.getHost());}catch(Throwable ignored){return false;}}\nprivate void markPostDispatchTransient(String kind){if(!postDispatchWindowActive())return;postDispatchTransientSeen=true;postDispatchTransientKind=BootstrapResultPolicy.safe(kind,48);runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+postDispatchTransientKind);}\n'''
+          sub(service,
+              'private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}\n\n    private void postWebCallback',
+              'private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}\n'+helpers+'\n    private void postWebCallback')
+          old_wait='''    if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)\n            && SelfRunRolloverPolicy.knownConversation(store.conversationUrl())\n            && SelfRunRolloverPolicy.postDispatchNoStartTimedOut(store.phaseStartedAt(),\n                    store.turnObserverSawStop(), networkState.validatedSince(), System.currentTimeMillis())){\n        rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);return;\n    }'''
+          new_wait='''    if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)\n            && SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){\n        long nowElapsed=SystemClock.elapsedRealtime();\n        int noStartAction=SelfRunRolloverPolicy.postDispatchNoStartAction(ensurePostDispatchNoStartWindow(),\n                store.turnObserverSawStop(),networkState.validatedSinceElapsed(),nowElapsed,postDispatchTransientSeen);\n        if(noStartAction==SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT){\n            String kind=postDispatchTransientKind.isEmpty()?"UNKNOWN":postDispatchTransientKind;\n            runLog.record(store,"POST_DISPATCH_NO_START","action=pause_transient;kind="+kind);\n            enterPreservedPause("CHATGPT_POST_DISPATCH_TRANSIENT","ChatGPT 일시적 서비스 오류가 관찰되어 자동 승계를 보류했습니다.",false);\n            NotificationHelper.notifyUser(this,"일시정지",store.status());return;\n        }\n        if(noStartAction==SelfRunRolloverPolicy.NO_START_ROLLOVER){\n            rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);return;\n        }\n    }'''
+          sub(service, old_wait, new_wait)
+          sub(service,
+              'if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnObserverToken();evaluate(phase,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}',
+              'if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnObserverToken();beginPostDispatchNoStartWindow();evaluate(phase,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}')
+          sub(service,
+              'if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnObserverToken();evaluate(phase,SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}',
+              'if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnObserverToken();beginPostDispatchNoStartWindow();evaluate(phase,SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}')
+          sub(service,
+              'private void continuationSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}',
+              'private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}')
+          sub(service,
+              'private void bootstrapSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}',
+              'private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}')
+          sub(service,
+              'removeAutomationCallbacks(); releaseWakeLock(); pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");',
+              'removeAutomationCallbacks(); resetPostDispatchNoStartState(); releaseWakeLock(); pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");')
+          sub(service,
+              'private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();turnObserverNeedsIdleBaseline=false;synchronized',
+              'private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();resetPostDispatchNoStartState();turnObserverNeedsIdleBaseline=false;synchronized')
+
+          test='app/src/test/java/com/shaterguy/chatgptselfrun/ChatReasoningPolicyTest.java'
+          sub(test,
+              '    @Test public void sixChatReasoningSelectionsMapLeftToRight() {\n        assertEquals(0, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.INSTANT));\n        assertEquals(1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.MEDIUM));\n        assertEquals(2, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.HIGH));\n        assertEquals(3, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.EXTRA_HIGH));\n        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));\n        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));\n        assertEquals(ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.normalize("pro"));',
+              '    @Test public void sevenChatReasoningSelectionsMapLeftToRight() {\n        assertEquals(0, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.INSTANT));\n        assertEquals(1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.MEDIUM));\n        assertEquals(2, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.HIGH));\n        assertEquals(3, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.EXTRA_HIGH));\n        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO));\n        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));\n        assertEquals(6, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));\n        assertEquals(ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.normalize("pro"));')
+
+          hierarchy='app/src/androidTest/java/com/shaterguy/chatgptselfrun/ChatReasoningHierarchicalMenuAndroidTest.java'
+          sub(hierarchy,
+              '    @Test public void englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation() throws Exception {\n        assertEnglishProSelection(ChatReasoningPreferenceStore.PRO_EXTENDED, "pro_extended", "Pro Extended");\n    }\n\n    @Test public void englishAdvancedButtonReplacementMenuAppliesProStandardWithoutSliderMutation() throws Exception {',
+              '    @Test public void englishAdvancedButtonReplacementMenuAppliesBareProWithoutSliderMutation() throws Exception {\n        assertEnglishProSelection(ChatReasoningPreferenceStore.PRO, "pro", "Pro");\n    }\n\n    @Test public void englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation() throws Exception {\n        assertEnglishProSelection(ChatReasoningPreferenceStore.PRO_EXTENDED, "pro_extended", "Pro Extended");\n    }\n\n    @Test public void englishAdvancedButtonReplacementMenuAppliesProStandardWithoutSliderMutation() throws Exception {')
+          sub(hierarchy,
+              '<button id="pro-standard" type="button" role="menuitemradio" aria-checked="false">Pro Standard</button><button id="pro-extended" type="button" role="menuitemradio" aria-checked="false">Pro Extended</button>',
+              '<button id="pro" type="button" role="menuitemradio" aria-checked="false">Pro</button><button id="pro-standard" type="button" role="menuitemradio" aria-checked="false">Pro Standard</button><button id="pro-extended" type="button" role="menuitemradio" aria-checked="false">Pro Extended</button>')
+          sub(hierarchy,
+              "document.getElementById('pro-standard').onclick=applyPro;document.getElementById('pro-extended').onclick=applyPro;",
+              "document.getElementById('pro').onclick=applyPro;document.getElementById('pro-standard').onclick=applyPro;document.getElementById('pro-extended').onclick=applyPro;")
+
+          coord='app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunRolloverCoordinatorAndroidTest.java'
+          sub(coord,
+              '    @Test public void proStandardAndExtendedRemainDistinctAcrossRollover() {\n        for (String selection : new String[]{ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {',
+              '    @Test public void allCurrentProVariantsRemainDistinctAcrossRollover() {\n        for (String selection : new String[]{ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {')
+          sub(coord,
+              '        assertTrue(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, false, start, deadline));',
+              '        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER,\n                SelfRunRolloverPolicy.postDispatchNoStartAction(start, false, start, deadline, false));\n        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT,\n                SelfRunRolloverPolicy.postDispatchNoStartAction(start, false, start, deadline, true));')
+
+          poltest='app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunRolloverPolicyTest.java'
+          sub(poltest,
+              '        assertTrue(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,false,phaseStarted,deadline));',
+              '        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER,\n                SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,false,phaseStarted,deadline,false));\n        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT,\n                SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,false,phaseStarted,deadline,true));')
+          sub(poltest,
+              '    @Test public void lineageCauseSetBlocksSameCauseFromRecurring() {',
+              '    @Test public void trustedServiceHostRejectsSuffixConfusion() {\n        assertTrue(SelfRunRolloverPolicy.trustedChatgptServiceHost("chatgpt.com"));\n        assertTrue(SelfRunRolloverPolicy.trustedChatgptServiceHost("api.chatgpt.com"));\n        assertFalse(SelfRunRolloverPolicy.trustedChatgptServiceHost("evilchatgpt.com"));\n        assertFalse(SelfRunRolloverPolicy.trustedChatgptServiceHost("chatgpt.com.evil.example"));\n    }\n\n    @Test public void monotonicNoStartGuardRejectsBackwardElapsedValues() {\n        assertEquals(SelfRunRolloverPolicy.NO_START_WAIT,\n                SelfRunRolloverPolicy.postDispatchNoStartAction(10_000L,false,10_000L,9_999L,false));\n    }\n\n    @Test public void lineageCauseSetBlocksSameCauseFromRecurring() {')
+
+          cont='app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunContinuationSubmissionVerificationTest.java'
+          sub(cont,
+              '        assertTrue(service.contains("postDispatchNoStartTimedOut(store.phaseStartedAt()"));\n        assertTrue(service.contains("store.turnObserverSawStop(), networkState.validatedSince()"));\n        assertTrue(service.contains("CONTINUATION_NO_START_TIMEOUT"));\n        String network = source("SelfRunNetworkState.java");\n        assertTrue(network.contains("registerDefaultNetworkCallback"));\n        assertTrue(network.contains("validatedSince()"));',
+              '        assertTrue(service.contains("postDispatchNoStartAction(ensurePostDispatchNoStartWindow()"));\n        assertTrue(service.contains("networkState.validatedSinceElapsed()"));\n        assertTrue(service.contains("NO_START_PAUSE_TRANSIENT"));\n        assertTrue(service.contains("CONTINUATION_NO_START_TIMEOUT"));\n        assertTrue(service.contains("markPostDispatchTransient(\\"HTTP_\\"+status)"));\n        assertTrue(service.contains("markPostDispatchTransient(\\"WEB_\\"+code)"));\n        String network = source("SelfRunNetworkState.java");\n        assertTrue(network.contains("registerDefaultNetworkCallback"));\n        assertTrue(network.contains("validatedSinceElapsed()"));\n        assertTrue(network.contains("SystemClock.elapsedRealtime()"));\n        assertFalse(network.contains("System.currentTimeMillis()"));')
+
+          # Static policy gates for final diff.
+          service_text=Path(service).read_text()
+          assert 'postDispatchNoStartTimedOut(store.phaseStartedAt()' not in service_text
+          assert 'networkState.validatedSince()' not in service_text
+          assert 'if(!launchedRunId.equals(store.runId())||!r.isForMainFrame())return;' not in service_text
+          assert 'SystemClock.elapsedRealtime()' in service_text
+          option_text=Path(option).read_text()
+          assert "return'pro';" in option_text and "return'pro_standard';" in option_text and "return'pro_extended';" in option_text
+          PY
+          git diff --check
+          git diff --stat
+      - name: Verify tests before source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:compileDebugAndroidTestJavaWithJavac
+      - name: Commit verified source rework
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SelfRun GitHub Actions'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src
+          test -n "$(git status --porcelain -- app/src)"
+          git commit -m 'fix(drive): preserve rollover state and transient boundaries'
+          git push origin HEAD:selfrun-drive/v1.7.0-dev1
