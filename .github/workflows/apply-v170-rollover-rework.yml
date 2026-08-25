@@ -14,39 +14,30 @@ concurrency:
 
 jobs:
   apply:
+    if: >-
+      github.event.head_commit.message != 'fix(drive): close rollover verification gaps'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Apply bounded rework and remove staging helpers
+      - name: Apply bounded source rework
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/apply_v170_rollover_rework.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('.github/workflows/build-drive-test.yml')
-          s=p.read_text(encoding='utf-8')
-          begin='  # BEGIN TEMP V170 ROLLOVER APPLY\n'
-          end='  # END TEMP V170 ROLLOVER APPLY\n'
-          if begin in s:
-              a=s.index(begin)
-              b=s.index(end,a)+len(end)
-              s=s[:a]+s[b:]
-          p.write_text(s,encoding='utf-8')
-          PY
-          rm -f tools/apply_v170_rollover_rework.py .github/workflows/apply-v170-rollover-rework.yml
+          git checkout -- .github/workflows/build-drive-test.yml
+          rm -f tools/apply_v170_rollover_rework.py
           git diff --check
           git status --short
-          test -n "$(git status --porcelain)"
-      - name: Commit bounded rework
+          test -n "$(git status --porcelain app tools/apply_v170_rollover_rework.py)"
+      - name: Commit bounded source rework
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add -A app tools/apply_v170_rollover_rework.py
           git commit -m 'fix(drive): close rollover verification gaps'
           git push origin HEAD:selfrun-drive/v1.7.0-dev1
