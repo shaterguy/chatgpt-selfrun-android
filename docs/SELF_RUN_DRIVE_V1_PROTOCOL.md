@@ -27,6 +27,8 @@ DRIVE_JOB_FOLDER_ID=<jobFolderId>
 
 `DRIVE_JOB_FOLDER_ID`는 ChatGPT가 signal Google Doc을 생성해야 하는 유일한 Run 폴더 주소입니다. 신규 transport에서 ChatGPT는 signal 문서를 이 ID가 가리키는 폴더 바로 아래에만 생성합니다. `DRIVE_TURN_DOCUMENT_ID`는 초기 실행문서·첨부파일 경계·구버전 호환을 위해 유지하지만 신규 signal의 쓰기 대상이 아닙니다.
 
+신규 transport의 실행턴 Google Doc은 초기화 시 비어 있습니다. ChatGPT에 제공된 Drive 도구가 기존 Google Doc을 지정 parent로 직접 복사할 수 있으면, 이 빈 `DRIVE_TURN_DOCUMENT_ID` 문서를 템플릿으로 사용하여 최종 signal title과 `DRIVE_JOB_FOLDER_ID`를 동시에 지정하는 복사 경로를 우선합니다. NEXT_INPUT이 없는 signal은 이 복사만으로 완결되며, `NEXT_INPUT_B64URL=BODY`가 있는 signal만 복사된 문서의 본문을 추가 작성합니다. 직접 parent 지정 복사·생성이 불가능한 도구에서는 생성 후 정확한 parent로 이동하고 readback하기 전까지 기록 완료로 간주하지 않습니다. 이는 transport 호출 수를 줄이는 최적화이며 signal 의미와 문법을 바꾸지 않습니다.
+
 첨부파일이 있는 경우 `SELF_RUN_REFERENCE_FOLDER_ID`도 같은 `DRIVE_JOB_FOLDER_ID`를 사용합니다. 사용자가 앱에 입력한 원본 요구사항은 `[요구사항]` 행 바로 뒤에 trim·요약 없이 그대로 붙습니다.
 
 `SELF_RUN_SKILL_DOCUMENT_ID`는 앱의 단일 상수에서 prompt metadata로만 전달합니다. 앱은 해당 Google Drive 문서의 이름 검색, 다운로드, 캐싱, 버전 판정, 규칙 파싱 또는 Project 규범과의 우선순위 해석을 수행하지 않습니다. 문서 로드와 Project 규범 병행 적용은 ChatGPT가 담당합니다.
