@@ -1,11 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.Test;
-
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.junit.Assert.*;
 
@@ -69,41 +64,37 @@ public class DriveSignalDocumentTransportTest {
         }
     }
 
-    @Test public void orderingUsesCreatedTimeThenTitleTimestampThenFileId() throws Exception {
-        List<DriveApiClient.Metadata> values = new ArrayList<>();
-        values.add(metadata("signal_C0000001", "2026-08-25T01:50:01Z",
-                signal("2026.08.25 | 10:40:00", "")));
-        values.add(metadata("signal_A0000001", "2026-08-25T01:50:00Z",
-                signal("2026.08.25 | 10:50:00", "")));
-        values.add(metadata("signal_B0000001", "2026-08-25T01:50:00Z",
-                signal("2026.08.25 | 10:50:01", "")));
-        values.sort(DriveSignalDocumentTransport.comparator(RUN));
-        assertEquals("signal_A0000001", values.get(0).id);
-        assertEquals("signal_B0000001", values.get(1).id);
-        assertEquals("signal_C0000001", values.get(2).id);
+    @Test public void orderingUsesCreatedTimeThenTitleTimestampThenFileId() {
+        String aTitle = signal("2026.08.25 | 10:50:00", "");
+        String bTitle = signal("2026.08.25 | 10:50:01", "");
+        String cTitle = signal("2026.08.25 | 10:40:00", "");
+        assertTrue(DriveSignalDocumentTransport.compareFields(
+                "2026-08-25T01:50:00Z", aTitle, "signal_A0000001",
+                "2026-08-25T01:50:00Z", bTitle, "signal_B0000001", RUN) < 0);
+        assertTrue(DriveSignalDocumentTransport.compareFields(
+                "2026-08-25T01:50:00Z", bTitle, "signal_B0000001",
+                "2026-08-25T01:50:01Z", cTitle, "signal_C0000001", RUN) < 0);
+        assertTrue(DriveSignalDocumentTransport.compareFields(
+                "2026-08-25T01:50:00Z", aTitle, "signal_A0000001",
+                "2026-08-25T01:50:00Z", aTitle, "signal_B0000001", RUN) < 0);
     }
 
-    @Test public void candidateRequiresExactParentNativeDocAndProviderCreatedTime() throws Exception {
-        DriveApiClient.Metadata valid = metadata("signal_A0000001", "2026-08-25T01:50:00.123Z",
-                signal("2026.08.25 | 10:50:00", ""));
-        assertTrue(DriveSignalDocumentTransport.isCandidate(valid, RUN, PARENT));
-        assertFalse(DriveSignalDocumentTransport.isCandidate(valid, RUN, "other_folder_123"));
-        DriveApiClient.Metadata missingCreated = metadata("signal_B0000001", "",
-                signal("2026.08.25 | 10:50:00", ""));
-        assertFalse(DriveSignalDocumentTransport.isCandidate(missingCreated, RUN, PARENT));
-    }
-
-    private static DriveApiClient.Metadata metadata(String id, String createdTime, String name) throws Exception {
-        JSONObject json = new JSONObject()
-                .put("id", id)
-                .put("name", name)
-                .put("mimeType", DriveApiClient.MIME_DOCUMENT)
-                .put("parents", new JSONArray().put(PARENT))
-                .put("trashed", false)
-                .put("shared", false)
-                .put("createdTime", createdTime)
-                .put("modifiedTime", createdTime)
-                .put("version", "1");
-        return new DriveApiClient.Metadata(json);
+    @Test public void candidateRequiresExactParentNativeDocAndProviderCreatedTime() {
+        String title = signal("2026.08.25 | 10:50:00", "");
+        assertTrue(DriveSignalDocumentTransport.isCandidateFields(
+                "signal_A0000001", title, DriveApiClient.MIME_DOCUMENT, PARENT,
+                false, false, "2026-08-25T01:50:00.123Z", RUN, PARENT));
+        assertFalse(DriveSignalDocumentTransport.isCandidateFields(
+                "signal_A0000001", title, DriveApiClient.MIME_DOCUMENT, PARENT,
+                false, false, "2026-08-25T01:50:00.123Z", RUN, "other_folder_123"));
+        assertFalse(DriveSignalDocumentTransport.isCandidateFields(
+                "signal_B0000001", title, DriveApiClient.MIME_DOCUMENT, PARENT,
+                false, false, "", RUN, PARENT));
+        assertFalse(DriveSignalDocumentTransport.isCandidateFields(
+                "signal_C0000001", title, DriveApiClient.MIME_FOLDER, PARENT,
+                false, false, "2026-08-25T01:50:00Z", RUN, PARENT));
+        assertFalse(DriveSignalDocumentTransport.isCandidateFields(
+                "signal_D0000001", title, DriveApiClient.MIME_DOCUMENT, PARENT,
+                false, true, "2026-08-25T01:50:00Z", RUN, PARENT));
     }
 }
