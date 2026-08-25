@@ -1,0 +1,34 @@
+name: Cleanup SelfRun Drive rollover dev1 temporary tooling
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v1.7.0-dev1'
+    paths:
+      - '.github/workflows/cleanup-rollover-dev1-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: selfrun-drive/v1.7.0-dev1
+          fetch-depth: 0
+      - name: Remove one-shot files and temporary branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/cleanup_rollover_dev1_temp.sh
+          rm -f .github/workflows/cleanup-rollover-dev1-temp.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore(drive): remove rollover dev1 temporary tooling'
+          git push origin HEAD:selfrun-drive/v1.7.0-dev1
+          git push origin --delete tmp-cleanup-unused tmp-cleanup-unused-2 || true
