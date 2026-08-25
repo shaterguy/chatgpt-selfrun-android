@@ -62,6 +62,12 @@ final class SelfRunRolloverPolicy {
                 || SelfRunContinuationDom.STOP.equals(status) || SelfRunContinuationDom.SEND_DISABLED.equals(status);
     }
 
+    static String continuationFailureBucket(String status) {
+        if (hardContinuationFailureStatus(status)) return "CONTINUATION_HARD_NO_PROGRESS";
+        if (softContinuationStallStatus(status)) return "CONTINUATION_SOFT_STALL";
+        return normalizeCause(status);
+    }
+
     static boolean shouldCountContinuationFailure(String status, long phaseStartedAt, long now) {
         if (phaseStartedAt <= 0L || now < phaseStartedAt) return false;
         long elapsed = now - phaseStartedAt;
