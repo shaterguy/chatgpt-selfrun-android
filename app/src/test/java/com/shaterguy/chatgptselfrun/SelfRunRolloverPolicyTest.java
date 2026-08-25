@@ -20,6 +20,16 @@ public final class SelfRunRolloverPolicyTest {
         assertFalse(SelfRunRolloverPolicy.rolloverRenderer(CONVERSATION,false));
         assertFalse(SelfRunRolloverPolicy.rolloverRenderer("https://chatgpt.com/",true));
     }
+    @Test public void repeatedContinuationFailuresAreBoundedButTransientStatesGetGrace() {
+        long started=1_000L;
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure("UNKNOWN",started,5_999L));
+        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure("UNKNOWN",started,6_000L));
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,15_999L));
+        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,16_000L));
+        assertTrue(SelfRunRolloverPolicy.hardContinuationFailureStatus("SUBMISSION_FAILED"));
+        assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("READY_TO_SUBMIT"));
+    }
+
     @Test public void lineageCauseSetBlocksSameCauseFromRecurring() {
         String causes=SelfRunRolloverPolicy.appendCause("",SelfRunRolloverPolicy.ROUTE_MISMATCH);
         assertTrue(SelfRunRolloverPolicy.containsCause(causes,SelfRunRolloverPolicy.ROUTE_MISMATCH));

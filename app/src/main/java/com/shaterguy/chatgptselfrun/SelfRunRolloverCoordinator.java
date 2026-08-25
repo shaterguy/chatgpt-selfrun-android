@@ -19,6 +19,7 @@ final class SelfRunRolloverCoordinator {
     private static final String CURRENT = "currentClaim";
     private static final String LINEAGE_PREFIX = "lineage:";
     private static final String FAILURE_PREFIX = "localFailures:";
+    private static final String FAILURE_KEY_PREFIX = "localFailureKey:";
     private static final String STORE_PREFS = "selfrun_drive";
 
     static final class Result {
@@ -72,6 +73,10 @@ final class SelfRunRolloverCoordinator {
         if (SelfRunStore.MODE_WORK.equals(store.mode()) && !SelfRunProtocol.validWorkProfile(model, reasoning)) {
             return failed(cause);
         }
+        String chatPickerSelection = SelfRunStore.MODE_CHAT.equals(store.mode())
+                ? ChatPickerStateStore.effectiveForRun(app, predecessorRunId) : "";
+        if (SelfRunStore.MODE_CHAT.equals(store.mode())
+                && !ChatReasoningPreferenceStore.shouldApply(chatPickerSelection)) return failed(cause);
         String successorRunId = SelfRunRunId.create();
         JSONObject next = new JSONObject();
         try {
@@ -84,7 +89,7 @@ final class SelfRunRolloverCoordinator {
             next.put("mode", store.mode());
             next.put("model", model);
             next.put("reasoning", reasoning);
-            next.put("chatReasoning", ChatReasoningPreferenceStore.selectionForRun(app, predecessorRunId));
+            next.put("chatPickerSelection", chatPickerSelection);
             next.put("cause", cause);
             next.put("priorCauses", priorCauses);
             next.put("claimedAt", System.currentTimeMillis());
@@ -127,8 +132,13 @@ final class SelfRunRolloverCoordinator {
         if (!SelfRunOriginalRequirement.valid(requirement)) return failed(cause);
         if (!markPredecessorTerminal(store, successorRunId, cause)) return failed(cause);
 
-        String chatReasoning = state.optString("chatReasoning", ChatReasoningPreferenceStore.KEEP);
-        if (!ChatReasoningPreferenceStore.save(app, successorRunId, chatReasoning)) return failed(cause);
+        String chatPickerSelection = state.optString("chatPickerSelection",
+                state.optString("chatReasoning", ChatReasoningPreferenceStore.KEEP));
+        if (SelfRunStore.MODE_CHAT.equals(state.optString("mode"))
+                && !ChatReasoningPreferenceStore.shouldApply(chatPickerSelection)) return failed(cause);
+        String successorChatSelection = SelfRunStore.MODE_CHAT.equals(state.optString("mode"))
+                ? chatPickerSelection : ChatReasoningPreferenceStore.KEEP;
+        if (!ChatReasoningPreferenceStore.save(app, successorRunId, successorChatSelection)) return failed(cause);
         if (!SelfRunSignalTransport.mark(app, successorRunId)) return failed(cause);
         try {
             store.start(successorRunId, state.optString("mode"), state.optString("projectUrl"),
@@ -212,15 +222,23 @@ final class SelfRunRolloverCoordinator {
     }
 
     int incrementLocalFailure(String runId) {
+        return recordLocalFailure(runId, "GENERIC");
+    }
+
+    int recordLocalFailure(String runId, String rawKey) {
         if (!SelfRunProtocolRules.validRunId(runId)) return Integer.MAX_VALUE;
-        String key = FAILURE_PREFIX + runId;
-        int current = prefs.getInt(key, 0);
+        String normalized = SelfRunRolloverPolicy.normalizeCause(rawKey);
+        String countKey = FAILURE_PREFIX + runId, statusKey = FAILURE_KEY_PREFIX + runId;
+        String prior = prefs.getString(statusKey, "");
+        int current = normalized.equals(prior) ? prefs.getInt(countKey, 0) : 0;
         int next = current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1;
-        return prefs.edit().putInt(key, next).commit() ? next : Integer.MAX_VALUE;
+        return prefs.edit().putString(statusKey, normalized).putInt(countKey, next).commit()
+                ? next : Integer.MAX_VALUE;
     }
 
     void clearLocalFailures(String runId) {
-        if (SelfRunProtocolRules.validRunId(runId)) prefs.edit().remove(FAILURE_PREFIX + runId).commit();
+        if (SelfRunProtocolRules.validRunId(runId)) prefs.edit()
+                .remove(FAILURE_PREFIX + runId).remove(FAILURE_KEY_PREFIX + runId).commit();
     }
 
     String lineageCauses(String runId) {

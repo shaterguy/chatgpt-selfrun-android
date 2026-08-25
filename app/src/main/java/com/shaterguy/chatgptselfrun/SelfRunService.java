@@ -783,7 +783,7 @@ private void evaluate(String phase,String script){
   if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;}
   BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
   JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
-  if(isContinuationDiagnosticPhase(phase))rollover.clearLocalFailures(runId);
+  if(isContinuationDiagnosticPhase(phase)&&SelfRunRolloverPolicy.continuationProgressStatus(status))rollover.clearLocalFailures(runId);
   if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
       BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
       runLog.record(store,"DOM_RESULT",BootstrapResultPolicy.logDetail(parsed,current,webGeneration,bootstrapScope()));
@@ -808,12 +808,19 @@ private void evaluate(String phase,String script){
       if("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(BOOTSTRAP_SEND_POLL_MS);return;}
   }
   if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){
-      if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){continuationSubmitted(detail);return;}
+      if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){rollover.clearLocalFailures(runId);continuationSubmitted(detail);return;}
+      if(SelfRunRolloverPolicy.shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis())&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+          recordContinuationWait(phase,status,detail);
+          if(!networkState.isValidated()){rollover.clearLocalFailures(runId);scheduleWeb(1200L);return;}
+          int failures=rollover.recordLocalFailure(runId,status);
+          if(SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_PROGRESS);return;}
+          scheduleWeb(1200L);return;
+      }
       if("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
   }
   if("UI_WAIT".equals(status)||"WAIT".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?BOOTSTRAP_SEND_POLL_MS:("WAIT".equals(status)?2000L:1200L));return;}
   if(isConversationLocalFailureStatus(status)&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-      int failures=rollover.incrementLocalFailure(runId);
+      int failures=rollover.recordLocalFailure(runId,status);
       if(networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);return;}
       scheduleWeb(1200L);return;
   }
@@ -887,7 +894,7 @@ private void failBootstrap(String code,String detail,JSONObject diagnostics){
 private String bootstrapScope(){return SelfRunScript.isGeneralChatUrl(store.projectUrl())?"general":"project";}
 
 
-private static boolean isConversationLocalFailureStatus(String status){return "SUBMISSION_AMBIGUOUS".equals(status)||"MARKER_FAILED".equals(status)||"SUBMISSION_PENDING".equals(status);}
+private static boolean isConversationLocalFailureStatus(String status){return SelfRunRolloverPolicy.hardContinuationFailureStatus(status);}
 
 private void recordContinuationWait(String phase,String status,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.waitDetail(phase,status,detail));}
 private void recordContinuationState(String phase,String status){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.stateDetail(phase,status));}
@@ -897,10 +904,15 @@ private static boolean isContinuationDiagnosticPhase(String phase){return SelfRu
 
 private boolean completeBootstrap(JSONObject result){
     String runId=store.runId();String requested=ChatReasoningPreferenceStore.selectionForRun(runId);
-    if(SelfRunStore.MODE_CHAT.equals(store.mode())&&ChatReasoningPreferenceStore.shouldApply(requested)){
+    if(SelfRunStore.MODE_CHAT.equals(store.mode())){
         String observed=BootstrapResultPolicy.observedReasoning(result);
-        if(!requested.equals(ChatReasoningPreferenceStore.normalize(observed))){failBootstrap(BootstrapResultPolicy.READBACK_MISSING,"requested="+requested+";observed="+observed,result==null?null:result.optJSONObject("diagnostics"));return false;}
-        if(!BootstrapRunStateStore.markReasoningApplied(this,runId,observed)){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"reasoning applied state persistence failed",result==null?null:result.optJSONObject("diagnostics"));return false;}
+        String normalizedObserved=ChatReasoningPreferenceStore.normalize(observed);
+        if(!ChatReasoningPreferenceStore.shouldApply(normalizedObserved)){failBootstrap(BootstrapResultPolicy.READBACK_MISSING,"effective Chat picker readback missing",result==null?null:result.optJSONObject("diagnostics"));return false;}
+        if(ChatReasoningPreferenceStore.shouldApply(requested)){
+            if(!requested.equals(normalizedObserved)){failBootstrap(BootstrapResultPolicy.READBACK_MISSING,"explicit Chat picker readback mismatch",result==null?null:result.optJSONObject("diagnostics"));return false;}
+            if(!BootstrapRunStateStore.markReasoningApplied(this,runId,normalizedObserved)){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"reasoning applied state persistence failed",result==null?null:result.optJSONObject("diagnostics"));return false;}
+        }
+        if(!ChatPickerStateStore.saveObserved(this,runId,normalizedObserved)){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"effective Chat picker state persistence failed",result==null?null:result.optJSONObject("diagnostics"));return false;}
     }
     if(!BootstrapRunStateStore.markBootstrapCompleted(this,runId,"READY")){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap completion persistence failed",result==null?null:result.optJSONObject("diagnostics"));return false;}
     new SelfRunHistoryStore(this).sync(store);

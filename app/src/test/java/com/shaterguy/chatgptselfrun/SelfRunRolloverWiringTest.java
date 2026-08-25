@@ -34,6 +34,17 @@ public final class SelfRunRolloverWiringTest {
         assertTrue(start.contains("resumePendingRollover = ACTION_RESUME.equals(action) && rollover.hasPendingClaim()"));
     }
 
+    @Test public void continuationFailureEvidenceIsNotClearedBeforeClassification() throws Exception {
+        String service=src("SelfRunService.java");
+        assertFalse(service.contains("if(isContinuationDiagnosticPhase(phase))rollover.clearLocalFailures(runId)"));
+        assertTrue(service.contains("shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis())"));
+        assertTrue(service.contains("rollover.recordLocalFailure(runId,status)"));
+        assertTrue(service.contains("CONTINUATION_NO_PROGRESS"));
+        String coordinator=src("SelfRunRolloverCoordinator.java");
+        assertTrue(coordinator.contains("ChatPickerStateStore.effectiveForRun"));
+        assertTrue(coordinator.contains("chatPickerSelection"));
+    }
+
     @Test public void successorBootstrapCarriesPredecessorReferences() throws Exception {
         String coordinator=src("SelfRunRolloverCoordinator.java");
         assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_RUN_ID="));

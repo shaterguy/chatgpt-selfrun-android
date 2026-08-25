@@ -60,6 +60,22 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
         }
     }
 
+    @Test public void keepCapturesCurrentPickerValueWithoutChangingIt() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web, englishFixture());
+            String runId = "SR-CAPTURE-CURRENT";
+            scenario.onActivity(activity -> assertTrue(ChatReasoningPreferenceStore.save(
+                    activity, runId, ChatReasoningPreferenceStore.KEEP)));
+            JSONObject ready = runToReady(scenario, web,
+                    SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_CHAT, runId));
+            assertEquals("xhigh", ready.getJSONObject("diagnostics").getString("observed"));
+            assertEquals("capture-current", ready.getJSONObject("diagnostics").getString("action"));
+            assertEquals("0", read(scenario, web, "String(window.optionClicks)"));
+            assertEquals("Extra high", read(scenario, web, "document.getElementById('reasoning-trigger').textContent"));
+        }
+    }
+
     @Test public void matchingCurrentValueSkipsAllReasoningSelectionUi() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
