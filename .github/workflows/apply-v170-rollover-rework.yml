@@ -1,0 +1,40 @@
+name: Apply v1.7.0 rollover rework
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v1.7.0-dev1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-v170-rollover-rework
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.event.head_commit.message != 'fix(drive): close rollover verification gaps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply bounded rework
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_v170_rollover_rework.py
+          git diff --check
+          git status --short
+          test -n "$(git status --porcelain)"
+      - name: Commit verified source mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app .github/workflows/build-drive-test.yml
+          git commit -m 'fix(drive): close rollover verification gaps'
+          git push origin HEAD:selfrun-drive/v1.7.0-dev1
