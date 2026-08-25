@@ -227,7 +227,7 @@ final class SelfRunRolloverCoordinator {
 
     int recordLocalFailure(String runId, String rawKey) {
         if (!SelfRunProtocolRules.validRunId(runId)) return Integer.MAX_VALUE;
-        String normalized = SelfRunRolloverPolicy.normalizeCause(rawKey);
+        String normalized = SelfRunRolloverPolicy.continuationFailureBucket(rawKey);
         String countKey = FAILURE_PREFIX + runId, statusKey = FAILURE_KEY_PREFIX + runId;
         String prior = prefs.getString(statusKey, "");
         int current = normalized.equals(prior) ? prefs.getInt(countKey, 0) : 0;
