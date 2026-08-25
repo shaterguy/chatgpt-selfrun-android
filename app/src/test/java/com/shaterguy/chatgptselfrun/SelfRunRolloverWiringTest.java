@@ -26,11 +26,22 @@ public final class SelfRunRolloverWiringTest {
         assertTrue(service.contains("stopAutomationCallbacks();"));
         assertTrue(service.contains("cleanupWebView();"));
     }
+    @Test public void pausePrecedesPendingRolloverAndPausedStickyRunDoesNotResumeIt() throws Exception {
+        String service=src("SelfRunService.java");
+        String start=between(service,"@Override public int onStartCommand","private void startForegroundCompat");
+        assertTrue(start.indexOf("ACTION_PAUSE.equals(action)") < start.indexOf("rollover.hasPendingClaim()"));
+        assertTrue(start.contains("if (store.paused()) { stopAutomationCallbacks(); releaseWakeLock(); return START_STICKY; }"));
+        assertTrue(start.contains("resumePendingRollover = ACTION_RESUME.equals(action) && rollover.hasPendingClaim()"));
+    }
+
     @Test public void successorBootstrapCarriesPredecessorReferences() throws Exception {
         String coordinator=src("SelfRunRolloverCoordinator.java");
         assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_RUN_ID="));
         assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_JOB_FOLDER_ID="));
         assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_TURN_DOCUMENT_ID="));
+        assertTrue(coordinator.contains("SELF_RUN_PREDECESSOR_ORIGINAL_REQUIREMENT_STORED="));
+        assertTrue(coordinator.contains("predecessorOriginalStored"));
+        assertTrue(coordinator.contains("predecessor turn document 본문을 원문 요구사항으로 해석하지 않는다"));
         assertTrue(coordinator.contains("특정 마지막 HANDOFF 하나의 존재를 전제로 하지 말고"));
     }
     private static String src(String f)throws Exception{Path p=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+f);if(!Files.exists(p))p=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+f);return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);}

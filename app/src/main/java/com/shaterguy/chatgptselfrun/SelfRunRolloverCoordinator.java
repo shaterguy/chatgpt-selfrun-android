@@ -79,6 +79,7 @@ final class SelfRunRolloverCoordinator {
             next.put("successorRunId", successorRunId);
             next.put("predecessorJobFolderId", store.jobFolderId());
             next.put("predecessorTurnDocumentId", store.turnDocumentId());
+            next.put("predecessorOriginalRequirementStored", SelfRunSignalTransport.isSignalDocumentRun(app, predecessorRunId));
             next.put("projectUrl", store.projectUrl());
             next.put("mode", store.mode());
             next.put("model", model);
@@ -177,6 +178,7 @@ final class SelfRunRolloverCoordinator {
             lineage.put("predecessorRunId", claim.optString("predecessorRunId"));
             lineage.put("predecessorJobFolderId", claim.optString("predecessorJobFolderId"));
             lineage.put("predecessorTurnDocumentId", claim.optString("predecessorTurnDocumentId"));
+            lineage.put("predecessorOriginalRequirementStored", claim.optBoolean("predecessorOriginalRequirementStored", false));
             lineage.put("cause", claim.optString("cause"));
             lineage.put("causes", causes);
         } catch (Exception ignored) {
@@ -190,9 +192,11 @@ final class SelfRunRolloverCoordinator {
                 store.turnDocumentId(), store.jobFolderId(), store.hasAttachments());
         JSONObject lineage = lineage(store.runId());
         if (lineage == null) return base;
+        boolean predecessorOriginalStored = lineage.optBoolean("predecessorOriginalRequirementStored", false);
         String metadata = "SELF_RUN_PREDECESSOR_RUN_ID=" + lineage.optString("predecessorRunId") + "\n"
                 + "SELF_RUN_PREDECESSOR_JOB_FOLDER_ID=" + lineage.optString("predecessorJobFolderId") + "\n"
                 + "SELF_RUN_PREDECESSOR_TURN_DOCUMENT_ID=" + lineage.optString("predecessorTurnDocumentId") + "\n"
+                + "SELF_RUN_PREDECESSOR_ORIGINAL_REQUIREMENT_STORED=" + (predecessorOriginalStored ? "1" : "0") + "\n"
                 + "SELF_RUN_ROLLOVER_REASON=" + lineage.optString("cause") + "\n";
         int metadataAt = base.indexOf("\n\n이 실행은 SelfRun이다.");
         if (metadataAt < 0) throw new IllegalStateException("bootstrap metadata anchor missing");
@@ -200,7 +204,10 @@ final class SelfRunRolloverCoordinator {
         String requirementMarker = "\n\n[요구사항]\n";
         int requirementAt = withMetadata.indexOf(requirementMarker);
         if (requirementAt < 0) throw new IllegalStateException("bootstrap requirement anchor missing");
-        String handoffInstruction = "\n\n이 Run은 이전 SelfRun 작업의 자동 승계 Run이다. 실질 작업을 시작하기 전에 SELF_RUN_PREDECESSOR_TURN_DOCUMENT_ID 문서의 본문을 원래 사용자 요구사항 권위 원본으로 읽고, SELF_RUN_PREDECESSOR_JOB_FOLDER_ID 폴더의 관련 실행 문서와 사용 가능한 모든 누적 HANDOFF를 확인한다. 특정 마지막 HANDOFF 하나의 존재를 전제로 하지 말고 실제 외부 상태와 대조하여 완료된 작업, 실제 반영 상태, 미완료 작업과 다음 진행 지점을 판정한 뒤 중복 작업 없이 이어서 수행한다.";
+        String originalRequirementInstruction = predecessorOriginalStored
+                ? "SELF_RUN_PREDECESSOR_TURN_DOCUMENT_ID 문서의 본문을 원래 사용자 요구사항 권위 원본으로 읽는다."
+                : "predecessor는 원문 요구사항 저장 기능 도입 전 Run이므로 현재 successor의 [요구사항]과 현재 DRIVE_TURN_DOCUMENT_ID 본문을 원래 사용자 요구사항 권위 원본으로 사용하고 predecessor turn document 본문을 원문 요구사항으로 해석하지 않는다.";
+        String handoffInstruction = "\n\n이 Run은 이전 SelfRun 작업의 자동 승계 Run이다. 실질 작업을 시작하기 전에 " + originalRequirementInstruction + " SELF_RUN_PREDECESSOR_JOB_FOLDER_ID 폴더의 관련 실행 문서와 사용 가능한 모든 누적 HANDOFF를 확인한다. 특정 마지막 HANDOFF 하나의 존재를 전제로 하지 말고 실제 외부 상태와 대조하여 완료된 작업, 실제 반영 상태, 미완료 작업과 다음 진행 지점을 판정한 뒤 중복 작업 없이 이어서 수행한다.";
         return withMetadata.substring(0, requirementAt) + handoffInstruction + withMetadata.substring(requirementAt);
     }
 

@@ -115,7 +115,18 @@ public final class SelfRunService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_RUN : intent.getAction();
+        if (ACTION_PAUSE.equals(action)) {
+            pauseFromUi();
+            return store.active() ? START_STICKY : START_NOT_STICKY;
+        }
+        boolean resumePendingRollover = ACTION_RESUME.equals(action) && rollover.hasPendingClaim();
+        if (resumePendingRollover && store.paused()) {
+            stopAutomationCallbacks();
+            store.beginManualResumeOverride();
+            store.clearLastError();
+        }
         if (rollover.hasPendingClaim()) {
+            if (store.paused()) { stopAutomationCallbacks(); releaseWakeLock(); return START_STICKY; }
             startForegroundCompat();
             stopAutomationCallbacks();
             cleanupWebView();
@@ -134,8 +145,10 @@ public final class SelfRunService extends Service {
             accessToken = "";
             bootstrapSendCallbackRecoveries = 0;
         }
-        if (ACTION_PAUSE.equals(action)) { pauseFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY; }
-        if (ACTION_RESUME.equals(action)) { resumeFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY; }
+        if (ACTION_RESUME.equals(action)) {
+            if (resumePendingRollover) { if (canRun()) handler.post(this::resumeStateMachine); return store.active() ? START_STICKY : START_NOT_STICKY; }
+            resumeFromUi(); return store.active() ? START_STICKY : START_NOT_STICKY;
+        }
         if (store.terminalSideEffectPending()) {
             replayTerminalSideEffect();
             return store.active() ? START_STICKY : START_NOT_STICKY;

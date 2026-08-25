@@ -43,6 +43,7 @@ public final class SelfRunRolloverPersistencePolicyTest {
         String claim = section(source, "String successorRunId = SelfRunRunId.create()", "return startClaimedSuccessor(store, next)");
         assertTrue(claim.contains("predecessorJobFolderId"));
         assertTrue(claim.contains("predecessorTurnDocumentId"));
+        assertTrue(claim.contains("predecessorOriginalRequirementStored"));
         assertFalse(claim.contains("next.put(\"requirement\""));
         assertFalse(claim.contains("next.put(\"rawRequirement\""));
     }
