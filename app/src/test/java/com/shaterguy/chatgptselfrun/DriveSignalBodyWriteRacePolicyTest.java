@@ -13,7 +13,7 @@ public final class DriveSignalBodyWriteRacePolicyTest {
     @Test public void sameSignalFileBodyCompletionChangesSyntheticPollIdentity() throws Exception {
         String api = src("DriveApiClient.java");
         assertTrue(api.contains("\"signal:\" + latest.id + \":\" + latest.modifiedTime"));
-        assertTrue(api.contains("latest.modifiedTime));"));
+        assertTrue(api.contains("latest.modifiedTime);"));
     }
 
     @Test public void malformedOrNotYetWrittenNextInputBodyIsNotConsumed() throws Exception {
