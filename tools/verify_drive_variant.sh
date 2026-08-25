@@ -10,6 +10,7 @@ PROTOCOL=$SRC/SelfRunProtocol.java
 PARSER=$SRC/DriveCommitParser.java
 CONTINUE_DOM=$SRC/SelfRunContinuationDom.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
+RUN_ID=$SRC/SelfRunRunId.java
 HISTORY=$SRC/SelfRunHistoryActivity.java
 RESTART=$SRC/SelfRunRestartActivity.java
 RESTART_POLICY=$SRC/SelfRunRestartPolicy.java
@@ -61,9 +62,9 @@ if grep -Fq 'requestRectangleOnScreen' "$ACTIVITY"; then echo 'generic descendan
 if grep -Fq 'getLocationOnScreen' "$ACTIVITY" || grep -Fq 'WindowInsets' "$ACTIVITY"; then echo 'command visibility must be computed in ScrollView content coordinates, not mixed screen/inset coordinates' >&2; exit 1; fi
 if grep -Fq -- '-editor.getScrollY()' "$ACTIVITY"; then echo 'command caret content coordinates must not pre-subtract editor scroll state' >&2; exit 1; fi
 if grep -Fq 'Math.min(editor.getHeight()' "$ACTIVITY"; then echo 'caret coordinates must not be clamped to the editor viewport' >&2; exit 1; fi
-grep -Fq 'RUN_SUFFIX_LENGTH = 6' "$ACTIVITY"
-grep -Fq 'TimeZone.getTimeZone("Asia/Seoul")' "$ACTIVITY"
-! grep -Fq 'UUID.randomUUID' "$ACTIVITY"
+grep -Fq 'SUFFIX_LENGTH = 6' "$RUN_ID"
+grep -Fq 'TimeZone.getTimeZone("Asia/Seoul")' "$RUN_ID"
+! grep -Fq 'UUID.randomUUID' "$RUN_ID"
 grep -Fq 'driveContinuation' "$PROTOCOL"
 grep -Fq 'kstTimestamp' "$PROTOCOL"
 grep -Fq 'DriveSignalParser.scan' "$SERVICE"
@@ -134,5 +135,5 @@ if grep -Fq 'startForegroundCompat();' <<<"$TRANSITION_BLOCK"; then echo 'routin
 BOOTSTRAP_BLOCK="$(sed -n '/private void bootstrapSubmitted/,/private String commandPrompt/p' "$SERVICE")"
 if grep -Fq 'startForegroundCompat();' <<<"$BOOTSTRAP_BLOCK"; then echo 'command submission must not repost the foreground notification' >&2; exit 1; fi
 FG_POST_COUNT="$(grep -o 'startForegroundCompat();' "$SERVICE" | wc -l | tr -d ' ')"
-[[ "$FG_POST_COUNT" == '4' ]]
+[[ "$FG_POST_COUNT" == '5' ]]
 echo "SelfRun Drive ${VERSION_NAME} policy checks passed (versionCode=${VERSION_CODE})."

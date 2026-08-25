@@ -161,7 +161,7 @@ public final class SelfRunService extends Service {
     private void resumePendingRollover() {
         if (!rollover.hasPendingClaim()) { if (canRun()) resumeStateMachine(); return; }
         SelfRunRolloverCoordinator.Result resumed = rollover.resumePending(store);
-        if (resumed.started()) { adoptSuccessorRuntime(); startForegroundCompat(); resumeStateMachine(); }
+        if (resumed.started()) { adoptSuccessorRuntime(); resumeStateMachine(); }
         else if (rollover.hasPendingClaim()) handler.postDelayed(this::resumePendingRollover, 5_000L);
     }
 
@@ -979,7 +979,6 @@ private void transition(String next, String status, String reason) {String prior
         }
         if (result.started()) {
             adoptSuccessorRuntime();
-            startForegroundCompat();
             handler.post(this::resumeStateMachine);
             return;
         }
