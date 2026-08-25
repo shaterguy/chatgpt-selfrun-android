@@ -3,7 +3,7 @@ plugins {
 }
 
 def selfRunDriveVersionCode = 1000096
-def selfRunDriveVersionName = '1.6.1-dev6'
+def selfRunDriveVersionName = '1.6.1'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'

@@ -158,11 +158,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p formal-baseline
-          gh release download drive-v1.4.0 \
+          gh release download drive-v1.6.0 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v1.4.0.apk' \
+            --pattern 'chatgpt-selfrun-drive-v1.6.0.apk' \
             --dir formal-baseline
-          test -s formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+          test -s formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk
       - name: Find actual previous TEST artifact
         id: previous_test_run
         shell: bash
@@ -282,7 +282,7 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           CURRENT_APK=current-candidate/current-test.apk
           PREV_APK=predecessor/previous-test.apk
-          FORMAL_APK=formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+          FORMAL_APK=formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk
           test -s "$CURRENT_APK" || fail 'canonical current TEST APK missing'
           test -s "$PREV_APK" || fail 'previous TEST APK missing'
           test -s "$FORMAL_APK" || fail 'formal baseline APK missing'
@@ -301,8 +301,8 @@ jobs:
           grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING" || fail 'current TEST versionName mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$PREV_BADGING" || fail 'previous TEST package mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING" || fail 'formal package mismatch'
-          grep -Fq "versionCode='1000054'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionCode mismatch'
-          grep -Fq "versionName='1.4.0'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionName mismatch'
+          grep -Fq "versionCode='1000090'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionCode mismatch'
+          grep -Fq "versionName='1.6.0'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionName mismatch'
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > coinstall-current-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$PREV_APK" > coinstall-test-prev-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$FORMAL_APK" > coinstall-formal-cert.txt
@@ -314,7 +314,7 @@ jobs:
           [[ "$FORMAL_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]] || fail 'formal signer mismatch'
           echo "TEST_PREV_VERSION_NAME=$PREV_VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_PREV_VERSION_CODE=$PREV_VERSION_CODE" >> "$GITHUB_ENV"
-          note "formal fixture: 1.4.0 / 1000054"
+          note "formal fixture: 1.6.0 / 1000090"
           note "TEST predecessor: $PREV_VERSION_NAME / $PREV_VERSION_CODE / source=$PREDECESSOR_SOURCE"
           note "TEST current: $CURRENT_VERSION_NAME / $CURRENT_VERSION_CODE / source=$GITHUB_SHA"
           note 'preflight: PASS'
@@ -341,9 +341,9 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest;
             adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
-            FORMAL_EXPECTED_VERSION="1.4.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"
+            FORMAL_EXPECTED_VERSION="1.6.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"
             timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh
-            formal-baseline/chatgpt-selfrun-drive-v1.4.0.apk
+            formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk
             predecessor/previous-test.apk
             current-candidate/current-test.apk |
             tee drive-test-coinstall-evidence.txt'
