@@ -12,15 +12,18 @@ import static org.junit.Assert.*;
 public class SelfRunProtocolTest {
     private static final String RUN = "SR-20260813-220315-A1B2C3";
     private static final String DOC = "document_12345678";
+    private static final String JOB_FOLDER = "folder_12345678";
     private static final String SKILL_ID = "1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs";
     private static final String REMOVED_BOOTSTRAP_SENTENCE = "SelfRun의 역할 전환, HANDOFF, continuation, SelfRun 제어신호, Drive 실행턴 signal, pause/resume의 AI 측 의미, SelfRun 완료 판정은 위 canonical SelfRun 운영문서를 따른다.";
 
     @Test public void bootstrapContainsGlobalSkillMetadataExactlyOnce() {
-        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC);
+        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC, JOB_FOLDER, false);
         assertEquals(1, occurrences(bootstrap, "SELF_RUN_SKILL_DOCUMENT_ID"));
         assertTrue(bootstrap.contains("SELF_RUN_SKILL_DOCUMENT_ID=" + SKILL_ID));
         assertTrue(bootstrap.contains("SELF_RUN_CLIENT=DRIVE_V1"));
         assertTrue(bootstrap.contains("DRIVE_TURN_DOCUMENT_ID=" + DOC));
+        assertEquals(1, occurrences(bootstrap, "DRIVE_JOB_FOLDER_ID="));
+        assertTrue(bootstrap.contains("DRIVE_JOB_FOLDER_ID=" + JOB_FOLDER));
         assertFalse(bootstrap.contains("앱은 현재 대화가 Project인지 직접 판정하지 않는다."));
         assertFalse(bootstrap.contains("위 메타데이터 및 설명 뒤에 사용자가 앱에 입력한 원본 요구사항을 내용 손실이나 요약 없이 그대로 붙인다."));
         assertFalse(bootstrap.contains(REMOVED_BOOTSTRAP_SENTENCE));
@@ -30,24 +33,25 @@ public class SelfRunProtocolTest {
 
     @Test public void originalRequirementIsPreservedWithoutTrimOrSummary() {
         String requirement = "  첫 줄\n둘째 줄\n\n끝 공백  ";
-        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, requirement, DOC);
+        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, requirement, DOC, JOB_FOLDER, false);
         assertTrue(bootstrap.endsWith("[요구사항]\n" + requirement));
         assertTrue(bootstrap.endsWith(requirement));
         assertFalse(bootstrap.toLowerCase().contains("command received"));
     }
 
     @Test public void emptyRequirementEndsAtRequirementsHeader() {
-        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, null, DOC);
+        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, null, DOC, JOB_FOLDER, false);
         assertFalse(bootstrap.toLowerCase().contains("command received"));
         assertTrue(bootstrap.endsWith("[요구사항]\n"));
     }
 
     @Test public void chatAndWorkUseSameGlobalSkillIdWithoutProjectSpecificMetadata() {
-        String chat = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "chat", DOC);
-        String work = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_WORK, "work", DOC);
+        String chat = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "chat", DOC, JOB_FOLDER, false);
+        String work = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_WORK, "work", DOC, JOB_FOLDER, false);
         assertTrue(chat.contains("SELF_RUN_SKILL_DOCUMENT_ID=" + SKILL_ID));
         assertTrue(work.contains("SELF_RUN_SKILL_DOCUMENT_ID=" + SKILL_ID));
         for (String bootstrap : new String[]{chat, work}) {
+            assertTrue(bootstrap.contains("DRIVE_JOB_FOLDER_ID=" + JOB_FOLDER));
             assertFalse(bootstrap.contains("Vibe Coding")); assertFalse(bootstrap.contains("PROJECT_ID=")); assertFalse(bootstrap.contains("PROJECT_NAME=")); assertFalse(bootstrap.contains("PROJECT_SKILL"));
             assertFalse(bootstrap.contains(REMOVED_BOOTSTRAP_SENTENCE));
             assertFalse(bootstrap.toLowerCase().contains("command received"));
@@ -57,7 +61,7 @@ public class SelfRunProtocolTest {
 
     @Test public void driveContinueIsOnlyTimestampedControlSignal() {
         assertEquals("1970.01.01 | 09:00:00", SelfRunProtocol.kstTimestamp(new Date(0)));
-        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC);
+        String bootstrap = SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "work", DOC, JOB_FOLDER, false);
         assertTrue(bootstrap.split("\\n", 2)[0].matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_BOOTSTRAP 0\\.2\\.0 .*"));
         String driveContinue = SelfRunProtocol.driveContinuation(RUN);
         assertTrue(driveContinue.matches("^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] \\[SELF_RUN_CONTINUE " + RUN + "]$"));
@@ -104,6 +108,15 @@ public class SelfRunProtocolTest {
         assertFalse(SelfRunProtocol.validWorkProfile("terra", "ultra"));
         assertFalse(SelfRunProtocol.validWorkProfile("luna", "high"));
         assertFalse(SelfRunProtocol.validWorkProfile("luna", "ultra"));
+    }
+
+    @Test public void currentBootstrapRequiresValidJobFolderId() {
+        try {
+            SelfRunProtocol.bootstrapDrive(RUN, SelfRunStore.MODE_CHAT, "x", DOC, "bad", false);
+            fail("invalid job folder id must be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("job folder"));
+        }
     }
 
     private static int occurrences(String text, String token) { int count = 0; for (int at = 0; (at = text.indexOf(token, at)) >= 0; at += token.length()) count++; return count; }
