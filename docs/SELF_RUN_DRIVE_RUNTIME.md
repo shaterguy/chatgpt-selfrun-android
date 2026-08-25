@@ -41,9 +41,9 @@ WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습�
 2. title의 `yyyy.mm.dd | hh:mm:ss`
 3. Drive `fileId`
 
-최신 candidate fileId를 synthetic version marker로 사용하므로 기존 `SelfRunService`의 version-change gating을 재사용합니다. 새 candidate가 있으면 `readDocumentSnapshot()`은 실제 실행턴 문서 대신 정렬된 signal document 목록을 기존 append-only signal line처럼 합성합니다. 이렇게 기존 `DriveSignalParser`, physical cursor, dominance, Work profile, NEXT_INPUT, pause/resume 상태전이는 유지합니다.
+최신 candidate의 `fileId + modifiedTime`을 synthetic version marker로 사용하여 기존 `SelfRunService`의 version-change gating을 재사용합니다. 최신성 순위 자체는 `createdTime → title timestamp → fileId`로 고정하지만, NEXT_INPUT 문서는 제목 생성 뒤 같은 fileId의 본문이 추가되므로 `modifiedTime` 변화도 재조회 트리거로 사용합니다. 새 candidate 또는 같은 candidate의 본문 갱신이 있으면 `readDocumentSnapshot()`은 실제 실행턴 문서 대신 정렬된 signal document 목록을 기존 append-only signal line처럼 합성합니다. 이렇게 기존 `DriveSignalParser`, physical cursor, dominance, Work profile, NEXT_INPUT, pause/resume 상태전이는 유지합니다.
 
-`NEXT_INPUT_B64URL=BODY` marker가 없는 signal은 제목만 사용하므로 Docs 본문을 열지 않습니다. marker가 있는 문서만 Docs API로 본문을 읽고, 정확한 `NEXT_INPUT_B64URL=<Base64URL>` 한 줄을 제목에 materialize한 뒤 기존 parser에 넘깁니다. malformed title/body, 다른 Run, 다른 parent, shared/trashed 항목은 fail closed합니다.
+`NEXT_INPUT_B64URL=BODY` marker가 없는 signal은 제목만 사용하므로 Docs 본문을 열지 않습니다. marker가 있는 문서만 Docs API로 본문을 읽고, 정확한 `NEXT_INPUT_B64URL=<Base64URL>` 한 줄을 제목에 materialize한 뒤 기존 parser에 넘깁니다. 제목은 canonical이지만 본문이 아직 쓰이지 않았거나 malformed인 NEXT_INPUT 문서는 정상 signal로 소비하지 않고 현재 합성 로그에서 건너뜁니다. 같은 fileId의 본문이 완성되면 `modifiedTime`이 synthetic version을 바꾸므로 다음 동기화에서 다시 검증합니다. 이후 더 최신한 정상 signal이 생성된 경우에도 오래된 malformed BODY 문서가 새 signal 처리를 영구 차단하지 않습니다. 다른 Run, 다른 parent, shared/trashed 항목도 fail closed합니다.
 
 `RESUME_BASELINE`도 같은 Run-folder signal 목록을 다시 합성해 최신 cursor 이후의 completion을 확인합니다. signal 문서가 아직 없으면 5초 간격으로 최대 5분 재확인합니다. STOP/SEND 완료 감지에 짧은 주기의 반복 polling은 사용하지 않습니다.
 
