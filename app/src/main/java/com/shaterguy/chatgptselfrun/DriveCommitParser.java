@@ -37,13 +37,35 @@ final class DriveSignalParser {
         final List<Event> unseen;
         final int totalCount;
         final Event latest;
+        final Event latestCanonical;
         final boolean cursorRebased;
 
-        Scan(List<Event> unseen, int totalCount, Event latest, boolean cursorRebased) {
+        Scan(List<Event> unseen, int totalCount, Event latest, Event latestCanonical, boolean cursorRebased) {
             this.unseen = unseen;
             this.totalCount = totalCount;
             this.latest = latest;
+            this.latestCanonical = latestCanonical;
             this.cursorRebased = cursorRebased;
+        }
+    }
+
+    static final class CursorMigration {
+        final boolean resolved;
+        final int cursor;
+        final String method;
+
+        CursorMigration(boolean resolved, int cursor, String method) {
+            this.resolved = resolved;
+            this.cursor = Math.max(0, cursor);
+            this.method = method == null ? "" : method;
+        }
+
+        static CursorMigration resolved(int cursor, String method) {
+            return new CursorMigration(true, cursor, method);
+        }
+
+        static CursorMigration unresolved() {
+            return new CursorMigration(false, 0, "UNRESOLVED");
         }
     }
 
@@ -81,28 +103,28 @@ final class DriveSignalParser {
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
         List<Event> all = new ArrayList<>();
         int absoluteCursor = 0;
-        for (String source : (text == null ? "" : text).split("\\r?\\n")) {
-            String trimmed = source.trim();
+        Event latestCanonical = null;
+        for (String source : (text == null ? "" : text).split("\\r?\\n", -1)) {
+            String trimmed = physicalLine(source);
+            if (trimmed.isEmpty()) continue;
+            absoluteCursor++;
             Matcher retired = RETIRED_CURSOR_LINE.matcher(trimmed);
-            if (retired.matches() && jobId.equals(retired.group(1))) {
-                absoluteCursor++;
-                continue;
-            }
+            if (retired.matches() && jobId.equals(retired.group(1))) continue;
             Matcher matcher = LINE.matcher(trimmed);
             if (!matcher.matches() || !jobId.equals(matcher.group(3))) continue;
             Type type = type(matcher.group(2));
             String tail = matcher.group(4) == null ? "" : matcher.group(4).trim();
             if (type != Type.TURN_COMPLETED) {
-                if (!tail.isEmpty()) continue; // Preserve 1.2.1 non-completion behavior.
-                absoluteCursor++;
-                all.add(new Event(type, matcher.group(1), matcher.group(0), absoluteCursor));
+                if (!tail.isEmpty()) continue;
+                Event event = new Event(type, matcher.group(1), matcher.group(0), absoluteCursor);
+                all.add(event);
+                latestCanonical = event;
                 continue;
             }
-            Event completion = completion(
-                    matcher.group(1), matcher.group(0), absoluteCursor + 1, tail, work);
+            Event completion = completion(matcher.group(1), matcher.group(0), absoluteCursor, tail, work);
             if (completion != null) {
-                absoluteCursor++;
                 all.add(completion);
+                if (canonical(completion, work)) latestCanonical = completion;
             }
         }
         int requested = Math.max(0, consumed);
@@ -112,7 +134,79 @@ final class DriveSignalParser {
             for (Event event : all) if (event.cursor > requested) unseen.add(event);
         }
         return new Scan(Collections.unmodifiableList(unseen), absoluteCursor,
-                all.isEmpty() ? null : all.get(all.size() - 1), rebased);
+                all.isEmpty() ? null : all.get(all.size() - 1), latestCanonical, rebased);
+    }
+
+    static CursorMigration migrateCursor(String text, String jobId, int legacyCursor,
+                                         String lastRaw, String lastTimestamp, String lastType) {
+        int legacy = Math.max(0, legacyCursor);
+        String raw = lastRaw == null ? "" : lastRaw.trim();
+        String timestamp = lastTimestamp == null ? "" : lastTimestamp.trim();
+        String typeValue = lastType == null ? "" : lastType.trim();
+        if (legacy == 0 && raw.isEmpty() && timestamp.isEmpty() && typeValue.isEmpty()) {
+            return CursorMigration.resolved(0, "EMPTY");
+        }
+        if (!raw.isEmpty()) {
+            int exact = uniquePhysicalCursor(text, line -> line.equals(raw));
+            if (exact >= legacy && exact > 0) return CursorMigration.resolved(exact, "EXACT_RAW");
+        }
+        Type expected = storedType(typeValue);
+        if (expected == null || timestamp.isEmpty() || jobId == null || jobId.isEmpty()) {
+            return CursorMigration.unresolved();
+        }
+        int identity = uniquePhysicalCursor(text,
+                line -> legacyIdentityMatches(line, jobId, timestamp, expected));
+        if (identity >= legacy && identity > 0) return CursorMigration.resolved(identity, "IDENTITY");
+        return CursorMigration.unresolved();
+    }
+
+    private interface LineMatcher { boolean matches(String line); }
+
+    private static int uniquePhysicalCursor(String text, LineMatcher matcher) {
+        int cursor = 0, found = 0;
+        for (String source : (text == null ? "" : text).split("\\r?\\n", -1)) {
+            String line = physicalLine(source);
+            if (line.isEmpty()) continue;
+            cursor++;
+            if (!matcher.matches(line)) continue;
+            if (found != 0) return -1;
+            found = cursor;
+        }
+        return found;
+    }
+
+    private static boolean legacyIdentityMatches(String line, String jobId, String timestamp, Type type) {
+        String prefix = "[" + timestamp + "] [" + signalToken(type) + " " + jobId;
+        if (!line.startsWith(prefix)) return false;
+        if (line.length() == prefix.length()) return true;
+        char boundary = line.charAt(prefix.length());
+        return boundary == ']' || Character.isWhitespace(boundary);
+    }
+
+    private static Type storedType(String value) {
+        try { return Type.valueOf(value); }
+        catch (RuntimeException ignored) { return null; }
+    }
+
+    private static String signalToken(Type type) {
+        return switch (type) {
+            case TURN_COMPLETED -> "SELF_RUN_TURN_COMPLETED";
+            case USER_ACTION_REQUIRED -> "SELF_RUN_USER_ACTION_REQUIRED";
+            case PAUSED -> "SELF_RUN_PAUSED";
+            case DONE -> "SELF_RUN_DONE";
+        };
+    }
+
+    private static String physicalLine(String source) {
+        String line = source == null ? "" : source.trim();
+        if (!line.isEmpty() && line.charAt(0) == '\uFEFF') line = line.substring(1).trim();
+        return line;
+    }
+
+    private static boolean canonical(Event event, boolean work) {
+        if (event == null || !event.protocolError.isEmpty()) return false;
+        if (event.type != Type.TURN_COMPLETED) return true;
+        return !work || workProfile(event.raw).valid;
     }
 
     static Event latestCompletion(List<Event> events) {

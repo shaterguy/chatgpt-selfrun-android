@@ -37,6 +37,32 @@ final class SelfRunRestartPolicy {
                 : SelfRunStore.PHASE_SEND_CONTINUE;
     }
 
+    static DriveSignalParser.Event restartCompletion(DriveSignalParser.Scan scan, JSONObject snapshot) {
+        int stoppedCursor = snapshot == null ? 0 : Math.max(0, snapshot.optInt("driveSignalCursor", 0));
+        boolean hadPendingCompletion = snapshot != null
+                && DriveSignalParser.Type.TURN_COMPLETED.name().equals(
+                        snapshot.optString("pendingDriveSignalType", ""));
+        return restartCompletion(scan, stoppedCursor, hadPendingCompletion);
+    }
+
+    static DriveSignalParser.Event restartCompletion(DriveSignalParser.Scan scan, int stoppedCursor,
+                                                      boolean hadPendingCompletion) {
+        if (scan == null) return null;
+        DriveSignalParser.Event completion = DriveSignalParser.latestCompletion(scan.unseen);
+        DriveSignalParser.Event blocking = DriveSignalParser.latestBlocking(scan.unseen);
+        if (completion != null && completion.protocolError.isEmpty()
+                && (blocking == null || completion.cursor > blocking.cursor)) {
+            return completion;
+        }
+        if (!hadPendingCompletion) return null;
+        DriveSignalParser.Event latest = scan.latest;
+        int normalizedCursor = Math.max(0, stoppedCursor);
+        if (latest == null || latest.type != DriveSignalParser.Type.TURN_COMPLETED
+                || latest.cursor != normalizedCursor || !latest.protocolError.isEmpty()
+                || DriveSignalParser.hasRecoveryIdField(latest.raw)) return null;
+        return latest;
+    }
+
     static String continuationPrompt(String runId, String replacementDocumentId) {
         String base = "[" + SelfRunProtocol.kstTimestamp(new Date()) + "] "
                 + SelfRunProtocol.continuation(runId);

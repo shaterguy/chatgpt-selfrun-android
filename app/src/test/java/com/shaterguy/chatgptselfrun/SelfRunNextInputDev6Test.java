@@ -81,7 +81,10 @@ public class SelfRunNextInputDev6Test {
 
     @Test public void legacyChatExtensionIsStillIgnoredAndHistoryIsRedacted() {
         String legacyInvalid = line("MODEL=sol REASONING=xhigh");
-        assertEquals(0, DriveSignalParser.scan(legacyInvalid, RUN, 0, SelfRunStore.MODE_CHAT).totalCount);
+        DriveSignalParser.Scan legacyScan = DriveSignalParser.scan(legacyInvalid, RUN, 0, SelfRunStore.MODE_CHAT);
+        assertEquals(1, legacyScan.totalCount);
+        assertTrue(legacyScan.unseen.isEmpty());
+        assertNull(legacyScan.latest);
         String raw = line("NEXT_INPUT_B64URL=" + encode("secret user text"));
         assertFalse(DriveSignalParser.historySafeRaw(raw).contains(encode("secret user text")));
         assertTrue(DriveSignalParser.historySafeRaw(raw).contains("NEXT_INPUT_B64URL=<redacted>"));

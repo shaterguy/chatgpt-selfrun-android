@@ -148,6 +148,31 @@ public final class WorkPreferenceDomWebViewTest {
                 SelfRunContinuationDom.COMPOSER_IDLE);
     }
 
+    @Test public void turnObserverCompletesWhenSendMovesBesideComposerForm() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrl = new AtomicReference<>();
+            CountDownLatch completionSeen = new CountDownLatch(1);
+            loadContinuationFixture(scenario, web,
+                    "<div id='stop' data-selfrun-scope='composer' role='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</div>",
+                    callbackUrl, completionSeen);
+
+            JSONObject armed = evaluate(scenario, web,
+                    SelfRunContinuationDom.observeTurnCompletion(
+                            CONVERSATION_URL, OBSERVER_RUN_ID, OBSERVER_TOKEN, 200L, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+
+            evaluate(scenario, web, "(()=>{document.getElementById('stop').remove();"
+                    + "const composer=document.getElementById('prompt-textarea');composer.setAttribute('aria-disabled','true');"
+                    + "const send=document.createElement('button');send.id='adjacent-send';send.type='button';send.dataset.testid='send-button';send.setAttribute('aria-label','Send message');send.textContent='Send';"
+                    + "document.getElementById('continuation-controls').appendChild(send);return JSON.stringify({status:'IDLE_READY'});})()");
+
+            assertTrue("Adjacent SEND did not complete the common turn observer",
+                    completionSeen.await(5, TimeUnit.SECONDS));
+            assertTrue(callbackUrl.get().contains("selfrun-drive://turn-completed"));
+        }
+    }
+
     @Test public void turnObserverRebindsInPlaceAfterComposerDomReplacement() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
@@ -213,6 +238,31 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("true", read(scenario, web,
                     "String(window.__selfRunDriveTurnObserver===null)"));
             assertEquals(CONVERSATION_URL, read(scenario, web, "location.href"));
+        }
+    }
+
+    @Test public void turnObserverCompletesWhileWebViewRemainsActive() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callbackUrls = new AtomicReference<>("");
+            CountDownLatch callbacks = new CountDownLatch(1);
+            loadContinuationFixture(scenario, web,
+                    "<button type='button' role='button' data-testid='send-button' aria-label='Send prompt'>Send</button>",
+                    callbackUrls, callbacks);
+
+            JSONObject armed = evaluate(scenario, web, SelfRunContinuationDom.observeTurnCompletion(
+                    CONVERSATION_URL, "active-wait-run", "active-wait-token", 50L, false));
+            assertEquals("OBSERVER_ARMED", armed.getString("status"));
+
+            evaluate(scenario, web, "(()=>{const b=document.querySelector('form button');b.dataset.testid='stop-stream-action';b.setAttribute('aria-label','Stop streaming');b.textContent='Stop';return JSON.stringify({status:'STOP'});})()");
+            Thread.sleep(150L);
+            evaluate(scenario, web, "(()=>{const b=document.querySelector('form button');b.dataset.testid='send-button';b.setAttribute('aria-label','Send prompt');b.textContent='Send';return JSON.stringify({status:'SEND'});})()");
+
+            assertTrue("active WebView observer did not report stop and stable completion",
+                    callbacks.await(5, TimeUnit.SECONDS));
+            String observed = callbackUrls.get();
+            assertTrue(observed.contains("selfrun-drive://turn-stop-seen"));
+            assertTrue(observed.contains("selfrun-drive://turn-completed"));
         }
     }
 
@@ -417,8 +467,8 @@ public final class WorkPreferenceDomWebViewTest {
                 @Override public boolean shouldOverrideUrlLoading(WebView ignored, WebResourceRequest request) {
                     String requested = String.valueOf(request.getUrl());
                     if (!requested.startsWith("selfrun-drive://")) return false;
-                    if (callbackUrl != null) callbackUrl.set(requested);
-                    if (callbackSeen != null) callbackSeen.countDown();
+                    if (callbackUrl != null) callbackUrl.updateAndGet(previous -> previous == null || previous.isEmpty() ? requested : previous + "\n" + requested);
+                    if (callbackSeen != null && requested.startsWith("selfrun-drive://turn-completed")) callbackSeen.countDown();
                     return true;
                 }
             });

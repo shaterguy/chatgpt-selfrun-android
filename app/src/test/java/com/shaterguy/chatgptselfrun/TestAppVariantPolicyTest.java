@@ -34,8 +34,8 @@ public final class TestAppVariantPolicyTest {
 
     @Test public void developmentVersionUsesCurrentDevIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.0'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000090"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.6.1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000096"));
     }
 
     @Test public void devPushBuildsOnlyTheTestApplicationChannel() throws Exception {
@@ -56,6 +56,12 @@ public final class TestAppVariantPolicyTest {
         assertTrue(activity.contains("claimProcessId"));
         assertTrue(activity.contains("SelfRunRestartPolicy.processClaimConflicts"));
         assertTrue(activity.contains("requireClaimOwnership();"));
+    }
+
+    @Test public void authDependencyVersionMustRemainIndependentFromAppVersion() throws Exception {
+        String gradle = read("app/build.gradle", "build.gradle");
+        assertTrue(gradle.contains("play-services-auth:21.6.0"));
+        assertFalse(gradle.contains("play-services-auth:21.6.1-dev1"));
     }
 
     private static String read(String first, String second) throws Exception {

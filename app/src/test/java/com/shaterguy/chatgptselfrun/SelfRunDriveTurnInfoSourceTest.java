@@ -17,7 +17,8 @@ public class SelfRunDriveTurnInfoSourceTest {
         assertTrue(store.contains("if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put(\"pendingModel\", value)"));
         assertTrue(store.contains("if(MODE_WORK.equals(mode())&&hasPendingDriveCompletion())return;put(\"pendingReasoning\", value)"));
         assertTrue(service.contains("DriveSignalParser.scan(body,snapshot.runId,0,snapshot.mode)"));
-        assertTrue(service.contains("DriveSignalParser.scan(document.text,snapshot.runId,snapshot.driveSignalCursor,snapshot.mode)"));
+        assertTrue(service.contains("DriveSignalParser.Scan documentScan=DriveSignalParser.scan(document.text,snapshot.runId,0,snapshot.mode)"));
+        assertTrue(service.contains("DriveSignalParser.scan(document.text,snapshot.runId,consumed,snapshot.mode)"));
     }
 
     @Test public void invalidDriveProfileUsesRewriteWithoutAssistantControlState() throws Exception {

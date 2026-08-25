@@ -39,6 +39,7 @@ public final class TurnCompletionWatchdogPolicyTest {
                 "private static String completionObserver", "private static String conversationGuard");
         assertTrue(observer.contains("composerRoot?.parentElement"));
         assertTrue(observer.contains("childList:true,subtree:true,attributes:true"));
+        assertTrue(source("SelfRunContinuationDom.java").contains("const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\\\"button\\\"]')].filter(visible):[];"));
         assertFalse(observer.contains("assistant"));
     }
 
@@ -67,6 +68,20 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertFalse(observer.contains("location.assign"));
         assertFalse(observer.contains("history.go"));
         assertFalse(observer.contains("window.open"));
+    }
+
+    @Test public void activeWaitKeepsWebViewRunningButReleasesWakeLock() throws Exception {
+        String service = source("SelfRunService.java");
+        String activeWait = section(service,
+                "if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){",
+                "if(\"TARGET_ERROR\".equals(status))");
+        String preservedPause = section(service,
+                "private void enterPreservedPause", "private void removeAutomationCallbacks");
+
+        assertTrue(activeWait.contains("releaseWakeLock();"));
+        assertTrue(activeWait.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);"));
+        assertFalse(activeWait.contains("pauseWebView();"));
+        assertTrue(preservedPause.contains("pauseWebView();"));
     }
 
     @Test public void composerRebindMustPreserveTheCumulativeIdleWindow() throws Exception {

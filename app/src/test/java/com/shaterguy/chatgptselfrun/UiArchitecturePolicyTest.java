@@ -104,7 +104,7 @@ public final class UiArchitecturePolicyTest {
         assertTrue(restart.contains("closeButton.setEnabled(!recoveryStarted)"));
         assertTrue(restart.contains("DriveAuthorization.requestSilently"));
         assertTrue(restart.contains("requireClaimOwnership();"));
-        assertTrue(restart.contains("restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, prompt)"));
+        assertTrue(restart.contains("restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, restartCompletion, prompt)"));
         assertFalse(restart.contains("Ui.title(this, \"중지 작업 재시작\")"));
     }
 

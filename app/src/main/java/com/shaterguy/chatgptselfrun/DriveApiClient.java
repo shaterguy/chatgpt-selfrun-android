@@ -12,11 +12,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Set;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 
 /** Minimal Drive v3 and Docs v1 REST client. Tokens are memory-only and never logged. */
 final class DriveApiClient {
@@ -25,13 +27,19 @@ final class DriveApiClient {
     static final String MIME_OCTET_STREAM = "application/octet-stream";
     private static final String GOOGLE_WORKSPACE_MIME_PREFIX = "application/vnd.google-apps.";
     private static final String FILE_FIELDS = "id,name,mimeType,size,parents,trashed,appProperties,version,"
-            + "modifiedTime,webViewLink,isAppAuthorized,shared,capabilities(canAddChildren)";
-    private static final String POLL_FIELDS = "id,mimeType,parents,trashed,version,modifiedTime,shared";
+            + "createdTime,modifiedTime,webViewLink,isAppAuthorized,shared,capabilities(canAddChildren)";
+    private static final String POLL_FIELDS = "id,name,mimeType,parents,trashed,version,createdTime,modifiedTime,shared";
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_DOCUMENT_CHARS = 1_000_000;
+    private static final int MAX_SIGNAL_DOCUMENTS = 2_000;
     private static final int UPLOAD_BUFFER_BYTES = 256 * 1024;
     private static final Set<String> ALLOWED_HOSTS = Collections.unmodifiableSet(new HashSet<>(
             Arrays.asList("www.googleapis.com", "docs.googleapis.com")));
+
+    private final Object signalSnapshotLock = new Object();
+    private String pendingSignalTurnDocumentId = "";
+    private String pendingSignalRunId = "";
+    private List<Metadata> pendingSignalDocuments = Collections.emptyList();
 
     static final class ApiException extends Exception {
         final int status;
@@ -57,6 +65,7 @@ final class DriveApiClient {
         final String parentId;
         final boolean trashed;
         final String version;
+        final String createdTime;
         final String modifiedTime;
         final String webViewLink;
         final JSONObject appProperties;
@@ -73,6 +82,7 @@ final class DriveApiClient {
             parentId = parents == null || parents.length() != 1 ? "" : parents.optString(0, "");
             trashed = json.optBoolean("trashed", false);
             version = String.valueOf(json.opt("version") == null ? "" : json.opt("version"));
+            createdTime = json.optString("createdTime", "");
             modifiedTime = json.optString("modifiedTime", "");
             webViewLink = json.optString("webViewLink", "");
             appProperties = json.optJSONObject("appProperties") == null
@@ -81,6 +91,23 @@ final class DriveApiClient {
             shared = json.optBoolean("shared", false);
             JSONObject capabilities = json.optJSONObject("capabilities");
             canAddChildren = capabilities != null && capabilities.optBoolean("canAddChildren", false);
+        }
+
+        private Metadata(Metadata source, String pollVersion, String pollModifiedTime) {
+            id = source.id;
+            name = source.name;
+            mimeType = source.mimeType;
+            size = source.size;
+            parentId = source.parentId;
+            trashed = source.trashed;
+            version = pollVersion == null ? "" : pollVersion;
+            createdTime = source.createdTime;
+            modifiedTime = pollModifiedTime == null ? "" : pollModifiedTime;
+            webViewLink = source.webViewLink;
+            appProperties = source.appProperties;
+            isAppAuthorized = source.isAppAuthorized;
+            shared = source.shared;
+            canAddChildren = source.canAddChildren;
         }
     }
 
@@ -111,6 +138,15 @@ final class DriveApiClient {
         }
     }
 
+    private static final class PendingSignalBatch {
+        final String runId;
+        final List<Metadata> documents;
+        PendingSignalBatch(String runId, List<Metadata> documents) {
+            this.runId = runId == null ? "" : runId;
+            this.documents = documents == null ? Collections.emptyList() : documents;
+        }
+    }
+
     String getAccountPermissionId(String accessToken) throws Exception {
         JSONObject json = request("GET", "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)", accessToken, null);
         JSONObject user = json.optJSONObject("user");
@@ -128,7 +164,71 @@ final class DriveApiClient {
     Metadata getPollMetadata(String accessToken, String fileId) throws Exception {
         requireFileId(fileId);
         String endpoint = "https://www.googleapis.com/drive/v3/files/" + fileId + "?supportsAllDrives=true&fields=" + POLL_FIELDS;
-        return new Metadata(request("GET", endpoint, accessToken, null));
+        Metadata turnDocument = new Metadata(request("GET", endpoint, accessToken, null));
+        if (turnDocument.trashed || turnDocument.shared || !MIME_DOCUMENT.equals(turnDocument.mimeType)
+                || !validFileId(turnDocument.parentId) || !SelfRunProtocolRules.validRunId(turnDocument.name)) {
+            stageSignalDocuments(fileId, "", Collections.emptyList());
+            return turnDocument;
+        }
+        List<Metadata> signals = listSignalDocuments(accessToken, turnDocument.name, turnDocument.parentId);
+        stageSignalDocuments(fileId, turnDocument.name, signals);
+        if (signals.isEmpty()) return turnDocument;
+        Metadata latest = signals.get(signals.size() - 1);
+        return new Metadata(turnDocument,
+                "signal:" + latest.id + ":" + latest.modifiedTime,
+                latest.modifiedTime);
+    }
+
+    private List<Metadata> listSignalDocuments(String accessToken, String runId, String parentId) throws Exception {
+        requireParent(parentId);
+        if (!SelfRunProtocolRules.validRunId(runId)) throw new IllegalArgumentException("valid run id required");
+        String q = "'" + parentId + "' in parents and trashed = false and mimeType = '" + MIME_DOCUMENT + "'";
+        String fields = "nextPageToken,files(" + FILE_FIELDS + ")";
+        ArrayList<Metadata> result = new ArrayList<>();
+        String pageToken = "";
+        do {
+            String endpoint = "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true"
+                    + "&q=" + URLEncoder.encode(q, StandardCharsets.UTF_8.name())
+                    + "&fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8.name())
+                    + "&pageSize=1000"
+                    + (pageToken.isEmpty() ? "" : "&pageToken=" + URLEncoder.encode(pageToken, StandardCharsets.UTF_8.name()));
+            JSONObject page = request("GET", endpoint, accessToken, null, false);
+            JSONArray files = page.optJSONArray("files");
+            if (files != null) for (int i = 0; i < files.length(); i++) {
+                JSONObject raw = files.optJSONObject(i);
+                if (raw == null) continue;
+                Metadata candidate = new Metadata(raw);
+                if (DriveSignalDocumentTransport.isCandidate(candidate, runId, parentId)) result.add(candidate);
+                if (result.size() > MAX_SIGNAL_DOCUMENTS) {
+                    throw new IllegalStateException("too many signal documents in one SelfRun job");
+                }
+            }
+            pageToken = page.optString("nextPageToken", "");
+        } while (!pageToken.isEmpty());
+        result.sort(DriveSignalDocumentTransport.comparator(runId));
+        return Collections.unmodifiableList(result);
+    }
+
+    private void stageSignalDocuments(String turnDocumentId, String runId, List<Metadata> documents) {
+        synchronized (signalSnapshotLock) {
+            pendingSignalTurnDocumentId = turnDocumentId == null ? "" : turnDocumentId;
+            pendingSignalRunId = runId == null ? "" : runId;
+            pendingSignalDocuments = documents == null || documents.isEmpty()
+                    ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(documents));
+        }
+    }
+
+    private PendingSignalBatch consumeSignalDocuments(String turnDocumentId) {
+        synchronized (signalSnapshotLock) {
+            if (!turnDocumentId.equals(pendingSignalTurnDocumentId) || pendingSignalDocuments.isEmpty()) {
+                return new PendingSignalBatch("", Collections.emptyList());
+            }
+            PendingSignalBatch batch = new PendingSignalBatch(pendingSignalRunId, pendingSignalDocuments);
+            pendingSignalTurnDocumentId = "";
+            pendingSignalRunId = "";
+            pendingSignalDocuments = Collections.emptyList();
+            return batch;
+        }
     }
 
     Metadata findSingleTurnDocument(String accessToken, String jobId, String parentId) throws Exception {
@@ -290,6 +390,38 @@ final class DriveApiClient {
 
     DocumentSnapshot readDocumentSnapshot(String accessToken, String documentId) throws Exception {
         requireFileId(documentId);
+        PendingSignalBatch batch = consumeSignalDocuments(documentId);
+        if (!batch.documents.isEmpty()) return readSignalDocumentSnapshot(accessToken, batch);
+        return readNativeDocumentSnapshot(accessToken, documentId);
+    }
+
+    private DocumentSnapshot readSignalDocumentSnapshot(String accessToken, PendingSignalBatch batch) throws Exception {
+        if (!SelfRunProtocolRules.validRunId(batch.runId)) throw new IllegalStateException("signal batch run id invalid");
+        StringBuilder text = new StringBuilder();
+        String latestId = "";
+        for (Metadata metadata : batch.documents) {
+            String logical;
+            if (DriveSignalDocumentTransport.needsBodyRead(metadata.name)) {
+                String body = readNativeDocumentSnapshot(accessToken, metadata.id).text;
+                try {
+                    logical = DriveSignalDocumentTransport.materialize(metadata.name, body, batch.runId);
+                } catch (IllegalArgumentException malformedSignal) {
+                    continue;
+                }
+            } else {
+                logical = DriveSignalDocumentTransport.materialize(metadata.name, "", batch.runId);
+            }
+            if (text.length() + logical.length() + 1 > MAX_DOCUMENT_CHARS) {
+                throw new IllegalStateException("signal document log too large");
+            }
+            text.append(logical).append('\n');
+            latestId = metadata.id;
+        }
+        return new DocumentSnapshot(text.toString(), "signal-batch:" + latestId, "", -1, -1, new JSONObject());
+    }
+
+    private DocumentSnapshot readNativeDocumentSnapshot(String accessToken, String documentId) throws Exception {
+        requireFileId(documentId);
         JSONObject document = request("GET", "https://docs.googleapis.com/v1/documents/" + documentId + "?includeTabsContent=true", accessToken, null);
         String revisionId = document.optString("revisionId", "");
         if (revisionId.isEmpty()) throw new IllegalStateException("execution document revisionId missing");
@@ -342,7 +474,7 @@ final class DriveApiClient {
             return true;
         } catch (ApiException api) {
             if (api.status != 400) throw api;
-            DocumentSnapshot current = readDocumentSnapshot(accessToken, documentId);
+            DocumentSnapshot current = readNativeDocumentSnapshot(accessToken, documentId);
             if (current.hasNamedRange(claimName)) return true;
             if (!snapshot.revisionId.equals(current.revisionId)) return false;
             throw api;

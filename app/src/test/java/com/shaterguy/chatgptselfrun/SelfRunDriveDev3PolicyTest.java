@@ -20,15 +20,21 @@ public final class SelfRunDriveDev3PolicyTest {
         assertFalse(service.contains("PHASE_WAIT_INTERNAL_SEND"));
     }
 
-    @Test public void noSignalTimeoutKeepsCurrentProfileAndContinues() throws Exception {
+    @Test public void noSignalTimeoutFailsClosedAndCursorMigrationIsExplicit() throws Exception {
         String store = source("SelfRunStore.java");
-        String begin = section(store, "void beginTurnCompletionWait", "boolean beginPostDomDriveSync");
-        String timeout = section(store, "void continueAfterPostDomDriveTimeout", "void applyDriveSignals");
-        assertTrue(begin.contains("String appliedModel=pendingModel(),appliedReasoning=pendingReasoning()"));
-        assertTrue(begin.contains("putString(\"pendingModel\",appliedModel)"));
-        assertTrue(begin.contains("putString(\"pendingReasoning\",appliedReasoning)"));
-        assertTrue(timeout.contains("MODE_WORK.equals(mode())?PHASE_APPLY_PREFS:PHASE_SEND_CONTINUE"));
-        assertTrue(timeout.contains("현재 설정으로 다음 턴 전송"));
+        String service = source("SelfRunService.java");
+        String parser = source("DriveCommitParser.java");
+        assertTrue(store.contains("DRIVE_SIGNAL_CURSOR_SCHEMA_PHYSICAL = 2"));
+        assertTrue(store.contains("driveSignalCursorSchemaVersion"));
+        assertFalse(store.contains("continueAfterPostDomDriveTimeout"));
+        assertTrue(parser.contains("migrateCursor"));
+        assertTrue(parser.contains("latestCanonical"));
+        assertTrue(service.contains("DRIVE_SIGNAL_CURSOR_MIGRATION_UNRESOLVED"));
+        assertTrue(service.contains("DRIVE_SIGNAL_CURSOR_OUT_OF_RANGE"));
+        assertTrue(service.contains("POST_DOM_DRIVE_SYNC_TIMEOUT"));
+        assertTrue(service.contains("action=pause_fail_closed"));
+        assertTrue(service.contains("isDominantCanonicalControl"));
+        assertFalse(service.contains("action=continue_current_profile"));
     }
 
     @Test public void driveCompletionPayloadCanOverrideProfileAndNextInput() throws Exception {

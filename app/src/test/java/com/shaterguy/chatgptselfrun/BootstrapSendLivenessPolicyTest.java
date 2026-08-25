@@ -13,7 +13,7 @@ public final class BootstrapSendLivenessPolicyTest {
     @Test public void bootstrapSendCallbackUsesExistingFiveSecondGuard() {
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_BOOTSTRAP_SEND));
         assertEquals(5_000L, SelfRunService.CONTINUATION_CALLBACK_TIMEOUT_MS);
-        assertFalse(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
+        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
     }
 
     @Test public void persistentSixtySecondDeadlineFailsClosed() {
