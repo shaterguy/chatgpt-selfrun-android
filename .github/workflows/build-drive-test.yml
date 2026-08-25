@@ -18,45 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # BEGIN TEMP V170 ROLLOVER APPLY
-  apply-v170-rollover-rework:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'chore(drive): trigger rollover rework apply'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Apply verification rework and remove staging helpers
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 tools/apply_v170_rollover_rework.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('.github/workflows/build-drive-test.yml')
-          s=p.read_text(encoding='utf-8')
-          a=s.index('  # BEGIN TEMP V170 ROLLOVER APPLY\n')
-          b=s.index('  # END TEMP V170 ROLLOVER APPLY\n',a)+len('  # END TEMP V170 ROLLOVER APPLY\n')
-          p.write_text(s[:a]+s[b:],encoding='utf-8')
-          PY
-          rm -f tools/apply_v170_rollover_rework.py .github/workflows/apply-v170-rollover-rework.yml
-          git diff --check
-          git status --short
-          test -n "$(git status --porcelain)"
-      - name: Commit bounded rework
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'fix(drive): close rollover verification gaps'
-          git push origin HEAD:selfrun-drive/v1.7.0-dev1
-  # END TEMP V170 ROLLOVER APPLY
-
   build-test-app:
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -377,7 +338,7 @@ jobs:
             bash -o pipefail -c
             'set -euo pipefail;
             gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest;
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest;
             adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
             FORMAL_EXPECTED_VERSION="1.6.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"
