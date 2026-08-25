@@ -10,14 +10,15 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatReasoningPolicyTest {
-    @Test public void sixChatReasoningSelectionsMapLeftToRight() {
+    @Test public void sevenChatReasoningSelectionsMapLeftToRight() {
         assertEquals(0, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.INSTANT));
         assertEquals(1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.MEDIUM));
         assertEquals(2, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.HIGH));
         assertEquals(3, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.EXTRA_HIGH));
-        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));
-        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));
-        assertEquals(ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.normalize("pro"));
+        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO));
+        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));
+        assertEquals(6, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));
+        assertEquals(ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.normalize("pro"));
         assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
     }
 

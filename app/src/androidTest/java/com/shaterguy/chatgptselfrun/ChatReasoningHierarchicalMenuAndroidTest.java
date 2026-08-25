@@ -42,6 +42,10 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
         }
     }
 
+    @Test public void englishAdvancedButtonReplacementMenuAppliesBareProWithoutSliderMutation() throws Exception {
+        assertEnglishProSelection(ChatReasoningPreferenceStore.PRO, "pro", "Pro");
+    }
+
     @Test public void englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation() throws Exception {
         assertEnglishProSelection(ChatReasoningPreferenceStore.PRO_EXTENDED, "pro_extended", "Pro Extended");
     }
@@ -149,14 +153,14 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
                     <div id="reasoning-row" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Reasoning level Extra high</div>
                   </div>
                 </div>
-                <div id="submenu" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="false">Instant</button><button type="button" role="menuitemradio" aria-checked="false">Medium</button><button type="button" role="menuitemradio" aria-checked="false">High</button><button type="button" role="menuitemradio" aria-checked="true">Extra high</button><button id="pro-standard" type="button" role="menuitemradio" aria-checked="false">Pro Standard</button><button id="pro-extended" type="button" role="menuitemradio" aria-checked="false">Pro Extended</button></div>
+                <div id="submenu" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="false">Instant</button><button type="button" role="menuitemradio" aria-checked="false">Medium</button><button type="button" role="menuitemradio" aria-checked="false">High</button><button type="button" role="menuitemradio" aria-checked="true">Extra high</button><button id="pro" type="button" role="menuitemradio" aria-checked="false">Pro</button><button id="pro-standard" type="button" role="menuitemradio" aria-checked="false">Pro Standard</button><button id="pro-extended" type="button" role="menuitemradio" aria-checked="false">Pro Extended</button></div>
                 <script>
                 window.triggerClicks=0;window.advancedClicks=0;window.reasoningClicks=0;window.inertReasoningClicks=0;window.optionClicks=0;window.sliderEvents=0;
                 const trigger=document.getElementById('reasoning-trigger'),sheet=document.getElementById('sheet'),advanced=document.getElementById('advanced'),simpleView=document.getElementById('simple-view'),advancedView=document.getElementById('advanced-view'),row=document.getElementById('reasoning-row'),submenu=document.getElementById('submenu'),slider=document.getElementById('slider');
                 trigger.onpointerdown=()=>{window.triggerClicks++;const opening=sheet.hidden;sheet.hidden=!opening;trigger.setAttribute('aria-expanded',opening?'true':'false');};
                 advanced.onclick=()=>{window.advancedClicks++;simpleView.dataset.active='false';simpleView.setAttribute('inert','');advancedView.dataset.active='true';advancedView.removeAttribute('inert');advanced.setAttribute('aria-label','Show fewer options');advanced.setAttribute('aria-expanded','true');};
                 row.onclick=()=>{if(row.closest('[inert]')){window.inertReasoningClicks++;return;}window.reasoningClicks++;row.setAttribute('aria-expanded','true');submenu.hidden=false;};
-                const applyPro=event=>{window.optionClicks++;for(const option of submenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent=event.currentTarget.textContent;trigger.setAttribute('aria-expanded','false');sheet.hidden=true;submenu.hidden=true;};document.getElementById('pro-standard').onclick=applyPro;document.getElementById('pro-extended').onclick=applyPro;
+                const applyPro=event=>{window.optionClicks++;for(const option of submenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent=event.currentTarget.textContent;trigger.setAttribute('aria-expanded','false');sheet.hidden=true;submenu.hidden=true;};document.getElementById('pro').onclick=applyPro;document.getElementById('pro-standard').onclick=applyPro;document.getElementById('pro-extended').onclick=applyPro;
                 for(const type of ['input','change','keydown','pointerdown','mousedown','click'])slider.addEventListener(type,()=>window.sliderEvents++);
                 </script></body></html>
                 """;

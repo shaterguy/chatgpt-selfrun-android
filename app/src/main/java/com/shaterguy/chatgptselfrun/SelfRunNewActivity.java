@@ -33,12 +33,14 @@ public final class SelfRunNewActivity extends Activity {
     private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK};
     private static final String[] CHAT_REASONING_LABELS = {
             "현재 Chat 설정 유지", "Instant · 빠른 응답", "Medium · 표준 추론",
-            "High · 확장 추론", "Extra High · 최대 추론", "Pro Extended · 최고 성능"
+            "High · 확장 추론", "Extra High · 최대 추론", "Pro · 최고 성능",
+            "Pro Standard", "Pro Extended"
     };
     private static final String[] CHAT_REASONING_VALUES = {
             ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.INSTANT,
             ChatReasoningPreferenceStore.MEDIUM, ChatReasoningPreferenceStore.HIGH,
-            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO_EXTENDED
+            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO,
+            ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED
     };
     private static final int REQUEST_ATTACHMENTS = 3017;
     private static final String STATE_REQUIREMENT = "requirement";

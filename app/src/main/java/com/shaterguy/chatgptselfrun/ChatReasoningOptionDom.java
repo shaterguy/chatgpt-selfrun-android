@@ -21,6 +21,7 @@ final class ChatReasoningOptionDom {
                   if(/^(extra high|very high|xhigh|maximum|매우\\s*높음|최대)(?:\\s|$)/.test(v))return'xhigh';
                   if(/^(?:pro[\\s·:—-]*standard|프로[\\s·:—-]*표준)(?:\\s|$)/.test(v))return'pro_standard';
                   if(/^(?:pro[\\s·:—-]*extended|프로[\\s·:—-]*확장)(?:\\s|$)/.test(v))return'pro_extended';
+                  if(/^(?:pro|프로)(?:\\s|$)/.test(v))return'pro';
                   if(/^(medium|중간|표준|standard)(?:\\s|$)/.test(v))return'medium';
                   if(/^(high|높음|extended|확장)(?:\\s|$)/.test(v))return'high';
                   if(/^(instant|flash|빠른|즉시)(?:\\s|$)/.test(v))return'instant';

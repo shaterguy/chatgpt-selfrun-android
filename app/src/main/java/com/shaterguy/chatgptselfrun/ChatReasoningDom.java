@@ -6,9 +6,10 @@ final class ChatReasoningDom {
 
     static String inline(String selection, String runId) {
         String requested = ChatReasoningPreferenceStore.normalize(selection);
-        String wanted = ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested) ? "pro" : requested;
-        int ordinal = ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested)
-                ? 4 : ChatReasoningPreferenceStore.ordinal(requested);
+        boolean legacyPro = ChatReasoningPreferenceStore.PRO.equals(requested)
+                || ChatReasoningPreferenceStore.PRO_STANDARD.equals(requested);
+        String wanted = legacyPro ? "pro" : requested;
+        int ordinal = legacyPro ? 4 : ChatReasoningPreferenceStore.ordinal(requested);
         if (ordinal < 0) return "";
         String stateKey = "selfrun-drive:chat-reasoning:" + runId;
         String script = """

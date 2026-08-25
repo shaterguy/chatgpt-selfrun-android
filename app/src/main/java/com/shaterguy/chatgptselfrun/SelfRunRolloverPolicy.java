@@ -21,6 +21,9 @@ final class SelfRunRolloverPolicy {
     static final long CONTINUATION_HARD_FAILURE_GRACE_MS = 5_000L;
     static final long CONTINUATION_SOFT_STALL_GRACE_MS = 15_000L;
     static final long CONTINUATION_NO_START_MAX_WAIT_MS = 60_000L;
+    static final int NO_START_WAIT = 0;
+    static final int NO_START_ROLLOVER = 1;
+    static final int NO_START_PAUSE_TRANSIENT = 2;
 
     private SelfRunRolloverPolicy() {}
 
@@ -47,6 +50,12 @@ final class SelfRunRolloverPolicy {
 
     static boolean retryHttpStatus(int status) {
         return status == 408 || status == 429 || status >= 500;
+    }
+
+    static boolean trustedChatgptServiceHost(String host) {
+        if (host == null) return false;
+        String normalized = host.trim().toLowerCase(java.util.Locale.ROOT);
+        return "chatgpt.com".equals(normalized) || normalized.endsWith(".chatgpt.com");
     }
 
     static boolean rolloverRenderer(String conversationUrl, boolean didCrash) {
@@ -77,12 +86,20 @@ final class SelfRunRolloverPolicy {
         return softContinuationStallStatus(status) && elapsed >= CONTINUATION_SOFT_STALL_GRACE_MS;
     }
 
-    static boolean postDispatchNoStartTimedOut(long phaseStartedAt, boolean sawStop,
-                                                      long validatedSince, long now) {
-        if (sawStop || phaseStartedAt <= 0L || validatedSince <= 0L
-                || now < phaseStartedAt || now < validatedSince) return false;
-        long continuouslyValidatedStart = Math.max(phaseStartedAt, validatedSince);
-        return now - continuouslyValidatedStart >= CONTINUATION_NO_START_MAX_WAIT_MS;
+    static int postDispatchNoStartAction(long dispatchStartedElapsed, boolean sawStop,
+                                                long validatedSinceElapsed, long nowElapsed,
+                                                boolean transientSeen) {
+        if (sawStop || dispatchStartedElapsed <= 0L || validatedSinceElapsed <= 0L
+                || nowElapsed < dispatchStartedElapsed || nowElapsed < validatedSinceElapsed) return NO_START_WAIT;
+        long continuouslyValidatedStart = Math.max(dispatchStartedElapsed, validatedSinceElapsed);
+        if (nowElapsed - continuouslyValidatedStart < CONTINUATION_NO_START_MAX_WAIT_MS) return NO_START_WAIT;
+        return transientSeen ? NO_START_PAUSE_TRANSIENT : NO_START_ROLLOVER;
+    }
+
+    static boolean postDispatchNoStartTimedOut(long dispatchStartedElapsed, boolean sawStop,
+                                                long validatedSinceElapsed, long nowElapsed) {
+        return postDispatchNoStartAction(dispatchStartedElapsed, sawStop, validatedSinceElapsed,
+                nowElapsed, false) == NO_START_ROLLOVER;
     }
 
     static boolean continuationProgressStatus(String status) {

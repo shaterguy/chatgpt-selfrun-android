@@ -131,8 +131,8 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
     }
 
-    @Test public void proStandardAndExtendedRemainDistinctAcrossRollover() {
-        for (String selection : new String[]{ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {
+    @Test public void allCurrentProVariantsRemainDistinctAcrossRollover() {
+        for (String selection : new String[]{ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {
             clearAll();
             SelfRunStore store = predecessor();
             assertTrue(ChatPickerStateStore.saveObserved(context, store.runId(), selection));
@@ -148,7 +148,8 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         long deadline = start + SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS;
         assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, false, 0L, deadline + 1L));
         assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, true, start, deadline + 1L));
-        assertTrue(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, false, start, deadline));
+        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER, SelfRunRolloverPolicy.postDispatchNoStartAction(start, false, start, deadline, false));
+        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT, SelfRunRolloverPolicy.postDispatchNoStartAction(start, false, start, deadline, true));
     }
 
     private SelfRunStore predecessor() {

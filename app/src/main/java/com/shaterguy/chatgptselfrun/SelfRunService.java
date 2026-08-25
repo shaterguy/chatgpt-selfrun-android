@@ -14,6 +14,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebResourceError;
@@ -91,6 +92,10 @@ public final class SelfRunService extends Service {
     private volatile String runtimeRunId = "";
     private String continuationAttemptPrompt = "";
     private String continuationAttemptMarkerId = "";
+    private long postDispatchStartedElapsed;
+    private String postDispatchRunId = "";
+    private boolean postDispatchTransientSeen;
+    private String postDispatchTransientKind = "";
     private boolean turnObserverNeedsIdleBaseline = false;
     private String loggedTurnObserverToken = "";
     private int bootstrapSendCallbackRecoveries;
@@ -169,6 +174,7 @@ public final class SelfRunService extends Service {
         retryAttempt = 0;
         bootstrapSendCallbackRecoveries = 0;
         clearContinuationAttempt();
+        resetPostDispatchNoStartState();
     }
 
     private void resumePendingRollover() {
@@ -669,16 +675,20 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
                     return !allowed;
                 }
                 @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {
-                    if(!launchedRunId.equals(store.runId())||!r.isForMainFrame())return;
+                    if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
                     int status=response.getStatusCode();
+                    if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive()) markPostDispatchTransient("HTTP_"+status);
+                    if(!r.isForMainFrame())return;
                     if(SelfRunRolloverPolicy.rolloverHttpStatus(store.conversationUrl(),networkState.isValidated(),status)){
                         rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_HTTP_GONE);return;
                     }
                     if(SelfRunRolloverPolicy.retryHttpStatus(status)) scheduleWeb(30_000L);
                 }
                 @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                    if(!launchedRunId.equals(store.runId())||!r.isForMainFrame()||!canRun()||!isWebAutomationPhase(store.phase()))return;
+                    if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
                     int code=e.getErrorCode();
+                    if(SelfRunRolloverPolicy.transientWebError(code)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive()) markPostDispatchTransient("WEB_"+code);
+                    if(!r.isForMainFrame())return;
                     if(SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){
                         rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);return;
                     }
@@ -688,8 +698,9 @@ private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))
                         else v.loadUrl(canonicalUrl());
                     },3_000L);
                 }
-                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}
+                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {if(postDispatchWindowActive()&&trustedChatgptServiceUrl(e==null?"":e.getUrl()))markPostDispatchTransient("SSL");runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}
                 @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
+                    if(!detail.didCrash()&&postDispatchWindowActive())markPostDispatchTransient("RENDERER_KILLED");
                     cleanupWebView();
                     if(launchedRunId.equals(store.runId())&&!store.paused()&&isWebAutomationPhase(store.phase())){
                         if(SelfRunRolloverPolicy.rolloverRenderer(store.conversationUrl(),detail.didCrash())) rolloverConversation(SelfRunRolloverPolicy.RENDERER_CRASH);
@@ -724,6 +735,7 @@ private boolean isTurnCompletionCallback(String requested,String launchedRunId){
     }
     maybeCaptureConversationUrl(webView==null?"":webView.getUrl());
     if(!store.beginPostDomDriveSync(token))return true;
+    resetPostDispatchNoStartState();
     turnObserverNeedsIdleBaseline=false;
     runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stable_idle;stabilityMs="+TURN_COMPLETION_STABILITY_MS+";action=drive_immediate");
     releaseWakeLock();handler.post(this::authorizeAndRunDrive);return true;
@@ -731,16 +743,31 @@ private boolean isTurnCompletionCallback(String requested,String launchedRunId){
 
 private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
 
+private void beginPostDispatchNoStartWindow(){postDispatchRunId=store.runId();postDispatchStartedElapsed=SystemClock.elapsedRealtime();postDispatchTransientSeen=false;postDispatchTransientKind="";}
+private boolean postDispatchWindowActive(){return postDispatchStartedElapsed>0L&&store.runId().equals(postDispatchRunId);}
+private long ensurePostDispatchNoStartWindow(){if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();return postDispatchStartedElapsed;}
+private void resetPostDispatchNoStartState(){postDispatchStartedElapsed=0L;postDispatchRunId="";postDispatchTransientSeen=false;postDispatchTransientKind="";}
+private boolean trustedChatgptServiceResource(WebResourceRequest request){if(request==null||request.getUrl()==null)return false;return "https".equalsIgnoreCase(request.getUrl().getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(request.getUrl().getHost());}
+private boolean trustedChatgptServiceUrl(String raw){try{Uri uri=Uri.parse(raw);return "https".equalsIgnoreCase(uri.getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(uri.getHost());}catch(Throwable ignored){return false;}}
+private void markPostDispatchTransient(String kind){if(!postDispatchWindowActive())return;postDispatchTransientSeen=true;postDispatchTransientKind=BootstrapResultPolicy.safe(kind,48);runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+postDispatchTransientKind);}
+
     private void postWebCallback(Runnable callback, long delay) {int epoch = automationEpoch;String runId=store.runId();handler.postDelayed(() -> {if (epoch == automationEpoch && runId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) callback.run();}, delay);}
 
 private void runWebStep(){
     if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;
     String phase=store.phase();
     if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
-            && SelfRunRolloverPolicy.knownConversation(store.conversationUrl())
-            && SelfRunRolloverPolicy.postDispatchNoStartTimedOut(store.phaseStartedAt(),
-                    store.turnObserverSawStop(), networkState.validatedSince(), System.currentTimeMillis())){
-        rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);return;
+            && SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+        long nowElapsed=SystemClock.elapsedRealtime();
+        int noStartAction=SelfRunRolloverPolicy.postDispatchNoStartAction(ensurePostDispatchNoStartWindow(),
+                store.turnObserverSawStop(),networkState.validatedSinceElapsed(),nowElapsed,postDispatchTransientSeen);
+        if(noStartAction==SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT){
+            String kind=postDispatchTransientKind.isEmpty()?"UNKNOWN":postDispatchTransientKind;
+            runLog.record(store,"POST_DISPATCH_NO_START","action=pause_transient;kind="+kind);
+            enterPreservedPause("CHATGPT_POST_DISPATCH_TRANSIENT","ChatGPT 일시적 서비스 오류가 관찰되어 자동 승계를 보류했습니다.",false);
+            NotificationHelper.notifyUser(this,"일시정지",store.status());return;
+        }
+        if(noStartAction==SelfRunRolloverPolicy.NO_START_ROLLOVER){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);return;}
     }
     if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase))resumeWebView();
     maybeCaptureConversationUrl(webView.getUrl());
@@ -929,10 +956,10 @@ private void handleWebResult(String phase,String status,JSONObject result){
     if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){if(!completeBootstrap(result))return;transition(SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND,"ChatGPT bootstrap 설정 준비","context_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_BOOTSTRAP_REASONING,"첫 턴 Work 추론 적용","model_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_BOOTSTRAP_SEND,"첫 프롬프트 전송 준비","reasoning_ready");scheduleWeb(250L);return;}
-    if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnObserverToken();evaluate(phase,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}
+    if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnObserverToken();beginPostDispatchNoStartWindow();evaluate(phase,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}
     if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_APPLY_REASONING,"다음 턴 추론 적용","model_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_SEND_CONTINUE,"Work MODEL/REASONING 적용 완료 · 다음 턴 전송 준비","reasoning_ready_for_send");scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
-    if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnObserverToken();evaluate(phase,SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}
+    if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnObserverToken();beginPostDispatchNoStartWindow();evaluate(phase,SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}
     scheduleWeb(750L);
 }
 
@@ -940,8 +967,8 @@ private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRA
 private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
 private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
-private void continuationSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
-private void bootstrapSubmitted(String detail){if(!canRun())return;String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
 
 private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?rollover.bootstrapPrompt(store):SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
 private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}
@@ -1034,11 +1061,11 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private void enterPreservedPause(String cause, String status, boolean needsContinuation) {
         String prior;
         synchronized (automationStateLock) {synchronized (SelfRunStore.RUN_STATE_LOCK) {prior = store.phase();automationEpoch++; generation++; authorizationInFlight = false; domInFlight = false;store.enterPause(prior, needsContinuation); store.setStatus(status);}}
-        removeAutomationCallbacks(); releaseWakeLock(); pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
+        removeAutomationCallbacks(); resetPostDispatchNoStartState(); releaseWakeLock(); pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
     }
 
     private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);handler.removeCallbacks(driveRetryRunnable);}
-    private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();turnObserverNeedsIdleBaseline=false;synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
+    private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();resetPostDispatchNoStartState();turnObserverNeedsIdleBaseline=false;synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
     private void disconnectTurnObserver(){String token=store==null?"":store.turnObserverToken();WebView active=webView;if(active==null||token.isEmpty())return;try{active.evaluateJavascript(SelfRunContinuationDom.cancelTurnCompletionObserver(token),null);}catch(Throwable ignored){}}
     private void pauseWebView() { if (webView==null||webViewPaused)return;try{webView.onPause();webViewPaused=true;}catch(Throwable ignored){} }
     private void resumeWebView() { if (webView==null||!webViewPaused)return;try{webView.onResume();}catch(Throwable ignored){}finally{webViewPaused=false;} }

@@ -129,12 +129,17 @@ public final class SelfRunContinuationSubmissionVerificationTest {
 
     @Test public void waitTurnCompletionHasBoundedNoStartConvergenceWithoutNewPolling() throws Exception {
         String service = source("SelfRunService.java");
-        assertTrue(service.contains("postDispatchNoStartTimedOut(store.phaseStartedAt()"));
-        assertTrue(service.contains("store.turnObserverSawStop(), networkState.validatedSince()"));
+        assertTrue(service.contains("postDispatchNoStartAction(ensurePostDispatchNoStartWindow()"));
+        assertTrue(service.contains("networkState.validatedSinceElapsed()"));
+        assertTrue(service.contains("NO_START_PAUSE_TRANSIENT"));
         assertTrue(service.contains("CONTINUATION_NO_START_TIMEOUT"));
+        assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status)"));
+        assertTrue(service.contains("markPostDispatchTransient(\"WEB_\"+code)"));
         String network = source("SelfRunNetworkState.java");
         assertTrue(network.contains("registerDefaultNetworkCallback"));
-        assertTrue(network.contains("validatedSince()"));
+        assertTrue(network.contains("validatedSinceElapsed()"));
+        assertTrue(network.contains("SystemClock.elapsedRealtime()"));
+        assertFalse(network.contains("System.currentTimeMillis()"));
         assertFalse(network.contains("setInterval"));
         String observer = SelfRunContinuationDom.observeTurnCompletion(URL, "SR-TEST", "bounded-token", 5000L, false);
         assertTrue(observer.contains("state.sawStop"));
