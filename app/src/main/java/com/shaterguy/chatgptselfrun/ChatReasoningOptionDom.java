@@ -100,13 +100,15 @@ final class ChatReasoningOptionDom {
                 const __sroMouse=(element,type,buttons)=>{try{return element.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,composed:true,button:0,buttons,view:window}));}catch(_){return false;}};
                 const __sroToggleMenu=(element,want)=>{if(!element)return;element.focus?.();const tracked=__sroDesired(element)!==null;if(tracked&&__sroReached(element,want))return;__sroMouse(element,'pointerdown',1);if(tracked&&__sroReached(element,want))return;__sroMouse(element,'mousedown',1);if(tracked&&__sroReached(element,want))return;__sroMouse(element,'pointerup',0);__sroMouse(element,'mouseup',0);if(!tracked||!__sroReached(element,want))element.click?.();};
                 const __sroActivate=element=>{const target=__sroOwner(element)||element;if(!target)return;if(target.getAttribute?.('aria-expanded')!==null||target.hasAttribute?.('aria-haspopup'))__sroToggleMenu(target,true);else{target.focus?.();__sroMouse(target,'pointerdown',1);__sroMouse(target,'mousedown',1);__sroMouse(target,'pointerup',0);__sroMouse(target,'mouseup',0);if(target.isConnected)target.click?.();}};
-                const __sroClose=()=>{if(__sroTrigger&&__sroTrigger.getAttribute?.('aria-expanded')==='true'){__sroToggleMenu(__sroTrigger,false);return'trigger';}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));return'escape';};
+                const __sroEscape=target=>{const node=target&&target.dispatchEvent?target:document;node.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true,composed:true}));node.dispatchEvent(new KeyboardEvent('keyup',{key:'Escape',code:'Escape',bubbles:true,cancelable:true,composed:true}));};
+                const __sroOutsideComposer=()=>{if(!__sroInput)return false;__sroInput.focus?.();__sroMouse(__sroInput,'pointerdown',1);__sroMouse(__sroInput,'mousedown',1);__sroMouse(__sroInput,'pointerup',0);__sroMouse(__sroInput,'mouseup',0);if(__sroInput.isConnected)__sroInput.click?.();return true;};
+                const __sroClose=attempt=>{const step=Math.max(1,Number(attempt)||1);if(step===1&&__sroTrigger&&__sroTrigger.getAttribute?.('aria-expanded')==='true'){__sroToggleMenu(__sroTrigger,false);return'trigger';}if(step===2){const active=document.activeElement;__sroEscape(active&&active!==document.body?active:document);return'focused-escape';}if(step>=3&&__sroOutsideComposer()){__sroEscape(__sroInput);return'composer-outside-escape';}__sroEscape(document);return'document-escape';};
                 const __sroMayClick=(count,max)=>Number(count)<1||(__sroSinceActionMs>=__sroRetryMs&&Number(count)<max);
                 if(__sroCaptureOnly){
                   const __sroObserved=__sroSelectedLevels.length===1?__sroSelectedLevels[0]:__sroTriggerLevel;
                   if(__sroObserved){
                     if(__sroPopups.length===0)return __sroReady(__sroObserved,{action:'capture-current'});
-                    if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-captured-current';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose();return result('UI_WAIT','현재 Chat picker 선택값 확인 후 메뉴 닫힘 대기',__sroDiagnostics({action:'close-captured-current',observed:__sroObserved,closeMethod:method}));}
+                    if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-captured-current';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose(__sroState.closeAttempts);return result('UI_WAIT','현재 Chat picker 선택값 확인 후 메뉴 닫힘 대기',__sroDiagnostics({action:'close-captured-current',observed:__sroObserved,closeMethod:method}));}
                     if(__sroElapsedMs>=__sroOverallTimeoutMs||__sroState.attempts>=__sroMaxAttempts)return __sroResult('CHAT_REASONING_MENU_CLOSE_FAILED','현재 Chat picker 선택값 확인 후 메뉴가 닫히지 않았습니다.',{action:'capture-close-timeout',observed:__sroObserved});
                     return __sroResult('UI_WAIT','현재 Chat picker 선택값 확인 후 메뉴 닫힘 대기',{action:'wait-capture-close',observed:__sroObserved});
                   }
@@ -121,13 +123,13 @@ final class ChatReasoningOptionDom {
                 }
                 if(__sroTriggerLevel===__sroWanted){
                   if(__sroPopups.length===0)return __sroReady(__sroTriggerLevel,{action:'already-selected'});
-                  if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-current-match';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose();return result('UI_WAIT','현재 추론 수준이 목표와 같아 열린 메뉴 닫힘 확인 대기',__sroDiagnostics({action:'close-current-match',closeMethod:method}));}
+                  if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-current-match';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose(__sroState.closeAttempts);return result('UI_WAIT','현재 추론 수준이 목표와 같아 열린 메뉴 닫힘 확인 대기',__sroDiagnostics({action:'close-current-match',closeMethod:method}));}
                   if(__sroElapsedMs>=__sroOverallTimeoutMs)return __sroResult('CHAT_REASONING_MENU_CLOSE_FAILED','현재 추론 수준 확인 후 메뉴가 닫히지 않았습니다.',{action:'current-match-close-timeout'});
                   return __sroResult('UI_WAIT','현재 추론 수준 확인 후 메뉴 닫힘 대기',{action:'wait-current-match-close'});
                 }
                 if(__sroWantedOption&&selectedState(__sroWantedOption.element)){
                   if(__sroPopups.length===0)return __sroReady(__sroWanted,{action:'selected-option-readback'});
-                  if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-menu';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose();return result('UI_WAIT','Chat 추론 메뉴 닫힘 확인 대기',__sroDiagnostics({action:'close-menu',closeMethod:method}));}
+                  if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-menu';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose(__sroState.closeAttempts);return result('UI_WAIT','Chat 추론 메뉴 닫힘 확인 대기',__sroDiagnostics({action:'close-menu',closeMethod:method}));}
                   if(__sroElapsedMs>=__sroOverallTimeoutMs)return __sroResult('CHAT_REASONING_MENU_CLOSE_FAILED','Chat 추론 선택 후 메뉴가 닫히지 않았습니다.',{action:'menu-close-timeout'});
                   return __sroResult('UI_WAIT','Chat 추론 메뉴 닫힘 대기',{action:'wait-menu-close'});
                 }
