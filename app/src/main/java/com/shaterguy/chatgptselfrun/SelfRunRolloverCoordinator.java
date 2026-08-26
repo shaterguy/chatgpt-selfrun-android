@@ -225,7 +225,10 @@ final class SelfRunRolloverCoordinator {
     }
 
     int incrementLocalFailure(String runId) {
-        return recordLocalFailure(runId, "GENERIC");
+        // A missing evaluateJavascript callback is a transient WebView observation failure,
+        // not proof that the conversation itself can no longer make progress.
+        clearLocalFailures(runId);
+        return 0;
     }
 
     int recordLocalFailure(String runId, String rawKey) {

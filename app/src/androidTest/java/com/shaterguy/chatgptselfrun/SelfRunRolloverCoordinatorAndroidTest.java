@@ -201,6 +201,23 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
     }
 
+    @Test public void callbackTimeoutsDoNotConsumeBudgetOrBridgeHardFailureStreaks() {
+        SelfRunStore store = predecessor();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        String runId = store.runId();
+
+        assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
+        assertEquals(0, coordinator.incrementLocalFailure(runId));
+        assertEquals(0, coordinator.incrementLocalFailure(runId));
+        assertEquals(0, coordinator.incrementLocalFailure(runId));
+        assertFalse(SelfRunRolloverPolicy.localFailureBudgetExhausted(0));
+
+        assertEquals(1, coordinator.recordLocalFailure(runId, SelfRunContinuationDom.UNKNOWN));
+        assertEquals(2, coordinator.recordLocalFailure(runId, "SUBMISSION_FAILED"));
+        assertEquals(3, coordinator.recordLocalFailure(runId, "SCRIPT_ERROR"));
+        assertTrue(SelfRunRolloverPolicy.localFailureBudgetExhausted(3));
+    }
+
     @Test public void allCurrentProVariantsRemainDistinctAcrossRollover() {
         for (String selection : new String[]{ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {
             clearAll();
