@@ -205,7 +205,7 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
                 const trigger=document.getElementById('reasoning-trigger'),menu=document.getElementById('stuck-menu'),item=document.getElementById('stuck-item');
                 trigger.onclick=()=>{window.stuckTriggerClicks++;trigger.setAttribute('aria-expanded','true');menu.hidden=false;};
                 const closeOnEscape=event=>{if(event.key!=='Escape'||menu.hidden)return;window.escapeCloses++;menu.hidden=true;trigger.setAttribute('aria-expanded','false');event.preventDefault();};
-                menu.addEventListener('keydown',closeOnEscape);item.focus();
+                menu.addEventListener('keydown',closeOnEscape);trigger.addEventListener('keydown',closeOnEscape);item.focus();
                 </script></body></html>
                 """;
     }
