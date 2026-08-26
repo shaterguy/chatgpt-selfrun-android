@@ -69,6 +69,7 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("return'composer-outside-escape'"));
         assertTrue(script.contains("return'document-escape'"));
         assertTrue(script.contains("__sroClose(__sroState.closeAttempts)"));
+        assertEquals(3, occurrences(script, "__sroClose(__sroState.closeAttempts)"));
         assertTrue(script.contains("new KeyboardEvent('keydown'"));
         assertTrue(script.contains("new KeyboardEvent('keyup'"));
         assertFalse(script.contains("location.reload"));
@@ -105,6 +106,12 @@ public final class ChatReasoningPolicyTest {
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
         assertTrue(mode.contains("modeTimeoutMs=20000"));
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) count++;
+        return count;
     }
 
     private static String read(String first, String second) throws Exception {
