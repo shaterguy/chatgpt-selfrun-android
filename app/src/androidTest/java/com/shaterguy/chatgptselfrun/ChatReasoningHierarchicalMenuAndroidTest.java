@@ -106,6 +106,34 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
         }
     }
 
+    @Test public void matchingValueWithStuckExpandedTriggerRecoversThroughFocusedEscape() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web, stuckExpandedFixture());
+            String runId = "SR-STUCK-CLOSE";
+            scenario.onActivity(activity -> assertTrue(ChatReasoningPreferenceStore.save(
+                    activity, runId, ChatReasoningPreferenceStore.EXTRA_HIGH)));
+            String script = SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_CHAT, runId);
+
+            JSONObject first = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", first.getString("status"));
+            assertEquals("trigger", first.getJSONObject("diagnostics").getString("closeMethod"));
+            assertEquals("false", read(scenario, web, "String(document.getElementById('stuck-menu').hidden)"));
+
+            Thread.sleep(3_800L);
+            JSONObject second = evaluate(scenario, web, script);
+            assertEquals("UI_WAIT", second.getString("status"));
+            assertEquals("focused-escape", second.getJSONObject("diagnostics").getString("closeMethod"));
+            assertEquals("true", read(scenario, web, "String(document.getElementById('stuck-menu').hidden)"));
+
+            JSONObject ready = evaluate(scenario, web, script);
+            assertEquals(ready.toString(), "READY", ready.getString("status"));
+            assertEquals("already-selected", ready.getJSONObject("diagnostics").getString("action"));
+            assertEquals("1", read(scenario, web, "String(window.stuckTriggerClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.escapeCloses)"));
+        }
+    }
+
     private static JSONObject runToReady(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web, String script) throws Exception {
         JSONObject result = null;
         for (int attempt = 0; attempt < 18; attempt++) {
@@ -162,6 +190,22 @@ public final class ChatReasoningHierarchicalMenuAndroidTest {
                 row.onclick=()=>{if(row.closest('[inert]')){window.inertReasoningClicks++;return;}window.reasoningClicks++;row.setAttribute('aria-expanded','true');submenu.hidden=false;};
                 const applyPro=event=>{window.optionClicks++;for(const option of submenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent=event.currentTarget.textContent;trigger.setAttribute('aria-expanded','false');sheet.hidden=true;submenu.hidden=true;};document.getElementById('pro').onclick=applyPro;document.getElementById('pro-standard').onclick=applyPro;document.getElementById('pro-extended').onclick=applyPro;
                 for(const type of ['input','change','keydown','pointerdown','mousedown','click'])slider.addEventListener(type,()=>window.sliderEvents++);
+                </script></body></html>
+                """;
+    }
+
+    private static String stuckExpandedFixture() {
+        return """
+                <!doctype html><html><head><style>[hidden]{display:none!important}body{min-height:800px}form{margin-top:500px}</style></head><body>
+                <div><button id="chat" aria-selected="true">Chat</button><button id="work" aria-selected="false">Work</button></div>
+                <form><textarea id="prompt-textarea"></textarea><button id="reasoning-trigger" type="button" aria-haspopup="menu" aria-controls="stuck-menu" aria-expanded="true"><span data-animated-slider-trigger="true">Extra high</span></button></form>
+                <div id="stuck-menu" role="menu"><button id="stuck-item" type="button" role="menuitemradio" aria-checked="true">Extra high</button></div>
+                <script>
+                window.stuckTriggerClicks=0;window.escapeCloses=0;
+                const trigger=document.getElementById('reasoning-trigger'),menu=document.getElementById('stuck-menu'),item=document.getElementById('stuck-item');
+                trigger.onclick=()=>{window.stuckTriggerClicks++;trigger.setAttribute('aria-expanded','true');menu.hidden=false;};
+                const closeOnEscape=event=>{if(event.key!=='Escape'||menu.hidden)return;window.escapeCloses++;menu.hidden=true;trigger.setAttribute('aria-expanded','false');event.preventDefault();};
+                menu.addEventListener('keydown',closeOnEscape);item.focus();
                 </script></body></html>
                 """;
     }
