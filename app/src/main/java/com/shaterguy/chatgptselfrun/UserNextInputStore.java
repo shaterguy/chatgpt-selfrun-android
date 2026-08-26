@@ -86,7 +86,8 @@ final class UserNextInputStore {
     static synchronized boolean managesContinuation(String runId) {
         ensureInitialized();
         cleanupReservation();
-        return currentSendContext(runId);
+        return !SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId)
+                && currentSendContext(runId);
     }
 
     static synchronized boolean beginLockedRetryProbe(String runId, String continuationIdentity) {

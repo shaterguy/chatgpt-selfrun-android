@@ -28,6 +28,7 @@ public final class TurnDocumentRetryAndroidTest {
     @Before public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         clearAll();
+        UserNextInputStore.initialize(context);
     }
 
     @After public void tearDown() { clearAll(); }
@@ -68,9 +69,32 @@ public final class TurnDocumentRetryAndroidTest {
         coordinator = new SelfRunRolloverCoordinator(context);
 
         assertFalse(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId));
+        store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
         String next = SelfRunProtocol.driveContinuation(runId);
         assertTrue(next.contains("[SELF_RUN_CONTINUE " + runId + "]"));
         assertFalse(next.contains("SELF_RUN_TURN_DOCUMENT_RETRY"));
+    }
+
+    @Test public void transportRetryDoesNotConsumeLateUserNextInput() {
+        SelfRunStore store = eligibleRun();
+        String runId = store.runId();
+        assertTrue(UserNextInputStore.save(runId, "late user next input"));
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
+                coordinator.beginOrResume(store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
+
+        assertFalse(UserNextInputStore.managesContinuation(runId));
+        assertEquals("late user next input", UserNextInputStore.current(runId));
+
+        String observer = "retryobserver";
+        store.prepareTurnObserver(observer);
+        store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
+        assertEquals("late user next input", UserNextInputStore.current(runId));
+
+        store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
+        String normal = SelfRunProtocol.driveContinuation(runId);
+        assertTrue(normal.contains("[SELF_RUN_CONTINUE " + runId + "]"));
+        assertTrue(normal.endsWith("late user next input"));
     }
 
     @Test public void secondTimeoutRollsOverAndSuccessorGetsFreshRetryBudget() {
