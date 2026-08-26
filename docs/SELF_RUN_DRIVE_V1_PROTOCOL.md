@@ -111,6 +111,8 @@ marker가 없는 signal document의 본문은 signal 판정에 사용하지 않�
 
 native 완료 콜백 직후 앱은 실행턴 문서 본문 변경을 기다리지 않고 Run 폴더의 signal document metadata를 즉시 조회합니다. 마지막으로 소비한 signal cursor 이후 `TURN_COMPLETED`가 있으면 NEXT_INPUT과 Work profile을 적용합니다. 없으면 5초 간격으로 최대 5분 재확인합니다. `createdTime`과 제목 timestamp는 최신 signal 선택에 사용하고, 기존 실행턴 문서 `modifiedTime`은 legacy 호환 경로 외에는 신규 signal 상태가 아닙니다.
 
+5분이 지나도 `TURN_COMPLETED`를 찾지 못한 경우, signal-document transport를 사용하는 현재 Run에서 문서 누락 복구를 아직 사용하지 않았다면 앱은 자동 승계 전에 정확히 한 번 `[SELF_RUN_TURN_DOCUMENT_RETRY <RUN_ID>]`를 같은 conversation에 제출합니다. 이 제어신호는 작업 진행용 CONTINUE가 아니며, ChatGPT는 canonical SelfRun 운영문서에 따라 직전 정상 턴에서 누락된 기존 `SELF_RUN_TURN_COMPLETED` signal document만 다시 생성합니다. 복구 요청이 제출되면 앱은 다시 답변 완료와 Drive signal을 관찰하며, 같은 Run에서 두 번째로 5분 누락이 발생하면 복구신호를 반복하지 않고 기존 `TURN_COMPLETION_SIGNAL_TIMEOUT` 자동승계 경로를 사용합니다. 자동승계 successor는 새로운 RUN_ID이므로 문서 누락 복구 횟수를 predecessor에서 상속하지 않고 새 1회 기회를 가집니다. 복구 제어신호 자체는 NEXT_INPUT을 소비하거나 덧붙이지 않으며, 보류 중인 사용자 NEXT_INPUT은 다음 정상 CONTINUE까지 보존합니다.
+
 제출 성공과 답변 완료는 내부 WebView DOM으로 확정하며 Drive의 별도 수신확인 신호를 기다리거나 재제출 게이트로 사용하지 않습니다. STOP/SEND 완료 판정에 짧은 주기의 반복 polling을 사용하지 않습니다. 입력 전문 readback 뒤 SEND가 활성화된 경우에만 다음 프롬프트를 클릭합니다.
 
 ## Runs folder binding과 OAuth
