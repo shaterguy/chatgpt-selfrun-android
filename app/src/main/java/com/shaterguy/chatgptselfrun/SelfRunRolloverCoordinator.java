@@ -12,6 +12,7 @@ final class SelfRunRolloverCoordinator {
     static final String PHASE_ROLLED_OVER = "ROLLED_OVER";
     static final String RESULT_STARTED = "STARTED";
     static final String RESULT_ALREADY_STARTED = "ALREADY_STARTED";
+    static final String RESULT_TURN_DOCUMENT_RETRY = "TURN_DOCUMENT_RETRY";
     static final String RESULT_LOOP_GUARD = "LOOP_GUARD";
     static final String RESULT_FAILED = "FAILED";
 
@@ -20,7 +21,13 @@ final class SelfRunRolloverCoordinator {
     private static final String LINEAGE_PREFIX = "lineage:";
     private static final String FAILURE_PREFIX = "localFailures:";
     private static final String FAILURE_KEY_PREFIX = "localFailureKey:";
+    private static final String TURN_DOCUMENT_RETRY_OWNER = "turnDocumentRetryOwner";
+    private static final String TURN_DOCUMENT_RETRY_USED = "turnDocumentRetryUsed";
+    private static final String TURN_DOCUMENT_RETRY_PENDING = "turnDocumentRetryPending";
     private static final String STORE_PREFS = "selfrun_drive";
+    private static SharedPreferences retryPrefs;
+    private static SharedPreferences runStatePrefs;
+    private static SharedPreferences.OnSharedPreferenceChangeListener runStateListener;
 
     static final class Result {
         final String status;
@@ -31,7 +38,10 @@ final class SelfRunRolloverCoordinator {
             this.successorRunId = successorRunId == null ? "" : successorRunId;
             this.cause = cause == null ? "" : cause;
         }
-        boolean started() { return RESULT_STARTED.equals(status) || RESULT_ALREADY_STARTED.equals(status); }
+        boolean started() {
+            return RESULT_STARTED.equals(status) || RESULT_ALREADY_STARTED.equals(status)
+                    || RESULT_TURN_DOCUMENT_RETRY.equals(status);
+        }
     }
 
     private final Context app;
@@ -40,6 +50,7 @@ final class SelfRunRolloverCoordinator {
     SelfRunRolloverCoordinator(Context context) {
         app = context.getApplicationContext();
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        initializeTurnDocumentRetryState(app, prefs);
     }
 
     synchronized boolean hasPendingClaim() {
@@ -57,6 +68,10 @@ final class SelfRunRolloverCoordinator {
         }
 
         String cause = SelfRunRolloverPolicy.normalizeCause(rawCause);
+        if (prepareTurnDocumentRetry(store, cause)) {
+            return new Result(RESULT_TURN_DOCUMENT_RETRY, store.runId(), cause);
+        }
+
         String predecessorRunId = store.runId();
         String priorCauses = lineageCauses(predecessorRunId);
         if (new SelfRunHistoryStore(app).rolloverProgressObserved(predecessorRunId)) {
@@ -114,6 +129,89 @@ final class SelfRunRolloverCoordinator {
         }
         if (!store.runId().equals(pred) && !store.runId().equals(succ)) return failed(existing.optString("cause"));
         return startClaimedSuccessor(store, existing);
+    }
+
+    private boolean prepareTurnDocumentRetry(SelfRunStore store, String cause) {
+        String runId = store.runId();
+        if (!SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT.equals(cause)
+                || !SelfRunSignalTransport.isSignalDocumentRun(app, runId)
+                || !SelfRunRolloverPolicy.knownConversation(store.conversationUrl())
+                || !DriveApiClient.validFileId(store.jobFolderId())
+                || !DriveApiClient.validFileId(store.turnDocumentId())
+                || !claimTurnDocumentRetry(runId)) {
+            return false;
+        }
+        try {
+            store.clearLastError();
+            store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
+            store.setStatus("Drive TURN_COMPLETED 문서 누락 · 재생성 요청 1회 전송 준비");
+            clearLocalFailures(runId);
+            return true;
+        } catch (RuntimeException error) {
+            rollbackTurnDocumentRetry(runId);
+            return false;
+        }
+    }
+
+    private boolean claimTurnDocumentRetry(String runId) {
+        if (!SelfRunProtocolRules.validRunId(runId)) return false;
+        synchronized (SelfRunRolloverCoordinator.class) {
+            cleanupTurnDocumentRetryPrompt();
+            String owner = prefs.getString(TURN_DOCUMENT_RETRY_OWNER, "");
+            if (runId.equals(owner) && prefs.getBoolean(TURN_DOCUMENT_RETRY_USED, false)) return false;
+            return prefs.edit().putString(TURN_DOCUMENT_RETRY_OWNER, runId)
+                    .putBoolean(TURN_DOCUMENT_RETRY_USED, true)
+                    .putBoolean(TURN_DOCUMENT_RETRY_PENDING, true).commit();
+        }
+    }
+
+    private void rollbackTurnDocumentRetry(String runId) {
+        synchronized (SelfRunRolloverCoordinator.class) {
+            if (!runId.equals(prefs.getString(TURN_DOCUMENT_RETRY_OWNER, ""))) return;
+            prefs.edit().remove(TURN_DOCUMENT_RETRY_OWNER).remove(TURN_DOCUMENT_RETRY_USED)
+                    .remove(TURN_DOCUMENT_RETRY_PENDING).commit();
+        }
+    }
+
+    static boolean turnDocumentRetryPromptPending(String runId) {
+        synchronized (SelfRunRolloverCoordinator.class) {
+            cleanupTurnDocumentRetryPrompt();
+            return retryPrefs != null && SelfRunProtocolRules.validRunId(runId)
+                    && runId.equals(retryPrefs.getString(TURN_DOCUMENT_RETRY_OWNER, ""))
+                    && retryPrefs.getBoolean(TURN_DOCUMENT_RETRY_PENDING, false);
+        }
+    }
+
+    private static void initializeTurnDocumentRetryState(Context app, SharedPreferences rolloverPrefs) {
+        synchronized (SelfRunRolloverCoordinator.class) {
+            retryPrefs = rolloverPrefs;
+            runStatePrefs = app.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE);
+            if (runStateListener == null) {
+                runStateListener = (sharedPreferences, key) -> {
+                    if ("phase".equals(key) || "runId".equals(key)
+                            || "active".equals(key) || "userStopped".equals(key)) {
+                        cleanupTurnDocumentRetryPrompt();
+                    }
+                };
+                runStatePrefs.registerOnSharedPreferenceChangeListener(runStateListener);
+            }
+            cleanupTurnDocumentRetryPrompt();
+        }
+    }
+
+    private static void cleanupTurnDocumentRetryPrompt() {
+        if (retryPrefs == null || runStatePrefs == null
+                || !retryPrefs.getBoolean(TURN_DOCUMENT_RETRY_PENDING, false)) return;
+        String owner = retryPrefs.getString(TURN_DOCUMENT_RETRY_OWNER, "");
+        String currentRunId = runStatePrefs.getString("runId", "");
+        if (owner.isEmpty() || !owner.equals(currentRunId)) return;
+        String phase = runStatePrefs.getString("phase", SelfRunStore.PHASE_IDLE);
+        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
+                || SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)
+                || SelfRunStore.PHASE_DONE.equals(phase)
+                || SelfRunStore.PHASE_IDLE.equals(phase)) {
+            retryPrefs.edit().putBoolean(TURN_DOCUMENT_RETRY_PENDING, false).commit();
+        }
     }
 
     private Result startClaimedSuccessor(SelfRunStore store, JSONObject state) {

@@ -90,11 +90,23 @@ final class SelfRunProtocol {
         TURN_INFO_REWRITE_GATE.request(runId);
     }
 
+    static String turnDocumentRetry(String runId) {
+        if (!safeCode(runId)) throw new IllegalArgumentException("valid run id required");
+        return "[SELF_RUN_TURN_DOCUMENT_RETRY " + runId + "]";
+    }
+
+    static String driveTurnDocumentRetry(String runId) {
+        return "[" + kstTimestamp(new Date()) + "] " + turnDocumentRetry(runId);
+    }
+
     static String driveContinuation(String runId) {
         return driveContinuation(runId, "");
     }
 
     static String driveContinuation(String runId, String nextInput) {
+        if (SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId)) {
+            return driveTurnDocumentRetry(runId);
+        }
         if (TURN_INFO_REWRITE_GATE.consume(runId)) return turnInfoRewrite(runId);
         String base = "[" + kstTimestamp(new Date()) + "] " + continuation(runId);
         String merged = UserNextInputStore.initialized()
