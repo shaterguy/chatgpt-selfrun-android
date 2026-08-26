@@ -61,6 +61,21 @@ public final class ChatReasoningPolicyTest {
         assertFalse(script.contains("new PointerEvent"));
     }
 
+    @Test public void menuCloseRecoveryUsesDistinctStrategiesBeforeFailingClosed() {
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-CLOSE");
+        assertTrue(script.contains("const __sroClose=attempt=>"));
+        assertTrue(script.contains("return'trigger'"));
+        assertTrue(script.contains("return'focused-escape'"));
+        assertTrue(script.contains("return'composer-outside-escape'"));
+        assertTrue(script.contains("return'document-escape'"));
+        assertTrue(script.contains("__sroClose(__sroState.closeAttempts)"));
+        assertTrue(script.contains("new KeyboardEvent('keydown'"));
+        assertTrue(script.contains("new KeyboardEvent('keyup'"));
+        assertFalse(script.contains("location.reload"));
+        assertFalse(script.contains("window.location"));
+        assertTrue(script.contains("CHAT_REASONING_MENU_CLOSE_FAILED"));
+    }
+
     @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
         String[] statuses = {
                 "CHAT_REASONING_TRIGGER_NOT_FOUND", "CHAT_REASONING_SLIDER_NOT_FOUND",
