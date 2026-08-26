@@ -141,9 +141,11 @@ final class DriveApiClient {
     private static final class PendingSignalBatch {
         final String runId;
         final List<Metadata> documents;
-        PendingSignalBatch(String runId, List<Metadata> documents) {
+        final boolean staged;
+        PendingSignalBatch(String runId, List<Metadata> documents, boolean staged) {
             this.runId = runId == null ? "" : runId;
             this.documents = documents == null ? Collections.emptyList() : documents;
+            this.staged = staged;
         }
     }
 
@@ -162,14 +164,19 @@ final class DriveApiClient {
     }
 
     Metadata getPollMetadata(String accessToken, String fileId) throws Exception {
+        return getPollMetadata(accessToken, fileId, false);
+    }
+
+    Metadata getPollMetadata(String accessToken, String fileId, boolean signalDocumentTransport) throws Exception {
         requireFileId(fileId);
         String endpoint = "https://www.googleapis.com/drive/v3/files/" + fileId + "?supportsAllDrives=true&fields=" + POLL_FIELDS;
         Metadata turnDocument = new Metadata(request("GET", endpoint, accessToken, null));
         if (turnDocument.trashed || turnDocument.shared || !MIME_DOCUMENT.equals(turnDocument.mimeType)
                 || !validFileId(turnDocument.parentId) || !SelfRunProtocolRules.validRunId(turnDocument.name)) {
-            stageSignalDocuments(fileId, "", Collections.emptyList());
+            if (signalDocumentTransport) stageSignalDocuments(fileId, "", Collections.emptyList());
             return turnDocument;
         }
+        if (!signalDocumentTransport) return turnDocument;
         List<Metadata> signals = listSignalDocuments(accessToken, turnDocument.name, turnDocument.parentId);
         stageSignalDocuments(fileId, turnDocument.name, signals);
         if (signals.isEmpty()) return turnDocument;
@@ -220,10 +227,10 @@ final class DriveApiClient {
 
     private PendingSignalBatch consumeSignalDocuments(String turnDocumentId) {
         synchronized (signalSnapshotLock) {
-            if (!turnDocumentId.equals(pendingSignalTurnDocumentId) || pendingSignalDocuments.isEmpty()) {
-                return new PendingSignalBatch("", Collections.emptyList());
+            if (!turnDocumentId.equals(pendingSignalTurnDocumentId)) {
+                return new PendingSignalBatch("", Collections.emptyList(), false);
             }
-            PendingSignalBatch batch = new PendingSignalBatch(pendingSignalRunId, pendingSignalDocuments);
+            PendingSignalBatch batch = new PendingSignalBatch(pendingSignalRunId, pendingSignalDocuments, true);
             pendingSignalTurnDocumentId = "";
             pendingSignalRunId = "";
             pendingSignalDocuments = Collections.emptyList();
@@ -381,17 +388,27 @@ final class DriveApiClient {
     }
 
     void initializeDocument(String accessToken, String documentId, String initialText) throws Exception {
+        initializeDocument(accessToken, documentId, initialText, "");
+    }
+
+    void initializeDocument(String accessToken, String documentId, String initialText,
+                            String requiredRevisionId) throws Exception {
         requireFileId(documentId);
         if (initialText == null || initialText.isEmpty()) throw new IllegalArgumentException("initial text required");
-        JSONObject insert = new JSONObject().put("location", new JSONObject().put("index", 1)).put("text", initialText);
+        JSONObject location = new JSONObject().put("index", 1);
+        JSONObject insert = new JSONObject().put("location", location).put("text", initialText);
         JSONObject body = new JSONObject().put("requests", new JSONArray().put(new JSONObject().put("insertText", insert)));
-        request("POST", "https://docs.googleapis.com/v1/documents/" + documentId + ":batchUpdate", accessToken, body);
+        if (requiredRevisionId != null && !requiredRevisionId.isEmpty()) {
+            body.put("writeControl", new JSONObject().put("requiredRevisionId", requiredRevisionId));
+        }
+        request("POST", "https://docs.googleapis.com/v1/documents/" + documentId + ":batchUpdate",
+                accessToken, body, true, "original requirement write result unknown");
     }
 
     DocumentSnapshot readDocumentSnapshot(String accessToken, String documentId) throws Exception {
         requireFileId(documentId);
         PendingSignalBatch batch = consumeSignalDocuments(documentId);
-        if (!batch.documents.isEmpty()) return readSignalDocumentSnapshot(accessToken, batch);
+        if (batch.staged) return readSignalDocumentSnapshot(accessToken, batch);
         return readNativeDocumentSnapshot(accessToken, documentId);
     }
 
@@ -418,6 +435,10 @@ final class DriveApiClient {
             latestId = metadata.id;
         }
         return new DocumentSnapshot(text.toString(), "signal-batch:" + latestId, "", -1, -1, new JSONObject());
+    }
+
+    DocumentSnapshot readTurnDocumentSnapshot(String accessToken, String documentId) throws Exception {
+        return readNativeDocumentSnapshot(accessToken, documentId);
     }
 
     private DocumentSnapshot readNativeDocumentSnapshot(String accessToken, String documentId) throws Exception {

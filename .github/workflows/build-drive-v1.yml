@@ -162,27 +162,27 @@ jobs:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools build-tools;36.0.0'
-      - name: Download immutable formal 1.6.0 baseline
+      - name: Download immutable formal 1.6.1 baseline
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p formal-baseline
-          gh release download drive-v1.6.0 \
+          gh release download drive-v1.6.1 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v1.6.0.apk' \
+            --pattern 'chatgpt-selfrun-drive-v1.6.1.apk' \
             --dir formal-baseline
-          test -s formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk
+          test -s formal-baseline/chatgpt-selfrun-drive-v1.6.1.apk
       - name: Validate formal update pair and prepare test
         shell: bash
         run: |
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           CURRENT_APK=current-candidate/current-formal.apk
-          BASE_APK=formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk
+          BASE_APK=formal-baseline/chatgpt-selfrun-drive-v1.6.1.apk
           CURRENT_VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           CURRENT_VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           [[ "$CURRENT_VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected formal versionName: $CURRENT_VERSION_NAME" >&2; exit 1; }
-          (( CURRENT_VERSION_CODE > 1000090 ))
+          (( CURRENT_VERSION_CODE > 1000096 ))
           "$BT/apksigner" verify --verbose --print-certs "$BASE_APK" > formal-baseline/base-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > current-candidate/current-cert.txt
           BASE_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' formal-baseline/base-cert.txt | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
@@ -193,15 +193,15 @@ jobs:
           CURRENT_BADGING="$($BT/aapt dump badging "$CURRENT_APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$CURRENT_BADGING"
-          grep -Fq "versionCode='1000090'" <<<"$BASE_BADGING"
-          grep -Fq "versionName='1.6.0'" <<<"$BASE_BADGING"
+          grep -Fq "versionCode='1000096'" <<<"$BASE_BADGING"
+          grep -Fq "versionName='1.6.1'" <<<"$BASE_BADGING"
           grep -Fq "versionCode='$CURRENT_VERSION_CODE'" <<<"$CURRENT_BADGING"
           grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING"
           cat > verify-formal-update.sh <<SH
           #!/usr/bin/env bash
           set -euo pipefail
           PKG='com.shaterguy.chatgptselfrun.drive'
-          BASE_APK='formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk'
+          BASE_APK='formal-baseline/chatgpt-selfrun-drive-v1.6.1.apk'
           CURRENT_APK='current-candidate/current-formal.apk'
           CURRENT_VERSION_NAME='${CURRENT_VERSION_NAME}'
           CURRENT_VERSION_CODE='${CURRENT_VERSION_CODE}'
@@ -212,8 +212,8 @@ jobs:
           uid_from_line() { sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' <<<"\$1"; }
           adb uninstall "\$PKG" >/dev/null 2>&1 || true
           adb install --no-incremental "\$BASE_APK"
-          [[ "\$(package_version)" == '1.6.0' ]] || fail 'unexpected baseline version'
-          [[ "\$(package_version_code)" == '1000090' ]] || fail 'unexpected baseline versionCode'
+          [[ "\$(package_version)" == '1.6.1' ]] || fail 'unexpected baseline version'
+          [[ "\$(package_version_code)" == '1000096' ]] || fail 'unexpected baseline versionCode'
           BEFORE_UID="\$(uid_from_line "\$(package_uid_line)")"
           [[ -n "\$BEFORE_UID" ]] || fail 'baseline UID unavailable'
           adb install -r --no-incremental "\$CURRENT_APK" || fail 'adb install -r failed'

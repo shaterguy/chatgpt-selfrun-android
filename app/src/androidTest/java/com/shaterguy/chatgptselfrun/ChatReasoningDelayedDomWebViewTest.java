@@ -29,7 +29,7 @@ public final class ChatReasoningDelayedDomWebViewTest {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web, delayedTriggerFixture());
-            String script = chatReasoningScript(ChatReasoningPreferenceStore.PRO, "SR-DELAYED-TRIGGER");
+            String script = chatReasoningScript(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-DELAYED-TRIGGER");
 
             JSONObject waitingForTrigger = evaluate(scenario, web, script);
             assertEquals("UI_WAIT", waitingForTrigger.getString("status"));
@@ -50,10 +50,10 @@ public final class ChatReasoningDelayedDomWebViewTest {
             setNow(scenario, web, 42_000L);
             assertEquals("installed", read(scenario, web, "window.installSlider()"));
             JSONObject ready = runToReady(scenario, web, script);
-            assertEquals("4", read(scenario, web, "document.getElementById('slider').value"));
+            assertEquals("3", read(scenario, web, "document.getElementById('slider').value"));
             assertEquals("1", read(scenario, web, "String(window.menuOpenClicks)"));
             assertEquals("1", read(scenario, web, "String(window.menuCloseClicks)"));
-            assertEquals("pro", ready.getJSONObject("diagnostics").getString("observed"));
+            assertEquals("xhigh", ready.getJSONObject("diagnostics").getString("observed"));
             assertTrue(ready.getJSONObject("diagnostics").getLong("sliderWaitElapsedMs") < 24_000L);
         }
     }
@@ -116,7 +116,7 @@ public final class ChatReasoningDelayedDomWebViewTest {
                     ChatReasoningPreferenceStore.MEDIUM,
                     ChatReasoningPreferenceStore.HIGH,
                     ChatReasoningPreferenceStore.EXTRA_HIGH,
-                    ChatReasoningPreferenceStore.PRO,
+                    ChatReasoningPreferenceStore.PRO_STANDARD,
                     ChatReasoningPreferenceStore.INSTANT
             };
             int[] expected = {1, 2, 3, 4, 0};
@@ -125,7 +125,9 @@ public final class ChatReasoningDelayedDomWebViewTest {
                         chatReasoningScript(selections[index], "SR-CUSTOM-" + index));
                 assertEquals(String.valueOf(expected[index]), read(scenario, web,
                         "document.getElementById('slider').getAttribute('aria-valuenow')"));
-                assertEquals(selections[index], ready.getJSONObject("diagnostics").getString("observed"));
+                String expectedObserved = ChatReasoningPreferenceStore.PRO_STANDARD.equals(selections[index])
+                        ? "pro" : selections[index];
+                assertEquals(expectedObserved, ready.getJSONObject("diagnostics").getString("observed"));
             }
             assertTrue(Integer.parseInt(read(scenario, web, "String(window.keyboardEvents)")) >= 8);
             assertEquals("5", read(scenario, web, "String(window.menuOpenClicks)"));
@@ -242,7 +244,7 @@ public final class ChatReasoningDelayedDomWebViewTest {
 
                 String firstSummary = BootstrapRunStateStore.summary(activity, runId);
                 assertTrue(BootstrapRunStateStore.startRun(activity, "SR-BOOTSTRAP-STATE-B",
-                        ChatReasoningPreferenceStore.PRO));
+                        ChatReasoningPreferenceStore.EXTRA_HIGH));
                 assertEquals(firstSummary, BootstrapRunStateStore.summary(activity, runId));
             });
         }

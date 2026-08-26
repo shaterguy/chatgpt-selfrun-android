@@ -10,14 +10,18 @@ final class ChatReasoningOptionDom {
 
     static String inline(String selection, String runId) {
         String wanted = ChatReasoningPreferenceStore.normalize(selection);
+        boolean captureOnly = ChatReasoningPreferenceStore.KEEP.equals(wanted);
         int ordinal = ChatReasoningPreferenceStore.ordinal(wanted);
-        if (ordinal < 0) return "";
+        if (ordinal < 0 && !captureOnly) return "";
         return """
-                const __sroWanted=__WANTED__,__sroWantedOrdinal=__ORDINAL__,__sroRunId=__RUN_ID__;
+                const __sroWanted=__WANTED__,__sroWantedOrdinal=__ORDINAL__,__sroRunId=__RUN_ID__,__sroCaptureOnly=__CAPTURE_ONLY__;
+                if(__sroCaptureOnly&&typeof requestedMode!=='undefined'&&requestedMode==='work')return result('READY','WORK 모드에서는 Chat picker 현재값 캡처를 생략합니다.',{strategy:'advanced-menu',action:'skip-chat-picker-work',currentMode:'work'});
                 const __sroLevel=source=>{
                   let v=exactText(source).replace(/^[✓✔☑●•·\\s]+/,'');
                   if(/^(extra high|very high|xhigh|maximum|매우\\s*높음|최대)(?:\\s|$)/.test(v))return'xhigh';
-                  if(/^(pro|프로)(?:\\s|$)/.test(v))return'pro';
+                  if(/^(?:pro[\\s·:—-]*standard|프로[\\s·:—-]*표준)(?:\\s|$)/.test(v))return'pro_standard';
+                  if(/^(?:pro[\\s·:—-]*extended|프로[\\s·:—-]*확장)(?:\\s|$)/.test(v))return'pro_extended';
+                  if(/^(?:pro|프로)(?:\\s|$)/.test(v))return'pro';
                   if(/^(medium|중간|표준|standard)(?:\\s|$)/.test(v))return'medium';
                   if(/^(high|높음|extended|확장)(?:\\s|$)/.test(v))return'high';
                   if(/^(instant|flash|빠른|즉시)(?:\\s|$)/.test(v))return'instant';
@@ -98,6 +102,23 @@ final class ChatReasoningOptionDom {
                 const __sroActivate=element=>{const target=__sroOwner(element)||element;if(!target)return;if(target.getAttribute?.('aria-expanded')!==null||target.hasAttribute?.('aria-haspopup'))__sroToggleMenu(target,true);else{target.focus?.();__sroMouse(target,'pointerdown',1);__sroMouse(target,'mousedown',1);__sroMouse(target,'pointerup',0);__sroMouse(target,'mouseup',0);if(target.isConnected)target.click?.();}};
                 const __sroClose=()=>{if(__sroTrigger&&__sroTrigger.getAttribute?.('aria-expanded')==='true'){__sroToggleMenu(__sroTrigger,false);return'trigger';}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));return'escape';};
                 const __sroMayClick=(count,max)=>Number(count)<1||(__sroSinceActionMs>=__sroRetryMs&&Number(count)<max);
+                if(__sroCaptureOnly){
+                  const __sroObserved=__sroSelectedLevels.length===1?__sroSelectedLevels[0]:__sroTriggerLevel;
+                  if(__sroObserved){
+                    if(__sroPopups.length===0)return __sroReady(__sroObserved,{action:'capture-current'});
+                    if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-captured-current';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose();return result('UI_WAIT','현재 Chat picker 선택값 확인 후 메뉴 닫힘 대기',__sroDiagnostics({action:'close-captured-current',observed:__sroObserved,closeMethod:method}));}
+                    if(__sroElapsedMs>=__sroOverallTimeoutMs||__sroState.attempts>=__sroMaxAttempts)return __sroResult('CHAT_REASONING_MENU_CLOSE_FAILED','현재 Chat picker 선택값 확인 후 메뉴가 닫히지 않았습니다.',{action:'capture-close-timeout',observed:__sroObserved});
+                    return __sroResult('UI_WAIT','현재 Chat picker 선택값 확인 후 메뉴 닫힘 대기',{action:'wait-capture-close',observed:__sroObserved});
+                  }
+                  if(__sroPopups.length===0&&__sroTrigger){
+                    if(__sroMayClick(__sroState.triggerClicks,2)){__sroState.triggerClicks++;__sroState.lastAction='open-picker-for-capture';__sroState.lastActionAt=__sroNow;__sroSave();__sroActivate(__sroTrigger);return result('UI_WAIT','현재 Chat picker 선택값 readback을 위한 메뉴 열림 대기',__sroDiagnostics({action:'open-picker-for-capture'}));}
+                    if(__sroElapsedMs>=__sroOverallTimeoutMs||__sroState.attempts>=__sroMaxAttempts)return __sroResult('CHAT_REASONING_READBACK_MISMATCH','현재 Chat picker 선택값을 확인하지 못했습니다.',{action:'capture-trigger-timeout'});
+                    return __sroResult('UI_WAIT','현재 Chat picker 메뉴 열림 확인 대기',{action:'wait-capture-trigger'});
+                  }
+                  if(!__sroTrigger&&__sroPopups.length===0&&(__sroElapsedMs>=__sroOverallTimeoutMs||__sroState.attempts>=__sroMaxAttempts))return __sroResult('CHAT_REASONING_TRIGGER_NOT_FOUND','현재 Chat picker를 찾지 못했습니다.',{action:'capture-missing-trigger'});
+                  if(__sroPopups.length>0&&(__sroElapsedMs>=__sroRenderTimeoutMs||__sroState.attempts>=14))return __sroResult('CHAT_REASONING_READBACK_MISMATCH','열린 Chat picker에서 현재 선택값을 확인하지 못했습니다.',{action:'capture-open-popup-timeout'});
+                  return __sroResult('UI_WAIT','현재 Chat picker 선택값 readback 대기',{action:'wait-capture-readback'});
+                }
                 if(__sroTriggerLevel===__sroWanted){
                   if(__sroPopups.length===0)return __sroReady(__sroTriggerLevel,{action:'already-selected'});
                   if(__sroMayClick(__sroState.closeAttempts,3)){__sroState.closeAttempts++;__sroState.lastAction='close-current-match';__sroState.lastActionAt=__sroNow;__sroSave();const method=__sroClose();return result('UI_WAIT','현재 추론 수준이 목표와 같아 열린 메뉴 닫힘 확인 대기',__sroDiagnostics({action:'close-current-match',closeMethod:method}));}
@@ -150,6 +171,7 @@ final class ChatReasoningOptionDom {
                 """
                 .replace("__WANTED__", SelfRunScript.quote(wanted))
                 .replace("__ORDINAL__", String.valueOf(ordinal))
-                .replace("__RUN_ID__", SelfRunScript.quote(runId));
+                .replace("__RUN_ID__", SelfRunScript.quote(runId))
+                .replace("__CAPTURE_ONLY__", String.valueOf(captureOnly));
     }
 }

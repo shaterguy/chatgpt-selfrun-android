@@ -127,6 +127,25 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertFalse(web.contains("loadUrl("));
     }
 
+    @Test public void waitTurnCompletionHasBoundedNoStartConvergenceWithoutNewPolling() throws Exception {
+        String service = source("SelfRunService.java");
+        assertTrue(service.contains("postDispatchNoStartAction(ensurePostDispatchNoStartWindow()"));
+        assertTrue(service.contains("networkState.validatedSinceElapsed()"));
+        assertTrue(service.contains("NO_START_PAUSE_TRANSIENT"));
+        assertTrue(service.contains("CONTINUATION_NO_START_TIMEOUT"));
+        assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status)"));
+        assertTrue(service.contains("markPostDispatchTransient(\"WEB_\"+code)"));
+        String network = source("SelfRunNetworkState.java");
+        assertTrue(network.contains("registerDefaultNetworkCallback"));
+        assertTrue(network.contains("validatedSinceElapsed()"));
+        assertTrue(network.contains("SystemClock.elapsedRealtime()"));
+        assertFalse(network.contains("System.currentTimeMillis()"));
+        assertFalse(network.contains("setInterval"));
+        String observer = SelfRunContinuationDom.observeTurnCompletion(URL, "SR-TEST", "bounded-token", 5000L, false);
+        assertTrue(observer.contains("state.sawStop"));
+        assertFalse(observer.contains("setInterval"));
+    }
+
     private static String source(String name) throws Exception {
         Path p = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(p)) p = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);

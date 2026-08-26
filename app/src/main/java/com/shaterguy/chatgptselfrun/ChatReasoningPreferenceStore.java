@@ -11,6 +11,8 @@ final class ChatReasoningPreferenceStore {
     static final String HIGH = "high";
     static final String EXTRA_HIGH = "xhigh";
     static final String PRO = "pro";
+    static final String PRO_STANDARD = "pro_standard";
+    static final String PRO_EXTENDED = "pro_extended";
 
     private static final String PREFS = "selfrun_drive_chat_reasoning";
     private static final String KEY_RUN_ID = "runId";
@@ -75,6 +77,8 @@ final class ChatReasoningPreferenceStore {
             case HIGH -> 2;
             case EXTRA_HIGH -> 3;
             case PRO -> 4;
+            case PRO_STANDARD -> 5;
+            case PRO_EXTENDED -> 6;
             default -> -1;
         };
     }
@@ -86,6 +90,8 @@ final class ChatReasoningPreferenceStore {
             case HIGH -> "High";
             case EXTRA_HIGH -> "Extra High";
             case PRO -> "Pro";
+            case PRO_STANDARD -> "Pro Standard";
+            case PRO_EXTENDED -> "Pro Extended";
             default -> "현재 Chat 설정 유지";
         };
     }
@@ -93,7 +99,7 @@ final class ChatReasoningPreferenceStore {
     static String normalize(String selection) {
         if (selection == null) return KEEP;
         return switch (selection) {
-            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO -> selection;
+            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO, PRO_STANDARD, PRO_EXTENDED -> selection;
             default -> KEEP;
         };
     }

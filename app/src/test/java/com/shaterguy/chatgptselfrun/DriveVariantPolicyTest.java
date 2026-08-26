@@ -6,7 +6,7 @@ import static org.junit.Assert.*;
 
 public class DriveVariantPolicyTest {
     @Test public void driveIdentityDefaultChatAndKeyboardVisibility() throws Exception {
-        String g=read("app/build.gradle","build.gradle"),a=src("SelfRunNewActivity.java");
+        String g=read("app/build.gradle","build.gradle"),a=src("SelfRunNewActivity.java"),runId=src("SelfRunRunId.java");
         assertTrue(g.matches("(?s).*selfRunDriveVersionCode = [0-9]+.*"));
         assertTrue(g.matches("(?s).*selfRunDriveVersionName = '[0-9]+\\.[0-9]+\\.[0-9]+(-(dev|rc)[0-9]+)?'.*"));
         assertTrue(g.contains("com.shaterguy.chatgptselfrun.drive"));
@@ -24,9 +24,9 @@ public class DriveVariantPolicyTest {
         assertFalse(a.contains("WindowInsets"));
         assertFalse(a.contains("-editor.getScrollY()"));
         assertFalse(a.contains("Math.min(editor.getHeight()"));
-        assertTrue(a.contains("RUN_SUFFIX_LENGTH = 6"));
-        assertTrue(a.contains("Asia/Seoul"));
-        assertFalse(a.contains("UUID.randomUUID"));
+        assertTrue(runId.contains("SUFFIX_LENGTH = 6"));
+        assertTrue(runId.contains("Asia/Seoul"));
+        assertFalse(runId.contains("UUID.randomUUID"));
     }
     @Test public void globalRunsPathAndExistingFolderIdPolicyArePreserved() throws Exception {String setup=src("DriveSetupActivity.java"),service=src("SelfRunService.java"),auth=src("DriveAuthorization.java");assertTrue(setup.contains("/GPT/Self Run/Runs/"));assertFalse(setup.contains("/GPT/Project/Vibe Coding/00_System/SelfRun/Runs/"));assertTrue(service.contains("String base = driveOperationBaseFolderId;"));assertTrue(service.contains("drive.getMetadata(accessToken, base)"));assertTrue(service.contains("DRIVE_BASE_FOLDER_REBIND_REQUIRED"));assertTrue(auth.contains("static final String DRIVE_FILE_SCOPE = \"https://www.googleapis.com/auth/drive.file\";"));assertFalse(auth.contains("\"https://www.googleapis.com/auth/drive\";"));assertFalse(auth.contains("\"https://www.googleapis.com/auth/drive.readonly\";"));}
     @Test public void pickerOAuthScopeIsIsolatedFromRuntimeReadScopes() throws Exception {

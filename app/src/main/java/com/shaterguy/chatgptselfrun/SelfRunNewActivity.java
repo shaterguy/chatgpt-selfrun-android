@@ -22,31 +22,26 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.security.SecureRandom;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.TimeZone;
 
 public final class SelfRunNewActivity extends Activity {
     private static final String[] MODE_LABELS = {"일반 Chat · 추론 정도 선택", "Work · 모델/추론 동적 전환"};
     private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK};
     private static final String[] CHAT_REASONING_LABELS = {
             "현재 Chat 설정 유지", "Instant · 빠른 응답", "Medium · 표준 추론",
-            "High · 확장 추론", "Extra High · 최대 추론", "Pro · 최고 성능"
+            "High · 확장 추론", "Extra High · 최대 추론", "Pro · 최고 성능",
+            "Pro Standard", "Pro Extended"
     };
     private static final String[] CHAT_REASONING_VALUES = {
             ChatReasoningPreferenceStore.KEEP, ChatReasoningPreferenceStore.INSTANT,
             ChatReasoningPreferenceStore.MEDIUM, ChatReasoningPreferenceStore.HIGH,
-            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO
+            ChatReasoningPreferenceStore.EXTRA_HIGH, ChatReasoningPreferenceStore.PRO,
+            ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED
     };
-    private static final SecureRandom RUN_RANDOM = new SecureRandom();
-    private static final char[] RUN_SUFFIX_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
-    private static final int RUN_SUFFIX_LENGTH = 6;
     private static final int REQUEST_ATTACHMENTS = 3017;
     private static final String STATE_REQUIREMENT = "requirement";
     private static final String STATE_MODE = "mode";
@@ -454,9 +449,10 @@ public final class SelfRunNewActivity extends Activity {
             return;
         }
         String project = selectedProjectUrl();
-        String request = requirement.getText().toString().trim();
-        if (request.isEmpty()) {
-            Toast.makeText(this, "셀프런 명령을 입력하세요.", Toast.LENGTH_LONG).show();
+        String request = requirement.getText().toString();
+        String requirementError = SelfRunOriginalRequirement.validationError(request);
+        if (!requirementError.isEmpty()) {
+            Toast.makeText(this, requirementError, Toast.LENGTH_LONG).show();
             return;
         }
         if (!DriveApiClient.validFileId(store.driveRunsBaseFolderId())
@@ -467,7 +463,7 @@ public final class SelfRunNewActivity extends Activity {
         String selectedMode = MODE_VALUES[mode.getSelectedItemPosition()];
         String selectedReasoning = SelfRunStore.MODE_CHAT.equals(selectedMode)
                 ? selectedChatReasoning() : ChatReasoningPreferenceStore.KEEP;
-        String runId = newRunId();
+        String runId = SelfRunRunId.create();
         if (!ChatReasoningPreferenceStore.save(this, runId, selectedReasoning)) {
             Toast.makeText(this, "Chat 추론 정도 설정을 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
             return;
@@ -488,6 +484,11 @@ public final class SelfRunNewActivity extends Activity {
         store.setDefaultProjectUrl(project);
         if (!store.runId().isEmpty()) history.sync(store);
         stopService(new Intent(this, SelfRunService.class));
+        if (!SelfRunSignalTransport.mark(this, runId)) {
+            store.cancelAttachmentGrantHandoff();
+            Toast.makeText(this, "SelfRun signal transport 상태를 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
         try {
             store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments));
             attachmentsHandedOff = true;
@@ -594,13 +595,4 @@ public final class SelfRunNewActivity extends Activity {
                 : projectEntries.get(position - 1).canonicalUrl;
     }
 
-    private static String newRunId() {
-        SimpleDateFormat format = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US);
-        format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
-        StringBuilder suffix = new StringBuilder(RUN_SUFFIX_LENGTH);
-        for (int i = 0; i < RUN_SUFFIX_LENGTH; i++) {
-            suffix.append(RUN_SUFFIX_ALPHABET[RUN_RANDOM.nextInt(RUN_SUFFIX_ALPHABET.length)]);
-        }
-        return "SR-" + format.format(new Date()) + "-" + suffix;
-    }
 }

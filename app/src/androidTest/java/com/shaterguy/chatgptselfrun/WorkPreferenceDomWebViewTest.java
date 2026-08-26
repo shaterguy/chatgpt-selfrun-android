@@ -43,8 +43,8 @@ public final class WorkPreferenceDomWebViewTest {
     }
 
     @Test public void chatReasoningNativeRangeMovesBySemanticSteps() throws Exception {
-        assertChatReasoningFixture(nativeChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
-                "document.getElementById('slider').value", "4");
+        assertChatReasoningFixture(nativeChatReasoningFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
+                "document.getElementById('slider').value", "3");
     }
 
     @Test public void chatReasoningAriaSliderMovesBySemanticSteps() throws Exception {
@@ -60,7 +60,7 @@ public final class WorkPreferenceDomWebViewTest {
     @Test public void chatReasoningReducedRangeRejectsUnavailableLevels() throws Exception {
     assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
             "CHAT_REASONING_OPTION_UNAVAILABLE");
-    assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.PRO,
+    assertChatReasoningTerminal(reducedChatReasoningFixture(), ChatReasoningPreferenceStore.EXTRA_HIGH,
             "CHAT_REASONING_OPTION_UNAVAILABLE");
 }
 

@@ -10,29 +10,37 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatReasoningPolicyTest {
-    @Test public void fiveChatReasoningSelectionsMapLeftToRight() {
+    @Test public void sevenChatReasoningSelectionsMapLeftToRight() {
         assertEquals(0, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.INSTANT));
         assertEquals(1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.MEDIUM));
         assertEquals(2, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.HIGH));
         assertEquals(3, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.EXTRA_HIGH));
         assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO));
+        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));
+        assertEquals(6, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));
+        assertEquals(ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.normalize("pro"));
         assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
     }
 
-    @Test public void keepSelectionSkipsChatReasoningAutomation() {
+    @Test public void keepSelectionCapturesCurrentProductionPickerWithoutSelectingAnotherOption() {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
-        assertEquals("", ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST");
+        assertFalse(script.isEmpty());
+        assertTrue(script.contains("__sroCaptureOnly=true"));
+        assertTrue(script.contains("capture-current"));
+        assertTrue(script.contains("open-picker-for-capture"));
+        assertTrue(script.contains("wait-capture-readback"));
     }
 
     @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {
-        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.PRO, "SR-LEGACY");
+        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-LEGACY");
         assertTrue(script.contains("CHAT_REASONING_SLIDER_NOT_FOUND"));
         assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
         assertTrue(script.contains("__srcOverallTimeoutMs=60000"));
     }
 
     @Test public void advancedMenuScriptObservesSheetAndNeverMutatesSlider() {
-        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO, "SR-ADVANCED");
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO_EXTENDED, "SR-ADVANCED");
         assertTrue(script.contains("strategy:'advanced-menu'"));
         assertTrue(script.contains("open-reasoning-sheet"));
         assertTrue(script.contains("open-advanced-control"));
