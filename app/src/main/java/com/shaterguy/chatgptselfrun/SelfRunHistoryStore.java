@@ -23,8 +23,16 @@ final class SelfRunHistoryStore {
     synchronized boolean sync(SelfRunStore store) {
         if (store == null || store.runId().isEmpty()) return true;
         JSONArray current = read();
+        JSONObject prior = null;
+        for (int i = 0; i < current.length(); i++) {
+            JSONObject item = current.optJSONObject(i);
+            if (item != null && store.runId().equals(item.optString("runId"))) {
+                prior = item;
+                break;
+            }
+        }
         JSONArray next = new JSONArray();
-        next.put(snapshot(store));
+        next.put(snapshot(store, prior));
         for (int i = 0; i < current.length() && next.length() < MAX_RUNS; i++) {
             JSONObject item = current.optJSONObject(i);
             if (item == null || store.runId().equals(item.optString("runId"))) continue;
@@ -54,7 +62,12 @@ final class SelfRunHistoryStore {
         return null;
     }
 
-    private JSONObject snapshot(SelfRunStore store) {
+    synchronized boolean rolloverProgressObserved(String runId) {
+        JSONObject item = get(runId);
+        return item != null && item.optBoolean("rolloverProgressObserved", false);
+    }
+
+    private JSONObject snapshot(SelfRunStore store, JSONObject prior) {
         JSONObject item = new JSONObject();
         try {
             item.put("runId", store.runId());
@@ -94,6 +107,10 @@ final class SelfRunHistoryStore {
             item.put("userStopped", store.userStopped());
             item.put("lastErrorCode", store.lastErrorCode());
             item.put("lastErrorMessage", bounded(store.lastErrorMessage(), 1_000));
+            boolean priorProgress = prior != null && prior.optBoolean("rolloverProgressObserved", false);
+            boolean currentProgress = DriveSignalParser.Type.TURN_COMPLETED.name().equals(store.pendingDriveSignalType())
+                    && !store.pendingDriveSignalRaw().isEmpty();
+            item.put("rolloverProgressObserved", priorProgress || currentProgress);
             item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || SelfRunRolloverCoordinator.PHASE_ROLLED_OVER.equals(store.phase()) || store.userStopped());
             BootstrapRunStateStore.appendHistory(app, store.runId(), item);
         } catch (Exception ignored) {

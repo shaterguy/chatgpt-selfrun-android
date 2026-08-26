@@ -49,9 +49,79 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertEquals(SelfRunRolloverCoordinator.PHASE_ROLLED_OVER, history.optString("phase"));
         assertTrue(history.optBoolean("terminal"));
         String once = store.runId();
-        coordinator.beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        SelfRunRolloverCoordinator.Result blocked = coordinator.beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_LOOP_GUARD, blocked.status);
         assertEquals(once, store.runId());
         assertFalse(coordinator.hasPendingClaim());
+    }
+
+    @Test public void validProgressAllowsSameCauseAcrossSecondAndThirdRollover() throws Exception {
+        SelfRunStore store = predecessor();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        assertTrue(coordinator.beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH).started());
+
+        prepareRolloverEligible(store);
+        recordValidCompletion(store);
+        SelfRunRolloverCoordinator.Result second = coordinator.beginOrResume(
+                store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_STARTED, second.status);
+
+        prepareRolloverEligible(store);
+        recordValidCompletion(store);
+        SelfRunRolloverCoordinator.Result third = coordinator.beginOrResume(
+                store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_STARTED, third.status);
+        assertNotEquals(second.successorRunId, third.successorRunId);
+    }
+
+    @Test public void alternatingCausesWithoutProgressAreStillBounded() throws Exception {
+        SelfRunStore store = predecessor();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        assertTrue(coordinator.beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH).started());
+        prepareRolloverEligible(store);
+        assertTrue(coordinator.beginOrResume(store, SelfRunRolloverPolicy.TARGET_ERROR).started());
+        prepareRolloverEligible(store);
+
+        SelfRunRolloverCoordinator.Result blocked = coordinator.beginOrResume(
+                store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_LOOP_GUARD, blocked.status);
+    }
+
+    @Test public void malformedCompletionDoesNotResetCauseWindow() throws Exception {
+        SelfRunStore store = predecessor();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        assertTrue(coordinator.beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH).started());
+        prepareRolloverEligible(store);
+
+        String raw = "[2026.08.26 | 17:00:00] [SELF_RUN_TURN_COMPLETED " + store.runId()
+                + " NEXT_INPUT_B64URL=INVALID]";
+        DriveSignalParser.Event malformed = new DriveSignalParser.Event(
+                DriveSignalParser.Type.TURN_COMPLETED, "2026.08.26 | 17:00:00", raw, 1,
+                false, "", "NEXT_INPUT_INVALID");
+        store.applyDriveSignals(Collections.singletonList(malformed), System.currentTimeMillis());
+        JSONObject history = new SelfRunHistoryStore(context).get(store.runId());
+        assertNotNull(history);
+        assertFalse(history.optBoolean("rolloverProgressObserved", false));
+
+        SelfRunRolloverCoordinator.Result blocked = coordinator.beginOrResume(
+                store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_LOOP_GUARD, blocked.status);
+    }
+
+    @Test public void progressFlagSurvivesStoreRecreation() throws Exception {
+        SelfRunStore store = predecessor();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        assertTrue(coordinator.beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH).started());
+        prepareRolloverEligible(store);
+        recordValidCompletion(store);
+        String progressedRun = store.runId();
+
+        store = new SelfRunStore(context);
+        assertEquals(progressedRun, store.runId());
+        assertTrue(new SelfRunHistoryStore(context).rolloverProgressObserved(progressedRun));
+        SelfRunRolloverCoordinator.Result next = new SelfRunRolloverCoordinator(context)
+                .beginOrResume(store, SelfRunRolloverPolicy.ROUTE_MISMATCH);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_STARTED, next.status);
     }
 
     @Test public void processRecreationUsesReservedSuccessorIdAndClearsClaim() throws Exception {
@@ -162,11 +232,26 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertTrue(SelfRunSignalTransport.mark(context, runId));
         store.start(runId, SelfRunStore.MODE_CHAT, SelfRunScript.GENERAL_CHAT_URL,
                 "original requirement", Collections.emptyList());
+        prepareRolloverEligible(store);
+        return store;
+    }
+
+    private void prepareRolloverEligible(SelfRunStore store) {
         store.saveJobFolder(JOB);
         store.saveTurnDocument(TURN, "https://docs.google.com/document/d/" + TURN + "/edit");
         store.captureConversationUrl(CONVERSATION);
         assertEquals(CONVERSATION, store.conversationUrl());
-        return store;
+    }
+
+    private void recordValidCompletion(SelfRunStore store) throws Exception {
+        String raw = "[2026.08.26 | 17:00:00] [SELF_RUN_TURN_COMPLETED " + store.runId() + "]";
+        DriveSignalParser.Event completion = new DriveSignalParser.Event(
+                DriveSignalParser.Type.TURN_COMPLETED, "2026.08.26 | 17:00:00", raw, 1,
+                false, "", "");
+        store.applyDriveSignals(Collections.singletonList(completion), System.currentTimeMillis());
+        JSONObject history = new SelfRunHistoryStore(context).get(store.runId());
+        assertNotNull(history);
+        assertTrue(history.optBoolean("rolloverProgressObserved", false));
     }
 
     private void writeClaim(SelfRunStore store, String successor, boolean priorTerminal) throws Exception {

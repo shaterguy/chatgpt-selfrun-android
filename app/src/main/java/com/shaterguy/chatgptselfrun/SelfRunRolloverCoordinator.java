@@ -59,6 +59,9 @@ final class SelfRunRolloverCoordinator {
         String cause = SelfRunRolloverPolicy.normalizeCause(rawCause);
         String predecessorRunId = store.runId();
         String priorCauses = lineageCauses(predecessorRunId);
+        if (new SelfRunHistoryStore(app).rolloverProgressObserved(predecessorRunId)) {
+            priorCauses = "";
+        }
         if (SelfRunRolloverPolicy.containsCause(priorCauses, cause)) {
             return new Result(RESULT_LOOP_GUARD, "", cause);
         }
