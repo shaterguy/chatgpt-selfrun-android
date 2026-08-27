@@ -12,6 +12,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.BootstrapStageAndDirectPickerAndroidTest";
     private static final String HIERARCHICAL_REASONING_TEST =
             "com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest";
+    private static final String BOOTSTRAP_RECONNECT_TEST =
+            "com.shaterguy.chatgptselfrun.BootstrapCanonicalReconnectAndroidTest";
     private static final String WORK_HEADER_CONTINUATION_TEST =
             "com.shaterguy.chatgptselfrun.WorkPreferenceHeaderContinuationAndroidTest";
     private static final String TURN_DOCUMENT_RETRY_TEST =
@@ -22,6 +24,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         appendRequiredClass(effective, PROCESS_RECREATION_TEST);
         appendRequiredClass(effective, BOOTSTRAP_STAGE_TEST);
         appendRequiredClass(effective, HIERARCHICAL_REASONING_TEST);
+        appendRequiredClass(effective, BOOTSTRAP_RECONNECT_TEST);
         appendRequiredClass(effective, WORK_HEADER_CONTINUATION_TEST);
         appendRequiredClass(effective, TURN_DOCUMENT_RETRY_TEST);
         super.onCreate(effective);
