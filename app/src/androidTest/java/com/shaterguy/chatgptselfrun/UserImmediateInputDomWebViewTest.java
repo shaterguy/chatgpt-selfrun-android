@@ -25,15 +25,16 @@ public final class UserImmediateInputDomWebViewTest {
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
     private static final String INPUT = "change direction now";
 
-    @Test public void activeResponseWithEnabledSendClicksExactlyOnce() throws Exception {
+    @Test public void stopToSendReplacementClicksExactlyOnce() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            loadFixture(scenario, web, true, true);
+            loadFixture(scenario, web, true, true, true);
 
             JSONObject prepared = evaluate(scenario, web,
                     UserImmediateInputDom.prepare(CONVERSATION_URL, INPUT, "send-once"));
             assertEquals(UserImmediateInputDom.PREPARED, prepared.getString("status"));
             assertEquals(INPUT, read(scenario, web, "document.getElementById('prompt-textarea').value"));
+            assertEquals("false", read(scenario, web, "String(!!document.getElementById('stop'))"));
 
             JSONObject resolved = evaluate(scenario, web,
                     UserImmediateInputDom.resolve(CONVERSATION_URL, INPUT, "send-once"));
@@ -68,10 +69,28 @@ public final class UserImmediateInputDomWebViewTest {
         }
     }
 
+    @Test public void sendAppearingWhileStopRemainsDefersToNextTurn() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadFixture(scenario, web, true, true, false);
+
+            JSONObject prepared = evaluate(scenario, web,
+                    UserImmediateInputDom.prepare(CONVERSATION_URL, INPUT, "stop-remains"));
+            assertEquals(UserImmediateInputDom.PREPARED, prepared.getString("status"));
+            assertEquals("true", read(scenario, web, "String(!!document.getElementById('stop'))"));
+
+            JSONObject resolved = evaluate(scenario, web,
+                    UserImmediateInputDom.resolve(CONVERSATION_URL, INPUT, "stop-remains"));
+            assertEquals(UserImmediateInputDom.DEFERRED, resolved.getString("status"));
+            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
+            assertEquals("0", read(scenario, web, "String(window.sendClicks)"));
+        }
+    }
+
     @Test public void responseFinishRaceNeverUsesIdleSendAsImmediateSteering() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            loadFixture(scenario, web, true, true);
+            loadFixture(scenario, web, true, false);
 
             JSONObject prepared = evaluate(scenario, web,
                     UserImmediateInputDom.prepare(CONVERSATION_URL, INPUT, "finish-race"));
@@ -120,6 +139,12 @@ public final class UserImmediateInputDomWebViewTest {
     private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario,
                                     AtomicReference<WebView> web, boolean stopVisible,
                                     boolean enableSendOnInput) throws Exception {
+        loadFixture(scenario, web, stopVisible, enableSendOnInput, false);
+    }
+
+    private static void loadFixture(ActivityScenario<SelfRunNewActivity> scenario,
+                                    AtomicReference<WebView> web, boolean stopVisible,
+                                    boolean enableSendOnInput, boolean replaceStopWithSendOnInput) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
@@ -134,7 +159,12 @@ public final class UserImmediateInputDomWebViewTest {
                     ? "<button id='stop' type='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</button>"
                     : "";
             String listener = enableSendOnInput
-                    ? "document.getElementById('prompt-textarea').addEventListener('input',()=>{document.getElementById('send').style.display='';});"
+                    ? "document.getElementById('prompt-textarea').addEventListener('input',()=>{"
+                    + "document.getElementById('send').style.display='';"
+                    + (replaceStopWithSendOnInput
+                    ? "const stop=document.getElementById('stop');if(stop)stop.remove();"
+                    : "")
+                    + "});"
                     : "";
             String html = "<!doctype html><html><body><main><div id='shell'><form id='composer'>"
                     + "<textarea id='prompt-textarea'></textarea>" + stop

@@ -26,7 +26,7 @@ final class UserImmediateInputDom {
                 + "if(!composerEditable()){writeMarker('deferred','composer_not_editable');return result('" + DEFERRED + "','composer not editable');}"
                 + "if(!empty()&&!same()){writeMarker('deferred','composer_busy');return result('" + DEFERRED + "','composer already contains different text');}"
                 + "if(empty())inputComposer();"
-                + "if(same()){writeMarker('prepared','exact_readback');return result('" + PREPARED + "','exact immediate input prepared');}"
+                + "if(same()){const send=forceSend();if(send&&!runningStop()){writeMarker('prepared_send','stop_to_send');return result('" + PREPARED + "','exact immediate input prepared after Stop-to-Send transition');}writeMarker('prepared','exact_readback');return result('" + PREPARED + "','exact immediate input prepared');}"
                 + "if(!empty())clearComposer();if(empty()){writeMarker('deferred','input_readback_failed');return result('" + DEFERRED + "','input readback failed; composer restored empty');}"
                 + "return result('" + CLEANUP_PENDING + "','input readback failed; cleanup pending');})()";
     }
@@ -43,10 +43,10 @@ final class UserImmediateInputDom {
                 + composerOps() + controls(sendKey)
                 + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
                 + "if(!same()){writeMarker('deferred','composer_changed');return result('" + DEFERRED + "','composer changed before immediate send');}"
-                + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_send');return result('" + DEFERRED + "','assistant finished before SEND decision');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
-                + "const send=forceSend();if(send){writeMarker('send_ready','enabled_send');return result('" + SEND_READY + "','running response has enabled SEND ready');}"
-                + "clearComposer();if(empty()){writeMarker('deferred','send_unavailable');return result('" + DEFERRED + "','running response has no enabled SEND; defer next turn');}"
-                + "return result('" + CLEANUP_PENDING + "','enabled SEND unavailable; cleanup pending');})()";
+                + "if(m.state==='prepared_send'){const send=forceSend();if(send&&!runningStop()){writeMarker('send_ready','stop_to_send');return result('" + SEND_READY + "','Stop changed to enabled SEND after immediate input');}}"
+                + "if(runningStop()){clearComposer();if(empty()){writeMarker('deferred','stop_still_running');return result('" + DEFERRED + "','assistant still exposes Stop after input; defer next turn');}return result('" + CLEANUP_PENDING + "','assistant still running; cleanup pending');}"
+                + "clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_send');return result('" + DEFERRED + "','assistant finished before confirmed Stop-to-Send transition');}"
+                + "return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');})()";
     }
 
     static String click(String conversationUrl, String text, String requestId) {
@@ -61,10 +61,11 @@ final class UserImmediateInputDom {
                 + composerOps() + controls(sendKey)
                 + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
                 + "if(!same()){writeMarker('deferred','composer_changed_before_click');return result('" + DEFERRED + "','composer changed before click');}"
-                + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_click');return result('" + DEFERRED + "','assistant finished before click');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
-                + "const send=forceSend();if(send){writeMarker('clicking','enabled_send');try{send.focus?.();send.click();writeMarker('sent','button_click');return result('" + SENT + "','enabled SEND clicked once');}catch(_){return result('" + CLICK_UNCERTAIN + "','SEND click threw after dispatch attempt');}}"
-                + "clearComposer();if(empty()){writeMarker('deferred','send_lost_before_click');return result('" + DEFERRED + "','enabled SEND lost before click; defer next turn');}"
-                + "return result('" + CLEANUP_PENDING + "','SEND lost; cleanup pending');})()";
+                + "const send=forceSend();if(m.state==='send_ready'&&send&&!runningStop()){writeMarker('clicking','enabled_send');try{send.focus?.();send.click();writeMarker('sent','button_click');return result('" + SENT + "','confirmed Stop-to-Send SEND clicked once');}catch(_){return result('" + CLICK_UNCERTAIN + "','SEND click threw after dispatch attempt');}}"
+                + "if(m.state==='send_ready'){clearComposer();if(empty()){writeMarker('deferred','send_transition_lost_before_click');return result('" + DEFERRED + "','confirmed SEND transition was lost before click; defer next turn');}return result('" + CLEANUP_PENDING + "','SEND transition lost; cleanup pending');}"
+                + "if(runningStop()){clearComposer();if(empty()){writeMarker('deferred','stop_still_running_before_click');return result('" + DEFERRED + "','assistant still exposes Stop before click; defer next turn');}return result('" + CLEANUP_PENDING + "','assistant still running; cleanup pending');}"
+                + "clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_click');return result('" + DEFERRED + "','assistant finished before confirmed immediate click');}"
+                + "return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');})()";
     }
 
     static String cleanup(String conversationUrl, String text, String requestId) {
