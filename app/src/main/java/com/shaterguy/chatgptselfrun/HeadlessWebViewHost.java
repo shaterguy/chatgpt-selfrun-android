@@ -14,6 +14,8 @@ import android.widget.FrameLayout;
 
 /** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
 final class HeadlessWebViewHost {
+    private static volatile WebView activeWebView;
+
     private final WebView webView;
     private final Presentation presentation;
     private final VirtualDisplay virtualDisplay;
@@ -27,6 +29,7 @@ final class HeadlessWebViewHost {
         this.virtualDisplay = virtualDisplay;
         this.surface = surface;
         this.texture = texture;
+        activeWebView = webView;
     }
 
     static HeadlessWebViewHost create(Context context) {
@@ -107,9 +110,12 @@ final class HeadlessWebViewHost {
         }
     }
 
+    static WebView activeWebView() { return activeWebView; }
+
     WebView webView() { return webView; }
 
     void destroy() {
+        if (activeWebView == webView) activeWebView = null;
         try {
             webView.setWebViewClient(null);
             webView.setWebChromeClient(null);
