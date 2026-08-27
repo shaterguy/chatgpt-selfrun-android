@@ -7,6 +7,7 @@ final class UserImmediateInputDom {
     static final String SENT = "IMMEDIATE_INPUT_SENT";
     static final String DEFERRED = "IMMEDIATE_INPUT_DEFERRED";
     static final String CLEANUP_PENDING = "IMMEDIATE_INPUT_CLEANUP_PENDING";
+    static final String CLICK_UNCERTAIN = "IMMEDIATE_INPUT_CLICK_UNCERTAIN";
 
     private UserImmediateInputDom() {}
 
@@ -20,7 +21,8 @@ final class UserImmediateInputDom {
                 + markerOps(requestId) + composer(composerKey)
                 + "if(!composer){writeMarker('deferred','composer_unavailable');return result('" + DEFERRED + "','composer unavailable');}"
                 + composerOps() + controls(sendKey)
-                + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');"
+                + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
+                + "if(!runningStop()){writeMarker('deferred','assistant_not_running');return result('" + DEFERRED + "','assistant response is no longer running');}"
                 + "if(!composerEditable()){writeMarker('deferred','composer_not_editable');return result('" + DEFERRED + "','composer not editable');}"
                 + "if(!empty()&&!same()){writeMarker('deferred','composer_busy');return result('" + DEFERRED + "','composer already contains different text');}"
                 + "if(empty())inputComposer();"
@@ -39,10 +41,11 @@ final class UserImmediateInputDom {
                 + markerOps(requestId) + composer(composerKey)
                 + "if(!composer){writeMarker('deferred','composer_unavailable');return result('" + DEFERRED + "','composer unavailable');}"
                 + composerOps() + controls(sendKey)
-                + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');"
+                + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
                 + "if(!same()){writeMarker('deferred','composer_changed');return result('" + DEFERRED + "','composer changed before immediate send');}"
-                + "const send=forceSend();if(send){writeMarker('send_ready','enabled_send');return result('" + SEND_READY + "','enabled SEND ready');}"
-                + "clearComposer();if(empty()){writeMarker('deferred','send_unavailable');return result('" + DEFERRED + "','enabled SEND unavailable; defer next turn');}"
+                + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_send');return result('" + DEFERRED + "','assistant finished before SEND decision');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
+                + "const send=forceSend();if(send){writeMarker('send_ready','enabled_send');return result('" + SEND_READY + "','running response has enabled SEND ready');}"
+                + "clearComposer();if(empty()){writeMarker('deferred','send_unavailable');return result('" + DEFERRED + "','running response has no enabled SEND; defer next turn');}"
                 + "return result('" + CLEANUP_PENDING + "','enabled SEND unavailable; cleanup pending');})()";
     }
 
@@ -56,11 +59,12 @@ final class UserImmediateInputDom {
                 + markerOps(requestId) + composer(composerKey)
                 + "if(!composer){writeMarker('deferred','composer_unavailable_before_click');return result('" + DEFERRED + "','composer unavailable before click');}"
                 + composerOps() + controls(sendKey)
-                + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');"
+                + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
                 + "if(!same()){writeMarker('deferred','composer_changed_before_click');return result('" + DEFERRED + "','composer changed before click');}"
-                + "const send=forceSend();if(send){writeMarker('clicking','enabled_send');try{send.focus?.();send.click();writeMarker('sent','button_click');return result('" + SENT + "','enabled SEND clicked');}catch(_){writeMarker('cleanup','click_failed');}}"
-                + "if(same())clearComposer();if(empty()){writeMarker('deferred','send_lost_before_click');return result('" + DEFERRED + "','enabled SEND lost before click; defer next turn');}"
-                + "return result('" + CLEANUP_PENDING + "','click failed or SEND lost; cleanup pending');})()";
+                + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_click');return result('" + DEFERRED + "','assistant finished before click');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
+                + "const send=forceSend();if(send){writeMarker('clicking','enabled_send');try{send.focus?.();send.click();writeMarker('sent','button_click');return result('" + SENT + "','enabled SEND clicked once');}catch(_){return result('" + CLICK_UNCERTAIN + "','SEND click threw after dispatch attempt');}}"
+                + "clearComposer();if(empty()){writeMarker('deferred','send_lost_before_click');return result('" + DEFERRED + "','enabled SEND lost before click; defer next turn');}"
+                + "return result('" + CLEANUP_PENDING + "','SEND lost; cleanup pending');})()";
     }
 
     static String cleanup(String conversationUrl, String text, String requestId) {
@@ -71,8 +75,10 @@ final class UserImmediateInputDom {
                 + conversationGuard(conversation) + calibration() + textHelpers(expected)
                 + markerOps(requestId) + composer(composerKey)
                 + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');"
-                + "if(!composer){writeMarker('deferred','composer_gone');return result('" + DEFERRED + "','composer gone');}"
+                + "const ambiguous=m.state==='clicking'||m.state==='clicking_cleaned';"
+                + "if(!composer){if(ambiguous){writeMarker('clicking_cleaned','composer_gone_after_click');return result('" + CLICK_UNCERTAIN + "','composer gone after click attempt');}writeMarker('deferred','composer_gone');return result('" + DEFERRED + "','composer gone');}"
                 + composerOps()
+                + "if(ambiguous){if(same())clearComposer();if(empty()||!same()){writeMarker('clicking_cleaned','cleanup_after_ambiguous_click');return result('" + CLICK_UNCERTAIN + "','post-click cleanup completed without fallback');}return result('" + CLEANUP_PENDING + "','post-click cleanup pending');}"
                 + "if(!same()){writeMarker('deferred','composer_changed');return result('" + DEFERRED + "','different composer content preserved');}"
                 + "clearComposer();if(empty()){writeMarker('deferred','cleanup_complete');return result('" + DEFERRED + "','immediate text removed before next-turn fallback');}"
                 + "return result('" + CLEANUP_PENDING + "','cleanup pending');})()";
@@ -109,9 +115,9 @@ final class UserImmediateInputDom {
                 + "const stopSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:composer-)?stop(?:[-_:]|$)/.test(id)||/\\bstop(?:\\s+(?:generating|streaming|responding))?\\b/.test(text)||/(?:생성|응답)?\\s*(?:중지|정지)/.test(text);};"
                 + "const voiceSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:composer-)?(?:speech|voice|mic|microphone|dictation)(?:-mode|-button)?(?:[-_:]|$)/.test(id)||/\\b(?:start\\s+)?(?:voice(?:\\s+(?:mode|input))?|dictat(?:e|ion)|microphone|mic)\\b/.test(text)||/(?:음성\\s*(?:모드|입력)?|받아쓰기|마이크)/.test(text);};"
                 + "const sendSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:send-button|composer-submit-button)(?:[-_:]|$)/.test(id)||/\\b(?:send|submit)(?:\\s+(?:message|prompt))?\\b|보내기/.test(text);};"
-                + "const isVoice=e=>!!e&&buttonLike(e)&&inComposer(e)&&voiceSemantic(e);"
                 + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
                 + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&!stopSemantic(e)&&sendSemantic(e);"
+                + "const runningStop=()=>[...document.querySelectorAll('button,[role=\"button\"]')].some(e=>visible(e)&&buttonLike(e)&&stopSemantic(e));"
                 + "const forceSend=()=>{const calibrated=__srFind(" + q(sendKey) + ");const buttons=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacent=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!buttons.includes(calibrated)&&!adjacent.includes(calibrated))adjacent.unshift(calibrated);const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(buttons.find(isSend)||adjacent.find(isAdjacentSend));if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return null;return send;};";
     }
 

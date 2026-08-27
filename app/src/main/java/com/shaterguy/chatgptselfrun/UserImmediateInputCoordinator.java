@@ -104,6 +104,7 @@ final class UserImmediateInputCoordinator {
                     return;
                 }
                 if (UserImmediateInputDom.SENT.equals(parsed.status)) { finishSent("prepare marker already sent"); return; }
+                if (UserImmediateInputDom.CLICK_UNCERTAIN.equals(parsed.status)) { cleanupAfterAmbiguousClick(0, "prior click marker recovered"); return; }
                 if (UserImmediateInputDom.PREPARED.equals(parsed.status)) {
                     handler.postDelayed(() -> resolve(0), SEND_SETTLE_MS);
                     return;
@@ -124,7 +125,7 @@ final class UserImmediateInputCoordinator {
         void resolve(int retry) {
             if (finished) return;
             if (!sameRun() || HeadlessWebViewHost.activeWebView() != view) {
-                deferNow("webview changed before resolve");
+                cleanupAndDefer(0, "webview changed before resolve");
                 return;
             }
             if (!immediateEligible(store.active(), store.paused(), store.userStopped(), store.phase(),
@@ -141,12 +142,13 @@ final class UserImmediateInputCoordinator {
                     return;
                 }
                 if (UserImmediateInputDom.SENT.equals(parsed.status)) { finishSent("resolve marker already sent"); return; }
+                if (UserImmediateInputDom.CLICK_UNCERTAIN.equals(parsed.status)) { cleanupAfterAmbiguousClick(0, "prior click marker recovered"); return; }
                 if (UserImmediateInputDom.SEND_READY.equals(parsed.status)) {
                     removeMatchingReservationThenClick();
                     return;
                 }
                 if (UserImmediateInputDom.DEFERRED.equals(parsed.status)) {
-                    deferNow("enabled SEND unavailable");
+                    deferNow("running response has no enabled SEND");
                     return;
                 }
                 if (UserImmediateInputDom.CLEANUP_PENDING.equals(parsed.status)) {
@@ -164,10 +166,10 @@ final class UserImmediateInputCoordinator {
                 cleanupAndDefer(0, "matching reservation could not be released safely");
                 return;
             }
-            click(0);
+            click();
         }
 
-        void click(int retry) {
+        void click() {
             if (finished) return;
             if (!sameRun() || HeadlessWebViewHost.activeWebView() != view
                     || !SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())) {
@@ -177,12 +179,14 @@ final class UserImmediateInputCoordinator {
             evaluate(UserImmediateInputDom.click(conversationUrl, text, requestId), parsed -> {
                 if (finished) return;
                 if (!parsed.valid) {
-                    if (retry < MAX_CALLBACK_RETRIES) {
-                        handler.postDelayed(() -> click(retry + 1), RETRY_MS);
-                    } else cleanupAndDefer(0, "click callback ambiguous");
+                    cleanupAfterAmbiguousClick(0, "click callback ambiguous");
                     return;
                 }
                 if (UserImmediateInputDom.SENT.equals(parsed.status)) { finishSent("enabled SEND clicked"); return; }
+                if (UserImmediateInputDom.CLICK_UNCERTAIN.equals(parsed.status)) {
+                    cleanupAfterAmbiguousClick(0, "click outcome uncertain");
+                    return;
+                }
                 if (UserImmediateInputDom.DEFERRED.equals(parsed.status)) {
                     deferNow("SEND disappeared before click");
                     return;
@@ -191,7 +195,7 @@ final class UserImmediateInputCoordinator {
                     cleanupAndDefer(0, "click cleanup pending");
                     return;
                 }
-                cleanupAndDefer(0, "unexpected click status: " + parsed.status);
+                cleanupAfterAmbiguousClick(0, "unexpected post-dispatch status: " + parsed.status);
             });
         }
 
@@ -199,7 +203,7 @@ final class UserImmediateInputCoordinator {
             if (finished) return;
             if (!sameRun()) { finishFailed("run changed during cleanup"); return; }
             if (HeadlessWebViewHost.activeWebView() != view) {
-                deferNow(reason + "; old webview gone");
+                deferNow(reason + "; old webview gone before any confirmed click");
                 return;
             }
             evaluate(UserImmediateInputDom.cleanup(conversationUrl, text, requestId), parsed -> {
@@ -211,12 +215,37 @@ final class UserImmediateInputCoordinator {
                     return;
                 }
                 if (UserImmediateInputDom.SENT.equals(parsed.status)) { finishSent(reason + "; sent marker recovered"); return; }
+                if (UserImmediateInputDom.CLICK_UNCERTAIN.equals(parsed.status)) { finishFailed(reason + "; click ambiguity blocks fallback"); return; }
                 if (UserImmediateInputDom.DEFERRED.equals(parsed.status)) { deferNow(reason); return; }
                 if (UserImmediateInputDom.CLEANUP_PENDING.equals(parsed.status) && retry < MAX_CLEANUP_RETRIES) {
                     handler.postDelayed(() -> cleanupAndDefer(retry + 1, reason), RETRY_MS);
                     return;
                 }
                 finishFailed(reason + "; cleanup not confirmed");
+            });
+        }
+
+        void cleanupAfterAmbiguousClick(int retry, String reason) {
+            if (finished) return;
+            if (!sameRun() || HeadlessWebViewHost.activeWebView() != view) {
+                finishFailed(reason + "; no next-turn fallback after a possible click");
+                return;
+            }
+            evaluate(UserImmediateInputDom.cleanup(conversationUrl, text, requestId), parsed -> {
+                if (finished) return;
+                if (parsed.valid && UserImmediateInputDom.SENT.equals(parsed.status)) {
+                    finishSent(reason + "; sent marker recovered");
+                    return;
+                }
+                if (parsed.valid && UserImmediateInputDom.CLICK_UNCERTAIN.equals(parsed.status)) {
+                    finishFailed(reason + "; input cleaned when possible; fallback suppressed to prevent duplicate");
+                    return;
+                }
+                if (retry < MAX_CLEANUP_RETRIES) {
+                    handler.postDelayed(() -> cleanupAfterAmbiguousClick(retry + 1, reason), RETRY_MS);
+                    return;
+                }
+                finishFailed(reason + "; fallback suppressed because click result cannot be proven absent");
             });
         }
 
