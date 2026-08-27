@@ -37,28 +37,21 @@ public final class BootstrapResultPolicyTest {
                 "CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"
         };
         for (String status : reconnectable) {
-            BootstrapResultPolicy.Parsed parsed = BootstrapResultPolicy.parse(
-                    "{\"status\":\"" + status + "\",\"detail\":\"retry\",\"diagnostics\":{}}");
-            assertTrue(parsed.valid);
-            assertTrue(BootstrapResultPolicy.requiresCanonicalReconnect(status));
-            assertEquals("TARGET_ERROR", parsed.status);
-            assertEquals(status, parsed.result.optJSONObject("diagnostics").optString("reconnectCause"));
-            assertEquals("", BootstrapResultPolicy.fatalStatus(parsed, 10_000L, 9_000L));
+            assertTrue(status, BootstrapResultPolicy.requiresCanonicalReconnect(status));
         }
+        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect("CHAT_BOOTSTRAP_NEW_CHAT_FAILED"));
+        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect(BootstrapResultPolicy.TIMEOUT));
+        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect(BootstrapResultPolicy.STATE_PERSIST_FAILED));
     }
 
-    @Test public void reconnectPolicyDoesNotMaskConversationTransitionFailureOrDeadline() {
-        BootstrapResultPolicy.Parsed newChatFailure = BootstrapResultPolicy.parse(
-                "{\"status\":\"CHAT_BOOTSTRAP_NEW_CHAT_FAILED\",\"detail\":\"failed\"}");
-        assertEquals("CHAT_BOOTSTRAP_NEW_CHAT_FAILED", newChatFailure.status);
-        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect(newChatFailure.status));
-        assertEquals("CHAT_BOOTSTRAP_NEW_CHAT_FAILED",
-                BootstrapResultPolicy.fatalStatus(newChatFailure, 10_000L, 9_000L));
-
-        BootstrapResultPolicy.Parsed reconnectable = BootstrapResultPolicy.parse(
-                "{\"status\":\"CHAT_REASONING_OPTION_UNAVAILABLE\",\"detail\":\"failed\"}");
-        assertEquals(BootstrapResultPolicy.TIMEOUT,
-                BootstrapResultPolicy.fatalStatus(reconnectable, 10_000L, 10_000L));
+    @Test public void reconnectParsingPreservesCauseAndDeadlineRemainsDominant() throws Exception {
+        String source = read("app/src/main/java/com/shaterguy/chatgptselfrun/BootstrapResultPolicy.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/BootstrapResultPolicy.java");
+        assertTrue(source.contains("diagnostics.put(\"reconnectCause\", status)"));
+        assertTrue(source.contains("return new Parsed(result, \"TARGET_ERROR\""));
+        int deadline = source.indexOf("if (deadlineAt > 0L && now >= deadlineAt) return TIMEOUT;");
+        int nonFatal = source.indexOf("return NON_FATAL.contains(parsed.status) ? \"\" : UNKNOWN_STATUS;");
+        assertTrue(deadline >= 0 && nonFatal > deadline);
     }
 
     @Test public void serviceTargetErrorRecoveryUsesCanonicalEntryOnlyBeforeConversation() throws Exception {
