@@ -117,7 +117,7 @@ final class UserImmediateInputDom {
                 + "const sendSemantic=e=>{const id=testid(e),text=label(e);return /(^|[-_:])(?:send-button|composer-submit-button)(?:[-_:]|$)/.test(id)||/\\b(?:send|submit)(?:\\s+(?:message|prompt))?\\b|보내기/.test(text);};"
                 + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
                 + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&!stopSemantic(e)&&sendSemantic(e);"
-                + "const runningStop=()=>[...document.querySelectorAll('button,[role=\"button\"]')].some(e=>visible(e)&&buttonLike(e)&&stopSemantic(e));"
+                + "const runningStop=()=>[...document.querySelectorAll('button,[role=\"button\"]')].some(e=>visible(e)&&buttonLike(e)&&inComposer(e)&&stopSemantic(e));"
                 + "const forceSend=()=>{const calibrated=__srFind(" + q(sendKey) + ");const buttons=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacent=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!buttons.includes(calibrated)&&!adjacent.includes(calibrated))adjacent.unshift(calibrated);const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(buttons.find(isSend)||adjacent.find(isAdjacentSend));if(!send||send.disabled||send.getAttribute('aria-disabled')==='true')return null;return send;};";
     }
 

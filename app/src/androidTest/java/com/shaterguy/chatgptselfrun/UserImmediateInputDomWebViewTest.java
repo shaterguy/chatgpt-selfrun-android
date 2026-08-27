@@ -87,6 +87,22 @@ public final class UserImmediateInputDomWebViewTest {
         }
     }
 
+    @Test public void stopOutsideComposerNeverMakesIdleSendImmediate() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            loadFixture(scenario, web, false, true);
+            evaluate(scenario, web, "(()=>{const stop=document.createElement('button');stop.id='outside-stop';"
+                    + "stop.type='button';stop.dataset.testid='stop-stream-action';stop.setAttribute('aria-label','Stop streaming');stop.textContent='Stop';"
+                    + "document.getElementById('shell').prepend(stop);return JSON.stringify({status:'SEEDED'});})()");
+
+            JSONObject prepared = evaluate(scenario, web,
+                    UserImmediateInputDom.prepare(CONVERSATION_URL, INPUT, "outside-stop"));
+            assertEquals(UserImmediateInputDom.DEFERRED, prepared.getString("status"));
+            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
+            assertEquals("0", read(scenario, web, "String(window.sendClicks)"));
+        }
+    }
+
     @Test public void differentExistingComposerTextIsPreservedAndDeferred() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
