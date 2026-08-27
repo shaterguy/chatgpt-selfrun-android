@@ -17,6 +17,22 @@ final class BootstrapResultPolicy {
 
     private static final Set<String> NON_FATAL = Set.of(
   "READY", "UI_WAIT", "WAIT", "TARGET_ERROR", "AUTH_REQUIRED");
+    /**
+     * These failures are emitted only after the bootstrap DOM has confirmed that it is on the
+     * new-conversation surface. Reclassifying them as TARGET_ERROR lets the service use its
+     * existing canonical-route recovery (ChatGPT home or the selected project home) without
+     * weakening the persistent bootstrap deadline.
+     */
+    private static final Set<String> CANONICAL_RECONNECT_FAILURES = Set.of(
+  "CHAT_REASONING_TRIGGER_NOT_FOUND",
+  "CHAT_REASONING_SLIDER_NOT_FOUND",
+  "CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND",
+  "CHAT_REASONING_OPTION_UNAVAILABLE",
+  "CHAT_REASONING_READBACK_MISMATCH",
+  "CHAT_REASONING_MENU_CLOSE_FAILED",
+  "CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND",
+  "CHAT_BOOTSTRAP_MODE_READBACK_FAILED",
+  "CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND");
     private static final String[] DIAGNOSTIC_KEYS = {
   "action", "requested", "observed", "verifiedValue", "currentMode",
   "targetFound", "targetSelected", "targetSource", "modeAttempts",
@@ -24,7 +40,7 @@ final class BootstrapResultPolicy {
   "triggerFound", "searchElapsedMs", "stage", "sliderObserved",
   "advancedButtonFound", "calibratedTargetValid", "current", "source",
   "levelFound", "optionFound", "attempts", "elapsedMs", "timeoutMs",
-  "errorName", "errorMessage"
+  "errorName", "errorMessage", "reconnectCause"
     };
 
     private BootstrapResultPolicy() {}
@@ -57,6 +73,15 @@ final class BootstrapResultPolicy {
   JSONObject result = new JSONObject(object.toString());
   String status = result.optString("status", "").trim();
   if (status.isEmpty()) return invalid("missing-status");
+  if (requiresCanonicalReconnect(status)) {
+      JSONObject diagnostics = result.optJSONObject("diagnostics");
+      if (diagnostics == null) {
+          diagnostics = new JSONObject();
+          result.put("diagnostics", diagnostics);
+      }
+      diagnostics.put("reconnectCause", status);
+      return new Parsed(result, "TARGET_ERROR", result.optString("detail", ""), true, "");
+  }
   return new Parsed(result, status, result.optString("detail", ""), true, "");
         } catch (Throwable error) {
   return invalid(error.getClass().getSimpleName());
@@ -70,6 +95,10 @@ final class BootstrapResultPolicy {
   result.put("detail", "WebView callback parse failed");
         } catch (Throwable ignored) {}
         return new Parsed(result, "SCRIPT_ERROR", "WebView callback parse failed", false, reason);
+    }
+
+    static boolean requiresCanonicalReconnect(String status) {
+        return status != null && CANONICAL_RECONNECT_FAILURES.contains(status);
     }
 
     static String fatalStatus(Parsed parsed, long deadlineAt, long now) {
