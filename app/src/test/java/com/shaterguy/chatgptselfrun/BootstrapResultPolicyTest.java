@@ -24,21 +24,21 @@ public final class BootstrapResultPolicyTest {
         assertTrue(source.contains("compactDiagnostics"));
     }
 
-    @Test public void newConversationUiFailuresRequestCanonicalReconnect() {
+    @Test public void newConversationReasoningFailuresRequestCanonicalReconnect() {
         String[] reconnectable = {
                 "CHAT_REASONING_TRIGGER_NOT_FOUND",
                 "CHAT_REASONING_SLIDER_NOT_FOUND",
                 "CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND",
                 "CHAT_REASONING_OPTION_UNAVAILABLE",
                 "CHAT_REASONING_READBACK_MISMATCH",
-                "CHAT_REASONING_MENU_CLOSE_FAILED",
-                "CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND",
-                "CHAT_BOOTSTRAP_MODE_READBACK_FAILED",
-                "CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"
+                "CHAT_REASONING_MENU_CLOSE_FAILED"
         };
         for (String status : reconnectable) {
             assertTrue(status, BootstrapResultPolicy.requiresCanonicalReconnect(status));
         }
+        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
+        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
+        assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect("CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"));
         assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect("CHAT_BOOTSTRAP_NEW_CHAT_FAILED"));
         assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect(BootstrapResultPolicy.TIMEOUT));
         assertFalse(BootstrapResultPolicy.requiresCanonicalReconnect(BootstrapResultPolicy.STATE_PERSIST_FAILED));

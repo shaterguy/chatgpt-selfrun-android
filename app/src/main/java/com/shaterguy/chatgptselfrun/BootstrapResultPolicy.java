@@ -18,10 +18,10 @@ final class BootstrapResultPolicy {
     private static final Set<String> NON_FATAL = Set.of(
   "READY", "UI_WAIT", "WAIT", "TARGET_ERROR", "AUTH_REQUIRED");
     /**
-     * These failures are emitted only after the bootstrap DOM has confirmed that it is on the
-     * new-conversation surface. Reclassifying them as TARGET_ERROR lets the service use its
-     * existing canonical-route recovery (ChatGPT home or the selected project home) without
-     * weakening the persistent bootstrap deadline.
+     * These failures are emitted only by the Chat reasoning picker after the bootstrap DOM has
+     * confirmed the new-conversation surface. Reclassifying them as TARGET_ERROR lets the
+     * service use its existing canonical-route recovery (ChatGPT home or selected project home)
+     * without weakening the persistent bootstrap deadline.
      */
     private static final Set<String> CANONICAL_RECONNECT_FAILURES = Set.of(
   "CHAT_REASONING_TRIGGER_NOT_FOUND",
@@ -29,10 +29,7 @@ final class BootstrapResultPolicy {
   "CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND",
   "CHAT_REASONING_OPTION_UNAVAILABLE",
   "CHAT_REASONING_READBACK_MISMATCH",
-  "CHAT_REASONING_MENU_CLOSE_FAILED",
-  "CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND",
-  "CHAT_BOOTSTRAP_MODE_READBACK_FAILED",
-  "CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND");
+  "CHAT_REASONING_MENU_CLOSE_FAILED");
     private static final String[] DIAGNOSTIC_KEYS = {
   "action", "requested", "observed", "verifiedValue", "currentMode",
   "targetFound", "targetSelected", "targetSource", "modeAttempts",
