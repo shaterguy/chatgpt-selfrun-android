@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -107,6 +108,11 @@ public final class UserImmediateInputDomWebViewTest {
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
             view.getSettings().setJavaScriptEnabled(true);
+            view.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView v, String url) {
+                    loaded.countDown();
+                }
+            });
             web.set(view);
             String stop = stopVisible
                     ? "<button id='stop' type='button' data-testid='stop-stream-action' aria-label='Stop streaming'>Stop</button>"
@@ -122,7 +128,6 @@ public final class UserImmediateInputDomWebViewTest {
                     + "document.getElementById('send').addEventListener('click',e=>{e.preventDefault();window.sendClicks++;});"
                     + listener + "</script></body></html>";
             view.loadDataWithBaseURL(CONVERSATION_URL, html, "text/html", "UTF-8", null);
-            view.postDelayed(loaded::countDown, 250L);
         });
         assertTrue("fixture did not load", loaded.await(5, TimeUnit.SECONDS));
         assertNotNull(web.get());
