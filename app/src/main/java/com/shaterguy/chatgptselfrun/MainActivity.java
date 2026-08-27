@@ -40,6 +40,7 @@ public final class MainActivity extends Activity {
     private TextView technicalDetails;
     private TextView nextInputStatus;
     private EditText nextInputEditor;
+    private Button immediateInputButton;
     private Button nextInputSaveButton;
     private Button nextInputDeleteButton;
     private Button pauseButton;
@@ -48,6 +49,7 @@ public final class MainActivity extends Activity {
     private Button currentLogsButton;
     private String lastNextInputRunId = "";
     private String lastNextInputStored = "";
+    private boolean immediateInputInFlight;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -130,20 +132,21 @@ public final class MainActivity extends Activity {
 
         nextInputStatus = Ui.muted(this, "");
         nextInputEditor = new EditText(this);
-        nextInputEditor.setHint("다음 턴에 추가할 사용자 입력");
+        nextInputEditor.setHint("다음 턴에 추가하거나 즉시 강제입력할 사용자 입력");
         nextInputEditor.setMinLines(Ui.isExpanded(this) ? 6 : 2);
         nextInputEditor.setMaxLines(Ui.isExpanded(this) ? 14 : 7);
         nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        nextInputSaveButton = Ui.button(this, "저장", v -> saveNextInput());
+        immediateInputButton = Ui.outlinedButton(this, "즉시 강제입력", v -> forceImmediateInput());
+        nextInputSaveButton = Ui.button(this, "차기턴 저장", v -> saveNextInput());
         nextInputDeleteButton = Ui.textButton(this, "예약 삭제", v -> deleteNextInput());
         composerPanel = Ui.card(this,
-                Ui.section(this, "NEXT TURN"),
-                Ui.headline(this, "다음 턴에 추가할 입력"),
+                Ui.section(this, "USER INPUT"),
+                Ui.headline(this, "차기턴 예약 · 즉시 강제입력"),
                 nextInputStatus,
                 nextInputEditor,
-                Ui.actionStrip(this, nextInputDeleteButton, nextInputSaveButton));
+                Ui.actionStrip(this, nextInputDeleteButton, immediateInputButton, nextInputSaveButton));
 
         if (Ui.isExpanded(this)) {
             LinearLayout workspace = new LinearLayout(this);
@@ -242,22 +245,57 @@ public final class MainActivity extends Activity {
         lastNextInputStored = stored;
         nextInputEditor.setEnabled(editable);
         nextInputEditor.setVisibility(unavailable ? View.GONE : View.VISIBLE);
-        nextInputSaveButton.setEnabled(editable);
+        immediateInputButton.setEnabled(editable && !immediateInputInFlight);
+        immediateInputButton.setVisibility(unavailable ? View.GONE : View.VISIBLE);
+        nextInputSaveButton.setEnabled(editable && !immediateInputInFlight);
         nextInputSaveButton.setVisibility(unavailable ? View.GONE : View.VISIBLE);
-        nextInputDeleteButton.setEnabled(editable && !stored.isEmpty());
+        nextInputDeleteButton.setEnabled(editable && !stored.isEmpty() && !immediateInputInFlight);
         nextInputDeleteButton.setVisibility(!unavailable && !stored.isEmpty() ? View.VISIBLE : View.GONE);
 
         if (runId.isEmpty()) {
             nextInputStatus.setText("");
+        } else if (immediateInputInFlight) {
+            nextInputStatus.setText("즉시 강제입력 가능 여부를 확인 중입니다. 전송할 수 없으면 차기턴으로 예약합니다.");
         } else if (editable && stored.isEmpty()) {
-            nextInputStatus.setText("제출이 시작되기 전까지 다음 턴 입력을 예약할 수 있습니다.");
+            nextInputStatus.setText("차기턴 예약 또는 현재 응답에 즉시 강제입력을 사용할 수 있습니다.");
         } else if (editable) {
-            nextInputStatus.setText("다음 턴에 예약됨 · 실제 제출 시작 전까지 수정할 수 있습니다.");
+            nextInputStatus.setText("다음 턴에 예약됨 · 즉시 강제입력을 선택하면 현재 입력을 먼저 시도합니다.");
         } else if (locked) {
             nextInputStatus.setText("다음 턴 제출이 시작되어 현재 예약 입력은 잠겼습니다.");
         } else {
-            nextInputStatus.setText("현재 단계에서는 다음 턴 입력을 예약할 수 없습니다.");
+            nextInputStatus.setText("현재 단계에서는 사용자 입력을 예약할 수 없습니다.");
         }
+    }
+
+    private void forceImmediateInput() {
+        String runId = store.runId();
+        String value = nextInputEditor.getText().toString();
+        if (value.trim().isEmpty()) {
+            Toast.makeText(this, "강제입력할 내용을 입력하세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!UserNextInputStore.withinUtf8Limit(value, UserNextInputStore.MAX_USER_UTF8_BYTES)) {
+            Toast.makeText(this, "입력 내용이 허용 길이를 초과했습니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (immediateInputInFlight || runId.isEmpty()) return;
+        immediateInputInFlight = true;
+        nextInputEditor.clearFocus();
+        refreshNextInput(runId);
+        UserImmediateInputCoordinator.submit(store, runLog, value, result -> {
+            if (isFinishing() || isDestroyed()) return;
+            immediateInputInFlight = false;
+            String message;
+            if (UserImmediateInputCoordinator.OUTCOME_SENT.equals(result.outcome)) {
+                message = "현재 응답에 즉시 강제입력했습니다.";
+            } else if (UserImmediateInputCoordinator.OUTCOME_DEFERRED.equals(result.outcome)) {
+                message = "즉시 전송할 수 없어 차기턴 입력으로 예약했습니다.";
+            } else {
+                message = "강제입력을 안전하게 확정하지 못했습니다. 로그를 확인하세요.";
+            }
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+            refreshCurrent();
+        });
     }
 
     private void saveNextInput() {
