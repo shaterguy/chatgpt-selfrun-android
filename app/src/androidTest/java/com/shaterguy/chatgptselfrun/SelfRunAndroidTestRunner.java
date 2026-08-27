@@ -18,6 +18,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.WorkPreferenceHeaderContinuationAndroidTest";
     private static final String TURN_DOCUMENT_RETRY_TEST =
             "com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest";
+    private static final String IMMEDIATE_INPUT_DOM_TEST =
+            "com.shaterguy.chatgptselfrun.UserImmediateInputDomWebViewTest";
 
     @Override public void onCreate(Bundle arguments) {
         Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
@@ -27,6 +29,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         appendRequiredClass(effective, BOOTSTRAP_RECONNECT_TEST);
         appendRequiredClass(effective, WORK_HEADER_CONTINUATION_TEST);
         appendRequiredClass(effective, TURN_DOCUMENT_RETRY_TEST);
+        appendRequiredClass(effective, IMMEDIATE_INPUT_DOM_TEST);
         super.onCreate(effective);
     }
 
