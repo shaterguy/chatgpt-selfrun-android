@@ -4,6 +4,7 @@ import android.content.Context;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.junit.After;
 import org.junit.Before;
@@ -89,6 +90,7 @@ public final class TurnDocumentRetryAndroidTest {
         String observer = "retryobserver";
         store.prepareTurnObserver(observer);
         store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         assertEquals("late user next input", UserNextInputStore.current(runId));
 
         store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
