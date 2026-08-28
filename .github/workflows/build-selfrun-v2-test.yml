@@ -137,9 +137,20 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          disable-animations: true
+          disable-animations: false
           script: |
             set -euo pipefail
+            adb wait-for-device
+            READY=0
+            for attempt in $(seq 1 30); do
+              if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == '1' ]] \
+                  && adb shell cmd package list packages >/dev/null 2>&1; then
+                READY=1
+                break
+              fi
+              sleep 2
+            done
+            [[ "$READY" == '1' ]]
             CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev1.apk
             PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
             TEST1=comparator/selfrun-v18-test.apk
