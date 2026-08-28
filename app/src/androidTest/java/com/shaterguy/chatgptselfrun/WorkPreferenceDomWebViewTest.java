@@ -329,6 +329,10 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("1", read(scenario, web, "String(window.submitCount)"));
 
             evaluate(scenario, web, "(()=>{const m=document.createElement('div');m.setAttribute('data-message-author-role','user');document.querySelector('main').prepend(m);return JSON.stringify({status:'USER_APPENDED'});})()");
+            JSONObject routeMissing = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
+            assertEquals("COMPOSER_INPUTTING", routeMissing.getString("status"));
+            evaluate(scenario, web, "(()=>{history.replaceState({},'', '/g/g-p-test/c/conversation123');return JSON.stringify({status:'ROUTE_CREATED'});})()");
             JSONObject confirmed = evaluate(scenario, web,
                     SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
             assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
@@ -353,7 +357,9 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals(expectedResult, result.getString("status"));
             if (dispatchExpected) {
                 assertTrue(result.getString("detail").contains("dispatch=CONTINUE_CLICKED"));
-                assertTrue(result.getString("detail").contains("submit=form_request_submit"));
+                String expectedSubmitPath = SelfRunContinuationDom.SEND_ENABLED.equals(expected)
+                        ? "submit=button" : "submit=form_request_submit";
+                assertTrue(result.getString("detail").contains(expectedSubmitPath));
                 assertEquals("clicked", read(scenario, web,
                         "JSON.parse(window.__selfRunDriveMarkers['selfrun-drive:verified-continuation:"
                                 + markerId + "']).state"));
