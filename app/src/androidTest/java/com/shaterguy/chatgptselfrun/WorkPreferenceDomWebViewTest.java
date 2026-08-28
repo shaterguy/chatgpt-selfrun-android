@@ -118,11 +118,19 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals(CONTINUE_PROMPT, read(scenario, web, "document.getElementById('prompt-textarea').value"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
 
-            JSONObject click = evaluate(scenario, web,
+            JSONObject pending = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe",
                             OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
-            assertEquals("CONTINUE_CLICKED", click.getString("status"));
+            assertEquals("COMPOSER_INPUTTING", pending.getString("status"));
+            assertTrue(pending.getString("detail").contains("dispatch=CONTINUE_CLICKED"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.submitCount)"));
+
+            evaluate(scenario, web, "(()=>{const m=document.createElement('div');m.setAttribute('data-message-author-role','user');document.querySelector('main').prepend(m);return JSON.stringify({status:'USER_APPENDED'});})()");
+            JSONObject confirmed = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "global-stop-probe"));
+            assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
+            assertEquals("1", read(scenario, web, "String(window.submitCount)"));
         }
     }
 
@@ -281,12 +289,19 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
 
-            JSONObject clicked = evaluate(scenario, web,
+            JSONObject pending = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe",
                             OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
-            assertEquals("CONTINUE_CLICKED", clicked.getString("status"));
+            assertEquals("COMPOSER_INPUTTING", pending.getString("status"));
+            assertTrue(pending.getString("detail").contains("dispatch=CONTINUE_CLICKED"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.submitCount)"));
+
+            evaluate(scenario, web, "(()=>{const m=document.createElement('div');m.setAttribute('data-message-author-role','user');document.querySelector('main').prepend(m);return JSON.stringify({status:'USER_APPENDED'});})()");
+            JSONObject confirmed = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, "voice-idle-probe"));
+            assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
+            assertEquals("1", read(scenario, web, "String(window.submitCount)"));
         }
     }
 
@@ -305,12 +320,19 @@ public final class WorkPreferenceDomWebViewTest {
             assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
 
-            JSONObject clicked = evaluate(scenario, web,
+            JSONObject pending = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe",
                             OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
-            assertEquals("BOOTSTRAP_CLICKED", clicked.getString("status"));
+            assertEquals("COMPOSER_INPUTTING", pending.getString("status"));
+            assertTrue(pending.getString("detail").contains("dispatch=BOOTSTRAP_CLICKED"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.submitCount)"));
+
+            evaluate(scenario, web, "(()=>{const m=document.createElement('div');m.setAttribute('data-message-author-role','user');document.querySelector('main').prepend(m);return JSON.stringify({status:'USER_APPENDED'});})()");
+            JSONObject confirmed = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, CONTINUE_PROMPT, "bootstrap-voice-probe"));
+            assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
+            assertEquals("1", read(scenario, web, "String(window.submitCount)"));
         }
     }
 
@@ -325,15 +347,17 @@ public final class WorkPreferenceDomWebViewTest {
             JSONObject result = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT, markerId,
                             OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
-            boolean formFallback = SelfRunContinuationDom.COMPOSER_IDLE.equals(expected);
-            String expectedResult = SelfRunContinuationDom.SEND_ENABLED.equals(expected) || formFallback
-                    ? "CONTINUE_CLICKED" : expected;
+            boolean dispatchExpected = SelfRunContinuationDom.SEND_ENABLED.equals(expected)
+                    || SelfRunContinuationDom.COMPOSER_IDLE.equals(expected);
+            String expectedResult = dispatchExpected ? "COMPOSER_INPUTTING" : expected;
             assertEquals(expectedResult, result.getString("status"));
-            if (formFallback) {
+            if (dispatchExpected) {
+                assertTrue(result.getString("detail").contains("dispatch=CONTINUE_CLICKED"));
                 assertTrue(result.getString("detail").contains("submit=form_request_submit"));
                 assertEquals("clicked", read(scenario, web,
                         "JSON.parse(window.__selfRunDriveMarkers['selfrun-drive:verified-continuation:"
                                 + markerId + "']).state"));
+                assertEquals("1", read(scenario, web, "String(window.submitCount)"));
             }
         }
     }
@@ -627,7 +651,7 @@ public final class WorkPreferenceDomWebViewTest {
         return "<!doctype html><html><head><style>body{margin:20px}button,[role=button]{display:block;margin:8px}</style></head>"
                 + "<body><main><div id='composer-shell'><form><textarea id='prompt-textarea'></textarea>"
                 + formControls + "</form><div id='continuation-controls'>" + outsideControls + "</div></div></main>"
-                + "<script>window.stopClicks=0;document.querySelector('form')?.addEventListener('submit',event=>event.preventDefault());const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
+                + "<script>window.stopClicks=0;window.submitCount=0;const form=document.querySelector('form');form?.addEventListener('submit',event=>{event.preventDefault();window.submitCount++;});const stop=document.getElementById('stop');if(stop)stop.addEventListener('click',()=>window.stopClicks++);</script>"
                 + "</body></html>";
     }
 
@@ -635,12 +659,12 @@ public final class WorkPreferenceDomWebViewTest {
         return "<!doctype html><html><head><style>body{margin:20px}button{display:block;margin:8px}</style></head>"
                 + "<body><main><form id='composer'><textarea id='prompt-textarea'></textarea>"
                 + "<button id='voice' type='submit' data-testid='composer-speech-button' aria-label='Start voice mode'>Voice</button>"
-                + "</form></main><script>window.voiceClicks=0;window.sendClicks=0;"
+                + "</form></main><script>window.voiceClicks=0;window.submitCount=0;"
                 + "const form=document.getElementById('composer'),composer=document.getElementById('prompt-textarea'),voice=document.getElementById('voice');"
                 + "voice.addEventListener('click',event=>{event.preventDefault();window.voiceClicks++;});"
+                + "form.addEventListener('submit',event=>{event.preventDefault();window.submitCount++;});"
                 + "composer.addEventListener('input',()=>{if(!composer.value||document.getElementById('send'))return;voice.remove();"
-                + "const send=document.createElement('button');send.id='send';send.type='submit';send.dataset.testid='send-button';send.setAttribute('aria-label','Send');send.textContent='Send';"
-                + "send.addEventListener('click',event=>{event.preventDefault();window.sendClicks++;});form.appendChild(send);});</script>"
+                + "const send=document.createElement('button');send.id='send';send.type='submit';send.dataset.testid='send-button';send.setAttribute('aria-label','Send');send.textContent='Send';form.appendChild(send);});</script>"
                 + "</body></html>";
     }
 }
