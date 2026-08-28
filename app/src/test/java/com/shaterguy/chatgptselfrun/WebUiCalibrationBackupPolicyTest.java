@@ -80,8 +80,9 @@ public class WebUiCalibrationBackupPolicyTest {
 
     @Test public void developmentVersionIdentityIsAdvanced() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000104"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000001"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev1'"));
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
     }
 
     private static final class FailingFirstCommitPreferences implements SharedPreferences {
