@@ -130,7 +130,30 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging comparator/chatgpt-selfrun-drive-v1.8.0.apk \
             | grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'"
 
-      - name: Prepare simultaneous-install verification script
+      - name: Download immutable v2.0.0-dev1 TEST predecessor
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREV_RUN_ID='33150667249'
+          PREV_ARTIFACT='selfrun-v2-test-f5f4d2a3de23a14863c42be22b13d4a17b10bb2e-1'
+          PREV_SHA='f5f4d2a3de23a14863c42be22b13d4a17b10bb2e'
+          PREV_BRANCH='selfrun-drive-v2/v2.0.0-dev1'
+          mkdir -p comparator-v2
+          gh run download "$PREV_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$PREV_ARTIFACT" --dir comparator-v2
+          PREV_V2="$(find comparator-v2 -type f -name 'chatgpt-selfrun-v2-test-v2.0.0-dev1.apk' -print -quit)"
+          test -s "$PREV_V2"
+          [[ "$(tr -d '[:space:]' < comparator-v2/SOURCE_COMMIT.txt)" == "$PREV_SHA" ]]
+          [[ "$(tr -d '\r\n' < comparator-v2/SOURCE_BRANCH.txt)" == "$PREV_BRANCH" ]]
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          BADGING="$($BT/aapt dump badging "$PREV_V2")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.v2.test'" <<<"$BADGING"
+          grep -Fq "versionCode='2000001'" <<<"$BADGING"
+          grep -Fq "versionName='2.0.0-dev1'" <<<"$BADGING"
+          "$BT/apksigner" verify --verbose --print-certs "$PREV_V2" > comparator-v2/APK_CERT.txt
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' comparator-v2/APK_CERT.txt
+
+      - name: Prepare simultaneous-install and update verification script
         shell: bash
         run: |
           set -euo pipefail
@@ -154,26 +177,36 @@ jobs:
           adb uninstall com.shaterguy.chatgptselfrun.v2.test >/dev/null 2>&1 || true
           adb uninstall com.shaterguy.chatgptselfrun.v2 >/dev/null 2>&1 || true
           CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev3.apk
+          PREV_V2="$(find comparator-v2 -type f -name 'chatgpt-selfrun-v2-test-v2.0.0-dev1.apk' -print -quit)"
           PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
           TEST1=comparator/selfrun-v18-test.apk
           adb install "$PROD"
           adb install "$TEST1"
+          adb install "$PREV_V2"
           PROD_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           TEST_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
-          adb install "$CURRENT"
+          V2_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          V2_DATA_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
+          grep -Fq 'versionCode=2000001' <<<"$V2_BEFORE"
+          adb install -r "$CURRENT"
           PROD_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           TEST_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          V2_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          V2_DATA_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
+          grep -Fq 'versionCode=2000003' <<<"$V2_AFTER"
+          [[ "$V2_DATA_BEFORE" == "$V2_DATA_AFTER" ]]
           [[ "$PROD_BEFORE" == "$PROD_AFTER" ]]
           [[ "$TEST_BEFORE" == "$TEST_AFTER" ]]
           adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.drive'
           adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.drive.test'
           adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.v2.test'
-          V2_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
+          V2_DATA="$V2_DATA_AFTER"
           PROD_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
           TEST_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
           [[ -n "$V2_DATA" && "$V2_DATA" != "$PROD_DATA" && "$V2_DATA" != "$TEST_DATA" ]]
           printf '%s\n' "$PROD_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_PROD_STATE.txt
           printf '%s\n' "$TEST_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_TEST_STATE.txt
+          printf 'before:\n%s\nafter:\n%s\n' "$V2_BEFORE" "$V2_AFTER" > app/build/outputs/selfrun-v2-test/COINSTALL_V2_UPDATE_STATE.txt
           printf 'v2DataDir=%s\nprodDataDir=%s\ntestDataDir=%s\n' "$V2_DATA" "$PROD_DATA" "$TEST_DATA" > app/build/outputs/selfrun-v2-test/DATA_DIRS.txt
           BASH
           chmod 700 "$COINSTALL_SCRIPT"
@@ -189,7 +222,7 @@ jobs:
             sudo udevadm trigger --name-match=kvm
           fi
 
-      - name: Verify simultaneous installation and 1.x package immutability
+      - name: Verify submission, dev1 update, and 1.x coinstallation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
@@ -212,6 +245,7 @@ jobs:
             app/build/outputs/selfrun-v2-test/SOURCE_BRANCH.txt
             app/build/outputs/selfrun-v2-test/COINSTALL_PROD_STATE.txt
             app/build/outputs/selfrun-v2-test/COINSTALL_TEST_STATE.txt
+            app/build/outputs/selfrun-v2-test/COINSTALL_V2_UPDATE_STATE.txt
             app/build/outputs/selfrun-v2-test/DATA_DIRS.txt
           if-no-files-found: error
           compression-level: 0
