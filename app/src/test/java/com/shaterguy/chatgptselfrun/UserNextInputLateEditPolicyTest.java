@@ -58,7 +58,7 @@ public final class UserNextInputLateEditPolicyTest {
         assertTrue(click.contains("UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)"));
         assertTrue(click.contains("if (!plan.clickAllowed) return preflightPreparedDriveTurn"));
         assertTrue(click.contains("c.send.click()"));
-        assertTrue(click.contains("return result('COMPOSER_INPUTTING','dispatch=CONTINUE_CLICKED"));
+        assertTrue(click.contains("return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED"));
     }
 
     @Test public void missingPreparedMarkerNeverClaimsSubmission() throws Exception {
