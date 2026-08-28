@@ -9,10 +9,16 @@ import java.util.Set;
 
 /** Document-start fetch/XHR interceptor and target-profile bridge for SelfRun 2.0. */
 final class RequestProfileScript {
+    static final String ENGINE_VERSION = "calibration-v2";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
     private RequestProfileScript() {}
+
+    static String engineAvailableExpression() {
+        return "window.__selfRunRequestProfileEngine?.version==="
+                + SelfRunScript.quote(ENGINE_VERSION);
+    }
 
     static void installDocumentStart(WebView webView) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -50,7 +56,7 @@ final class RequestProfileScript {
     static String documentStartScript() {
         return """
                 (()=>{
-                  if(window.__selfRunRequestProfileEngine?.version==='calibration-v2')return;
+                  if(window.__selfRunRequestProfileEngine?.version===__ENGINE_VERSION__)return;
                   const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
                   const state={target:null,last:{ok:false,reason:'not_attempted'}};
                   const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,160)};throw new Error('SELFRUN_PROFILE:'+state.last.reason);};
@@ -89,8 +95,8 @@ final class RequestProfileScript {
                   const meta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){meta.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
                   XMLHttpRequest.prototype.send=function(body){const m=meta.get(this)||{method:'',url:''};let patched=null;try{patched=patchText(m.url,m.method,body);}catch(error){throw error;}return nativeSend.call(this,patched===null?body:patched);};
-                  window.__selfRunRequestProfileEngine={version:'calibration-v2',begin,setChatReasoning,setWorkModel,setWorkReasoning,diagnostics:()=>({...state.last}),target:()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,profileVersion:state.target.profileVersion,ready:state.target.ready}:null};
+                  window.__selfRunRequestProfileEngine={version:__ENGINE_VERSION__,begin,setChatReasoning,setWorkModel,setWorkReasoning,diagnostics:()=>({...state.last}),target:()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,profileVersion:state.target.profileVersion,ready:state.target.ready}:null};
                 })();
-                """;
+                """.replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION));
     }
 }

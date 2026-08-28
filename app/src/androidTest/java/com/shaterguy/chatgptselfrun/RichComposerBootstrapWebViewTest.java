@@ -28,7 +28,7 @@ public final class RichComposerBootstrapWebViewTest {
     @Test public void emptyRichComposerScaffoldSurvivesPreparationAndCreatesConversation() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
-            installChatProfile(scenario, web);
+            installChatProfile(scenario, web, "SR-RICH");
 
             JSONObject first = evaluate(scenario, web,
                     SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, PROMPT, "rich-bootstrap"));
@@ -84,7 +84,7 @@ public final class RichComposerBootstrapWebViewTest {
     @Test public void requestInputAndNonSubmissionPostsKeepBodyOwnershipAndIdentity() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
-            installChatProfile(scenario, web);
+            installChatProfile(scenario, web, "SR-OWNERSHIP");
             assertEquals("started", read(scenario, web, requestOwnershipProbe()));
 
             for (int attempt = 0; attempt < 40; attempt++) {
@@ -116,7 +116,7 @@ public final class RichComposerBootstrapWebViewTest {
     @Test public void rejectedConversationSchemaBecomesFixedSubmissionFailure() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
-            installChatProfile(scenario, web);
+            installChatProfile(scenario, web, "SR-REJECT");
             assertEquals("true", read(scenario, web, "String(window.forceInvalidBody=true)"));
 
             JSONObject state = evaluate(scenario, web,
@@ -170,12 +170,22 @@ public final class RichComposerBootstrapWebViewTest {
     }
 
     private static void installChatProfile(ActivityScenario<SelfRunNewActivity> scenario,
-                                           AtomicReference<WebView> web) throws Exception {
+                                           AtomicReference<WebView> web, String runId) throws Exception {
+        AtomicReference<Boolean> persisted = new AtomicReference<>(false);
+        scenario.onActivity(activity -> persisted.set(ChatReasoningPreferenceStore.save(
+                activity, runId, ChatReasoningPreferenceStore.MEDIUM)));
+        assertTrue("MEDIUM Chat profile was not persisted for the run", persisted.get());
+
         read(scenario, web, RequestProfileScript.documentStartScript());
-        assertEquals("true", read(scenario, web,
-                RequestProfileScript.beginTarget("chat", "SR-RICH")));
-        assertEquals("true", read(scenario, web,
-                RequestProfileScript.setChatReasoning("medium")));
+        JSONObject initial = evaluate(scenario, web,
+                SelfRunDom.prepareInitialContext(PROJECT_URL, SelfRunStore.MODE_CHAT, runId));
+        assertEquals("READY", initial.getString("status"));
+        JSONObject diagnostics = initial.getJSONObject("diagnostics");
+        assertEquals("request-profile", diagnostics.getString("strategy"));
+        assertTrue(diagnostics.getBoolean("enginePresent"));
+        assertTrue(diagnostics.getBoolean("engineVersionMatch"));
+        assertEquals(ChatReasoningPreferenceStore.MEDIUM,
+                diagnostics.getString("observed"));
     }
 
     private static JSONObject evaluate(ActivityScenario<SelfRunNewActivity> scenario,

@@ -11,10 +11,18 @@ final class BootstrapModeDom {
                 const modeRunId=__RUN_ID__;
                 let diagnostics={strategy:'request-profile',requested:requestedMode,currentMode:'request-profile',targetFound:true,targetSelected:true,targetSource:'native-request',modeAttempts:1,modeClickAttempts:0,modeElapsedMs:0};
                 const modeDiag=()=>('strategy=request-profile;requested='+requestedMode+';uiClicks=0');
-                if(!window.__selfRunRequestProfileEngine||window.__selfRunRequestProfileEngine.version!=='calibration-v1')return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE','Request Profile Engine document-start injection is unavailable.',diagnostics);
-                try{window.__selfRunRequestProfileEngine.begin(requestedMode,modeRunId);}catch(error){return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE',String(error?.message||error),diagnostics);}
+                const profileEngine=window.__selfRunRequestProfileEngine;
+                const enginePresent=!!profileEngine;
+                const engineVersionMatch=enginePresent&&(__ENGINE_AVAILABLE__);
+                const profileAvailability={strategy:'request-profile',profileStage:'availability',enginePresent,engineVersionMatch};
+                diagnostics={...diagnostics,...profileAvailability};
+                if(!enginePresent)return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE','request profile engine absent',profileAvailability);
+                if(!engineVersionMatch)return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE','request profile engine version mismatch',profileAvailability);
+                try{profileEngine.begin(requestedMode,modeRunId);}catch(_){return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE','request profile initialization rejected',{...profileAvailability,profileStage:'begin',operationOk:false});}
                 """
                 .replace("__REQUESTED__", SelfRunScript.quote(mode))
-                .replace("__RUN_ID__", SelfRunScript.quote(runId));
+                .replace("__RUN_ID__", SelfRunScript.quote(runId))
+                .replace("__ENGINE_AVAILABLE__", RequestProfileScript.engineAvailableExpression());
     }
+
 }

@@ -23,7 +23,7 @@ final class ChatReasoningOptionDom {
                 try{
                   window.__selfRunRequestProfileEngine.setChatReasoning(__WANTED__);
                   diagnostics={...diagnostics,observed:__WANTED__,verifiedValue:__WANTED__,action:'profile-ready',uiClicks:0};
-                }catch(error){return result('CHAT_REASONING_OPTION_UNAVAILABLE',String(error?.message||error),{strategy:'request-profile',requested:__WANTED__});}
+                }catch(_){return result('CHAT_REASONING_OPTION_UNAVAILABLE','request profile Chat target rejected',{strategy:'request-profile',profileStage:'target',enginePresent:true,engineVersionMatch:true,operationOk:false});}
                 """.replace("__WANTED__", SelfRunScript.quote(wanted));
     }
 }

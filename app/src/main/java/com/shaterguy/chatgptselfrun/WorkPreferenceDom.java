@@ -39,12 +39,16 @@ final class WorkPreferenceDom {
                 ? RequestProfileScript.beginTarget("work", resetKey)
                 : "";
         String failure = "model".equals(kind) ? "WORK_MODEL_READBACK_MISMATCH" : "WORK_REASONING_READBACK_MISMATCH";
+        String engineAvailable = RequestProfileScript.engineAvailableExpression();
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,diagnostics,url:location.href});"
                 + guard
-                + "if(!window.__selfRunRequestProfileEngine||window.__selfRunRequestProfileEngine.version!=='calibration-v1')return result('" + failure + "','Request Profile Engine unavailable',{strategy:'request-profile'});"
-                + "try{" + begin + action + "const t=window.__selfRunRequestProfileEngine.target();return result('READY','absolute Work target profile staged',{strategy:'request-profile',kind:"
-                + q(kind) + ",requested:" + q(wanted) + ",targetMode:t?.mode||'',targetModel:t?.model||'',targetReasoning:t?.reasoning||'',targetReady:!!t?.ready,uiClicks:0});}catch(error){return result('"
-                + failure + "',String(error?.message||error),{strategy:'request-profile',kind:" + q(kind) + ",requested:" + q(wanted) + "});}})()";
+                + "const profileEngine=window.__selfRunRequestProfileEngine;const enginePresent=!!profileEngine;const engineVersionMatch=enginePresent&&(" + engineAvailable + ");"
+                + "const profileAvailability={strategy:'request-profile',profileStage:'availability',enginePresent,engineVersionMatch};"
+                + "if(!enginePresent)return result('" + failure + "','request profile engine absent',profileAvailability);"
+                + "if(!engineVersionMatch)return result('" + failure + "','request profile engine version mismatch',profileAvailability);"
+                + "try{" + begin + action + "const t=profileEngine.target();return result('READY','absolute Work target profile staged',{strategy:'request-profile',kind:"
+                + q(kind) + ",requested:" + q(wanted) + ",targetMode:t?.mode||'',targetModel:t?.model||'',targetReasoning:t?.reasoning||'',targetReady:!!t?.ready,uiClicks:0});}catch(_){return result('"
+                + failure + "','request profile target rejected',{strategy:'request-profile',profileStage:'target',enginePresent:true,engineVersionMatch:true,operationOk:false});}})()";
     }
 
     private static String projectGuard(String projectId) {
