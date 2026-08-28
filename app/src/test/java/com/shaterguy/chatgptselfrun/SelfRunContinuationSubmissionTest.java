@@ -34,7 +34,7 @@ public class SelfRunContinuationSubmissionTest {
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertTrue(click.contains("baselineUserCount=userMessageCount()"));
         assertTrue(click.contains("armCompletionObserver(false)"));
-        assertTrue(click.indexOf("requestComposerSubmit()") < click.indexOf("c.send.click()"));
+        assertTrue(click.indexOf("c.send.click()") < click.indexOf("requestComposerSubmit()"));
         assertTrue(verification.contains("users>baseline"));
         assertTrue(verification.contains("STOP"));
         assertTrue(verification.contains("state:'confirmed'"));

@@ -35,7 +35,7 @@ public final class UserNextInputLateEditPolicyTest {
         String preflight = between(dom, "private static String preflightPreparedDriveTurn", "static String observeTurnCompletion");
         assertTrue(click.contains("c.send.click()"));
         assertTrue(click.contains("requestComposerSubmit()"));
-        assertTrue(click.indexOf("requestComposerSubmit()") < click.indexOf("c.send.focus"));
+        assertTrue(click.indexOf("c.send.click()") < click.indexOf("requestComposerSubmit()"));
         assertTrue(click.contains("armCompletionObserver(false)"));
         assertTrue(click.contains("dispatch=CONTINUE_CLICKED"));
         assertTrue(click.contains("verification=pending"));
