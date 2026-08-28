@@ -9,7 +9,7 @@ final class BootstrapModeDom {
         return """
                 const requestedMode=__REQUESTED__;
                 const modeRunId=__RUN_ID__;
-                const diagnostics={strategy:'request-profile',requested:requestedMode,currentMode:'request-profile',targetFound:true,targetSelected:true,targetSource:'native-request',modeAttempts:1,modeClickAttempts:0,modeElapsedMs:0};
+                let diagnostics={strategy:'request-profile',requested:requestedMode,currentMode:'request-profile',targetFound:true,targetSelected:true,targetSource:'native-request',modeAttempts:1,modeClickAttempts:0,modeElapsedMs:0};
                 const modeDiag=()=>('strategy=request-profile;requested='+requestedMode+';uiClicks=0');
                 if(!window.__selfRunRequestProfileEngine||window.__selfRunRequestProfileEngine.version!=='calibration-v1')return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE','Request Profile Engine document-start injection is unavailable.',diagnostics);
                 try{window.__selfRunRequestProfileEngine.begin(requestedMode,modeRunId);}catch(error){return result('CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE',String(error?.message||error),diagnostics);}
