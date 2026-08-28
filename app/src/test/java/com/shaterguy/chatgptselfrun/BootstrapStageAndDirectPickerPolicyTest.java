@@ -11,13 +11,15 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class BootstrapStageAndDirectPickerPolicyTest {
-    @Test public void monotonicModeStageAndAdvancedPickerAreWiredWithoutProductionSlider() throws Exception {
+    @Test public void monotonicModeStageAndCurrentSliderPickerAreWired() throws Exception {
         String dom = src("SelfRunDom.java");
         String mode = src("BootstrapModeDom.java");
         String options = src("ChatReasoningOptionDom.java");
+        String work = src("WorkPreferenceDom.java");
         String runner = androidTest("SelfRunAndroidTestRunner.java");
         String flatInstrumentation = androidTest("BootstrapStageAndDirectPickerAndroidTest.java");
-        String hierarchicalInstrumentation = androidTest("ChatReasoningHierarchicalMenuAndroidTest.java");
+        String currentInstrumentation = androidTest("ChatReasoningHierarchicalMenuAndroidTest.java");
+        String workInstrumentation = androidTest("WorkAdvancedMenuAndroidTest.java");
 
         int modeAdapter = dom.indexOf("BootstrapModeDom.inline(requested, runId)");
         int optionAdapter = dom.indexOf("ChatReasoningOptionDom.inline(chatReasoning, runId)");
@@ -29,22 +31,29 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(mode.contains("stageRegressionBlocked"));
         assertTrue(mode.contains("data-tpp-toggle-value"));
         assertTrue(mode.contains("dispatchModeMouse(element,'pointerdown'"));
+
         assertTrue(options.contains("[role=\"slider\"]"));
-        assertTrue(options.contains("open-reasoning-sheet"));
-        assertTrue(options.contains("open-advanced-control"));
-        assertTrue(options.contains("open-reasoning-menu"));
-        assertTrue(options.contains("wait-reasoning-options"));
-        assertTrue(options.contains("nested-option-click"));
-        assertTrue(options.contains("sliderObserved"));
-        assertFalse(options.contains("positive-slider-fallback"));
-        assertFalse(options.contains("set-slider"));
+        assertTrue(options.contains("slider-model-popover"));
+        assertTrue(options.contains("open-reasoning-popover"));
+        assertTrue(options.contains("open-model-menu"));
+        assertTrue(options.contains("set-slider"));
+        assertTrue(options.contains("slider-pointer-fallback"));
+        assertFalse(options.contains("open-advanced-control"));
+        assertFalse(options.contains("__sroShowAdvancedLabel"));
+
+        assertTrue(work.contains("effort-popover-slider"));
+        assertTrue(work.contains("open-effort-popover"));
+        assertTrue(work.contains("open-model-menu"));
+        assertTrue(work.contains("set-slider"));
+
         assertTrue(runner.contains("BootstrapStageAndDirectPickerAndroidTest"));
         assertTrue(runner.contains("ChatReasoningHierarchicalMenuAndroidTest"));
+        assertTrue(runner.contains("WorkAdvancedMenuAndroidTest"));
         assertTrue(flatInstrumentation.contains("confirmedChatStageSurvivesPickerRenderAndAppliesInstantDirectly"));
         assertTrue(flatInstrumentation.contains("workToChatTransitionClicksExactlyOnceBeforeDirectPicker"));
-        assertTrue(hierarchicalInstrumentation.contains("koreanAdvancedButtonPathAppliesInstantWithoutSliderMutation"));
-        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation"));
-        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProStandardWithoutSliderMutation"));
+        assertTrue(currentInstrumentation.contains("koreanCurrentSliderAppliesExtraHighWithoutAdvanced"));
+        assertTrue(currentInstrumentation.contains("currentModelMenuThenProSliderAppliesProExtended"));
+        assertTrue(workInstrumentation.contains("workUsesCombinedHeaderForModelAndSliderForReasoningWithoutAdvanced"));
     }
 
     @Test public void newChatRunDefaultsToExtraHighWithoutOverridingRestoredDraft() throws Exception {
@@ -63,8 +72,8 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
 
     @Test public void currentDevIdentityKeepsApprovedUiDependenciesPinned() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000105"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.1-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000106"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.1-dev2'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
     }

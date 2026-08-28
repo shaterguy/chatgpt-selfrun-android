@@ -19,47 +19,61 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-/** Exercises the persistent desktop Work advanced-menu state in Android WebView. */
+/** Exercises the current Work effort popover: combined model/reasoning row plus reasoning slider. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkAdvancedMenuAndroidTest {
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
 
-    @Test public void workEntersAdvancedOnceThenKeepsModelAndReasoningMenuFlow() throws Exception {
+    @Test public void workUsesCombinedHeaderForModelAndSliderForReasoningWithoutAdvanced() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web);
 
             JSONObject modelReady = runToReady(scenario, web,
                     WorkPreferenceDom.modelForConversation(CONVERSATION_URL, "sol"));
-            assertEquals("sol", modelReady.getJSONObject("diagnostics").getString("current"));
-            assertEquals("1", read(scenario, web, "String(window.advancedClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.modelRowClicks)"));
+            assertEquals("sol", modelReady.getJSONObject("diagnostics").getString("currentModel"));
+            assertEquals("1", read(scenario, web, "String(window.modelHeaderClicks)"));
             assertEquals("1", read(scenario, web, "String(window.modelOptionClicks)"));
+            assertEquals("0", read(scenario, web, "String(window.advancedClicks)"));
 
             JSONObject reasoningReady = runToReady(scenario, web,
                     WorkPreferenceDom.reasoningForConversation(CONVERSATION_URL, "max"));
-            assertEquals("max", reasoningReady.getJSONObject("diagnostics").getString("current"));
-            assertEquals("1", read(scenario, web, "String(window.advancedClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.reasoningRowClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.reasoningOptionClicks)"));
-            assertEquals("0", read(scenario, web, "String(window.sliderEvents)"));
-            assertEquals("0", read(scenario, web, "String(window.resetClicks)"));
+            assertEquals("max", reasoningReady.getJSONObject("diagnostics").getString("currentReasoning"));
+            assertEquals("4", read(scenario, web,
+                    "document.getElementById('slider').getAttribute('aria-valuenow')"));
+            assertEquals("5.6 Sol Maximum >", read(scenario, web,
+                    "document.getElementById('combined').textContent"));
+            assertEquals("2", read(scenario, web, "String(window.sliderKeydowns)"));
+            assertEquals("0", read(scenario, web, "String(window.advancedClicks)"));
 
             JSONObject alreadySelected = runToReady(scenario, web,
                     WorkPreferenceDom.reasoningForConversation(CONVERSATION_URL, "max"));
-            assertEquals("already-selected",
-                    alreadySelected.getJSONObject("diagnostics").getString("action"));
-            assertEquals("2", read(scenario, web, "String(window.triggerClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.advancedClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.reasoningRowClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.reasoningOptionClicks)"));
+            assertEquals("max", alreadySelected.getJSONObject("diagnostics").getString("currentReasoning"));
+            assertEquals("2", read(scenario, web, "String(window.sliderKeydowns)"));
+        }
+    }
+
+    @Test public void workCanMoveFromMaximumToUltraOnTheSameDirectSlider() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web);
+            runToReady(scenario, web, WorkPreferenceDom.modelForConversation(CONVERSATION_URL, "sol"));
+            runToReady(scenario, web, WorkPreferenceDom.reasoningForConversation(CONVERSATION_URL, "max"));
+
+            JSONObject ready = runToReady(scenario, web,
+                    WorkPreferenceDom.reasoningForConversation(CONVERSATION_URL, "ultra"));
+            assertEquals("ultra", ready.getJSONObject("diagnostics").getString("currentReasoning"));
+            assertEquals("5", read(scenario, web,
+                    "document.getElementById('slider').getAttribute('aria-valuenow')"));
+            assertEquals("5.6 Sol Ultra >", read(scenario, web,
+                    "document.getElementById('combined').textContent"));
         }
     }
 
     private static JSONObject runToReady(ActivityScenario<SelfRunNewActivity> scenario,
                                          AtomicReference<WebView> web, String script) throws Exception {
         JSONObject result = null;
-        for (int attempt = 0; attempt < 18; attempt++) {
+        for (int attempt = 0; attempt < 28; attempt++) {
             result = evaluate(scenario, web, script);
             if ("READY".equals(result.getString("status"))) break;
             assertEquals(result.toString(), "UI_WAIT", result.getString("status"));
@@ -85,7 +99,7 @@ public final class WorkAdvancedMenuAndroidTest {
             web.set(view);
             view.loadDataWithBaseURL(CONVERSATION_URL, fixture(), "text/html", "UTF-8", null);
         });
-        assertTrue("Work advanced fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+        assertTrue("Work current effort fixture did not load", loaded.await(15, TimeUnit.SECONDS));
         assertNotNull("Android System WebView must be available", WebView.getCurrentWebViewPackage());
     }
 
@@ -93,46 +107,36 @@ public final class WorkAdvancedMenuAndroidTest {
         return """
                 <!doctype html><html><head><style>
                 [hidden]{display:none!important}body{min-height:800px}form{margin-top:500px}
-                #compact-menu,#advanced-menu,#model-submenu,#reasoning-submenu{position:absolute;width:300px;min-height:100px}
+                #effort-popup,#model-menu{position:absolute;width:320px;min-height:120px}
+                #slider{display:block;width:280px;height:28px}
                 </style></head><body>
                 <form><textarea id="prompt-textarea"></textarea>
-                  <button id="trigger" type="button" aria-haspopup="menu" aria-expanded="false">GPT-5.6 Terra High</button>
+                  <button id="effort" type="button" aria-haspopup="dialog" aria-controls="effort-popup" aria-expanded="false">Select effort</button>
                 </form>
-                <div id="compact-menu" role="menu" hidden>
-                  <div role="menuitem" aria-label="Performance"><div id="slider" role="slider" aria-hidden="true" tabindex="-1" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3"></div></div>
-                  <button id="advanced" type="button" role="menuitem" aria-label="Show advanced options">Advanced</button>
-                  <button type="button" role="menuitem">Model GPT-5.6 Terra</button>
-                  <button type="button" role="menuitem">Reasoning level High</button>
+                <div id="effort-popup" role="dialog" hidden>
+                  <button id="combined" type="button" aria-haspopup="menu" aria-expanded="false">5.6 Terra High &gt;</button>
+                  <div id="slider" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="5" aria-valuenow="2" aria-valuestep="1" aria-valuetext="High"></div>
                 </div>
-                <div id="advanced-menu" role="menu" hidden>
-                  <button type="button" role="menuitem" aria-label="Show fewer options">Advanced</button>
-                  <button id="reset" type="button" role="menuitem">Reset to default</button>
-                  <button id="model-row" type="button" role="menuitem" aria-haspopup="menu">Model GPT-5.6 Terra</button>
-                  <button id="reasoning-row" type="button" role="menuitem" aria-haspopup="menu">Reasoning level High</button>
-                  <button type="button" role="menuitem">Speed Standard</button>
-                </div>
-                <div id="model-submenu" role="menu" hidden>
-                  <button id="sol" type="button" role="menuitemradio" aria-checked="false">GPT-5.6 Sol</button>
-                  <button type="button" role="menuitemradio" aria-checked="true">GPT-5.6 Terra</button>
-                  <button type="button" role="menuitemradio" aria-checked="false">GPT-5.6 Luna</button>
-                </div>
-                <div id="reasoning-submenu" role="menu" hidden>
-                  <button type="button" role="menuitemradio" aria-checked="false">Medium</button>
-                  <button type="button" role="menuitemradio" aria-checked="true">High</button>
-                  <button id="maximum" type="button" role="menuitemradio" aria-checked="false">Maximum</button>
+                <div id="model-menu" role="menu" hidden>
+                  <button type="button" role="menuitem">Default</button>
+                  <button id="sol" type="button" role="menuitemradio" aria-checked="false">5.6 Sol</button>
+                  <button id="terra" type="button" role="menuitemradio" aria-checked="true">5.6 Terra</button>
+                  <button type="button" role="menuitemradio" aria-checked="false">5.6 Luna</button>
+                  <button type="button" role="menuitemradio" aria-checked="false">5.5</button>
                 </div>
                 <script>
-                window.advancedEnabled=false;window.triggerClicks=0;window.advancedClicks=0;window.modelRowClicks=0;window.reasoningRowClicks=0;window.modelOptionClicks=0;window.reasoningOptionClicks=0;window.sliderEvents=0;window.resetClicks=0;
-                const trigger=document.getElementById('trigger'),compact=document.getElementById('compact-menu'),advancedMenu=document.getElementById('advanced-menu'),advanced=document.getElementById('advanced'),modelRow=document.getElementById('model-row'),reasoningRow=document.getElementById('reasoning-row'),modelSubmenu=document.getElementById('model-submenu'),reasoningSubmenu=document.getElementById('reasoning-submenu'),slider=document.getElementById('slider');
-                const closeAll=()=>{compact.hidden=true;advancedMenu.hidden=true;modelSubmenu.hidden=true;reasoningSubmenu.hidden=true;trigger.setAttribute('aria-expanded','false');};
-                trigger.onclick=()=>{window.triggerClicks++;const opening=trigger.getAttribute('aria-expanded')!=='true';closeAll();if(opening){(window.advancedEnabled?advancedMenu:compact).hidden=false;trigger.setAttribute('aria-expanded','true');}};
-                advanced.onclick=()=>{window.advancedClicks++;window.advancedEnabled=true;compact.hidden=true;advancedMenu.hidden=false;};
-                modelRow.onclick=()=>{window.modelRowClicks++;modelSubmenu.hidden=false;};
-                reasoningRow.onclick=()=>{window.reasoningRowClicks++;reasoningSubmenu.hidden=false;};
-                document.getElementById('sol').onclick=event=>{window.modelOptionClicks++;for(const option of modelSubmenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent=trigger.textContent.replace('Terra','Sol');modelRow.textContent='Model GPT-5.6 Sol';closeAll();};
-                document.getElementById('maximum').onclick=event=>{window.reasoningOptionClicks++;for(const option of reasoningSubmenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent=trigger.textContent.replace('High','Maximum');reasoningRow.textContent='Reasoning level Maximum';closeAll();};
-                document.getElementById('reset').onclick=()=>window.resetClicks++;
-                for(const type of ['input','change','keydown','pointerdown','mousedown','click'])slider.addEventListener(type,()=>window.sliderEvents++);
+                window.rootClicks=0;window.modelHeaderClicks=0;window.modelOptionClicks=0;window.sliderKeydowns=0;window.advancedClicks=0;
+                const effort=document.getElementById('effort'),popup=document.getElementById('effort-popup'),combined=document.getElementById('combined'),slider=document.getElementById('slider'),modelMenu=document.getElementById('model-menu');
+                let model='Terra';const labels=['Light','Medium','High','Extra High','Maximum','Ultra'];
+                const update=()=>{const index=Number(slider.getAttribute('aria-valuenow')),reasoning=labels[index];slider.setAttribute('aria-valuetext',reasoning);combined.textContent='5.6 '+model+' '+reasoning+' >';};
+                const closeAll=()=>{popup.hidden=true;modelMenu.hidden=true;combined.setAttribute('aria-expanded','false');effort.setAttribute('aria-expanded','false');};
+                effort.onclick=()=>{window.rootClicks++;const opening=effort.getAttribute('aria-expanded')!=='true';closeAll();if(opening){popup.hidden=false;effort.setAttribute('aria-expanded','true');}};
+                combined.onclick=()=>{window.modelHeaderClicks++;popup.hidden=true;modelMenu.hidden=false;combined.setAttribute('aria-expanded','true');};
+                document.getElementById('sol').onclick=event=>{window.modelOptionClicks++;for(const option of modelMenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');model='Sol';modelMenu.hidden=true;popup.hidden=false;combined.setAttribute('aria-expanded','false');update();};
+                document.getElementById('terra').onclick=event=>{for(const option of modelMenu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');model='Terra';modelMenu.hidden=true;popup.hidden=false;combined.setAttribute('aria-expanded','false');update();};
+                slider.onkeydown=event=>{if(event.key!=='ArrowRight'&&event.key!=='ArrowLeft')return;window.sliderKeydowns++;const current=Number(slider.getAttribute('aria-valuenow')),next=Math.max(0,Math.min(5,current+(event.key==='ArrowRight'?1:-1)));slider.setAttribute('aria-valuenow',String(next));update();event.preventDefault();};
+                document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!modelMenu.hidden){modelMenu.hidden=true;popup.hidden=false;combined.setAttribute('aria-expanded','false');}});
+                update();
                 </script></body></html>
                 """;
     }

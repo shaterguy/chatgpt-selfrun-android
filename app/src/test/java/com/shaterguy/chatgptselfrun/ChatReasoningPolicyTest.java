@@ -22,14 +22,38 @@ public final class ChatReasoningPolicyTest {
         assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
     }
 
-    @Test public void keepSelectionCapturesCurrentProductionPickerWithoutSelectingAnotherOption() {
+    @Test public void keepSelectionCapturesCurrentPopoverWithoutMovingSlider() {
         assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST");
         assertFalse(script.isEmpty());
         assertTrue(script.contains("__sroCaptureOnly=true"));
-        assertTrue(script.contains("capture-current"));
+        assertTrue(script.contains("strategy:'slider-model-popover'"));
         assertTrue(script.contains("open-picker-for-capture"));
+        assertTrue(script.contains("capture-current"));
         assertTrue(script.contains("wait-capture-readback"));
+    }
+
+    @Test public void currentProductionPathDirectlyMutatesSliderAndDoesNotRequireAdvanced() {
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-CURRENT");
+        assertTrue(script.contains("strategy:'slider-model-popover'"));
+        assertTrue(script.contains("open-reasoning-popover"));
+        assertTrue(script.contains("set-slider"));
+        assertTrue(script.contains("slider-pointer-fallback"));
+        assertTrue(script.contains("ArrowRight"));
+        assertTrue(script.contains("[role=\"slider\"]"));
+        assertFalse(script.contains("open-advanced-control"));
+        assertFalse(script.contains("__sroShowAdvancedLabel"));
+        assertFalse(script.contains("CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"));
+    }
+
+    @Test public void proSelectionsUseModelMenuThenDirectProSlider() {
+        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO_EXTENDED, "SR-PRO");
+        assertTrue(script.contains("pro_standard"));
+        assertTrue(script.contains("pro_extended"));
+        assertTrue(script.contains("open-model-menu"));
+        assertTrue(script.contains("select-model"));
+        assertTrue(script.contains("targetModel"));
+        assertTrue(script.contains("set-slider"));
     }
 
     @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {
@@ -39,42 +63,15 @@ public final class ChatReasoningPolicyTest {
         assertTrue(script.contains("__srcOverallTimeoutMs=60000"));
     }
 
-    @Test public void advancedMenuScriptObservesSheetAndNeverMutatesSlider() {
-        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO_EXTENDED, "SR-ADVANCED");
-        assertTrue(script.contains("strategy:'advanced-menu'"));
-        assertTrue(script.contains("open-reasoning-sheet"));
-        assertTrue(script.contains("open-advanced-control"));
-        assertTrue(script.contains("__sroShowAdvancedLabel"));
-        assertTrue(script.contains("close-current-match"));
-        assertTrue(script.contains("open-reasoning-menu"));
-        assertTrue(script.contains("nested-option-click"));
-        assertTrue(script.contains("direct-option-click"));
-        assertTrue(script.contains("data-animated-slider-trigger"));
-        assertTrue(script.contains("__sroMouse(element,'pointerdown'"));
-        assertTrue(script.contains("sliderObserved"));
-        assertTrue(script.contains("CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"));
-        assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
-        assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
-        assertFalse(script.contains("positive-slider-fallback"));
-        assertFalse(script.contains("set-slider"));
-        assertFalse(script.contains("ArrowRight"));
-        assertFalse(script.contains("new PointerEvent"));
-    }
-
-    @Test public void menuCloseRecoveryUsesDistinctStrategiesBeforeFailingClosed() {
+    @Test public void menuCloseRecoveryNeverReloadsTheConversation() {
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-CLOSE");
-        assertTrue(script.contains("const __sroClose=attempt=>"));
+        assertTrue(script.contains("const __sroClose=()=>"));
         assertTrue(script.contains("return'trigger'"));
-        assertTrue(script.contains("return'focused-escape'"));
-        assertTrue(script.contains("return'composer-outside-escape'"));
-        assertTrue(script.contains("return'document-escape'"));
-        assertTrue(script.contains("__sroClose(__sroState.closeAttempts)"));
-        assertEquals(3, occurrences(script, "__sroClose(__sroState.closeAttempts)"));
+        assertTrue(script.contains("return'escape'"));
         assertTrue(script.contains("new KeyboardEvent('keydown'"));
         assertTrue(script.contains("new KeyboardEvent('keyup'"));
         assertFalse(script.contains("location.reload"));
         assertFalse(script.contains("window.location"));
-        assertTrue(script.contains("CHAT_REASONING_MENU_CLOSE_FAILED"));
     }
 
     @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
@@ -90,7 +87,7 @@ public final class ChatReasoningPolicyTest {
         assertFalse(SelfRunService.isChatReasoningFailureStatus("UI_WAIT"));
     }
 
-    @Test public void newTaskBootstrapUsesOnlyTheAdvancedMenuAdapter() throws Exception {
+    @Test public void newTaskBootstrapUsesCurrentPopoverAdapter() throws Exception {
         String dom = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java");
         String mode = read("app/src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java",
@@ -106,12 +103,6 @@ public final class ChatReasoningPolicyTest {
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
         assertTrue(mode.contains("modeTimeoutMs=20000"));
-    }
-
-    private static int occurrences(String text, String needle) {
-        int count = 0;
-        for (int index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) count++;
-        return count;
     }
 
     private static String read(String first, String second) throws Exception {
