@@ -4,7 +4,7 @@ run-name: SelfRun 2.0 TEST (${{ github.ref_name }}) #${{ github.run_number }}.${
 on:
   push:
     branches:
-      - 'selfrun-drive/v2.*-dev*'
+      - 'selfrun-drive-v2/v2.*-dev*'
   workflow_dispatch:
 
 permissions:
