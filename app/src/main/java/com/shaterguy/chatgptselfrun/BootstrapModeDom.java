@@ -5,7 +5,7 @@ final class BootstrapModeDom {
     private BootstrapModeDom() {}
 
     static String inline(String requested, String runId) {
-        String mode = SelfRunStore.MODE_WORK.equals(requested) ? "work" : "chat";
+        String mode = SelfRunStore.MODE_WORK.equalsIgnoreCase(requested) ? "work" : "chat";
         return """
                 const requestedMode=__REQUESTED__;
                 const modeRunId=__RUN_ID__;
