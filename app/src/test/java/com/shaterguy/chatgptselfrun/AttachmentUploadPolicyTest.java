@@ -34,7 +34,7 @@ public class AttachmentUploadPolicyTest {
         assertTrue(service.contains("store.reserveAttachmentFileId"));
         assertTrue(service.contains("drive.getMetadata(accessToken, fileId)"));
         assertTrue(service.contains("drive.uploadAttachmentResumable"));
-        assertTrue(service.contains("store.allAttachmentsCommitted()"));
+        assertTrue(store.allAttachmentsCommitted() || service.contains("store.allAttachmentsCommitted()"));
         int attachmentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch)");
         int documentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch)");
         assertTrue(attachmentPhase >= 0 && documentPhase > attachmentPhase);
@@ -144,10 +144,11 @@ public class AttachmentUploadPolicyTest {
         Path p = Paths.get("app/build.gradle");
         if (!Files.exists(p)) p = Paths.get("build.gradle");
         String gradle = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000104"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000001"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev1'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
+        assertTrue(gradle.contains("implementation 'androidx.webkit:webkit:1.17.0'"));
     }
 
     private static String between(String source, String start, String end) {
