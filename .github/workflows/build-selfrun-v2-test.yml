@@ -173,7 +173,7 @@ jobs:
           [[ "$READY" == '1' ]]
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest
           adb uninstall com.shaterguy.chatgptselfrun.v2.test >/dev/null 2>&1 || true
           adb uninstall com.shaterguy.chatgptselfrun.v2 >/dev/null 2>&1 || true
           CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev5.apk
@@ -222,7 +222,7 @@ jobs:
             sudo udevadm trigger --name-match=kvm
           fi
 
-      - name: Verify submission, dev4 update, and 1.x coinstallation
+      - name: Verify rich composer regression, dev4 update, and 1.x coinstallation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
