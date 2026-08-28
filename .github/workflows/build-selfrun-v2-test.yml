@@ -130,6 +130,17 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging comparator/chatgpt-selfrun-drive-v1.8.0.apk \
             | grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'"
 
+      - name: Enable KVM group permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+
       - name: Verify simultaneous installation and 1.x package immutability
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
@@ -139,6 +150,7 @@ jobs:
           profile: pixel_6
           disable-animations: false
           script: |
+            bash <<'BASH'
             set -euo pipefail
             adb wait-for-device
             READY=0
@@ -173,6 +185,7 @@ jobs:
             printf '%s\n' "$PROD_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_PROD_STATE.txt
             printf '%s\n' "$TEST_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_TEST_STATE.txt
             printf 'v2DataDir=%s\nprodDataDir=%s\ntestDataDir=%s\n' "$V2_DATA" "$PROD_DATA" "$TEST_DATA" > app/build/outputs/selfrun-v2-test/DATA_DIRS.txt
+            BASH
 
       - name: Upload SelfRun 2.0 TEST artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
