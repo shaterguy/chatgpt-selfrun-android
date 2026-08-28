@@ -48,6 +48,17 @@ final class SelfRunWebDiagnostics {
         return "status=CALLBACK_TIMEOUT;phase=" + phaseKind(phase) + ";reason=evaluate_javascript";
     }
 
+    static String targetErrorDetail(String phase, String detail) {
+        String reason = switch (detail == null ? "" : detail) {
+            case "host mismatch", "호스트 불일치" -> "host_mismatch";
+            case "project mismatch", "프로젝트 불일치" -> "project_mismatch";
+            case "canonical conversation mismatch", "canonical conversation 이탈" -> "conversation_mismatch";
+            case "general chat target mismatch", "일반 Chat 범위 이탈" -> "general_target_mismatch";
+            default -> "unknown";
+        };
+        return "status=TARGET_ERROR;phase=" + phaseKind(phase) + ";reason=" + reason;
+    }
+
     private static String phaseKind(String phase) {
         if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) return "bootstrap_send";
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) return "wait_turn_completion";

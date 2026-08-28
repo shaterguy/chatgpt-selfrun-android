@@ -836,7 +836,7 @@ private void evaluate(String phase,String script){
       if("OBSERVER_UNAVAILABLE".equals(status)){runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
   }
   if("TARGET_ERROR".equals(status)){
-      recordContinuationTargetError(phase);
+      recordContinuationTargetError(phase,detail);
       if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){if(networkState.isValidated())rolloverConversation(SelfRunRolloverPolicy.TARGET_ERROR);else scheduleWeb(5_000L);}
       else if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);
       return;
@@ -939,7 +939,7 @@ private static boolean isConversationLocalFailureStatus(String status){return Se
 private void recordContinuationWait(String phase,String status,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.waitDetail(phase,status,detail));}
 private void recordContinuationState(String phase,String status){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.stateDetail(phase,status));}
 private void recordContinuationRouteMismatch(String actual){String phase=store.phase();if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.routeMismatchDetail(phase,canonicalUrl(),actual));}
-private void recordContinuationTargetError(String phase){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT","status=TARGET_ERROR;reason=target_guard");}
+private void recordContinuationTargetError(String phase,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.targetErrorDetail(phase,detail));}
 private static boolean isContinuationDiagnosticPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 
 private boolean completeBootstrap(JSONObject result){

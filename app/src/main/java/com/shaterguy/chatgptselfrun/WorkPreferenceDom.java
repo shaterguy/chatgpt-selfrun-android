@@ -55,7 +55,9 @@ final class WorkPreferenceDom {
         if (SelfRunScript.GENERAL_CHAT_SCOPE.equals(projectId)) {
             return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');";
         }
-        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');const __wpParts=location.pathname.split('/').filter(Boolean),__wpI=__wpParts.indexOf('g'),__wpActual=__wpI>=0&&__wpI+1<__wpParts.length?__wpParts[__wpI+1]:'';if(__wpActual!=="
+        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','호스트 불일치');"
+                + ProjectUrlPolicy.webProjectIdentityPrelude()
+                + "const __wpParts=location.pathname.split('/').filter(Boolean),__wpI=__wpParts.indexOf('g'),__wpRaw=__wpI>=0&&__wpI+1<__wpParts.length?__wpParts[__wpI+1]:'',__wpActual=__srCanonicalProjectId(__wpRaw);if(!__wpActual||__wpActual!=="
                 + q(projectId) + ")return result('TARGET_ERROR','프로젝트 불일치');";
     }
 

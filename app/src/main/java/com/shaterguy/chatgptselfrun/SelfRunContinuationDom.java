@@ -215,7 +215,9 @@ final class SelfRunContinuationDom {
 
     private static String projectGuard(String project) {
         String general = q(SelfRunScript.GENERAL_CHAT_SCOPE);
-        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','host mismatch');const p=location.pathname.split('/').filter(Boolean);const after=k=>{const i=p.indexOf(k);return i>=0&&i+1<p.length?p[i+1]:''};const expectedProject=" + project + ";const actualProject=after('g');if(expectedProject===" + general + "){const generalNew=p.length===0;const generalConversation=p.length===2&&p[0]==='c'&&!!p[1];if(!generalNew&&!generalConversation)return result('TARGET_ERROR','general chat target mismatch');}else if(actualProject!==expectedProject)return result('TARGET_ERROR','project mismatch');";
+        return "if(location.hostname!=='chatgpt.com'&&location.hostname!=='www.chatgpt.com')return result('TARGET_ERROR','host mismatch');"
+                + ProjectUrlPolicy.webProjectIdentityPrelude()
+                + "const p=location.pathname.split('/').filter(Boolean);const after=k=>{const i=p.indexOf(k);return i>=0&&i+1<p.length?p[i+1]:''};const expectedProject=" + project + ";const actualProject=__srCanonicalProjectId(after('g'));if(expectedProject===" + general + "){const generalNew=p.length===0;const generalConversation=p.length===2&&p[0]==='c'&&!!p[1];if(!generalNew&&!generalConversation)return result('TARGET_ERROR','general chat target mismatch');}else if(!actualProject||actualProject!==expectedProject)return result('TARGET_ERROR','project mismatch');";
     }
 
     private static String authGuard() {

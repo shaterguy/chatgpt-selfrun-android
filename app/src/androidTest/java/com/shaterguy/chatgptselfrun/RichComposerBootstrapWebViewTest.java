@@ -22,7 +22,15 @@ import static org.junit.Assert.assertTrue;
 /** End-to-end regression for rich composer bootstrap plus the request-profile fetch wrapper. */
 @RunWith(AndroidJUnit4.class)
 public final class RichComposerBootstrapWebViewTest {
-    private static final String PROJECT_URL = "https://chatgpt.com/g/g-p-test";
+    private static final String PROJECT_ID = "g-p-6a582c824ba08191ac7e74e9bad721fc";
+    private static final String SLUGGED_PROJECT_ID = PROJECT_ID + "-vibe-coding";
+    private static final String PROJECT_URL = "https://chatgpt.com/g/" + PROJECT_ID + "/project";
+    private static final String SLUGGED_PROJECT_URL = "https://chatgpt.com/g/" + SLUGGED_PROJECT_ID + "/project";
+    private static final String SLUGGED_CONVERSATION_PATH =
+            "/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
+    private static final String OTHER_PROJECT_URL =
+            "https://chatgpt.com/g/g-p-6a582c824ba08191ac7e74e9bad721fd/project";
+    private static final String HOSTILE_EMPTY_SLUG_PATH = "/g/" + PROJECT_ID + "-/project";
     private static final String PROMPT = "SELF_RUN_RICH_COMPOSER_BOOTSTRAP";
 
     @Test public void emptyRichComposerScaffoldSurvivesPreparationAndCreatesConversation() throws Exception {
@@ -65,6 +73,7 @@ public final class RichComposerBootstrapWebViewTest {
                 Thread.sleep(100L);
             }
             assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
+            assertEquals(SLUGGED_CONVERSATION_PATH, read(scenario, web, "location.pathname"));
             assertEquals("true", read(scenario, web, "String(window.submitFetchOk)"));
             assertEquals("/backend-api/conversation/", read(scenario, web,
                     "window.fetchRecords.find(r=>r.path==='/backend-api/conversation/').path"));
@@ -78,6 +87,41 @@ public final class RichComposerBootstrapWebViewTest {
                     "window.fetchRecords.find(r=>r.path==='/backend-api/conversation/').credentials"));
             assertEquals("false", read(scenario, web,
                     "String(window.fetchRecords.find(r=>r.path==='/backend-api/conversation/').signalAborted)"));
+        }
+    }
+
+    @Test public void bootstrapAndWorkGuardsAcceptSluggedPageButRejectAnotherProject() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = loadFixture(scenario);
+            installChatProfile(scenario, web, "SR-SLUG-GUARDS");
+
+            JSONObject work = evaluate(scenario, web,
+                    WorkPreferenceDom.modelForProject(PROJECT_URL, "sol"));
+            assertEquals("READY", work.getString("status"));
+
+            JSONObject otherBootstrap = evaluate(scenario, web,
+                    SelfRunDom.prepareInitialContext(
+                            OTHER_PROJECT_URL, SelfRunStore.MODE_CHAT, "SR-OTHER-PROJECT"));
+            assertEquals("TARGET_ERROR", otherBootstrap.getString("status"));
+            JSONObject otherWork = evaluate(scenario, web,
+                    WorkPreferenceDom.modelForProject(OTHER_PROJECT_URL, "sol"));
+            assertEquals("TARGET_ERROR", otherWork.getString("status"));
+
+            assertEquals("changed", read(scenario, web,
+                    "(()=>{history.replaceState({},'',"
+                            + SelfRunScript.quote(HOSTILE_EMPTY_SLUG_PATH)
+                            + ");return 'changed';})()"));
+            JSONObject hostileBootstrap = evaluate(scenario, web,
+                    SelfRunDom.prepareInitialContext(
+                            PROJECT_URL, SelfRunStore.MODE_CHAT, "SR-HOSTILE-SUFFIX"));
+            assertEquals("TARGET_ERROR", hostileBootstrap.getString("status"));
+            JSONObject hostileWork = evaluate(scenario, web,
+                    WorkPreferenceDom.modelForProject(PROJECT_URL, "sol"));
+            assertEquals("TARGET_ERROR", hostileWork.getString("status"));
+            JSONObject hostileSubmission = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareBootstrap(
+                            PROJECT_URL, PROMPT, "hostile-suffix-marker"));
+            assertEquals("TARGET_ERROR", hostileSubmission.getString("status"));
         }
     }
 
@@ -163,7 +207,7 @@ public final class RichComposerBootstrapWebViewTest {
             });
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(PROJECT_URL, fixture(), "text/html", "UTF-8", null);
+            view.loadDataWithBaseURL(SLUGGED_PROJECT_URL, fixture(), "text/html", "UTF-8", null);
         });
         assertTrue("Rich composer fixture did not load", loaded.await(15, TimeUnit.SECONDS));
         return web;
@@ -283,10 +327,11 @@ public final class RichComposerBootstrapWebViewTest {
                         &&parsed.model==='gpt-5-6-thinking'&&parsed.thinking_effort==='standard'
                         &&parsed.messages?.[0]?.opaque==='bootstrap-message'
                         &&parsed.opaqueTop?.keep===true;
-                      if(window.submitFetchOk)history.replaceState({},'', '/g/g-p-test/c/conversation123');
+                      if(window.submitFetchOk)history.replaceState({},'', __SLUGGED_CONVERSATION_PATH__);
                     }).catch(error=>{window.submitError=String(error?.message||error);});
                 });
                 </script></body></html>
-                """;
+                """.replace("__SLUGGED_CONVERSATION_PATH__",
+                        SelfRunScript.quote(SLUGGED_CONVERSATION_PATH));
     }
 }

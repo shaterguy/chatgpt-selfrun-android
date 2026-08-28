@@ -23,6 +23,8 @@ public class ProjectUrlPolicyTest {
         ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(slugged);
         ProjectUrlPolicy.ProjectRef conversation = ProjectUrlPolicy.parseProject(sluggedConversation);
         assertNotNull(ref); assertNotNull(conversation);
+        assertEquals(id, ProjectUrlPolicy.canonicalProjectId(id));
+        assertEquals(id, ProjectUrlPolicy.canonicalProjectId(id + "-vibe-coding"));
         assertEquals(id, ref.projectId);
         assertEquals(id, conversation.projectId);
         assertEquals("https://chatgpt.com/g/" + id + "/project", ref.canonicalUrl);
@@ -35,7 +37,32 @@ public class ProjectUrlPolicyTest {
     @Test public void doesNotStripSuffixFromLegacyOpaqueProjectIds() {
         ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject("https://chatgpt.com/g/g-p-AbCd-legacy/project");
         assertNotNull(ref);
+        assertEquals("g-p-AbCd-legacy", ProjectUrlPolicy.canonicalProjectId("g-p-AbCd-legacy"));
         assertEquals("g-p-AbCd-legacy", ref.projectId);
+        assertFalse(ProjectUrlPolicy.sameProject(
+                "https://chatgpt.com/g/g-p-AbCd/project",
+                "https://chatgpt.com/g/g-p-AbCd-legacy/project"));
+    }
+
+    @Test public void malformedOrNonModernSuffixesNeverCollapseIntoCanonicalIdentity() {
+        String id = "g-p-6a582c824ba08191ac7e74e9bad721fc";
+        String nonHex = "g-p-z" + id.substring(5);
+        assertEquals(id + "-", ProjectUrlPolicy.canonicalProjectId(id + "-"));
+        assertEquals(nonHex + "-vibe-coding",
+                ProjectUrlPolicy.canonicalProjectId(nonHex + "-vibe-coding"));
+        assertEquals("", ProjectUrlPolicy.canonicalProjectId(id + "-bad!"));
+        assertFalse(ProjectUrlPolicy.sameProject(
+                "https://chatgpt.com/g/" + id + "/project",
+                "https://chatgpt.com/g/" + id + "-/project"));
+        assertFalse(ProjectUrlPolicy.sameProject(
+                "https://chatgpt.com/g/" + id + "/project",
+                "https://chatgpt.com/g/" + nonHex + "-vibe-coding/project"));
+        assertNull(ProjectUrlPolicy.parseProject(
+                "https://chatgpt.com/g/" + id + "-bad%2Fslug/project"));
+        assertNull(ProjectUrlPolicy.parseProject(
+                "https://chatgpt.com/g/" + id + "-vibe-coding/project?project=" + id));
+        assertNull(ProjectUrlPolicy.parseProject(
+                "https://chatgpt.com.evil/g/" + id + "-vibe-coding/project"));
     }
 
     @Test public void rejectsOriginAndParsingConfusion() {

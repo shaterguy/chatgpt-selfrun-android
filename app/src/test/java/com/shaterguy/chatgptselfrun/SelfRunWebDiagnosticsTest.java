@@ -43,6 +43,23 @@ public class SelfRunWebDiagnosticsTest {
         assertFalse(wait.contains("secret prompt"));
     }
 
+    @Test public void targetErrorsUseOnlyFixedPrivacySafeReasons() {
+        String phase = SelfRunStore.PHASE_BOOTSTRAP_SEND;
+        assertEquals("status=TARGET_ERROR;phase=bootstrap_send;reason=host_mismatch",
+                SelfRunWebDiagnostics.targetErrorDetail(phase, "host mismatch"));
+        assertEquals("status=TARGET_ERROR;phase=bootstrap_send;reason=project_mismatch",
+                SelfRunWebDiagnostics.targetErrorDetail(phase, "프로젝트 불일치"));
+        assertEquals("status=TARGET_ERROR;phase=bootstrap_send;reason=conversation_mismatch",
+                SelfRunWebDiagnostics.targetErrorDetail(phase, "canonical conversation mismatch"));
+        assertEquals("status=TARGET_ERROR;phase=bootstrap_send;reason=general_target_mismatch",
+                SelfRunWebDiagnostics.targetErrorDetail(phase, "일반 Chat 범위 이탈"));
+        String unknown = SelfRunWebDiagnostics.targetErrorDetail(
+                phase, "https://chatgpt.com/g/secret-project/c/secret-conversation");
+        assertEquals("status=TARGET_ERROR;phase=bootstrap_send;reason=unknown", unknown);
+        assertFalse(unknown.contains("chatgpt.com"));
+        assertFalse(unknown.contains("secret"));
+    }
+
     @Test public void routeMismatchDoesNotExposeUrlsOrConversationIds() {
         String detail = SelfRunWebDiagnostics.routeMismatchDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
                 "https://chatgpt.com/c/conversation123", "https://chatgpt.com/settings");

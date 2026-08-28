@@ -55,6 +55,16 @@ final class ProjectUrlPolicy {
         return validOpaqueId(slug) ? value.substring(0, canonicalEnd) : value;
     }
 
+    /** JavaScript equivalent of canonicalProjectId(), derived from the same policy constants. */
+    static String webProjectIdentityPrelude() {
+        return "const __srProjectPrefix=" + SelfRunScript.quote(PROJECT_PREFIX)
+                + ",__srProjectTokenLength=" + MODERN_PROJECT_TOKEN_LENGTH
+                + ",__srProjectMaxIdLength=" + MAX_ID_LENGTH + ";"
+                + "const __srProjectOpaque=value=>{if(typeof value!=='string'||value.length===0||value.length>__srProjectMaxIdLength)return false;for(let i=0;i<value.length;i++){const c=value.charAt(i);if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c==='-'||c==='_'))return false;}return true;};"
+                + "const __srProjectHex=c=>(c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F');"
+                + "const __srCanonicalProjectId=value=>{if(typeof value!=='string'||!value.startsWith(__srProjectPrefix)||!__srProjectOpaque(value))return '';const tokenStart=__srProjectPrefix.length,canonicalEnd=tokenStart+__srProjectTokenLength;if(value.length<=canonicalEnd+1||value.charAt(canonicalEnd)!=='-')return value;for(let i=tokenStart;i<canonicalEnd;i++)if(!__srProjectHex(value.charAt(i)))return value;const slug=value.substring(canonicalEnd+1);return __srProjectOpaque(slug)?value.substring(0,canonicalEnd):value;};";
+    }
+
     static boolean isTrustedChatgptPage(String raw) {
         if (raw == null || raw.length() == 0 || raw.length() > MAX_URL_LENGTH || containsControl(raw)) return false;
         try {

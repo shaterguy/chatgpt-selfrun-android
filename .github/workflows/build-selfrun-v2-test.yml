@@ -47,7 +47,7 @@ jobs:
           git merge-base --is-ancestor "$BASE_SHA" HEAD
           [[ "$(git rev-list --max-parents=0 HEAD | head -1)" != '' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.v2'" app/build.gradle
-          grep -Fq "selfRunDriveVersionName = '2.0.0-dev7'" app/build.gradle
+          grep -Fq "selfRunDriveVersionName = '2.0.0-dev8'" app/build.gradle
           grep -Fq "androidx.webkit:webkit:1.17.0" app/build.gradle
           gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleQaApp
           BT="$ANDROID_HOME/build-tools/36.0.0"
@@ -55,8 +55,8 @@ jobs:
           test -s "$UNSIGNED"
           BADGING="$($BT/aapt dump badging "$UNSIGNED")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.v2.test'" <<<"$BADGING"
-          grep -Fq "versionCode='2000007'" <<<"$BADGING"
-          grep -Fq "versionName='2.0.0-dev7'" <<<"$BADGING"
+          grep -Fq "versionCode='2000008'" <<<"$BADGING"
+          grep -Fq "versionName='2.0.0-dev8'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun 2.0 TEST'" <<<"$BADGING"
 
       - name: Install hash-locked signing dependencies
@@ -81,15 +81,15 @@ jobs:
           UNSIGNED="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           OUT=app/build/outputs/selfrun-v2-test
           mkdir -p "$OUT"
-          ALIGNED="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev7-aligned-unsigned.apk"
-          APK="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev7.apk"
+          ALIGNED="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev8-aligned-unsigned.apk"
+          APK="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev8.apk"
           "$BT/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$ALIGNED" "$PASS_FILE" "$APK" > "$OUT/APKSIGNER_VERIFY.txt"
           "$BT/apksigner" verify --verbose --print-certs "$APK" > "$OUT/APK_CERT.txt"
           BADGING="$($BT/aapt dump badging "$APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.v2.test'" <<<"$BADGING"
-          grep -Fq "versionCode='2000007'" <<<"$BADGING"
-          grep -Fq "versionName='2.0.0-dev7'" <<<"$BADGING"
+          grep -Fq "versionCode='2000008'" <<<"$BADGING"
+          grep -Fq "versionName='2.0.0-dev8'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun 2.0 TEST'" <<<"$BADGING"
           sha256sum "$APK" > "$OUT/SHA256SUMS.txt"
           printf '%s\n' "$GITHUB_SHA" > "$OUT/SOURCE_COMMIT.txt"
@@ -130,26 +130,26 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging comparator/chatgpt-selfrun-drive-v1.8.0.apk \
             | grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'"
 
-      - name: Download immutable v2.0.0-dev6 TEST predecessor
+      - name: Download immutable v2.0.0-dev7 TEST predecessor
         shell: bash
         run: |
           set -euo pipefail
-          PREV_RUN_ID='33174946717'
-          PREV_ARTIFACT='selfrun-v2-test-4e74efd8af15f1065602ce5266a56c6020d2deb5-1'
-          PREV_SHA='4e74efd8af15f1065602ce5266a56c6020d2deb5'
-          PREV_BRANCH='selfrun-drive-v2/v2.0.0-dev6'
+          PREV_RUN_ID='33177207627'
+          PREV_ARTIFACT='selfrun-v2-test-ce7a46c9aad5f2b1b9a6f3723ad7bddc07197834-1'
+          PREV_SHA='ce7a46c9aad5f2b1b9a6f3723ad7bddc07197834'
+          PREV_BRANCH='selfrun-drive-v2/v2.0.0-dev7'
           mkdir -p comparator-v2
           gh run download "$PREV_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name "$PREV_ARTIFACT" --dir comparator-v2
-          PREV_V2="$(find comparator-v2 -type f -name 'chatgpt-selfrun-v2-test-v2.0.0-dev6.apk' -print -quit)"
+          PREV_V2="$(find comparator-v2 -type f -name 'chatgpt-selfrun-v2-test-v2.0.0-dev7.apk' -print -quit)"
           test -s "$PREV_V2"
           [[ "$(tr -d '[:space:]' < comparator-v2/SOURCE_COMMIT.txt)" == "$PREV_SHA" ]]
           [[ "$(tr -d '\r\n' < comparator-v2/SOURCE_BRANCH.txt)" == "$PREV_BRANCH" ]]
           BT="$ANDROID_HOME/build-tools/36.0.0"
           BADGING="$($BT/aapt dump badging "$PREV_V2")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.v2.test'" <<<"$BADGING"
-          grep -Fq "versionCode='2000006'" <<<"$BADGING"
-          grep -Fq "versionName='2.0.0-dev6'" <<<"$BADGING"
+          grep -Fq "versionCode='2000007'" <<<"$BADGING"
+          grep -Fq "versionName='2.0.0-dev7'" <<<"$BADGING"
           "$BT/apksigner" verify --verbose --print-certs "$PREV_V2" > comparator-v2/APK_CERT.txt
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' comparator-v2/APK_CERT.txt
 
@@ -176,8 +176,8 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest
           adb uninstall com.shaterguy.chatgptselfrun.v2.test >/dev/null 2>&1 || true
           adb uninstall com.shaterguy.chatgptselfrun.v2 >/dev/null 2>&1 || true
-          CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev7.apk
-          PREV_V2="$(find comparator-v2 -type f -name 'chatgpt-selfrun-v2-test-v2.0.0-dev6.apk' -print -quit)"
+          CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev8.apk
+          PREV_V2="$(find comparator-v2 -type f -name 'chatgpt-selfrun-v2-test-v2.0.0-dev7.apk' -print -quit)"
           PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
           TEST1=comparator/selfrun-v18-test.apk
           adb install "$PROD"
@@ -187,13 +187,13 @@ jobs:
           TEST_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           V2_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           V2_DATA_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
-          grep -Fq 'versionCode=2000006' <<<"$V2_BEFORE"
+          grep -Fq 'versionCode=2000007' <<<"$V2_BEFORE"
           adb install -r "$CURRENT"
           PROD_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           TEST_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           V2_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
           V2_DATA_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
-          grep -Fq 'versionCode=2000007' <<<"$V2_AFTER"
+          grep -Fq 'versionCode=2000008' <<<"$V2_AFTER"
           [[ "$V2_DATA_BEFORE" == "$V2_DATA_AFTER" ]]
           [[ "$PROD_BEFORE" == "$PROD_AFTER" ]]
           [[ "$TEST_BEFORE" == "$TEST_AFTER" ]]
@@ -222,7 +222,7 @@ jobs:
             sudo udevadm trigger --name-match=kvm
           fi
 
-      - name: Verify request-profile bootstrap regression, dev6 update, and 1.x coinstallation
+      - name: Verify slugged project bootstrap, dev7 update, and 1.x coinstallation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
@@ -237,7 +237,7 @@ jobs:
         with:
           name: selfrun-v2-test-${{ github.sha }}-${{ github.run_attempt }}
           path: |
-            app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev7.apk
+            app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev8.apk
             app/build/outputs/selfrun-v2-test/SHA256SUMS.txt
             app/build/outputs/selfrun-v2-test/APKSIGNER_VERIFY.txt
             app/build/outputs/selfrun-v2-test/APK_CERT.txt
