@@ -20,9 +20,23 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest";
     private static final String IMMEDIATE_INPUT_DOM_TEST =
             "com.shaterguy.chatgptselfrun.UserImmediateInputDomWebViewTest";
+    private static final String SUBMISSION_WEBVIEW_TEST =
+            "com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest";
+    private static final String SUBMISSION_WEBVIEW_METHODS = String.join(",",
+            SUBMISSION_WEBVIEW_TEST + "#continuationClassifierIgnoresAStopOutsideTheComposerForm",
+            SUBMISSION_WEBVIEW_TEST + "#continuationClassifierStillBlocksAStopInsideTheComposerForm",
+            SUBMISSION_WEBVIEW_TEST + "#continuationClassifierSeparatesSendDisabledAndEditableIdle",
+            SUBMISSION_WEBVIEW_TEST + "#voiceIdleComposerBecomesSendAfterInputWithoutClickingVoice",
+            SUBMISSION_WEBVIEW_TEST + "#bootstrapVoiceIdleComposerAlsoClicksOnlySend");
 
     @Override public void onCreate(Bundle arguments) {
         Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
+        String selected = effective.getString("class", "").trim();
+        if (SUBMISSION_WEBVIEW_TEST.equals(selected)) {
+            effective.putString("class", SUBMISSION_WEBVIEW_METHODS);
+            super.onCreate(effective);
+            return;
+        }
         appendRequiredClass(effective, PROCESS_RECREATION_TEST);
         appendRequiredClass(effective, BOOTSTRAP_STAGE_TEST);
         appendRequiredClass(effective, HIERARCHICAL_REASONING_TEST);
