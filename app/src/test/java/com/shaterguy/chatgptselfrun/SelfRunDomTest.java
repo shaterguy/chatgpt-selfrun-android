@@ -28,13 +28,17 @@ public class SelfRunDomTest {
         assertFalse(script.contains("assistant"));
     }
 
-    @Test public void generalChatScopeSupportsBootstrapAndWorkPreferences() {
+    @Test public void generalChatScopeSupportsBootstrapAndAbsoluteWorkPreferences() {
         String initial = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL, SelfRunStore.MODE_CHAT, "SR-20260814-TEST00");
         String model = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
         assertTrue(initial.contains("__GENERAL_CHAT__"));
         assertTrue(initial.contains("일반 Chat 범위 이탈"));
-        assertTrue(model.contains("__GENERAL_CHAT__"));
-        assertTrue(model.contains("일반 Chat 범위 이탈"));
+        assertTrue(initial.contains("__selfRunRequestProfileEngine"));
+        assertTrue(model.contains("__selfRunRequestProfileEngine"));
+        assertTrue(model.contains("setWorkModel"));
+        assertTrue(model.contains("uiClicks:0"));
+        assertTrue(model.contains("호스트 불일치"));
+        assertFalse(model.contains("open-work-mode-fallback"));
     }
 
     private static String src(String file) throws Exception {
