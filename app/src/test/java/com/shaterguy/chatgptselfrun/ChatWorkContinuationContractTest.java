@@ -10,22 +10,24 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatWorkContinuationContractTest {
-    @Test public void productionChatUsesAdvancedMenuWithoutSliderMutation() throws Exception {
+    @Test public void productionChatUsesCurrentSliderPopoverWithoutAdvancedDependency() throws Exception {
         String dom = source("SelfRunDom.java");
-        String menu = source("ChatReasoningOptionDom.java");
+        String picker = source("ChatReasoningOptionDom.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
-        assertTrue(menu.contains("open-reasoning-sheet"));
-        assertTrue(menu.contains("open-advanced-control"));
-        assertFalse(menu.contains("positive-slider-fallback"));
-        assertFalse(menu.contains("set-slider"));
-        assertFalse(menu.contains("new PointerEvent"));
+        assertTrue(picker.contains("slider-model-popover"));
+        assertTrue(picker.contains("open-reasoning-popover"));
+        assertTrue(picker.contains("open-model-menu"));
+        assertTrue(picker.contains("set-slider"));
+        assertTrue(picker.contains("slider-pointer-fallback"));
+        assertFalse(picker.contains("open-advanced-control"));
+        assertFalse(picker.contains("__sroShowAdvancedLabel"));
     }
 
     @Test public void workPreferenceWaitsRemainFiniteAndTerminal() throws Exception {
         String preference = source("WorkPreferenceDom.java");
         String service = source("SelfRunService.java");
-        assertTrue(preference.contains("__wpTimeoutMs=20000"));
+        assertTrue(preference.contains("__wpTimeoutMs=26000"));
         assertTrue(preference.contains("'SELECTION_TIMEOUT'"));
         assertTrue(preference.contains("'READBACK_MISMATCH'"));
         assertTrue(service.contains("isWorkPreferenceFailureStatus"));

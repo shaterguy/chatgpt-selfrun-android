@@ -81,27 +81,25 @@ public class WebUiCalibrationPolicyTest {
                 WebUiCalibrationStore.workReasoningPurpose(false, false));
     }
 
-    @Test public void workPreferenceValidatesCalibrationAndKeepsHeaderTriggerFallback() {
+    @Test public void workPreferenceValidatesScopedCalibrationAndKeepsCurrentEffortFallback() {
         String model = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
         String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
-        assertTrue(model.contains("__wpCalibratedOptionValid"));
-        assertTrue(reasoning.contains("__wpCalibratedOptionValid"));
-        assertTrue(model.contains("__wpCalibratedTriggerValid"));
-        assertTrue(reasoning.contains("__wpCalibratedTriggerValid"));
-        assertTrue(model.contains("calibratedTargetValid"));
-        assertTrue(reasoning.contains("calibratedTargetValid"));
-        assertFalse(model.contains("__wpMenuTrigger(__wpCalibrated)&&__wpNear(__wpCalibrated)"));
-        assertFalse(reasoning.contains("__wpMenuTrigger(__wpCalibrated)&&__wpNear(__wpCalibrated)"));
-        assertTrue(model.contains("__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]"));
-        assertTrue(reasoning.contains("__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]"));
-        assertTrue(model.contains("__wpOption=__wpSemanticOption||__wpCalibratedOption"));
-        assertTrue(reasoning.contains("__wpOption=__wpSemanticOption||__wpCalibratedOption"));
-        assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
-        assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
+        assertTrue(model.contains("__wpCalibratedRaw=__srFind(__wpPurpose)"));
+        assertTrue(reasoning.contains("__wpCalibratedRaw=__srFind(__wpPurpose)"));
+        assertTrue(model.contains("__wpCalibratedRoot="));
+        assertTrue(reasoning.contains("__wpCalibratedRoot="));
+        assertTrue(model.contains("!__wpCalibrated.closest(__wpPopupSelector)"));
+        assertTrue(reasoning.contains("!__wpCalibrated.closest(__wpPopupSelector)"));
+        assertTrue(model.contains("__wpNear(__wpCalibrated)"));
+        assertTrue(reasoning.contains("__wpNear(__wpCalibrated)"));
+        assertTrue(model.contains("__wpRootEntries[0]?.element||__wpCalibratedRoot||null"));
+        assertTrue(reasoning.contains("__wpRootEntries[0]?.element||__wpCalibratedRoot||null"));
         assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
         assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
-        assertTrue(model.contains("open-work-mode-fallback"));
-        assertTrue(reasoning.contains("open-work-mode-fallback"));
+        assertTrue(model.contains("open-effort-popover"));
+        assertTrue(reasoning.contains("open-effort-popover"));
+        assertTrue(model.contains("open-model-menu"));
+        assertTrue(reasoning.contains("set-slider"));
         assertTrue(model.contains("[aria-haspopup],[aria-expanded]"));
         assertTrue(reasoning.contains("[aria-haspopup],[aria-expanded]"));
         assertTrue(model.contains("menu|listbox|dialog|true"));
