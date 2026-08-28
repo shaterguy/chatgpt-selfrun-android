@@ -148,6 +148,11 @@ jobs:
             sleep 2
           done
           [[ "$READY" == '1' ]]
+          gradle --build-cache --no-daemon --console=plain --stacktrace \
+            :app:connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest
+          adb uninstall com.shaterguy.chatgptselfrun.v2.test >/dev/null 2>&1 || true
+          adb uninstall com.shaterguy.chatgptselfrun.v2 >/dev/null 2>&1 || true
           CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev3.apk
           PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
           TEST1=comparator/selfrun-v18-test.apk
