@@ -51,8 +51,8 @@ public final class BootstrapFiniteStateWiringTest {
 
     @Test public void developmentIdentityAdvancesOnce() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000004"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev4'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000005"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev5'"));
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
     }
 
