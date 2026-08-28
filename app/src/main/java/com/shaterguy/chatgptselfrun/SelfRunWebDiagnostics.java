@@ -6,18 +6,20 @@ final class SelfRunWebDiagnostics {
 
     static String waitDetail(String phase, String status, String detail) {
         String safeStatus = switch (status == null ? "" : status) {
-            case "WAIT", "UI_WAIT", "COMPOSER_CLEARING", "COMPOSER_INPUTTING",
+            case "WAIT", "UI_WAIT", "COMPOSER_CLEARING", "COMPOSER_INPUTTING", "SUBMISSION_PENDING",
                     "SEND_DISABLED", "STOP", "UNKNOWN", "SCRIPT_ERROR", "SUBMISSION_FAILED" -> status;
             default -> "OTHER";
         };
         String reason;
         if ("COMPOSER_CLEARING".equals(safeStatus)) reason = "composer_clearing";
         else if ("COMPOSER_INPUTTING".equals(safeStatus)) reason = "composer_inputting";
+        else if ("SUBMISSION_PENDING".equals(safeStatus)) reason = "submission_pending";
         else if ("SEND_DISABLED".equals(safeStatus)) reason = "send_disabled";
         else if ("STOP".equals(safeStatus)) reason = "stop_visible";
         else if ("UNKNOWN".equals(safeStatus)) reason = "control_unknown";
         else if ("SCRIPT_ERROR".equals(safeStatus)) reason = "script_error";
-        else if ("SUBMISSION_FAILED".equals(safeStatus)) reason = "submission_failed";
+        else if ("SUBMISSION_FAILED".equals(safeStatus)) reason = "request_profile_rejected".equals(detail)
+                ? "request_profile_rejected" : "submission_failed";
         else if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) reason = "model_wait";
         else if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) reason = "reasoning_wait";
         else {

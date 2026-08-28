@@ -50,7 +50,7 @@ final class RequestProfileScript {
     static String documentStartScript() {
         return """
                 (()=>{
-                  if(window.__selfRunRequestProfileEngine?.version==='calibration-v1')return;
+                  if(window.__selfRunRequestProfileEngine?.version==='calibration-v2')return;
                   const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
                   const state={target:null,last:{ok:false,reason:'not_attempted'}};
                   const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,160)};throw new Error('SELFRUN_PROFILE:'+state.last.reason);};
@@ -71,25 +71,25 @@ final class RequestProfileScript {
                   if(!model||!effort)fail('unsupported_work_profile');if(t.model==='luna'&&t.reasoning==='ultra')fail('luna_ultra_unsupported');
                   return [['set','model',model],['set','thinking_effort',effort],['set','conversation_origin','tpp'],['set','service_tier','standard']];};
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
-                  const strongConversationRoute=url=>{try{const p=new URL(url,location.href).pathname.toLowerCase();return p.includes('/backend-api/')&&p.includes('conversation');}catch(_){return false;}};
-                  const backendRoute=url=>{try{return new URL(url,location.href).pathname.toLowerCase().includes('/backend-api/');}catch(_){return false;}};
+                  const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/\\/+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
                   const strip=obj=>{const copy={...obj};for(const key of CONTROL)delete copy[key];return copy;};
-                  const patchObject=(body,url)=>{if(!body||typeof body!=='object'||Array.isArray(body)){if(strongConversationRoute(url))fail('unknown_conversation_schema');return null;}const hasMessages=Array.isArray(body.messages);if(!hasMessages){if(strongConversationRoute(url))fail('unknown_conversation_schema');return null;}if(!backendRoute(url))fail('messages_submission_outside_backend');const before=JSON.stringify(strip(body));const out={...body};const ops=plan();for(const [kind,path,value] of ops){if(!CONTROL.includes(path))fail('control_allowlist_violation');if(kind==='set')out[path]=value;else if(kind==='remove')delete out[path];else fail('unknown_operation');}if(JSON.stringify(strip(out))!==before)fail('data_plane_changed');const t=state.target;state.last={ok:true,reason:'patched',mode:t.mode,model:t.model,reasoning:t.reasoning,ops:ops.map(op=>op[0]+':'+op[1]),schema:'messages-array'};return out;};
-                  const patchText=(url,method,text)=>{if(norm(method)!=='post'||!sameOrigin(url))return null;if(typeof text!=='string'){if(strongConversationRoute(url))fail('non_text_conversation_body');return null;}let body;try{body=JSON.parse(text);}catch(_){if(strongConversationRoute(url))fail('invalid_conversation_json');return null;}const patched=patchObject(body,url);return patched===null?null:JSON.stringify(patched);};
+                  const patchObject=(body,url)=>{if(!conversationRoute(url))fail('conversation_route_not_allowed');if(!body||typeof body!=='object'||Array.isArray(body))fail('unknown_conversation_schema');if(!Array.isArray(body.messages))fail('unknown_conversation_schema');const before=JSON.stringify(strip(body));const out={...body};const ops=plan();for(const [kind,path,value] of ops){if(!CONTROL.includes(path))fail('control_allowlist_violation');if(kind==='set')out[path]=value;else if(kind==='remove')delete out[path];else fail('unknown_operation');}if(JSON.stringify(strip(out))!==before)fail('data_plane_changed');const t=state.target;state.last={ok:true,reason:'patched',mode:t.mode,model:t.model,reasoning:t.reasoning,ops:ops.map(op=>op[0]+':'+op[1]),schema:'messages-array'};return out;};
+                  const patchText=(url,method,text)=>{if(norm(method)!=='post'||!sameOrigin(url)||!conversationRoute(url))return null;if(typeof text!=='string')fail('non_text_conversation_body');let body;try{body=JSON.parse(text);}catch(_){fail('invalid_conversation_json');}return JSON.stringify(patchObject(body,url));};
                   const nativeFetch=window.fetch.bind(window);
+                  const fetchProbe=(input,init)=>{try{const requestInput=typeof Request!=='undefined'&&input instanceof Request;const url=requestInput?input.url:String(input??'');const method=init&&init.method!==undefined?init.method:(requestInput?input.method:'GET');return{url,method,eligible:norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url)};}catch(_){return{url:'',method:'',eligible:false};}};
                   window.fetch=async function(input,init){
-                    let request;try{request=new Request(input,init);}catch(error){return nativeFetch(input,init);}
-                    if(norm(request.method)!=='post'||!sameOrigin(request.url))return nativeFetch(input,init);
-                    let text='';try{text=await request.clone().text();}catch(_){if(strongConversationRoute(request.url))return Promise.reject(new Error('SELFRUN_PROFILE:request_body_unreadable'));return nativeFetch(input,init);}
+                    const probe=fetchProbe(input,init);if(!probe.eligible)return nativeFetch(input,init);
+                    let request;try{const source=typeof Request!=='undefined'&&input instanceof Request?input.clone():input;request=new Request(source,init);}catch(_){try{fail('request_construction_failed');}catch(error){return Promise.reject(error);}}
+                    let text='';try{text=await request.clone().text();}catch(_){try{fail('request_body_unreadable');}catch(error){return Promise.reject(error);}}
                     let patched;try{patched=patchText(request.url,request.method,text);}catch(error){return Promise.reject(error);}
                     if(patched===null)return nativeFetch(input,init);
-                    return nativeFetch(new Request(request,{body:patched}));
+                    try{return nativeFetch(new Request(request,{body:patched}));}catch(_){try{fail('patched_request_construction_failed');}catch(error){return Promise.reject(error);}}
                   };
                   const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;
                   const meta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){meta.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
                   XMLHttpRequest.prototype.send=function(body){const m=meta.get(this)||{method:'',url:''};let patched=null;try{patched=patchText(m.url,m.method,body);}catch(error){throw error;}return nativeSend.call(this,patched===null?body:patched);};
-                  window.__selfRunRequestProfileEngine={version:'calibration-v1',begin,setChatReasoning,setWorkModel,setWorkReasoning,diagnostics:()=>({...state.last}),target:()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,profileVersion:state.target.profileVersion,ready:state.target.ready}:null};
+                  window.__selfRunRequestProfileEngine={version:'calibration-v2',begin,setChatReasoning,setWorkModel,setWorkReasoning,diagnostics:()=>({...state.last}),target:()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,profileVersion:state.target.profileVersion,ready:state.target.ready}:null};
                 })();
                 """;
     }

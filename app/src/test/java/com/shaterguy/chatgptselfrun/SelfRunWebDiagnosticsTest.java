@@ -34,6 +34,12 @@ public class SelfRunWebDiagnosticsTest {
         assertEquals("status=SEND_DISABLED;phase=bootstrap_send;reason=send_disabled",
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
                         "SEND_DISABLED", "secret prompt must not leak"));
+        assertEquals("status=SUBMISSION_PENDING;phase=bootstrap_send;reason=submission_pending",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
+                        "SUBMISSION_PENDING", "dispatch detail with secret prompt"));
+        assertEquals("status=SUBMISSION_FAILED;phase=bootstrap_send;reason=request_profile_rejected",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_BOOTSTRAP_SEND,
+                        "SUBMISSION_FAILED", "request_profile_rejected"));
         assertFalse(wait.contains("secret prompt"));
     }
 

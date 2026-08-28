@@ -27,6 +27,9 @@ public final class SelfRunRolloverPolicyTest {
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,15_999L));
         assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,16_000L));
         assertTrue(SelfRunRolloverPolicy.hardContinuationFailureStatus("SUBMISSION_FAILED"));
+        assertFalse(SelfRunRolloverPolicy.hardContinuationFailureStatus("SUBMISSION_PENDING"));
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure("SUBMISSION_PENDING", started, 99_000L));
+        assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("SUBMISSION_PENDING"));
         assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("READY_TO_SUBMIT"));
         assertEquals(SelfRunRolloverPolicy.continuationFailureBucket("UNKNOWN"),
                 SelfRunRolloverPolicy.continuationFailureBucket("SUBMISSION_FAILED"));

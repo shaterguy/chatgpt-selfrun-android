@@ -155,6 +155,18 @@ public class RequestProfileEngineTest {
                 RequestProfileEngine.CONTROL_PATHS);
     }
 
+    @Test public void browserInterceptorPreflightsBeforeRebuildingOnlyExactConversationRoutes() {
+        String script = RequestProfileScript.documentStartScript();
+        assertTrue(script.contains("p==='/backend-api/conversation'||p==='/backend-api/f/conversation'"));
+        assertTrue(script.contains("p=p.replace(/\\/+$/"));
+        assertTrue(script.contains("if(!probe.eligible)return nativeFetch(input,init)"));
+        assertTrue(script.indexOf("if(!probe.eligible)return nativeFetch(input,init)")
+                < script.indexOf("input instanceof Request?input.clone():input"));
+        assertTrue(script.contains("input instanceof Request?input.clone():input"));
+        assertFalse(script.contains("p.includes('/backend-api/')"));
+        assertFalse(script.contains("p.includes('conversation')"));
+    }
+
     @Test public void legacyUiSelectorsAreNotRequiredByV2ProfileBridges() {
         String work = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/abc", "sol");
         String chat = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.HIGH, "run");

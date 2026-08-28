@@ -27,6 +27,7 @@ public final class SubmissionDispatchEvidencePolicyTest {
         assertTrue(click.indexOf("c.send.focus") < click.indexOf("requestComposerSubmit()"));
         assertTrue(click.contains("dispatch=BOOTSTRAP_CLICKED"));
         assertTrue(click.contains("verification=pending"));
+        assertTrue(click.contains("return result('SUBMISSION_PENDING'"));
         assertFalse(click.contains("return result('BOOTSTRAP_CLICKED'"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
     }
@@ -45,6 +46,7 @@ public final class SubmissionDispatchEvidencePolicyTest {
         assertTrue(click.indexOf("c.send.focus") < click.indexOf("requestComposerSubmit()"));
         assertTrue(click.contains("dispatch=CONTINUE_CLICKED"));
         assertTrue(click.contains("verification=pending"));
+        assertTrue(click.contains("return result('SUBMISSION_PENDING'"));
         assertFalse(click.contains("return result('CONTINUE_CLICKED'"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
     }
