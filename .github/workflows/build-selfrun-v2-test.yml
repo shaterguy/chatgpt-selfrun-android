@@ -130,6 +130,49 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging comparator/chatgpt-selfrun-drive-v1.8.0.apk \
             | grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'"
 
+      - name: Prepare simultaneous-install verification script
+        shell: bash
+        run: |
+          set -euo pipefail
+          COINSTALL_SCRIPT="$RUNNER_TEMP/selfrun-v2-coinstall.sh"
+          cat > "$COINSTALL_SCRIPT" <<'BASH'
+          set -euo pipefail
+          adb wait-for-device
+          READY=0
+          for attempt in $(seq 1 30); do
+            if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == '1' ]] \
+                && adb shell cmd package list packages >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
+            sleep 2
+          done
+          [[ "$READY" == '1' ]]
+          CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev1.apk
+          PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
+          TEST1=comparator/selfrun-v18-test.apk
+          adb install "$PROD"
+          adb install "$TEST1"
+          PROD_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          TEST_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          adb install "$CURRENT"
+          PROD_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          TEST_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
+          [[ "$PROD_BEFORE" == "$PROD_AFTER" ]]
+          [[ "$TEST_BEFORE" == "$TEST_AFTER" ]]
+          adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.drive'
+          adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.drive.test'
+          adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.v2.test'
+          V2_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
+          PROD_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
+          TEST_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
+          [[ -n "$V2_DATA" && "$V2_DATA" != "$PROD_DATA" && "$V2_DATA" != "$TEST_DATA" ]]
+          printf '%s\n' "$PROD_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_PROD_STATE.txt
+          printf '%s\n' "$TEST_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_TEST_STATE.txt
+          printf 'v2DataDir=%s\nprodDataDir=%s\ntestDataDir=%s\n' "$V2_DATA" "$PROD_DATA" "$TEST_DATA" > app/build/outputs/selfrun-v2-test/DATA_DIRS.txt
+          BASH
+          chmod 700 "$COINSTALL_SCRIPT"
+
       - name: Enable KVM group permissions
         shell: bash
         run: |
@@ -149,43 +192,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: false
-          script: |
-            bash <<'BASH'
-            set -euo pipefail
-            adb wait-for-device
-            READY=0
-            for attempt in $(seq 1 30); do
-              if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == '1' ]] \
-                  && adb shell cmd package list packages >/dev/null 2>&1; then
-                READY=1
-                break
-              fi
-              sleep 2
-            done
-            [[ "$READY" == '1' ]]
-            CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev1.apk
-            PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
-            TEST1=comparator/selfrun-v18-test.apk
-            adb install "$PROD"
-            adb install "$TEST1"
-            PROD_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
-            TEST_BEFORE="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
-            adb install "$CURRENT"
-            PROD_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
-            TEST_AFTER="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -E 'versionCode=|lastUpdateTime=|dataDir=' | tr -d '\r')"
-            [[ "$PROD_BEFORE" == "$PROD_AFTER" ]]
-            [[ "$TEST_BEFORE" == "$TEST_AFTER" ]]
-            adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.drive'
-            adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.drive.test'
-            adb shell pm list packages | grep -Fxq 'package:com.shaterguy.chatgptselfrun.v2.test'
-            V2_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.v2.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
-            PROD_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
-            TEST_DATA="$(adb shell dumpsys package com.shaterguy.chatgptselfrun.drive.test | grep -m1 'dataDir=' | sed 's/.*dataDir=//' | tr -d '\r')"
-            [[ -n "$V2_DATA" && "$V2_DATA" != "$PROD_DATA" && "$V2_DATA" != "$TEST_DATA" ]]
-            printf '%s\n' "$PROD_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_PROD_STATE.txt
-            printf '%s\n' "$TEST_BEFORE" > app/build/outputs/selfrun-v2-test/COINSTALL_TEST_STATE.txt
-            printf 'v2DataDir=%s\nprodDataDir=%s\ntestDataDir=%s\n' "$V2_DATA" "$PROD_DATA" "$TEST_DATA" > app/build/outputs/selfrun-v2-test/DATA_DIRS.txt
-            BASH
+          script: bash "$RUNNER_TEMP/selfrun-v2-coinstall.sh"
 
       - name: Upload SelfRun 2.0 TEST artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
