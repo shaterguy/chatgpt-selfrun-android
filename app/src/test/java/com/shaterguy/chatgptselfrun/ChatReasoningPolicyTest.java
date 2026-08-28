@@ -27,33 +27,36 @@ public final class ChatReasoningPolicyTest {
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST");
         assertFalse(script.isEmpty());
         assertTrue(script.contains("__sroCaptureOnly=true"));
-        assertTrue(script.contains("strategy:'slider-model-popover'"));
+        assertTrue(script.contains("strategy:'composer-detent-picker'"));
         assertTrue(script.contains("open-picker-for-capture"));
         assertTrue(script.contains("capture-current"));
         assertTrue(script.contains("wait-capture-readback"));
     }
 
-    @Test public void currentProductionPathDirectlyMutatesSliderAndDoesNotRequireAdvanced() {
+    @Test public void currentProductionPathUsesSemanticDetentsWithFiniteSliderFallback() {
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-CURRENT");
-        assertTrue(script.contains("strategy:'slider-model-popover'"));
+        assertTrue(script.contains("strategy:'composer-detent-picker'"));
         assertTrue(script.contains("open-reasoning-popover"));
+        assertTrue(script.contains("set-slider-detent"));
+        assertTrue(script.contains("set-slider-track"));
         assertTrue(script.contains("set-slider"));
-        assertTrue(script.contains("slider-pointer-fallback"));
         assertTrue(script.contains("ArrowRight"));
         assertTrue(script.contains("[role=\"slider\"]"));
+        assertTrue(script.contains("aria-valuenow"));
         assertFalse(script.contains("open-advanced-control"));
         assertFalse(script.contains("__sroShowAdvancedLabel"));
         assertFalse(script.contains("CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"));
     }
 
-    @Test public void proSelectionsUseModelMenuThenDirectProSlider() {
+    @Test public void proSelectionsUseModelMenuThenCurrentPerformanceControl() {
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO_EXTENDED, "SR-PRO");
         assertTrue(script.contains("pro_standard"));
         assertTrue(script.contains("pro_extended"));
         assertTrue(script.contains("open-model-menu"));
         assertTrue(script.contains("select-model"));
         assertTrue(script.contains("targetModel"));
-        assertTrue(script.contains("set-slider"));
+        assertTrue(script.contains("set-slider-detent"));
+        assertTrue(script.contains("set-slider-track"));
     }
 
     @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {

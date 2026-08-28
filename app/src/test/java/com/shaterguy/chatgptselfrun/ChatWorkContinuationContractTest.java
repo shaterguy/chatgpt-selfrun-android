@@ -15,11 +15,11 @@ public final class ChatWorkContinuationContractTest {
         String picker = source("ChatReasoningOptionDom.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
-        assertTrue(picker.contains("slider-model-popover"));
+        assertTrue(picker.contains("composer-detent-picker"));
         assertTrue(picker.contains("open-reasoning-popover"));
         assertTrue(picker.contains("open-model-menu"));
-        assertTrue(picker.contains("set-slider"));
-        assertTrue(picker.contains("slider-pointer-fallback"));
+        assertTrue(picker.contains("set-slider-detent"));
+        assertTrue(picker.contains("set-slider-track"));
         assertFalse(picker.contains("open-advanced-control"));
         assertFalse(picker.contains("__sroShowAdvancedLabel"));
     }

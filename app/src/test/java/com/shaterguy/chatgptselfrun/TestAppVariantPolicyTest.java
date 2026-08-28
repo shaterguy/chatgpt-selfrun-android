@@ -34,8 +34,8 @@ public final class TestAppVariantPolicyTest {
 
     @Test public void developmentVersionUsesCurrentDevIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.1-dev4'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000108"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.1-dev5'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000109"));
     }
 
     @Test public void devPushBuildsOnlyTheTestApplicationChannel() throws Exception {

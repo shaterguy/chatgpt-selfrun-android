@@ -86,24 +86,23 @@ public class WebUiCalibrationPolicyTest {
         String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
         assertTrue(model.contains("__wpCalibratedRaw=__srFind(__wpPurpose)"));
         assertTrue(reasoning.contains("__wpCalibratedRaw=__srFind(__wpPurpose)"));
-        assertTrue(model.contains("__wpCalibratedRoot="));
-        assertTrue(reasoning.contains("__wpCalibratedRoot="));
-        assertTrue(model.contains("!__wpCalibrated.closest(__wpPopupSelector)"));
-        assertTrue(reasoning.contains("!__wpCalibrated.closest(__wpPopupSelector)"));
-        assertTrue(model.contains("__wpNear(__wpCalibrated)"));
-        assertTrue(reasoning.contains("__wpNear(__wpCalibrated)"));
-        assertTrue(model.contains("__wpRootEntries[0]?.element||__wpCalibratedRoot||null"));
-        assertTrue(reasoning.contains("__wpRootEntries[0]?.element||__wpCalibratedRoot||null"));
+        assertTrue(model.contains("__wpCalibrated=__wpCalibratedRaw?.closest?"));
+        assertTrue(reasoning.contains("__wpCalibrated=__wpCalibratedRaw?.closest?"));
+        assertTrue(model.contains("__wpVisible(__wpCalibrated)&&__wpNear(__wpCalibrated)"));
+        assertTrue(reasoning.contains("__wpVisible(__wpCalibrated)&&__wpNear(__wpCalibrated)"));
+        assertTrue(model.contains("__wpRoot=__wpRoots[0]?.element||"));
+        assertTrue(reasoning.contains("__wpRoot=__wpRoots[0]?.element||"));
         assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
         assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
         assertTrue(model.contains("open-effort-popover"));
         assertTrue(reasoning.contains("open-effort-popover"));
         assertTrue(model.contains("open-model-menu"));
-        assertTrue(reasoning.contains("set-slider"));
+        assertTrue(reasoning.contains("set-slider-detent"));
+        assertTrue(reasoning.contains("set-slider-track"));
         assertTrue(model.contains("[aria-haspopup],[aria-expanded]"));
         assertTrue(reasoning.contains("[aria-haspopup],[aria-expanded]"));
-        assertTrue(model.contains("menu|listbox|dialog|true"));
-        assertTrue(reasoning.contains("menu|listbox|dialog|true"));
+        assertTrue(model.contains("[role=\"menu\"],[role=\"listbox\"],[role=\"dialog\"]"));
+        assertTrue(reasoning.contains("[role=\"menu\"],[role=\"listbox\"],[role=\"dialog\"]"));
     }
 
     @Test public void calibrationActivityExposesFourIndependentWorkContexts() throws Exception {
