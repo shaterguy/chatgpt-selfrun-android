@@ -47,7 +47,7 @@ jobs:
           git merge-base --is-ancestor "$BASE_SHA" HEAD
           [[ "$(git rev-list --max-parents=0 HEAD | head -1)" != '' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.v2'" app/build.gradle
-          grep -Fq "selfRunDriveVersionName = '2.0.0-dev1'" app/build.gradle
+          grep -Fq "selfRunDriveVersionName = '2.0.0-dev2'" app/build.gradle
           grep -Fq "androidx.webkit:webkit:1.17.0" app/build.gradle
           gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleQaApp
           BT="$ANDROID_HOME/build-tools/36.0.0"
@@ -55,8 +55,8 @@ jobs:
           test -s "$UNSIGNED"
           BADGING="$($BT/aapt dump badging "$UNSIGNED")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.v2.test'" <<<"$BADGING"
-          grep -Fq "versionCode='2000001'" <<<"$BADGING"
-          grep -Fq "versionName='2.0.0-dev1'" <<<"$BADGING"
+          grep -Fq "versionCode='2000002'" <<<"$BADGING"
+          grep -Fq "versionName='2.0.0-dev2'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun 2.0 TEST'" <<<"$BADGING"
 
       - name: Install hash-locked signing dependencies
@@ -81,15 +81,15 @@ jobs:
           UNSIGNED="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           OUT=app/build/outputs/selfrun-v2-test
           mkdir -p "$OUT"
-          ALIGNED="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev1-aligned-unsigned.apk"
-          APK="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev1.apk"
+          ALIGNED="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev2-aligned-unsigned.apk"
+          APK="$OUT/chatgpt-selfrun-v2-test-v2.0.0-dev2.apk"
           "$BT/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$ALIGNED" "$PASS_FILE" "$APK" > "$OUT/APKSIGNER_VERIFY.txt"
           "$BT/apksigner" verify --verbose --print-certs "$APK" > "$OUT/APK_CERT.txt"
           BADGING="$($BT/aapt dump badging "$APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.v2.test'" <<<"$BADGING"
-          grep -Fq "versionCode='2000001'" <<<"$BADGING"
-          grep -Fq "versionName='2.0.0-dev1'" <<<"$BADGING"
+          grep -Fq "versionCode='2000002'" <<<"$BADGING"
+          grep -Fq "versionName='2.0.0-dev2'" <<<"$BADGING"
           grep -Fq "application-label:'SelfRun 2.0 TEST'" <<<"$BADGING"
           sha256sum "$APK" > "$OUT/SHA256SUMS.txt"
           printf '%s\n' "$GITHUB_SHA" > "$OUT/SOURCE_COMMIT.txt"
@@ -148,7 +148,7 @@ jobs:
             sleep 2
           done
           [[ "$READY" == '1' ]]
-          CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev1.apk
+          CURRENT=app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev2.apk
           PROD=comparator/chatgpt-selfrun-drive-v1.8.0.apk
           TEST1=comparator/selfrun-v18-test.apk
           adb install "$PROD"
@@ -199,7 +199,7 @@ jobs:
         with:
           name: selfrun-v2-test-${{ github.sha }}-${{ github.run_attempt }}
           path: |
-            app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev1.apk
+            app/build/outputs/selfrun-v2-test/chatgpt-selfrun-v2-test-v2.0.0-dev2.apk
             app/build/outputs/selfrun-v2-test/SHA256SUMS.txt
             app/build/outputs/selfrun-v2-test/APKSIGNER_VERIFY.txt
             app/build/outputs/selfrun-v2-test/APK_CERT.txt

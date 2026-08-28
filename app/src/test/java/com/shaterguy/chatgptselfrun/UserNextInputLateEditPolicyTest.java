@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class UserNextInputLateEditPolicyTest {
-    @Test public void lateEditUsesRevisionPreflightBeforeRealClick() throws Exception {
+    @Test public void lateEditUsesRevisionPreflightBeforeRealDispatch() throws Exception {
         String store = src("UserNextInputStore.java");
         String dom = src("SelfRunContinuationDom.java");
         assertTrue(store.contains("PREFLIGHT_CONTINUATION"));
@@ -28,18 +28,23 @@ public final class UserNextInputLateEditPolicyTest {
         assertTrue(dom.contains("locked continuation has definite no-dispatch evidence"));
     }
 
-    @Test public void actualSendScriptStillOwnsTheIrreversibleBoundary() throws Exception {
+    @Test public void actualSendScriptOwnsIrreversibleBoundaryButDoesNotClaimSuccess() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
         String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
         String probe = between(dom, "private static String probeLockedDriveTurn", "private static String preflightPreparedDriveTurn");
         String preflight = between(dom, "private static String preflightPreparedDriveTurn", "static String observeTurnCompletion");
         assertTrue(click.contains("c.send.click()"));
         assertTrue(click.contains("requestComposerSubmit()"));
+        assertTrue(click.indexOf("requestComposerSubmit()") < click.indexOf("c.send.focus"));
         assertTrue(click.contains("armCompletionObserver(false)"));
+        assertTrue(click.contains("dispatch=CONTINUE_CLICKED"));
+        assertTrue(click.contains("verification=pending"));
+        assertFalse(click.contains("return result('CONTINUE_CLICKED'"));
+        assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertFalse(probe.contains("c.send.click()"));
         assertFalse(probe.contains("requestComposerSubmit()"));
         assertFalse(probe.contains("armCompletionObserver(false)"));
-        assertTrue(probe.contains("m.state==='clicked'||m.state==='confirmed'"));
+        assertTrue(probe.contains("continuationClickedVerification()"));
         assertTrue(probe.contains("definite no-dispatch evidence"));
         assertFalse(preflight.contains("c.send.click()"));
         assertFalse(preflight.contains("requestComposerSubmit()"));
@@ -47,13 +52,13 @@ public final class UserNextInputLateEditPolicyTest {
         assertTrue(preflight.contains("READY_TO_SUBMIT"));
     }
 
-    @Test public void unmanagedDomAdapterKeepsLegacyDirectClickContract() throws Exception {
+    @Test public void unmanagedDomAdapterAlsoUsesEvidenceGatedDispatchContract() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
         String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
         assertTrue(click.contains("UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)"));
         assertTrue(click.contains("if (!plan.clickAllowed) return preflightPreparedDriveTurn"));
         assertTrue(click.contains("c.send.click()"));
-        assertTrue(click.contains("return result('CONTINUE_CLICKED'"));
+        assertTrue(click.contains("return result('COMPOSER_INPUTTING','dispatch=CONTINUE_CLICKED"));
     }
 
     @Test public void missingPreparedMarkerNeverClaimsSubmission() throws Exception {
@@ -62,7 +67,8 @@ public final class UserNextInputLateEditPolicyTest {
         assertTrue(click.contains("m.state==='clicked'||m.state==='confirmed'"));
         assertTrue(click.contains("if(!m.state)writeMarker({state:'clearing'"));
         assertTrue(click.contains("prepared marker unavailable before click"));
-        assertFalse(click.contains("if(m.state!=='prepared')return result('VERIFY_REQUIRED'"));
+        assertFalse(click.contains("VERIFY_REQUIRED"));
+        assertFalse(click.contains("SUBMISSION_CONFIRMED"));
     }
 
     private static String src(String file) throws Exception {

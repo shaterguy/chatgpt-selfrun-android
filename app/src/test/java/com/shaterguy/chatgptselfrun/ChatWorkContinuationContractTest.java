@@ -35,7 +35,7 @@ public final class ChatWorkContinuationContractTest {
         assertFalse(preference.contains("SELECTION_TIMEOUT"));
     }
 
-    @Test public void continuationSubmissionIsVerifiedWithoutBlindResubmit() throws Exception {
+    @Test public void continuationSubmissionRequiresPositiveDomEvidenceBeforeWaitPhase() throws Exception {
         String service = source("SelfRunService.java");
         String continuation = source("SelfRunContinuationDom.java");
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
@@ -43,10 +43,13 @@ public final class ChatWorkContinuationContractTest {
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_REASONING));
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_SEND_CONTINUE));
         assertTrue(continuation.contains("writeMarker({state:'clicked'"));
-        assertTrue(continuation.contains("if(m.state==='clicked')return result('VERIFY_REQUIRED'"));
+        assertTrue(continuation.contains("continuationClickedVerification()"));
+        assertTrue(continuation.contains("continuation submission evidence confirmed"));
+        assertTrue(continuation.contains("continuation submission verification pending"));
+        assertTrue(continuation.contains("dispatch=CONTINUE_CLICKED"));
+        assertFalse(continuation.contains("return result('VERIFY_REQUIRED'"));
         assertFalse(continuation.contains("verifyDriveTurnSubmission"));
         assertFalse(service.contains("SelfRunContinuationDom.verifyDriveTurnSubmission"));
-        assertTrue(service.contains("\"CONTINUE_CLICKED\".equals(status)"));
         assertTrue(service.contains("store.beginTurnCompletionWait"));
         String callbackRecovery = section(service, "private void scheduleContinuationCallbackDeadline", "private void recoverBootstrapSendCallback");
         assertTrue(callbackRecovery.contains("PHASE_WAIT_TURN_COMPLETION"));
