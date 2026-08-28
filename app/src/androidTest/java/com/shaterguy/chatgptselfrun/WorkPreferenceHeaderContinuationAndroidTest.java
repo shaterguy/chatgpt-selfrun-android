@@ -16,16 +16,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-/** Covers the existing-chat WORK selector when its semantic trigger is in the header. */
+/** Covers existing-chat WORK selection with the current composer effort popover. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkPreferenceHeaderContinuationAndroidTest {
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/work-header-continuation";
 
-    @Test public void farHeaderModelTriggerWinsAfterStaleCalibrationIsRejected() throws Exception {
+    @Test public void composerEffortTriggerWinsAfterStaleCalibrationIsRejected() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web, modelFixture());
@@ -33,10 +32,12 @@ public final class WorkPreferenceHeaderContinuationAndroidTest {
                     + WebUiCalibrationStore.STORAGE_KEY + "',JSON.stringify(profile));return JSON.stringify({status:'READY'});})()");
 
             assertEquals("true", read(scenario, web,
-                    "String(document.getElementById('prompt-textarea').getBoundingClientRect().top-document.getElementById('trigger').getBoundingClientRect().bottom>260)"));
+                    "String(document.getElementById('prompt-textarea').getBoundingClientRect().top-document.getElementById('stale').getBoundingClientRect().bottom>260)"));
+            assertEquals("true", read(scenario, web,
+                    "String(document.querySelector('form').contains(document.getElementById('effort')))"));
 
             JSONObject result = null;
-            for (int attempt = 0; attempt < 12; attempt++) {
+            for (int attempt = 0; attempt < 18; attempt++) {
                 result = evaluate(scenario, web,
                         WorkPreferenceDom.modelForConversation(CONVERSATION_URL, "luna"));
                 if ("READY".equals(result.getString("status"))) break;
@@ -46,15 +47,13 @@ public final class WorkPreferenceHeaderContinuationAndroidTest {
             assertNotNull(result);
             assertEquals(result.toString(), "READY", result.getString("status"));
             JSONObject diagnostics = result.getJSONObject("diagnostics");
-            assertEquals("luna", diagnostics.getString("current"));
-            assertEquals("heuristic-trigger", diagnostics.getString("source"));
-            assertTrue(diagnostics.getBoolean("calibratedTargetFound"));
-            assertFalse(diagnostics.getBoolean("calibratedTargetValid"));
+            assertEquals("luna", diagnostics.getString("observed"));
+            assertEquals("luna", diagnostics.getString("currentModel"));
             assertEquals("0", read(scenario, web, "String(window.staleClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.triggerClicks)"));
-            assertEquals("1", read(scenario, web, "String(window.rowClicks)"));
+            assertEquals("2", read(scenario, web, "String(window.effortClicks)"));
+            assertEquals("1", read(scenario, web, "String(window.modelHeaderClicks)"));
             assertEquals("1", read(scenario, web, "String(window.optionClicks)"));
-            assertEquals("Luna", read(scenario, web, "document.getElementById('trigger').textContent"));
+            assertTrue(read(scenario, web, "document.getElementById('combined').textContent").contains("Luna"));
         }
     }
 
@@ -63,12 +62,12 @@ public final class WorkPreferenceHeaderContinuationAndroidTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web, missingSelectorFixture());
             evaluate(scenario, web,
-                    "(()=>{const key='selfrun-drive:work-preference:model:GENERAL_CONTINUATION_WORK_MODEL:'+location.pathname;sessionStorage.setItem(key,JSON.stringify({startedAt:Date.now()-21000,requested:'luna',attempts:23,triggerClicks:0,rowClicks:0,optionClicks:0,fallbackClicks:0,closeAttempts:0,pending:false,lastAction:'',lastActionAt:0}));return JSON.stringify({status:'READY'});})()");
+                    "(()=>{const key='selfrun-drive:work-preference-current:model:GENERAL_CONTINUATION_WORK_MODEL:'+location.pathname;sessionStorage.setItem(key,JSON.stringify({startedAt:Date.now()-27000,requested:'luna',attempts:31,rootClicks:0,advancedClicks:0,rowClicks:0,optionClicks:0,sliderMoves:0,closeAttempts:0,pending:false,pendingLevel:'',pendingDirection:0,pendingTarget:null,pendingStrategy:'',pendingWaits:0,verified:'',lastAction:'',lastActionAt:0}));return JSON.stringify({status:'READY'});})()");
 
             JSONObject result = evaluate(scenario, web,
                     WorkPreferenceDom.modelForConversation(CONVERSATION_URL, "luna"));
             assertEquals("WORK_MODEL_SELECTION_TIMEOUT", result.getString("status"));
-            assertTrue(result.getJSONObject("diagnostics").getLong("elapsedMs") >= 20_000L);
+            assertTrue(result.getJSONObject("diagnostics").getLong("elapsedMs") >= 26_000L);
         }
     }
 
@@ -76,28 +75,34 @@ public final class WorkPreferenceHeaderContinuationAndroidTest {
         return """
                 <!doctype html><html><head><style>
                 [hidden]{display:none!important}body{margin:0;min-height:1000px}header{height:72px;padding:8px}
-                main{margin-top:650px}form{height:80px}button{display:block;margin:6px}
+                main{margin-top:650px}form{height:100px}button{display:block;margin:6px}
+                #settings,#model-menu{position:absolute;width:320px;min-height:120px}#slider{display:block;width:280px;height:28px}
                 </style></head><body>
-                <header>
-                  <button id="stale" type="button" aria-haspopup="dialog">Account</button>
-                  <button id="trigger" type="button" aria-haspopup="dialog" aria-controls="settings" aria-expanded="false">Sol</button>
-                </header>
-                <main><form><textarea id="prompt-textarea"></textarea></form></main>
+                <header><button id="stale" type="button" aria-haspopup="dialog">Account</button></header>
+                <main><form><textarea id="prompt-textarea"></textarea>
+                  <button id="effort" type="button" aria-haspopup="dialog" aria-controls="settings" aria-expanded="false">Select effort</button>
+                </form></main>
                 <div id="settings" role="dialog" hidden>
-                  <button id="model-row" type="button" role="menuitem">Model Sol</button>
+                  <button id="combined" type="button" aria-haspopup="menu" aria-expanded="false">5.6 Sol High &gt;</button>
+                  <div id="slider" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="5" aria-valuenow="2" aria-valuestep="1" aria-valuetext="High"></div>
                 </div>
-                <div id="options" role="menu" hidden>
-                  <button type="button" role="menuitemradio" aria-checked="true">Sol</button>
-                  <button type="button" role="menuitemradio" aria-checked="false">Terra</button>
-                  <button id="luna" type="button" role="menuitemradio" aria-checked="false">Luna</button>
+                <div id="model-menu" role="menu" hidden>
+                  <button type="button" role="menuitem">Default</button>
+                  <button id="sol" type="button" role="menuitemradio" aria-checked="true">5.6 Sol</button>
+                  <button type="button" role="menuitemradio" aria-checked="false">5.6 Terra</button>
+                  <button id="luna" type="button" role="menuitemradio" aria-checked="false">5.6 Luna</button>
                 </div>
                 <script>
-                window.staleClicks=0;window.triggerClicks=0;window.rowClicks=0;window.optionClicks=0;
-                const stale=document.getElementById('stale'),trigger=document.getElementById('trigger'),settings=document.getElementById('settings'),row=document.getElementById('model-row'),options=document.getElementById('options');
+                window.staleClicks=0;window.effortClicks=0;window.modelHeaderClicks=0;window.optionClicks=0;
+                const stale=document.getElementById('stale'),effort=document.getElementById('effort'),settings=document.getElementById('settings'),combined=document.getElementById('combined'),menu=document.getElementById('model-menu');
+                let model='Sol';
+                const update=()=>{combined.textContent='5.6 '+model+' High >';};
+                const closeAll=()=>{settings.hidden=true;menu.hidden=true;combined.setAttribute('aria-expanded','false');effort.setAttribute('aria-expanded','false');};
                 stale.onclick=()=>window.staleClicks++;
-                trigger.onclick=()=>{window.triggerClicks++;const opening=settings.hidden;settings.hidden=!opening;trigger.setAttribute('aria-expanded',opening?'true':'false');};
-                row.onclick=()=>{window.rowClicks++;settings.hidden=true;options.hidden=false;};
-                document.getElementById('luna').onclick=event=>{window.optionClicks++;for(const option of options.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');trigger.textContent='Luna';trigger.setAttribute('aria-expanded','false');settings.hidden=true;options.hidden=true;};
+                effort.onclick=()=>{window.effortClicks++;const opening=effort.getAttribute('aria-expanded')!=='true';closeAll();if(opening){settings.hidden=false;effort.setAttribute('aria-expanded','true');}};
+                combined.onclick=()=>{window.modelHeaderClicks++;settings.hidden=true;menu.hidden=false;combined.setAttribute('aria-expanded','true');};
+                document.getElementById('luna').onclick=event=>{window.optionClicks++;for(const option of menu.querySelectorAll('[role=menuitemradio]'))option.setAttribute('aria-checked','false');event.currentTarget.setAttribute('aria-checked','true');model='Luna';menu.hidden=true;settings.hidden=false;combined.setAttribute('aria-expanded','false');update();};
+                update();
                 </script></body></html>
                 """;
     }
@@ -123,7 +128,7 @@ public final class WorkPreferenceHeaderContinuationAndroidTest {
             web.set(view);
             view.loadDataWithBaseURL(CONVERSATION_URL, html, "text/html", "UTF-8", null);
         });
-        assertTrue("WORK header fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+        assertTrue("WORK effort fixture did not load", loaded.await(15, TimeUnit.SECONDS));
         assertNotNull("Android System WebView must be available", WebView.getCurrentWebViewPackage());
     }
 
