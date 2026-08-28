@@ -45,7 +45,7 @@ public final class ProjectGuardCanonicalizationPolicyTest {
         assertTrue(workConsumer.contains("ProjectUrlPolicy.webProjectIdentityPrelude()"));
         assertFalse(initialConsumer.contains("const actualProject=afterProject('g')"));
         assertFalse(continuationConsumer.contains("const actualProject=after('g')"));
-        assertFalse(workConsumer.contains("__wpActual=__wpI>=0"));
+        assertFalse(workConsumer.contains("__wpI=__wpParts.indexOf('g'),__wpActual=__wpI>=0"));
     }
 
     private static String source(String name) throws Exception {
