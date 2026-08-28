@@ -34,7 +34,7 @@ public class AttachmentUploadPolicyTest {
         assertTrue(service.contains("store.reserveAttachmentFileId"));
         assertTrue(service.contains("drive.getMetadata(accessToken, fileId)"));
         assertTrue(service.contains("drive.uploadAttachmentResumable"));
-        assertTrue(store.allAttachmentsCommitted() || service.contains("store.allAttachmentsCommitted()"));
+        assertTrue(service.contains("store.allAttachmentsCommitted()"));
         int attachmentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch)");
         int documentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch)");
         assertTrue(attachmentPhase >= 0 && documentPhase > attachmentPhase);
