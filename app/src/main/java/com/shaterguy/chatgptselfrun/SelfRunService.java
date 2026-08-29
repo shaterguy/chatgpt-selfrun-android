@@ -47,7 +47,7 @@ public final class SelfRunService extends Service {
     /** MutationObserver is immediate; this low-frequency pass only repairs a detached DOM binding. */
     static final long TURN_OBSERVER_HEALTHCHECK_MS = 15_000L;
     static final long POST_DOM_DRIVE_RETRY_MS = 5_000L;
-    static final long POST_DOM_DRIVE_MAX_WAIT_MS = 5 * 60_000L;
+    static final long POST_DOM_DRIVE_MAX_WAIT_MS = 3 * 60_000L;
     private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
     static final long CONTINUATION_VERIFY_INTERVAL_MS = 250L;
     static final long CONTINUATION_CALLBACK_TIMEOUT_MS = 5_000L;

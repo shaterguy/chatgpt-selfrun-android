@@ -10,17 +10,18 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TurnDocumentRetryWiringTest {
-    @Test public void fiveMinuteSignalMissRoutesToOneShotRepairBeforeExistingRollover() throws Exception {
+    @Test public void threeMinuteSignalMissRoutesToOneShotRepairBeforeExistingRollover() throws Exception {
         String service = src("SelfRunService.java");
         String coordinator = src("SelfRunRolloverCoordinator.java");
         String protocol = src("SelfRunProtocol.java");
 
-        assertEquals(5 * 60_000L, SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS);
+        assertEquals(3 * 60_000L, SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS);
         assertTrue(service.contains("rolloverConversation(SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT)"));
         assertTrue(coordinator.contains("RESULT_TURN_DOCUMENT_RETRY"));
         assertTrue(coordinator.contains("TURN_DOCUMENT_RETRY_USED"));
         assertTrue(coordinator.contains("TURN_DOCUMENT_RETRY_PENDING"));
         assertTrue(coordinator.contains("SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT.equals(cause)"));
+        assertTrue(coordinator.contains("turnDocumentRetryPromptPending(store.runId())"));
         assertTrue(coordinator.contains("store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE)"));
         assertTrue(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
         assertTrue(protocol.contains("turnDocumentRetryPromptPending(runId)"));
@@ -33,6 +34,7 @@ public final class TurnDocumentRetryWiringTest {
 
         assertTrue(nextInput.contains("!SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId)"));
         assertTrue(runner.contains("TurnDocumentRetryAndroidTest"));
+        assertTrue(regression.contains("duplicateTimeoutWhileRetryPendingKeepsSameRunAndRetryPrompt"));
         assertTrue(regression.contains("transportRetryDoesNotConsumeLateUserNextInput"));
         assertTrue(regression.contains("secondTimeoutRollsOverAndSuccessorGetsFreshRetryBudget"));
     }
