@@ -43,7 +43,7 @@ public final class UiArchitecturePolicyTest {
         assertTrue(detail.contains("ORIGINAL MISSION"));
     }
 
-    @Test public void launchWorkspaceUsesDynamicChatRegistryAndKeepsWorkAutomatic() throws Exception {
+    @Test public void launchWorkspaceUsesDynamicRegistriesAndAllowsWorkBootstrapSelection() throws Exception {
         String activity = src("SelfRunNewActivity.java");
         assertTrue(activity.contains("Launch Workspace"));
         assertTrue(activity.contains("DESTINATION"));
@@ -51,9 +51,12 @@ public final class UiArchitecturePolicyTest {
         assertTrue(activity.contains("MISSION"));
         assertTrue(activity.contains("REFERENCES"));
         assertTrue(activity.contains("ProfileRegistry.listChat()"));
+        assertTrue(activity.contains("ProfileRegistry.listWork()"));
+        assertTrue(activity.contains("첫 부트스트랩 Work 모델 · 추론 정도"));
+        assertTrue(activity.contains("WorkBootstrapPreferenceStore.load(this)"));
         assertTrue(activity.contains("TURN_COMPLETED MODEL/REASONING"));
         assertFalse(activity.contains("CHAT_REASONING_LABELS"));
-        assertFalse(activity.contains("Work 모델"));
+        assertFalse(activity.contains("Work 모드는 새 작업에서 수동 선택하지 않고"));
     }
 
     @Test public void toolsExposeProfileRegistryInsteadOfLegacyCalibrationEntry() throws Exception {
