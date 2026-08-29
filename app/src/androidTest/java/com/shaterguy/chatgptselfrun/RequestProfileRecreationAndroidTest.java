@@ -34,6 +34,8 @@ public final class RequestProfileRecreationAndroidTest {
                             + "return JSON.stringify(window.__selfRunRequestProfileEngine.target());})()"));
             assertEquals("chat", first.getString("mode"));
             assertEquals("medium", first.getString("reasoning"));
+            assertEquals("medium", first.getString("bootstrapReasoning"));
+            assertEquals("medium", first.getString("continuationReasoning"));
             assertTrue(first.getBoolean("ready"));
 
             recreateFixture(scenario, web);
@@ -44,9 +46,11 @@ public final class RequestProfileRecreationAndroidTest {
                     "JSON.stringify(window.__selfRunRequestProfileEngine.diagnostics())"));
             assertEquals("chat", restored.getString("mode"));
             assertEquals("medium", restored.getString("reasoning"));
+            assertEquals("medium", restored.getString("bootstrapReasoning"));
+            assertEquals("medium", restored.getString("continuationReasoning"));
             assertTrue(restored.getBoolean("ready"));
             assertEquals("target_restored", diagnostics.getString("reason"));
-            read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v2');return 'cleared';})()");
+            read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v3');return 'cleared';})()");
         }
     }
 

@@ -22,12 +22,20 @@ import android.widget.Toast;
 
 import org.json.JSONTokener;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 
-/** Read-only signal vocabulary management plus one-shot real submission capture. */
+/** Read-only signal vocabulary management plus one-shot capture and portable registry transfer. */
 public final class ProfileRegistryActivity extends Activity {
-    private static final int REQUEST_EXPORT_WORK = 7201;
+    private static final int REQUEST_EXPORT_CHAT = 7201;
+    private static final int REQUEST_EXPORT_WORK = 7202;
+    private static final int REQUEST_IMPORT_CHAT = 7203;
+    private static final int REQUEST_IMPORT_WORK = 7204;
+    private static final int MAX_IMPORT_BYTES = 1_048_576;
     private static final long CAPTURE_POLL_MS = 350L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -81,6 +89,9 @@ public final class ProfileRegistryActivity extends Activity {
                 "Chat은 현재 프로토콜에서 REASONING 신호만 사용합니다. 표시명은 읽기 전용이며 신호명 수정 기능은 없습니다."));
         content.addView(Ui.outlinedButton(this, "새로운 조합 등록",
                 v -> startCapture(ProfileRegistry.Mode.CHAT)));
+        content.addView(Ui.actionStrip(this,
+                Ui.outlinedButton(this, "등록 조합 내보내기", v -> startExport(ProfileRegistry.Mode.CHAT)),
+                Ui.outlinedButton(this, "등록 조합 가져오기", v -> startImport(ProfileRegistry.Mode.CHAT))));
         chatList = new LinearLayout(this);
         chatList.setOrientation(LinearLayout.VERTICAL);
         content.addView(chatList);
@@ -88,9 +99,11 @@ public final class ProfileRegistryActivity extends Activity {
         content.addView(Ui.section(this, "Work"));
         content.addView(Ui.muted(this,
                 "TURN_COMPLETED의 MODEL/REASONING 신호와 실제 outgoing request 조합을 동일 Registry에서 해석합니다."));
+        content.addView(Ui.outlinedButton(this, "새로운 조합 등록",
+                v -> startCapture(ProfileRegistry.Mode.WORK)));
         content.addView(Ui.actionStrip(this,
-                Ui.outlinedButton(this, "새로운 조합 등록", v -> startCapture(ProfileRegistry.Mode.WORK)),
-                Ui.outlinedButton(this, "등록 조합 내보내기", v -> startExportWork())));
+                Ui.outlinedButton(this, "등록 조합 내보내기", v -> startExport(ProfileRegistry.Mode.WORK)),
+                Ui.outlinedButton(this, "등록 조합 가져오기", v -> startImport(ProfileRegistry.Mode.WORK))));
         workList = new LinearLayout(this);
         workList.setOrientation(LinearLayout.VERTICAL);
         content.addView(workList);
@@ -303,33 +316,98 @@ public final class ProfileRegistryActivity extends Activity {
         webView.evaluateJavascript(RequestProfileScript.syncRegistry(), ignored -> {});
     }
 
-    private void startExportWork() {
+    private void startExport(ProfileRegistry.Mode mode) {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "selfrun-work-profile-registry-v1.json");
-        startActivityForResult(intent, REQUEST_EXPORT_WORK);
+        intent.putExtra(Intent.EXTRA_TITLE, mode == ProfileRegistry.Mode.CHAT
+                ? "selfrun-chat-profile-registry-v1.json"
+                : "selfrun-work-profile-registry-v1.json");
+        startActivityForResult(intent, mode == ProfileRegistry.Mode.CHAT
+                ? REQUEST_EXPORT_CHAT : REQUEST_EXPORT_WORK);
+    }
+
+    private void startImport(ProfileRegistry.Mode mode) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(intent, mode == ProfileRegistry.Mode.CHAT
+                ? REQUEST_IMPORT_CHAT : REQUEST_IMPORT_WORK);
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_EXPORT_WORK || resultCode != RESULT_OK
-                || data == null || data.getData() == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
-        try (OutputStream output = getContentResolver().openOutputStream(uri, "w")) {
-            if (output == null) throw new IllegalStateException("export output unavailable");
-            output.write(ProfileRegistry.exportWorkJson(BuildConfig.VERSION_NAME)
-                    .getBytes(StandardCharsets.UTF_8));
-            output.flush();
-            offerShare(uri);
-        } catch (Exception error) {
-            Toast.makeText(this, "Work Registry JSON을 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
+        if (requestCode == REQUEST_EXPORT_CHAT || requestCode == REQUEST_EXPORT_WORK) {
+            ProfileRegistry.Mode mode = requestCode == REQUEST_EXPORT_CHAT
+                    ? ProfileRegistry.Mode.CHAT : ProfileRegistry.Mode.WORK;
+            writeExport(uri, mode);
+            return;
+        }
+        if (requestCode == REQUEST_IMPORT_CHAT || requestCode == REQUEST_IMPORT_WORK) {
+            ProfileRegistry.Mode mode = requestCode == REQUEST_IMPORT_CHAT
+                    ? ProfileRegistry.Mode.CHAT : ProfileRegistry.Mode.WORK;
+            readImport(uri, mode);
         }
     }
 
-    private void offerShare(Uri uri) {
+    private void writeExport(Uri uri, ProfileRegistry.Mode mode) {
+        try (OutputStream output = getContentResolver().openOutputStream(uri, "w")) {
+            if (output == null) throw new IllegalStateException("export output unavailable");
+            String json = mode == ProfileRegistry.Mode.CHAT
+                    ? ProfileRegistry.exportChatJson(BuildConfig.VERSION_NAME)
+                    : ProfileRegistry.exportWorkJson(BuildConfig.VERSION_NAME);
+            output.write(json.getBytes(StandardCharsets.UTF_8));
+            output.flush();
+            offerShare(uri, mode);
+        } catch (Exception error) {
+            Toast.makeText(this, modeLabel(mode) + " Registry JSON을 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void readImport(Uri uri, ProfileRegistry.Mode mode) {
+        try {
+            String json = readUtf8Bounded(uri);
+            ProfileRegistry.ImportResult result = ProfileRegistry.importJson(mode, json);
+            syncRegistryToWeb();
+            renderRegistry();
+            new AlertDialog.Builder(this)
+                    .setTitle(modeLabel(mode) + " 등록 조합 가져오기 완료")
+                    .setMessage("새로 등록: " + result.added + "개\n중복 건너뜀: " + result.skipped + "개")
+                    .setPositiveButton("확인", null)
+                    .show();
+        } catch (Exception error) {
+            String message = error.getMessage();
+            if (message == null || message.isEmpty()) message = "파일을 안전하게 해석하지 못했습니다.";
+            Toast.makeText(this, modeLabel(mode) + " 조합 가져오기 실패 · " + message, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private String readUtf8Bounded(Uri uri) throws Exception {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IllegalStateException("import input unavailable");
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read == 0) continue;
+                if (bytes.size() > MAX_IMPORT_BYTES - read) {
+                    throw new IllegalArgumentException("가져오기 파일은 1 MB 이하여야 합니다.");
+                }
+                bytes.write(buffer, 0, read);
+            }
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes.toByteArray())).toString();
+        }
+    }
+
+    private void offerShare(Uri uri, ProfileRegistry.Mode mode) {
         new AlertDialog.Builder(this)
-                .setTitle("Work Registry JSON 저장 완료")
+                .setTitle(modeLabel(mode) + " Registry JSON 저장 완료")
                 .setMessage("파일을 저장했습니다. 지금 공유할 수도 있습니다.")
                 .setNegativeButton("닫기", null)
                 .setPositiveButton("공유", (dialog, which) -> {
@@ -337,8 +415,12 @@ public final class ProfileRegistryActivity extends Activity {
                     share.setType("application/json");
                     share.putExtra(Intent.EXTRA_STREAM, uri);
                     share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    startActivity(Intent.createChooser(share, "Work Registry JSON 공유"));
+                    startActivity(Intent.createChooser(share, modeLabel(mode) + " Registry JSON 공유"));
                 }).show();
+    }
+
+    private static String modeLabel(ProfileRegistry.Mode mode) {
+        return mode == ProfileRegistry.Mode.CHAT ? "Chat" : "Work";
     }
 
     private static boolean trustedUrl(String url) {

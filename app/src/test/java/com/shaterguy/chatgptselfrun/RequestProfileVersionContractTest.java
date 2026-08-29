@@ -12,9 +12,9 @@ import static org.junit.Assert.*;
 /** Prevents producer/consumer registry engine drift. */
 public final class RequestProfileVersionContractTest {
     @Test public void producerOwnsOneCanonicalRegistryEngineVersion() throws Exception {
-        assertEquals("profile-registry-v1", RequestProfileScript.ENGINE_VERSION);
+        assertEquals("profile-registry-v2", RequestProfileScript.ENGINE_VERSION);
         String producer = source("RequestProfileScript.java");
-        assertEquals(1, occurrences(producer, "profile-registry-v1"));
+        assertEquals(1, occurrences(producer, "profile-registry-v2"));
         assertTrue(producer.contains("static final String ENGINE_VERSION"));
         assertTrue(producer.contains("__ENGINE_VERSION__"));
         assertTrue(producer.contains("ProfileRegistry.runtimeJson()"));
@@ -22,7 +22,7 @@ public final class RequestProfileVersionContractTest {
         String script = RequestProfileScript.documentStartScript();
         assertEquals(2, occurrences(script, RequestProfileScript.ENGINE_VERSION));
         assertTrue(script.contains("selfrun-drive:profile-registry-runtime:v1"));
-        assertTrue(script.contains("selfrun-drive:request-profile-target:v2"));
+        assertTrue(script.contains("selfrun-drive:request-profile-target:v3"));
         assertTrue(script.contains("p==='/backend-api/conversation'||p==='/backend-api/f/conversation'"));
         assertTrue(script.contains("if(!probe.eligible)return nativeFetch(input,init)"));
     }
@@ -60,7 +60,9 @@ public final class RequestProfileVersionContractTest {
         assertTrue(script.contains("if(state.target&&!targetValid(state.target))"));
         assertTrue(script.contains("target_deleted_or_unsupported"));
         assertTrue(script.contains("profile_deleted_or_unsupported"));
-        assertTrue(script.contains("resolveProfile(t.mode,t.model,t.reasoning)"));
+        assertTrue(script.contains("profileForBody=body=>"));
+        assertTrue(script.contains("latestMessageText"));
+        assertTrue(script.contains("setChatProfiles"));
     }
 
     @Test public void consumersUseSharedEngineExpressionAndRegistryInjection() throws Exception {

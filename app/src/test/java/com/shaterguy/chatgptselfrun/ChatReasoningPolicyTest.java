@@ -32,11 +32,11 @@ public final class ChatReasoningPolicyTest {
         assertFalse(script.contains("click()"));
     }
 
-    @Test public void registeredReasoningStagesProfileWithoutMenuInteraction() {
+    @Test public void registeredReasoningStagesBootstrapAndContinuationProfilesWithoutMenuInteraction() {
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-PROFILE");
         assertTrue(script.contains("__selfRunRequestProfileEngine"));
         assertTrue(script.contains("installRegistry"));
-        assertTrue(script.contains("setChatReasoning"));
+        assertTrue(script.contains("setChatProfiles"));
         assertTrue(script.contains("profile-ready"));
         assertTrue(script.contains("uiClicks:0"));
         assertFalse(script.contains("querySelectorAll"));
@@ -46,8 +46,8 @@ public final class ChatReasoningPolicyTest {
     @Test public void deletedOrUnknownChatSignalFailsClosed() {
         String script = ChatReasoningOptionDom.inline("pro", "SR-PRO");
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
-        assertTrue(script.contains("Unsupported or deleted Chat reasoning target"));
-        assertFalse(script.contains("setChatReasoning"));
+        assertTrue(script.contains("Unsupported or deleted Chat bootstrap reasoning target"));
+        assertFalse(script.contains("setChatProfiles"));
     }
 
     @Test public void productionBootstrapUsesOnlyRequestProfileBridges() throws Exception {
@@ -57,10 +57,17 @@ public final class ChatReasoningPolicyTest {
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
         String activity = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java");
+        String script = read("app/src/main/java/com/shaterguy/chatgptselfrun/RequestProfileScript.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/RequestProfileScript.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(activity.contains("ProfileRegistry.listChat()"));
+        assertTrue(activity.contains("부트스트랩 전용 추론 정도"));
+        assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)"));
+        assertTrue(script.contains("setChatProfiles"));
+        assertTrue(script.contains("latestMessageText"));
+        assertTrue(script.contains("SELF_RUN_BOOTSTRAP"));
         assertFalse(activity.contains("PRO_STANDARD"));
         assertFalse(activity.contains("PRO_EXTENDED"));
         assertFalse(activity.contains("Pro · 최고 성능"));
