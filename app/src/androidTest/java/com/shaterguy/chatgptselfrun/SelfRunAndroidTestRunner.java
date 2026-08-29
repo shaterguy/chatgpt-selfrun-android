@@ -20,6 +20,10 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest";
     private static final String REQUEST_PROFILE_RECREATION_TEST =
             "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest";
+    private static final String PROFILE_REGISTRY_CAPTURE_TEST =
+            "com.shaterguy.chatgptselfrun.ProfileRegistryCaptureAndroidTest";
+    private static final String PROFILE_REGISTRY_PERSISTENCE_TEST =
+            "com.shaterguy.chatgptselfrun.ProfileRegistryPersistenceAndroidTest";
     private static final String IMMEDIATE_INPUT_DOM_TEST =
             "com.shaterguy.chatgptselfrun.UserImmediateInputDomWebViewTest";
     private static final String SUBMISSION_WEBVIEW_TEST =
@@ -43,6 +47,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         }
         if (RICH_COMPOSER_BOOTSTRAP_TEST.equals(selected)) {
             appendRequiredClass(effective, REQUEST_PROFILE_RECREATION_TEST);
+            appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
+            appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
             super.onCreate(effective);
             return;
         }
@@ -53,6 +59,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         appendRequiredClass(effective, WORK_HEADER_CONTINUATION_TEST);
         appendRequiredClass(effective, TURN_DOCUMENT_RETRY_TEST);
         appendRequiredClass(effective, REQUEST_PROFILE_RECREATION_TEST);
+        appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
+        appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
         appendRequiredClass(effective, IMMEDIATE_INPUT_DOM_TEST);
         super.onCreate(effective);
     }

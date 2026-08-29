@@ -14,6 +14,7 @@ public final class SelfRunApplication extends Application {
     }
 
     static void initializeProcess(Context context) {
+        ProfileRegistry.initialize(context);
         ChatReasoningPreferenceStore.initialize(context);
         UserNextInputStore.initialize(context);
     }

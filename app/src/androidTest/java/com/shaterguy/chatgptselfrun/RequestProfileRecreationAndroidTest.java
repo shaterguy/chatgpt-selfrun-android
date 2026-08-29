@@ -18,14 +18,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-/** Reproduces the request-profile lifetime boundary that TURN_DOCUMENT_RETRY crosses. */
+/** Reproduces request-profile lifetime across WebView destruction and recreation. */
 @RunWith(AndroidJUnit4.class)
 public final class RequestProfileRecreationAndroidTest {
-    private static final String BASE_URL =
-            "https://chatgpt.com/g/g-p-6a582c824ba08191ac7e74e9bad721fc-vibe-coding/project";
+    private static final String BASE_URL = "https://chatgpt.com/g/g-p-test/project";
     private static final String RUN_ID = "SR-PROFILE-RECREATE";
 
-    @Test public void readyChatTargetRestoresAfterWebViewDestructionAndRecreation() throws Exception {
+    @Test public void readyChatTargetRestoresAgainstCurrentRegistryAfterRecreation() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
             evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
@@ -47,14 +46,11 @@ public final class RequestProfileRecreationAndroidTest {
             assertEquals("medium", restored.getString("reasoning"));
             assertTrue(restored.getBoolean("ready"));
             assertEquals("target_restored", diagnostics.getString("reason"));
-
-            read(scenario, web,
-                    "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v1');return 'cleared';})()");
+            read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v2');return 'cleared';})()");
         }
     }
 
-    private static AtomicReference<WebView> loadFixture(
-            ActivityScenario<SelfRunNewActivity> scenario) throws Exception {
+    private static AtomicReference<WebView> loadFixture(ActivityScenario<SelfRunNewActivity> scenario) throws Exception {
         AtomicReference<WebView> web = new AtomicReference<>();
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
@@ -62,8 +58,7 @@ public final class RequestProfileRecreationAndroidTest {
             configure(view, loaded);
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(BASE_URL, "<!doctype html><html><body>profile</body></html>",
-                    "text/html", "UTF-8", null);
+            view.loadDataWithBaseURL(BASE_URL, "<!doctype html><html><body>profile</body></html>", "text/html", "UTF-8", null);
         });
         assertTrue("initial WebView did not load", loaded.await(15, TimeUnit.SECONDS));
         return web;
@@ -73,48 +68,33 @@ public final class RequestProfileRecreationAndroidTest {
                                         AtomicReference<WebView> web) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
-            WebView old = web.get();
-            if (old != null) old.destroy();
-            WebView replacement = new WebView(activity);
-            configure(replacement, loaded);
-            activity.setContentView(replacement);
-            web.set(replacement);
-            replacement.loadDataWithBaseURL(BASE_URL,
-                    "<!doctype html><html><body>profile-recreated</body></html>",
-                    "text/html", "UTF-8", null);
+            WebView old = web.get(); if (old != null) old.destroy();
+            WebView replacement = new WebView(activity); configure(replacement, loaded);
+            activity.setContentView(replacement); web.set(replacement);
+            replacement.loadDataWithBaseURL(BASE_URL, "<!doctype html><html><body>profile-recreated</body></html>", "text/html", "UTF-8", null);
         });
         assertTrue("recreated WebView did not load", loaded.await(15, TimeUnit.SECONDS));
     }
 
     private static void configure(WebView view, CountDownLatch loaded) {
-        view.getSettings().setJavaScriptEnabled(true);
-        view.getSettings().setDomStorageEnabled(true);
+        view.getSettings().setJavaScriptEnabled(true); view.getSettings().setDomStorageEnabled(true);
         view.setWebViewClient(new WebViewClient() {
-            @Override public void onPageFinished(WebView ignored, String url) {
-                loaded.countDown();
-            }
+            @Override public void onPageFinished(WebView ignored, String url) { loaded.countDown(); }
         });
     }
 
     private static void evaluateIgnoringResult(ActivityScenario<SelfRunNewActivity> scenario,
-                                               AtomicReference<WebView> web,
-                                               String script) throws Exception {
+                                               AtomicReference<WebView> web, String script) throws Exception {
         CountDownLatch complete = new CountDownLatch(1);
         scenario.onActivity(activity -> web.get().evaluateJavascript(script, ignored -> complete.countDown()));
         assertTrue("WebView script timed out", complete.await(15, TimeUnit.SECONDS));
     }
 
     private static String read(ActivityScenario<SelfRunNewActivity> scenario,
-                               AtomicReference<WebView> web,
-                               String expression) throws Exception {
-        CountDownLatch complete = new CountDownLatch(1);
-        AtomicReference<String> raw = new AtomicReference<>();
-        scenario.onActivity(activity -> web.get().evaluateJavascript(expression, value -> {
-            raw.set(value);
-            complete.countDown();
-        }));
+                               AtomicReference<WebView> web, String expression) throws Exception {
+        CountDownLatch complete = new CountDownLatch(1); AtomicReference<String> raw = new AtomicReference<>();
+        scenario.onActivity(activity -> web.get().evaluateJavascript(expression, value -> { raw.set(value); complete.countDown(); }));
         assertTrue("WebView read timed out", complete.await(15, TimeUnit.SECONDS));
-        Object decoded = new JSONTokener(raw.get()).nextValue();
-        return String.valueOf(decoded);
+        Object decoded = new JSONTokener(raw.get()).nextValue(); return String.valueOf(decoded);
     }
 }

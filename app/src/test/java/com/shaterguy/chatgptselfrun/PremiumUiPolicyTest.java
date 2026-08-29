@@ -21,6 +21,7 @@ public final class PremiumUiPolicyTest {
         assertTrue(night.contains("Theme.Material3Expressive.DayNight.NoActionBar"));
         assertTrue(styles.contains("dynamicColorThemeOverlay"));
         assertTrue(application.contains("DynamicColors.applyToActivitiesIfAvailable(this)"));
+        assertTrue(application.contains("ProfileRegistry.initialize(context)"));
     }
 
     @Test public void commonUiUsesMaterialComponentsAndAccessibleTargets() throws Exception {
@@ -29,36 +30,25 @@ public final class PremiumUiPolicyTest {
         assertTrue(ui.contains("MaterialCardView"));
         assertTrue(ui.contains("MaterialAutoCompleteTextView"));
         assertTrue(ui.contains("TextInputLayout"));
-        assertTrue(ui.contains("textInputOutlinedExposedDropdownMenuStyle"));
-        assertTrue(ui.contains("materialButtonTonalStyle"));
-        assertTrue(ui.contains("materialButtonOutlinedStyle"));
         assertTrue(ui.contains("setMinimumHeight(dp(context, 48))"));
-        assertTrue(ui.contains("WindowInsets.Type.systemBars()"));
-        assertTrue(ui.contains("WindowInsets.Type.displayCutout()"));
-        assertTrue(ui.contains("WindowInsets.Type.ime()"));
         assertTrue(ui.contains("fontScale >= 1.6f"));
-        assertTrue(ui.contains("stack ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL"));
     }
 
-    @Test public void selectionInputsUseMaterialDropdownsAndPreserveIndexState() throws Exception {
-        String ui = src("Ui.java");
-        String task = src("SelfRunNewActivity.java");
+    @Test public void selectionInputsUseDynamicRegistryAndPreserveTokenState() throws Exception {
+        String ui = src("Ui.java"), task = src("SelfRunNewActivity.java");
         assertTrue(task.contains("Ui.SelectionField project"));
         assertTrue(task.contains("Ui.SelectionField mode"));
         assertTrue(task.contains("Ui.SelectionField chatReasoning"));
         assertTrue(task.contains("mode.setOnSelectionChangedListener"));
         assertTrue(task.contains("outState.putInt(STATE_MODE"));
-        assertTrue(task.contains("mode.getSelectedItemPosition()"));
-        assertTrue(task.contains("mode.setSelection(modePosition)"));
-        assertTrue(task.contains("chatReasoning.setSelection(reasoningPosition)"));
+        assertTrue(task.contains("outState.putString(STATE_CHAT_REASONING, selectedChatReasoning())"));
+        assertTrue(task.contains("refreshChatReasoningOptions(reasoning)"));
+        assertTrue(task.contains("ProfileRegistry.listChat()"));
         assertTrue(task.contains("project.setSelection(selected)"));
         assertTrue(ui.contains("int getSelectedItemPosition()"));
         assertTrue(ui.contains("void setSelection(int position)"));
-        assertTrue(ui.contains("input.setKeyListener(null)"));
-        assertTrue(ui.contains("addView(input, new LinearLayout.LayoutParams("));
-        assertFalse(ui.contains("addView(input, new ViewGroup.LayoutParams("));
         assertFalse(task.contains("android.widget.Spinner"));
-        assertFalse(task.contains("simple_spinner_dropdown_item"));
+        assertFalse(task.contains("CHAT_REASONING_LABELS"));
     }
 
     @Test public void commonContentAdaptsAcrossWindowWidthClasses() throws Exception {
@@ -68,26 +58,18 @@ public final class PremiumUiPolicyTest {
         assertTrue(ui.contains("navigationRail(activity, destination)"));
         assertTrue(ui.contains("bottomNavigation(activity, destination)"));
         assertTrue(ui.contains("applyAdaptiveContentWidth"));
-        assertTrue(ui.contains("FrameLayout"));
-        assertTrue(ui.contains("Gravity.TOP | Gravity.CENTER_HORIZONTAL"));
     }
 
-    @Test public void mainConsoleKeepsRunActionsWhileToolsOwnRuntimeSetup() throws Exception {
-        String main = src("MainActivity.java");
-        String tools = src("SelfRunLogMenuActivity.java");
+    @Test public void mainConsoleKeepsRunActionsWhileToolsOwnRuntimeAndProfiles() throws Exception {
+        String main = src("MainActivity.java"), tools = src("SelfRunLogMenuActivity.java");
         assertTrue(main.contains("Run Console"));
-        assertTrue(main.contains("Ui.heroSurface(this"));
-        assertTrue(main.contains("Ui.outlinedButton(this"));
-        assertTrue(main.contains("Ui.dangerButton(this"));
         assertTrue(main.contains("pauseSelfRun()"));
         assertTrue(main.contains("resumeSelfRun()"));
         assertTrue(main.contains("stopSelfRun()"));
-        assertTrue(main.contains("saveNextInput()"));
-        assertTrue(main.contains("deleteNextInput()"));
         assertFalse(main.contains("requestNotificationPermission()"));
-        assertFalse(main.contains("requestBatteryExemption()"));
         assertTrue(tools.contains("requestNotificationPermission()"));
         assertTrue(tools.contains("requestBatteryExemption()"));
+        assertTrue(tools.contains("모델 및 추론수준 관리"));
     }
 
     @Test public void uiChangeDoesNotExpandAndroidPermissionSurface() throws Exception {

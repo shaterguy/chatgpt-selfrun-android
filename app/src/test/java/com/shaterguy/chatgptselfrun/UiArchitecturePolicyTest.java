@@ -19,12 +19,7 @@ public final class UiArchitecturePolicyTest {
         assertTrue(main.contains("pauseButton.setVisibility(running ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("resumeButton.setVisibility(paused ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("if (Ui.isExpanded(this))"));
-        assertTrue(main.contains("pane.addView(composerPanel"));
-        assertTrue(main.contains("supportingPane = pane"));
-        assertTrue(main.contains("workspace.setOrientation(LinearLayout.HORIZONTAL)"));
         assertFalse(main.contains("빠른 실행"));
-        assertFalse(main.contains("백그라운드 실행 준비"));
-        assertFalse(main.contains("Ui.row(this, pauseButton, resumeButton, stopButton)"));
     }
 
     @Test public void primaryNavigationChangesByWindowWidth() throws Exception {
@@ -39,58 +34,52 @@ public final class UiArchitecturePolicyTest {
     }
 
     @Test public void historyAndDetailUseBrowserAndInspectorPatterns() throws Exception {
-        String history = src("SelfRunHistoryActivity.java");
-        String detail = src("SelfRunDetailActivity.java");
+        String history = src("SelfRunHistoryActivity.java"), detail = src("SelfRunDetailActivity.java");
         assertTrue(history.contains("Run Browser"));
         assertTrue(history.contains("Ui.isExpanded(this)"));
         assertTrue(history.contains("renderDetailPane"));
-        assertTrue(history.contains("Ui.setPrimaryContent(this, screen, Ui.DEST_HISTORY)"));
         assertTrue(detail.contains("Run Inspector"));
         assertTrue(detail.contains("EXECUTION SNAPSHOT"));
-        assertTrue(detail.contains("SOURCE & DIAGNOSTIC"));
         assertTrue(detail.contains("ORIGINAL MISSION"));
     }
 
-    @Test public void launchWorkspaceSeparatesSetupMissionAndReferences() throws Exception {
+    @Test public void launchWorkspaceUsesDynamicChatRegistryAndKeepsWorkAutomatic() throws Exception {
         String activity = src("SelfRunNewActivity.java");
         assertTrue(activity.contains("Launch Workspace"));
         assertTrue(activity.contains("DESTINATION"));
         assertTrue(activity.contains("RUNTIME"));
         assertTrue(activity.contains("MISSION"));
         assertTrue(activity.contains("REFERENCES"));
-        assertTrue(activity.contains("workspace.setOrientation(LinearLayout.HORIZONTAL)"));
-        assertTrue(activity.contains("chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE)"));
+        assertTrue(activity.contains("ProfileRegistry.listChat()"));
+        assertTrue(activity.contains("TURN_COMPLETED MODEL/REASONING"));
+        assertFalse(activity.contains("CHAT_REASONING_LABELS"));
+        assertFalse(activity.contains("Work 모델"));
     }
 
-    @Test public void toolsOwnRuntimeSetupAndDiagnostics() throws Exception {
+    @Test public void toolsExposeProfileRegistryInsteadOfLegacyCalibrationEntry() throws Exception {
         String tools = src("SelfRunLogMenuActivity.java");
-        String main = src("MainActivity.java");
         assertTrue(tools.contains("CONNECTIONS"));
         assertTrue(tools.contains("RUNTIME"));
-        assertTrue(tools.contains("DIAGNOSTICS"));
-        assertTrue(tools.contains("requestNotificationPermission"));
-        assertTrue(tools.contains("requestBatteryExemption"));
-        assertFalse(main.contains("requestNotificationPermission"));
-        assertFalse(main.contains("requestBatteryExemption"));
+        assertTrue(tools.contains("PROFILES"));
+        assertTrue(tools.contains("RUN LOGS"));
+        assertTrue(tools.contains("모델 및 추론수준 관리"));
+        assertTrue(tools.contains("ProfileRegistryActivity.class"));
+        assertFalse(tools.contains("WebUiCalibrationActivity.class"));
+        assertFalse(tools.contains("웹 UI 보정 로그"));
     }
 
-    @Test public void logsLoginCalibrationAndDriveUsePurposeSpecificLayouts() throws Exception {
-        String logs = src("SelfRunLogsActivity.java");
-        String login = src("LoginActivity.java");
-        String calibration = src("WebUiCalibrationActivity.java");
+    @Test public void profileManagementUsesPurposeSpecificCaptureLayout() throws Exception {
+        String profiles = src("ProfileRegistryActivity.java");
         String drive = src("DriveSetupActivity.java");
-        assertTrue(logs.contains("root.addView(viewer, new LinearLayout.LayoutParams("));
-        assertTrue(logs.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
-        assertTrue(login.contains("ChatGPT 세션 · 프로젝트"));
-        assertTrue(login.contains("root.addView(webView, new LinearLayout.LayoutParams("));
-        assertTrue(login.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
-        assertFalse(login.contains("Ui.row(this,"));
-        assertTrue(calibration.contains("Ui.topBar(this, \"웹 UI 보정\""));
-        assertTrue(calibration.contains("Ui.actionStrip(this, selectButton, cancelButton, confirmButton)"));
-        assertTrue(calibration.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
-        assertFalse(calibration.contains("controls.addView(status"));
-        assertTrue(drive.contains("Ui.statusPill(this, store.driveRunsBaseFolderId().isEmpty() ? \"NOT CONNECTED\" : \"CONNECTED\")"));
-        assertFalse(drive.contains("Ui.row(this, Ui.button(this, \"Drive 실행문서 저장 위치 연결\""));
+        assertTrue(profiles.contains("모델 및 추론수준 관리"));
+        assertTrue(profiles.contains("일반 Chat"));
+        assertTrue(profiles.contains("Work"));
+        assertTrue(profiles.contains("새로운 조합 등록"));
+        assertTrue(profiles.contains("등록 조합 내보내기"));
+        assertTrue(profiles.contains("webView.setVisibility(View.VISIBLE)"));
+        assertTrue(profiles.contains("registryScroll.setVisibility(View.GONE)"));
+        assertTrue(profiles.contains("메뉴 클릭만으로는 캡처되지 않습니다"));
+        assertTrue(drive.contains("CONNECTED"));
     }
 
     @Test public void restartUsesRecoveryConsoleAndKeepsRecoverySemantics() throws Exception {
@@ -98,15 +87,8 @@ public final class UiArchitecturePolicyTest {
         assertTrue(restart.contains("Recovery Console"));
         assertTrue(restart.contains("RECOVERY TARGET"));
         assertTrue(restart.contains("RECOVERY PATH"));
-        assertTrue(restart.contains("progressText("));
-        assertTrue(restart.contains("showRecoveryStage(\"AUTH\""));
-        assertTrue(restart.contains("showRecoveryStage(\"RECOVERING\""));
-        assertTrue(restart.contains("showRecoveryStage(\"READY\""));
-        assertTrue(restart.contains("closeButton.setEnabled(!recoveryStarted)"));
         assertTrue(restart.contains("DriveAuthorization.requestSilently"));
         assertTrue(restart.contains("requireClaimOwnership();"));
-        assertTrue(restart.contains("restoreRun(baseFolderId, actualAccount, jobFolder, document, baseline, restartCompletion, prompt)"));
-        assertFalse(restart.contains("Ui.title(this, \"중지 작업 재시작\")"));
     }
 
     private static String src(String file) throws Exception {

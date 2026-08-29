@@ -3,16 +3,16 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Durable current-run selection plus per-run bootstrap evidence. */
+import java.util.List;
+import java.util.Locale;
+
+/** Durable current-run Chat protocol selection backed by the dynamic Profile Registry. */
 final class ChatReasoningPreferenceStore {
     static final String KEEP = "keep";
     static final String INSTANT = "instant";
     static final String MEDIUM = "medium";
     static final String HIGH = "high";
     static final String EXTRA_HIGH = "xhigh";
-    static final String PRO = "pro";
-    static final String PRO_STANDARD = "pro_standard";
-    static final String PRO_EXTENDED = "pro_extended";
 
     private static final String PREFS = "selfrun_drive_chat_reasoning";
     private static final String KEY_RUN_ID = "runId";
@@ -26,11 +26,10 @@ final class ChatReasoningPreferenceStore {
         if (context == null || (preferences != null && appContext != null)) return;
         Context application = context.getApplicationContext();
         if (application == null) application = context;
+        ProfileRegistry.initialize(application);
         synchronized (ChatReasoningPreferenceStore.class) {
             if (appContext == null) appContext = application;
-            if (preferences == null) {
-                preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            }
+            if (preferences == null) preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         }
     }
 
@@ -39,9 +38,9 @@ final class ChatReasoningPreferenceStore {
         SharedPreferences current = preferences;
         if (current == null || runId == null || runId.isEmpty()) return false;
         String normalized = normalize(selection);
+        if (!KEEP.equals(normalized) && ProfileRegistry.resolveChat(normalized) == null) return false;
         if (!BootstrapRunStateStore.startRun(context, runId, normalized)) return false;
-        return current.edit().putString(KEY_RUN_ID, runId)
-                .putString(KEY_SELECTION, normalized).commit();
+        return current.edit().putString(KEY_RUN_ID, runId).putString(KEY_SELECTION, normalized).commit();
     }
 
     static String selectionForRun(Context context, String runId) {
@@ -67,40 +66,28 @@ final class ChatReasoningPreferenceStore {
     }
 
     static boolean shouldApply(String selection) {
-        return !KEEP.equals(normalize(selection));
+        String normalized = normalize(selection);
+        return !KEEP.equals(normalized) && ProfileRegistry.resolveChat(normalized) != null;
     }
 
     static int ordinal(String selection) {
-        return switch (normalize(selection)) {
-            case INSTANT -> 0;
-            case MEDIUM -> 1;
-            case HIGH -> 2;
-            case EXTRA_HIGH -> 3;
-            case PRO -> 4;
-            case PRO_STANDARD -> 5;
-            case PRO_EXTENDED -> 6;
-            default -> -1;
-        };
+        String normalized = normalize(selection);
+        List<ProfileRegistry.Profile> profiles = ProfileRegistry.listChat();
+        for (int i = 0; i < profiles.size(); i++) {
+            if (profiles.get(i).signalReasoning.equals(normalized)) return i;
+        }
+        return -1;
     }
 
     static String label(String selection) {
-        return switch (normalize(selection)) {
-            case INSTANT -> "Instant";
-            case MEDIUM -> "Medium";
-            case HIGH -> "High";
-            case EXTRA_HIGH -> "Extra High";
-            case PRO -> "Pro";
-            case PRO_STANDARD -> "Pro Standard";
-            case PRO_EXTENDED -> "Pro Extended";
-            default -> "현재 Chat 설정 유지";
-        };
+        ProfileRegistry.Profile profile = ProfileRegistry.resolveChat(normalize(selection));
+        return profile == null ? (KEEP.equals(normalize(selection)) ? "현재 Chat 설정 유지" : "지원하지 않는 프로필")
+                : profile.displayLabel();
     }
 
     static String normalize(String selection) {
         if (selection == null) return KEEP;
-        return switch (selection) {
-            case INSTANT, MEDIUM, HIGH, EXTRA_HIGH, PRO, PRO_STANDARD, PRO_EXTENDED -> selection;
-            default -> KEEP;
-        };
+        String normalized = selection.trim().toLowerCase(Locale.ROOT);
+        return normalized.isEmpty() ? KEEP : normalized;
     }
 }

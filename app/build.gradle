@@ -2,21 +2,21 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2000011
-def selfRunDriveVersionName = '2.0.0'
+def selfRunDriveVersionCode = 2010001
+def selfRunDriveVersionName = '2.1.0-dev1'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.shaterguy.chatgptselfrun.drive'
+        applicationId 'com.shaterguy.chatgptselfrun.v2'
         minSdk 26
         targetSdk 36
         versionCode selfRunDriveVersionCode
         versionName selfRunDriveVersionName
         testInstrumentationRunner 'com.shaterguy.chatgptselfrun.SelfRunAndroidTestRunner'
-        manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive']
+        manifestPlaceholders = [selfRunAppLabel: 'SelfRun 2.0']
     }
 
     buildTypes {
@@ -27,7 +27,7 @@ android {
         qaApp {
             initWith release
             applicationIdSuffix '.test'
-            manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive TEST']
+            manifestPlaceholders = [selfRunAppLabel: 'SelfRun 2.0 TEST']
         }
     }
 
@@ -54,20 +54,24 @@ dependencies {
 def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
     group = 'verification'
     doLast {
-        def expectedId = 'com.shaterguy.chatgptselfrun.drive'
+        def expectedId = 'com.shaterguy.chatgptselfrun.v2'
         if (android.defaultConfig.applicationId != expectedId) {
-            throw new GradleException("SelfRun Drive applicationId must be ${expectedId}")
+            throw new GradleException("SelfRun 2.0 applicationId must be ${expectedId}")
+        }
+        if (expectedId == 'com.shaterguy.chatgptselfrun.drive'
+                || expectedId == 'com.shaterguy.chatgptselfrun.drive.test') {
+            throw new GradleException('SelfRun 2.0 must not reuse a 1.x applicationId')
         }
         if (android.defaultConfig.versionCode != selfRunDriveVersionCode
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
-            throw new GradleException('SelfRun Drive version identity mismatch')
+            throw new GradleException('SelfRun 2.0 version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.0.0') {
-            throw new GradleException('SelfRun Drive stable version must be 2.0.0')
+        if (!selfRunDriveVersionName.startsWith('2.1.0-dev')) {
+            throw new GradleException('SelfRun 2.1 development builds must remain prerelease builds')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
-            throw new GradleException('SelfRun Drive TEST applicationId suffix must remain .test')
+            throw new GradleException('SelfRun 2.0 TEST applicationId suffix must remain .test')
         }
         def manifest = file('src/main/AndroidManifest.xml').getText('UTF-8')
         if (manifest.contains('android:sharedUserId')) {

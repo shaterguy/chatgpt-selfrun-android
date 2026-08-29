@@ -2,7 +2,6 @@ package com.shaterguy.chatgptselfrun;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -25,19 +24,15 @@ import java.util.Date;
 public final class SelfRunLogMenuActivity extends Activity {
     private SelfRunStore current;
     private SelfRunHistoryStore history;
-    private WebUiCalibrationStore calibration;
     private TextView runtimeStatus;
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         current = new SelfRunStore(this);
         history = new SelfRunHistoryStore(this);
-        calibration = new WebUiCalibrationStore(this);
     }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
         history.sync(current);
         render();
@@ -49,7 +44,7 @@ public final class SelfRunLogMenuActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout page = Ui.page(this);
         scroll.addView(page);
-        page.addView(Ui.topBar(this, "도구", "Connections · Runtime · Diagnostics",
+        page.addView(Ui.topBar(this, "도구", "Connections · Runtime · Profiles · Diagnostics",
                 Ui.textButton(this, "새로고침", v -> { history.sync(current); render(); })));
 
         page.addView(Ui.section(this, "CONNECTIONS"));
@@ -78,16 +73,11 @@ public final class SelfRunLogMenuActivity extends Activity {
                 batteryReady() ? "SelfRun Drive가 최적화 제외 상태입니다." : "장기 실행 안정성을 위해 제외를 권장합니다.",
                 Ui.outlinedButton(this, batteryReady() ? "확인됨" : "설정", v -> requestBatteryExemption())));
 
-        page.addView(Ui.section(this, "DIAGNOSTICS"));
+        page.addView(Ui.section(this, "PROFILES"));
         page.addView(Ui.settingsRow(this,
-                "웹 UI 보정",
-                "현재 ChatGPT 모바일 UI에 맞춘 보정 항목을 관리합니다.",
-                Ui.outlinedButton(this, "열기", v -> startActivity(new Intent(this, WebUiCalibrationActivity.class)))));
-        page.addView(Ui.divider(this));
-        page.addView(Ui.settingsRow(this,
-                "웹 UI 보정 로그",
-                calibration.purposeStatus(WebUiCalibrationStore.PURPOSE_MODE_CHAT),
-                Ui.outlinedButton(this, "보기", v -> showCalibrationLog())));
+                "모델 및 추론수준 관리",
+                "Chat/Work 운영 신호와 실제 request profile을 조회·캡처·삭제하고 Work Registry를 내보냅니다.",
+                Ui.outlinedButton(this, "열기", v -> startActivity(new Intent(this, ProfileRegistryActivity.class)))));
 
         page.addView(Ui.section(this, "RUN LOGS"));
         JSONArray runs = history.read();
@@ -117,14 +107,6 @@ public final class SelfRunLogMenuActivity extends Activity {
                 Ui.textButton(this, "실행 로그", v -> open(runId, SelfRunLogsActivity.KIND_EXECUTION)),
                 Ui.textButton(this, "디버그", v -> open(runId, SelfRunLogsActivity.KIND_DEBUG))));
         page.addView(Ui.divider(this));
-    }
-
-    private void showCalibrationLog() {
-        new AlertDialog.Builder(this)
-                .setTitle("웹 UI 보정 로그")
-                .setMessage(calibration.logText(120))
-                .setPositiveButton("닫기", null)
-                .show();
     }
 
     private void open(String runId, String kind) {
