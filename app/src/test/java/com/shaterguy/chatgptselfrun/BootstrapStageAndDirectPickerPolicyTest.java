@@ -52,10 +52,11 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(activity.contains("chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE)"));
     }
 
-    @Test public void currentDevIdentityKeepsApprovedDependenciesPinned() throws Exception {
+    @Test public void stableIdentityKeepsApprovedDependenciesPinned() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev11'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
         assertTrue(gradle.contains("implementation 'androidx.webkit:webkit:1.17.0'"));
