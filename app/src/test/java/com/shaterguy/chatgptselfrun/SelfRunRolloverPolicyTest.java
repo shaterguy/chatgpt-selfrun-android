@@ -20,12 +20,14 @@ public final class SelfRunRolloverPolicyTest {
         assertFalse(SelfRunRolloverPolicy.rolloverRenderer(CONVERSATION,false));
         assertFalse(SelfRunRolloverPolicy.rolloverRenderer("https://chatgpt.com/",true));
     }
-    @Test public void repeatedContinuationFailuresAreBoundedButTransientStatesGetGrace() {
+    @Test public void repeatedContinuationFailuresAreBoundedButVisibleStopIsNormalWait() {
         long started=1_000L;
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure("UNKNOWN",started,5_999L));
         assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure("UNKNOWN",started,6_000L));
-        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,15_999L));
-        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,16_000L));
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,16_000L));
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,99_000L));
+        assertFalse(SelfRunRolloverPolicy.softContinuationStallStatus(SelfRunContinuationDom.STOP));
+        assertTrue(SelfRunRolloverPolicy.softContinuationStallStatus(SelfRunContinuationDom.SEND_DISABLED));
         assertTrue(SelfRunRolloverPolicy.hardContinuationFailureStatus("SUBMISSION_FAILED"));
         assertFalse(SelfRunRolloverPolicy.hardContinuationFailureStatus("SUBMISSION_PENDING"));
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure("SUBMISSION_PENDING", started, 99_000L));
@@ -33,7 +35,7 @@ public final class SelfRunRolloverPolicyTest {
         assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("READY_TO_SUBMIT"));
         assertEquals(SelfRunRolloverPolicy.continuationFailureBucket("UNKNOWN"),
                 SelfRunRolloverPolicy.continuationFailureBucket("SUBMISSION_FAILED"));
-        assertEquals(SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP),
+        assertNotEquals(SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP),
                 SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.SEND_DISABLED));
         assertNotEquals(SelfRunRolloverPolicy.continuationFailureBucket("UNKNOWN"),
                 SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP));
