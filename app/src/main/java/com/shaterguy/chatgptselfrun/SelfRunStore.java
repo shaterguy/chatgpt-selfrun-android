@@ -127,6 +127,25 @@ final class SelfRunStore {
     }
 
     void start(String runId, String mode, String projectUrl, String requirement, List<Attachment> attachments) {
+        String model = MODE_WORK.equals(mode) ? "sol" : "";
+        String reasoning = MODE_WORK.equals(mode) ? "xhigh" : "";
+        startInternal(runId, mode, projectUrl, requirement, attachments, model, reasoning);
+    }
+
+    void startWork(String runId, String projectUrl, String requirement, String model, String reasoning) {
+        startWork(runId, projectUrl, requirement, new ArrayList<>(), model, reasoning);
+    }
+
+    void startWork(String runId, String projectUrl, String requirement, List<Attachment> attachments,
+                   String model, String reasoning) {
+        if (!SelfRunProtocol.validWorkProfile(model, reasoning)) {
+            throw new IllegalArgumentException("registered Work profile required");
+        }
+        startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning);
+    }
+
+    private void startInternal(String runId, String mode, String projectUrl, String requirement,
+                               List<Attachment> attachments, String initialModel, String initialReasoning) {
         synchronized (RUN_STATE_LOCK) {
             if (!DriveApiClient.validOpaqueAccountId(driveAccountId())
                     || !DriveApiClient.validFileId(driveRunsBaseFolderId())) {
@@ -138,16 +157,16 @@ final class SelfRunStore {
                 if (ref == null) throw new IllegalArgumentException("trusted ChatGPT project URL required");
                 target = ref.canonicalUrl;
             }
-            startLocked(runId, mode, target, requirement, normalizeDrafts(attachments));
+            startLocked(runId, mode, target, requirement, normalizeDrafts(attachments), initialModel, initialReasoning);
         }
     }
 
-private void startLocked(String runId,String mode,String projectUrl,String requirement,List<Attachment> attachments){
+private void startLocked(String runId,String mode,String projectUrl,String requirement,List<Attachment> attachments,String initialModel,String initialReasoning){
  long now=System.currentTimeMillis();
  commitOrThrow(prefs.edit().putString("runId",safe(runId)).putLong("createdAt",now).putLong("phaseStartedAt",now)
   .putString("mode",safe(mode)).putString("projectUrl",safe(projectUrl)).putString("requirement",safe(requirement)).putString("conversationUrl","")
   .putString("phase",PHASE_DRIVE_ACCOUNT_CHECK).putString("status","Drive 계정 확인 준비")
-  .putString("pendingModel",MODE_WORK.equals(mode)?"sol":"").putString("pendingReasoning",MODE_WORK.equals(mode)?"xhigh":"")
+  .putString("pendingModel",safe(initialModel)).putString("pendingReasoning",safe(initialReasoning))
   .putString("lastErrorCode","").putString("lastErrorMessage","").putString("runDriveAccountId",driveAccountId()).putString("runBaseFolderId",driveRunsBaseFolderId())
   .putString("jobFolderId","").putString("turnDocumentId","").putString("turnDocumentUrl","").putString(KEY_ATTACHMENTS,encodeAttachments(attachments)).putString(KEY_ATTACHMENT_GRANT_CLEANUP,"[]").putInt("turn",0).putString("lastSeenDriveVersion","").putString("lastSeenModifiedTime","")
   .putInt("driveSignalCursor",0).putInt("driveSignalCursorSchemaVersion",DRIVE_SIGNAL_CURSOR_SCHEMA_PHYSICAL).putString("turnObserverToken","").putBoolean("turnObserverSawStop",false).putLong("postDomDriveSyncStartedAt",0L).putString("lastDriveSignalRaw","").putString("lastDriveSignalTimestamp","").putString("lastDriveSignalType","")
