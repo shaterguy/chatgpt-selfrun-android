@@ -27,6 +27,17 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(protocol.contains("turnDocumentRetryPromptPending(runId)"));
     }
 
+    @Test public void repairProfileTargetSurvivesTheWebViewRecreationDoneBeforeRetry() throws Exception {
+        String service = src("SelfRunService.java");
+        String profile = src("RequestProfileScript.java");
+
+        assertTrue(service.contains("stopAutomationCallbacks();\n        cleanupWebView();"));
+        assertTrue(profile.contains("const TARGET_STORE='selfrun-drive:request-profile-target:v1'"));
+        assertTrue(profile.contains("state.target=restoreTarget();"));
+        assertTrue(profile.contains("persistTarget();state.last={ok:true,reason:'target_begun'"));
+        assertTrue(profile.contains("if(!t||!t.ready)fail('target_not_ready')"));
+    }
+
     @Test public void repairBypassesNormalNextInputReservationAndRunsInEmulatorRegression() throws Exception {
         String nextInput = src("UserNextInputStore.java");
         String runner = androidTest("SelfRunAndroidTestRunner.java");
