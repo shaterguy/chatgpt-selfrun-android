@@ -1,0 +1,97 @@
+name: Verify SelfRun Drive Release Co-install
+run-name: SelfRun Drive Release Co-install (${{ github.ref_name }}) #${{ github.run_number }}
+
+on:
+  push:
+    branches:
+      - 'selfrun-drive/v*-rc*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selfrun-drive-release-coinstall-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-release-coinstall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out exact legacy baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 526a9f604fc6e2b3d785293d7ce056bfc5efa5af
+          path: legacy-baseline
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Verify current identity and build debug candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/verify_drive_variant.sh
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$VERSION_CODE"
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:assembleDebug
+          DEBUG_APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$DEBUG_APK"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          BADGING="$($BT/aapt dump badging "$DEBUG_APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+          grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
+          grep -Fq "versionName='$VERSION_NAME'" <<<"$BADGING"
+          grep -Fq "application-label:'SelfRun Drive'" <<<"$BADGING"
+          echo "DRIVE_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "DRIVE_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+      - name: Build immutable legacy fixture only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --project-dir legacy-baseline :app:assembleDebug
+          test -s legacy-baseline/app/build/outputs/apk/debug/app-debug.apk
+      - name: Enable hardware acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Verify release co-install isolation with exact release script
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: >-
+            bash -o pipefail -c
+            'set -euo pipefail;
+            sed -i "s/^DRIVE_EXPECTED_VERSION=.*/DRIVE_EXPECTED_VERSION=\"$DRIVE_VERSION_NAME\"/" tools/verify_coinstall_emulator.sh;
+            timeout --foreground 8m tools/verify_coinstall_emulator.sh legacy-baseline/app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/app-debug.apk 2>&1 | tee release-coinstall-evidence.txt;
+            grep -Fq "COINSTALL_VERIFY_PASS" release-coinstall-evidence.txt'
+      - name: Upload release co-install evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-rc-release-coinstall-evidence
+          path: release-coinstall-evidence.txt
+          if-no-files-found: warn
+          retention-days: 30
