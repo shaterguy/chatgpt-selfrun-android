@@ -174,7 +174,14 @@ IME_ID="$("$ADB" shell ime list -s | tr -d '\r' | head -1)"
 sleep 1
 
 echo "Running long-command IME instrumentation regression"
-gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
+if [[ "$DRIVE_EXPECTED_VERSION" == 2.* ]]; then
+  COINSTALL_INSTRUMENTATION_CLASS="${COINSTALL_INSTRUMENTATION_CLASS:-com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest}"
+  echo "Using v2 request-profile instrumentation: $COINSTALL_INSTRUMENTATION_CLASS"
+  gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest \
+    -Pandroid.testInstrumentationRunnerArguments.class="$COINSTALL_INSTRUMENTATION_CLASS"
+else
+  gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
+fi
 
 echo "Installing legacy APK first"
 "$ADB" install -r "$LEGACY_APK" >/dev/null
