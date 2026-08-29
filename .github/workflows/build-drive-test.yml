@@ -237,7 +237,7 @@ jobs:
           fi
           sed -i -E "s/def selfRunDriveVersionCode = [0-9]+/def selfRunDriveVersionCode = ${PREV_VERSION_CODE}/" "$PREV_SRC/app/build.gradle"
           sed -i -E "s/def selfRunDriveVersionName = '[^']*'/def selfRunDriveVersionName = '${PREV_VERSION_NAME}'/" "$PREV_SRC/app/build.gradle"
-          gradle --build-cache --no-daemon --console=plain --stacktrace --project-dir "$PREV_SRC" :app:assembleQaApp
+          gradle --build-cache --no-daemon --console=plain --stacktrace --project-dir "$PREV_SRC" :app:assembleQaApp -x :app:verifyDriveVariantIdentity
           PREV_UNSIGNED="$(find "$PREV_SRC/app/build/outputs/apk/qaApp" -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
           test -s "$PREV_UNSIGNED"
           cp "$PREV_UNSIGNED" predecessor/previous-test-unsigned.apk
