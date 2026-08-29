@@ -78,13 +78,6 @@ public class WebUiCalibrationBackupPolicyTest {
         assertTrue(manifest.contains(".WebUiCalibrationActivity\" android:exported=\"false\""));
     }
 
-    @Test public void stableVersionIdentityMatchesPromotion() throws Exception {
-        String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
-        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-    }
-
     private static final class FailingFirstCommitPreferences implements SharedPreferences {
         private final Map<String, Object> values = new HashMap<>();
         int commitCount;

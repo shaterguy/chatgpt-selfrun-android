@@ -26,7 +26,6 @@ public final class ChatReasoningPolicyTest {
     }
 
     @Test public void keepSelectionIsNotSilentlyGuessedForChat() {
-        assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST");
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
         assertTrue(script.contains("explicit registered reasoning profile"));

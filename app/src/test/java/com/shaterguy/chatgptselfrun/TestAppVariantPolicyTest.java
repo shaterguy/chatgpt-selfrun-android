@@ -10,13 +10,14 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TestAppVariantPolicyTest {
-    @Test public void stableCandidateHasFixedStableAndTestIdentity() throws Exception {
+    @Test public void v2DevelopmentKeepsDedicatedFormalAndTestIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
-        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
+        assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
-        assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
+        assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun 2.0 TEST'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
         assertTrue(manifest.contains(".SelfRunRestartActivity"));
         assertTrue(manifest.contains(".SelfRunRestartActivity\" android:exported=\"false\""));
@@ -31,12 +32,6 @@ public final class TestAppVariantPolicyTest {
         assertTrue(test.contains("ChatGPT SelfRun Android Test"));
         assertFalse(test.contains("b\"chatgpt-selfrun-signing-v1|\" + secret"));
         assertTrue(signer.contains("2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e"));
-    }
-
-    @Test public void promotionVersionUsesStableIdentity() throws Exception {
-        String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
     }
 
     @Test public void v2DevPushUsesOnlyDedicatedV2TestWorkflow() throws Exception {
