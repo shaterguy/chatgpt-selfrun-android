@@ -80,8 +80,8 @@ public class WebUiCalibrationBackupPolicyTest {
 
     @Test public void developmentVersionIdentityIsAdvanced() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000010"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev10'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev11'"));
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
     }
 
