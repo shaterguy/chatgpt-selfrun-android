@@ -318,13 +318,19 @@ jobs:
           note "TEST predecessor: $PREV_VERSION_NAME / $PREV_VERSION_CODE / source=$PREDECESSOR_SOURCE"
           note "TEST current: $CURRENT_VERSION_NAME / $CURRENT_VERSION_CODE / source=$GITHUB_SHA"
           note 'preflight: PASS'
-      - name: Resolve TEST version
+      - name: Resolve TEST instrumentation profile
         shell: bash
         run: |
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
+          if [[ "$VERSION_NAME" == 2.* ]]; then
+            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest'
+          else
+            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest'
+          fi
           echo "TEST_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "TEST_INSTRUMENTATION_CLASS=$INSTRUMENTATION_CLASS" >> "$GITHUB_ENV"
       - name: Enable hardware acceleration
         run: |
           test -c /dev/kvm
@@ -342,16 +348,7 @@ jobs:
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
           script: >-
-            set -eu;
-            if [ "${TEST_VERSION_NAME#2.}" != "$TEST_VERSION_NAME" ]; then
-              gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest;
-            else
-              gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest;
-            fi;
-            adb shell dumpsys webviewupdate > drive-test-webview-evidence.txt;
-            cat drive-test-webview-evidence.txt;
-            FORMAL_EXPECTED_VERSION="1.6.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1;
-            cat drive-test-coinstall-evidence.txt
+            gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=$TEST_INSTRUMENTATION_CLASS && adb shell dumpsys webviewupdate > drive-test-webview-evidence.txt && cat drive-test-webview-evidence.txt && FORMAL_EXPECTED_VERSION="1.6.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1 && cat drive-test-coinstall-evidence.txt
       - name: Upload TEST verification evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
