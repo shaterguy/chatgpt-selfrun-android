@@ -54,8 +54,8 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
 
     @Test public void currentDevIdentityKeepsApprovedDependenciesPinned() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000010"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev10'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0-dev11'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
         assertTrue(gradle.contains("implementation 'androidx.webkit:webkit:1.17.0'"));
