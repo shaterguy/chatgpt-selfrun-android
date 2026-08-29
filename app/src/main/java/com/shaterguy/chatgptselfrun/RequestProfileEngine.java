@@ -1,26 +1,18 @@
 package com.shaterguy.chatgptselfrun;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/**
- * Capture-calibrated absolute request profile engine for SelfRun 2.0.
- *
- * <p>Only the four control paths proven by the 2026-08-28 calibration set are mutable. Every
- * profile is absolute: no previous turn or UI readback participates in profile construction.</p>
- */
+/** Applies an absolute request profile resolved only from the durable Profile Registry. */
 final class RequestProfileEngine {
-    static final String PROFILE_VERSION = "chatgpt-request-snapshot-calibration-v1@2026-08-28";
-    static final Set<String> CONTROL_PATHS = Set.of(
-            "model", "thinking_effort", "conversation_origin", "service_tier");
+    static final String PROFILE_VERSION = ProfileRegistry.SCHEMA;
+    static final Set<String> CONTROL_PATHS = ProfileRegistry.CONTROL_PATHS;
 
     enum Mode { CHAT, WORK }
-    enum OperationKind { SET, REMOVE }
 
     static final class TargetProfile {
         final Mode mode;
@@ -40,37 +32,15 @@ final class RequestProfileEngine {
         }
     }
 
-    static final class Operation {
-        final OperationKind kind;
-        final String path;
-        final String value;
-
-        private Operation(OperationKind kind, String path, String value) {
-            if (!CONTROL_PATHS.contains(path)) throw new IllegalArgumentException("non-allowlisted control path: " + path);
-            this.kind = kind;
-            this.path = path;
-            this.value = value;
-        }
-
-        static Operation set(String path, String value) {
-            if (value == null) throw new IllegalArgumentException("SET value is null");
-            return new Operation(OperationKind.SET, path, value);
-        }
-
-        static Operation remove(String path) { return new Operation(OperationKind.REMOVE, path, null); }
-
-        @Override public String toString() {
-            return kind == OperationKind.SET ? "SET(" + path + ")" : "REMOVE(" + path + ")";
-        }
-    }
-
     static final class ProfilePlan {
         final TargetProfile target;
-        final List<Operation> operations;
+        final List<ProfileRegistry.Operation> operations;
+        final String fingerprint;
 
-        ProfilePlan(TargetProfile target, List<Operation> operations) {
+        ProfilePlan(TargetProfile target, ProfileRegistry.Profile profile) {
             this.target = target;
-            this.operations = Collections.unmodifiableList(new ArrayList<>(operations));
+            this.operations = profile.operations;
+            this.fingerprint = profile.fingerprint;
         }
     }
 
@@ -78,80 +48,64 @@ final class RequestProfileEngine {
 
     static ProfilePlan plan(TargetProfile target) {
         Objects.requireNonNull(target, "target");
-        if (!PROFILE_VERSION.equals(target.profileVersion)) throw new IllegalArgumentException("unsupported profile version");
-        return switch (target.mode) {
-            case CHAT -> chatPlan(target);
-            case WORK -> workPlan(target);
-        };
-    }
-
-    private static ProfilePlan chatPlan(TargetProfile target) {
-        List<Operation> ops = new ArrayList<>();
-        switch (target.reasoning) {
-            case "instant" -> {
-                ops.add(Operation.set("model", "gpt-5-6"));
-                ops.add(Operation.remove("thinking_effort"));
-            }
-            case "medium" -> {
-                ops.add(Operation.set("model", "gpt-5-6-thinking"));
-                ops.add(Operation.set("thinking_effort", "standard"));
-            }
-            case "high" -> {
-                ops.add(Operation.set("model", "gpt-5-6-thinking"));
-                ops.add(Operation.set("thinking_effort", "extended"));
-            }
-            case "xhigh", "extra_high", "extra high" -> {
-                ops.add(Operation.set("model", "gpt-5-6-thinking"));
-                ops.add(Operation.set("thinking_effort", "max"));
-            }
-            case "pro", "pro_standard", "pro_extended" ->
-                    throw new IllegalArgumentException("Chat Pro request profile is not captured in dev1");
-            default -> throw new IllegalArgumentException("unsupported Chat reasoning profile: " + target.reasoning);
+        if (!PROFILE_VERSION.equals(target.profileVersion)) {
+            throw new IllegalArgumentException("unsupported profile version");
         }
-        ops.add(Operation.remove("conversation_origin"));
-        ops.add(Operation.remove("service_tier"));
-        return new ProfilePlan(target, ops);
-    }
-
-    private static ProfilePlan workPlan(TargetProfile target) {
-        String model = switch (target.model) {
-            case "sol", "5.6 sol" -> "gpt-5.6-sol-wm";
-            case "terra", "5.6 terra" -> "gpt-5.6-terra-wm";
-            case "luna", "5.6 luna" -> "gpt-5.6-luna-wm";
-            default -> throw new IllegalArgumentException("unsupported Work model: " + target.model);
-        };
-        String effort = switch (target.reasoning) {
-            case "light" -> "min";
-            case "medium" -> "standard";
-            case "high" -> "extended";
-            case "xhigh", "extra_high", "extra high" -> "xhigh";
-            case "max" -> "max";
-            case "ultra" -> "ultra";
-            default -> throw new IllegalArgumentException("unsupported Work reasoning: " + target.reasoning);
-        };
-        if ("gpt-5.6-luna-wm".equals(model) && "ultra".equals(effort)) {
-            throw new IllegalArgumentException("Luna does not support Ultra");
+        ProfileRegistry.Profile profile = target.mode == Mode.CHAT
+                ? ProfileRegistry.resolveChat(target.reasoning)
+                : ProfileRegistry.resolveWork(target.model, target.reasoning);
+        if (profile == null) {
+            throw new IllegalArgumentException("unsupported or deleted request profile");
         }
-        return new ProfilePlan(target, List.of(
-                Operation.set("model", model),
-                Operation.set("thinking_effort", effort),
-                Operation.set("conversation_origin", "tpp"),
-                Operation.set("service_tier", "standard")));
+        return new ProfilePlan(target, profile);
     }
 
-    /** Applies an absolute profile to a JSON-like top-level map and enforces the data-plane invariant. */
+    /** Applies only allowlisted control operations and preserves the native data plane exactly. */
     static Map<String, Object> apply(Map<String, Object> nativeRequest, TargetProfile target) {
         validateSubmissionSchema(nativeRequest);
         Map<String, Object> before = new LinkedHashMap<>(nativeRequest);
         Map<String, Object> after = new LinkedHashMap<>(nativeRequest);
-        for (Operation op : plan(target).operations) {
-            if (op.kind == OperationKind.SET) after.put(op.path, op.value);
-            else after.remove(op.path);
+        for (ProfileRegistry.Operation operation : plan(target).operations) {
+            if (operation.kind == ProfileRegistry.OperationKind.SET) {
+                after.put(operation.path, operation.value);
+            } else {
+                after.remove(operation.path);
+            }
         }
         if (!nonControlEquivalent(before, after)) {
             throw new IllegalStateException("request mutation escaped control allowlist");
         }
         return after;
+    }
+
+    static ProfileRegistry.CapturedProfile canonicalizeCapture(Mode mode, Map<String, Object> request) {
+        validateSubmissionSchema(request);
+        ArrayList<ProfileRegistry.Operation> operations = new ArrayList<>();
+        for (String path : ProfileRegistry.CONTROL_PATH_ORDER) {
+            if (!request.containsKey(path)) {
+                operations.add(ProfileRegistry.Operation.remove(path));
+                continue;
+            }
+            Object value = request.get(path);
+            if (!(value instanceof String)) {
+                throw new IllegalArgumentException("non-string control field: " + path);
+            }
+            operations.add(ProfileRegistry.Operation.set(path, (String) value));
+        }
+        StringBuilder json = new StringBuilder("{\"mode\":\"")
+                .append(mode == Mode.CHAT ? "chat" : "work")
+                .append("\",\"operations\":[");
+        for (int i = 0; i < operations.size(); i++) {
+            if (i > 0) json.append(',');
+            ProfileRegistry.Operation operation = operations.get(i);
+            json.append("{\"op\":\"").append(operation.kind.name())
+                    .append("\",\"path\":\"").append(operation.path).append('"');
+            if (operation.kind == ProfileRegistry.OperationKind.SET) {
+                json.append(",\"value\":\"").append(escapeJson(operation.value)).append('"');
+            }
+            json.append('}');
+        }
+        return ProfileRegistry.parseCaptured(json.append("]}").toString());
     }
 
     static void validateSubmissionSchema(Map<String, Object> request) {
@@ -166,5 +120,10 @@ final class RequestProfileEngine {
         CONTROL_PATHS.forEach(left::remove);
         CONTROL_PATHS.forEach(right::remove);
         return left.equals(right);
+    }
+
+    private static String escapeJson(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r");
     }
 }

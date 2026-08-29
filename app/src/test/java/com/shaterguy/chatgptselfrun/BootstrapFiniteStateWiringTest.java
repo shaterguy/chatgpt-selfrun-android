@@ -49,13 +49,6 @@ public final class BootstrapFiniteStateWiringTest {
         assertTrue(manifest.contains("android:name=\".SelfRunApplication\""));
     }
 
-    @Test public void stableIdentityMatchesPromotion() throws Exception {
-        String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
-        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-    }
-
     private static String src(String file) throws Exception {
         return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
                 "src/main/java/com/shaterguy/chatgptselfrun/" + file);

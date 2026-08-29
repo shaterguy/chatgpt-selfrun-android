@@ -3,7 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Durable per-run readback of the effective Chat model-picker selection. */
+/** Durable per-run readback of the effective Chat request profile. */
 final class ChatPickerStateStore {
     private static final String PREFS = "selfrun_drive_chat_picker_state";
     private static final String PREFIX = "run:";
@@ -27,6 +27,10 @@ final class ChatPickerStateStore {
     }
 
     static String effectiveForRun(Context context, String runId) {
+        String continuation = ChatReasoningPreferenceStore.continuationSelectionForRun(context, runId);
+        if (ChatReasoningPreferenceStore.shouldApply(continuation)) {
+            return ChatReasoningPreferenceStore.normalize(continuation);
+        }
         String observed = observedForRun(context, runId);
         if (!observed.isEmpty()) return observed;
         String requested = ChatReasoningPreferenceStore.selectionForRun(context, runId);

@@ -203,6 +203,12 @@ static boolean ownsRendererCallback(Object callbackView, Object currentView,
             && launchedRunId != null && launchedRunId.equals(currentRunId);
 }
 
+static boolean shouldCleanupCompletedRun(String ownerRunId, String currentRunId, String phase,
+                                         boolean terminalSideEffectPending, boolean ownsActiveWebView) {
+    return ownerRunId != null && !ownerRunId.isEmpty() && ownerRunId.equals(currentRunId)
+            && SelfRunStore.PHASE_DONE.equals(phase) && !terminalSideEffectPending && ownsActiveWebView;
+}
+
 private void resumeStateMachine(){if(!canRun())return;String phase=store.phase();if(drivePhase(phase))authorizeAndRunDrive();else ensureWebView();}
 
 private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)||SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)||SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)||SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)||SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)||SelfRunStore.PHASE_RESUME_BASELINE.equals(phase);}
@@ -651,8 +657,36 @@ private void replayTerminalSideEffect(){startForegroundCompat();String owner=sto
     private void finishDoneSideEffect(String ownerRunId, String commitId, String type) {
         if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;
         runLog.record(store, "TERMINAL", "done_signal"); NotificationHelper.notifyUser(this, "완료", ownerRunId);
-        if (!store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type)) return; stopRuntime();
+        if (!store.acknowledgeTerminalSideEffect(ownerRunId, commitId, type)) return;
+        cleanupAfterCompletedRun(ownerRunId);
+        stopRuntime();
     }
+
+private void cleanupAfterCompletedRun(String ownerRunId) {
+    String detail = "";
+    try {
+        synchronized (automationStateLock) {
+            synchronized (SelfRunStore.RUN_STATE_LOCK) {
+                HeadlessWebViewHost completedHost = host;
+                WebView completedWebView = webView;
+                boolean ownsActiveWebView = completedHost != null && completedWebView != null
+                        && completedHost.webView() == completedWebView
+                        && HeadlessWebViewHost.activeWebView() == completedWebView;
+                if (!shouldCleanupCompletedRun(ownerRunId, store.runId(), store.phase(),
+                        store.terminalSideEffectPending(), ownsActiveWebView)) return;
+                boolean cleared = completedHost.clearResourceCacheAfterCompletedRun();
+                detail = "webview_resource_cache=" + (cleared ? "cleared" : "already_cleared")
+                        + ";disposable_cache=none";
+            }
+        }
+    } catch (Throwable error) {
+        detail = "webview_resource_cache=failed;error=" + error.getClass().getSimpleName()
+                + ";disposable_cache=none";
+    }
+    if (detail.isEmpty()) return;
+    try { if (runLog != null) runLog.record(store, "COMPLETED_RUN_CACHE_CLEANUP", detail); }
+    catch (Throwable ignored) {}
+}
 
 private void finishPersistedTerminalPause(String cause, String alertTitle, String ownerRunId,String commitId, String type) {if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;stopAutomationCallbacks();releaseWakeLock();pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");NotificationHelper.notifyUser(this, alertTitle, store.status());store.acknowledgeTerminalSideEffect(ownerRunId,commitId,type);}
 

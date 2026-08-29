@@ -6,166 +6,64 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashSet;
-import java.util.Set;
 
 import static org.junit.Assert.*;
 
-public class WebUiCalibrationPolicyTest {
-    @Test public void recorderRedactsComposerTextAndFiltersSubmitControl() {
-        String script = WebUiCalibrationDom.install(WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT);
-        assertTrue(script.contains("addEventListener('input'"));
-        assertTrue(script.contains("addEventListener('submit'"));
-        assertTrue(script.contains("composer:state.composer"));
-        assertTrue(script.contains("text:inputLike(e)?'':norm(e.innerText||e.textContent)"));
-        assertTrue(script.contains("const looksSubmit=e=>"));
-        assertTrue(script.contains("state.composer&&looksSubmit(e)"));
-        assertFalse(script.contains("target.value"));
-        assertFalse(script.contains("composer.value"));
-    }
-
-    @Test public void matcherPrioritizesStableAttributesKeepsFallbackAndLogsPurpose() {
-        String script = WebUiCalibrationDom.runtimePrelude();
-        assertTrue(script.contains(WebUiCalibrationStore.STORAGE_KEY));
-        assertTrue(script.contains("__srFind"));
-        assertTrue(script.contains("s+=14"));
-        assertTrue(script.contains("score>=6"));
-        assertTrue(script.contains("rawScore>=6?'REJECT':'MISS'"));
-        assertTrue(script.contains("60000"));
-        assertTrue(WebUiCalibrationDom.readRuntimeLog().contains("ui-runtime-log"));
-    }
-
-    @Test public void runtimeWorkProfilesAreIndependentOfCalibrationScopeAndTurnStage() {
-        String generalBootstrapModel = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
-        String generalBootstrapReasoning = WorkPreferenceDom.reasoningForProject(SelfRunScript.GENERAL_CHAT_URL, "xhigh");
-        String projectBootstrapModel = WorkPreferenceDom.modelForProject("https://chatgpt.com/g/g-p-test/project", "sol");
-        String projectBootstrapReasoning = WorkPreferenceDom.reasoningForProject("https://chatgpt.com/g/g-p-test/project", "xhigh");
-        String generalContinuationModel = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
-        String generalContinuationReasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
-        String projectContinuationModel = WorkPreferenceDom.modelForConversation("https://chatgpt.com/g/g-p-test/c/conversation123", "sol");
-        String projectContinuationReasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/g/g-p-test/c/conversation123", "xhigh");
-
-        String[] all = {generalBootstrapModel, generalBootstrapReasoning, projectBootstrapModel,
-                projectBootstrapReasoning, generalContinuationModel, generalContinuationReasoning,
-                projectContinuationModel, projectContinuationReasoning};
-        for (String script : all) {
+/** Keeps legacy selector calibration isolated while the active profile path uses request capture. */
+public final class WebUiCalibrationPolicyTest {
+    @Test public void runtimeWorkProfilesDoNotDependOnLegacyCalibrationSelectors() {
+        String model = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
+        String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
+        for (String script : new String[]{model, reasoning}) {
             assertTrue(script.contains("__selfRunRequestProfileEngine"));
+            assertTrue(script.contains("installRegistry"));
             assertTrue(script.contains("strategy:'request-profile'"));
             assertTrue(script.contains("uiClicks:0"));
             assertFalse(script.contains("__wpCalibratedOptionValid"));
             assertFalse(script.contains("open-work-mode-fallback"));
+            assertFalse(script.contains("querySelectorAll"));
         }
-        assertTrue(generalBootstrapModel.contains("setWorkModel"));
-        assertTrue(projectContinuationModel.contains("setWorkModel"));
-        assertTrue(generalBootstrapReasoning.contains("setWorkReasoning"));
-        assertTrue(projectContinuationReasoning.contains("setWorkReasoning"));
     }
 
-    @Test public void allEightWorkCalibrationTargetsAreDistinct() {
-        Set<String> purposes = new HashSet<>();
-        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL);
-        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING);
-        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL);
-        purposes.add(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING);
-        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL);
-        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING);
-        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL);
-        purposes.add(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING);
-        assertEquals(8, purposes.size());
-        assertEquals(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL,
-                WebUiCalibrationStore.workModelPurpose(true, true));
-        assertEquals(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL,
-                WebUiCalibrationStore.workModelPurpose(true, false));
-        assertEquals(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING,
-                WebUiCalibrationStore.workReasoningPurpose(false, true));
-        assertEquals(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING,
-                WebUiCalibrationStore.workReasoningPurpose(false, false));
-    }
-
-    @Test public void workPreferenceUsesProfileEngineWithoutMenuFallback() {
-        String model = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
-        String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
-        assertTrue(model.contains("__selfRunRequestProfileEngine"));
-        assertTrue(reasoning.contains("__selfRunRequestProfileEngine"));
-        assertTrue(model.contains("setWorkModel"));
-        assertTrue(reasoning.contains("setWorkReasoning"));
-        assertTrue(model.contains("targetReady:!!t?.ready"));
-        assertTrue(reasoning.contains("targetReady:!!t?.ready"));
-        assertTrue(model.contains("uiClicks:0"));
-        assertTrue(reasoning.contains("uiClicks:0"));
-        assertFalse(model.contains("__wpCalibratedOptionValid"));
-        assertFalse(reasoning.contains("__wpCalibratedOptionValid"));
-        assertFalse(model.contains("open-work-mode-fallback"));
-        assertFalse(reasoning.contains("open-work-mode-fallback"));
-        assertFalse(model.contains("[aria-haspopup],[aria-expanded]"));
-        assertFalse(reasoning.contains("[aria-haspopup],[aria-expanded]"));
-    }
-
-    @Test public void calibrationActivityExposesFourIndependentWorkContexts() throws Exception {
-        String activity = src("WebUiCalibrationActivity.java");
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL));
-        assertTrue(activity.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING));
-    }
-
-    @Test public void calibrationUsesWebViewFirstLayoutAndTransientPurposePicker() throws Exception {
-        String activity = src("WebUiCalibrationActivity.java");
-        assertTrue(activity.contains("root.addView(webView, new LinearLayout.LayoutParams("));
-        assertTrue(activity.contains("ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f"));
-        assertTrue(activity.contains("Ui.topBar(this, \"웹 UI 보정\""));
-        assertTrue(activity.contains("Ui.actionStrip(this, selectButton, cancelButton, confirmButton)"));
-        assertTrue(activity.contains("showPurposePicker()"));
-        assertTrue(activity.contains("setTitle(\"보정 항목 선택\")"));
-        assertTrue(activity.contains("setItems(items, (dialog, which) -> startPurpose(PURPOSES[which]))"));
-        assertFalse(activity.contains("statusText(\"\")"));
-        assertFalse(activity.contains("task(\"일반채팅 메뉴\""));
-    }
-
-    @Test public void calibrationCaptureModeLeavesOnlyMinimalActionsVisible() throws Exception {
-        String activity = src("WebUiCalibrationActivity.java");
-        String ui = src("Ui.java");
-        assertTrue(activity.contains("selectButton.setVisibility(active ? View.GONE : View.VISIBLE)"));
-        assertTrue(activity.contains("manageButton.setVisibility(active ? View.GONE : View.VISIBLE)"));
-        assertTrue(activity.contains("cancelButton.setVisibility(active ? View.VISIBLE : View.GONE)"));
-        assertTrue(activity.contains("confirmButton.setVisibility(canConfirm ? View.VISIBLE : View.GONE)"));
-        assertTrue(activity.contains("CAPTURE_CANCELLED"));
-        assertTrue(ui.contains("setMinHeight(dp(context, 48))"));
-        assertTrue(ui.contains("setMinimumHeight(dp(context, 48))"));
-    }
-
-    @Test public void automationAndCalibrationShareMobileWebViewPolicy() throws Exception {
-        String config = src("WebViewConfig.java");
-        String host = src("HeadlessWebViewHost.java");
-        String activity = src("WebUiCalibrationActivity.java");
-        assertTrue(config.contains("setUseWideViewPort(false)"));
-        assertTrue(config.contains("setLoadWithOverviewMode(false)"));
-        assertFalse(host.contains("1440"));
-        assertFalse(host.contains("900"));
-        assertTrue(host.contains("new WebUiCalibrationStore(context).viewport()"));
-        assertTrue(activity.contains("WebViewConfig.applyAutomation(webView)"));
-    }
-
-    @Test public void calibrationAddsNoJavascriptBridgeOrNewPermissionSurface() throws Exception {
-        String activity = src("WebUiCalibrationActivity.java");
+    @Test public void legacyCalibrationRemainsPrivateButHasNoToolsEntrypoint() throws Exception {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
+        String tools = src("SelfRunLogMenuActivity.java");
+        assertTrue(manifest.contains(".WebUiCalibrationActivity"));
+        assertTrue(manifest.contains(".ProfileRegistryActivity"));
+        assertTrue(manifest.contains("android:exported=\"false\""));
+        assertFalse(tools.contains("WebUiCalibrationActivity.class"));
+        assertTrue(tools.contains("ProfileRegistryActivity.class"));
+        assertTrue(tools.contains("모델 및 추론수준 관리"));
+    }
+
+    @Test public void activeCaptureAddsNoJavascriptBridgeOrPermissionSurface() throws Exception {
+        String activity = src("ProfileRegistryActivity.java");
+        String config = src("WebViewConfig.java");
+        String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
+        assertTrue(activity.contains("evaluateJavascript(RequestProfileScript.consumeCapture()"));
+        assertTrue(activity.contains("trustedUrl(url)"));
         assertFalse(activity.contains("addJavascriptInterface"));
         assertFalse(activity.contains("setAllowUniversalAccessFromFileURLs(true)"));
-        assertTrue(manifest.contains("WebUiCalibrationActivity"));
-        assertTrue(manifest.contains("android:exported=\"false\""));
+        assertTrue(config.contains("RequestProfileScript.installDocumentStart(webView)"));
+        assertFalse(manifest.contains("MANAGE_EXTERNAL_STORAGE"));
+        assertFalse(manifest.contains("WRITE_EXTERNAL_STORAGE"));
     }
 
-    @Test public void calibrationAndRuntimeLogsAreVisibleInsideApp() throws Exception {
-        String logMenu = src("SelfRunLogMenuActivity.java");
-        String activity = src("WebUiCalibrationActivity.java");
-        assertTrue(logMenu.contains("웹 UI 보정 로그"));
-        assertTrue(logMenu.contains("calibration.logText(120)"));
-        assertTrue(activity.contains("[런타임 MATCH/MISS]"));
-        assertTrue(activity.contains("WebUiCalibrationDom.readRuntimeLog()"));
+    @Test public void legacyRecorderStillRedactsComposerTextIfInternallyInvoked() {
+        String script = WebUiCalibrationDom.install(WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT);
+        assertTrue(script.contains("text:inputLike(e)?'':norm(e.innerText||e.textContent)"));
+        assertFalse(script.contains("target.value"));
+        assertFalse(script.contains("composer.value"));
+    }
+
+    @Test public void profileManagementDisplaysSignalAndActualCombinationWithoutEditAction() throws Exception {
+        String activity = src("ProfileRegistryActivity.java");
+        assertTrue(activity.contains("신호 REASONING="));
+        assertTrue(activity.contains("MODEL="));
+        assertTrue(activity.contains("실제 조합 "));
+        assertTrue(activity.contains("Ui.dangerButton(this, \"삭제\""));
+        assertFalse(activity.contains("이름 수정"));
+        assertFalse(activity.contains("displayName"));
     }
 
     private static String src(String file) throws Exception {

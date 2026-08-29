@@ -1,29 +1,33 @@
 package com.shaterguy.chatgptselfrun;
 
-/** SelfRun 2.0 Chat reasoning bridge. No ChatGPT reasoning-menu interaction is performed. */
+/** SelfRun Chat profile bridge. Bootstrap and continuation reasoning can differ without menu interaction. */
 final class ChatReasoningOptionDom {
     private ChatReasoningOptionDom() {}
 
     static String inline(String selection, String runId) {
-        String wanted = ChatReasoningPreferenceStore.normalize(selection);
-        if (ChatReasoningPreferenceStore.KEEP.equals(wanted)) {
+        String bootstrap = ChatReasoningPreferenceStore.normalize(selection);
+        String continuation = ChatReasoningPreferenceStore.continuationSelectionForRun(runId);
+        if (ChatReasoningPreferenceStore.KEEP.equals(continuation)) continuation = bootstrap;
+        if (ChatReasoningPreferenceStore.KEEP.equals(bootstrap)) {
             return "if(requestedMode==='work')return result('READY','WORK target profile initialization complete',{strategy:'request-profile',observed:'',action:'skip-chat-profile-work'});"
-                    + "return result('CHAT_REASONING_OPTION_UNAVAILABLE','Chat target requires an explicit captured reasoning profile.',{strategy:'request-profile',requested:'keep'});";
+                    + "return result('CHAT_REASONING_OPTION_UNAVAILABLE','Chat target requires an explicit registered reasoning profile.',{strategy:'request-profile',requested:'keep'});";
         }
-        if (ChatReasoningPreferenceStore.PRO.equals(wanted)
-                || ChatReasoningPreferenceStore.PRO_STANDARD.equals(wanted)
-                || ChatReasoningPreferenceStore.PRO_EXTENDED.equals(wanted)) {
-            return "return result('CHAT_REASONING_OPTION_UNAVAILABLE','Chat Pro request profile is uncaptured in 2.0.0-dev1.',{strategy:'request-profile',requested:"
-                    + SelfRunScript.quote(wanted) + ",proCaptured:false});";
+        if (ProfileRegistry.resolveChat(bootstrap) == null) {
+            return "return result('CHAT_REASONING_OPTION_UNAVAILABLE','Unsupported or deleted Chat bootstrap reasoning target.',{strategy:'request-profile',requested:"
+                    + SelfRunScript.quote(bootstrap) + "});";
         }
-        if (ChatReasoningPreferenceStore.ordinal(wanted) < 0) {
-            return "return result('CHAT_REASONING_OPTION_UNAVAILABLE','Unsupported Chat reasoning target.',{strategy:'request-profile'});";
+        if (!ChatReasoningPreferenceStore.shouldApply(continuation)) {
+            return "return result('CHAT_REASONING_OPTION_UNAVAILABLE','Unsupported or deleted Chat continuation reasoning target.',{strategy:'request-profile',requested:"
+                    + SelfRunScript.quote(continuation) + "});";
         }
         return """
                 try{
-                  window.__selfRunRequestProfileEngine.setChatReasoning(__WANTED__);
-                  diagnostics={...diagnostics,observed:__WANTED__,verifiedValue:__WANTED__,action:'profile-ready',uiClicks:0};
-                }catch(_){return result('CHAT_REASONING_OPTION_UNAVAILABLE','request profile Chat target rejected',{strategy:'request-profile',profileStage:'target',enginePresent:true,engineVersionMatch:true,operationOk:false});}
-                """.replace("__WANTED__", SelfRunScript.quote(wanted));
+                  __SET_CHAT_PROFILES__
+                  diagnostics={...diagnostics,observed:__BOOTSTRAP__,continuation:__CONTINUATION__,verifiedValue:__BOOTSTRAP__,action:'profile-ready',uiClicks:0};
+                }catch(_){return result('CHAT_REASONING_OPTION_UNAVAILABLE','request profile Chat targets rejected',{strategy:'request-profile',profileStage:'target',enginePresent:true,engineVersionMatch:true,operationOk:false});}
+                """
+                .replace("__SET_CHAT_PROFILES__", RequestProfileScript.setChatProfiles(bootstrap, continuation))
+                .replace("__BOOTSTRAP__", SelfRunScript.quote(bootstrap))
+                .replace("__CONTINUATION__", SelfRunScript.quote(continuation));
     }
 }

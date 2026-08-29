@@ -8,18 +8,16 @@ import androidx.test.runner.AndroidJUnitRunner;
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
     private static final String PROCESS_RECREATION_TEST =
             "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest";
-    private static final String BOOTSTRAP_STAGE_TEST =
-            "com.shaterguy.chatgptselfrun.BootstrapStageAndDirectPickerAndroidTest";
-    private static final String HIERARCHICAL_REASONING_TEST =
-            "com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest";
     private static final String BOOTSTRAP_RECONNECT_TEST =
             "com.shaterguy.chatgptselfrun.BootstrapCanonicalReconnectAndroidTest";
-    private static final String WORK_HEADER_CONTINUATION_TEST =
-            "com.shaterguy.chatgptselfrun.WorkPreferenceHeaderContinuationAndroidTest";
     private static final String TURN_DOCUMENT_RETRY_TEST =
             "com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest";
     private static final String REQUEST_PROFILE_RECREATION_TEST =
             "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest";
+    private static final String PROFILE_REGISTRY_CAPTURE_TEST =
+            "com.shaterguy.chatgptselfrun.ProfileRegistryCaptureAndroidTest";
+    private static final String PROFILE_REGISTRY_PERSISTENCE_TEST =
+            "com.shaterguy.chatgptselfrun.ProfileRegistryPersistenceAndroidTest";
     private static final String IMMEDIATE_INPUT_DOM_TEST =
             "com.shaterguy.chatgptselfrun.UserImmediateInputDomWebViewTest";
     private static final String SUBMISSION_WEBVIEW_TEST =
@@ -43,16 +41,17 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         }
         if (RICH_COMPOSER_BOOTSTRAP_TEST.equals(selected)) {
             appendRequiredClass(effective, REQUEST_PROFILE_RECREATION_TEST);
+            appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
+            appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
             super.onCreate(effective);
             return;
         }
         appendRequiredClass(effective, PROCESS_RECREATION_TEST);
-        appendRequiredClass(effective, BOOTSTRAP_STAGE_TEST);
-        appendRequiredClass(effective, HIERARCHICAL_REASONING_TEST);
         appendRequiredClass(effective, BOOTSTRAP_RECONNECT_TEST);
-        appendRequiredClass(effective, WORK_HEADER_CONTINUATION_TEST);
         appendRequiredClass(effective, TURN_DOCUMENT_RETRY_TEST);
         appendRequiredClass(effective, REQUEST_PROFILE_RECREATION_TEST);
+        appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
+        appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
         appendRequiredClass(effective, IMMEDIATE_INPUT_DOM_TEST);
         super.onCreate(effective);
     }

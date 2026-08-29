@@ -23,6 +23,15 @@ public class SelfRunContinuationSubmissionTest {
         assertTrue(store.contains("migrateLegacyBootstrapAckWait"));
     }
 
+    @Test public void runningStopCanStageContinuationAndWaitForSend() {
+        String script = SelfRunContinuationDom.prepareDriveTurn(
+                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc",
+                "[SELF_RUN_CONTINUE SR-TEST]", "SR-TEST:continue:1:1");
+        assertTrue(script.contains("c0.state!=='STOP'"));
+        assertTrue(script.contains("waiting for enabled SEND after exact readback"));
+        assertTrue(script.contains("prepared continuation waiting for SEND"));
+    }
+
     @Test public void verifiedContinuationRequiresPositivePostClickEvidence() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
         String prepare = between(dom, "static String prepareDriveTurn", "static String clickPreparedDriveTurn");

@@ -25,7 +25,7 @@ public class SelfRunProtocolRefactorTest {
         assertTrue(SelfRunProtocolRules.validWorkProfile("luna", "max"));
         assertFalse(SelfRunProtocolRules.validWorkProfile("terra", "ultra"));
         assertFalse(SelfRunProtocolRules.validWorkProfile("luna", "high"));
-        assertFalse(SelfRunProtocolRules.validWorkProfile("Sol", "high"));
+        assertTrue(SelfRunProtocolRules.validWorkProfile("Sol", "high"));
     }
 
     @Test public void turnInfoRewriteGateIsRunScopedAndOneShot() {

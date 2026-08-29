@@ -43,9 +43,9 @@ final class UserImmediateInputDom {
                 + composerOps() + controls(sendKey)
                 + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
                 + "if(!same()){writeMarker('deferred','composer_changed');return result('" + DEFERRED + "','composer changed before immediate send');}"
+                + "const send=forceSend();if(send){writeMarker('send_ready','enabled_send');return result('" + SEND_READY + "','prepared immediate input has enabled SEND ready');}"
                 + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_send');return result('" + DEFERRED + "','assistant finished before SEND decision');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
-                + "const send=forceSend();if(send){writeMarker('send_ready','enabled_send');return result('" + SEND_READY + "','running response has enabled SEND ready');}"
-                + "clearComposer();if(empty()){writeMarker('deferred','send_unavailable');return result('" + DEFERRED + "','running response has no enabled SEND; defer next turn');}"
+                + "clearComposer();if(empty()){writeMarker('deferred','send_unavailable');return result('" + DEFERRED + "','running response still shows STOP with no enabled SEND; defer next turn');}"
                 + "return result('" + CLEANUP_PENDING + "','enabled SEND unavailable; cleanup pending');})()";
     }
 
@@ -61,16 +61,17 @@ final class UserImmediateInputDom {
                 + composerOps() + controls(sendKey)
                 + "const m=readMarker();if(m.state==='sent')return result('" + SENT + "','already sent');if(m.state==='deferred')return result('" + DEFERRED + "','already deferred');if(m.state==='clicking'||m.state==='clicking_cleaned')return result('" + CLICK_UNCERTAIN + "','prior click outcome is uncertain');"
                 + "if(!same()){writeMarker('deferred','composer_changed_before_click');return result('" + DEFERRED + "','composer changed before click');}"
-                + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_click');return result('" + DEFERRED + "','assistant finished before click');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
                 + "const send=forceSend();if(send){writeMarker('clicking','enabled_send');try{send.focus?.();send.click();writeMarker('sent','button_click');return result('" + SENT + "','enabled SEND clicked once');}catch(_){return result('" + CLICK_UNCERTAIN + "','SEND click threw after dispatch attempt');}}"
-                + "clearComposer();if(empty()){writeMarker('deferred','send_lost_before_click');return result('" + DEFERRED + "','enabled SEND lost before click; defer next turn');}"
-                + "return result('" + CLEANUP_PENDING + "','SEND lost; cleanup pending');})()";
+                + "if(!runningStop()){clearComposer();if(empty()){writeMarker('deferred','assistant_finished_before_click');return result('" + DEFERRED + "','assistant finished before click');}return result('" + CLEANUP_PENDING + "','assistant finished; cleanup pending');}"
+                + "clearComposer();if(empty()){writeMarker('deferred','send_lost_before_click');return result('" + DEFERRED + "','enabled SEND unavailable while STOP remains; defer next turn');}"
+                + "return result('" + CLEANUP_PENDING + "','SEND unavailable; cleanup pending');})()";
     }
 
     static String cleanup(String conversationUrl, String text, String requestId) {
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(text);
         String composerKey = composerKey(conversationUrl);
+        String sendKey = sendKey(conversationUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(conversation) + calibration() + textHelpers(expected)
                 + markerOps(requestId) + composer(composerKey)

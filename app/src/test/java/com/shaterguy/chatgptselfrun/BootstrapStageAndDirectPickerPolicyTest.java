@@ -27,8 +27,8 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(mode.contains("uiClicks=0"));
         assertFalse(mode.contains("data-tpp-toggle-value"));
         assertFalse(mode.contains("dispatchModeMouse"));
-        assertTrue(options.contains("__selfRunRequestProfileEngine"));
-        assertTrue(options.contains("setChatReasoning"));
+        assertTrue(options.contains("RequestProfileScript.setChatProfiles"));
+        assertTrue(options.contains("continuation"));
         assertTrue(options.contains("uiClicks:0"));
         assertFalse(options.contains("open-reasoning-sheet"));
         assertFalse(options.contains("nested-option-click"));
@@ -38,25 +38,26 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(interceptor.contains("XMLHttpRequest"));
     }
 
-    @Test public void newChatRunDefaultsToExtraHighWithoutOverridingRestoredDraft() throws Exception {
+    @Test public void newChatRunDefaultsFromRegistryWithoutOverridingRestoredSignal() throws Exception {
         String activity = src("SelfRunNewActivity.java");
         int restoreMethod = activity.indexOf("private void restoreDraftState(Bundle state)");
-        int freshDefault = activity.indexOf(
-                "chatReasoning.setSelection(chatReasoningPosition(ChatReasoningPreferenceStore.EXTRA_HIGH));",
-                restoreMethod);
-        int restoredSelection = activity.indexOf("state.getInt(STATE_CHAT_REASONING, 0)", restoreMethod);
-        assertTrue(restoreMethod >= 0 && freshDefault > restoreMethod);
-        assertTrue(restoredSelection > freshDefault);
-        assertTrue(activity.contains("private static int chatReasoningPosition(String value)"));
-        assertTrue(activity.contains("CHAT_REASONING_VALUES[i].equals(value)"));
+        int registryDefault = activity.indexOf(
+                "ProfileRegistry.resolveChat(ChatReasoningPreferenceStore.EXTRA_HIGH)", restoreMethod);
+        int defaultRefresh = activity.indexOf("refreshChatReasoningOptions(preferred);", registryDefault);
+        int restoredSelection = activity.indexOf("state.getString(STATE_CHAT_REASONING", restoreMethod);
+        int restoredRefresh = activity.indexOf("refreshChatReasoningOptions(reasoning);", restoredSelection);
+        assertTrue(restoreMethod >= 0 && registryDefault > restoreMethod);
+        assertTrue(defaultRefresh > registryDefault);
+        assertTrue(restoredSelection > defaultRefresh);
+        assertTrue(restoredRefresh > restoredSelection);
+        assertTrue(activity.contains("for (ProfileRegistry.Profile profile : ProfileRegistry.listChat())"));
+        assertTrue(activity.contains("chatReasoningValues.add(profile.signalReasoning)"));
         assertTrue(activity.contains("chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE)"));
+        assertFalse(activity.contains("CHAT_REASONING_VALUES"));
     }
 
-    @Test public void stableIdentityKeepsApprovedDependenciesPinned() throws Exception {
+    @Test public void approvedDependenciesRemainPinned() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
-        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
         assertTrue(gradle.contains("implementation 'androidx.webkit:webkit:1.17.0'"));

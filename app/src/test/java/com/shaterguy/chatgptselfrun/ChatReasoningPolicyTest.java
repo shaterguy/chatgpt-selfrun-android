@@ -1,5 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -10,85 +12,65 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatReasoningPolicyTest {
-    @Test public void sevenChatReasoningSelectionsMapLeftToRight() {
-        assertEquals(0, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.INSTANT));
-        assertEquals(1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.MEDIUM));
-        assertEquals(2, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.HIGH));
-        assertEquals(3, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.EXTRA_HIGH));
-        assertEquals(4, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO));
-        assertEquals(5, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_STANDARD));
-        assertEquals(6, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.PRO_EXTENDED));
-        assertEquals(ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.normalize("pro"));
-        assertEquals(-1, ChatReasoningPreferenceStore.ordinal(ChatReasoningPreferenceStore.KEEP));
+    @Before public void reset() { ProfileRegistry.resetForTests(); }
+    @After public void cleanup() { ProfileRegistry.resetForTests(); }
+
+    @Test public void capturedChatRegistryDefinesDefaultLeftToRightOrderWithoutProGuesses() {
+        assertEquals(0, ChatReasoningPreferenceStore.ordinal("instant"));
+        assertEquals(1, ChatReasoningPreferenceStore.ordinal("medium"));
+        assertEquals(2, ChatReasoningPreferenceStore.ordinal("high"));
+        assertEquals(3, ChatReasoningPreferenceStore.ordinal("xhigh"));
+        assertEquals(-1, ChatReasoningPreferenceStore.ordinal("pro"));
+        assertEquals("pro", ChatReasoningPreferenceStore.normalize(" Pro "));
+        assertFalse(ChatReasoningPreferenceStore.shouldApply("pro"));
     }
 
     @Test public void keepSelectionIsNotSilentlyGuessedForChat() {
-        assertEquals("", ChatReasoningDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST"));
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.KEEP, "SR-TEST");
-        assertFalse(script.isEmpty());
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
-        assertTrue(script.contains("explicit captured reasoning profile"));
+        assertTrue(script.contains("explicit registered reasoning profile"));
         assertFalse(script.contains("click()"));
     }
 
-    @Test public void legacySliderAdapterRemainsFiniteButIsNotTheProductionPath() {
-        String script = ChatReasoningDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-LEGACY");
-        assertTrue(script.contains("CHAT_REASONING_SLIDER_NOT_FOUND"));
-        assertTrue(script.contains("CHAT_REASONING_READBACK_MISMATCH"));
-        assertTrue(script.contains("__srcOverallTimeoutMs=60000"));
-    }
-
-    @Test public void capturedReasoningStagesProfileWithoutMenuInteraction() {
+    @Test public void registeredReasoningStagesBootstrapAndContinuationProfilesWithoutMenuInteraction() {
         String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-PROFILE");
         assertTrue(script.contains("__selfRunRequestProfileEngine"));
-        assertTrue(script.contains("setChatReasoning"));
+        assertTrue(script.contains("installRegistry"));
+        assertTrue(script.contains("setChatProfiles"));
         assertTrue(script.contains("profile-ready"));
         assertTrue(script.contains("uiClicks:0"));
-        assertFalse(script.contains("open-reasoning-sheet"));
-        assertFalse(script.contains("open-advanced-control"));
-        assertFalse(script.contains("nested-option-click"));
         assertFalse(script.contains("querySelectorAll"));
-        assertFalse(script.contains("new KeyboardEvent"));
+        assertFalse(script.contains("click()"));
     }
 
-    @Test public void uncapturedChatProFailsClosed() {
-        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.PRO_EXTENDED, "SR-PRO");
+    @Test public void deletedOrUnknownChatSignalFailsClosed() {
+        String script = ChatReasoningOptionDom.inline("pro", "SR-PRO");
         assertTrue(script.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
-        assertTrue(script.contains("uncaptured in 2.0.0-dev1"));
-        assertTrue(script.contains("proCaptured:false"));
-        assertFalse(script.contains("setChatReasoning"));
+        assertTrue(script.contains("Unsupported or deleted Chat bootstrap reasoning target"));
+        assertFalse(script.contains("setChatProfiles"));
     }
 
-    @Test public void bootstrapFailureStatusesMapToPreservedPauseMessages() {
-        String[] statuses = {
-                "CHAT_REASONING_TRIGGER_NOT_FOUND", "CHAT_REASONING_SLIDER_NOT_FOUND",
-                "CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND", "CHAT_REASONING_OPTION_UNAVAILABLE",
-                "CHAT_REASONING_READBACK_MISMATCH", "CHAT_REASONING_MENU_CLOSE_FAILED"
-        };
-        for (String status : statuses) {
-            assertTrue(SelfRunService.isChatReasoningFailureStatus(status));
-            assertFalse(SelfRunService.chatReasoningFailureMessage(status).isEmpty());
-        }
-        assertFalse(SelfRunService.isChatReasoningFailureStatus("UI_WAIT"));
-    }
-
-    @Test public void newTaskBootstrapUsesOnlyRequestProfileBridges() throws Exception {
+    @Test public void productionBootstrapUsesOnlyRequestProfileBridges() throws Exception {
         String dom = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunDom.java");
-        String mode = read("app/src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java",
-                "src/main/java/com/shaterguy/chatgptselfrun/BootstrapModeDom.java");
         String service = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java");
-        assertTrue(dom.contains("BootstrapModeDom.inline(requested, runId)"));
+        String activity = read("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunNewActivity.java");
+        String script = read("app/src/main/java/com/shaterguy/chatgptselfrun/RequestProfileScript.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/RequestProfileScript.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
-        assertTrue(service.contains("BootstrapRunStateStore.touchBootstrap"));
-        assertTrue(service.contains("BootstrapResultPolicy.fatalStatus"));
-        assertTrue(service.contains("SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND"));
         assertFalse(service.contains("ChatReasoningDom"));
-        assertTrue(mode.contains("__selfRunRequestProfileEngine"));
-        assertTrue(mode.contains("CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE"));
-        assertFalse(mode.contains("dispatchModeMouse"));
+        assertTrue(activity.contains("ProfileRegistry.listChat()"));
+        assertTrue(activity.contains("부트스트랩 전용 추론 정도"));
+        assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)"));
+        assertTrue(script.contains("setChatProfiles"));
+        assertTrue(script.contains("latestMessageText"));
+        assertTrue(script.contains("SELF_RUN_BOOTSTRAP"));
+        assertFalse(activity.contains("PRO_STANDARD"));
+        assertFalse(activity.contains("PRO_EXTENDED"));
+        assertFalse(activity.contains("Pro · 최고 성능"));
     }
 
     private static String read(String first, String second) throws Exception {

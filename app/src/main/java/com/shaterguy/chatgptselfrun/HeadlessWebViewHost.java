@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.ViewGroup;
@@ -21,6 +22,7 @@ final class HeadlessWebViewHost {
     private final VirtualDisplay virtualDisplay;
     private final Surface surface;
     private final SurfaceTexture texture;
+    private boolean completedRunResourceCacheCleared;
 
     private HeadlessWebViewHost(WebView webView, Presentation presentation,
                                 VirtualDisplay virtualDisplay, Surface surface, SurfaceTexture texture) {
@@ -113,6 +115,16 @@ final class HeadlessWebViewHost {
     static WebView activeWebView() { return activeWebView; }
 
     WebView webView() { return webView; }
+
+    boolean clearResourceCacheAfterCompletedRun() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            throw new IllegalStateException("completed-run cache cleanup must run on the main thread");
+        }
+        if (completedRunResourceCacheCleared || activeWebView != webView) return false;
+        completedRunResourceCacheCleared = true;
+        webView.clearCache(true);
+        return true;
+    }
 
     void destroy() {
         if (activeWebView == webView) activeWebView = null;

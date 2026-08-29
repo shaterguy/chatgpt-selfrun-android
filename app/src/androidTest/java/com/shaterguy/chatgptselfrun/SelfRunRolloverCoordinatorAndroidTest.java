@@ -218,8 +218,12 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
         assertTrue(SelfRunRolloverPolicy.localFailureBudgetExhausted(3));
     }
 
-    @Test public void allCurrentProVariantsRemainDistinctAcrossRollover() {
-        for (String selection : new String[]{ChatReasoningPreferenceStore.PRO, ChatReasoningPreferenceStore.PRO_STANDARD, ChatReasoningPreferenceStore.PRO_EXTENDED}) {
+    @Test public void allRegisteredBuiltInChatProfilesRemainDistinctAcrossRollover() {
+        for (String selection : new String[]{
+                ChatReasoningPreferenceStore.INSTANT,
+                ChatReasoningPreferenceStore.MEDIUM,
+                ChatReasoningPreferenceStore.HIGH,
+                ChatReasoningPreferenceStore.EXTRA_HIGH}) {
             clearAll();
             SelfRunStore store = predecessor();
             assertTrue(ChatPickerStateStore.saveObserved(context, store.runId(), selection));

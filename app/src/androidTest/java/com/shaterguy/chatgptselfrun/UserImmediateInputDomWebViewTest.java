@@ -68,22 +68,26 @@ public final class UserImmediateInputDomWebViewTest {
         }
     }
 
-    @Test public void responseFinishRaceNeverUsesIdleSendAsImmediateSteering() throws Exception {
+    @Test public void stopToSendTransitionForcesImmediateSteering() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             loadFixture(scenario, web, true, true);
 
             JSONObject prepared = evaluate(scenario, web,
-                    UserImmediateInputDom.prepare(CONVERSATION_URL, INPUT, "finish-race"));
+                    UserImmediateInputDom.prepare(CONVERSATION_URL, INPUT, "stop-to-send"));
             assertEquals(UserImmediateInputDom.PREPARED, prepared.getString("status"));
 
             evaluate(scenario, web, "(()=>{document.getElementById('stop').remove();"
-                    + "document.getElementById('send').style.display='';return JSON.stringify({status:'FINISHED'});})()");
+                    + "document.getElementById('send').style.display='';return JSON.stringify({status:'SEND_NOW'});})()");
             JSONObject resolved = evaluate(scenario, web,
-                    UserImmediateInputDom.resolve(CONVERSATION_URL, INPUT, "finish-race"));
-            assertEquals(UserImmediateInputDom.DEFERRED, resolved.getString("status"));
-            assertEquals("", read(scenario, web, "document.getElementById('prompt-textarea').value"));
-            assertEquals("0", read(scenario, web, "String(window.sendClicks)"));
+                    UserImmediateInputDom.resolve(CONVERSATION_URL, INPUT, "stop-to-send"));
+            assertEquals(UserImmediateInputDom.SEND_READY, resolved.getString("status"));
+            assertEquals(INPUT, read(scenario, web, "document.getElementById('prompt-textarea').value"));
+
+            JSONObject clicked = evaluate(scenario, web,
+                    UserImmediateInputDom.click(CONVERSATION_URL, INPUT, "stop-to-send"));
+            assertEquals(UserImmediateInputDom.SENT, clicked.getString("status"));
+            assertEquals("1", read(scenario, web, "String(window.sendClicks)"));
         }
     }
 

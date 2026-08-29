@@ -15,8 +15,8 @@ public final class ChatWorkContinuationContractTest {
         String bridge = source("ChatReasoningOptionDom.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
-        assertTrue(bridge.contains("__selfRunRequestProfileEngine"));
-        assertTrue(bridge.contains("setChatReasoning"));
+        assertTrue(bridge.contains("RequestProfileScript.setChatProfiles"));
+        assertTrue(bridge.contains("continuation"));
         assertTrue(bridge.contains("uiClicks:0"));
         assertFalse(bridge.contains("open-reasoning-sheet"));
         assertFalse(bridge.contains("open-advanced-control"));

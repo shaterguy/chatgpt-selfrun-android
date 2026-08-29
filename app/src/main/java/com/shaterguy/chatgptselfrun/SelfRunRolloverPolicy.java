@@ -70,7 +70,7 @@ final class SelfRunRolloverPolicy {
 
     static boolean softContinuationStallStatus(String status) {
         return "COMPOSER_CLEARING".equals(status) || "COMPOSER_INPUTTING".equals(status)
-                || SelfRunContinuationDom.STOP.equals(status) || SelfRunContinuationDom.SEND_DISABLED.equals(status);
+                || SelfRunContinuationDom.SEND_DISABLED.equals(status);
     }
 
     static String continuationFailureBucket(String status) {
