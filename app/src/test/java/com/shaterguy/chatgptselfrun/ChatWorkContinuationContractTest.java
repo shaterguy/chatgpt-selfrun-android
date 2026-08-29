@@ -10,30 +10,32 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatWorkContinuationContractTest {
-    @Test public void productionChatUsesAdvancedMenuWithoutSliderMutation() throws Exception {
+    @Test public void productionChatUsesRequestProfileWithoutUiReasoningMutation() throws Exception {
         String dom = source("SelfRunDom.java");
-        String menu = source("ChatReasoningOptionDom.java");
+        String bridge = source("ChatReasoningOptionDom.java");
         assertTrue(dom.contains("ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
-        assertTrue(menu.contains("open-reasoning-sheet"));
-        assertTrue(menu.contains("open-advanced-control"));
-        assertFalse(menu.contains("positive-slider-fallback"));
-        assertFalse(menu.contains("set-slider"));
-        assertFalse(menu.contains("new PointerEvent"));
+        assertTrue(bridge.contains("__selfRunRequestProfileEngine"));
+        assertTrue(bridge.contains("setChatReasoning"));
+        assertTrue(bridge.contains("uiClicks:0"));
+        assertFalse(bridge.contains("open-reasoning-sheet"));
+        assertFalse(bridge.contains("open-advanced-control"));
+        assertFalse(bridge.contains("new PointerEvent"));
     }
 
-    @Test public void workPreferenceWaitsRemainFiniteAndTerminal() throws Exception {
+    @Test public void workPreferenceStagesAbsoluteTargetAndFailsClosed() throws Exception {
         String preference = source("WorkPreferenceDom.java");
-        String service = source("SelfRunService.java");
-        assertTrue(preference.contains("__wpTimeoutMs=20000"));
-        assertTrue(preference.contains("'SELECTION_TIMEOUT'"));
-        assertTrue(preference.contains("'READBACK_MISMATCH'"));
-        assertTrue(service.contains("isWorkPreferenceFailureStatus"));
-        assertTrue(service.contains("WORK_MODEL_SELECTION_TIMEOUT"));
-        assertTrue(service.contains("WORK_REASONING_READBACK_MISMATCH"));
+        assertTrue(preference.contains("__selfRunRequestProfileEngine"));
+        assertTrue(preference.contains("RequestProfileScript.setWorkModel"));
+        assertTrue(preference.contains("RequestProfileScript.setWorkReasoning"));
+        assertTrue(preference.contains("WORK_MODEL_READBACK_MISMATCH"));
+        assertTrue(preference.contains("WORK_REASONING_READBACK_MISMATCH"));
+        assertTrue(preference.contains("uiClicks:0"));
+        assertFalse(preference.contains("open-work-mode-fallback"));
+        assertFalse(preference.contains("SELECTION_TIMEOUT"));
     }
 
-    @Test public void continuationSubmissionIsVerifiedWithoutBlindResubmit() throws Exception {
+    @Test public void continuationSubmissionRequiresPositiveDomEvidenceBeforeWaitPhase() throws Exception {
         String service = source("SelfRunService.java");
         String continuation = source("SelfRunContinuationDom.java");
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
@@ -41,10 +43,13 @@ public final class ChatWorkContinuationContractTest {
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_APPLY_REASONING));
         assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_SEND_CONTINUE));
         assertTrue(continuation.contains("writeMarker({state:'clicked'"));
-        assertTrue(continuation.contains("if(m.state==='clicked')return result('VERIFY_REQUIRED'"));
+        assertTrue(continuation.contains("continuationClickedVerification()"));
+        assertTrue(continuation.contains("continuation submission evidence confirmed"));
+        assertTrue(continuation.contains("continuation submission verification pending"));
+        assertTrue(continuation.contains("dispatch=CONTINUE_CLICKED"));
+        assertFalse(continuation.contains("return result('VERIFY_REQUIRED'"));
         assertFalse(continuation.contains("verifyDriveTurnSubmission"));
         assertFalse(service.contains("SelfRunContinuationDom.verifyDriveTurnSubmission"));
-        assertTrue(service.contains("\"CONTINUE_CLICKED\".equals(status)"));
         assertTrue(service.contains("store.beginTurnCompletionWait"));
         String callbackRecovery = section(service, "private void scheduleContinuationCallbackDeadline", "private void recoverBootstrapSendCallback");
         assertTrue(callbackRecovery.contains("PHASE_WAIT_TURN_COMPLETION"));

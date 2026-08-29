@@ -62,6 +62,16 @@ public class SelfRunGeneralChatPolicyTest {
 
         assertTrue(SelfRunStore.canCaptureConversationUrl(
                 "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-test/c/conversation123"));
+        String modern = "g-p-6a582c824ba08191ac7e74e9bad721fc";
+        assertTrue(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/" + modern + "/project",
+                "https://chatgpt.com/g/" + modern + "-vibe-coding/c/conversation123"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/" + modern + "/project",
+                "https://chatgpt.com/g/" + modern + "-vibe-coding/c/conversation123?leak=1"));
+        assertFalse(SelfRunStore.canCaptureConversationUrl(
+                "https://chatgpt.com/g/" + modern + "/project",
+                "https://chatgpt.com/g/g-p-6a582c824ba08191ac7e74e9bad721fd-vibe-coding/c/conversation123"));
         assertFalse(SelfRunStore.canCaptureConversationUrl(
                 "https://chatgpt.com/g/g-p-test/project", "https://chatgpt.com/g/g-p-other/c/conversation123"));
         assertFalse(SelfRunStore.canCaptureConversationUrl(

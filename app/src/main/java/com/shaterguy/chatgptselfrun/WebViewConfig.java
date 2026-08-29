@@ -18,10 +18,11 @@ final class WebViewConfig {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         String current = settings.getUserAgentString();
-        String marker = "SelfRunDrive/" + BuildConfig.VERSION_NAME;
+        String marker = "SelfRunV2/" + BuildConfig.VERSION_NAME;
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        RequestProfileScript.installDocumentStart(webView);
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")

@@ -13,7 +13,12 @@ public final class BootstrapSendFallbackPolicyTest {
                 "run-a", "observer-a", 5_000L);
 
         assertTrue(prepare.contains("new InputEvent('beforeinput'"));
-        assertTrue(prepare.contains("composer.replaceChildren(document.createTextNode(expected))"));
+        assertTrue(prepare.contains("composer.ownerDocument||document"));
+        assertTrue(prepare.contains("const placeCaret="));
+        assertTrue(prepare.contains("range.collapse(false)"));
+        assertTrue(prepare.contains("block&&block!==composer"));
+        assertTrue(prepare.contains("block.textContent=expected"));
+        assertFalse(prepare.contains("composer.replaceChildren("));
         assertTrue(prepare.contains("requestComposerSubmit"));
         assertTrue(prepare.contains("c.state!=='SEND_ENABLED'&&c.state!=='COMPOSER_IDLE'"));
         assertTrue(click.contains("form.requestSubmit()"));

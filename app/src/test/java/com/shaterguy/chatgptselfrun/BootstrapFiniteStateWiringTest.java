@@ -22,7 +22,7 @@ public final class BootstrapFiniteStateWiringTest {
         assertFalse(service.contains("JSONObject result=parse(raw);String status=result.optString(\"status\",\"SCRIPT_ERROR\")"));
     }
 
-    @Test public void domModeGateAndRunHistoryAreFiniteAndRunScoped() throws Exception {
+    @Test public void requestProfileModeGateAndRunHistoryAreFiniteAndRunScoped() throws Exception {
         String dom = src("SelfRunDom.java");
         String mode = src("BootstrapModeDom.java");
         String history = src("SelfRunHistoryStore.java");
@@ -31,11 +31,12 @@ public final class BootstrapFiniteStateWiringTest {
         String application = src("SelfRunApplication.java");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(dom.contains("BootstrapModeDom.inline(requested, runId)"));
-        assertTrue(mode.contains("modeTimeoutMs=20000"));
-        assertTrue(mode.contains("modeMaxAttempts=18"));
-        assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_CONTROL_NOT_FOUND"));
-        assertTrue(mode.contains("CHAT_BOOTSTRAP_MODE_READBACK_FAILED"));
-        assertTrue(mode.contains("CHAT_BOOTSTRAP_COMPOSER_NOT_FOUND"));
+        assertTrue(mode.contains("__selfRunRequestProfileEngine"));
+        assertTrue(mode.contains("begin(requestedMode,modeRunId)"));
+        assertTrue(mode.contains("uiClicks=0"));
+        assertTrue(mode.contains("CHAT_BOOTSTRAP_PROFILE_ENGINE_UNAVAILABLE"));
+        assertFalse(mode.contains("dispatchModeMouse"));
+        assertFalse(mode.contains("data-tpp-toggle-value"));
         assertTrue(dom.contains("newChatRetryMs=1800"));
         assertTrue(dom.contains("newChatFailureMs=10000"));
         assertTrue(history.contains("BootstrapRunStateStore.appendHistory"));
@@ -48,10 +49,11 @@ public final class BootstrapFiniteStateWiringTest {
         assertTrue(manifest.contains("android:name=\".SelfRunApplication\""));
     }
 
-    @Test public void developmentIdentityAdvancesOnce() throws Exception {
+    @Test public void stableIdentityMatchesPromotion() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000104"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
     }
 
     private static String src(String file) throws Exception {

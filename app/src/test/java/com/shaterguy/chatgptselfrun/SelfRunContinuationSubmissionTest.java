@@ -23,16 +23,21 @@ public class SelfRunContinuationSubmissionTest {
         assertTrue(store.contains("migrateLegacyBootstrapAckWait"));
     }
 
-    @Test public void verifiedContinuationUsesNewUserMessageOnlyAsPostClickProof() throws Exception {
+    @Test public void verifiedContinuationRequiresPositivePostClickEvidence() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
         String prepare = between(dom, "static String prepareDriveTurn", "static String clickPreparedDriveTurn");
-        String click = between(dom, "static String clickPreparedDriveTurn", "static String observeTurnCompletion");
+        String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
+        String verification = between(dom, "private static String continuationClickedVerification", "private static String runIdFromContinuationMarker");
         String observer = between(dom, "static String observeTurnCompletion", "static String cancelTurnCompletionObserver");
         String completion = between(dom, "private static String completionObserver", "private static String conversationGuard");
         assertFalse(prepare.contains("users>baseline"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertTrue(click.contains("baselineUserCount=userMessageCount()"));
         assertTrue(click.contains("armCompletionObserver(false)"));
+        assertTrue(click.indexOf("c.send.click()") < click.indexOf("requestComposerSubmit()"));
+        assertTrue(verification.contains("users>baseline"));
+        assertTrue(verification.contains("STOP"));
+        assertTrue(verification.contains("state:'confirmed'"));
         assertTrue(observer.contains("completionObserver(runId, observerToken, stabilityMs)"));
         assertTrue(completion.contains("new MutationObserver"));
         assertTrue(completion.contains("state.observer?.disconnect()"));

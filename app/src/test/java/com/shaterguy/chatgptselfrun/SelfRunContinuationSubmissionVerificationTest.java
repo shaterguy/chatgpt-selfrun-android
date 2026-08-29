@@ -62,6 +62,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(js.contains("state:'clicked'"));
         assertTrue(js.contains("c.send.click()"));
         assertTrue(js.contains("CONTINUE_CLICKED"));
+        assertTrue(js.contains("SUBMISSION_PENDING"));
         assertFalse(js.contains("SUBMISSION_CONFIRMED"));
     }
 
@@ -77,6 +78,9 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(prepare.contains("exact bootstrap prepared"));
         assertTrue(prepare.contains("window.__selfRunDriveMarkers"));
         assertTrue(click.contains("BOOTSTRAP_CLICKED"));
+        assertTrue(click.contains("SUBMISSION_PENDING"));
+        assertTrue(prepare.contains("request_profile_rejected"));
+        assertTrue(prepare.contains("SUBMISSION_FAILED"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
     }
 

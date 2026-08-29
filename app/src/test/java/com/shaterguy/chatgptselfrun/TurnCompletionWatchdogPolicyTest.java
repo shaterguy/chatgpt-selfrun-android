@@ -95,7 +95,7 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertTrue(observer.contains(";idleMs='+idleMs"));
     }
 
-    @Test public void fiveMinutePostDomDriveWindowHasExactBoundary() {
+    @Test public void threeMinutePostDomDriveWindowHasExactBoundary() {
         long start = 1_000_000L;
         assertFalse(SelfRunService.postDomDriveSyncTimedOut(start,
                 start + SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS - 1L));
@@ -103,7 +103,7 @@ public final class TurnCompletionWatchdogPolicyTest {
                 start + SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS));
         assertFalse(SelfRunService.postDomDriveSyncTimedOut(0L, Long.MAX_VALUE));
         assertEquals(5_000L, SelfRunService.POST_DOM_DRIVE_RETRY_MS);
-        assertEquals(5 * 60_000L, SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS);
+        assertEquals(3 * 60_000L, SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS);
     }
 
     private static int count(String text, String value) {

@@ -10,9 +10,10 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TestAppVariantPolicyTest {
-    @Test public void testAppHasFixedSeparateInstallIdentity() throws Exception {
+    @Test public void stableCandidateHasFixedStableAndTestIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
@@ -32,21 +33,21 @@ public final class TestAppVariantPolicyTest {
         assertTrue(signer.contains("2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e"));
     }
 
-    @Test public void developmentVersionUsesCurrentDevIdentity() throws Exception {
+    @Test public void promotionVersionUsesStableIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.0'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000104"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
     }
 
-    @Test public void devPushBuildsOnlyTheTestApplicationChannel() throws Exception {
-        String production = read(".github/workflows/build-drive-v1.yml", "../.github/workflows/build-drive-v1.yml");
-        String test = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
-        assertFalse(production.contains("- 'selfrun-drive/v*-dev*'"));
-        assertTrue(production.contains("- 'selfrun-drive/v*-rc*'"));
-        assertTrue(production.contains("workflow_dispatch:"));
-        assertTrue(test.contains("- 'selfrun-drive/v*-dev*'"));
-        assertTrue(test.contains(":app:assembleQaApp"));
-        assertTrue(test.contains("com.shaterguy.chatgptselfrun.drive.test"));
+    @Test public void v2DevPushUsesOnlyDedicatedV2TestWorkflow() throws Exception {
+        String v1Test = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
+        String v2Test = read(".github/workflows/build-selfrun-v2-test.yml", "../.github/workflows/build-selfrun-v2-test.yml");
+        assertTrue(v1Test.contains("- 'selfrun-drive/v*-dev*'"));
+        assertFalse(v1Test.contains("selfrun-drive-v2/"));
+        assertTrue(v2Test.contains("- 'selfrun-drive-v2/v2.*-dev*'"));
+        assertTrue(v2Test.contains(":app:assembleQaApp"));
+        assertTrue(v2Test.contains("com.shaterguy.chatgptselfrun.v2.test"));
+        assertTrue(v2Test.contains("chatgpt-selfrun-v2-test-v"));
     }
 
     @Test public void restartClaimIsWiredToProcessOwnership() throws Exception {

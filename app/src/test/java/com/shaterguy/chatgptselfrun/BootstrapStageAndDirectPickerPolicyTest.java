@@ -11,40 +11,31 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class BootstrapStageAndDirectPickerPolicyTest {
-    @Test public void monotonicModeStageAndAdvancedPickerAreWiredWithoutProductionSlider() throws Exception {
+    @Test public void bootstrapStagesAbsoluteProfileWithoutModeOrReasoningMenuClicks() throws Exception {
         String dom = src("SelfRunDom.java");
         String mode = src("BootstrapModeDom.java");
         String options = src("ChatReasoningOptionDom.java");
-        String runner = androidTest("SelfRunAndroidTestRunner.java");
-        String flatInstrumentation = androidTest("BootstrapStageAndDirectPickerAndroidTest.java");
-        String hierarchicalInstrumentation = androidTest("ChatReasoningHierarchicalMenuAndroidTest.java");
+        String interceptor = src("RequestProfileScript.java");
 
         int modeAdapter = dom.indexOf("BootstrapModeDom.inline(requested, runId)");
         int optionAdapter = dom.indexOf("ChatReasoningOptionDom.inline(chatReasoning, runId)");
         int sliderAdapter = dom.indexOf("ChatReasoningDom.inline(chatReasoning, runId)");
         assertTrue(modeAdapter >= 0 && optionAdapter > modeAdapter);
         assertTrue(sliderAdapter < 0);
-        assertTrue(mode.contains("chatgpt-selfrun:bootstrap-stage:"));
-        assertTrue(mode.contains("MODE_CONFIRMED"));
-        assertTrue(mode.contains("stageRegressionBlocked"));
-        assertTrue(mode.contains("data-tpp-toggle-value"));
-        assertTrue(mode.contains("dispatchModeMouse(element,'pointerdown'"));
-        assertTrue(options.contains("[role=\"slider\"]"));
-        assertTrue(options.contains("open-reasoning-sheet"));
-        assertTrue(options.contains("open-advanced-control"));
-        assertTrue(options.contains("open-reasoning-menu"));
-        assertTrue(options.contains("wait-reasoning-options"));
-        assertTrue(options.contains("nested-option-click"));
-        assertTrue(options.contains("sliderObserved"));
-        assertFalse(options.contains("positive-slider-fallback"));
-        assertFalse(options.contains("set-slider"));
-        assertTrue(runner.contains("BootstrapStageAndDirectPickerAndroidTest"));
-        assertTrue(runner.contains("ChatReasoningHierarchicalMenuAndroidTest"));
-        assertTrue(flatInstrumentation.contains("confirmedChatStageSurvivesPickerRenderAndAppliesInstantDirectly"));
-        assertTrue(flatInstrumentation.contains("workToChatTransitionClicksExactlyOnceBeforeDirectPicker"));
-        assertTrue(hierarchicalInstrumentation.contains("koreanAdvancedButtonPathAppliesInstantWithoutSliderMutation"));
-        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProExtendedWithoutSliderMutation"));
-        assertTrue(hierarchicalInstrumentation.contains("englishAdvancedButtonReplacementMenuAppliesProStandardWithoutSliderMutation"));
+        assertTrue(mode.contains("__selfRunRequestProfileEngine"));
+        assertTrue(mode.contains("begin(requestedMode,modeRunId)"));
+        assertTrue(mode.contains("uiClicks=0"));
+        assertFalse(mode.contains("data-tpp-toggle-value"));
+        assertFalse(mode.contains("dispatchModeMouse"));
+        assertTrue(options.contains("__selfRunRequestProfileEngine"));
+        assertTrue(options.contains("setChatReasoning"));
+        assertTrue(options.contains("uiClicks:0"));
+        assertFalse(options.contains("open-reasoning-sheet"));
+        assertFalse(options.contains("nested-option-click"));
+        assertFalse(options.contains("[role=\"slider\"]"));
+        assertTrue(interceptor.contains("installDocumentStart"));
+        assertTrue(interceptor.contains("window.fetch"));
+        assertTrue(interceptor.contains("XMLHttpRequest"));
     }
 
     @Test public void newChatRunDefaultsToExtraHighWithoutOverridingRestoredDraft() throws Exception {
@@ -61,22 +52,19 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(activity.contains("chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE)"));
     }
 
-    @Test public void currentDevIdentityKeepsApprovedUiDependenciesPinned() throws Exception {
+    @Test public void stableIdentityKeepsApprovedDependenciesPinned() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 1000104"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '1.8.0'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2000011"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.0.0'"));
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("implementation 'com.google.android.gms:play-services-auth:21.6.0'"));
         assertTrue(gradle.contains("implementation 'com.google.android.material:material:1.14.0'"));
+        assertTrue(gradle.contains("implementation 'androidx.webkit:webkit:1.17.0'"));
     }
 
     private static String src(String file) throws Exception {
         return read("app/src/main/java/com/shaterguy/chatgptselfrun/" + file,
                 "src/main/java/com/shaterguy/chatgptselfrun/" + file);
-    }
-
-    private static String androidTest(String file) throws Exception {
-        return read("app/src/androidTest/java/com/shaterguy/chatgptselfrun/" + file,
-                "src/androidTest/java/com/shaterguy/chatgptselfrun/" + file);
     }
 
     private static String read(String first, String fallback) throws Exception {

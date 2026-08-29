@@ -35,7 +35,7 @@ public class WebUiCalibrationPolicyTest {
         assertTrue(WebUiCalibrationDom.readRuntimeLog().contains("ui-runtime-log"));
     }
 
-    @Test public void runtimeSelectsCalibrationByScopeAndTurnStage() {
+    @Test public void runtimeWorkProfilesAreIndependentOfCalibrationScopeAndTurnStage() {
         String generalBootstrapModel = WorkPreferenceDom.modelForProject(SelfRunScript.GENERAL_CHAT_URL, "sol");
         String generalBootstrapReasoning = WorkPreferenceDom.reasoningForProject(SelfRunScript.GENERAL_CHAT_URL, "xhigh");
         String projectBootstrapModel = WorkPreferenceDom.modelForProject("https://chatgpt.com/g/g-p-test/project", "sol");
@@ -45,19 +45,20 @@ public class WebUiCalibrationPolicyTest {
         String projectContinuationModel = WorkPreferenceDom.modelForConversation("https://chatgpt.com/g/g-p-test/c/conversation123", "sol");
         String projectContinuationReasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/g/g-p-test/c/conversation123", "xhigh");
 
-        assertTrue(generalBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL));
-        assertTrue(generalBootstrapReasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_REASONING));
-        assertTrue(projectBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL));
-        assertTrue(projectBootstrapReasoning.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_REASONING));
-        assertTrue(generalContinuationModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
-        assertTrue(generalContinuationReasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
-        assertTrue(projectContinuationModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL));
-        assertTrue(projectContinuationReasoning.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_REASONING));
-
-        assertFalse(generalBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_BOOTSTRAP_WORK_MODEL));
-        assertFalse(generalContinuationModel.contains(WebUiCalibrationStore.PURPOSE_PROJECT_CONTINUATION_WORK_MODEL));
-        assertFalse(projectBootstrapModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_BOOTSTRAP_WORK_MODEL));
-        assertFalse(projectContinuationModel.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
+        String[] all = {generalBootstrapModel, generalBootstrapReasoning, projectBootstrapModel,
+                projectBootstrapReasoning, generalContinuationModel, generalContinuationReasoning,
+                projectContinuationModel, projectContinuationReasoning};
+        for (String script : all) {
+            assertTrue(script.contains("__selfRunRequestProfileEngine"));
+            assertTrue(script.contains("strategy:'request-profile'"));
+            assertTrue(script.contains("uiClicks:0"));
+            assertFalse(script.contains("__wpCalibratedOptionValid"));
+            assertFalse(script.contains("open-work-mode-fallback"));
+        }
+        assertTrue(generalBootstrapModel.contains("setWorkModel"));
+        assertTrue(projectContinuationModel.contains("setWorkModel"));
+        assertTrue(generalBootstrapReasoning.contains("setWorkReasoning"));
+        assertTrue(projectContinuationReasoning.contains("setWorkReasoning"));
     }
 
     @Test public void allEightWorkCalibrationTargetsAreDistinct() {
@@ -81,31 +82,23 @@ public class WebUiCalibrationPolicyTest {
                 WebUiCalibrationStore.workReasoningPurpose(false, false));
     }
 
-    @Test public void workPreferenceValidatesCalibrationAndKeepsHeaderTriggerFallback() {
+    @Test public void workPreferenceUsesProfileEngineWithoutMenuFallback() {
         String model = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/conversation123", "sol");
         String reasoning = WorkPreferenceDom.reasoningForConversation("https://chatgpt.com/c/conversation123", "xhigh");
-        assertTrue(model.contains("__wpCalibratedOptionValid"));
-        assertTrue(reasoning.contains("__wpCalibratedOptionValid"));
-        assertTrue(model.contains("__wpCalibratedTriggerValid"));
-        assertTrue(reasoning.contains("__wpCalibratedTriggerValid"));
-        assertTrue(model.contains("calibratedTargetValid"));
-        assertTrue(reasoning.contains("calibratedTargetValid"));
-        assertFalse(model.contains("__wpMenuTrigger(__wpCalibrated)&&__wpNear(__wpCalibrated)"));
-        assertFalse(reasoning.contains("__wpMenuTrigger(__wpCalibrated)&&__wpNear(__wpCalibrated)"));
-        assertTrue(model.contains("__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]"));
-        assertTrue(reasoning.contains("__wpHeuristicTriggers.find(__wpNear)||__wpHeuristicTriggers[0]"));
-        assertTrue(model.contains("__wpOption=__wpSemanticOption||__wpCalibratedOption"));
-        assertTrue(reasoning.contains("__wpOption=__wpSemanticOption||__wpCalibratedOption"));
-        assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
-        assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_MODE_WORK));
-        assertTrue(model.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_MODEL));
-        assertTrue(reasoning.contains(WebUiCalibrationStore.PURPOSE_GENERAL_CONTINUATION_WORK_REASONING));
-        assertTrue(model.contains("open-work-mode-fallback"));
-        assertTrue(reasoning.contains("open-work-mode-fallback"));
-        assertTrue(model.contains("[aria-haspopup],[aria-expanded]"));
-        assertTrue(reasoning.contains("[aria-haspopup],[aria-expanded]"));
-        assertTrue(model.contains("menu|listbox|dialog|true"));
-        assertTrue(reasoning.contains("menu|listbox|dialog|true"));
+        assertTrue(model.contains("__selfRunRequestProfileEngine"));
+        assertTrue(reasoning.contains("__selfRunRequestProfileEngine"));
+        assertTrue(model.contains("setWorkModel"));
+        assertTrue(reasoning.contains("setWorkReasoning"));
+        assertTrue(model.contains("targetReady:!!t?.ready"));
+        assertTrue(reasoning.contains("targetReady:!!t?.ready"));
+        assertTrue(model.contains("uiClicks:0"));
+        assertTrue(reasoning.contains("uiClicks:0"));
+        assertFalse(model.contains("__wpCalibratedOptionValid"));
+        assertFalse(reasoning.contains("__wpCalibratedOptionValid"));
+        assertFalse(model.contains("open-work-mode-fallback"));
+        assertFalse(reasoning.contains("open-work-mode-fallback"));
+        assertFalse(model.contains("[aria-haspopup],[aria-expanded]"));
+        assertFalse(reasoning.contains("[aria-haspopup],[aria-expanded]"));
     }
 
     @Test public void calibrationActivityExposesFourIndependentWorkContexts() throws Exception {

@@ -52,6 +52,29 @@ public final class TurnDocumentRetryAndroidTest {
         assertFalse(coordinator.hasPendingClaim());
     }
 
+    @Test public void duplicateTimeoutWhileRetryPendingKeepsSameRunAndRetryPrompt() {
+        SelfRunStore store = eligibleRun();
+        String runId = store.runId();
+        SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
+        assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
+                coordinator.beginOrResume(store,
+                        SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
+        assertTrue(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId));
+
+        SelfRunRolloverCoordinator.Result duplicate = coordinator.beginOrResume(
+                store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT);
+
+        assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY, duplicate.status);
+        assertEquals(runId, duplicate.successorRunId);
+        assertEquals(runId, store.runId());
+        assertEquals(SelfRunStore.PHASE_SEND_CONTINUE, store.phase());
+        assertTrue(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId));
+        assertFalse(coordinator.hasPendingClaim());
+        String prompt = SelfRunProtocol.driveContinuation(runId);
+        assertTrue(prompt.contains("[SELF_RUN_TURN_DOCUMENT_RETRY " + runId + "]"));
+        assertFalse(prompt.contains("[SELF_RUN_CONTINUE " + runId + "]"));
+    }
+
     @Test public void pendingRetrySurvivesRecreationUntilSubmissionIsConfirmed() {
         SelfRunStore store = eligibleRun();
         String runId = store.runId();

@@ -64,7 +64,7 @@ final class SelfRunRolloverPolicy {
 
     static boolean hardContinuationFailureStatus(String status) {
         return "SUBMISSION_AMBIGUOUS".equals(status) || "MARKER_FAILED".equals(status)
-                || "SUBMISSION_PENDING".equals(status) || "SUBMISSION_FAILED".equals(status)
+                || "SUBMISSION_FAILED".equals(status)
                 || SelfRunContinuationDom.UNKNOWN.equals(status) || "SCRIPT_ERROR".equals(status);
     }
 
@@ -104,6 +104,7 @@ final class SelfRunRolloverPolicy {
 
     static boolean continuationProgressStatus(String status) {
         return "READY".equals(status) || "READY_TO_SUBMIT".equals(status)
+                || SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)
                 || "CONTINUE_CLICKED".equals(status) || "SUBMISSION_CONFIRMED".equals(status)
                 || "VERIFY_REQUIRED".equals(status) || "OBSERVER_ARMED".equals(status);
     }

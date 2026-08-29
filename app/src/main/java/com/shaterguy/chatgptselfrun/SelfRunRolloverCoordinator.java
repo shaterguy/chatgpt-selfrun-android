@@ -68,6 +68,10 @@ final class SelfRunRolloverCoordinator {
         }
 
         String cause = SelfRunRolloverPolicy.normalizeCause(rawCause);
+        if (SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT.equals(cause)
+                && turnDocumentRetryPromptPending(store.runId())) {
+            return new Result(RESULT_TURN_DOCUMENT_RETRY, store.runId(), cause);
+        }
         if (prepareTurnDocumentRetry(store, cause)) {
             return new Result(RESULT_TURN_DOCUMENT_RETRY, store.runId(), cause);
         }

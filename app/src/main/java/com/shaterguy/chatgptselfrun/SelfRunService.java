@@ -47,7 +47,7 @@ public final class SelfRunService extends Service {
     /** MutationObserver is immediate; this low-frequency pass only repairs a detached DOM binding. */
     static final long TURN_OBSERVER_HEALTHCHECK_MS = 15_000L;
     static final long POST_DOM_DRIVE_RETRY_MS = 5_000L;
-    static final long POST_DOM_DRIVE_MAX_WAIT_MS = 5 * 60_000L;
+    static final long POST_DOM_DRIVE_MAX_WAIT_MS = 3 * 60_000L;
     private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
     static final long CONTINUATION_VERIFY_INTERVAL_MS = 250L;
     static final long CONTINUATION_CALLBACK_TIMEOUT_MS = 5_000L;
@@ -836,7 +836,7 @@ private void evaluate(String phase,String script){
       if("OBSERVER_UNAVAILABLE".equals(status)){runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
   }
   if("TARGET_ERROR".equals(status)){
-      recordContinuationTargetError(phase);
+      recordContinuationTargetError(phase,detail);
       if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){if(networkState.isValidated())rolloverConversation(SelfRunRolloverPolicy.TARGET_ERROR);else scheduleWeb(5_000L);}
       else if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);
       return;
@@ -845,7 +845,7 @@ private void evaluate(String phase,String script){
   if(isWorkPreferenceFailureStatus(status)){runLog.record(store,"WORK_PREFERENCE_FAILURE","status="+BootstrapResultPolicy.safe(status,80)+";detail="+BootstrapResultPolicy.safe(detail,180)+BootstrapResultPolicy.compactDiagnostics(result.optJSONObject("diagnostics")));pauseError(status,workPreferenceFailureMessage(status));return;}
   if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){
       if("BOOTSTRAP_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){bootstrapSubmitted(detail);return;}
-      if("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(BOOTSTRAP_SEND_POLL_MS);return;}
+      if("SUBMISSION_FAILED".equals(status)||SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(BOOTSTRAP_SEND_POLL_MS);return;}
   }
   if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){
       if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){rollover.clearLocalFailures(runId);continuationSubmitted(detail);return;}
@@ -856,7 +856,7 @@ private void evaluate(String phase,String script){
           if(SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_PROGRESS);return;}
           scheduleWeb(1200L);return;
       }
-      if("SUBMISSION_FAILED".equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+      if("SUBMISSION_FAILED".equals(status)||SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
   }
   if("UI_WAIT".equals(status)||"WAIT".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?BOOTSTRAP_SEND_POLL_MS:("WAIT".equals(status)?2000L:1200L));return;}
   if(isConversationLocalFailureStatus(status)&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
@@ -939,7 +939,7 @@ private static boolean isConversationLocalFailureStatus(String status){return Se
 private void recordContinuationWait(String phase,String status,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.waitDetail(phase,status,detail));}
 private void recordContinuationState(String phase,String status){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.stateDetail(phase,status));}
 private void recordContinuationRouteMismatch(String actual){String phase=store.phase();if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.routeMismatchDetail(phase,canonicalUrl(),actual));}
-private void recordContinuationTargetError(String phase){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT","status=TARGET_ERROR;reason=target_guard");}
+private void recordContinuationTargetError(String phase,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.targetErrorDetail(phase,detail));}
 private static boolean isContinuationDiagnosticPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 
 private boolean completeBootstrap(JSONObject result){
