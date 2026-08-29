@@ -28,6 +28,18 @@ public final class RequestProfileVersionContractTest {
         assertTrue(script.contains("if(!probe.eligible)return nativeFetch(input,init)"));
     }
 
+    @Test public void restoredTargetSurvivesWebViewRecreationWithoutRelaxingFailClosed() {
+        String script = RequestProfileScript.documentStartScript();
+        assertTrue(script.contains("selfrun-drive:request-profile-target:v1"));
+        assertTrue(script.contains("localStorage.setItem(TARGET_STORE,JSON.stringify(state.target))"));
+        assertTrue(script.contains("localStorage.getItem(TARGET_STORE)"));
+        assertTrue(script.contains("state.target=restoreTarget();"));
+        assertTrue(script.contains("reason:'target_restored'"));
+        assertTrue(script.contains("if(!validTarget(t)){localStorage.removeItem(TARGET_STORE);return null;}"));
+        assertTrue(script.contains("if(!t||!t.ready)fail('target_not_ready')"));
+        assertTrue(script.contains("t.profileVersion!==PROFILE_VERSION"));
+    }
+
     @Test public void bootstrapAndWorkConsumersUseTheSharedExpressionWithoutLiterals() throws Exception {
         String expression = RequestProfileScript.engineAvailableExpression();
         String bootstrapScript = BootstrapModeDom.inline(SelfRunStore.MODE_CHAT, "SR-VERSION");
