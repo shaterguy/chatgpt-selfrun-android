@@ -72,6 +72,23 @@ public final class ProfileRegistryTest {
         assertNull(ProfileRegistry.resolveWork("solar", "maximum"));
     }
 
+    @Test public void deletedBuiltInCanBeReRegisteredWithoutResurrectingOldSignal() {
+        ProfileRegistry.Profile original = ProfileRegistry.resolveWork("sol", "max");
+        assertNotNull(original);
+        assertTrue(ProfileRegistry.delete(original.fingerprint));
+        assertNull(ProfileRegistry.resolveWork("sol", "max"));
+
+        ProfileRegistry.CapturedProfile captured = capture("work", "gpt-5.6-sol-wm", "max", true);
+        ProfileRegistry.RegisterResult replacement = ProfileRegistry.registerCaptured(captured, "solar", "maximum");
+        assertEquals(ProfileRegistry.RegisterResult.ADDED, replacement.status);
+        assertNull(ProfileRegistry.resolveWork("sol", "max"));
+        assertNotNull(ProfileRegistry.resolveWork("solar", "maximum"));
+
+        assertTrue(ProfileRegistry.delete(replacement.profile.fingerprint));
+        assertNull(ProfileRegistry.resolveWork("solar", "maximum"));
+        assertNull(ProfileRegistry.resolveWork("sol", "max"));
+    }
+
     @Test public void chatRegistrationUsesReasoningSignalOnly() {
         ProfileRegistry.CapturedProfile captured = capture("chat", "gpt-5.6-pro", "super", false);
         ProfileRegistry.RegisterResult result = ProfileRegistry.registerCaptured(captured, "ignored", "pro");
