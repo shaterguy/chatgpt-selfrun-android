@@ -337,10 +337,15 @@ jobs:
           script: >-
             bash -o pipefail -c
             'set -euo pipefail;
-            gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest;
-            adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             TEST_VERSION=$(sed -n "s/.*selfRunDriveVersionName = '\''\([^'\'']*\)'\''.*/\1/p" app/build.gradle | head -1);
+            if [[ "$TEST_VERSION" == 2.* ]]; then
+              gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest
+              -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest;
+            else
+              gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest
+              -Pandroid.testInstrumentationRunnerArguments.class=com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest;
+            fi;
+            adb shell dumpsys webviewupdate | tee drive-test-webview-evidence.txt;
             FORMAL_EXPECTED_VERSION="1.6.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION"
             timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh
             formal-baseline/chatgpt-selfrun-drive-v1.6.0.apk
