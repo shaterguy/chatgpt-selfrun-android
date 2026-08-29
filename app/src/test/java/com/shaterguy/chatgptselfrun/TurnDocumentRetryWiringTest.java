@@ -32,7 +32,7 @@ public final class TurnDocumentRetryWiringTest {
         String profile = src("RequestProfileScript.java");
 
         assertTrue(service.contains("stopAutomationCallbacks();\n        cleanupWebView();"));
-        assertTrue(profile.contains("const TARGET_STORE='selfrun-drive:request-profile-target:v1'"));
+        assertTrue(profile.contains("const TARGET_STORE='selfrun-drive:request-profile-target:v2'"));
         assertTrue(profile.contains("state.target=restoreTarget();"));
         assertTrue(profile.contains("persistTarget();state.last={ok:true,reason:'target_begun'"));
         assertTrue(profile.contains("if(!t||!t.ready)fail('target_not_ready')"));

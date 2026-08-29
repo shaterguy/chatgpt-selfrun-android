@@ -27,8 +27,7 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(mode.contains("uiClicks=0"));
         assertFalse(mode.contains("data-tpp-toggle-value"));
         assertFalse(mode.contains("dispatchModeMouse"));
-        assertTrue(options.contains("__selfRunRequestProfileEngine"));
-        assertTrue(options.contains("setChatReasoning"));
+        assertTrue(options.contains("RequestProfileScript.setChatReasoning"));
         assertTrue(options.contains("uiClicks:0"));
         assertFalse(options.contains("open-reasoning-sheet"));
         assertFalse(options.contains("nested-option-click"));
