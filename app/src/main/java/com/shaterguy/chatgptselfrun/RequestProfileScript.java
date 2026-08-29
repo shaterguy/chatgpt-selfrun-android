@@ -58,15 +58,36 @@ final class RequestProfileScript {
                 (()=>{
                   if(window.__selfRunRequestProfileEngine?.version===__ENGINE_VERSION__)return;
                   const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
+                  const TARGET_STORE='selfrun-drive:request-profile-target:v1';
+                  const PROFILE_VERSION='chatgpt-request-snapshot-calibration-v1@2026-08-28';
                   const state={target:null,last:{ok:false,reason:'not_attempted'}};
                   const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,160)};throw new Error('SELFRUN_PROFILE:'+state.last.reason);};
                   const norm=v=>String(v??'').trim().toLowerCase();
-                  const begin=(mode,runId)=>{const m=norm(mode);if(m!=='chat'&&m!=='work')fail('unsupported_mode');state.target={mode:m,model:'',reasoning:'',runId:String(runId||'').slice(0,128),profileVersion:'chatgpt-request-snapshot-calibration-v1@2026-08-28',ready:false};state.last={ok:true,reason:'target_begun',mode:m};return true;};
+                  const validTarget=t=>{
+                    if(!t||typeof t!=='object'||Array.isArray(t)||t.profileVersion!==PROFILE_VERSION||typeof t.runId!=='string'||t.runId.length>128)return false;
+                    if(t.mode==='chat'){
+                      if(t.model===''&&t.reasoning===''&&t.ready===false)return true;
+                      return t.model==='chat'&&['instant','medium','high','xhigh'].includes(t.reasoning)&&t.ready===true;
+                    }
+                    if(t.mode==='work'){
+                      if(t.model===''&&t.reasoning===''&&t.ready===false)return true;
+                      if(!['sol','terra','luna'].includes(t.model))return false;
+                      if(t.reasoning===''&&t.ready===false)return true;
+                      if(!['light','medium','high','xhigh','max','ultra'].includes(t.reasoning)||t.ready!==true)return false;
+                      return !(t.model==='luna'&&t.reasoning==='ultra');
+                    }
+                    return false;
+                  };
+                  const persistTarget=()=>{try{if(validTarget(state.target))localStorage.setItem(TARGET_STORE,JSON.stringify(state.target));else localStorage.removeItem(TARGET_STORE);}catch(_){}};
+                  const restoreTarget=()=>{try{const raw=localStorage.getItem(TARGET_STORE);if(!raw)return null;const t=JSON.parse(raw);if(!validTarget(t)){localStorage.removeItem(TARGET_STORE);return null;}return{mode:t.mode,model:t.model,reasoning:t.reasoning,runId:t.runId,profileVersion:t.profileVersion,ready:t.ready};}catch(_){return null;}};
+                  state.target=restoreTarget();
+                  if(state.target)state.last={ok:true,reason:'target_restored',mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning};
+                  const begin=(mode,runId)=>{const m=norm(mode);if(m!=='chat'&&m!=='work')fail('unsupported_mode');state.target={mode:m,model:'',reasoning:'',runId:String(runId||'').slice(0,128),profileVersion:PROFILE_VERSION,ready:false};persistTarget();state.last={ok:true,reason:'target_begun',mode:m};return true;};
                   const requireTarget=mode=>{const t=state.target;if(!t||t.mode!==mode)fail('target_mode_not_initialized');return t;};
-                  const setChatReasoning=reasoning=>{const t=requireTarget('chat'),r=norm(reasoning);if(['pro','pro_standard','pro_extended'].includes(r))fail('chat_pro_uncaptured');if(!['instant','medium','high','xhigh'].includes(r))fail('unsupported_chat_reasoning');t.model='chat';t.reasoning=r;t.ready=true;state.last={ok:true,reason:'target_ready',mode:'chat',model:'chat',reasoning:r};return true;};
-                  const setWorkModel=model=>{const t=requireTarget('work'),m=norm(model).replace(/^5\\.6\\s+/,'');if(!['sol','terra','luna'].includes(m))fail('unsupported_work_model');t.model=m;t.reasoning='';t.ready=false;state.last={ok:true,reason:'work_model_set',mode:'work',model:m};return true;};
-                  const setWorkReasoning=reasoning=>{const t=requireTarget('work'),r=norm(reasoning).replace('extra high','xhigh').replace('extra_high','xhigh');if(!t.model)fail('work_model_missing');if(!['light','medium','high','xhigh','max','ultra'].includes(r))fail('unsupported_work_reasoning');if(t.model==='luna'&&r==='ultra')fail('luna_ultra_unsupported');t.reasoning=r;t.ready=true;state.last={ok:true,reason:'target_ready',mode:'work',model:t.model,reasoning:r};return true;};
-                  const plan=()=>{const t=state.target;if(!t||!t.ready)fail('target_not_ready');if(t.profileVersion!=='chatgpt-request-snapshot-calibration-v1@2026-08-28')fail('profile_version_mismatch');if(t.mode==='chat'){
+                  const setChatReasoning=reasoning=>{const t=requireTarget('chat'),r=norm(reasoning);if(['pro','pro_standard','pro_extended'].includes(r))fail('chat_pro_uncaptured');if(!['instant','medium','high','xhigh'].includes(r))fail('unsupported_chat_reasoning');t.model='chat';t.reasoning=r;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'chat',model:'chat',reasoning:r};return true;};
+                  const setWorkModel=model=>{const t=requireTarget('work'),m=norm(model).replace(/^5\\.6\\s+/,'');if(!['sol','terra','luna'].includes(m))fail('unsupported_work_model');t.model=m;t.reasoning='';t.ready=false;persistTarget();state.last={ok:true,reason:'work_model_set',mode:'work',model:m};return true;};
+                  const setWorkReasoning=reasoning=>{const t=requireTarget('work'),r=norm(reasoning).replace('extra high','xhigh').replace('extra_high','xhigh');if(!t.model)fail('work_model_missing');if(!['light','medium','high','xhigh','max','ultra'].includes(r))fail('unsupported_work_reasoning');if(t.model==='luna'&&r==='ultra')fail('luna_ultra_unsupported');t.reasoning=r;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'work',model:t.model,reasoning:r};return true;};
+                  const plan=()=>{const t=state.target;if(!t||!t.ready)fail('target_not_ready');if(t.profileVersion!==PROFILE_VERSION)fail('profile_version_mismatch');if(t.mode==='chat'){
                     const effort={medium:'standard',high:'extended',xhigh:'max'}[t.reasoning];
                     if(t.reasoning==='instant')return [['set','model','gpt-5-6'],['remove','thinking_effort'],['remove','conversation_origin'],['remove','service_tier']];
                     if(!effort)fail('unsupported_chat_reasoning');
