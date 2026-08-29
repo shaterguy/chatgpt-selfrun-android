@@ -36,7 +36,7 @@ public final class SelfRunDriveCommandAckPollingTest {
         assertFalse(service.contains("scheduleDrivePoll"));
         assertFalse(service.contains("SelfRunContinuationDom.buttonState("));
         assertTrue(service.contains("POST_DOM_DRIVE_RETRY_MS = 5_000L"));
-        assertTrue(service.contains("POST_DOM_DRIVE_MAX_WAIT_MS = 5 * 60_000L"));
+        assertTrue(service.contains("POST_DOM_DRIVE_MAX_WAIT_MS = 3 * 60_000L"));
     }
 
     private static String source(String name) throws Exception {
