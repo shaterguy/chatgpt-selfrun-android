@@ -1,0 +1,44 @@
+name: Fix SelfRun Drive v2.2.1-dev2 bootstrap fixture
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v2.2.1-dev2
+    paths:
+      - .github/workflows/fix-v2.2.1-dev2-bootstrap-fixture.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Model the submitted bootstrap user turn
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('app/src/androidTest/java/com/shaterguy/chatgptselfrun/RichComposerBootstrapWebViewTest.java')
+          text = path.read_text(encoding='utf-8')
+          old = "                      if(window.submitFetchOk)history.replaceState({},'', __SLUGGED_CONVERSATION_PATH__);"
+          new = "                      if(window.submitFetchOk){const user=document.createElement('div');user.setAttribute('data-message-author-role','user');user.textContent='bootstrap user';document.querySelector('main').prepend(user);history.replaceState({},'', __SLUGGED_CONVERSATION_PATH__);}"
+          if text.count(old) != 1:
+              raise SystemExit(f'bootstrap fixture marker count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm -f .github/workflows/fix-v2.2.1-dev2-bootstrap-fixture.yml
+          git diff --check
+      - name: Commit fixture correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'test(v2): model fresh bootstrap user turn'
+          git push origin HEAD:selfrun-drive/v2.2.1-dev2
