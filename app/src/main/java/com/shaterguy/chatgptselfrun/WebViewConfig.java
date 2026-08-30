@@ -22,6 +22,7 @@ final class WebViewConfig {
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        TurnProtocolLogBridge.install(webView);
         RequestProfileScript.installDocumentStart(webView);
         ChatGptTurnProtocolScript.installDocumentStart(webView);
     }

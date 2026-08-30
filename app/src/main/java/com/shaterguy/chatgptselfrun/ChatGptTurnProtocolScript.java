@@ -56,6 +56,7 @@ final class ChatGptTurnProtocolScript {
                   };
                   let state=restore(),pendingTimer=0;
                   const save=()=>{try{sessionStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(_){}};
+                  const emitLog=(stage,source)=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;sink.postMessage(JSON.stringify({stage:safe(stage),source:safe(source),phase:state.phase,sequence:state.turnSequence,kind:state.turnKind}));}catch(_){}};
                   const profileTarget=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const resetForRun=run=>{state=blank();state.runId=safe(run);save();};
                   const alignRun=()=>{
@@ -105,7 +106,7 @@ final class ChatGptTurnProtocolScript {
                     state.lastSource=safe(meta?.source||'fetch');
                     const route=routeConversationId();
                     if(route.startsWith('WEB:'))state.temporaryConversationId=route;
-                    save();return true;
+                    save();emitLog('turn_request','canonical_post');return true;
                   };
                   const bindConversation=id=>{
                     const value=safe(id);if(!value)return true;
@@ -149,6 +150,7 @@ final class ChatGptTurnProtocolScript {
                     const token=safe(observer?.token||'');
                     if(!run||!token){if(allowRetry)schedulePendingDispatch(source);return false;}
                     state.completionDispatched=true;state.completionSource=safe(source);save();
+                    emitLog('completion_dispatch',source);
                     cancelDomFallback(observer);
                     const callback=COMPLETION_SCHEME+'://'+COMPLETION_HOST
                       +'?run='+encodeURIComponent(run)+'&token='+encodeURIComponent(token)
@@ -159,6 +161,7 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     state.phase='COMPLETE';state.sawStreamComplete=true;
                     state.lastSource=safe(source);state.lastError='';save();
+                    emitLog('complete',source);
                     dispatchCompletion(source,true);return true;
                   };
                   const markError=(reason,sequence)=>{
@@ -183,7 +186,7 @@ final class ChatGptTurnProtocolScript {
                       if(value.marker==='final_channel_token'){
                         state.sawFinalChannelToken=true;
                         if(state.phase==='THINKING')state.phase='ANSWERING';
-                        state.lastSource=safe(source);save();return;
+                        state.lastSource=safe(source);save();emitLog('answering_started','final_channel');return;
                       }
                     }
                     if(value.type==='message_stream_complete'){complete('message_stream_complete');return;}
