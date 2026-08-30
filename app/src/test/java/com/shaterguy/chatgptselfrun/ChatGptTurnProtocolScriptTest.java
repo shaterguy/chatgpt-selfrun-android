@@ -13,58 +13,97 @@ import static org.junit.Assert.assertTrue;
 
 /** Contract tests for the protocol-first ChatGPT turn state detector. */
 public final class ChatGptTurnProtocolScriptTest {
-    @Test public void canonicalRequestOwnsFirstAndFollowupLifecycle() {
-        assertEquals("turn-protocol-v2", ChatGptTurnProtocolScript.ENGINE_VERSION);
+    @Test public void canonicalConversationPostOwnsEveryUserTurn() {
+        assertEquals("turn-protocol-v4", ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
-        assertTrue(script.contains("path==='/backend-api/f/responses'"));
+        assertFalse(script.contains("path==='/backend-api/f/responses'"));
         assertFalse(script.contains("/backend-api/f/conversation/prepare"));
-        assertTrue(script.contains("previous==='IDLE'"));
-        assertTrue(script.contains("state.turnKind='FIRST_TURN'"));
-        assertTrue(script.contains("previous==='COMPLETE'"));
-        assertTrue(script.contains("state.turnKind='FOLLOWUP_TURN'"));
-        assertTrue(script.contains("else return false"));
+        assertFalse(script.contains("/backend-api/conversation/init"));
+        assertTrue(script.contains("state.turnSequence=Math.max(1,state.turnSequence+1)"));
+        assertTrue(script.contains("state.turnKind=state.turnSequence===1?'FIRST_TURN':'FOLLOWUP_TURN'"));
+        assertFalse(script.contains("previous==='COMPLETE'"));
+        assertFalse(script.contains("else return false"));
         assertTrue(script.contains("state.phase='THINKING'"));
-        assertTrue(script.contains("selfrun-drive:turn-protocol-state:v2"));
+        assertTrue(script.contains("selfrun-drive:turn-protocol-state:v4"));
     }
 
-    @Test public void finalChannelAndSemanticCompletionOwnAnswerPhases() {
+    @Test public void finalChannelAndVisibleAnswerOwnAnsweringPhase() {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
-        assertTrue(script.contains("value.marker==='user_visible_token'"));
-        assertTrue(script.contains("value.marker==='final_channel_token'"));
+        assertTrue(script.contains("marker==='user_visible_token'"));
+        assertTrue(script.contains("marker==='cot_token'"));
+        assertTrue(script.contains("marker==='last_token'"));
+        assertTrue(script.contains("marker==='final_channel_token'&&event==='first'"));
+        assertTrue(script.contains("sawVisibleAnswer:false"));
+        assertTrue(script.contains("noteVisibleAnswer('final_channel')"));
+        assertTrue(script.contains("noteVisibleAnswer('visible_answer')"));
         assertTrue(script.contains("state.phase='ANSWERING'"));
-        assertTrue(script.contains("value.type==='message_stream_complete'"));
-        assertTrue(script.contains("finalMessage.status==='finished_successfully'&&finalMessage.end_turn===true"));
-        assertTrue(script.contains("if(!text||text==='[DONE]')return"));
-        assertTrue(script.contains("type==='done'"));
-        assertTrue(script.contains("payload.encoded_item"));
-        assertTrue(script.contains("complete('work_done')"));
+        assertTrue(script.contains("value.type==='stream_handoff'"));
     }
 
-    @Test public void directAnswerTextIsValidEvidenceWithoutThinkingMarker() {
+    @Test public void semanticCompletionDelegatesToExistingObserverOnly() {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
-        assertTrue(script.contains("sawAssistantFinalText:false"));
-        assertTrue(script.contains("completionEvidence=()=>state.sawFinalChannelToken||state.sawAssistantFinalText"));
-        assertTrue(script.contains("role!=='assistant'||channel!=='final'"));
-        assertTrue(script.contains("state.finalMessageActive=true"));
-        assertTrue(script.contains("noteAssistantFinalText('assistant_final_text')"));
-        assertTrue(script.contains("path.includes('/message/content/parts')"));
-        assertTrue(script.contains("value.v?.message"));
-        assertTrue(script.contains("sawAssistantFinalText:state.sawAssistantFinalText"));
+        assertTrue(script.contains("const delegateCompletion=source=>"));
+        assertTrue(script.contains("window.__selfRunDriveTurnObserver"));
+        assertTrue(script.contains("observer.allowIdleBaseline=true"));
+        assertTrue(script.contains("observer.protocolComplete=true"));
+        assertTrue(script.contains("observer.protocolSource=safe(source)"));
+        assertTrue(script.contains("emitLog('completion_delegate',source)"));
+        assertTrue(script.contains("observer.evaluate()"));
+        assertFalse(script.contains("COMPLETION_SCHEME"));
+        assertFalse(script.contains("COMPLETION_HOST"));
+        assertFalse(script.contains("location.href=callback"));
+        assertFalse(script.contains("cancelDomFallback"));
+        assertFalse(script.contains("suspendDomFallback"));
+        assertFalse(script.contains("observer.fired=true"));
+        assertFalse(script.contains("observer.observer?.disconnect"));
     }
 
-    @Test public void emptyStreamCompleteCannotFinishOrFallBackToDom() {
+    @Test public void earlySemanticCompleteLeavesFallbackAlive() {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("if(!completionEvidence())"));
-        assertTrue(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
         assertTrue(script.contains("state.lastError='completion_without_final_answer_evidence'"));
         assertTrue(script.contains("emitLog('completion_ignored',source)"));
-        assertTrue(script.contains("state.phase!=='COMPLETE'||state.completionDispatched||!completionEvidence()"));
-        assertTrue(script.contains("state.phase==='COMPLETE'&&!state.completionDispatched&&completionEvidence()"));
+        assertFalse(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
+        assertFalse(script.contains("cancelDomFallback(window.__selfRunDriveTurnObserver)"));
+    }
+
+    @Test public void protocolErrorCannotDisableFallback() {
+        String script = ChatGptTurnProtocolScript.documentStartScript();
+
+        assertTrue(script.contains("markError('canonical_http_'+safe(response?.status),sequence)"));
+        assertTrue(script.contains("markError('canonical_fetch_rejected',sequence)"));
+        assertTrue(script.contains("state.phase='ERROR'"));
+        assertFalse(script.contains("suspendDomFallback"));
+    }
+
+    @Test public void proAndWorkTransportRejectsInnerAndOuterDoneAsCompletion() {
+        String script = ChatGptTurnProtocolScript.documentStartScript();
+
+        assertTrue(script.contains("if(!text||text==='[DONE]')return"));
+        assertTrue(script.contains("const acceptSocketPayload=payload=>"));
+        assertTrue(script.contains("if(type==='done')return"));
+        assertTrue(script.contains("type!=='stream-item'||typeof payload.encoded_item!=='string'"));
+        assertTrue(script.contains("observeSseText(payload.encoded_item,'chatgpt-websocket',context)"));
+        assertTrue(script.contains("observeSocketFrame,observeWorkFrame:observeSocketFrame"));
+        assertFalse(script.contains("complete('work_done')"));
+    }
+
+    @Test public void directFinalMessageIsVisibleAnswerEvidence() {
+        String script = ChatGptTurnProtocolScript.documentStartScript();
+
+        assertTrue(script.contains("sawAssistantFinalText:false"));
+        assertTrue(script.contains("completionEvidence=()=>state.sawVisibleAnswer"));
+        assertTrue(script.contains("role!=='assistant'||channel!=='final'"));
+        assertTrue(script.contains("state.finalMessageActive=true"));
+        assertTrue(script.contains("noteAssistantFinalText('visible_answer')"));
+        assertTrue(script.contains("path.includes('/message/content/parts')"));
+        assertTrue(script.contains("value.v?.message"));
+        assertTrue(script.contains("completionDelegated:state.completionDelegated"));
     }
 
     @Test public void hiddenFinishedMessagesCannotCompleteTheTurn() {
@@ -74,38 +113,6 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("safe(finalMessage.channel).toLowerCase()==='final'"));
         assertTrue(script.contains("finalMessage.status==='finished_successfully'&&finalMessage.end_turn===true"));
         assertFalse(script.contains("message.status==='finished_successfully'&&message.end_turn===true"));
-    }
-
-    @Test public void canonicalHttpFailureDoesNotFeedSemanticParserOrDomFallback() {
-        String script = ChatGptTurnProtocolScript.documentStartScript();
-
-        assertTrue(script.contains("if(!response?.ok)"));
-        assertTrue(script.contains("markError('canonical_http_'+safe(response?.status),sequence)"));
-        assertTrue(script.contains("return response"));
-        assertTrue(script.contains("markError('canonical_fetch_rejected',sequence)"));
-        assertTrue(script.contains("const markError=(reason,sequence)=>"));
-        assertTrue(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
-    }
-
-    @Test public void protocolCompletionCancelsDomFallbackAndUsesVerifiedCallback() {
-        String script = ChatGptTurnProtocolScript.documentStartScript();
-
-        assertTrue(script.contains("window.__selfRunDriveTurnObserver"));
-        assertTrue(script.contains("const suspendDomFallback=observer=>"));
-        assertTrue(script.contains("observer.fired=true"));
-        assertTrue(script.contains("observer.observer?.disconnect"));
-        assertTrue(script.contains("window.__selfRunDriveTurnObserver=null"));
-        assertTrue(script.contains("const COMPLETION_SCHEME=\"selfrun-drive\";"));
-        assertTrue(script.contains("const COMPLETION_HOST=\"turn-completed\";"));
-        assertTrue(script.contains("+'://'+COMPLETION_HOST"));
-        assertTrue(script.contains("response.clone()"));
-        assertTrue(script.contains("window.fetch=async function"));
-        assertTrue(script.contains("window.WebSocket=WrappedWebSocket"));
-
-        assertFalse(script.contains("document.querySelector"));
-        assertFalse(script.contains("MutationObserver"));
-        assertFalse(script.contains("prompt-textarea"));
-        assertFalse(script.contains("data-message-author-role"));
     }
 
     @Test public void automationWebViewInstallsProfileAndTurnProtocolAtDocumentStart() throws Exception {

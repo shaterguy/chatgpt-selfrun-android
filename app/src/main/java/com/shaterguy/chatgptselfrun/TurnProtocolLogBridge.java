@@ -50,7 +50,7 @@ final class TurnProtocolLogBridge {
         return switch (stage) {
             case "turn_request", "completion_ignored" -> "THINKING".equals(phase);
             case "answering_started" -> "ANSWERING".equals(phase);
-            case "complete", "completion_dispatch" -> "COMPLETE".equals(phase);
+            case "complete", "completion_delegate" -> "COMPLETE".equals(phase);
             case "error" -> "ERROR".equals(phase);
             default -> false;
         };
@@ -60,23 +60,25 @@ final class TurnProtocolLogBridge {
         if ("turn_request".equals(stage)) return "canonical_post";
         if ("answering_started".equals(stage)) {
             return switch (source) {
-                case "final_channel", "assistant_final_text" -> source;
+                case "final_channel", "visible_answer", "assistant_final_text" -> source;
                 default -> "";
             };
         }
         if ("completion_ignored".equals(stage)) {
             return switch (source) {
-                case "message_stream_complete", "finished_successfully_end_turn", "work_done" -> source;
+                case "message_stream_complete", "finished_successfully_end_turn" -> source;
                 default -> "protocol_unknown";
             };
         }
         if ("error".equals(stage)) {
-            if ("canonical_fetch_rejected".equals(source)) return source;
-            return source != null && source.matches("canonical_http_[0-9]{1,3}") ? source : "protocol_unknown";
+            if ("canonical_fetch_rejected".equals(source)
+                    || "completion_delegate_failed".equals(source)) return source;
+            return source != null && source.matches("canonical_http_[0-9]{1,3}")
+                    ? source : "protocol_unknown";
         }
-        if (!("complete".equals(stage) || "completion_dispatch".equals(stage))) return "";
+        if (!("complete".equals(stage) || "completion_delegate".equals(stage))) return "";
         return switch (source) {
-            case "message_stream_complete", "finished_successfully_end_turn", "work_done", "restored_complete" -> source;
+            case "message_stream_complete", "finished_successfully_end_turn" -> source;
             default -> "protocol_unknown";
         };
     }

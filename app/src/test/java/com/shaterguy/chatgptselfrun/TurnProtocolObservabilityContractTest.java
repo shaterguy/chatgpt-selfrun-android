@@ -7,10 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class TurnProtocolObservabilityContractTest {
-    @Test public void protocolTransitionsAreExportedToRunLogBridge() throws Exception {
+    @Test public void protocolTransitionsAreExportedWithoutOwningNativeCompletion() throws Exception {
         String webConfig = source("WebViewConfig.java");
         String protocol = source("ChatGptTurnProtocolScript.java");
         String bridge = source("TurnProtocolLogBridge.java");
@@ -18,21 +19,25 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(webConfig.indexOf("TurnProtocolLogBridge.install")
                 < webConfig.indexOf("ChatGptTurnProtocolScript.installDocumentStart"));
         assertTrue(protocol.contains("emitLog('turn_request','canonical_post')"));
-        assertTrue(protocol.contains("noteAnswering('final_channel')"));
-        assertTrue(protocol.contains("noteAssistantFinalText('assistant_final_text')"));
+        assertTrue(protocol.contains("noteVisibleAnswer('final_channel')"));
+        assertTrue(protocol.contains("noteVisibleAnswer('visible_answer')"));
         assertTrue(protocol.contains("emitLog('completion_ignored',source)"));
         assertTrue(protocol.contains("emitLog('error',reason)"));
         assertTrue(protocol.contains("emitLog('complete',source)"));
-        assertTrue(protocol.contains("emitLog('completion_dispatch',source)"));
+        assertTrue(protocol.contains("emitLog('completion_delegate',source)"));
         assertTrue(protocol.contains("complete('message_stream_complete')"));
-        assertTrue(protocol.contains("complete('work_done')"));
+        assertFalse(protocol.contains("complete('work_done')"));
+        assertFalse(protocol.contains("location.href=callback"));
+        assertFalse(protocol.contains("observer.fired=true"));
         assertTrue(bridge.contains("WEB_MESSAGE_LISTENER"));
         assertTrue(bridge.contains("TURN_PROTOCOL"));
-        assertTrue(bridge.contains("assistant_final_text"));
+        assertTrue(bridge.contains("visible_answer"));
         assertTrue(bridge.contains("completion_ignored"));
+        assertTrue(bridge.contains("completion_delegate"));
         assertTrue(bridge.contains("canonical_http_"));
         assertTrue(bridge.contains("stage=\" + stage"));
         assertTrue(bridge.contains("source=\" + source"));
+        assertFalse(bridge.contains("completion_dispatch"));
     }
 
     private static String source(String file) throws Exception {

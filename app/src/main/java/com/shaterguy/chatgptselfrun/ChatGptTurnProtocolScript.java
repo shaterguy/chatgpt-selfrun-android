@@ -10,13 +10,13 @@ import java.util.Set;
 /**
  * Document-start, protocol-first ChatGPT turn state observer.
  *
- * <p>It passively observes canonical conversation fetch responses and Work WebSocket frames,
- * normalizes them into FIRST/FOLLOWUP plus THINKING/ANSWERING/COMPLETE, and reuses the
- * existing verified turn-completion callback. STOP/SEND observation remains an independent
- * fallback owned by {@link SelfRunContinuationDom}.</p>
+ * <p>It passively observes canonical conversation fetch responses plus Work and Pro WebSocket
+ * frames, normalizes them into FIRST/FOLLOWUP plus THINKING/ANSWERING/COMPLETE, and delegates
+ * verified semantic completion to the existing STOP/SEND observer. The DOM observer remains the
+ * sole owner of the native turn-completion callback.</p>
  */
 final class ChatGptTurnProtocolScript {
-    static final String ENGINE_VERSION = "turn-protocol-v2";
+    static final String ENGINE_VERSION = "turn-protocol-v4";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -34,17 +34,16 @@ final class ChatGptTurnProtocolScript {
                 (()=>{
                   const ENGINE_VERSION=__ENGINE_VERSION__;
                   if(window.__selfRunTurnProtocol?.version===ENGINE_VERSION)return;
-                  const COMPLETION_SCHEME=__COMPLETION_SCHEME__;
-                  const COMPLETION_HOST=__COMPLETION_HOST__;
-                  const STORE_KEY='selfrun-drive:turn-protocol-state:v2';
+                  const STORE_KEY='selfrun-drive:turn-protocol-state:v4';
                   const VALID_PHASES=new Set(['IDLE','THINKING','ANSWERING','COMPLETE','ERROR']);
                   const blank=()=>({
                     runId:'',phase:'IDLE',turnSequence:0,turnKind:'NONE',
                     canonicalConversationId:'',temporaryConversationId:'',
                     currentTurnStartRequestId:'',currentTurnExchangeId:'',currentWorkTurnId:'',
                     currentFinalMessageId:'',finalMessageActive:false,
-                    sawFinalChannelToken:false,sawAssistantFinalText:false,sawStreamComplete:false,
-                    completionDispatched:false,completionSource:'',serverFirstTurn:null,
+                    sawFinalChannelToken:false,sawVisibleAnswer:false,
+                    sawAssistantFinalText:false,sawStreamComplete:false,
+                    completionDelegated:false,completionSource:'',serverFirstTurn:null,
                     firstTurnMismatch:false,lastError:'',lastSource:''
                   });
                   const safe=value=>String(value??'').slice(0,256);
@@ -57,7 +56,7 @@ final class ChatGptTurnProtocolScript {
                       return{...blank(),...value,turnSequence:value.turnSequence};
                     }catch(_){return blank();}
                   };
-                  let state=restore(),pendingTimer=0;
+                  let state=restore();
                   const save=()=>{try{sessionStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(_){}};
                   const emitLog=(stage,source)=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;sink.postMessage(JSON.stringify({stage:safe(stage),source:safe(source),phase:state.phase,sequence:state.turnSequence,kind:state.turnKind}));}catch(_){}};
                   const profileTarget=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
@@ -78,7 +77,7 @@ final class ChatGptTurnProtocolScript {
                       const parsed=new URL(url,location.href);
                       if(parsed.origin!==location.origin)return'';
                       let path=parsed.pathname;if(path.length>1)path=path.replace(/\\/+$/,'');
-                      return path==='/backend-api/f/conversation'||path==='/backend-api/f/responses'?path:'';
+                      return path==='/backend-api/f/conversation'?path:'';
                     }catch(_){return'';}
                   };
                   const requestProbe=(input,init)=>{
@@ -92,20 +91,15 @@ final class ChatGptTurnProtocolScript {
                   };
                   const startTurn=meta=>{
                     alignRun();
-                    const previous=state.phase;
-                    if(previous==='IDLE'){
-                      state.turnSequence=1;state.turnKind='FIRST_TURN';
-                    }else if(previous==='COMPLETE'){
-                      state.turnSequence=Math.max(1,state.turnSequence+1);state.turnKind='FOLLOWUP_TURN';
-                    }else if(previous==='ERROR'){
-                      if(state.turnSequence<=0){state.turnSequence=1;state.turnKind='FIRST_TURN';}
-                    }else return false;
+                    state.turnSequence=Math.max(1,state.turnSequence+1);
+                    state.turnKind=state.turnSequence===1?'FIRST_TURN':'FOLLOWUP_TURN';
                     state.phase='THINKING';
                     state.currentTurnStartRequestId=safe(meta?.requestId||'');
                     state.currentTurnExchangeId='';state.currentWorkTurnId='';
                     state.currentFinalMessageId='';state.finalMessageActive=false;
-                    state.sawFinalChannelToken=false;state.sawAssistantFinalText=false;state.sawStreamComplete=false;
-                    state.completionDispatched=false;state.completionSource='';
+                    state.sawFinalChannelToken=false;state.sawVisibleAnswer=false;
+                    state.sawAssistantFinalText=false;state.sawStreamComplete=false;
+                    state.completionDelegated=false;state.completionSource='';
                     state.serverFirstTurn=null;state.firstTurnMismatch=false;state.lastError='';
                     state.lastSource=safe(meta?.source||'fetch');
                     const route=routeConversationId();
@@ -128,17 +122,22 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     return bindConversation(context?.conversationId||'')&&bindWorkTurn(context?.workTurnId||'');
                   };
-                  const completionEvidence=()=>state.sawFinalChannelToken||state.sawAssistantFinalText;
-                  const noteAnswering=(source)=>{
+                  const completionEvidence=()=>state.sawVisibleAnswer
+                    ||state.sawFinalChannelToken||state.sawAssistantFinalText;
+                  const noteAnswering=source=>{
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return;
                     const first=state.phase==='THINKING';
                     if(first)state.phase='ANSWERING';
                     state.lastSource=safe(source);state.lastError='';save();
                     if(first)emitLog('answering_started',source);
                   };
-                  const noteAssistantFinalText=(source)=>{
-                    if(state.sawAssistantFinalText)return;
-                    state.sawAssistantFinalText=true;save();noteAnswering(source);
+                  const noteVisibleAnswer=source=>{
+                    if(state.sawVisibleAnswer&&state.phase==='ANSWERING')return;
+                    state.sawVisibleAnswer=true;save();noteAnswering(source);
+                  };
+                  const noteAssistantFinalText=source=>{
+                    if(!state.sawAssistantFinalText){state.sawAssistantFinalText=true;save();}
+                    noteVisibleAnswer(source);
                   };
                   const markFinalMessage=message=>{
                     if(!message||typeof message!=='object')return false;
@@ -146,83 +145,58 @@ final class ChatGptTurnProtocolScript {
                     if(role!=='assistant'||channel!=='final')return false;
                     state.finalMessageActive=true;
                     if(message.id)state.currentFinalMessageId=safe(message.id);
+                    save();noteVisibleAnswer('visible_answer');
                     const parts=Array.isArray(message.content?.parts)?message.content.parts:[];
-                    if(parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');
-                    save();return true;
+                    if(parts.some(nonEmptyText))noteAssistantFinalText('visible_answer');
+                    return true;
                   };
                   const observeFinalTextDelta=value=>{
                     if(!state.finalMessageActive||!value||typeof value!=='object')return;
                     const path=safe(value.p||'');
                     if(path.includes('/message/content/parts')&&nonEmptyText(value.v)){
-                      noteAssistantFinalText('assistant_final_text');return;
+                      noteAssistantFinalText('visible_answer');return;
                     }
                     if(Array.isArray(value.v)){
                       for(const op of value.v){
                         if(!op||typeof op!=='object')continue;
                         const p=safe(op.p||'');
                         if(p.includes('/message/content/parts')&&nonEmptyText(op.v)){
-                          noteAssistantFinalText('assistant_final_text');return;
+                          noteAssistantFinalText('visible_answer');return;
                         }
                       }
                     }
                   };
-                  const cancelDomFallback=observer=>{
-                    if(!observer)return;
-                    observer.fired=true;
-                    try{observer.observer?.disconnect();}catch(_){}
-                    try{if(observer.timer)clearTimeout(observer.timer);}catch(_){}
-                    observer.timer=0;
-                    if(window.__selfRunDriveTurnObserver===observer)window.__selfRunDriveTurnObserver=null;
+                  const delegateCompletion=source=>{
+                    if(state.phase!=='COMPLETE'||state.completionDelegated||!completionEvidence())return false;
+                    const observer=window.__selfRunDriveTurnObserver;
+                    if(!observer||observer.fired||typeof observer.evaluate!=='function')return false;
+                    state.completionDelegated=true;state.completionSource=safe(source);save();
+                    observer.allowIdleBaseline=true;
+                    observer.protocolComplete=true;
+                    observer.protocolSource=safe(source);
+                    emitLog('completion_delegate',source);
+                    try{observer.evaluate();return true;}
+                    catch(_){
+                      state.completionDelegated=false;state.completionSource='';
+                      state.lastError='completion_delegate_failed';save();
+                      emitLog('error','completion_delegate_failed');return false;
+                    }
                   };
-                  const suspendDomFallback=observer=>{
-                    if(!observer)return;
-                    observer.fired=true;
-                    try{observer.observer?.disconnect();}catch(_){}
-                    try{if(observer.timer)clearTimeout(observer.timer);}catch(_){}
-                    observer.timer=0;
-                  };
-                  function schedulePendingDispatch(source){
-                    if(pendingTimer||state.completionDispatched||state.phase!=='COMPLETE'||!completionEvidence())return;
-                    let attempts=0;
-                    const retry=()=>{
-                      pendingTimer=0;
-                      if(state.completionDispatched||state.phase!=='COMPLETE'||!completionEvidence())return;
-                      if(dispatchCompletion(source,false))return;
-                      attempts++;
-                      if(attempts<40)pendingTimer=setTimeout(retry,50);
-                    };
-                    pendingTimer=setTimeout(retry,0);
-                  }
-                  function dispatchCompletion(source,allowRetry=true){
-                    if(state.phase!=='COMPLETE'||state.completionDispatched||!completionEvidence())return false;
-                    const run=alignRun(),observer=window.__selfRunDriveTurnObserver;
-                    const token=safe(observer?.token||'');
-                    if(!run||!token){if(allowRetry)schedulePendingDispatch(source);return false;}
-                    state.completionDispatched=true;state.completionSource=safe(source);save();
-                    emitLog('completion_dispatch',source);
-                    cancelDomFallback(observer);
-                    const callback=COMPLETION_SCHEME+'://'+COMPLETION_HOST
-                      +'?run='+encodeURIComponent(run)+'&token='+encodeURIComponent(token)
-                      +'&source='+encodeURIComponent(safe(source));
-                    location.href=callback;return true;
-                  }
                   const complete=source=>{
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     state.sawStreamComplete=true;
                     if(!completionEvidence()){
-                      suspendDomFallback(window.__selfRunDriveTurnObserver);
                       state.lastSource=safe(source);state.lastError='completion_without_final_answer_evidence';save();
                       emitLog('completion_ignored',source);return false;
                     }
                     state.phase='COMPLETE';
                     state.lastSource=safe(source);state.lastError='';save();
                     emitLog('complete',source);
-                    dispatchCompletion(source,true);return true;
+                    delegateCompletion(source);return true;
                   };
                   const markError=(reason,sequence)=>{
                     if(Number(sequence)!==state.turnSequence)return;
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return;
-                    suspendDomFallback(window.__selfRunDriveTurnObserver);
                     state.phase='ERROR';state.lastError=safe(reason);save();emitLog('error',reason);
                   };
                   const inspectSemantic=(value,source,context)=>{
@@ -237,13 +211,15 @@ final class ChatGptTurnProtocolScript {
                       state.firstTurnMismatch=(state.turnKind==='FIRST_TURN')!==value.metadata.is_first_turn;
                       save();
                     }
-                    if(value.type==='message_marker'&&value.event==='first'){
-                      if(value.marker==='user_visible_token')return;
-                      if(value.marker==='final_channel_token'){
+                    if(value.type==='stream_handoff')return;
+                    if(value.type==='message_marker'){
+                      const marker=safe(value.marker),event=safe(value.event);
+                      if(marker==='user_visible_token'||marker==='cot_token'||marker==='last_token')return;
+                      if(marker==='final_channel_token'&&event==='first'){
                         state.sawFinalChannelToken=true;
                         state.finalMessageActive=true;
                         if(value.message_id)state.currentFinalMessageId=safe(value.message_id);
-                        save();noteAnswering('final_channel');return;
+                        save();noteVisibleAnswer('final_channel');return;
                       }
                     }
                     const directMessage=value.message&&typeof value.message==='object'?value.message:null;
@@ -293,23 +269,21 @@ final class ChatGptTurnProtocolScript {
                       if(buffer.trim())parseSseBlock(buffer,'fetch-sse',context);
                     }catch(_){}
                   };
-                  const acceptWorkPayload=payload=>{
+                  const acceptSocketPayload=payload=>{
                     const type=safe(payload?.type).toLowerCase();
-                    if(type!=='stream-item'&&type!=='done')return;
+                    if(type==='done')return;
+                    if(type!=='stream-item'||typeof payload.encoded_item!=='string')return;
                     const conversationId=safe(payload.conversation_id||''),workTurnId=safe(payload.turn_id||'');
                     const context={sequence:state.turnSequence,conversationId,workTurnId};
                     if(!activeContext(context))return;
-                    if(type==='stream-item'&&typeof payload.encoded_item==='string'){
-                      observeSseText(payload.encoded_item,'work-websocket',context);return;
-                    }
-                    if(type==='done')complete('work_done');
+                    observeSseText(payload.encoded_item,'chatgpt-websocket',context);
                   };
-                  const observeWorkFrame=frame=>{
+                  const observeSocketFrame=frame=>{
                     let root;try{root=typeof frame==='string'?JSON.parse(frame):frame;}catch(_){return snapshot();}
                     const visit=node=>{
                       if(Array.isArray(node)){for(const item of node)visit(item);return;}
                       if(!node||typeof node!=='object')return;
-                      acceptWorkPayload(node);
+                      acceptSocketPayload(node);
                       for(const child of Object.values(node))if(child&&typeof child==='object')visit(child);
                     };
                     visit(root);return snapshot();
@@ -335,7 +309,7 @@ final class ChatGptTurnProtocolScript {
                   if(typeof NativeWebSocket==='function'){
                     const WrappedWebSocket=function(...args){
                       const socket=Reflect.construct(NativeWebSocket,args,NativeWebSocket);
-                      try{socket.addEventListener('message',event=>{if(typeof event.data==='string')observeWorkFrame(event.data);});}catch(_){}
+                      try{socket.addEventListener('message',event=>{if(typeof event.data==='string')observeSocketFrame(event.data);});}catch(_){}
                       return socket;
                     };
                     WrappedWebSocket.prototype=NativeWebSocket.prototype;
@@ -350,21 +324,17 @@ final class ChatGptTurnProtocolScript {
                   window.__selfRunTurnProtocol={
                     version:ENGINE_VERSION,snapshot,
                     observeCanonicalRequest:()=>{startTurn({source:'manual-canonical'});return snapshot();},
-                    observeRequest,observeSseText,observeWorkFrame,
+                    observeRequest,observeSseText,
+                    observeSocketFrame,observeWorkFrame:observeSocketFrame,
                     diagnostics:()=>({phase:state.phase,turnSequence:state.turnSequence,turnKind:state.turnKind,
                       conversationId:state.canonicalConversationId,workTurnId:state.currentWorkTurnId,
-                      sawFinalChannelToken:state.sawFinalChannelToken,sawAssistantFinalText:state.sawAssistantFinalText,
-                      sawStreamComplete:state.sawStreamComplete,completionDispatched:state.completionDispatched,
-                      lastError:state.lastError})
+                      sawFinalChannelToken:state.sawFinalChannelToken,sawVisibleAnswer:state.sawVisibleAnswer,
+                      sawAssistantFinalText:state.sawAssistantFinalText,sawStreamComplete:state.sawStreamComplete,
+                      completionDelegated:state.completionDelegated,lastError:state.lastError})
                   };
                   alignRun();
-                  if(state.phase==='COMPLETE'&&!state.completionDispatched&&completionEvidence())schedulePendingDispatch(state.lastSource||'restored_complete');
                 })();
                 """
-                .replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION))
-                .replace("__COMPLETION_SCHEME__", SelfRunScript.quote(
-                        SelfRunContinuationDom.TURN_COMPLETION_SCHEME))
-                .replace("__COMPLETION_HOST__", SelfRunScript.quote(
-                        SelfRunContinuationDom.TURN_COMPLETION_HOST));
+                .replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION));
     }
 }
