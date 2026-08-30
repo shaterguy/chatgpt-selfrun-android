@@ -39,7 +39,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             super.onCreate(effective);
             return;
         }
-        if (RICH_COMPOSER_BOOTSTRAP_TEST.equals(selected)) {
+        if (containsClass(selected, RICH_COMPOSER_BOOTSTRAP_TEST)) {
             appendRequiredClass(effective, REQUEST_PROFILE_RECREATION_TEST);
             appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
             appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
