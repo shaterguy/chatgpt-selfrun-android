@@ -10,21 +10,15 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TestAppVariantPolicyTest {
-    @Test public void v2BuildKeepsChannelSpecificFormalAndTestIdentity() throws Exception {
+    @Test public void driveV2BuildKeepsFormalBaseIdentityAndSeparateTestSuffix() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
-        boolean stable = gradle.matches("(?s).*selfRunDriveVersionName = '[0-9]+\\.[0-9]+\\.[0-9]+'.*");
-        if (stable) {
-            assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-            assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
-            assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        } else {
-            assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
-            assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-            assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun 2.0 TEST'"));
-        }
+
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
+        assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
         assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
+        assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
         assertTrue(manifest.contains(".SelfRunRestartActivity"));
         assertTrue(manifest.contains(".SelfRunRestartActivity\" android:exported=\"false\""));
@@ -41,7 +35,7 @@ public final class TestAppVariantPolicyTest {
         assertTrue(signer.contains("2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e"));
     }
 
-    @Test public void v2DevPushUsesOnlyDedicatedV2TestWorkflow() throws Exception {
+    @Test public void legacyDedicatedV2DevPushUsesOnlyItsDedicatedWorkflow() throws Exception {
         String v1Test = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
         String v2Test = read(".github/workflows/build-selfrun-v2-test.yml", "../.github/workflows/build-selfrun-v2-test.yml");
         assertTrue(v1Test.contains("- 'selfrun-drive/v*-dev*'"));

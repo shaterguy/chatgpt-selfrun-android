@@ -36,9 +36,11 @@ public final class TurnCompletionWatchdogFencePolicyTest {
     @Test public void observerDisconnectPrecedesNativeCompletionCallback() throws Exception {
         String observer = section(source("SelfRunContinuationDom.java"),
                 "private static String completionObserver", "private static String conversationGuard");
-        int disconnect = observer.indexOf("state.observer?.disconnect()");
-        int callback = observer.indexOf("location.href=observerCallback");
-        assertTrue(disconnect >= 0 && callback > disconnect);
+        String complete = section(observer, "const complete=", "const fireStable=");
+        int disconnect = complete.indexOf("cancelObserverState(state)");
+        int clearState = complete.indexOf("window.__selfRunDriveTurnObserver=null", disconnect);
+        int callback = complete.indexOf("location.href=observerCallback", clearState);
+        assertTrue(disconnect >= 0 && clearState > disconnect && callback > clearState);
     }
 
     @Test public void recoveryIdleBaselineRequiresDurableStopProof() throws Exception {
