@@ -28,6 +28,22 @@ jobs:
           active { line=$0; sub(/^          /,"",line); print line }
           ' .github/workflows/apply-v2.2.1-dev2-correction.yml > /tmp/apply_v221_dev2.py
           test -s /tmp/apply_v221_dev2.py
+          python3 <<'PYFIX'
+          from pathlib import Path
+          path = Path('/tmp/apply_v221_dev2.py')
+          text = path.read_text(encoding='utf-8')
+          old = "service = replace_once(service, old_deadline, new_deadline, 'callback timeout recovery')"
+          new = (
+              "service = replace_regex(\n"
+              "    service,\n"
+              "    r'        runLog\\.record\\(store,\"DOM_RESULT\",SelfRunWebDiagnostics\\.callbackTimeoutDetail\\(phase\\)\\);.*?        scheduleWeb\\(SelfRunStore\\.PHASE_WAIT_TURN_COMPLETION\\.equals\\(phase\\)\\?TURN_OBSERVER_HEALTHCHECK_MS:1200L\\);',\n"
+              "    new_deadline,\n"
+              "    'callback timeout recovery')"
+          )
+          if text.count(old) != 1:
+              raise SystemExit(f'callback patch script marker count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PYFIX
           python3 /tmp/apply_v221_dev2.py
           rm -f .github/workflows/apply-v2.2.1-dev2-runner.yml
           git diff --check
