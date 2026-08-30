@@ -41,11 +41,17 @@ public final class SelfRunRolloverPolicyTest {
                 SelfRunRolloverPolicy.continuationFailureBucket(SelfRunContinuationDom.STOP));
     }
 
-    @Test public void postDispatchNoStartNeedsAContinuousValidatedWindowAndStopsTimingAfterGenerationStarts() {
+    @Test public void postDispatchNoStartNeedsAContinuousValidatedWindowAndStopsTimingAfterHealthyGenerationStarts() {
         long phaseStarted=10_000L;
         long deadline=phaseStarted+SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS;
-        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER, SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,false,phaseStarted,deadline,false));
-        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT, SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,false,phaseStarted,deadline,true));
+        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER,
+                SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,false,phaseStarted,deadline,false));
+        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT,
+                SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,false,phaseStarted,deadline,true));
+        assertEquals(SelfRunRolloverPolicy.NO_START_WAIT,
+                SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,true,phaseStarted,deadline,false));
+        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT,
+                SelfRunRolloverPolicy.postDispatchNoStartAction(phaseStarted,true,phaseStarted,deadline,true));
         assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,true,phaseStarted,deadline+60_000L));
         assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(phaseStarted,false,0L,deadline+60_000L));
         long revalidated=deadline-1_000L;
