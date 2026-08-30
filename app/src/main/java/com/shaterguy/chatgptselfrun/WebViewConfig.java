@@ -23,6 +23,7 @@ final class WebViewConfig {
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         RequestProfileScript.installDocumentStart(webView);
+        ChatGptTurnProtocolScript.installDocumentStart(webView);
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")
