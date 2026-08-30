@@ -48,25 +48,29 @@ public final class ChatGptTurnProtocolScriptTest {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("if(!state.sawFinalChannelToken)"));
+        assertTrue(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
         assertTrue(script.contains("state.lastError='completion_before_final_channel'"));
         assertTrue(script.contains("emitLog('completion_ignored',source)"));
         assertTrue(script.contains("state.phase!=='COMPLETE'||state.completionDispatched||!state.sawFinalChannelToken"));
         assertTrue(script.contains("state.phase==='COMPLETE'&&!state.completionDispatched&&state.sawFinalChannelToken"));
     }
 
-    @Test public void canonicalHttpFailureDoesNotFeedSemanticParser() {
+    @Test public void canonicalHttpFailureDoesNotFeedSemanticParserOrDomFallback() {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("if(!response?.ok)"));
         assertTrue(script.contains("markError('canonical_http_'+safe(response?.status),sequence)"));
         assertTrue(script.contains("return response"));
         assertTrue(script.contains("markError('canonical_fetch_rejected',sequence)"));
+        assertTrue(script.contains("const markError=(reason,sequence)=>"));
+        assertTrue(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
     }
 
     @Test public void protocolCompletionCancelsDomFallbackAndUsesVerifiedCallback() {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("window.__selfRunDriveTurnObserver"));
+        assertTrue(script.contains("const suspendDomFallback=observer=>"));
         assertTrue(script.contains("observer.fired=true"));
         assertTrue(script.contains("observer.observer?.disconnect"));
         assertTrue(script.contains("window.__selfRunDriveTurnObserver=null"));
