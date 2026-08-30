@@ -47,7 +47,8 @@ public class SelfRunContinuationSubmissionTest {
         assertTrue(verification.contains("users>baseline"));
         assertTrue(verification.contains("STOP"));
         assertTrue(verification.contains("state:'confirmed'"));
-        assertTrue(observer.contains("completionObserver(runId, observerToken, stabilityMs)"));
+        assertTrue(observer.contains("completionObserver(runId, observerToken, stabilityMs, staleStopMs)"));
+        assertTrue(completion.contains("return completionObserver(runId, observerToken, stabilityMs, STALE_STOP_RESYNC_MS)"));
         assertTrue(completion.contains("new MutationObserver"));
         assertTrue(completion.contains("state.observer?.disconnect()"));
     }

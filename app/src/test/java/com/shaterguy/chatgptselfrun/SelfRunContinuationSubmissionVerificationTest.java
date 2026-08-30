@@ -117,7 +117,7 @@ public final class SelfRunContinuationSubmissionVerificationTest {
         assertTrue(js.contains("const noteStop="));
         assertTrue(js.contains("state.sawStop=true"));
         assertTrue(js.contains("stopSeenCallback"));
-        assertTrue(js.contains("const confirmed=controlState()"));
+        assertTrue(js.contains("const current=controlState()"));
         assertFalse(js.contains("setInterval"));
         assertFalse(js.contains("c.stop.click"));
     }
