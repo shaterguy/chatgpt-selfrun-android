@@ -18,7 +18,8 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(webConfig.indexOf("TurnProtocolLogBridge.install")
                 < webConfig.indexOf("ChatGptTurnProtocolScript.installDocumentStart"));
         assertTrue(protocol.contains("emitLog('turn_request','canonical_post')"));
-        assertTrue(protocol.contains("emitLog('answering_started','final_channel')"));
+        assertTrue(protocol.contains("noteAnswering('final_channel')"));
+        assertTrue(protocol.contains("noteAssistantFinalText('assistant_final_text')"));
         assertTrue(protocol.contains("emitLog('completion_ignored',source)"));
         assertTrue(protocol.contains("emitLog('error',reason)"));
         assertTrue(protocol.contains("emitLog('complete',source)"));
@@ -27,6 +28,7 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(protocol.contains("complete('work_done')"));
         assertTrue(bridge.contains("WEB_MESSAGE_LISTENER"));
         assertTrue(bridge.contains("TURN_PROTOCOL"));
+        assertTrue(bridge.contains("assistant_final_text"));
         assertTrue(bridge.contains("completion_ignored"));
         assertTrue(bridge.contains("canonical_http_"));
         assertTrue(bridge.contains("stage=\" + stage"));
