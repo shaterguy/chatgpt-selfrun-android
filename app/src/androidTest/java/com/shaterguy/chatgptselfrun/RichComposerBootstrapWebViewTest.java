@@ -327,7 +327,7 @@ public final class RichComposerBootstrapWebViewTest {
                         &&parsed.model==='gpt-5-6-thinking'&&parsed.thinking_effort==='standard'
                         &&parsed.messages?.[0]?.opaque==='bootstrap-message'
                         &&parsed.opaqueTop?.keep===true;
-                      if(window.submitFetchOk)history.replaceState({},'', __SLUGGED_CONVERSATION_PATH__);
+                      if(window.submitFetchOk){const user=document.createElement('div');user.setAttribute('data-message-author-role','user');user.textContent='bootstrap user';document.querySelector('main').prepend(user);history.replaceState({},'', __SLUGGED_CONVERSATION_PATH__);}
                     }).catch(error=>{window.submitError=String(error?.message||error);});
                 });
                 </script></body></html>
