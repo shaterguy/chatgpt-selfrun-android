@@ -132,6 +132,13 @@ final class ChatGptTurnProtocolScript {
                     observer.timer=0;
                     if(window.__selfRunDriveTurnObserver===observer)window.__selfRunDriveTurnObserver=null;
                   };
+                  const suspendDomFallback=observer=>{
+                    if(!observer)return;
+                    observer.fired=true;
+                    try{observer.observer?.disconnect();}catch(_){}
+                    try{if(observer.timer)clearTimeout(observer.timer);}catch(_){}
+                    observer.timer=0;
+                  };
                   function schedulePendingDispatch(source){
                     if(pendingTimer||state.completionDispatched||state.phase!=='COMPLETE'||!state.sawFinalChannelToken)return;
                     let attempts=0;
@@ -161,6 +168,7 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     state.sawStreamComplete=true;
                     if(!state.sawFinalChannelToken){
+                      suspendDomFallback(window.__selfRunDriveTurnObserver);
                       state.lastSource=safe(source);state.lastError='completion_before_final_channel';save();
                       emitLog('completion_ignored',source);return false;
                     }
@@ -172,6 +180,7 @@ final class ChatGptTurnProtocolScript {
                   const markError=(reason,sequence)=>{
                     if(Number(sequence)!==state.turnSequence)return;
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return;
+                    suspendDomFallback(window.__selfRunDriveTurnObserver);
                     state.phase='ERROR';state.lastError=safe(reason);save();emitLog('error',reason);
                   };
                   const inspectSemantic=(value,source,context)=>{
