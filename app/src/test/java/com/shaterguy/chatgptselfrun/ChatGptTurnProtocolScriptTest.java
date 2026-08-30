@@ -14,7 +14,7 @@ import static org.junit.Assert.assertTrue;
 /** Contract tests for the protocol-first ChatGPT turn state detector. */
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalRequestOwnsFirstAndFollowupLifecycle() {
-        assertEquals("turn-protocol-v1", ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v2", ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
@@ -26,7 +26,7 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("state.turnKind='FOLLOWUP_TURN'"));
         assertTrue(script.contains("else return false"));
         assertTrue(script.contains("state.phase='THINKING'"));
-        assertTrue(script.contains("selfrun-drive:turn-protocol-state:v1"));
+        assertTrue(script.contains("selfrun-drive:turn-protocol-state:v2"));
     }
 
     @Test public void finalChannelAndSemanticCompletionOwnAnswerPhases() {
@@ -42,6 +42,25 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("type==='done'"));
         assertTrue(script.contains("payload.encoded_item"));
         assertTrue(script.contains("complete('work_done')"));
+    }
+
+    @Test public void semanticCompletionCannotFinishBeforeFinalChannelEvidence() {
+        String script = ChatGptTurnProtocolScript.documentStartScript();
+
+        assertTrue(script.contains("if(!state.sawFinalChannelToken)"));
+        assertTrue(script.contains("state.lastError='completion_before_final_channel'"));
+        assertTrue(script.contains("emitLog('completion_ignored',source)"));
+        assertTrue(script.contains("state.phase!=='COMPLETE'||state.completionDispatched||!state.sawFinalChannelToken"));
+        assertTrue(script.contains("state.phase==='COMPLETE'&&!state.completionDispatched&&state.sawFinalChannelToken"));
+    }
+
+    @Test public void canonicalHttpFailureDoesNotFeedSemanticParser() {
+        String script = ChatGptTurnProtocolScript.documentStartScript();
+
+        assertTrue(script.contains("if(!response?.ok)"));
+        assertTrue(script.contains("markError('canonical_http_'+safe(response?.status),sequence)"));
+        assertTrue(script.contains("return response"));
+        assertTrue(script.contains("markError('canonical_fetch_rejected',sequence)"));
     }
 
     @Test public void protocolCompletionCancelsDomFallbackAndUsesVerifiedCallback() {
