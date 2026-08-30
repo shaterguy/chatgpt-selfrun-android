@@ -179,6 +179,10 @@ final class SelfRunContinuationDom {
                 + "return JSON.stringify({status:'OBSERVER_DISCONNECTED'});})()";
     }
 
+    private static String completionObserver(String runId, String observerToken, long stabilityMs) {
+        return completionObserver(runId, observerToken, stabilityMs, STALE_STOP_RESYNC_MS);
+    }
+
     private static String completionObserver(String runId, String observerToken,
                                    long stabilityMs, long staleStopMs) {
         long stable = Math.max(1L, stabilityMs);
