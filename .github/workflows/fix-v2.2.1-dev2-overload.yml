@@ -1,0 +1,44 @@
+name: Fix SelfRun Drive v2.2.1-dev2 observer overload
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v2.2.1-dev2
+    paths:
+      - .github/workflows/fix-v2.2.1-dev2-overload.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Add the missing delegating overload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunContinuationDom.java')
+          text = path.read_text(encoding='utf-8')
+          old = "    private static String completionObserver(String runId, String observerToken,\n                                   long stabilityMs, long staleStopMs) {"
+          new = "    private static String completionObserver(String runId, String observerToken, long stabilityMs) {\n        return completionObserver(runId, observerToken, stabilityMs, STALE_STOP_RESYNC_MS);\n    }\n\n" + old
+          if text.count(old) != 1:
+              raise SystemExit(f'completion observer marker count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm -f .github/workflows/fix-v2.2.1-dev2-overload.yml
+          git diff --check
+      - name: Commit the minimal compile fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(v2): restore completion observer overload'
+          git push origin HEAD:selfrun-drive/v2.2.1-dev2
