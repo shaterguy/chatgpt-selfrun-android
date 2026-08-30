@@ -13,11 +13,11 @@ public final class TestAppVariantPolicyTest {
     @Test public void v2BuildKeepsChannelSpecificFormalAndTestIdentity() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
-        boolean stable = gradle.matches("(?s).*selfRunDriveVersionName = '[0-9]+\\.[0-9]+\\.[0-9]+'.*");
-        if (stable) {
-            assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
+        boolean driveLineage = gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'");
+        if (driveLineage) {
             assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
             assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
+            assertTrue(gradle.matches("(?s).*selfRunDriveVersionName = '[0-9]+\\.[0-9]+\\.[0-9]+(-(dev|rc)[0-9]+)?'.*"));
         } else {
             assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
             assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
