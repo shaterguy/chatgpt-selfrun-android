@@ -60,13 +60,13 @@ final class TurnProtocolLogBridge {
         if ("turn_request".equals(stage)) return "canonical_post";
         if ("answering_started".equals(stage)) {
             return switch (source) {
-                case "final_channel", "assistant_final_text" -> source;
+                case "final_channel", "visible_answer", "assistant_final_text" -> source;
                 default -> "";
             };
         }
         if ("completion_ignored".equals(stage)) {
             return switch (source) {
-                case "message_stream_complete", "finished_successfully_end_turn", "work_done" -> source;
+                case "message_stream_complete", "finished_successfully_end_turn" -> source;
                 default -> "protocol_unknown";
             };
         }
@@ -76,7 +76,7 @@ final class TurnProtocolLogBridge {
         }
         if (!("complete".equals(stage) || "completion_dispatch".equals(stage))) return "";
         return switch (source) {
-            case "message_stream_complete", "finished_successfully_end_turn", "work_done", "restored_complete" -> source;
+            case "message_stream_complete", "finished_successfully_end_turn", "restored_complete" -> source;
             default -> "protocol_unknown";
         };
     }
