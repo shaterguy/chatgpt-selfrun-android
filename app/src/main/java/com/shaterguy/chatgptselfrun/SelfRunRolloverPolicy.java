@@ -89,13 +89,11 @@ final class SelfRunRolloverPolicy {
     static int postDispatchNoStartAction(long dispatchStartedElapsed, boolean sawStop,
                                          long validatedSinceElapsed, long nowElapsed,
                                          boolean transientSeen) {
-        if (dispatchStartedElapsed <= 0L || validatedSinceElapsed <= 0L
+        if (sawStop || dispatchStartedElapsed <= 0L || validatedSinceElapsed <= 0L
                 || nowElapsed < dispatchStartedElapsed || nowElapsed < validatedSinceElapsed) return NO_START_WAIT;
-        if (sawStop && !transientSeen) return NO_START_WAIT;
         long continuouslyValidatedStart = Math.max(dispatchStartedElapsed, validatedSinceElapsed);
         if (nowElapsed - continuouslyValidatedStart < CONTINUATION_NO_START_MAX_WAIT_MS) return NO_START_WAIT;
-        if (transientSeen) return NO_START_PAUSE_TRANSIENT;
-        return sawStop ? NO_START_WAIT : NO_START_ROLLOVER;
+        return transientSeen ? NO_START_PAUSE_TRANSIENT : NO_START_ROLLOVER;
     }
 
     static boolean postDispatchNoStartTimedOut(long dispatchStartedElapsed, boolean sawStop,
