@@ -1,0 +1,43 @@
+name: Run SelfRun Drive v2.2.1-dev2 correction
+
+on:
+  push:
+    branches:
+      - selfrun-drive/v2.2.1-dev2
+    paths:
+      - .github/workflows/apply-v2.2.1-dev2-runner.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Extract and apply the staged correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '
+          /^          PY$/ { exit }
+          /^          from pathlib import Path$/ { active=1 }
+          active { line=$0; sub(/^          /,"",line); print line }
+          ' .github/workflows/apply-v2.2.1-dev2-correction.yml > /tmp/apply_v221_dev2.py
+          test -s /tmp/apply_v221_dev2.py
+          python3 /tmp/apply_v221_dev2.py
+          rm -f .github/workflows/apply-v2.2.1-dev2-runner.yml
+          git diff --check
+
+      - name: Commit corrected implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(v2): resync hidden WebView before completion'
+          git push origin HEAD:selfrun-drive/v2.2.1-dev2
