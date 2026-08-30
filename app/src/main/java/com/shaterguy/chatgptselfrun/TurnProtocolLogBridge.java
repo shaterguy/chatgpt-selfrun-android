@@ -58,7 +58,12 @@ final class TurnProtocolLogBridge {
 
     private static String normalizedSource(String stage, String source) {
         if ("turn_request".equals(stage)) return "canonical_post";
-        if ("answering_started".equals(stage)) return "final_channel";
+        if ("answering_started".equals(stage)) {
+            return switch (source) {
+                case "final_channel", "assistant_final_text" -> source;
+                default -> "";
+            };
+        }
         if ("completion_ignored".equals(stage)) {
             return switch (source) {
                 case "message_stream_complete", "finished_successfully_end_turn", "work_done" -> source;
