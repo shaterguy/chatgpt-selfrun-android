@@ -16,8 +16,8 @@ final class SelfRunContinuationDom {
     static final String TURN_COMPLETION_SCHEME = "selfrun-drive";
     static final String TURN_COMPLETION_HOST = "turn-completed";
     static final String TURN_STOP_SEEN_HOST = "turn-stop-seen";
-    static final long STALE_STOP_RELOAD_MS = 3 * 60_000L;
-    static final long RELOADED_STOP_COMPLETION_MS = 30_000L;
+    static final String TURN_RESYNC_HOST = "turn-resync-requested";
+    static final long STALE_STOP_RESYNC_MS = 3 * 60_000L;
 
     private SelfRunContinuationDom() {}
 
@@ -155,15 +155,21 @@ final class SelfRunContinuationDom {
     }
 
     static String observeTurnCompletion(String conversationUrl, String runId, String observerToken,
-                                        long stabilityMs, boolean allowIdleBaseline) {
+                              long stabilityMs, boolean allowIdleBaseline) {
+        return observeTurnCompletion(conversationUrl, runId, observerToken, stabilityMs,
+      allowIdleBaseline, STALE_STOP_RESYNC_MS);
+    }
+
+    static String observeTurnCompletion(String conversationUrl, String runId, String observerToken,
+                              long stabilityMs, boolean allowIdleBaseline, long staleStopMs) {
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String composerKey = composerKey(conversationUrl);
         String sendKey = sendKey(conversationUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + conversationGuard(conversation) + authGuard() + calibration()
-                + composer(composerKey) + "if(!composer)return result('OBSERVER_UNAVAILABLE','completion composer unavailable');"
-                + controls(sendKey) + completionObserver(runId, observerToken, stabilityMs)
-                + "return armCompletionObserver(" + allowIdleBaseline + ");})()";
+      + conversationGuard(conversation) + authGuard() + calibration()
+      + composer(composerKey) + "if(!composer)return result('OBSERVER_UNAVAILABLE','completion composer unavailable');"
+      + controls(sendKey) + completionObserver(runId, observerToken, stabilityMs, staleStopMs)
+      + "return armCompletionObserver(" + allowIdleBaseline + ");})()";
     }
 
     static String cancelTurnCompletionObserver(String observerToken) {
@@ -173,58 +179,52 @@ final class SelfRunContinuationDom {
                 + "return JSON.stringify({status:'OBSERVER_DISCONNECTED'});})()";
     }
 
-    private static String completionObserver(String runId, String observerToken, long stabilityMs) {
+    private static String completionObserver(String runId, String observerToken,
+                                   long stabilityMs, long staleStopMs) {
         long stable = Math.max(1L, stabilityMs);
+        long stall = Math.max(stable, staleStopMs);
         return "const observerToken=" + q(observerToken) + ",observerRun=" + q(runId)
-                + ",observerStableMs=" + stable + ",observerReloadMs=" + STALE_STOP_RELOAD_MS
-                + ",observerReloadedStableMs=" + RELOADED_STOP_COMPLETION_MS + ";"
-                + "const observerCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_COMPLETION_HOST
-                + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
-                + "const stopSeenCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_STOP_SEEN_HOST
-                + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
-                + "const observerIdle=s=>s==='" + SEND_ENABLED + "'||s==='" + SEND_DISABLED + "'||s==='" + COMPOSER_IDLE + "';"
-                + "const recoveryKey='selfrun-drive:turn-recovery:'+observerRun+':'+observerToken;"
-                + "const recoveryCache=window.__selfRunDriveTurnRecovery||(window.__selfRunDriveTurnRecovery={});"
-                + "const readRecovery=()=>{let raw='';try{raw=sessionStorage.getItem(recoveryKey)||'';}catch(_){}if(!raw)raw=recoveryCache[recoveryKey]||'';try{return raw?JSON.parse(raw):{};}catch(_){return{};}};"
-                + "const writeRecovery=data=>{const raw=JSON.stringify(data);recoveryCache[recoveryKey]=raw;try{sessionStorage.setItem(recoveryKey,raw);}catch(_){}};"
-                + "const clearRecovery=()=>{delete recoveryCache[recoveryKey];try{sessionStorage.removeItem(recoveryKey);}catch(_){}};"
-                + "const cancelObserverState=s=>{if(!s)return;try{s.observer?.disconnect();}catch(_){}if(s.timer)clearTimeout(s.timer);s.timer=0;};"
-                + "const setObserverBaseline=value=>{const saved=readRecovery(),baseline=Number(value);if(Number.isFinite(baseline)){saved.baselineUserCount=baseline;saved.lastProgressAt=Date.now();writeRecovery(saved);}};"
-                + "const armCompletionObserver=allowIdleBaseline=>{let state=window.__selfRunDriveTurnObserver;"
-                + "if(state&&state.token!==observerToken){cancelObserverState(state);try{sessionStorage.removeItem(state.recoveryKey||'');}catch(_){}state=null;window.__selfRunDriveTurnObserver=null;}"
-                + "const observeRoot=document.querySelector('main')||composerRoot?.parentElement||composerRoot||document.body;"
-                + "if(!observeRoot)return result('OBSERVER_UNAVAILABLE','STOP/SEND observation root unavailable');"
-                + "if(!state){const saved=readRecovery(),savedBaseline=Number(saved.baselineUserCount),currentUsers=userMessageCount();"
-                + "const baselineUserCount=Number.isFinite(savedBaseline)?savedBaseline:Math.max(0,currentUsers-1);"
-                + "state={token:observerToken,recoveryKey,baselineUserCount,sawStop:false,stopNotified:false,allowIdleBaseline:false,idleSince:0,finalSince:0,timer:0,fired:false,observer:null,root:null,composer:null,progressSignature:String(saved.progressSignature||''),lastProgressAt:Number(saved.lastProgressAt)||Date.now(),reloads:Number(saved.reloads)||0,armCount:(Number(saved.armCount)||0)+1};window.__selfRunDriveTurnObserver=state;"
-                + "writeRecovery({baselineUserCount:state.baselineUserCount,progressSignature:state.progressSignature,lastProgressAt:state.lastProgressAt,reloads:state.reloads,armCount:state.armCount});}"
-                + "if(typeof state.idleSince!=='number')state.idleSince=0;if(typeof state.finalSince!=='number')state.finalSince=0;"
-                + "const persist=()=>writeRecovery({baselineUserCount:state.baselineUserCount,progressSignature:state.progressSignature,lastProgressAt:state.lastProgressAt,reloads:state.reloads,armCount:state.armCount});"
-                + "const cancelTimer=()=>{if(state.timer)clearTimeout(state.timer);state.timer=0;};"
-                + "const resetIdle=()=>{state.idleSince=0;cancelTimer();};"
-                + "const resetFinal=()=>{state.finalSince=0;cancelTimer();};"
-                + "const trackProgress=()=>{const turn=turnState();if(turn.signature&&turn.signature!==state.progressSignature){state.progressSignature=turn.signature;state.lastProgressAt=Date.now();state.finalSince=0;persist();}return turn;};"
-                + "const noteStop=turn=>{const currentUsers=userMessageCount(),fresh=currentUsers>state.baselineUserCount;if(!fresh){resetIdle();return false;}const first=!state.sawStop;state.sawStop=true;resetIdle();if(first&&!state.stopNotified){state.stopNotified=true;location.href=stopSeenCallback;}return true;};"
-                + "const complete=()=>{state.fired=true;cancelObserverState(state);window.__selfRunDriveTurnObserver=null;clearRecovery();location.href=observerCallback;};"
-                + "const fireStable=forceFinal=>{state.timer=0;if(state.fired)return;const confirmed=controlState(),turn=trackProgress(),now=Date.now();"
-                + "if(forceFinal){const recoveredStable=state.reloads>0&&now-state.lastProgressAt>=observerReloadedStableMs;if(confirmed.state!=='" + STOP + "'||!turn.hasAnswer||turn.streaming||!(turn.finalAction||recoveredStable)){state.finalSince=0;return;}complete();return;}"
-                + "if(!observerIdle(confirmed.state)||!turn.hasAnswer||!(state.sawStop||state.allowIdleBaseline)){resetIdle();return;}"
-                + "if(!state.idleSince)state.idleSince=now;if(now-state.idleSince<observerStableMs){scheduleStable(false);return;}complete();};"
-                + "const scheduleStable=forceFinal=>{if(state.timer)return;const since=forceFinal?state.finalSince:state.idleSince;const required=forceFinal&&state.reloads>0?observerReloadedStableMs:observerStableMs;const remaining=Math.max(1,required-(Date.now()-since));state.timer=setTimeout(()=>fireStable(forceFinal),remaining);};"
-                + "const reloadSameConversation=reason=>{if(state.reloads>=1||state.fired)return false;state.reloads++;state.lastProgressAt=Date.now();persist();cancelObserverState(state);window.__selfRunDriveTurnObserver=null;try{location.reload();}catch(_){location.href=location.href;}return true;};"
-                + "const evaluate=()=>{if(state.fired)return;const current=controlState(),turn=trackProgress(),now=Date.now();"
-                + "if(current.state==='" + STOP + "'){const fresh=noteStop(turn);const recoveredStable=state.reloads>0&&now-state.lastProgressAt>=observerReloadedStableMs;"
-                + "if(turn.hasAnswer&&!turn.streaming&&(turn.finalAction||recoveredStable)){if(!state.finalSince)state.finalSince=now;if(now-state.finalSince>=((state.reloads>0&&!turn.finalAction)?observerReloadedStableMs:observerStableMs))fireStable(true);else scheduleStable(true);return;}"
-                + "state.finalSince=0;if(fresh&&turn.hasAnswer&&!turn.streaming&&state.armCount>1&&state.reloads<1){reloadSameConversation('observer_rearmed');return;}"
-                + "if(fresh&&turn.hasAnswer&&!turn.streaming&&now-state.lastProgressAt>=observerReloadMs){reloadSameConversation('stale_stop');return;}return;}"
-                + "state.finalSince=0;if(!observerIdle(current.state)||!turn.hasAnswer||!(state.sawStop||state.allowIdleBaseline)){resetIdle();return;}"
-                + "if(!state.idleSince)state.idleSince=now;if(now-state.idleSince>=observerStableMs)fireStable(false);else scheduleStable(false);};"
-                + "state.allowIdleBaseline=state.allowIdleBaseline||!!allowIdleBaseline;"
-                + "const bindingChanged=state.root!==observeRoot||!state.root?.isConnected||state.composer!==composer||!state.composer?.isConnected;"
-                + "if(!state.observer||bindingChanged){if(bindingChanged)cancelTimer();try{state.observer?.disconnect();}catch(_){}state.root=observeRoot;state.composer=composer;state.evaluate=evaluate;state.observer=new MutationObserver(evaluate);"
-                + "state.observer.observe(observeRoot,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['disabled','aria-disabled','aria-label','aria-busy','data-testid','data-state','data-is-streaming','title','class']});}else state.evaluate=evaluate;"
-                + "state.evaluate();const idleMs=state.idleSince?Math.max(0,Date.now()-state.idleSince):0,progressAgeMs=Math.max(0,Date.now()-state.lastProgressAt);"
-                + "return result('OBSERVER_ARMED','STOP/SEND observer armed;stableMs='+observerStableMs+';baseline='+(state.allowIdleBaseline?1:0)+';sawStop='+(state.sawStop?1:0)+';bindingChanged='+(bindingChanged?1:0)+';idleMs='+idleMs+';progressAgeMs='+progressAgeMs+';reloads='+state.reloads);};";
+      + ",observerStableMs=" + stable + ",observerStallMs=" + stall + ";"
+      + "const observerCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_COMPLETION_HOST
+      + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
+      + "const stopSeenCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_STOP_SEEN_HOST
+      + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
+      + "const resyncCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_RESYNC_HOST
+      + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
+      + "const observerIdle=s=>s==='" + SEND_ENABLED + "'||s==='" + SEND_DISABLED + "'||s==='" + COMPOSER_IDLE + "';"
+      + "const recoveryKey='selfrun-drive:turn-recovery:'+observerRun+':'+observerToken;"
+      + "const recoveryCache=window.__selfRunDriveTurnRecovery||(window.__selfRunDriveTurnRecovery={});"
+      + "const readRecovery=()=>{let raw='';try{raw=sessionStorage.getItem(recoveryKey)||'';}catch(_){}if(!raw)raw=recoveryCache[recoveryKey]||'';try{return raw?JSON.parse(raw):{};}catch(_){return{};}};"
+      + "const writeRecovery=data=>{const raw=JSON.stringify(data);recoveryCache[recoveryKey]=raw;try{sessionStorage.setItem(recoveryKey,raw);}catch(_){}};"
+      + "const clearRecovery=()=>{delete recoveryCache[recoveryKey];try{sessionStorage.removeItem(recoveryKey);}catch(_){}};"
+      + "const cancelObserverState=s=>{if(!s)return;try{s.observer?.disconnect();}catch(_){}if(s.timer)clearTimeout(s.timer);s.timer=0;};"
+      + "const setObserverBaseline=value=>{const saved=readRecovery(),baseline=Number(value);if(Number.isFinite(baseline)){saved.baselineUserCount=baseline;saved.lastProgressAt=Date.now();writeRecovery(saved);}};"
+      + "const armCompletionObserver=allowIdleBaseline=>{let state=window.__selfRunDriveTurnObserver;"
+      + "if(state&&state.token!==observerToken){cancelObserverState(state);state=null;window.__selfRunDriveTurnObserver=null;}"
+      + "const observeRoot=document.querySelector('main')||composerRoot?.parentElement||composerRoot||document.body;"
+      + "if(!observeRoot)return result('OBSERVER_UNAVAILABLE','STOP/SEND observation root unavailable');"
+      + "if(!state){const saved=readRecovery(),savedBaseline=Number(saved.baselineUserCount),currentUsers=userMessageCount();"
+      + "const baselineUserCount=Number.isFinite(savedBaseline)?savedBaseline:Math.max(0,currentUsers-1);"
+      + "state={token:observerToken,recoveryKey,baselineUserCount,sawStop:false,stopNotified:false,allowIdleBaseline:false,idleSince:0,timer:0,fired:false,resyncRequested:false,observer:null,root:null,composer:null,progressSignature:String(saved.progressSignature||''),lastProgressAt:Number(saved.lastProgressAt)||Date.now(),armCount:(Number(saved.armCount)||0)+1};window.__selfRunDriveTurnObserver=state;"
+      + "writeRecovery({baselineUserCount:state.baselineUserCount,progressSignature:state.progressSignature,lastProgressAt:state.lastProgressAt,armCount:state.armCount});}"
+      + "if(typeof state.idleSince!=='number')state.idleSince=0;"
+      + "const persist=()=>writeRecovery({baselineUserCount:state.baselineUserCount,progressSignature:state.progressSignature,lastProgressAt:state.lastProgressAt,armCount:state.armCount});"
+      + "const cancelTimer=()=>{if(state.timer)clearTimeout(state.timer);state.timer=0;};"
+      + "const trackProgress=()=>{const turn=turnState();if(turn.signature&&turn.signature!==state.progressSignature){state.progressSignature=turn.signature;state.lastProgressAt=Date.now();state.idleSince=0;persist();}return turn;};"
+      + "const noteStop=()=>{const currentUsers=userMessageCount(),fresh=currentUsers>state.baselineUserCount;if(!fresh)return false;const first=!state.sawStop;state.sawStop=true;if(first&&!state.stopNotified){state.stopNotified=true;location.href=stopSeenCallback;}return true;};"
+      + "const complete=()=>{if(state.fired||state.resyncRequested)return;state.fired=true;cancelObserverState(state);window.__selfRunDriveTurnObserver=null;clearRecovery();location.href=observerCallback;};"
+      + "const requestResync=reason=>{if(state.fired||state.resyncRequested)return false;state.resyncRequested=true;persist();cancelObserverState(state);window.__selfRunDriveTurnObserver=null;location.href=resyncCallback+'&reason='+encodeURIComponent(reason);return true;};"
+      + "let evaluate;const scheduleEvaluate=delay=>{cancelTimer();state.timer=setTimeout(()=>{state.timer=0;evaluate();},Math.max(1,delay));};"
+      + "evaluate=()=>{if(state.fired||state.resyncRequested)return;cancelTimer();const current=controlState(),turn=trackProgress(),now=Date.now();"
+      + "if(current.state==='" + STOP + "'){state.idleSince=0;const fresh=noteStop();if(fresh&&state.armCount>1){requestResync('observer_rearmed');return;}if(fresh){const remaining=observerStallMs-(now-state.lastProgressAt);if(remaining<=0){requestResync('stale_stop');return;}scheduleEvaluate(remaining);}return;}"
+      + "if(!observerIdle(current.state)||!turn.hasAnswer||!(state.sawStop||state.allowIdleBaseline)){state.idleSince=0;return;}"
+      + "if(!state.idleSince)state.idleSince=now;const remaining=observerStableMs-(now-state.idleSince);if(remaining<=0)complete();else scheduleEvaluate(remaining);};"
+      + "state.allowIdleBaseline=state.allowIdleBaseline||!!allowIdleBaseline;"
+      + "const bindingChanged=state.root!==observeRoot||!state.root?.isConnected||state.composer!==composer||!state.composer?.isConnected;"
+      + "if(!state.observer||bindingChanged){cancelTimer();try{state.observer?.disconnect();}catch(_){}state.root=observeRoot;state.composer=composer;state.observer=new MutationObserver(evaluate);"
+      + "state.observer.observe(observeRoot,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['disabled','aria-disabled','aria-label','aria-busy','data-testid','data-state','data-is-streaming','title','class']});}"
+      + "evaluate();const idleMs=state.idleSince?Math.max(0,Date.now()-state.idleSince):0,progressAgeMs=Math.max(0,Date.now()-state.lastProgressAt);"
+      + "return result('OBSERVER_ARMED','STOP/SEND observer armed;stableMs='+observerStableMs+';baseline='+(state.allowIdleBaseline?1:0)+';sawStop='+(state.sawStop?1:0)+';bindingChanged='+(bindingChanged?1:0)+';idleMs='+idleMs+';progressAgeMs='+progressAgeMs+';armCount='+state.armCount);};";
     }
 
     private static String conversationGuard(String conversation) {
@@ -300,7 +300,7 @@ final class SelfRunContinuationDom {
     }
 
     private static String bootstrapClickedVerification() {
-        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount),conversation=after('c'),stopOnly=c.state==='" + STOP + "';const started=Number.isFinite(baseline)&&users>baseline;if(conversation&&started){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','bootstrap conversation route and user turn confirmed;users='+users+';baseline='+baseline+';control='+c.state+';conversation=1');}return result('SUBMISSION_PENDING',started?'bootstrap user turn observed;conversation route pending;users='+users+';baseline='+baseline+';control='+c.state:'bootstrap submission verification pending;users='+users+';baseline='+baseline+';control='+c.state+';stopOnly='+(stopOnly?1:0));}";
+        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount),conversation=after('c'),stopOnly=c.state==='" + STOP + "';const started=Number.isFinite(baseline)&&users>baseline;if(conversation){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','bootstrap conversation route confirmed;users='+users+';baseline='+baseline+';control='+c.state+';conversation=1');}return result('SUBMISSION_PENDING',started?'bootstrap user turn observed;conversation route pending;users='+users+';baseline='+baseline+';control='+c.state:'bootstrap submission verification pending;users='+users+';baseline='+baseline+';control='+c.state+';stopOnly='+(stopOnly?1:0));}";
     }
 
     private static String continuationClickedVerification() {

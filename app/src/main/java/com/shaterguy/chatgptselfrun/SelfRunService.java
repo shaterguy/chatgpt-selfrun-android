@@ -54,6 +54,8 @@ public final class SelfRunService extends Service {
     static final long BOOTSTRAP_SEND_MAX_WAIT_MS = 60_000L;
     static final long BOOTSTRAP_SEND_POLL_MS = 1_000L;
     static final int BOOTSTRAP_SEND_MAX_CALLBACK_RECOVERIES = 3;
+    static final int TURN_COMPLETION_CALLBACK_TIMEOUT_RESYNC_THRESHOLD = 3;
+    static final int MAX_TURN_COMPLETION_RESYNCS = 2;
     static final String CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT = "CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT";
     private static final long[] BACKOFF = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
     private static final int ATTACHMENT_COUNT_BUFFER = 64 * 1024;
@@ -99,6 +101,8 @@ public final class SelfRunService extends Service {
     private boolean turnObserverNeedsIdleBaseline = false;
     private String loggedTurnObserverToken = "";
     private int bootstrapSendCallbackRecoveries;
+    private int turnCompletionCallbackTimeouts;
+    private int turnCompletionResyncAttempts;
     private volatile boolean destroyed;
     /** Serializes pause/stop epoch changes with application of Drive results to durable state. */
     private final Object automationStateLock = new Object();
@@ -149,6 +153,8 @@ public final class SelfRunService extends Service {
             verifiedDriveAccountId = "";
             accessToken = "";
             bootstrapSendCallbackRecoveries = 0;
+            turnCompletionCallbackTimeouts = 0;
+            turnCompletionResyncAttempts = 0;
         }
         if (ACTION_RESUME.equals(action)) {
             if (resumePendingRollover) { if (canRun()) handler.post(this::resumeStateMachine); return store.active() ? START_STICKY : START_NOT_STICKY; }
@@ -173,6 +179,8 @@ public final class SelfRunService extends Service {
         accessToken = "";
         retryAttempt = 0;
         bootstrapSendCallbackRecoveries = 0;
+        turnCompletionCallbackTimeouts = 0;
+        turnCompletionResyncAttempts = 0;
         clearContinuationAttempt();
         resetPostDispatchNoStartState();
     }
@@ -770,16 +778,42 @@ private boolean isTurnCompletionCallback(String requested,String launchedRunId){
         if(store.markTurnObserverStopSeen(token))runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stop_seen");
         return true;
     }
+    if(SelfRunContinuationDom.TURN_RESYNC_HOST.equals(host)){
+        if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())||token==null||!token.equals(store.turnObserverToken())){
+  runLog.record(store,"TURN_COMPLETION_RESYNC","result=callback_rejected");return true;
+        }
+        requestTurnCompletionResync(uri.getQueryParameter("reason"));
+        return true;
+    }
     if(!SelfRunContinuationDom.TURN_COMPLETION_HOST.equals(host))return false;
     if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())||token==null||!token.equals(store.turnObserverToken())){
         runLog.record(store,"TURN_COMPLETION_OBSERVER","result=callback_rejected");return true;
     }
     maybeCaptureConversationUrl(webView==null?"":webView.getUrl());
     if(!store.beginPostDomDriveSync(token))return true;
+    turnCompletionCallbackTimeouts=0;turnCompletionResyncAttempts=0;
     resetPostDispatchNoStartState();
     turnObserverNeedsIdleBaseline=false;
     runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stable_idle;stabilityMs="+TURN_COMPLETION_STABILITY_MS+";action=drive_immediate");
     releaseWakeLock();handler.post(this::authorizeAndRunDrive);return true;
+}
+
+private void requestTurnCompletionResync(String reason){
+    if(Looper.myLooper()!=Looper.getMainLooper()){handler.post(()->requestTurnCompletionResync(reason));return;}
+    if(!canRun()||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))return;
+    String safeReason=BootstrapResultPolicy.safe(reason==null?"unknown":reason,80);
+    if(turnCompletionResyncAttempts>=MAX_TURN_COMPLETION_RESYNCS){
+        runLog.record(store,"TURN_COMPLETION_RESYNC","result=exhausted;attempts="+turnCompletionResyncAttempts+";reason="+safeReason);
+        enterPreservedPause("CHATGPT_TURN_RESYNC_EXHAUSTED","내부 WebView를 동일 대화와 재동기화했지만 응답 상태를 확정하지 못했습니다.",false);
+        NotificationHelper.notifyUser(this,"확인 필요",store.status());return;
+    }
+    turnCompletionResyncAttempts++;
+    turnCompletionCallbackTimeouts=0;
+    runLog.record(store,"TURN_COMPLETION_RESYNC","result=rebuild_same_conversation;attempt="+turnCompletionResyncAttempts+";reason="+safeReason);
+    store.setStatus("내부 WebView 상태를 동일 대화에서 재동기화 중");
+    handler.removeCallbacks(webRunnable);
+    cleanupWebView();
+    handler.postDelayed(this::ensureWebView,800L);
 }
 
 private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
@@ -925,12 +959,17 @@ private void scheduleContinuationCallbackDeadline(WebView active,int webGenerati
         domInFlight=false;webEvaluationId++;
         if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){recoverBootstrapSendCallback();return;}
         runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.callbackTimeoutDetail(phase));
+        if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
+  turnCompletionCallbackTimeouts++;
+  runLog.record(store,"TURN_COMPLETION_RESYNC","result=callback_timeout;count="+turnCompletionCallbackTimeouts);
+  if(turnCompletionCallbackTimeouts>=TURN_COMPLETION_CALLBACK_TIMEOUT_RESYNC_THRESHOLD){requestTurnCompletionResync("evaluate_javascript_timeout");return;}
+  releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;
+        }
         int failures=rollover.incrementLocalFailure(runId);
         if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())&&networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){
-            rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);return;
+  rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);return;
         }
-        releaseWakeLock();
-        scheduleWeb(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)?TURN_OBSERVER_HEALTHCHECK_MS:1200L);
+        releaseWakeLock();scheduleWeb(1200L);
     },CONTINUATION_CALLBACK_TIMEOUT_MS);
 }
 
@@ -1008,8 +1047,8 @@ private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRA
 private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
 private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
-private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
-private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();turnCompletionCallbackTimeouts=0;turnCompletionResyncAttempts=0;String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();turnCompletionCallbackTimeouts=0;turnCompletionResyncAttempts=0;String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
 
 private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?rollover.bootstrapPrompt(store):SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
 private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}
@@ -1097,7 +1136,7 @@ private void transition(String next, String status, String reason) {String prior
     }
 
 private void pauseFromUi() {if (!canRun()) return;startForegroundCompat();enterPreservedPause("UI_PAUSE", "사용자 일시정지", false);NotificationHelper.notifyUser(this, "일시정지", store.status());}
-private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId().isEmpty())return;stopAutomationCallbacks();store.beginManualResumeOverride();store.clearLastError();resumeWebView();startForegroundCompat();resumeStateMachine();}
+private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId().isEmpty())return;stopAutomationCallbacks();store.beginManualResumeOverride();store.clearLastError();boolean reconcile=SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())&&store.turnObserverSawStop();resumeWebView();startForegroundCompat();if(reconcile){requestTurnCompletionResync("manual_resume");return;}resumeStateMachine();}
 
     private void enterPreservedPause(String cause, String status, boolean needsContinuation) {
         String prior;
