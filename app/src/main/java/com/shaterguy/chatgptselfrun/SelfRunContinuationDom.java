@@ -16,6 +16,8 @@ final class SelfRunContinuationDom {
     static final String TURN_COMPLETION_SCHEME = "selfrun-drive";
     static final String TURN_COMPLETION_HOST = "turn-completed";
     static final String TURN_STOP_SEEN_HOST = "turn-stop-seen";
+    static final long STALE_STOP_RELOAD_MS = 3 * 60_000L;
+    static final long RELOADED_STOP_COMPLETION_MS = 30_000L;
 
     private SelfRunContinuationDom() {}
 
@@ -57,7 +59,7 @@ final class SelfRunContinuationDom {
                 + "if(m.state!=='prepared')return result('COMPOSER_INPUTTING','bootstrap prepared marker unavailable before dispatch');"
                 + "if(!same())return result('COMPOSER_CLEARING','exact bootstrap readback lost before click');"
                 + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled for bootstrap');"
-                + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath:'pending'});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified bootstrap text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath});armCompletionObserver(false);return result('SUBMISSION_PENDING','dispatch=BOOTSTRAP_CLICKED;submit='+submitPath+';observer=armed;verification=pending');})()";
+                + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath:'pending'});setObserverBaseline(baselineUserCount);let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified bootstrap text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath});armCompletionObserver(false);return result('SUBMISSION_PENDING','dispatch=BOOTSTRAP_CLICKED;submit='+submitPath+';observer=armed;verification=pending');})()";
     }
 
     static String prepareDriveTurn(String conversationUrl, String prompt, String markerId) {
@@ -116,7 +118,7 @@ final class SelfRunContinuationDom {
                 + "if(m.state!=='prepared'){if(!m.state)writeMarker({state:'clearing',at:Date.now()});return result('COMPOSER_INPUTTING','prepared marker unavailable before click');}"
                 + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','exact continuation readback lost before click');}"
                 + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled');"
-                + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath:'pending'});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath});armCompletionObserver(false);return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED;submit='+submitPath+';observer=armed;verification=pending');})()";
+                + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath:'pending'});setObserverBaseline(baselineUserCount);let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath});armCompletionObserver(false);return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED;submit='+submitPath+';observer=armed;verification=pending');})()";
     }
 
     private static String probeLockedDriveTurn(String conversationUrl, String markerId) {
@@ -174,39 +176,55 @@ final class SelfRunContinuationDom {
     private static String completionObserver(String runId, String observerToken, long stabilityMs) {
         long stable = Math.max(1L, stabilityMs);
         return "const observerToken=" + q(observerToken) + ",observerRun=" + q(runId)
-                + ",observerStableMs=" + stable + ";"
+                + ",observerStableMs=" + stable + ",observerReloadMs=" + STALE_STOP_RELOAD_MS
+                + ",observerReloadedStableMs=" + RELOADED_STOP_COMPLETION_MS + ";"
                 + "const observerCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_COMPLETION_HOST
                 + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
                 + "const stopSeenCallback='" + TURN_COMPLETION_SCHEME + "://" + TURN_STOP_SEEN_HOST
                 + "?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);"
                 + "const observerIdle=s=>s==='" + SEND_ENABLED + "'||s==='" + SEND_DISABLED + "'||s==='" + COMPOSER_IDLE + "';"
+                + "const recoveryKey='selfrun-drive:turn-recovery:'+observerRun+':'+observerToken;"
+                + "const recoveryCache=window.__selfRunDriveTurnRecovery||(window.__selfRunDriveTurnRecovery={});"
+                + "const readRecovery=()=>{let raw='';try{raw=sessionStorage.getItem(recoveryKey)||'';}catch(_){}if(!raw)raw=recoveryCache[recoveryKey]||'';try{return raw?JSON.parse(raw):{};}catch(_){return{};}};"
+                + "const writeRecovery=data=>{const raw=JSON.stringify(data);recoveryCache[recoveryKey]=raw;try{sessionStorage.setItem(recoveryKey,raw);}catch(_){}};"
+                + "const clearRecovery=()=>{delete recoveryCache[recoveryKey];try{sessionStorage.removeItem(recoveryKey);}catch(_){}};"
                 + "const cancelObserverState=s=>{if(!s)return;try{s.observer?.disconnect();}catch(_){}if(s.timer)clearTimeout(s.timer);s.timer=0;};"
+                + "const setObserverBaseline=value=>{const saved=readRecovery(),baseline=Number(value);if(Number.isFinite(baseline)){saved.baselineUserCount=baseline;saved.lastProgressAt=Date.now();writeRecovery(saved);}};"
                 + "const armCompletionObserver=allowIdleBaseline=>{let state=window.__selfRunDriveTurnObserver;"
-                + "if(state&&state.token!==observerToken){cancelObserverState(state);state=null;window.__selfRunDriveTurnObserver=null;}"
-                + "const observeRoot=composerRoot?.parentElement||composerRoot||document.querySelector('main')||document.body;"
+                + "if(state&&state.token!==observerToken){cancelObserverState(state);try{sessionStorage.removeItem(state.recoveryKey||'');}catch(_){}state=null;window.__selfRunDriveTurnObserver=null;}"
+                + "const observeRoot=document.querySelector('main')||composerRoot?.parentElement||composerRoot||document.body;"
                 + "if(!observeRoot)return result('OBSERVER_UNAVAILABLE','STOP/SEND observation root unavailable');"
-                + "if(!state){state={token:observerToken,sawStop:false,stopNotified:false,allowIdleBaseline:false,idleSince:0,timer:0,fired:false,observer:null,root:null,composer:null};window.__selfRunDriveTurnObserver=state;}"
-                + "if(typeof state.idleSince!=='number')state.idleSince=0;"
+                + "if(!state){const saved=readRecovery(),savedBaseline=Number(saved.baselineUserCount),currentUsers=userMessageCount();"
+                + "const baselineUserCount=Number.isFinite(savedBaseline)?savedBaseline:Math.max(0,currentUsers-1);"
+                + "state={token:observerToken,recoveryKey,baselineUserCount,sawStop:false,stopNotified:false,allowIdleBaseline:false,idleSince:0,finalSince:0,timer:0,fired:false,observer:null,root:null,composer:null,progressSignature:String(saved.progressSignature||''),lastProgressAt:Number(saved.lastProgressAt)||Date.now(),reloads:Number(saved.reloads)||0,armCount:(Number(saved.armCount)||0)+1};window.__selfRunDriveTurnObserver=state;"
+                + "writeRecovery({baselineUserCount:state.baselineUserCount,progressSignature:state.progressSignature,lastProgressAt:state.lastProgressAt,reloads:state.reloads,armCount:state.armCount});}"
+                + "if(typeof state.idleSince!=='number')state.idleSince=0;if(typeof state.finalSince!=='number')state.finalSince=0;"
+                + "const persist=()=>writeRecovery({baselineUserCount:state.baselineUserCount,progressSignature:state.progressSignature,lastProgressAt:state.lastProgressAt,reloads:state.reloads,armCount:state.armCount});"
                 + "const cancelTimer=()=>{if(state.timer)clearTimeout(state.timer);state.timer=0;};"
                 + "const resetIdle=()=>{state.idleSince=0;cancelTimer();};"
-                + "const noteStop=()=>{const first=!state.sawStop;state.sawStop=true;resetIdle();if(first&&!state.stopNotified){state.stopNotified=true;location.href=stopSeenCallback;}};"
-                + "const fireStable=()=>{state.timer=0;if(state.fired)return;const confirmed=controlState();"
-                + "if(confirmed.state==='" + STOP + "'){noteStop();return;}"
-                + "if(!observerIdle(confirmed.state)||!(state.sawStop||state.allowIdleBaseline)){resetIdle();return;}"
-                + "if(!state.idleSince)state.idleSince=Date.now();if(Date.now()-state.idleSince<observerStableMs){scheduleStable();return;}"
-                + "state.fired=true;try{state.observer?.disconnect();}catch(_){}window.__selfRunDriveTurnObserver=null;location.href=observerCallback;};"
-                + "const scheduleStable=()=>{if(state.timer)return;const remaining=Math.max(1,observerStableMs-(Date.now()-state.idleSince));state.timer=setTimeout(fireStable,remaining);};"
-                + "const evaluate=()=>{if(state.fired)return;const current=controlState();"
-                + "if(current.state==='" + STOP + "'){noteStop();return;}"
-                + "if(!observerIdle(current.state)||!(state.sawStop||state.allowIdleBaseline)){resetIdle();return;}"
-                + "if(!state.idleSince)state.idleSince=Date.now();if(Date.now()-state.idleSince>=observerStableMs)fireStable();else scheduleStable();};"
+                + "const resetFinal=()=>{state.finalSince=0;cancelTimer();};"
+                + "const trackProgress=()=>{const turn=turnState();if(turn.signature&&turn.signature!==state.progressSignature){state.progressSignature=turn.signature;state.lastProgressAt=Date.now();state.finalSince=0;persist();}return turn;};"
+                + "const noteStop=turn=>{const currentUsers=userMessageCount(),fresh=currentUsers>state.baselineUserCount;if(!fresh){resetIdle();return false;}const first=!state.sawStop;state.sawStop=true;resetIdle();if(first&&!state.stopNotified){state.stopNotified=true;location.href=stopSeenCallback;}return true;};"
+                + "const complete=()=>{state.fired=true;cancelObserverState(state);window.__selfRunDriveTurnObserver=null;clearRecovery();location.href=observerCallback;};"
+                + "const fireStable=forceFinal=>{state.timer=0;if(state.fired)return;const confirmed=controlState(),turn=trackProgress(),now=Date.now();"
+                + "if(forceFinal){const recoveredStable=state.reloads>0&&now-state.lastProgressAt>=observerReloadedStableMs;if(confirmed.state!=='" + STOP + "'||!turn.hasAnswer||turn.streaming||!(turn.finalAction||recoveredStable)){state.finalSince=0;return;}complete();return;}"
+                + "if(!observerIdle(confirmed.state)||!turn.hasAnswer||!(state.sawStop||state.allowIdleBaseline)){resetIdle();return;}"
+                + "if(!state.idleSince)state.idleSince=now;if(now-state.idleSince<observerStableMs){scheduleStable(false);return;}complete();};"
+                + "const scheduleStable=forceFinal=>{if(state.timer)return;const since=forceFinal?state.finalSince:state.idleSince;const required=forceFinal&&state.reloads>0?observerReloadedStableMs:observerStableMs;const remaining=Math.max(1,required-(Date.now()-since));state.timer=setTimeout(()=>fireStable(forceFinal),remaining);};"
+                + "const reloadSameConversation=reason=>{if(state.reloads>=1||state.fired)return false;state.reloads++;state.lastProgressAt=Date.now();persist();cancelObserverState(state);window.__selfRunDriveTurnObserver=null;try{location.reload();}catch(_){location.href=location.href;}return true;};"
+                + "const evaluate=()=>{if(state.fired)return;const current=controlState(),turn=trackProgress(),now=Date.now();"
+                + "if(current.state==='" + STOP + "'){const fresh=noteStop(turn);const recoveredStable=state.reloads>0&&now-state.lastProgressAt>=observerReloadedStableMs;"
+                + "if(turn.hasAnswer&&!turn.streaming&&(turn.finalAction||recoveredStable)){if(!state.finalSince)state.finalSince=now;if(now-state.finalSince>=((state.reloads>0&&!turn.finalAction)?observerReloadedStableMs:observerStableMs))fireStable(true);else scheduleStable(true);return;}"
+                + "state.finalSince=0;if(fresh&&turn.hasAnswer&&!turn.streaming&&state.armCount>1&&state.reloads<1){reloadSameConversation('observer_rearmed');return;}"
+                + "if(fresh&&turn.hasAnswer&&!turn.streaming&&now-state.lastProgressAt>=observerReloadMs){reloadSameConversation('stale_stop');return;}return;}"
+                + "state.finalSince=0;if(!observerIdle(current.state)||!turn.hasAnswer||!(state.sawStop||state.allowIdleBaseline)){resetIdle();return;}"
+                + "if(!state.idleSince)state.idleSince=now;if(now-state.idleSince>=observerStableMs)fireStable(false);else scheduleStable(false);};"
                 + "state.allowIdleBaseline=state.allowIdleBaseline||!!allowIdleBaseline;"
                 + "const bindingChanged=state.root!==observeRoot||!state.root?.isConnected||state.composer!==composer||!state.composer?.isConnected;"
                 + "if(!state.observer||bindingChanged){if(bindingChanged)cancelTimer();try{state.observer?.disconnect();}catch(_){}state.root=observeRoot;state.composer=composer;state.evaluate=evaluate;state.observer=new MutationObserver(evaluate);"
-                + "state.observer.observe(observeRoot,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','aria-disabled','aria-label','data-testid','title','class']});}else state.evaluate=evaluate;"
-                + "state.evaluate();"
-                + "const idleMs=state.idleSince?Math.max(0,Date.now()-state.idleSince):0;"
-                + "return result('OBSERVER_ARMED','STOP/SEND observer armed;stableMs='+observerStableMs+';baseline='+(state.allowIdleBaseline?1:0)+';sawStop='+(state.sawStop?1:0)+';bindingChanged='+(bindingChanged?1:0)+';idleMs='+idleMs);};";
+                + "state.observer.observe(observeRoot,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['disabled','aria-disabled','aria-label','aria-busy','data-testid','data-state','data-is-streaming','title','class']});}else state.evaluate=evaluate;"
+                + "state.evaluate();const idleMs=state.idleSince?Math.max(0,Date.now()-state.idleSince):0,progressAgeMs=Math.max(0,Date.now()-state.lastProgressAt);"
+                + "return result('OBSERVER_ARMED','STOP/SEND observer armed;stableMs='+observerStableMs+';baseline='+(state.allowIdleBaseline?1:0)+';sawStop='+(state.sawStop?1:0)+';bindingChanged='+(bindingChanged?1:0)+';idleMs='+idleMs+';progressAgeMs='+progressAgeMs+';reloads='+state.reloads);};";
     }
 
     private static String conversationGuard(String conversation) {
@@ -251,7 +269,10 @@ final class SelfRunContinuationDom {
                 + "const isVoice=e=>!!e&&buttonLike(e)&&inComposer(e)&&voiceSemantic(e);"
                 + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
                 + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&sendSemantic(e);"
-                + "const userMessageCount=()=>document.querySelectorAll('[data-message-author-role=\"user\"]').length;"
+                + "const messageNodes=()=>[...document.querySelectorAll('[data-message-author-role]')].filter(e=>e&&e.isConnected);"
+                + "const userMessageCount=()=>messageNodes().filter(e=>e.getAttribute('data-message-author-role')==='user').length;"
+                + "const hashText=value=>{let h=2166136261;for(let i=0;i<value.length;i++){h^=value.charCodeAt(i);h=Math.imul(h,16777619);}return(h>>>0).toString(16);};"
+                + "const turnState=()=>{const nodes=messageNodes();let lastUser=-1;for(let i=0;i<nodes.length;i++)if(nodes[i].getAttribute('data-message-author-role')==='user')lastUser=i;const assistants=lastUser<0?[]:nodes.slice(lastUser+1).filter(e=>e.getAttribute('data-message-author-role')==='assistant');const latest=assistants.length?assistants[assistants.length-1]:null;const text=String(latest?.innerText||latest?.textContent||'').replace(/\\s+/g,' ').trim();const container=latest?.closest?.('article,[data-testid*=conversation-turn]')||latest?.parentElement||latest;const finalAction=!!container?.querySelector?.('button[aria-label*=\"Copy\"],button[aria-label*=\"copy\"],button[aria-label*=\"복사\"],[data-testid*=\"copy\"],button[aria-label*=\"Good response\"],button[aria-label*=\"Bad response\"]');const streaming=!!(container?.matches?.('[aria-busy=\"true\"],[data-state=\"streaming\"],[data-is-streaming=\"true\"]')||container?.querySelector?.('[aria-busy=\"true\"],[data-state=\"streaming\"],[data-is-streaming=\"true\"],[class*=\"streaming\"]'));const signature=lastUser+'|'+assistants.length+'|'+text.length+'|'+hashText(text)+'|'+(finalAction?1:0)+'|'+(streaming?1:0);return{hasUser:lastUser>=0,hasAnswer:!!latest&&text.length>0,finalAction,streaming,signature};};"
                 + "const controlState=()=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);if(stop)return{state:'" + STOP + "',send:null};const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};return{state:'" + UNKNOWN + "',send:null};};";
     }
 
@@ -279,11 +300,11 @@ final class SelfRunContinuationDom {
     }
 
     private static String bootstrapClickedVerification() {
-        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount),conversation=after('c');if(conversation){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','bootstrap conversation route confirmed;users='+users+';baseline='+baseline+';control='+c.state+';conversation=1');}const activity=(Number.isFinite(baseline)&&users>baseline)||c.state==='" + STOP + "';return result('SUBMISSION_PENDING',activity?'bootstrap dispatch activity observed;conversation route pending;users='+users+';baseline='+baseline+';control='+c.state:'bootstrap submission verification pending;users='+users+';baseline='+baseline+';control='+c.state);}";
+        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount),conversation=after('c'),stopOnly=c.state==='" + STOP + "';const started=Number.isFinite(baseline)&&users>baseline;if(conversation&&started){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','bootstrap conversation route and user turn confirmed;users='+users+';baseline='+baseline+';control='+c.state+';conversation=1');}return result('SUBMISSION_PENDING',started?'bootstrap user turn observed;conversation route pending;users='+users+';baseline='+baseline+';control='+c.state:'bootstrap submission verification pending;users='+users+';baseline='+baseline+';control='+c.state+';stopOnly='+(stopOnly?1:0));}";
     }
 
     private static String continuationClickedVerification() {
-        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount);const started=(Number.isFinite(baseline)&&users>baseline)||c.state==='" + STOP + "';if(started){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','continuation submission evidence confirmed;users='+users+';baseline='+baseline+';control='+c.state);}return result('SUBMISSION_PENDING','continuation submission verification pending;users='+users+';baseline='+baseline+';control='+c.state);}";
+        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount),stopOnly=c.state==='" + STOP + "';const started=Number.isFinite(baseline)&&users>baseline;if(started){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','continuation submission evidence confirmed by fresh user turn;users='+users+';baseline='+baseline+';control='+c.state);}return result('SUBMISSION_PENDING','continuation submission verification pending;users='+users+';baseline='+baseline+';control='+c.state+';stopOnly='+(stopOnly?1:0));}";
     }
 
     private static String runIdFromContinuationMarker(String markerId) {

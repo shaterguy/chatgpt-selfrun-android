@@ -18,56 +18,65 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertEquals(1, count(observer, "new MutationObserver"));
         assertEquals(1, count(observer, "setTimeout"));
         assertEquals(0, count(observer, "setInterval"));
-        assertTrue(observer.contains("const confirmed=controlState()"));
-        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"')"));
+        assertTrue(observer.contains("const confirmed=controlState(),turn=trackProgress(),now=Date.now()"));
+        assertTrue(observer.contains("!turn.hasAnswer"));
         assertTrue(observer.contains("state.observer?.disconnect()"));
         assertTrue(observer.contains("location.href=observerCallback"));
     }
 
-    @Test public void stopReturningDuringStabilityWindowCancelsCompletion() throws Exception {
-        String observer = section(source("SelfRunContinuationDom.java"),
+    @Test public void staleStopCannotConfirmSubmissionButFinalAssistantCanComplete() throws Exception {
+        String dom = source("SelfRunContinuationDom.java");
+        String verification = section(dom,
+                "private static String continuationClickedVerification", "private static String runIdFromContinuationMarker");
+        String observer = section(dom,
                 "private static String completionObserver", "private static String conversationGuard");
-        assertTrue(observer.contains("const noteStop="));
-        assertTrue(observer.contains("if(current.state==='\" + STOP + \"'){noteStop();return;}"));
-        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"'){noteStop();return;}"));
-        assertTrue(observer.indexOf("const confirmed=controlState()")
-                < observer.indexOf("location.href=observerCallback"));
+
+        assertTrue(verification.contains("users>baseline"));
+        assertTrue(verification.contains("stopOnly=c.state==='\" + STOP + \"'"));
+        assertFalse(verification.contains("users>baseline)||c.state==='\" + STOP + \"'"));
+        assertTrue(observer.contains("turn.finalAction"));
+        assertTrue(observer.contains("turn.hasAnswer"));
+        assertTrue(observer.contains("turn.streaming"));
+        assertTrue(observer.contains("fireStable(true)"));
     }
 
-    @Test public void observerTargetsStopSendAreaAndNotAssistantMessages() throws Exception {
-        String observer = section(source("SelfRunContinuationDom.java"),
+    @Test public void observerTracksOnlyPrivacySafeLatestAssistantProgress() throws Exception {
+        String dom = source("SelfRunContinuationDom.java");
+        String observer = section(dom,
                 "private static String completionObserver", "private static String conversationGuard");
-        assertTrue(observer.contains("composerRoot?.parentElement"));
-        assertTrue(observer.contains("childList:true,subtree:true,attributes:true"));
-        assertTrue(source("SelfRunContinuationDom.java").contains("const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\\\"button\\\"]')].filter(visible):[];"));
-        assertFalse(observer.contains("assistant"));
+        String controls = section(dom, "private static String controls", "private static String composerOps");
+
+        assertTrue(observer.contains("document.querySelector('main')"));
+        assertTrue(observer.contains("characterData:true"));
+        assertTrue(controls.contains("[data-message-author-role]"));
+        assertTrue(controls.contains("lastUser"));
+        assertTrue(controls.contains("hashText(text)"));
+        assertTrue(controls.contains("text.length"));
+        assertFalse(observer.contains("innerText||latest"));
+        assertFalse(observer.contains("textContent||latest"));
     }
 
-    @Test public void observerRebindsInPlaceAndNativeHealthcheckDoesNotReloadChat() throws Exception {
+    @Test public void observerRebindsAndMayReloadOnlyTheSameConversationOnce() throws Exception {
         String observer = section(source("SelfRunContinuationDom.java"),
                 "private static String completionObserver", "private static String conversationGuard");
         String service = source("SelfRunService.java");
 
         assertEquals(15_000L, SelfRunService.TURN_OBSERVER_HEALTHCHECK_MS);
+        assertEquals(3 * 60_000L, SelfRunContinuationDom.STALE_STOP_RELOAD_MS);
+        assertEquals(30_000L, SelfRunContinuationDom.RELOADED_STOP_COMPLETION_MS);
         assertTrue(observer.contains("state.root!==observeRoot"));
         assertTrue(observer.contains("state.composer!==composer"));
         assertTrue(observer.contains("!state.root?.isConnected"));
         assertTrue(observer.contains("!state.composer?.isConnected"));
         assertTrue(observer.contains("state.observer?.disconnect()"));
         assertTrue(observer.contains("state.observer=new MutationObserver(evaluate)"));
-        assertTrue(observer.contains("idleSince:0"));
-        assertTrue(observer.contains("Date.now()-state.idleSince"));
-        assertTrue(observer.contains("if(bindingChanged)cancelTimer()"));
-        assertFalse(observer.contains("if(bindingChanged)resetIdle()"));
-        assertTrue(service.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS)"));
-        assertTrue(service.contains("boolean firstArm="));
-        assertTrue(service.contains("boolean rebound=detail.contains(\"bindingChanged=1\")"));
-        assertTrue(service.contains("if(firstArm||rebound)"));
-        assertTrue(service.contains("rebound&&!firstArm?\"rebound\":\"armed\""));
-        assertFalse(observer.contains("location.reload"));
+        assertTrue(observer.contains("sessionStorage.setItem(recoveryKey"));
+        assertTrue(observer.contains("if(state.reloads>=1||state.fired)return false"));
+        assertTrue(observer.contains("location.reload()"));
         assertFalse(observer.contains("location.assign"));
         assertFalse(observer.contains("history.go"));
         assertFalse(observer.contains("window.open"));
+        assertTrue(service.contains("scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS)"));
     }
 
     @Test public void activeWaitKeepsWebViewRunningButReleasesWakeLock() throws Exception {
@@ -84,15 +93,18 @@ public final class TurnCompletionWatchdogPolicyTest {
         assertTrue(preservedPause.contains("pauseWebView();"));
     }
 
-    @Test public void composerRebindMustPreserveTheCumulativeIdleWindow() throws Exception {
-        String observer = section(source("SelfRunContinuationDom.java"),
-                "private static String completionObserver", "private static String conversationGuard");
+    @Test public void rendererWatchdogIsScopedToTheBackgroundWebViewAndHandledByService() throws Exception {
+        String config = source("WebViewConfig.java");
+        String service = source("SelfRunService.java");
 
-        assertTrue(observer.contains("const resetIdle=()=>{state.idleSince=0;cancelTimer();}"));
-        assertTrue(observer.contains("if(!state.idleSince)state.idleSince=Date.now()"));
-        assertTrue(observer.contains("observerStableMs-(Date.now()-state.idleSince)"));
-        assertTrue(observer.contains("if(Date.now()-state.idleSince>=observerStableMs)fireStable()"));
-        assertTrue(observer.contains(";idleMs='+idleMs"));
+        assertTrue(config.contains("HeadlessWebViewHost.activeWebView() != webView"));
+        assertTrue(config.contains("RENDERER_UNRESPONSIVE_LIMIT = 3"));
+        assertTrue(config.contains("WEB_VIEW_RENDERER_CLIENT_BASIC_USAGE"));
+        assertTrue(config.contains("WEB_VIEW_RENDERER_TERMINATE"));
+        assertTrue(config.contains("renderer.terminate()"));
+        assertTrue(service.contains("onRenderProcessGone"));
+        assertTrue(service.contains("cleanupWebView();"));
+        assertTrue(service.contains("ensureWebView"));
     }
 
     @Test public void threeMinutePostDomDriveWindowHasExactBoundary() {

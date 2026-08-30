@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# Dev11 event-driven completion observer efficiency verification
+# v2.2.1 stale STOP completion recovery and direct TEST APK delivery
 
 on:
   push:
@@ -97,6 +97,15 @@ jobs:
           grep -Fq "application-label:'SelfRun Drive TEST'" <<<"$BADGING"
           sha256sum "$APK" > "$DIR/SHA256SUMS.txt"
           printf '%s\n' "$GITHUB_SHA" > "$DIR/SOURCE_COMMIT.txt"
+          echo "DIRECT_TEST_APK=$APK" >> "$GITHUB_ENV"
+      - name: Upload direct TEST APK
+        id: direct_test_apk
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: ${{ env.DIRECT_TEST_APK }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload canonical TEST candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -325,7 +334,7 @@ jobs:
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
           if [[ "$VERSION_NAME" == 2.* ]]; then
-            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest'
+            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest,com.shaterguy.chatgptselfrun.TurnCompletionRecoveryWebViewTest'
           else
             INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest'
           fi

@@ -9,17 +9,17 @@ public final class SubmissionDispatchEvidencePolicyTest {
     private static final String CONVERSATION = "https://chatgpt.com/g/g-p-test/c/conversation123";
     private static final String PROMPT = "SELF_RUN_SUBMISSION_EVIDENCE_PROBE";
 
-    @Test public void bootstrapRequiresDurableConversationRouteBeforeConfirmation() {
+    @Test public void bootstrapRequiresConversationRouteAndFreshUserTurnBeforeConfirmation() {
         String prepare = SelfRunContinuationDom.prepareBootstrap(PROJECT, PROMPT, "bootstrap-marker");
         String click = SelfRunContinuationDom.clickPreparedBootstrap(
                 PROJECT, PROMPT, "bootstrap-marker", "SR-TEST", "observer-token", 5000L);
-        assertTrue(prepare.contains("bootstrap conversation route confirmed"));
+        assertTrue(prepare.contains("bootstrap conversation route and user turn confirmed"));
         assertTrue(prepare.contains("conversation route pending"));
         assertTrue(prepare.contains("after('c')"));
         assertTrue(prepare.contains("users>baseline"));
-        assertTrue(prepare.contains("c.state==='STOP'"));
-        assertTrue(prepare.contains("if(conversation){"));
-        assertTrue(prepare.indexOf("if(conversation){") < prepare.indexOf("const activity="));
+        assertTrue(prepare.contains("stopOnly=c.state==='STOP'"));
+        assertFalse(prepare.contains("users>baseline)||c.state==='STOP'"));
+        assertTrue(prepare.contains("if(conversation&&started){"));
         assertTrue(prepare.contains("SUBMISSION_CONFIRMED"));
         assertFalse(prepare.contains("VERIFY_REQUIRED"));
         assertTrue(click.contains("c.send.focus"));
@@ -32,13 +32,14 @@ public final class SubmissionDispatchEvidencePolicyTest {
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
     }
 
-    @Test public void continuationDispatchUsesUserMessageOrStopAsEvidence() {
+    @Test public void continuationRequiresFreshUserTurnAndTreatsStopAsDiagnosticOnly() {
         String prepare = SelfRunContinuationDom.prepareDriveTurn(CONVERSATION, PROMPT, "continuation-marker");
         String click = SelfRunContinuationDom.clickPreparedDriveTurn(
                 CONVERSATION, PROMPT, "continuation-marker", "SR-TEST", "observer-token", 5000L);
-        assertTrue(prepare.contains("continuation submission evidence confirmed"));
+        assertTrue(prepare.contains("continuation submission evidence confirmed by fresh user turn"));
         assertTrue(prepare.contains("users>baseline"));
-        assertTrue(prepare.contains("c.state==='STOP'"));
+        assertTrue(prepare.contains("stopOnly=c.state==='STOP'"));
+        assertFalse(prepare.contains("users>baseline)||c.state==='STOP'"));
         assertTrue(prepare.contains("SUBMISSION_CONFIRMED"));
         assertFalse(prepare.contains("VERIFY_REQUIRED"));
         assertTrue(click.contains("c.send.focus"));
