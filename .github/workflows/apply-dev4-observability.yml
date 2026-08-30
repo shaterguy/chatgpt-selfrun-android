@@ -3,70 +3,68 @@ name: Apply SelfRun Drive dev4 observability
 on:
   push:
     branches:
-      - 'selfrun-drive/v2.2.1-dev4'
+      - selfrun-drive/v2.2.1-dev4
 
 permissions:
   contents: write
 
 jobs:
-  apply-observability:
-    if: github.event.head_commit.message == 'chore: apply dev4 observability patch'
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Apply completion-source observability patch
+      - name: Patch, verify diff, and commit
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path, old, new):
+          def once(path, old, new):
               p = Path(path)
               text = p.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected exactly one match, found {count}')
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{path}: expected one match, found {n}')
               p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
-          build = Path('app/build.gradle')
-          text = build.read_text(encoding='utf-8')
-          required = {
-              'def selfRunDriveVersionCode = 2020005': 'def selfRunDriveVersionCode = 2020006',
-              "def selfRunDriveVersionName = '2.2.1-dev3'": "def selfRunDriveVersionName = '2.2.1-dev4'",
-              "selfRunDriveVersionName != '2.2.1-dev3'": "selfRunDriveVersionName != '2.2.1-dev4'",
-              "SelfRun Drive development version must be 2.2.1-dev3": "SelfRun Drive development version must be 2.2.1-dev4",
-          }
-          for old, new in required.items():
-              if old not in text:
-                  raise SystemExit(f'app/build.gradle: missing {old!r}')
+          p = Path('app/build.gradle')
+          text = p.read_text(encoding='utf-8')
+          pairs = [
+              ('def selfRunDriveVersionCode = 2020005', 'def selfRunDriveVersionCode = 2020006'),
+              ("def selfRunDriveVersionName = '2.2.1-dev3'", "def selfRunDriveVersionName = '2.2.1-dev4'"),
+              ("selfRunDriveVersionName != '2.2.1-dev3'", "selfRunDriveVersionName != '2.2.1-dev4'"),
+              ('SelfRun Drive development version must be 2.2.1-dev3', 'SelfRun Drive development version must be 2.2.1-dev4'),
+          ]
+          for old, new in pairs:
+              if text.count(old) != 1:
+                  raise SystemExit(f'app/build.gradle: expected one {old!r}, found {text.count(old)}')
               text = text.replace(old, new, 1)
-          build.write_text(text, encoding='utf-8')
+          p.write_text(text, encoding='utf-8')
 
-          replace_once(
+          once(
               'app/src/main/java/com/shaterguy/chatgptselfrun/ChatGptTurnProtocolScript.java',
               "                      +'?run='+encodeURIComponent(run)+'&token='+encodeURIComponent(token)\n                      +'&source='+encodeURIComponent(safe(source));",
               "                      +'?run='+encodeURIComponent(run)+'&token='+encodeURIComponent(token)\n                      +'&path=protocol&source='+encodeURIComponent(safe(source))\n                      +'&turnSequence='+encodeURIComponent(String(state.turnSequence))\n                      +'&turnKind='+encodeURIComponent(safe(state.turnKind));"
           )
 
-          replace_once(
+          once(
               'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunContinuationDom.java',
               "                + \"const observerCallback='\" + TURN_COMPLETION_SCHEME + \"://\" + TURN_COMPLETION_HOST\n                + \"?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken);\"",
               "                + \"const observerCallback='\" + TURN_COMPLETION_SCHEME + \"://\" + TURN_COMPLETION_HOST\n                + \"?run='+encodeURIComponent(observerRun)+'&token='+encodeURIComponent(observerToken)+'&path=dom_fallback&source=stable_idle';\""
           )
 
-          service = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
-          text = service.read_text(encoding='utf-8')
-          old_vars = '    String host=uri.getHost(),run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");'
-          new_vars = '    String host=uri.getHost(),run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token"),completionPath=uri.getQueryParameter("path"),completionSource=uri.getQueryParameter("source"),turnSequence=uri.getQueryParameter("turnSequence"),turnKind=uri.getQueryParameter("turnKind");'
-          if text.count(old_vars) != 1:
-              raise SystemExit(f'SelfRunService.java: callback vars match count={text.count(old_vars)}')
-          text = text.replace(old_vars, new_vars, 1)
-          old_log = '    runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stable_idle;stabilityMs="+TURN_COMPLETION_STABILITY_MS+";action=drive_immediate");'
-          new_log = '''    String path="protocol".equals(completionPath)?"protocol":"dom_fallback";
+          p = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java')
+          text = p.read_text(encoding='utf-8')
+          old = '    String host=uri.getHost(),run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");'
+          new = '    String host=uri.getHost(),run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token"),completionPath=uri.getQueryParameter("path"),completionSource=uri.getQueryParameter("source"),turnSequence=uri.getQueryParameter("turnSequence"),turnKind=uri.getQueryParameter("turnKind");'
+          if text.count(old) != 1:
+              raise SystemExit(f'SelfRunService callback vars: expected one, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          old = '    runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stable_idle;stabilityMs="+TURN_COMPLETION_STABILITY_MS+";action=drive_immediate");'
+          new = '''    String path="protocol".equals(completionPath)?"protocol":"dom_fallback";
     String semantic;
     if("protocol".equals(path)){
         semantic=switch(completionSource==null?"":completionSource){
@@ -81,62 +79,17 @@ jobs:
         detail+=";turnSequence="+seq+";turnKind="+kind;
     }else detail+=";stabilityMs="+TURN_COMPLETION_STABILITY_MS;
     runLog.record(store,"TURN_COMPLETION_OBSERVER",detail+";action=drive_immediate");'''
-          if text.count(old_log) != 1:
-              raise SystemExit(f'SelfRunService.java: stable log match count={text.count(old_log)}')
-          text = text.replace(old_log, new_log, 1)
-          service.write_text(text, encoding='utf-8')
+          if text.count(old) != 1:
+              raise SystemExit(f'SelfRunService stable log: expected one, found {text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           test = Path('app/src/test/java/com/shaterguy/chatgptselfrun/TurnCompletionObservabilityContractTest.java')
-          test.write_text(r'''package com.shaterguy.chatgptselfrun;
-
-import org.junit.Test;
-
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
-import static org.junit.Assert.assertTrue;
-
-public final class TurnCompletionObservabilityContractTest {
-    @Test public void completionPathAndSemanticAreExplicitlyLogged() throws Exception {
-        String protocol = source("ChatGptTurnProtocolScript.java");
-        String dom = source("SelfRunContinuationDom.java");
-        String service = source("SelfRunService.java");
-
-        assertTrue(protocol.contains("&path=protocol&source="));
-        assertTrue(protocol.contains("&turnSequence="));
-        assertTrue(protocol.contains("&turnKind="));
-        assertTrue(dom.contains("&path=dom_fallback&source=stable_idle"));
-        assertTrue(service.contains("result=completed;path="));
-        assertTrue(service.contains("semantic="));
-        assertTrue(service.contains("message_stream_complete"));
-        assertTrue(service.contains("work_done"));
-        assertTrue(service.contains("stabilityMs="));
-    }
-
-    private static String source(String file) throws Exception {
-        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
-        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
-        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-    }
-}
-''', encoding='utf-8')
+          test.write_text('''package com.shaterguy.chatgptselfrun;\n\nimport org.junit.Test;\n\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\nimport java.nio.file.Paths;\n\nimport static org.junit.Assert.assertTrue;\n\npublic final class TurnCompletionObservabilityContractTest {\n    @Test public void completionPathAndSemanticAreExplicitlyLogged() throws Exception {\n        String protocol = source("ChatGptTurnProtocolScript.java");\n        String dom = source("SelfRunContinuationDom.java");\n        String service = source("SelfRunService.java");\n        assertTrue(protocol.contains("&path=protocol&source="));\n        assertTrue(protocol.contains("&turnSequence="));\n        assertTrue(protocol.contains("&turnKind="));\n        assertTrue(dom.contains("&path=dom_fallback&source=stable_idle"));\n        assertTrue(service.contains("result=completed;path="));\n        assertTrue(service.contains("semantic="));\n        assertTrue(service.contains("message_stream_complete"));\n        assertTrue(service.contains("work_done"));\n        assertTrue(service.contains("stabilityMs="));\n    }\n\n    private static String source(String file) throws Exception {\n        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);\n        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);\n        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);\n    }\n}\n''', encoding='utf-8')
           PY
           git diff --check
           git rm .github/workflows/apply-dev4-observability.yml
-          git status --short
-      - name: Commit observability update
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/build.gradle \
-                  app/src/main/java/com/shaterguy/chatgptselfrun/ChatGptTurnProtocolScript.java \
-                  app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunContinuationDom.java \
-                  app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java \
-                  app/src/test/java/com/shaterguy/chatgptselfrun/TurnCompletionObservabilityContractTest.java \
-                  .github/workflows/apply-dev4-observability.yml
+          git add -A
           git commit -m 'fix(drive): log protocol versus DOM completion source'
           git push origin HEAD:${GITHUB_REF_NAME}
