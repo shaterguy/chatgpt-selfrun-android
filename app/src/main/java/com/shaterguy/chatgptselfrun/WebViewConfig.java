@@ -1,5 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -17,6 +18,10 @@ final class WebViewConfig {
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+        settings.setOffscreenPreRaster(false);
+        webView.setHorizontalScrollBarEnabled(false);
+        webView.setVerticalScrollBarEnabled(false);
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         String current = settings.getUserAgentString();
         String marker = "SelfRunV2/" + BuildConfig.VERSION_NAME;
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
