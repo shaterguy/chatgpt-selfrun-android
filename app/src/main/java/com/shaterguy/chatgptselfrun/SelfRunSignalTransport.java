@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -12,21 +13,17 @@ final class SelfRunSignalTransport {
 
     private SelfRunSignalTransport() {}
 
-    static void mark(Context context, String runId) {
+    static boolean mark(Context context, String runId) {
         String value = runId == null ? "" : runId.trim();
-        if (context == null || !SelfRunProtocolRules.validRunId(value)) {
-            throw new IllegalArgumentException("valid SelfRun id required for signal transport marker");
-        }
+        if (context == null || !SelfRunProtocolRules.validRunId(value)) return false;
         synchronized (SelfRunSignalTransport.class) {
             Set<String> current = new HashSet<>(context.getApplicationContext()
                     .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .getStringSet(KEY_RUNS, Set.of()));
-            if (current.add(value)) {
-                boolean committed = context.getApplicationContext()
-                        .getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                        .putStringSet(KEY_RUNS, current).commit();
-                if (!committed) throw new IllegalStateException("signal transport marker persistence failed");
-            }
+                    .getStringSet(KEY_RUNS, Collections.emptySet()));
+            if (!current.add(value)) return true;
+            return context.getApplicationContext()
+                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putStringSet(KEY_RUNS, current).commit();
         }
     }
 
@@ -35,7 +32,7 @@ final class SelfRunSignalTransport {
         if (context == null || value.isEmpty()) return false;
         boolean enabled = context.getApplicationContext()
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getStringSet(KEY_RUNS, Set.of()).contains(value);
+                .getStringSet(KEY_RUNS, Collections.emptySet()).contains(value);
         if (enabled) DriveSignalDocumentIdentity.activate(context, value);
         return enabled;
     }
