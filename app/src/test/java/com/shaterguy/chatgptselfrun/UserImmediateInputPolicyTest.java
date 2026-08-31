@@ -40,10 +40,17 @@ public final class UserImmediateInputPolicyTest {
         String coordinator = src("UserImmediateInputCoordinator.java");
         String host = src("HeadlessWebViewHost.java");
         String activity = src("MainActivity.java");
+        String controls = between(existingDom,
+                "private static String controls", "private static String composerOps");
+        String observer = between(existingDom,
+                "private static String completionObserver", "private static String conversationGuard");
 
-        int existingStop = existingDom.indexOf("const stop=controls.find(isStop);if(stop)return");
-        int existingSend = existingDom.indexOf("const send=calibrated", existingStop);
-        assertTrue(existingStop >= 0 && existingSend > existingStop);
+        assertTrue(controls.contains("const controlState=(allowCompletedTurn=false)=>"));
+        assertTrue(controls.contains("if(stop&&!completedTurn)return"));
+        assertTrue(controls.contains("if(stop)return"));
+        assertTrue(observer.contains("const confirmed=controlState()"));
+        assertTrue(observer.contains("const current=controlState()"));
+        assertFalse(observer.contains("controlState(true)"));
         assertTrue(immediateDom.contains("const runningStop=()=>"));
         assertTrue(immediateDom.contains("if(!runningStop())"));
         assertTrue(immediateDom.contains("const forceSend=()=>"));
@@ -67,5 +74,13 @@ public final class UserImmediateInputPolicyTest {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static String between(String text, String start, String end) {
+        int from = text.indexOf(start);
+        int to = text.indexOf(end, from + start.length());
+        assertTrue("missing start marker: " + start, from >= 0);
+        assertTrue("missing end marker: " + end, to > from);
+        return text.substring(from, to);
     }
 }

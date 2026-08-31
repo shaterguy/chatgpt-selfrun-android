@@ -64,7 +64,10 @@ public final class CompletedTurnStaleStopContinuationPolicyTest {
         assertTrue(prepare.contains("controlState(true)"));
         assertTrue(click.contains("protocolPhase"));
         assertTrue(click.contains("controlState(true)"));
-        assertTrue(click.contains("const c=controlState(),users=userMessageCount()"));
+        assertTrue(click.contains("const confirmed=controlState()"));
+        assertTrue(click.contains("const current=controlState()"));
+        assertFalse(click.contains("const confirmed=controlState(true)"));
+        assertFalse(click.contains("const current=controlState(true)"));
     }
 
     private static int occurrences(String text, String needle) {
