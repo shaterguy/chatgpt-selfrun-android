@@ -19,11 +19,20 @@ final class TurnProtocolLogBridge {
 
     private TurnProtocolLogBridge() {}
 
-    static void install(WebView webView) {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+    static boolean install(WebView webView) {
         Context context = webView.getContext().getApplicationContext();
         SelfRunStore store = new SelfRunStore(context);
         SelfRunRunLog log = new SelfRunRunLog(context);
+        String runId = store.runId();
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            if (!runId.isEmpty()) {
+                TurnProtocolUiState.recordDetector(context, runId,
+                        TurnProtocolUiState.DETECTOR_DOM_FALLBACK_ONLY);
+                log.record(store, "TURN_DETECTOR",
+                        "path=DOM_FALLBACK_ONLY;reason=web_message_listener_unavailable");
+            }
+            return false;
+        }
         WebViewCompat.addWebMessageListener(webView, JS_OBJECT, CHATGPT_ORIGINS,
                 (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
                     if (!isMainFrame || message.getType() != WebMessageCompat.TYPE_STRING) return;
@@ -43,6 +52,13 @@ final class TurnProtocolLogBridge {
                     } catch (Throwable ignored) {
                     }
                 });
+        if (!runId.isEmpty()) {
+            TurnProtocolUiState.recordDetector(context, runId,
+                    TurnProtocolUiState.DETECTOR_PROTOCOL_PRIMARY);
+            log.record(store, "TURN_DETECTOR",
+                    "path=PROTOCOL_PRIMARY;fallback=DOM;bridge=web_message_listener");
+        }
+        return true;
     }
 
     private static boolean validPhaseForStage(String stage, String phase) {

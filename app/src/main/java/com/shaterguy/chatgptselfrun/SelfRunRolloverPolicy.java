@@ -91,11 +91,13 @@ final class SelfRunRolloverPolicy {
                                          boolean transientSeen) {
         if (dispatchStartedElapsed <= 0L || validatedSinceElapsed <= 0L
                 || nowElapsed < dispatchStartedElapsed || nowElapsed < validatedSinceElapsed) return NO_START_WAIT;
-        if (sawStop && !transientSeen) return NO_START_WAIT;
+        // STOP is direct evidence that generation started. A retryable WebView resource error is only
+        // diagnostic evidence because Android reports such callbacks for subresources as well as the
+        // main document. Neither signal may be converted into a pause or successor rollover here.
+        if (sawStop || transientSeen) return NO_START_WAIT;
         long continuouslyValidatedStart = Math.max(dispatchStartedElapsed, validatedSinceElapsed);
         if (nowElapsed - continuouslyValidatedStart < CONTINUATION_NO_START_MAX_WAIT_MS) return NO_START_WAIT;
-        if (transientSeen) return NO_START_PAUSE_TRANSIENT;
-        return sawStop ? NO_START_WAIT : NO_START_ROLLOVER;
+        return NO_START_ROLLOVER;
     }
 
     static boolean postDispatchNoStartTimedOut(long dispatchStartedElapsed, boolean sawStop,
