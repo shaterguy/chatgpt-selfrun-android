@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -38,6 +39,22 @@ public class HeadlessWebViewPowerPolicyTest {
         assertTrue(raster.height < height);
         assertEquals(cssPixels(width, density), cssPixels(raster.width, raster.densityDpi), 0.6);
         assertEquals(cssPixels(height, density), cssPixels(raster.height, raster.densityDpi), 0.6);
+    }
+
+    @Test public void onlyObserverHealthcheckScriptIsClassifiedAsIdleProbe() {
+        assertTrue(HeadlessWebViewPowerPolicy.isCompletionObserverHealthcheck(
+                "const armCompletionObserver=x=>x;return armCompletionObserver(false);"));
+        assertFalse(HeadlessWebViewPowerPolicy.isCompletionObserverHealthcheck(
+                "armCompletionObserver(false);return result('SUBMISSION_PENDING');"));
+        assertFalse(HeadlessWebViewPowerPolicy.isCompletionObserverHealthcheck(null));
+    }
+
+    @Test public void observerPauseRequiresArmedResult() {
+        assertTrue(HeadlessWebViewPowerPolicy.isObserverArmedResult(
+                "\"{\\\"status\\\":\\\"OBSERVER_ARMED\\\"}\""));
+        assertFalse(HeadlessWebViewPowerPolicy.isObserverArmedResult(
+                "\"{\\\"status\\\":\\\"OBSERVER_UNAVAILABLE\\\"}\""));
+        assertFalse(HeadlessWebViewPowerPolicy.isObserverArmedResult(null));
     }
 
     private static double cssPixels(int pixels, int densityDpi) {
