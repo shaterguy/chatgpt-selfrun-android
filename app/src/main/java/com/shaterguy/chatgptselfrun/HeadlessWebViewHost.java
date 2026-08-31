@@ -80,16 +80,22 @@ final class HeadlessWebViewHost {
     private static MobileDimensions dimensions(Context context) {
         WebUiCalibrationStore.Viewport viewport = new WebUiCalibrationStore(context).viewport();
         if (viewport != null) {
-            return new MobileDimensions(viewport.pixelWidth(), viewport.pixelHeight(), viewport.densityDpi());
+            return powerOptimizedDimensions(viewport.pixelWidth(), viewport.pixelHeight(), viewport.densityDpi());
         }
         DisplayMetrics metrics = context.getResources().getDisplayMetrics();
         int shorter = Math.max(320, Math.min(metrics.widthPixels, metrics.heightPixels));
         int longer = Math.max(480, Math.max(metrics.widthPixels, metrics.heightPixels));
         int density = Math.max(120, Math.min(640, metrics.densityDpi));
-        return new MobileDimensions(shorter, longer, density);
+        return powerOptimizedDimensions(shorter, longer, density);
     }
 
-    private static final class MobileDimensions {
+    static MobileDimensions powerOptimizedDimensions(int width, int height, int densityDpi) {
+        HeadlessWebViewPowerPolicy.RasterSize raster =
+                HeadlessWebViewPowerPolicy.capRasterDensity(width, height, densityDpi);
+        return new MobileDimensions(raster.width, raster.height, raster.densityDpi);
+    }
+
+    static final class MobileDimensions {
         final int width;
         final int height;
         final int densityDpi;
