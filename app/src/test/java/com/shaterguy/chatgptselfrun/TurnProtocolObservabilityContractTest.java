@@ -11,7 +11,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class TurnProtocolObservabilityContractTest {
-    @Test public void protocolTransitionsAreExportedToRunLogBridge() throws Exception {
+    @Test public void protocolTransitionsAreExportedToRunLogAndUiState() throws Exception {
         String webConfig = source("WebViewConfig.java");
         String protocol = source("ChatGptTurnProtocolScript.java");
         String bridge = source("TurnProtocolLogBridge.java");
@@ -25,6 +25,7 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(protocol.contains("emitLog('error',reason)"));
         assertTrue(protocol.contains("emitLog('complete',source)"));
         assertTrue(protocol.contains("emitLog('completion_dispatch',source)"));
+        assertTrue(protocol.contains("runId:safe(state.runId)"));
         assertTrue(protocol.contains("complete('message_stream_complete')"));
         assertFalse(protocol.contains("complete('work_done')"));
         assertTrue(bridge.contains("WEB_MESSAGE_LISTENER"));
@@ -32,6 +33,8 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(bridge.contains("visible_answer"));
         assertTrue(bridge.contains("completion_ignored"));
         assertTrue(bridge.contains("canonical_http_"));
+        assertTrue(bridge.contains("eventRunId.equals(store.runId())"));
+        assertTrue(bridge.contains("TurnProtocolUiState.record"));
         assertTrue(bridge.contains("stage=\" + stage"));
         assertTrue(bridge.contains("source=\" + source"));
         assertFalse(bridge.contains("case \"message_stream_complete\", \"finished_successfully_end_turn\", \"work_done\""));

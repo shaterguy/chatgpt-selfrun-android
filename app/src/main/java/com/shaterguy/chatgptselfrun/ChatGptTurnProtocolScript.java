@@ -16,7 +16,7 @@ import java.util.Set;
  * fallback owned by {@link SelfRunContinuationDom}.</p>
  */
 final class ChatGptTurnProtocolScript {
-    static final String ENGINE_VERSION = "turn-protocol-v3";
+    static final String ENGINE_VERSION = "turn-protocol-v5";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -36,7 +36,7 @@ final class ChatGptTurnProtocolScript {
                   if(window.__selfRunTurnProtocol?.version===ENGINE_VERSION)return;
                   const COMPLETION_SCHEME=__COMPLETION_SCHEME__;
                   const COMPLETION_HOST=__COMPLETION_HOST__;
-                  const STORE_KEY='selfrun-drive:turn-protocol-state:v3';
+                  const STORE_KEY='selfrun-drive:turn-protocol-state:v5';
                   const VALID_PHASES=new Set(['IDLE','THINKING','ANSWERING','COMPLETE','ERROR']);
                   const blank=()=>({
                     runId:'',phase:'IDLE',turnSequence:0,turnKind:'NONE',
@@ -60,7 +60,7 @@ final class ChatGptTurnProtocolScript {
                   };
                   let state=restore(),pendingTimer=0;
                   const save=()=>{try{sessionStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(_){}};
-                  const emitLog=(stage,source)=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;sink.postMessage(JSON.stringify({stage:safe(stage),source:safe(source),phase:state.phase,sequence:state.turnSequence,kind:state.turnKind}));}catch(_){}};
+                  const emitLog=(stage,source)=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;sink.postMessage(JSON.stringify({runId:safe(state.runId),stage:safe(stage),source:safe(source),phase:state.phase,sequence:state.turnSequence,kind:state.turnKind}));}catch(_){}};
                   const profileTarget=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const resetForRun=run=>{state=blank();state.runId=safe(run);save();};
                   const alignRun=()=>{
@@ -218,7 +218,6 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     state.sawStreamComplete=true;
                     if(!completionEvidence()){
-                      suspendDomFallback(window.__selfRunDriveTurnObserver);
                       state.lastSource=safe(source);state.lastError='completion_without_final_answer_evidence';save();
                       emitLog('completion_ignored',source);return false;
                     }

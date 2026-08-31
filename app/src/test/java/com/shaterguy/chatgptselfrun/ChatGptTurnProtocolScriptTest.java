@@ -14,7 +14,7 @@ import static org.junit.Assert.assertTrue;
 /** Contract tests for the protocol-first ChatGPT turn state detector. */
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalConversationPostOwnsFirstAndFollowupLifecycle() {
-        assertEquals("turn-protocol-v3", ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v5", ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
@@ -27,7 +27,7 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("state.turnKind='FOLLOWUP_TURN'"));
         assertTrue(script.contains("else return false"));
         assertTrue(script.contains("state.phase='THINKING'"));
-        assertTrue(script.contains("selfrun-drive:turn-protocol-state:v3"));
+        assertTrue(script.contains("selfrun-drive:turn-protocol-state:v5"));
     }
 
     @Test public void finalChannelAndVisibleAnswerOwnAnsweringPhase() {
@@ -72,13 +72,13 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("sawAssistantFinalText:state.sawAssistantFinalText"));
     }
 
-    @Test public void emptySemanticCompleteCannotFinishOrFallBackToDom() {
+    @Test public void earlySemanticCompleteCannotFinishAndKeepsDomFallbackAvailable() {
         String script = ChatGptTurnProtocolScript.documentStartScript();
 
         assertTrue(script.contains("if(!completionEvidence())"));
-        assertTrue(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
         assertTrue(script.contains("state.lastError='completion_without_final_answer_evidence'"));
         assertTrue(script.contains("emitLog('completion_ignored',source)"));
+        assertFalse(script.contains("if(!completionEvidence()){\n                      suspendDomFallback(window.__selfRunDriveTurnObserver);"));
         assertTrue(script.contains("state.phase!=='COMPLETE'||state.completionDispatched||!completionEvidence()"));
         assertTrue(script.contains("state.phase==='COMPLETE'&&!state.completionDispatched&&completionEvidence()"));
     }
@@ -101,6 +101,12 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("markError('canonical_fetch_rejected',sequence)"));
         assertTrue(script.contains("const markError=(reason,sequence)=>"));
         assertTrue(script.contains("suspendDomFallback(window.__selfRunDriveTurnObserver)"));
+    }
+
+    @Test public void protocolEventsCarryRunIdentityForNativeStatusProjection() {
+        String script = ChatGptTurnProtocolScript.documentStartScript();
+        assertTrue(script.contains("runId:safe(state.runId)"));
+        assertTrue(script.contains("sink.postMessage(JSON.stringify"));
     }
 
     @Test public void protocolCompletionCancelsDomFallbackAndUsesVerifiedCallback() {

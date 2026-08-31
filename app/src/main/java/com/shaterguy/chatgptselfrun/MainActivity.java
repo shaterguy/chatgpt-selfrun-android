@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
         runPage.addView(Ui.topBar(this, "SelfRun Drive", "v" + BuildConfig.VERSION_NAME + " · Run Console", newRun));
 
         emptyStage = Ui.heroSurface(this,
-                Ui.statusPill(this, "READY"),
+                Ui.statusPill(this, "대기"),
                 Ui.headline(this, "현재 실행 중인 SelfRun이 없습니다"),
                 Ui.body(this, "새 작업을 시작하거나 지난 작업을 확인할 수 있습니다."),
                 Ui.actionStrip(this,
@@ -103,7 +103,7 @@ public final class MainActivity extends Activity {
         emptyParams.topMargin = Ui.dp(this, 10);
         runPage.addView(emptyStage, emptyParams);
 
-        statusPill = Ui.statusPill(this, "RUN");
+        statusPill = Ui.statusPill(this, "실행");
         currentStatus = Ui.headline(this, "");
         runMeta = Ui.body(this, "");
         technicalDetails = Ui.muted(this, "");
@@ -205,17 +205,24 @@ public final class MainActivity extends Activity {
                 || SelfRunStore.PHASE_DONE.equals(store.phase())
                 || SelfRunStore.PHASE_IDLE.equals(store.phase());
         boolean running = store.active() && !paused && !terminal;
+        TurnProtocolUiState.Snapshot protocol = TurnProtocolUiState.read(this, runId);
+        String displayStatus = displayRuntimeStatus(protocol, paused, terminal);
 
-        statusPill.setText(paused ? "PAUSED" : terminal ? "FINISHED" : running ? "RUNNING" : "STATE");
-        currentStatus.setText(store.status());
-        String meta = store.mode() + " · " + prefs + " · Turn " + store.turn()
-                + "\n현재 단계  " + dash(store.phase());
+        statusPill.setText(TurnProtocolUiState.pillFor(displayStatus));
+        currentStatus.setText(displayStatus);
+        String meta = store.mode() + " · " + prefs + " · SelfRun Turn " + store.turn();
+        if (protocol.present) {
+            meta += "\nChatGPT Turn " + protocol.sequence + " · " + protocol.phase;
+        }
         if (!store.lastErrorCode().isEmpty()) {
             meta += "\n오류  " + errorSummary();
         }
         runMeta.setText(meta);
         technicalDetails.setText("Run ID  " + runId
                 + "\nconversation  " + dash(store.conversationUrl())
+                + "\n내부 phase  " + dash(store.phase())
+                + "\n턴 프로토콜 phase  " + (protocol.present ? protocol.phase : "-")
+                + "\n턴 프로토콜 event  " + (protocol.present ? protocol.stage : "-")
                 + "\nDrive 문서  " + dash(store.turnDocumentUrl())
                 + "\nDrive signal cursor  " + store.driveSignalCursor()
                 + "\n마지막 Drive signal  " + dash(store.lastDriveSignalType())
@@ -230,6 +237,42 @@ public final class MainActivity extends Activity {
         stopButton.setEnabled(running || paused);
         currentLogsButton.setEnabled(true);
         refreshNextInput(runId);
+    }
+
+    private String displayRuntimeStatus(TurnProtocolUiState.Snapshot protocol,
+                                        boolean paused, boolean terminal) {
+        if (store.userStopped()) return "사용자 중지";
+        if (paused) return store.lastErrorCode().isEmpty() ? "일시정지" : "일시정지 · 오류 확인 필요";
+        String phase = store.phase();
+        if (SelfRunStore.PHASE_DONE.equals(phase)) return "작업 완료";
+        if (SelfRunStore.PHASE_IDLE.equals(phase)) return "실행 종료";
+        if (!store.lastErrorCode().isEmpty()) return "오류 확인 필요";
+        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)) return "답변 완료 · 차기 턴 대기";
+        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
+                || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "차기 턴 설정 중";
+        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "차기 턴 전송 중";
+        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) {
+            String live = protocol.headline();
+            return live.isEmpty() ? "응답 상태 확인 중" : live;
+        }
+        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) {
+            String live = protocol.headline();
+            if (!live.isEmpty()) return live;
+            return "첫 턴 전송 중";
+        }
+        if (SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)
+                || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)) return "첫 턴 설정 중";
+        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)) return "ChatGPT 연결 준비 중";
+        if (SelfRunStore.PHASE_RESUME_BASELINE.equals(phase)) return "재개 상태 확인 중";
+        if (SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)
+                || SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)
+                || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
+                || SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)
+                || SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)
+                || SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)
+                || SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)
+                || SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)) return "실행 준비 중";
+        return terminal ? "실행 종료" : "실행 중";
     }
 
     private void refreshNextInput(String runId) {

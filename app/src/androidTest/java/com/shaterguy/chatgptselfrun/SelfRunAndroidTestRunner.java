@@ -26,6 +26,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest";
     private static final String TURN_PROTOCOL_STATE_TEST =
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest";
+    private static final String PRO_EARLY_COMPLETE_TEST =
+            "com.shaterguy.chatgptselfrun.ProEarlyCompleteFallbackWebViewTest";
     private static final String SUBMISSION_WEBVIEW_METHODS = String.join(",",
             SUBMISSION_WEBVIEW_TEST + "#continuationClassifierIgnoresAStopOutsideTheComposerForm",
             SUBMISSION_WEBVIEW_TEST + "#continuationClassifierStillBlocksAStopInsideTheComposerForm",
@@ -46,6 +48,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
             appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
             appendRequiredClass(effective, TURN_PROTOCOL_STATE_TEST);
+            appendRequiredClass(effective, PRO_EARLY_COMPLETE_TEST);
             super.onCreate(effective);
             return;
         }
@@ -57,6 +60,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
         appendRequiredClass(effective, IMMEDIATE_INPUT_DOM_TEST);
         appendRequiredClass(effective, TURN_PROTOCOL_STATE_TEST);
+        appendRequiredClass(effective, PRO_EARLY_COMPLETE_TEST);
         super.onCreate(effective);
     }
 

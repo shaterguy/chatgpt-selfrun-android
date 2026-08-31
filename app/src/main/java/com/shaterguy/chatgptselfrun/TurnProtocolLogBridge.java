@@ -11,7 +11,7 @@ import org.json.JSONObject;
 
 import java.util.Set;
 
-/** Receives protocol-state diagnostics from the trusted ChatGPT main frame and writes them to the run log. */
+/** Receives trusted protocol-state events for run logging and the user-facing runtime status. */
 final class TurnProtocolLogBridge {
     static final String JS_OBJECT = "selfRunTurnLog";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
@@ -31,14 +31,17 @@ final class TurnProtocolLogBridge {
                     if (raw == null || raw.length() > 1024) return;
                     try {
                         JSONObject item = new JSONObject(raw);
+                        String eventRunId = item.optString("runId", "");
                         String stage = item.optString("stage", "");
                         String phase = item.optString("phase", "");
                         String kind = item.optString("kind", "");
                         int sequence = item.optInt("sequence", -1);
                         String source = normalizedSource(stage, item.optString("source", ""));
+                        if (eventRunId.isEmpty() || !eventRunId.equals(store.runId())) return;
                         if (source.isEmpty() || sequence < 1 || sequence > 999999) return;
                         if (!("FIRST_TURN".equals(kind) || "FOLLOWUP_TURN".equals(kind))) return;
                         if (!validPhaseForStage(stage, phase)) return;
+                        TurnProtocolUiState.record(context, eventRunId, sequence, stage, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
                                 + ";phase=" + phase + ";sequence=" + sequence + ";kind=" + kind);
                     } catch (Throwable ignored) {
