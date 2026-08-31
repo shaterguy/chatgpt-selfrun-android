@@ -26,6 +26,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest";
     private static final String TURN_PROTOCOL_STATE_TEST =
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest";
+    private static final String WORK_TURN_PROTOCOL_INGRESS_TEST =
+            "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest";
     private static final String PRO_EARLY_COMPLETE_TEST =
             "com.shaterguy.chatgptselfrun.ProEarlyCompleteFallbackWebViewTest";
     private static final String DRIVE_SIGNAL_IDENTITY_TEST =
@@ -50,6 +52,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             appendRequiredClass(effective, PROFILE_REGISTRY_CAPTURE_TEST);
             appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
             appendRequiredClass(effective, TURN_PROTOCOL_STATE_TEST);
+            appendRequiredClass(effective, WORK_TURN_PROTOCOL_INGRESS_TEST);
             appendRequiredClass(effective, PRO_EARLY_COMPLETE_TEST);
             appendRequiredClass(effective, DRIVE_SIGNAL_IDENTITY_TEST);
             super.onCreate(effective);
@@ -63,6 +66,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         appendRequiredClass(effective, PROFILE_REGISTRY_PERSISTENCE_TEST);
         appendRequiredClass(effective, IMMEDIATE_INPUT_DOM_TEST);
         appendRequiredClass(effective, TURN_PROTOCOL_STATE_TEST);
+        appendRequiredClass(effective, WORK_TURN_PROTOCOL_INGRESS_TEST);
         appendRequiredClass(effective, PRO_EARLY_COMPLETE_TEST);
         appendRequiredClass(effective, DRIVE_SIGNAL_IDENTITY_TEST);
         super.onCreate(effective);
