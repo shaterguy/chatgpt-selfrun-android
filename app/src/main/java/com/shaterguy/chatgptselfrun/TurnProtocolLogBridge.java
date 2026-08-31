@@ -24,12 +24,14 @@ final class TurnProtocolLogBridge {
         SelfRunStore store = new SelfRunStore(context);
         SelfRunRunLog log = new SelfRunRunLog(context);
         String runId = store.runId();
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+        boolean messageBridge = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER);
+        boolean documentStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT);
+        if (!messageBridge || !documentStart) {
             if (!runId.isEmpty()) {
                 TurnProtocolUiState.recordDetector(context, runId,
                         TurnProtocolUiState.DETECTOR_DOM_FALLBACK_ONLY);
-                log.record(store, "TURN_DETECTOR",
-                        "path=DOM_FALLBACK_ONLY;reason=web_message_listener_unavailable");
+                log.record(store, "TURN_DETECTOR", "path=DOM_FALLBACK_ONLY;reason="
+                        + (!messageBridge ? "web_message_listener_unavailable" : "document_start_script_unavailable"));
             }
             return false;
         }
@@ -56,7 +58,7 @@ final class TurnProtocolLogBridge {
             TurnProtocolUiState.recordDetector(context, runId,
                     TurnProtocolUiState.DETECTOR_PROTOCOL_PRIMARY);
             log.record(store, "TURN_DETECTOR",
-                    "path=PROTOCOL_PRIMARY;fallback=DOM;bridge=web_message_listener");
+                    "path=PROTOCOL_PRIMARY;fallback=DOM;bridge=web_message_listener;document_start=1");
         }
         return true;
     }

@@ -33,6 +33,7 @@ public final class TurnProtocolObservabilityContractTest {
         assertFalse(protocol.contains("turnKind"));
         assertTrue(bridge.contains("static boolean install(WebView webView)"));
         assertTrue(bridge.contains("WEB_MESSAGE_LISTENER"));
+        assertTrue(bridge.contains("DOCUMENT_START_SCRIPT"));
         assertTrue(bridge.contains("TURN_PROTOCOL"));
         assertTrue(bridge.contains("TURN_DETECTOR"));
         assertTrue(bridge.contains("DETECTOR_PROTOCOL_PRIMARY"));
@@ -47,11 +48,13 @@ public final class TurnProtocolObservabilityContractTest {
         assertFalse(ui.contains("int sequence"));
     }
 
-    @Test public void noMessageBridgeMeansProtocolScriptIsNotInstalledAndDomFallbackRemainsOwner() throws Exception {
+    @Test public void missingProtocolFeatureMeansProtocolScriptIsNotInstalledAndDomFallbackRemainsOwner() throws Exception {
         String webConfig = source("WebViewConfig.java");
         String bridge = source("TurnProtocolLogBridge.java");
 
-        assertTrue(bridge.contains("if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER))"));
+        assertTrue(bridge.contains("boolean messageBridge = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)"));
+        assertTrue(bridge.contains("boolean documentStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)"));
+        assertTrue(bridge.contains("if (!messageBridge || !documentStart)"));
         assertTrue(bridge.contains("return false;"));
         assertTrue(webConfig.contains("if (protocolObservable) ChatGptTurnProtocolScript.installDocumentStart(webView)"));
     }
