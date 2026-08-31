@@ -25,17 +25,25 @@ public final class ProBootstrapStaleStopContinuationPolicyTest {
         assertFalse(selector.contains("continuationSelectionForRun"));
     }
 
-    @Test public void stopCanLosePriorityOnlyToAnActuallyDiscoveredSendControl() throws Exception {
-        String controls = section(source(),
+    @Test public void stopCanLosePriorityOnlyToAVerifiedSubmitPath() throws Exception {
+        String source = source();
+        String controls = section(source,
                 "private static String controls", "private static String composerOps");
+        String composerOps = section(source,
+                "private static String composerOps", "private static String composerOpsNullable");
 
         assertTrue(controls.contains("const controlState=(preferSendWhenStopCoexists=false)=>"));
         assertTrue(controls.contains("const stop=controls.find(isStop);const send="));
-        assertTrue(controls.contains("if(stop&&!(preferSendWhenStopCoexists&&send))"));
+        assertTrue(controls.contains("const form=composer?.closest?.('form'),formSubmitReady=!!form&&typeof form.requestSubmit==='function';"));
+        assertTrue(controls.contains("if(stop&&!preferSendWhenStopCoexists)"));
         assertTrue(controls.contains("if(send){if(send.disabled"));
-        assertTrue(controls.contains("if(stop)return{state:'\" + STOP + \"',send:null};"));
-        assertTrue(controls.indexOf("if(stop&&!(preferSendWhenStopCoexists&&send))")
+        assertTrue(controls.contains("if(stop&&!(composerEditable()&&formSubmitReady))"));
+        assertTrue(controls.indexOf("if(stop&&!preferSendWhenStopCoexists)")
                 < controls.indexOf("if(send){if(send.disabled"));
+        assertTrue(controls.indexOf("if(send){if(send.disabled")
+                < controls.indexOf("if(stop&&!(composerEditable()&&formSubmitReady))"));
+        assertTrue(composerOps.contains("typeof form.requestSubmit!=='function'"));
+        assertTrue(composerOps.contains("form.requestSubmit();return true;"));
     }
 
     @Test public void bootstrapAndCompletionObserverKeepStrictStopPriority() throws Exception {
