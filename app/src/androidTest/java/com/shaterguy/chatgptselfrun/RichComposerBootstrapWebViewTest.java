@@ -193,6 +193,10 @@ public final class RichComposerBootstrapWebViewTest {
         }
     }
 
+    @Test public void proBootstrapStaleStopContinuationUsesOnlyARealSendException() throws Exception {
+        ProBootstrapStaleStopContinuationWebViewRegression.run();
+    }
+
     private static AtomicReference<WebView> loadFixture(
             ActivityScenario<SelfRunNewActivity> scenario) throws Exception {
         AtomicReference<WebView> web = new AtomicReference<>();

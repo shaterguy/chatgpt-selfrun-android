@@ -61,9 +61,10 @@ final class SelfRunContinuationDom {
     }
 
     static String prepareDriveTurn(String conversationUrl, String prompt, String markerId) {
+        String runId = runIdFromContinuationMarker(markerId);
+        boolean preferSendWhenStopCoexists = proBootstrapRun(runId);
         String effectivePrompt = prompt;
         if (UserNextInputStore.initialized()) {
-            String runId = runIdFromContinuationMarker(markerId);
             String identity = continuationIdentityFromMarker(markerId);
             if (!runId.isEmpty() && UserNextInputStore.managesContinuation(runId)) {
                 effectivePrompt = UserNextInputStore.promptForPreparation(runId, prompt);
@@ -88,19 +89,23 @@ final class SelfRunContinuationDom {
                 + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "'&&c0.state!=='" + SEND_DISABLED + "'&&c0.state!=='" + COMPOSER_IDLE + "'&&c0.state!=='" + STOP + "')return result(c0.state,'continuation waits for an editable composer before mutation');"
                 + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','existing composer content cleared');}"
                 + "if(m.state==='clearing'){if(!empty()){clearComposer();return result('COMPOSER_CLEARING','waiting for empty composer readback');}writeMarker({state:'inputting',at:Date.now()});inputComposer();return result('COMPOSER_INPUTTING','fresh continuation inserted');}"
-                + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact continuation readback');}const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'waiting for enabled SEND after exact readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact continuation prepared');}"
-                + "if(m.state==='prepared'){if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','prepared composer changed; restarting input');}const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'prepared continuation waiting for SEND');return result('READY_TO_SUBMIT','exact continuation prepared');}"
+                + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact continuation readback');}const c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'waiting for enabled SEND after exact readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact continuation prepared');}"
+                + "if(m.state==='prepared'){if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','prepared composer changed; restarting input');}const c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'prepared continuation waiting for SEND');return result('READY_TO_SUBMIT','exact continuation prepared');}"
                 + "writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','unknown marker state reset');})()";
     }
 
     static String clickPreparedDriveTurn(String conversationUrl, String prompt, String markerId,
                                            String runId, String observerToken, long stabilityMs) {
+        boolean preferSendWhenStopCoexists = proBootstrapRun(runId);
         String effectivePrompt = prompt;
         if (UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)) {
             UserNextInputStore.ClickPlan plan = UserNextInputStore.nextClickPlan(
                     runId, continuationIdentityFromMarker(markerId), prompt);
             effectivePrompt = plan.prompt;
-            if (!plan.clickAllowed) return preflightPreparedDriveTurn(conversationUrl, effectivePrompt, markerId);
+            if (!plan.clickAllowed) {
+                return preflightPreparedDriveTurn(
+                        conversationUrl, effectivePrompt, markerId, preferSendWhenStopCoexists);
+            }
         }
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(effectivePrompt);
@@ -115,8 +120,8 @@ final class SelfRunContinuationDom {
                 + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('SUBMISSION_PENDING','continuation submission verification already pending');"
                 + "if(m.state!=='prepared'){if(!m.state)writeMarker({state:'clearing',at:Date.now()});return result('COMPOSER_INPUTTING','prepared marker unavailable before click');}"
                 + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','exact continuation readback lost before click');}"
-                + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled');"
-                + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath:'pending'});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,submitPath});armCompletionObserver(false);return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED;submit='+submitPath+';observer=armed;verification=pending');})()";
+                + "const strictBeforeClick=controlState(),baselineStop=strictBeforeClick.state==='" + STOP + "',c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled');"
+                + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,baselineStop,submitPath:'pending'});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,baselineStop,submitPath});armCompletionObserver(false);return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED;submit='+submitPath+';observer=armed;verification=pending');})()";
     }
 
     private static String probeLockedDriveTurn(String conversationUrl, String markerId) {
@@ -135,7 +140,8 @@ final class SelfRunContinuationDom {
                 + "return result('" + UNKNOWN + "','locked continuation marker has no safe no-dispatch proof');})()";
     }
 
-    private static String preflightPreparedDriveTurn(String conversationUrl, String prompt, String markerId) {
+    private static String preflightPreparedDriveTurn(String conversationUrl, String prompt, String markerId,
+                                                      boolean preferSendWhenStopCoexists) {
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(prompt);
         String marker = q("selfrun-drive:verified-continuation:" + markerId);
@@ -148,7 +154,7 @@ final class SelfRunContinuationDom {
                 + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('SUBMISSION_PENDING','prior dispatch awaits submission evidence');"
                 + "if(m.state!=='prepared')return result('COMPOSER_INPUTTING','submission preflight waits for prepared continuation');"
                 + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','user next-input changed before submission; rebuilding composer');}"
-                + "const c=controlState();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'submission preflight waits for enabled SEND');"
+                + "const c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'submission preflight waits for enabled SEND');"
                 + "return result('READY_TO_SUBMIT','latest continuation verified before submission lock');})()";
     }
 
@@ -252,7 +258,7 @@ final class SelfRunContinuationDom {
                 + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
                 + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&sendSemantic(e);"
                 + "const userMessageCount=()=>document.querySelectorAll('[data-message-author-role=\"user\"]').length;"
-                + "const controlState=()=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);if(stop)return{state:'" + STOP + "',send:null};const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};return{state:'" + UNKNOWN + "',send:null};};";
+                + "const controlState=(preferSendWhenStopCoexists=false)=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));if(stop&&!(preferSendWhenStopCoexists&&send))return{state:'" + STOP + "',send:null};if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(stop)return{state:'" + STOP + "',send:null};if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};return{state:'" + UNKNOWN + "',send:null};};";
     }
 
     private static String composerOps() {
@@ -283,7 +289,11 @@ final class SelfRunContinuationDom {
     }
 
     private static String continuationClickedVerification() {
-        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount);const started=(Number.isFinite(baseline)&&users>baseline)||c.state==='" + STOP + "';if(started){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','continuation submission evidence confirmed;users='+users+';baseline='+baseline+';control='+c.state);}return result('SUBMISSION_PENDING','continuation submission verification pending;users='+users+';baseline='+baseline+';control='+c.state);}";
+        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const c=controlState(),users=userMessageCount(),baseline=Number(m.baselineUserCount),baselineStop=!!m.baselineStop;const started=(Number.isFinite(baseline)&&users>baseline)||(c.state==='" + STOP + "'&&!baselineStop);if(started){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','continuation submission evidence confirmed;users='+users+';baseline='+baseline+';baselineStop='+(baselineStop?1:0)+';control='+c.state);}return result('SUBMISSION_PENDING','continuation submission verification pending;users='+users+';baseline='+baseline+';baselineStop='+(baselineStop?1:0)+';control='+c.state);}";
+    }
+
+    private static boolean proBootstrapRun(String runId) {
+        return "pro".equals(ChatReasoningPreferenceStore.selectionForRun(runId));
     }
 
     private static String runIdFromContinuationMarker(String markerId) {
