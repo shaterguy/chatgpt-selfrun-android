@@ -79,8 +79,13 @@ final class DriveSignalDocumentTransport {
 
     static Comparator<DriveApiClient.Metadata> comparator(String runId) {
         DriveSignalDocumentIdentity.seal(runId);
-        return (left, right) -> compareFields(left.createdTime, left.name, left.id,
-                right.createdTime, right.name, right.id, runId);
+        return (left, right) -> {
+            boolean leftKnown = DriveSignalDocumentIdentity.recognizedForPollOrdering(runId, left.id);
+            boolean rightKnown = DriveSignalDocumentIdentity.recognizedForPollOrdering(runId, right.id);
+            if (leftKnown != rightKnown) return leftKnown ? -1 : 1;
+            return compareFields(left.createdTime, left.name, left.id,
+                    right.createdTime, right.name, right.id, runId);
+        };
     }
 
     static int compareFields(String leftCreatedTime, String leftTitle, String leftId,

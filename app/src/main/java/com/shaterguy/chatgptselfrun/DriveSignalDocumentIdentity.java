@@ -59,9 +59,9 @@ final class DriveSignalDocumentIdentity {
 
         String documentId(String logicalSignal) {
             if (!enabled) return "";
-            List<Candidate> candidates = byTitle.get(candidateTitle(logicalSignal));
-            if (candidates == null || candidates.isEmpty()) return "";
             String title = candidateTitle(logicalSignal);
+            List<Candidate> candidates = byTitle.get(title);
+            if (candidates == null || candidates.isEmpty()) return "";
             int index = occurrences.getOrDefault(title, 0);
             occurrences.put(title, index + 1);
             return index < candidates.size() ? candidates.get(index).id : "";
@@ -96,6 +96,22 @@ final class DriveSignalDocumentIdentity {
         synchronized (LOCK) {
             if (activeContext != null && safe(runId).equals(activeRunId)) sealed = true;
         }
+    }
+
+    static boolean recognizedForPollOrdering(String runId, String documentId) {
+        Context context;
+        synchronized (LOCK) {
+            if (activeContext == null || !safe(runId).equals(activeRunId)) return false;
+            context = activeContext;
+        }
+        String id = safe(documentId);
+        if (id.isEmpty()) return false;
+        Set<String> recognized = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getStringSet(seenKey(runId), Collections.emptySet());
+        if (recognized.contains(id)) return true;
+        String lastSeenId = signalIdFromVersion(context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE)
+                .getString(STORE_LAST_SEEN_VERSION, ""));
+        return id.equals(lastSeenId);
     }
 
     static Resolver resolver(String runId, int legacyConsumed) {
