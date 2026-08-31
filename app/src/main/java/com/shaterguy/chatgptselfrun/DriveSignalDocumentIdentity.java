@@ -15,9 +15,10 @@ import java.util.regex.Pattern;
 /**
  * Maps one-signal-per-Google-Doc snapshots to durable Drive file identities.
  *
- * <p>A canonical signal document is new only when its Drive file ID has not previously been
- * recognized for the current run. The legacy cursor is consulted only to bootstrap an old run
- * that has no identity baseline; ongoing liveness never depends on that number.</p>
+ * <p>Modern signal consumption is keyed only by Drive file ID. The legacy numeric cursor is not
+ * consulted by this class. A provider-created document is considered already handled only when its
+ * own ID was recognized, or when it is strictly older by Drive createdTime than the exact signal ID
+ * recorded after a previously completed poll. Equal-createdTime unknown IDs remain new.</p>
  */
 final class DriveSignalDocumentIdentity {
     private static final String PREFS = "selfrun_drive_signal_identity";
@@ -39,7 +40,9 @@ final class DriveSignalDocumentIdentity {
         final String title;
         final String createdTime;
         Candidate(String id, String title, String createdTime) {
-            this.id = safe(id); this.title = safe(title); this.createdTime = safe(createdTime);
+            this.id = safe(id);
+            this.title = safe(title);
+            this.createdTime = safe(createdTime);
         }
     }
 
@@ -68,7 +71,8 @@ final class DriveSignalDocumentIdentity {
         }
 
         boolean recognized(String documentId) {
-            return enabled && documentId != null && !documentId.isEmpty() && recognized.contains(documentId);
+            return enabled && documentId != null && !documentId.isEmpty()
+                    && recognized.contains(documentId);
         }
     }
 
@@ -92,6 +96,39 @@ final class DriveSignalDocumentIdentity {
         }
     }
 
+    /**
+     * Reconstructs a safe handled-ID baseline from the exact ID persisted after the previous poll.
+     * This is called only after the current Job-folder candidate list has been collected.
+     */
+    static void preparePollOrdering(String runId) {
+        Context context;
+        ArrayList<Candidate> ordered;
+        synchronized (LOCK) {
+            if (activeContext == null || !safe(runId).equals(activeRunId)) return;
+            context = activeContext;
+            ordered = new ArrayList<>(activeCandidates);
+        }
+        ordered.sort(CANDIDATE_ORDER);
+        Set<String> stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getStringSet(seenKey(runId), Collections.emptySet());
+        HashSet<String> recognized = new HashSet<>(stored == null ? Collections.emptySet() : stored);
+        String lastSeenId = signalIdFromVersion(context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE)
+                .getString(STORE_LAST_SEEN_VERSION, ""));
+        Candidate boundary = findById(ordered, lastSeenId);
+        boolean changed = false;
+        if (boundary != null) {
+            long boundaryCreated = DriveSignalDocumentTransport.createdMillis(boundary.createdTime);
+            for (Candidate candidate : ordered) {
+                long created = DriveSignalDocumentTransport.createdMillis(candidate.createdTime);
+                if (candidate.id.equals(lastSeenId)
+                        || (created >= 0L && boundaryCreated >= 0L && created < boundaryCreated)) {
+                    changed |= recognized.add(candidate.id);
+                }
+            }
+        }
+        if (changed) persistRecognized(context, runId, recognized);
+    }
+
     static void seal(String runId) {
         synchronized (LOCK) {
             if (activeContext != null && safe(runId).equals(activeRunId)) sealed = true;
@@ -108,13 +145,10 @@ final class DriveSignalDocumentIdentity {
         if (id.isEmpty()) return false;
         Set<String> recognized = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getStringSet(seenKey(runId), Collections.emptySet());
-        if (recognized.contains(id)) return true;
-        String lastSeenId = signalIdFromVersion(context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE)
-                .getString(STORE_LAST_SEEN_VERSION, ""));
-        return id.equals(lastSeenId);
+        return recognized != null && recognized.contains(id);
     }
 
-    static Resolver resolver(String runId, int legacyConsumed) {
+    static Resolver resolver(String runId, int ignoredLegacyCursor) {
         Context context;
         ArrayList<Candidate> ordered;
         synchronized (LOCK) {
@@ -124,29 +158,15 @@ final class DriveSignalDocumentIdentity {
             context = activeContext;
             ordered = new ArrayList<>(activeCandidates);
         }
-        ordered.sort(CANDIDATE_ORDER);
-        HashSet<String> recognized = new HashSet<>(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getStringSet(seenKey(runId), Collections.emptySet()));
-
-        boolean changed = false;
-        String lastSeenId = signalIdFromVersion(context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE)
-                .getString(STORE_LAST_SEEN_VERSION, ""));
-        int lastIndex = indexOf(ordered, lastSeenId);
-        if (recognized.isEmpty()) {
-            if (lastIndex >= 0) {
-                for (int i = 0; i <= lastIndex; i++) changed |= recognized.add(ordered.get(i).id);
-            } else if (legacyConsumed > 0) {
-                int baseline = Math.min(Math.max(0, legacyConsumed), ordered.size());
-                for (int i = 0; i < baseline; i++) changed |= recognized.add(ordered.get(i).id);
-            }
-        } else if (!lastSeenId.isEmpty()) {
-            changed |= recognized.add(lastSeenId);
-        }
-        if (changed) {
-            boolean committed = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                    .putStringSet(seenKey(runId), new HashSet<>(recognized)).commit();
-            if (!committed) throw new IllegalStateException("signal document identity persistence failed");
-        }
+        Set<String> stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getStringSet(seenKey(runId), Collections.emptySet());
+        HashSet<String> recognized = new HashSet<>(stored == null ? Collections.emptySet() : stored);
+        ordered.sort((left, right) -> {
+            boolean leftKnown = recognized.contains(left.id);
+            boolean rightKnown = recognized.contains(right.id);
+            if (leftKnown != rightKnown) return leftKnown ? -1 : 1;
+            return CANDIDATE_ORDER.compare(left, right);
+        });
 
         HashMap<String, List<Candidate>> byTitle = new HashMap<>();
         for (Candidate candidate : ordered) {
@@ -155,7 +175,8 @@ final class DriveSignalDocumentIdentity {
         for (Map.Entry<String, List<Candidate>> entry : byTitle.entrySet()) {
             entry.setValue(Collections.unmodifiableList(entry.getValue()));
         }
-        return new Resolver(true, Collections.unmodifiableSet(recognized), Collections.unmodifiableMap(byTitle));
+        return new Resolver(true, Collections.unmodifiableSet(recognized),
+                Collections.unmodifiableMap(byTitle));
     }
 
     static String signalIdFromVersion(String version) {
@@ -171,8 +192,10 @@ final class DriveSignalDocumentIdentity {
     static List<String> unseenIds(List<String> orderedIds, Set<String> recognizedIds) {
         ArrayList<String> result = new ArrayList<>();
         Set<String> recognized = recognizedIds == null ? Collections.emptySet() : recognizedIds;
-        if (orderedIds != null) for (String id : orderedIds) {
-            if (DriveApiClient.validFileId(id) && !recognized.contains(id)) result.add(id);
+        if (orderedIds != null) {
+            for (String id : orderedIds) {
+                if (DriveApiClient.validFileId(id) && !recognized.contains(id)) result.add(id);
+            }
         }
         return Collections.unmodifiableList(result);
     }
@@ -182,6 +205,12 @@ final class DriveSignalDocumentIdentity {
         return signalIdFromVersion(context.getApplicationContext()
                 .getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE)
                 .getString(STORE_LAST_SEEN_VERSION, ""));
+    }
+
+    private static void persistRecognized(Context context, String runId, Set<String> recognized) {
+        boolean committed = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putStringSet(seenKey(runId), new HashSet<>(recognized)).commit();
+        if (!committed) throw new IllegalStateException("signal document identity persistence failed");
     }
 
     private static final Comparator<Candidate> CANDIDATE_ORDER = (left, right) -> {
@@ -201,13 +230,14 @@ final class DriveSignalDocumentIdentity {
 
     private static String candidateTitle(String logicalSignal) {
         String value = safe(logicalSignal).trim();
-        return NEXT_INPUT_VALUE.matcher(value).replaceFirst(DriveSignalDocumentTransport.NEXT_INPUT_BODY_MARKER);
+        return NEXT_INPUT_VALUE.matcher(value)
+                .replaceFirst(DriveSignalDocumentTransport.NEXT_INPUT_BODY_MARKER);
     }
 
-    private static int indexOf(List<Candidate> candidates, String id) {
-        if (id == null || id.isEmpty()) return -1;
-        for (int i = 0; i < candidates.size(); i++) if (id.equals(candidates.get(i).id)) return i;
-        return -1;
+    private static Candidate findById(List<Candidate> candidates, String id) {
+        if (id == null || id.isEmpty()) return null;
+        for (Candidate candidate : candidates) if (id.equals(candidate.id)) return candidate;
+        return null;
     }
 
     private static String seenKey(String runId) { return SEEN_PREFIX + safe(runId); }

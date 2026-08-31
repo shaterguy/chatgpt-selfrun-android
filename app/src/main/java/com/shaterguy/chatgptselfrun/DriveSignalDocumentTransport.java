@@ -78,6 +78,7 @@ final class DriveSignalDocumentTransport {
     }
 
     static Comparator<DriveApiClient.Metadata> comparator(String runId) {
+        DriveSignalDocumentIdentity.preparePollOrdering(runId);
         DriveSignalDocumentIdentity.seal(runId);
         return (left, right) -> {
             boolean leftKnown = DriveSignalDocumentIdentity.recognizedForPollOrdering(runId, left.id);

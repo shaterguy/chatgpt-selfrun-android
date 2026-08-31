@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Guards the file-ID based signal transport wiring against cursor regression. */
+/** Guards the file-ID based signal transport wiring against numeric cursor regression. */
 public final class DriveSignalIdentityWiringTest {
     @Test public void signalDocumentTransportUsesDriveIdsAsOngoingConsumptionAuthority() throws Exception {
         String marker = src("SelfRunSignalTransport.java");
@@ -21,14 +21,18 @@ public final class DriveSignalIdentityWiringTest {
 
         assertTrue(marker.contains("DriveSignalDocumentIdentity.activate(context, value)"));
         assertTrue(transport.contains("DriveSignalDocumentIdentity.observeCandidate"));
+        assertTrue(transport.contains("DriveSignalDocumentIdentity.preparePollOrdering(runId)"));
         assertTrue(transport.contains("DriveSignalDocumentIdentity.seal(runId)"));
         assertTrue(transport.contains("scanWithoutDocumentIdentity"));
         assertTrue(parser.contains("DriveSignalDocumentIdentity.resolver(jobId, consumed)"));
         assertTrue(parser.contains("!resolver.recognized(event.documentId)"));
-        assertTrue(parser.contains("boolean identityMode = resolver.enabled() && identityMappingComplete"));
-        assertTrue(identity.contains("Drive file ID has not previously been"));
-        assertTrue(identity.contains("lastSeenDriveVersion"));
+        assertTrue(parser.contains("signal document identity mapping incomplete"));
+        assertTrue(identity.contains("ignoredLegacyCursor"));
+        assertTrue(identity.contains("legacy numeric cursor is not"));
+        assertTrue(identity.contains("created < boundaryCreated"));
         assertTrue(service.contains("baselineManualResume(scan.totalCount,scan.latest,latestCompletion)"));
+        assertFalse(parser.contains("identityMappingComplete"));
+        assertFalse(identity.contains("legacyConsumed >"));
         assertFalse(identity.contains("event.cursor >"));
     }
 

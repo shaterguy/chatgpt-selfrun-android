@@ -52,30 +52,36 @@ public final class DriveSignalDocumentIdentityAndroidTest {
         assertEquals(0, scan.unseen.size());
     }
 
-    @Test public void newlyObservedIdRemainsNewEvenWhenItsSortPositionMovesEarlier() {
+    @Test public void laterCreatedIdStaysNewEvenWhenItsTitleSortsEarlier() {
         String run = "SR-20260831-100003-IDTEST";
         Context context = ApplicationProvider.getApplicationContext();
         setLastSeen(context, C);
-
         activate(context, run,
-                A, title(run, "10:00:00"), "2026-08-31T01:00:00Z",
-                B, title(run, "10:01:00"), "2026-08-31T01:01:00Z",
-                C, title(run, "10:02:00"), "2026-08-31T01:02:00Z");
-        DriveSignalParser.Scan baseline = DriveSignalParser.scan(
-                title(run, "10:00:00") + "\n" + title(run, "10:01:00") + "\n"
-                        + title(run, "10:02:00") + "\n",
-                run, 3, SelfRunStore.MODE_CHAT);
-        assertEquals(0, baseline.unseen.size());
-
-        activate(context, run,
-                D, title(run, "09:59:00"), "2026-08-31T00:59:00Z",
+                D, title(run, "09:59:00"), "2026-08-31T01:03:00Z",
                 A, title(run, "10:00:00"), "2026-08-31T01:00:00Z",
                 B, title(run, "10:01:00"), "2026-08-31T01:01:00Z",
                 C, title(run, "10:02:00"), "2026-08-31T01:02:00Z");
         DriveSignalParser.Scan scan = DriveSignalParser.scan(
-                title(run, "09:59:00") + "\n" + title(run, "10:00:00") + "\n"
-                        + title(run, "10:01:00") + "\n" + title(run, "10:02:00") + "\n",
+                title(run, "10:00:00") + "\n" + title(run, "10:01:00") + "\n"
+                        + title(run, "10:02:00") + "\n" + title(run, "09:59:00") + "\n",
                 run, 3, SelfRunStore.MODE_CHAT);
+        assertEquals(1, scan.unseen.size());
+        assertEquals(D, scan.unseen.get(0).documentId);
+    }
+
+    @Test public void equalCreatedTimeUnknownIdIsNeverAbsorbedByOlderBaseline() {
+        String run = "SR-20260831-100004-IDTEST";
+        Context context = ApplicationProvider.getApplicationContext();
+        setLastSeen(context, C);
+        activate(context, run,
+                A, title(run, "10:00:00"), "2026-08-31T01:00:00Z",
+                B, title(run, "10:01:00"), "2026-08-31T01:01:00Z",
+                C, title(run, "10:02:00"), "2026-08-31T01:02:00Z",
+                D, title(run, "09:58:00"), "2026-08-31T01:02:00Z");
+        DriveSignalParser.Scan scan = DriveSignalParser.scan(
+                title(run, "10:00:00") + "\n" + title(run, "10:01:00") + "\n"
+                        + title(run, "10:02:00") + "\n" + title(run, "09:58:00") + "\n",
+                run, 9999, SelfRunStore.MODE_CHAT);
         assertEquals(1, scan.unseen.size());
         assertEquals(D, scan.unseen.get(0).documentId);
     }
@@ -90,6 +96,7 @@ public final class DriveSignalDocumentIdentityAndroidTest {
         for (int i = 0; i < fields.length; i += 3) {
             DriveSignalDocumentIdentity.observeCandidate(fields[i], fields[i + 1], fields[i + 2], run);
         }
+        DriveSignalDocumentIdentity.preparePollOrdering(run);
         DriveSignalDocumentIdentity.seal(run);
     }
 

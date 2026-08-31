@@ -121,7 +121,6 @@ final class DriveSignalParser {
         DriveSignalDocumentIdentity.Resolver resolver = useDocumentIdentity
                 ? DriveSignalDocumentIdentity.resolver(jobId, consumed)
                 : new DriveSignalDocumentIdentity.Resolver(false, Collections.emptySet(), Collections.emptyMap());
-        boolean identityMappingComplete = resolver.enabled();
         List<Event> all = new ArrayList<>();
         int absoluteCursor = 0;
         for (String source : (text == null ? "" : text).split("\\r?\\n", -1)) {
@@ -144,17 +143,18 @@ final class DriveSignalParser {
             }
             if (resolver.enabled()) {
                 String documentId = resolver.documentId(event.raw);
-                if (documentId.isEmpty()) identityMappingComplete = false;
-                else event = event.withDocumentId(documentId);
+                if (documentId.isEmpty()) {
+                    throw new IllegalStateException("signal document identity mapping incomplete");
+                }
+                event = event.withDocumentId(documentId);
             }
             all.add(event);
         }
 
-        boolean identityMode = resolver.enabled() && identityMappingComplete;
         List<Event> unseen = new ArrayList<>();
         Event latestCanonical = null;
         boolean rebased = false;
-        if (identityMode) {
+        if (resolver.enabled()) {
             for (Event event : all) {
                 boolean newDocument = !resolver.recognized(event.documentId);
                 if (newDocument) unseen.add(event);
