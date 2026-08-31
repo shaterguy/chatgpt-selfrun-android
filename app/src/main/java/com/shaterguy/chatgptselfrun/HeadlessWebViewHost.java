@@ -10,7 +10,6 @@ import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.webkit.ValueCallback;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 
@@ -106,31 +105,10 @@ final class HeadlessWebViewHost {
     }
 
     private static final class FocusPreservingWebView extends WebView {
-        private boolean automationLifecyclePaused;
-
         FocusPreservingWebView(Context context) { super(context); }
-
-        @Override public void evaluateJavascript(String script, ValueCallback<String> resultCallback) {
-            boolean observerHealthcheck = HeadlessWebViewPowerPolicy.isCompletionObserverHealthcheck(script);
-            if (!observerHealthcheck && automationLifecyclePaused) onResume();
-            super.evaluateJavascript(script, value -> {
-                if (resultCallback != null) resultCallback.onReceiveValue(value);
-                if (observerHealthcheck
-                        && HeadlessWebViewPowerPolicy.isObserverArmedResult(value)
-                        && !automationLifecyclePaused) {
-                    onPause();
-                }
-            });
-        }
-
-        @Override public void onPause() {
-            super.onPause();
-            automationLifecyclePaused = true;
-        }
 
         @Override public void onResume() {
             super.onResume();
-            automationLifecyclePaused = false;
             requestFocus();
         }
 
