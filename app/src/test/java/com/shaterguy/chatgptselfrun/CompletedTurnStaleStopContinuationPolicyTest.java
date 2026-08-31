@@ -51,8 +51,7 @@ public final class CompletedTurnStaleStopContinuationPolicyTest {
         assertFalse(verification.contains("controlState(true)"));
         assertTrue(verification.contains("const c=controlState(),phase=protocolPhase()"));
         assertTrue(verification.contains("identity!==baselineIdentity"));
-        assertTrue(verification.contains("c.state==='" + SelfRunContinuationDom.STOP
-                + "'&&phase!=='COMPLETE'"));
+        assertTrue(verification.contains("c.state==='\" + STOP + \"'&&phase!=='COMPLETE'"));
         assertTrue(observer.contains("baselineProtocolIdentity:protocolIdentity()"));
         assertTrue(observer.contains("sawProtocolActivity"));
         assertTrue(observer.contains("const staleCompletedStop=()=>"));
@@ -76,12 +75,12 @@ public final class CompletedTurnStaleStopContinuationPolicyTest {
         assertTrue(prepare.contains("protocolIdentity"));
         assertTrue(prepare.contains("controlState(true)"));
         assertTrue(prepare.contains("protocolAdvanced"));
+        assertTrue(prepare.contains("const c=controlState(),phase=protocolPhase()"));
         assertTrue(click.contains("protocolPhase"));
         assertTrue(click.contains("protocolIdentity"));
         assertTrue(click.contains("controlState(true)"));
         assertTrue(click.contains("baselineProtocolIdentity"));
         assertTrue(click.contains("staleCompletedStop"));
-        assertTrue(click.contains("const c=controlState(),phase=protocolPhase()"));
         assertTrue(click.contains("const confirmed=controlState()"));
         assertTrue(click.contains("const current=controlState()"));
         assertFalse(click.contains("const confirmed=controlState(true)"));
