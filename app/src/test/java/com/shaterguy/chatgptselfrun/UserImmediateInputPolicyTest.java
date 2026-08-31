@@ -44,9 +44,12 @@ public final class UserImmediateInputPolicyTest {
         int existingStop = existingDom.indexOf("const stop=controls.find(isStop);");
         int existingSend = existingDom.indexOf("const send=calibrated", existingStop);
         int strictStopGate = existingDom.indexOf(
-                "if(stop&&!(preferSendWhenStopCoexists&&send))", existingSend);
+                "if(stop&&!preferSendWhenStopCoexists)", existingSend);
+        int verifiedFormFallbackGate = existingDom.indexOf(
+                "if(stop&&!(composerEditable()&&formSubmitReady))", strictStopGate);
         assertTrue(existingStop >= 0 && existingSend > existingStop
-                && strictStopGate > existingSend);
+                && strictStopGate > existingSend
+                && verifiedFormFallbackGate > strictStopGate);
         assertTrue(existingDom.contains(
                 "const controlState=(preferSendWhenStopCoexists=false)=>"));
         assertTrue(immediateDom.contains("const runningStop=()=>"));
