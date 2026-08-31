@@ -15,7 +15,7 @@ public final class WebViewTransientNoStartPolicyWiringTest {
         String service = src("SelfRunService.java");
         String policy = src("SelfRunRolloverPolicy.java");
 
-        assertTrue(service.contains("if(status>=400&&SelfRunRolloverPolicy.retryHttpStatus(status))"));
+        assertTrue(service.contains("if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive())"));
         assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status)"));
         assertTrue(policy.contains("if (sawStop || transientSeen) return NO_START_WAIT;"));
         assertFalse(policy.contains("if (transientSeen) return NO_START_PAUSE_TRANSIENT;"));
