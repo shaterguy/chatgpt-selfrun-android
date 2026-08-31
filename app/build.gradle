@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020011
-def selfRunDriveVersionName = '2.2.1-dev9'
+def selfRunDriveVersionCode = 2020012
+def selfRunDriveVersionName = '2.2.1-dev10'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.2.1-dev9') {
-            throw new GradleException('SelfRun Drive development version must be 2.2.1-dev9')
+        if (selfRunDriveVersionName != '2.2.1-dev10') {
+            throw new GradleException('SelfRun Drive development version must be 2.2.1-dev10')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -89,10 +89,10 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
             throw new GradleException('SelfRun 2.0 request profile document-start interceptor is required')
         }
         if (!webConfig.contains('TurnProtocolLogBridge.install')) {
-            throw new GradleException('turn protocol observability bridge is required')
+            throw new GradleException('response protocol observability bridge is required')
         }
         if (!webConfig.contains('ChatGptTurnProtocolScript.installDocumentStart')) {
-            throw new GradleException('protocol-first turn state document-start interceptor is required')
+            throw new GradleException('protocol-first response state document-start interceptor is required')
         }
     }
 }

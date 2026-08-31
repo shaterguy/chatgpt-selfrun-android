@@ -11,25 +11,36 @@ final class DriveSignalParser {
 
     static final class Event {
         final Type type;
-        final String timestamp, raw;
+        final String timestamp, raw, documentId;
         final int cursor;
         final boolean hasNextInput;
         final String nextInput;
         final String protocolError;
 
         Event(Type type, String timestamp, String raw, int cursor) {
-            this(type, timestamp, raw, cursor, false, "", "");
+            this(type, timestamp, raw, cursor, "", false, "", "");
         }
 
         Event(Type type, String timestamp, String raw, int cursor,
+              boolean hasNextInput, String nextInput, String protocolError) {
+            this(type, timestamp, raw, cursor, "", hasNextInput, nextInput, protocolError);
+        }
+
+        Event(Type type, String timestamp, String raw, int cursor, String documentId,
               boolean hasNextInput, String nextInput, String protocolError) {
             this.type = type;
             this.timestamp = timestamp;
             this.raw = raw;
             this.cursor = cursor;
+            this.documentId = documentId == null ? "" : documentId;
             this.hasNextInput = hasNextInput;
             this.nextInput = nextInput;
             this.protocolError = protocolError;
+        }
+
+        Event withDocumentId(String id) {
+            return new Event(type, timestamp, raw, cursor, id,
+                    hasNextInput, nextInput, protocolError);
         }
     }
 
@@ -86,9 +97,6 @@ final class DriveSignalParser {
                     + "([A-Za-z0-9._-]{1,128})(?:\\s+([^\\]]*))?]$");
     private static final Pattern RECOVERY_FIELD = Pattern.compile(
             "(?:^|\\s)RECOVERY_ID=", Pattern.CASE_INSENSITIVE);
-    // Older documents may contain a retired acknowledgement line. It is not an
-    // event, but still occupies its historical cursor position so an in-place
-    // update cannot replay an already-consumed completion.
     private static final Pattern RETIRED_CURSOR_LINE = Pattern.compile(
             "^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] "
                     + "\\[SELF_RUN_COMMAND_RECEIVED ([A-Za-z0-9._-]{1,128})]$");
@@ -100,10 +108,22 @@ final class DriveSignalParser {
     }
 
     static Scan scan(String text, String jobId, int consumed, String mode) {
+        return scanInternal(text, jobId, consumed, mode, true);
+    }
+
+    static Scan scanWithoutDocumentIdentity(String text, String jobId, int consumed, String mode) {
+        return scanInternal(text, jobId, consumed, mode, false);
+    }
+
+    private static Scan scanInternal(String text, String jobId, int consumed, String mode,
+                                     boolean useDocumentIdentity) {
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
+        DriveSignalDocumentIdentity.Resolver resolver = useDocumentIdentity
+                ? DriveSignalDocumentIdentity.resolver(jobId, consumed)
+                : new DriveSignalDocumentIdentity.Resolver(false, Collections.emptySet(), Collections.emptyMap());
+        boolean identityMappingComplete = resolver.enabled();
         List<Event> all = new ArrayList<>();
         int absoluteCursor = 0;
-        Event latestCanonical = null;
         for (String source : (text == null ? "" : text).split("\\r?\\n", -1)) {
             String trimmed = physicalLine(source);
             if (trimmed.isEmpty()) continue;
@@ -114,24 +134,39 @@ final class DriveSignalParser {
             if (!matcher.matches() || !jobId.equals(matcher.group(3))) continue;
             Type type = type(matcher.group(2));
             String tail = matcher.group(4) == null ? "" : matcher.group(4).trim();
+            Event event;
             if (type != Type.TURN_COMPLETED) {
                 if (!tail.isEmpty()) continue;
-                Event event = new Event(type, matcher.group(1), matcher.group(0), absoluteCursor);
-                all.add(event);
-                latestCanonical = event;
-                continue;
+                event = new Event(type, matcher.group(1), matcher.group(0), absoluteCursor);
+            } else {
+                event = completion(matcher.group(1), matcher.group(0), absoluteCursor, tail, work);
+                if (event == null) continue;
             }
-            Event completion = completion(matcher.group(1), matcher.group(0), absoluteCursor, tail, work);
-            if (completion != null) {
-                all.add(completion);
-                if (canonical(completion, work)) latestCanonical = completion;
+            if (resolver.enabled()) {
+                String documentId = resolver.documentId(event.raw);
+                if (documentId.isEmpty()) identityMappingComplete = false;
+                else event = event.withDocumentId(documentId);
             }
+            all.add(event);
         }
-        int requested = Math.max(0, consumed);
-        boolean rebased = requested > absoluteCursor;
+
+        boolean identityMode = resolver.enabled() && identityMappingComplete;
         List<Event> unseen = new ArrayList<>();
-        if (!rebased) {
-            for (Event event : all) if (event.cursor > requested) unseen.add(event);
+        Event latestCanonical = null;
+        boolean rebased = false;
+        if (identityMode) {
+            for (Event event : all) {
+                boolean newDocument = !resolver.recognized(event.documentId);
+                if (newDocument) unseen.add(event);
+                if (newDocument && canonical(event, work)) latestCanonical = event;
+            }
+        } else {
+            int requested = Math.max(0, consumed);
+            rebased = requested > absoluteCursor;
+            if (!rebased) {
+                for (Event event : all) if (event.cursor > requested) unseen.add(event);
+            }
+            for (Event event : all) if (canonical(event, work)) latestCanonical = event;
         }
         return new Scan(Collections.unmodifiableList(unseen), absoluteCursor,
                 all.isEmpty() ? null : all.get(all.size() - 1), latestCanonical, rebased);
@@ -233,9 +268,7 @@ final class DriveSignalParser {
 
     static WorkProfile workProfile(String raw) {
         Matcher line = LINE.matcher(raw == null ? "" : raw.trim());
-        if (!line.matches() || !"SELF_RUN_TURN_COMPLETED".equals(line.group(2))) {
-            return invalidProfile();
-        }
+        if (!line.matches() || !"SELF_RUN_TURN_COMPLETED".equals(line.group(2))) return invalidProfile();
         String tail = line.group(4) == null ? "" : line.group(4).trim();
         DriveSignalFields.Parsed fields = DriveSignalFields.parse(tail);
         if (!fields.valid || DriveSignalFields.hasUnknown(fields.values, true)) return invalidProfile();
@@ -245,25 +278,18 @@ final class DriveSignalParser {
         if (next.present && !next.valid) return invalidProfile();
         String model = DriveSignalFields.lower(fields.values.get("MODEL"));
         String reasoning = DriveSignalFields.lower(fields.values.get("REASONING"));
-        return new WorkProfile(model, reasoning,
-                SelfRunProtocolRules.validWorkProfile(model, reasoning));
+        return new WorkProfile(model, reasoning, SelfRunProtocolRules.validWorkProfile(model, reasoning));
     }
 
     static NextInputCodec.Decoded nextInput(String raw) {
         Matcher line = LINE.matcher(raw == null ? "" : raw.trim());
-        if (!line.matches() || !"SELF_RUN_TURN_COMPLETED".equals(line.group(2))) {
-            return NextInputCodec.absent();
-        }
+        if (!line.matches() || !"SELF_RUN_TURN_COMPLETED".equals(line.group(2))) return NextInputCodec.absent();
         String tail = line.group(4) == null ? "" : line.group(4).trim();
         if (!DriveSignalFields.mentionsNext(tail)) return NextInputCodec.absent();
         DriveSignalFields.Parsed fields = DriveSignalFields.parse(tail);
-        if (!fields.valid || DriveSignalFields.hasUnknown(fields.values, true)) {
-            return NextInputCodec.decodeToken("");
-        }
+        if (!fields.valid || DriveSignalFields.hasUnknown(fields.values, true)) return NextInputCodec.decodeToken("");
         String recovery = fields.values.get(DriveSignalFields.RECOVERY);
-        if (recovery != null && !SelfRunProtocolRules.validRecoveryId(recovery)) {
-            return NextInputCodec.decodeToken("");
-        }
+        if (recovery != null && !SelfRunProtocolRules.validRecoveryId(recovery)) return NextInputCodec.decodeToken("");
         return DriveSignalFields.decodeNext(fields.values);
     }
 
@@ -286,34 +312,22 @@ final class DriveSignalParser {
 
     static String historySafeRaw(String raw) {
         if (raw == null || raw.isEmpty()) return "";
-        return raw.replaceAll("(?i)NEXT_INPUT_B64URL=[^\\s\\]]*",
-                "NEXT_INPUT_B64URL=<redacted>");
+        return raw.replaceAll("(?i)NEXT_INPUT_B64URL=[^\\s\\]]*", "NEXT_INPUT_B64URL=<redacted>");
     }
 
-    private static Event completion(
-            String timestamp, String raw, int cursor, String tail, boolean work) {
+    private static Event completion(String timestamp, String raw, int cursor, String tail, boolean work) {
         if (tail.isEmpty()) return new Event(Type.TURN_COMPLETED, timestamp, raw, cursor);
         boolean hasNext = DriveSignalFields.mentionsNext(tail);
         boolean hasRecovery = DriveSignalFields.mentionsRecovery(tail);
-        if (!hasNext && !hasRecovery) {
-            return work ? new Event(Type.TURN_COMPLETED, timestamp, raw, cursor) : null;
-        }
+        if (!hasNext && !hasRecovery) return work ? new Event(Type.TURN_COMPLETED, timestamp, raw, cursor) : null;
         DriveSignalFields.Parsed fields = DriveSignalFields.parse(tail);
         if (!fields.valid) return invalidCompletion(timestamp, raw, cursor, fields.error);
-        if (DriveSignalFields.hasUnknown(fields.values, work)) {
-            return invalidCompletion(timestamp, raw, cursor, "TURN_COMPLETED_UNKNOWN_FIELD");
-        }
+        if (DriveSignalFields.hasUnknown(fields.values, work)) return invalidCompletion(timestamp, raw, cursor, "TURN_COMPLETED_UNKNOWN_FIELD");
         String recovery = fields.values.get(DriveSignalFields.RECOVERY);
-        if (recovery != null && !SelfRunProtocolRules.validRecoveryId(recovery)) {
-            return invalidCompletion(timestamp, raw, cursor, "RECOVERY_ID_INVALID");
-        }
+        if (recovery != null && !SelfRunProtocolRules.validRecoveryId(recovery)) return invalidCompletion(timestamp, raw, cursor, "RECOVERY_ID_INVALID");
         NextInputCodec.Decoded next = DriveSignalFields.decodeNext(fields.values);
-        if (hasNext && !next.present) {
-            return invalidCompletion(timestamp, raw, cursor, "NEXT_INPUT_MISSING");
-        }
-        if (next.present && !next.valid) {
-            return invalidCompletion(timestamp, raw, cursor, next.error);
-        }
+        if (hasNext && !next.present) return invalidCompletion(timestamp, raw, cursor, "NEXT_INPUT_MISSING");
+        if (next.present && !next.valid) return invalidCompletion(timestamp, raw, cursor, next.error);
         return new Event(Type.TURN_COMPLETED, timestamp, raw, cursor,
                 next.present, next.present ? next.text : "", "");
     }
@@ -322,9 +336,7 @@ final class DriveSignalParser {
         return new Event(Type.TURN_COMPLETED, timestamp, raw, cursor, false, "", error);
     }
 
-    private static WorkProfile invalidProfile() {
-        return new WorkProfile("", "", false);
-    }
+    private static WorkProfile invalidProfile() { return new WorkProfile("", "", false); }
 
     private static Type type(String value) {
         return switch (value) {

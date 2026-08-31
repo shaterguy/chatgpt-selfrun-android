@@ -1,43 +1,70 @@
-# ChatGPT turn-state protocol
+# ChatGPT response-state and Drive signal protocol
 
-SelfRun Drive 2.2.1-dev9부터 일반 Chat, Work, Pro 응답을 하나의 상태기계로 정규화하고, 그 상태를 Run Console의 사용자 상태 표시에도 직접 사용한다. Android WebView의 protocol-first observer가 사용하는 신호와 비신호는 아래와 같다.
+SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive signal cursor를 권위 기준으로 사용하지 않는다. 런타임은 다음 두 가지 현재성 규칙만 사용한다.
 
-## 공통 상태 전이
+1. ChatGPT에서는 가장 최근 `POST /backend-api/f/conversation`이 현재 응답 요청이다.
+2. Drive에서는 현재 Job 폴더에 존재하는 canonical signal Google Docs 중 아직 인식하지 않은 **Drive file ID**가 새 결과다.
+
+## ChatGPT 응답 상태
 
 | 상태 전이 | 권위 신호 |
 | --- | --- |
-| IDLE 또는 COMPLETE → THINKING | `POST /backend-api/f/conversation` |
-| THINKING → ANSWERING | Chat·Work의 `message_marker(final_channel_token, first)` 또는 final assistant message 기반 `visible_answer` |
+| 임의 상태 → THINKING | 가장 최근 `POST /backend-api/f/conversation` |
+| THINKING → ANSWERING | `message_marker(final_channel_token, first)` 또는 final assistant message 기반 `visible_answer` |
 | ANSWERING → COMPLETE | `message_stream_complete` 또는 final assistant message의 `finished_successfully + end_turn=true` |
 
-첫 canonical POST는 `FIRST_TURN`, COMPLETE 뒤의 다음 canonical POST는 `FOLLOWUP_TURN`으로 기록한다. `server_ste_metadata.metadata.is_first_turn`은 서버 분류와 로컬 분류의 일치 여부를 확인하는 보조 근거다.
+새 canonical POST는 기존 응답이 THINKING/ANSWERING 중이어도 현재 요청을 즉시 교체한다. 이는 즉시 강제입력처럼 기존 응답 도중 새 사용자 요청이 실제 제출되는 경우를 정상 흐름으로 취급하기 위함이다.
 
-## 일반 Chat과 Work
+이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. Work/Pro WebSocket은 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
 
-`user_visible_token:first`와 `cot_token:first`는 중간 stream 신호이므로 THINKING을 유지한다. `last_token:last`는 마지막 token 부근일 뿐 완료 신호가 아니다. Work WebSocket의 `stream-item.encoded_item`은 내부 SSE payload로 파싱하지만 outer `done`은 상태 완료를 발생시키지 않는다.
+`user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`은 전체 응답 COMPLETE를 직접 만들지 않는다.
 
-## Pro
+Pro에서 final answer evidence보다 `message_stream_complete`가 먼저 관찰되면 THINKING을 유지하고 `completion_ignored`를 기록하되 STOP/SEND DOM fallback을 중단하지 않는다. 이후 final answer 또는 안정된 DOM 완료가 확인되면 정상 완료 경로로 수렴한다.
 
-Pro도 canonical conversation POST에서 THINKING을 시작한다. `stream_handoff`는 fetch stream에서 WebSocket stream으로 전달 경로가 바뀌는 신호일 뿐 상태 전이가 아니다. Pro에 `final_channel_token:first`가 없더라도 final assistant message가 나타나면 이를 `visible_answer`로 정규화하여 ANSWERING으로 전이한다.
+## Drive signal document 현재성
 
-`encoded_item` 내부의 `data: [DONE]`은 개별 SSE stream 종료이므로 전체 assistant turn의 COMPLETE로 처리하지 않는다. outer WebSocket `done` 역시 완료 판정의 권위 신호가 아니다.
+신규 SelfRun은 한 signal을 한 Google Docs 파일로 기록한다. 앱은 Job 폴더를 조회하여 canonical signal document의 Drive file ID를 수집하고, 이미 인식한 ID 집합과 비교한다.
 
-Pro에서는 final answer evidence보다 `message_stream_complete`가 먼저 관찰될 수 있다. 이 경우 protocol phase는 THINKING을 유지하고 `completion_ignored`를 기록하지만 STOP/SEND DOM fallback을 중단하지 않는다. 이후 final answer semantic event가 도착하면 ANSWERING으로 진행하고, semantic completion이 다시 오거나 DOM이 안정된 idle 완료를 확인하면 기존 단일 completion callback 경로로 수렴한다.
+- 기존에 인식한 ID: 다시 실행하지 않는다.
+- 처음 보는 ID: 새 signal로 처리한다.
+- 파일 정렬 위치가 바뀌거나 과거 문서가 삭제되어도 ID가 같으면 재처리하지 않는다.
+- 과거 `driveSignalCursor` 값이 현재 파일 개수보다 크거나 작다는 이유로 실행을 중단하지 않는다.
 
-## Run Console 상태 표시
+기존 설치본에서 dev10으로 처음 올라오는 경우에만 `lastSeenDriveVersion`의 `signal:<fileId>:...` 값을 우선 이용해 기존 ID baseline을 복원한다. 그 정보가 없는 오래된 실행에는 기존 cursor를 최초 baseline 마이그레이션에 한 번 사용할 수 있지만, 이후 정상 실행 판단에는 사용하지 않는다.
 
-Run Console의 상단 상태는 서비스 내부 구현 문구를 그대로 노출하지 않는다. 현재 Run ID와 일치하는 protocol event를 기준으로 다음 상태를 우선 표시한다.
+## 정상 완료 후 흐름
 
-- `THINKING`: `추론 중`
-- final answer evidence 전 조기 completion: `답변 시작 대기 중`
-- `ANSWERING`: `답변 생성 중`
-- `COMPLETE` 또는 DOM 완료 후 Drive 동기화 단계: `답변 완료 · 차기 턴 대기`
-- 차기 턴 설정·전송 단계는 각각 `차기 턴 설정 중`, `차기 턴 전송 중`
+ChatGPT 응답 COMPLETE가 확인되면 앱은 Job 폴더를 조회한다.
 
-내부 phase, protocol phase와 마지막 protocol event는 `실행 정보`에서 진단용으로 확인한다. 서로 다른 Run의 잔류 protocol event는 UI 상태로 수용하지 않는다.
+1. 이전에 인식하지 못한 새 canonical signal document ID가 있으면 해당 signal을 처리한다.
+2. `TURN_COMPLETED`이면 필요한 다음 요청 설정을 적용하고 CONTINUE를 전송한다.
+3. `PAUSED`, `USER_ACTION_REQUIRED`, `DONE`이면 해당 제어 signal을 적용한다.
+4. 새 signal ID가 아직 없으면 제한시간 동안 Drive를 재확인한다.
+
+## 일시정지 후 재개
+
+재개 시에도 같은 file-ID 차집합 규칙을 사용한다.
+
+- 새 signal document ID가 있으면 그 최신 결과를 반영하고 CONTINUE 경로를 준비한다.
+- 새 signal document ID가 없으면 과거 cursor나 턴 번호를 맞추려 하지 않고 바로 CONTINUE 준비로 이동한다.
+
+## Run Console
+
+사용자 화면은 내부 ordinal을 노출하지 않는다.
+
+- `추론 중`
+- `답변 시작 대기 중`
+- `답변 생성 중`
+- `답변 완료 · 새 Drive 신호 확인 중`
+- `다음 요청 설정 중`
+- `CONTINUE 전송 중`
+- `재개 · 새 Drive 신호 확인 중`
+
+실행 정보에는 내부 phase, 응답 protocol phase/event, 마지막 인식 signal document ID를 제공한다. `SelfRun Turn`, `ChatGPT Turn`, `Drive signal cursor`는 표시하지 않는다.
 
 ## 회귀 검증
 
-`TurnProtocolStateWebViewTest`는 Android WebView에서 Chat·Work·Pro의 canonical POST, intermediate marker, visible answer와 semantic completion 순서를 검증한다. `ProEarlyCompleteFallbackWebViewTest`는 Pro에서 final answer보다 먼저 `message_stream_complete`가 도착했을 때 DOM fallback이 살아 있고 이후 ANSWERING/COMPLETE로 진행할 수 있는지 직접 검증한다.
-
-TEST 워크플로의 2.x instrumentation profile은 `SelfRunAndroidTestRunner`를 통해 이 회귀 테스트들을 항상 포함한다.
+- `TurnProtocolStateWebViewTest`: 활성 응답 중 새 canonical POST가 들어왔을 때 최신 요청으로 교체되고 이전 fetch/WebSocket 데이터가 폐기되는지 검증한다.
+- `ProEarlyCompleteFallbackWebViewTest`: Pro 조기 semantic completion이 DOM fallback을 파괴하지 않는지 검증한다.
+- `DriveSignalDocumentIdentityAndroidTest`: 비정상적으로 큰 과거 cursor, 파일 정렬 변화, 재개 시 신규 ID 부재에서도 Drive file ID 기준으로 unseen signal을 계산하는지 검증한다.
+- `SelfRunAndroidTestRunner`: 2.x TEST canonical instrumentation 경로에 위 회귀 테스트를 강제로 포함한다.

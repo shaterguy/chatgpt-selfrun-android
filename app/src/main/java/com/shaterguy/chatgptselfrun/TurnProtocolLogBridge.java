@@ -34,16 +34,12 @@ final class TurnProtocolLogBridge {
                         String eventRunId = item.optString("runId", "");
                         String stage = item.optString("stage", "");
                         String phase = item.optString("phase", "");
-                        String kind = item.optString("kind", "");
-                        int sequence = item.optInt("sequence", -1);
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (eventRunId.isEmpty() || !eventRunId.equals(store.runId())) return;
-                        if (source.isEmpty() || sequence < 1 || sequence > 999999) return;
-                        if (!("FIRST_TURN".equals(kind) || "FOLLOWUP_TURN".equals(kind))) return;
-                        if (!validPhaseForStage(stage, phase)) return;
-                        TurnProtocolUiState.record(context, eventRunId, sequence, stage, phase);
+                        if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
+                        TurnProtocolUiState.record(context, eventRunId, stage, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
-                                + ";phase=" + phase + ";sequence=" + sequence + ";kind=" + kind);
+                                + ";phase=" + phase);
                     } catch (Throwable ignored) {
                     }
                 });

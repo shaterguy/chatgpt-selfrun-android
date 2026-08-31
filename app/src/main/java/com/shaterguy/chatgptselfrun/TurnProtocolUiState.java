@@ -3,25 +3,22 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Small UI-facing projection of the protocol-first ChatGPT turn state. */
+/** Small UI-facing projection of the latest active ChatGPT response state. */
 final class TurnProtocolUiState {
     private static final String PREFS = "selfrun_turn_protocol_ui";
     private static final String KEY_RUN_ID = "runId";
-    private static final String KEY_SEQUENCE = "sequence";
     private static final String KEY_STAGE = "stage";
     private static final String KEY_PHASE = "phase";
     private static final String KEY_UPDATED_AT = "updatedAt";
 
     static final class Snapshot {
         final boolean present;
-        final int sequence;
         final String stage;
         final String phase;
         final long updatedAt;
 
-        Snapshot(boolean present, int sequence, String stage, String phase, long updatedAt) {
+        Snapshot(boolean present, String stage, String phase, long updatedAt) {
             this.present = present;
-            this.sequence = sequence;
             this.stage = safe(stage);
             this.phase = safe(phase);
             this.updatedAt = Math.max(0L, updatedAt);
@@ -32,11 +29,10 @@ final class TurnProtocolUiState {
 
     private TurnProtocolUiState() {}
 
-    static void record(Context context, String runId, int sequence, String stage, String phase) {
-        if (context == null || runId == null || runId.isEmpty() || sequence < 1 || !validPhase(phase)) return;
+    static void record(Context context, String runId, String stage, String phase) {
+        if (context == null || runId == null || runId.isEmpty() || !validPhase(phase)) return;
         context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString(KEY_RUN_ID, runId)
-                .putInt(KEY_SEQUENCE, sequence)
                 .putString(KEY_STAGE, safe(stage))
                 .putString(KEY_PHASE, safe(phase))
                 .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
@@ -49,9 +45,8 @@ final class TurnProtocolUiState {
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!runId.equals(prefs.getString(KEY_RUN_ID, ""))) return empty();
         String phase = prefs.getString(KEY_PHASE, "");
-        int sequence = prefs.getInt(KEY_SEQUENCE, 0);
-        if (!validPhase(phase) || sequence < 1) return empty();
-        return new Snapshot(true, sequence, prefs.getString(KEY_STAGE, ""), phase,
+        if (!validPhase(phase)) return empty();
+        return new Snapshot(true, prefs.getString(KEY_STAGE, ""), phase,
                 prefs.getLong(KEY_UPDATED_AT, 0L));
     }
 
@@ -88,6 +83,6 @@ final class TurnProtocolUiState {
                 || "COMPLETE".equals(phase) || "ERROR".equals(phase);
     }
 
-    private static Snapshot empty() { return new Snapshot(false, 0, "", "", 0L); }
+    private static Snapshot empty() { return new Snapshot(false, "", "", 0L); }
     private static String safe(String value) { return value == null ? "" : value; }
 }

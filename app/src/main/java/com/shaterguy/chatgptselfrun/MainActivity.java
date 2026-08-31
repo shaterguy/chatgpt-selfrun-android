@@ -210,21 +210,17 @@ public final class MainActivity extends Activity {
 
         statusPill.setText(TurnProtocolUiState.pillFor(displayStatus));
         currentStatus.setText(displayStatus);
-        String meta = store.mode() + " · " + prefs + " · SelfRun Turn " + store.turn();
-        if (protocol.present) {
-            meta += "\nChatGPT Turn " + protocol.sequence + " · " + protocol.phase;
-        }
-        if (!store.lastErrorCode().isEmpty()) {
-            meta += "\n오류  " + errorSummary();
-        }
+        String meta = store.mode() + " · " + prefs;
+        if (protocol.present) meta += "\nChatGPT 응답 상태  " + protocol.phase;
+        if (!store.lastErrorCode().isEmpty()) meta += "\n오류  " + errorSummary();
         runMeta.setText(meta);
         technicalDetails.setText("Run ID  " + runId
                 + "\nconversation  " + dash(store.conversationUrl())
                 + "\n내부 phase  " + dash(store.phase())
-                + "\n턴 프로토콜 phase  " + (protocol.present ? protocol.phase : "-")
-                + "\n턴 프로토콜 event  " + (protocol.present ? protocol.stage : "-")
+                + "\n응답 프로토콜 phase  " + (protocol.present ? protocol.phase : "-")
+                + "\n응답 프로토콜 event  " + (protocol.present ? protocol.stage : "-")
                 + "\nDrive 문서  " + dash(store.turnDocumentUrl())
-                + "\nDrive signal cursor  " + store.driveSignalCursor()
+                + "\n마지막 인식 signal document ID  " + dash(DriveSignalDocumentIdentity.latestRecognizedSignalId(this))
                 + "\n마지막 Drive signal  " + dash(store.lastDriveSignalType())
                 + "\n마지막 오류  " + errorSummary());
 
@@ -247,10 +243,10 @@ public final class MainActivity extends Activity {
         if (SelfRunStore.PHASE_DONE.equals(phase)) return "작업 완료";
         if (SelfRunStore.PHASE_IDLE.equals(phase)) return "실행 종료";
         if (!store.lastErrorCode().isEmpty()) return "오류 확인 필요";
-        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)) return "답변 완료 · 차기 턴 대기";
+        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)) return "답변 완료 · 새 Drive 신호 확인 중";
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
-                || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "차기 턴 설정 중";
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "차기 턴 전송 중";
+                || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "다음 요청 설정 중";
+        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "CONTINUE 전송 중";
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) {
             String live = protocol.headline();
             return live.isEmpty() ? "응답 상태 확인 중" : live;
@@ -258,12 +254,12 @@ public final class MainActivity extends Activity {
         if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) {
             String live = protocol.headline();
             if (!live.isEmpty()) return live;
-            return "첫 턴 전송 중";
+            return "첫 요청 전송 중";
         }
         if (SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)
-                || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)) return "첫 턴 설정 중";
+                || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)) return "첫 요청 설정 중";
         if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)) return "ChatGPT 연결 준비 중";
-        if (SelfRunStore.PHASE_RESUME_BASELINE.equals(phase)) return "재개 상태 확인 중";
+        if (SelfRunStore.PHASE_RESUME_BASELINE.equals(phase)) return "재개 · 새 Drive 신호 확인 중";
         if (SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)
                 || SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)
                 || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
@@ -298,13 +294,13 @@ public final class MainActivity extends Activity {
         if (runId.isEmpty()) {
             nextInputStatus.setText("");
         } else if (immediateInputInFlight) {
-            nextInputStatus.setText("즉시 강제입력 가능 여부를 확인 중입니다. 전송할 수 없으면 차기턴으로 예약합니다.");
+            nextInputStatus.setText("즉시 강제입력 가능 여부를 확인 중입니다. 전송할 수 없으면 다음 요청으로 예약합니다.");
         } else if (editable && stored.isEmpty()) {
-            nextInputStatus.setText("차기턴 예약 또는 현재 응답에 즉시 강제입력을 사용할 수 있습니다.");
+            nextInputStatus.setText("다음 요청 예약 또는 현재 응답에 즉시 강제입력을 사용할 수 있습니다.");
         } else if (editable) {
-            nextInputStatus.setText("다음 턴에 예약됨 · 즉시 강제입력을 선택하면 현재 입력을 먼저 시도합니다.");
+            nextInputStatus.setText("다음 요청에 예약됨 · 즉시 강제입력을 선택하면 현재 입력을 먼저 시도합니다.");
         } else if (locked) {
-            nextInputStatus.setText("다음 턴 제출이 시작되어 현재 예약 입력은 잠겼습니다.");
+            nextInputStatus.setText("다음 요청 제출이 시작되어 현재 예약 입력은 잠겼습니다.");
         } else {
             nextInputStatus.setText("현재 단계에서는 사용자 입력을 예약할 수 없습니다.");
         }
@@ -332,7 +328,7 @@ public final class MainActivity extends Activity {
             if (UserImmediateInputCoordinator.OUTCOME_SENT.equals(result.outcome)) {
                 message = "현재 응답에 즉시 강제입력했습니다.";
             } else if (UserImmediateInputCoordinator.OUTCOME_DEFERRED.equals(result.outcome)) {
-                message = "즉시 전송할 수 없어 차기턴 입력으로 예약했습니다.";
+                message = "즉시 전송할 수 없어 다음 요청 입력으로 예약했습니다.";
             } else {
                 message = "강제입력을 안전하게 확정하지 못했습니다. 로그를 확인하세요.";
             }
@@ -344,25 +340,25 @@ public final class MainActivity extends Activity {
     private void saveNextInput() {
         String runId = store.runId();
         if (!UserNextInputStore.save(runId, nextInputEditor.getText().toString())) {
-            Toast.makeText(this, "차기 턴 제출이 이미 시작되었거나 현재 입력할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "다음 요청 제출이 이미 시작되었거나 현재 입력할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
             refreshCurrent();
             return;
         }
         nextInputEditor.clearFocus();
-        Toast.makeText(this, "차기 턴 입력을 저장했습니다.", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "다음 요청 입력을 저장했습니다.", Toast.LENGTH_SHORT).show();
         refreshCurrent();
     }
 
     private void deleteNextInput() {
         String runId = store.runId();
         if (!UserNextInputStore.delete(runId)) {
-            Toast.makeText(this, "차기 턴 제출이 이미 시작되었거나 현재 삭제할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "다음 요청 제출이 이미 시작되었거나 현재 삭제할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
             refreshCurrent();
             return;
         }
         nextInputEditor.setText("");
         nextInputEditor.clearFocus();
-        Toast.makeText(this, "차기 턴 입력을 삭제했습니다.", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "다음 요청 입력을 삭제했습니다.", Toast.LENGTH_SHORT).show();
         refreshCurrent();
     }
 

@@ -9,14 +9,18 @@ import java.util.regex.Pattern;
 final class DriveSignalDocumentTransport {
     static final String NEXT_INPUT_BODY_MARKER = "NEXT_INPUT_B64URL=BODY";
     private static final String NEXT_INPUT_FIELD_PREFIX = "NEXT_INPUT_B64URL=";
-    private static final String VALIDATION_TOKEN = "QQ"; // canonical Base64URL for UTF-8 "A"
+    private static final String VALIDATION_TOKEN = "QQ";
     private static final Pattern BODY_LINE = Pattern.compile("^NEXT_INPUT_B64URL=([A-Za-z0-9_-]+)$");
 
     private DriveSignalDocumentTransport() {}
 
     static boolean isCandidate(DriveApiClient.Metadata metadata, String runId, String parentId) {
-        return metadata != null && isCandidateFields(metadata.id, metadata.name, metadata.mimeType,
+        boolean candidate = metadata != null && isCandidateFields(metadata.id, metadata.name, metadata.mimeType,
                 metadata.parentId, metadata.trashed, metadata.shared, metadata.createdTime, runId, parentId);
+        if (candidate) {
+            DriveSignalDocumentIdentity.observeCandidate(metadata.id, metadata.name, metadata.createdTime, runId);
+        }
+        return candidate;
     }
 
     static boolean isCandidateFields(String id, String name, String mimeType, String parentId,
@@ -45,9 +49,7 @@ final class DriveSignalDocumentTransport {
     }
 
     static String materialize(String title, String body, String runId) {
-        if (!isCanonicalTitle(title, runId)) {
-            throw new IllegalArgumentException("invalid signal document title");
-        }
+        if (!isCanonicalTitle(title, runId)) throw new IllegalArgumentException("invalid signal document title");
         if (!needsBodyRead(title)) return title;
         String normalized = normalizeBody(body);
         Matcher matcher = BODY_LINE.matcher(normalized);
@@ -76,6 +78,7 @@ final class DriveSignalDocumentTransport {
     }
 
     static Comparator<DriveApiClient.Metadata> comparator(String runId) {
+        DriveSignalDocumentIdentity.seal(runId);
         return (left, right) -> compareFields(left.createdTime, left.name, left.id,
                 right.createdTime, right.name, right.id, runId);
     }
@@ -98,7 +101,7 @@ final class DriveSignalDocumentTransport {
     }
 
     private static DriveSignalParser.Event canonicalEvent(String logical, String runId, String mode) {
-        DriveSignalParser.Scan scan = DriveSignalParser.scan(logical, runId, 0, mode);
+        DriveSignalParser.Scan scan = DriveSignalParser.scanWithoutDocumentIdentity(logical, runId, 0, mode);
         if (scan.totalCount != 1 || scan.latestCanonical == null
                 || !logical.equals(scan.latestCanonical.raw)) return null;
         return scan.latestCanonical;

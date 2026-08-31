@@ -17,9 +17,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
-/** Executes the protocol observer inside Android WebView with captured Chat, Work, and Pro ordering. */
+/** Executes the response protocol observer inside Android WebView. */
 @RunWith(AndroidJUnit4.class)
 public final class TurnProtocolStateWebViewTest {
     private static final String ORIGIN = "https://chatgpt.com/";
@@ -28,142 +29,109 @@ public final class TurnProtocolStateWebViewTest {
     @Test public void chatAndWorkUseCanonicalPostVisibleAnswerAndSemanticComplete() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            load(scenario, web);
-            install(scenario, web);
+            load(scenario, web); install(scenario, web);
 
-            assertPhase("IDLE", request(scenario, web, "POST",
-                    "/backend-api/f/conversation/prepare"));
-            assertPhase("IDLE", request(scenario, web, "POST",
-                    "/backend-api/conversation/init"));
-            assertPhase("IDLE", request(scenario, web, "POST",
-                    "/backend-api/f/responses"));
+            assertPhase("IDLE", request(scenario, web, "POST", "/backend-api/f/conversation/prepare"));
+            assertPhase("IDLE", request(scenario, web, "POST", "/backend-api/f/responses"));
 
-            JSONObject chatStart = request(scenario, web, "POST",
-                    "/backend-api/f/conversation");
+            JSONObject chatStart = request(scenario, web, "POST", "/backend-api/f/conversation");
             assertPhase("THINKING", chatStart);
-            assertEquals(1, chatStart.getInt("turnSequence"));
-            assertEquals("FIRST_TURN", chatStart.getString("turnKind"));
+            String firstIdentity = chatStart.getString("requestIdentity");
+            assertFalse(firstIdentity.isEmpty());
+            assertFalse(chatStart.has("turnSequence"));
+            assertFalse(chatStart.has("turnKind"));
 
-            JSONObject firstMetadata = semantic(scenario, web, new JSONObject()
-                    .put("type", "server_ste_metadata")
-                    .put("conversation_id", CONVERSATION_ID)
-                    .put("metadata", new JSONObject().put("is_first_turn", true)));
-            assertTrue(firstMetadata.getBoolean("serverFirstTurn"));
-            assertFalse(firstMetadata.getBoolean("firstTurnMismatch"));
-
-            assertPhase("THINKING", semantic(scenario, web, marker("user_visible_token", "first")));
-            JSONObject chatAnswering = semantic(scenario, web, marker("final_channel_token", "first"));
+            assertPhase("THINKING", semanticForIdentity(scenario, web, firstIdentity,
+                    marker("user_visible_token", "first")));
+            JSONObject chatAnswering = semanticForIdentity(scenario, web, firstIdentity,
+                    marker("final_channel_token", "first"));
             assertPhase("ANSWERING", chatAnswering);
             assertTrue(chatAnswering.getBoolean("sawVisibleAnswer"));
-            assertPhase("ANSWERING", semantic(scenario, web, marker("last_token", "last")));
-
-            JSONObject chatComplete = semantic(scenario, web, new JSONObject()
-                    .put("type", "message_stream_complete")
-                    .put("conversation_id", CONVERSATION_ID));
+            JSONObject chatComplete = semanticForIdentity(scenario, web, firstIdentity,
+                    new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID));
             assertPhase("COMPLETE", chatComplete);
-            assertTrue(chatComplete.getBoolean("sawStreamComplete"));
 
-            JSONObject workStart = request(scenario, web, "POST",
-                    "/backend-api/f/conversation");
+            JSONObject workStart = request(scenario, web, "POST", "/backend-api/f/conversation");
             assertPhase("THINKING", workStart);
-            assertEquals(2, workStart.getInt("turnSequence"));
-            assertEquals("FOLLOWUP_TURN", workStart.getString("turnKind"));
-
-            JSONObject secondMetadata = socketEvent(scenario, web, "work-turn-2", new JSONObject()
-                    .put("type", "server_ste_metadata")
-                    .put("metadata", new JSONObject().put("is_first_turn", false)));
-            assertFalse(secondMetadata.getBoolean("serverFirstTurn"));
-            assertFalse(secondMetadata.getBoolean("firstTurnMismatch"));
-            assertPhase("THINKING", socketEvent(scenario, web, "work-turn-2",
-                    marker("user_visible_token", "first")));
-            assertPhase("THINKING", socketEvent(scenario, web, "work-turn-2",
+            assertNotEquals(firstIdentity, workStart.getString("requestIdentity"));
+            assertPhase("THINKING", socketEvent(scenario, web, "work-request",
                     marker("cot_token", "first")));
-            assertPhase("ANSWERING", socketEvent(scenario, web, "work-turn-2",
+            assertPhase("ANSWERING", socketEvent(scenario, web, "work-request",
                     marker("final_channel_token", "first")));
-
-            JSONObject outerDoneBeforeSemanticComplete = socketOuterDone(scenario, web, "work-turn-2");
-            assertPhase("ANSWERING", outerDoneBeforeSemanticComplete);
-            assertFalse(outerDoneBeforeSemanticComplete.getBoolean("sawStreamComplete"));
-
-            JSONObject workComplete = socketEvent(scenario, web, "work-turn-2", new JSONObject()
-                    .put("type", "message_stream_complete"));
-            assertPhase("COMPLETE", workComplete);
-            assertPhase("COMPLETE", socketOuterDone(scenario, web, "work-turn-2"));
+            JSONObject outerDone = socketOuterDone(scenario, web, "work-request");
+            assertPhase("ANSWERING", outerDone);
+            assertFalse(outerDone.getBoolean("sawStreamComplete"));
+            assertPhase("COMPLETE", socketEvent(scenario, web, "work-request",
+                    new JSONObject().put("type", "message_stream_complete")));
         }
     }
 
-    @Test public void proIgnoresHandoffAndInnerDoneThenUsesVisibleAnswerForBothTurns() throws Exception {
+    @Test public void proIgnoresHandoffAndInnerDoneThenUsesVisibleAnswer() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            load(scenario, web);
-            install(scenario, web);
+            load(scenario, web); install(scenario, web);
 
-            JSONObject firstStart = request(scenario, web, "POST",
-                    "/backend-api/f/conversation");
-            assertPhase("THINKING", firstStart);
-            assertEquals("FIRST_TURN", firstStart.getString("turnKind"));
+            assertPhase("THINKING", request(scenario, web, "POST", "/backend-api/f/conversation"));
+            assertPhase("THINKING", semantic(scenario, web, new JSONObject()
+                    .put("type", "stream_handoff").put("conversation_id", CONVERSATION_ID)
+                    .put("turn_id", "pro-request")));
+            assertPhase("THINKING", socketEncoded(scenario, web, "pro-request", "data: [DONE]\n\n"));
 
-            JSONObject handoff = semantic(scenario, web, new JSONObject()
-                    .put("type", "stream_handoff")
-                    .put("conversation_id", CONVERSATION_ID)
-                    .put("turn_id", "pro-turn-1"));
-            assertPhase("THINKING", handoff);
-            assertPhase("THINKING", socketEncoded(scenario, web, "pro-turn-1", "data: [DONE]\n\n"));
-
-            JSONObject emptyFinalMessage = new JSONObject()
+            JSONObject visible = socketEvent(scenario, web, "pro-request", new JSONObject()
                     .put("type", "message_start")
-                    .put("message", finalAssistant("pro-message-1", ""));
-            JSONObject firstVisibleAnswer = socketEvent(scenario, web, "pro-turn-1", emptyFinalMessage);
-            assertPhase("ANSWERING", firstVisibleAnswer);
-            assertTrue(firstVisibleAnswer.getBoolean("sawVisibleAnswer"));
-            assertFalse(firstVisibleAnswer.getBoolean("sawAssistantFinalText"));
+                    .put("message", finalAssistant("pro-message", "Pro 답변")));
+            assertPhase("ANSWERING", visible);
+            assertTrue(visible.getBoolean("sawVisibleAnswer"));
+            assertTrue(visible.getBoolean("sawAssistantFinalText"));
+            assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-request"));
+            assertPhase("COMPLETE", socketEvent(scenario, web, "pro-request",
+                    new JSONObject().put("type", "message_stream_complete")));
+        }
+    }
 
-            JSONObject firstText = socketEvent(scenario, web, "pro-turn-1", new JSONObject()
-                    .put("p", "/message/content/parts/0")
-                    .put("v", "첫 Pro 답변"));
-            assertPhase("ANSWERING", firstText);
-            assertTrue(firstText.getBoolean("sawAssistantFinalText"));
+    @Test public void newestCanonicalPostSupersedesActiveResponseWithoutTurnNumbers() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web); install(scenario, web);
 
-            JSONObject firstOuterDone = socketOuterDone(scenario, web, "pro-turn-1");
-            assertPhase("ANSWERING", firstOuterDone);
-            assertFalse(firstOuterDone.getBoolean("sawStreamComplete"));
+            JSONObject first = request(scenario, web, "POST", "/backend-api/f/conversation");
+            String oldIdentity = first.getString("requestIdentity");
+            assertPhase("THINKING", socketEvent(scenario, web, "old-work-id",
+                    marker("cot_token", "first")));
 
-            JSONObject firstComplete = socketEvent(scenario, web, "pro-turn-1", new JSONObject()
-                    .put("type", "message_stream_complete"));
-            assertPhase("COMPLETE", firstComplete);
-            assertPhase("COMPLETE", socketOuterDone(scenario, web, "pro-turn-1"));
+            JSONObject replacement = request(scenario, web, "POST", "/backend-api/f/conversation");
+            String newIdentity = replacement.getString("requestIdentity");
+            assertPhase("THINKING", replacement);
+            assertNotEquals(oldIdentity, newIdentity);
 
-            JSONObject followupStart = request(scenario, web, "POST",
-                    "/backend-api/f/conversation");
-            assertPhase("THINKING", followupStart);
-            assertEquals(2, followupStart.getInt("turnSequence"));
-            assertEquals("FOLLOWUP_TURN", followupStart.getString("turnKind"));
-            assertPhase("THINKING", socketEncoded(scenario, web, "pro-turn-2", "data: [DONE]\n\n"));
+            JSONObject staleFetch = semanticForIdentity(scenario, web, oldIdentity,
+                    marker("final_channel_token", "first"));
+            assertPhase("THINKING", staleFetch);
+            assertFalse(staleFetch.getBoolean("sawVisibleAnswer"));
 
-            JSONObject followupVisibleAnswer = socketEvent(scenario, web, "pro-turn-2", new JSONObject()
-                    .put("type", "message_start")
-                    .put("message", finalAssistant("pro-message-2", "후속 Pro 답변")));
-            assertPhase("ANSWERING", followupVisibleAnswer);
-            assertTrue(followupVisibleAnswer.getBoolean("sawVisibleAnswer"));
-            assertTrue(followupVisibleAnswer.getBoolean("sawAssistantFinalText"));
+            JSONObject staleSocket = socketEvent(scenario, web, "old-work-id",
+                    marker("final_channel_token", "first"));
+            assertPhase("THINKING", staleSocket);
+            assertFalse(staleSocket.getBoolean("sawVisibleAnswer"));
 
-            JSONObject followupComplete = socketEvent(scenario, web, "pro-turn-2", new JSONObject()
-                    .put("type", "message_stream_complete"));
-            assertPhase("COMPLETE", followupComplete);
+            JSONObject replacementAnswer = semanticForIdentity(scenario, web, newIdentity,
+                    marker("final_channel_token", "first"));
+            assertPhase("ANSWERING", replacementAnswer);
+            assertTrue(replacementAnswer.getBoolean("sawVisibleAnswer"));
+            assertPhase("COMPLETE", semanticForIdentity(scenario, web, newIdentity,
+                    new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID)));
         }
     }
 
     private static JSONObject marker(String marker, String event) throws Exception {
-        return new JSONObject()
-                .put("type", "message_marker")
-                .put("marker", marker)
-                .put("event", event)
-                .put("conversation_id", CONVERSATION_ID);
+        return new JSONObject().put("type", "message_marker").put("marker", marker)
+                .put("event", event).put("conversation_id", CONVERSATION_ID);
     }
 
     private static JSONObject finalAssistant(String id, String text) throws Exception {
-        return new JSONObject()
-                .put("id", id)
+        return new JSONObject().put("id", id)
                 .put("author", new JSONObject().put("role", "assistant"))
                 .put("channel", "final")
                 .put("content", new JSONObject().put("parts",
@@ -171,8 +139,7 @@ public final class TurnProtocolStateWebViewTest {
     }
 
     private static JSONObject request(ActivityScenario<SelfRunNewActivity> scenario,
-                                      AtomicReference<WebView> web, String method, String path)
-            throws Exception {
+                                      AtomicReference<WebView> web, String method, String path) throws Exception {
         return state(scenario, web, "window.__selfRunTurnProtocol.observeRequest("
                 + JSONObject.quote(method) + "," + JSONObject.quote(ORIGIN.substring(0, ORIGIN.length() - 1) + path)
                 + ")");
@@ -180,9 +147,16 @@ public final class TurnProtocolStateWebViewTest {
 
     private static JSONObject semantic(ActivityScenario<SelfRunNewActivity> scenario,
                                        AtomicReference<WebView> web, JSONObject event) throws Exception {
-        String encoded = "data: " + event + "\n\n";
         return state(scenario, web, "window.__selfRunTurnProtocol.observeSseText("
-                + JSONObject.quote(encoded) + ",'fixture',{})");
+                + JSONObject.quote("data: " + event + "\n\n") + ",'fixture',{})");
+    }
+
+    private static JSONObject semanticForIdentity(ActivityScenario<SelfRunNewActivity> scenario,
+                                                  AtomicReference<WebView> web, String identity,
+                                                  JSONObject event) throws Exception {
+        String context = new JSONObject().put("requestIdentity", identity).toString();
+        return state(scenario, web, "window.__selfRunTurnProtocol.observeSseText("
+                + JSONObject.quote("data: " + event + "\n\n") + ",'fixture'," + context + ")");
     }
 
     private static JSONObject socketEvent(ActivityScenario<SelfRunNewActivity> scenario,
@@ -194,26 +168,20 @@ public final class TurnProtocolStateWebViewTest {
     private static JSONObject socketEncoded(ActivityScenario<SelfRunNewActivity> scenario,
                                             AtomicReference<WebView> web, String turnId,
                                             String encodedItem) throws Exception {
-        JSONObject payload = new JSONObject()
-                .put("type", "stream-item")
-                .put("conversation_id", CONVERSATION_ID)
-                .put("turn_id", turnId)
+        JSONObject payload = new JSONObject().put("type", "stream-item")
+                .put("conversation_id", CONVERSATION_ID).put("turn_id", turnId)
                 .put("encoded_item", encodedItem);
         return socketFrame(scenario, web, payload);
     }
 
     private static JSONObject socketOuterDone(ActivityScenario<SelfRunNewActivity> scenario,
-                                              AtomicReference<WebView> web, String turnId)
-            throws Exception {
-        return socketFrame(scenario, web, new JSONObject()
-                .put("type", "done")
-                .put("conversation_id", CONVERSATION_ID)
-                .put("turn_id", turnId));
+                                              AtomicReference<WebView> web, String turnId) throws Exception {
+        return socketFrame(scenario, web, new JSONObject().put("type", "done")
+                .put("conversation_id", CONVERSATION_ID).put("turn_id", turnId));
     }
 
     private static JSONObject socketFrame(ActivityScenario<SelfRunNewActivity> scenario,
-                                          AtomicReference<WebView> web, JSONObject payload)
-            throws Exception {
+                                          AtomicReference<WebView> web, JSONObject payload) throws Exception {
         JSONObject frame = new JSONObject().put("payload", new JSONObject().put("payload", payload));
         return state(scenario, web, "window.__selfRunTurnProtocol.observeSocketFrame("
                 + JSONObject.quote(frame.toString()) + ")");
@@ -242,13 +210,11 @@ public final class TurnProtocolStateWebViewTest {
                     if (url != null && url.startsWith(ORIGIN)) loaded.countDown();
                 }
             });
-            activity.setContentView(view);
-            web.set(view);
-            view.loadDataWithBaseURL(ORIGIN,
-                    "<!doctype html><html><body>turn protocol fixture</body></html>",
+            activity.setContentView(view); web.set(view);
+            view.loadDataWithBaseURL(ORIGIN, "<!doctype html><html><body>response protocol fixture</body></html>",
                     "text/html", "UTF-8", null);
         });
-        assertTrue("Turn protocol fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+        assertTrue("Response protocol fixture did not load", loaded.await(15, TimeUnit.SECONDS));
     }
 
     private static JSONObject state(ActivityScenario<SelfRunNewActivity> scenario,
@@ -268,10 +234,9 @@ public final class TurnProtocolStateWebViewTest {
         CountDownLatch complete = new CountDownLatch(1);
         AtomicReference<String> result = new AtomicReference<>();
         scenario.onActivity(activity -> web.get().evaluateJavascript(script, value -> {
-            result.set(value);
-            complete.countDown();
+            result.set(value); complete.countDown();
         }));
-        assertTrue("Turn protocol WebView script timed out", complete.await(15, TimeUnit.SECONDS));
+        assertTrue("Response protocol WebView script timed out", complete.await(15, TimeUnit.SECONDS));
         return result.get();
     }
 }

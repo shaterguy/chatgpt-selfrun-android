@@ -11,10 +11,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class TurnProtocolObservabilityContractTest {
-    @Test public void protocolTransitionsAreExportedToRunLogAndUiState() throws Exception {
+    @Test public void protocolTransitionsAreExportedWithoutTurnOrdinalDependency() throws Exception {
         String webConfig = source("WebViewConfig.java");
         String protocol = source("ChatGptTurnProtocolScript.java");
         String bridge = source("TurnProtocolLogBridge.java");
+        String ui = source("TurnProtocolUiState.java");
 
         assertTrue(webConfig.indexOf("TurnProtocolLogBridge.install")
                 < webConfig.indexOf("ChatGptTurnProtocolScript.installDocumentStart"));
@@ -26,18 +27,16 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(protocol.contains("emitLog('complete',source)"));
         assertTrue(protocol.contains("emitLog('completion_dispatch',source)"));
         assertTrue(protocol.contains("runId:safe(state.runId)"));
-        assertTrue(protocol.contains("complete('message_stream_complete')"));
-        assertFalse(protocol.contains("complete('work_done')"));
+        assertFalse(protocol.contains("turnSequence"));
+        assertFalse(protocol.contains("turnKind"));
         assertTrue(bridge.contains("WEB_MESSAGE_LISTENER"));
         assertTrue(bridge.contains("TURN_PROTOCOL"));
-        assertTrue(bridge.contains("visible_answer"));
-        assertTrue(bridge.contains("completion_ignored"));
-        assertTrue(bridge.contains("canonical_http_"));
         assertTrue(bridge.contains("eventRunId.equals(store.runId())"));
-        assertTrue(bridge.contains("TurnProtocolUiState.record"));
-        assertTrue(bridge.contains("stage=\" + stage"));
-        assertTrue(bridge.contains("source=\" + source"));
-        assertFalse(bridge.contains("case \"message_stream_complete\", \"finished_successfully_end_turn\", \"work_done\""));
+        assertTrue(bridge.contains("TurnProtocolUiState.record(context, eventRunId, stage, phase)"));
+        assertFalse(bridge.contains("optInt(\"sequence\""));
+        assertFalse(bridge.contains("FIRST_TURN"));
+        assertFalse(ui.contains("KEY_SEQUENCE"));
+        assertFalse(ui.contains("int sequence"));
     }
 
     private static String source(String file) throws Exception {
