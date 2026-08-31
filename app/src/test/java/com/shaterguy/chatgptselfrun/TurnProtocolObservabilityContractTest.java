@@ -20,7 +20,9 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(webConfig.contains("boolean protocolObservable = TurnProtocolLogBridge.install(webView)"));
         assertTrue(webConfig.indexOf("TurnProtocolLogBridge.install")
                 < webConfig.indexOf("ChatGptTurnProtocolScript.installDocumentStart"));
-        assertTrue(webConfig.contains("if (protocolObservable) ChatGptTurnProtocolScript.installDocumentStart(webView)"));
+        assertTrue(webConfig.contains("if (protocolObservable) {"));
+        assertTrue(webConfig.contains("ChatGptTurnProtocolScript.installDocumentStart(webView);"));
+        assertTrue(webConfig.contains("WorkTurnProtocolIngressScript.installDocumentStart(webView);"));
         assertTrue(protocol.contains("emitLog('turn_request','canonical_post')"));
         assertTrue(protocol.contains("noteVisibleAnswer('final_channel')"));
         assertTrue(protocol.contains("noteVisibleAnswer('visible_answer')"));
@@ -56,7 +58,9 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(bridge.contains("boolean documentStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)"));
         assertTrue(bridge.contains("if (!messageBridge || !documentStart)"));
         assertTrue(bridge.contains("return false;"));
-        assertTrue(webConfig.contains("if (protocolObservable) ChatGptTurnProtocolScript.installDocumentStart(webView)"));
+        assertTrue(webConfig.contains("if (protocolObservable) {"));
+        assertTrue(webConfig.contains("ChatGptTurnProtocolScript.installDocumentStart(webView);"));
+        assertTrue(webConfig.contains("WorkTurnProtocolIngressScript.installDocumentStart(webView);"));
     }
 
     private static String source(String file) throws Exception {
