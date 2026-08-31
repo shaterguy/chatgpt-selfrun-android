@@ -1,6 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
-/** Reduces hidden WebView raster work while preserving the same logical CSS viewport. */
+/** Reduces hidden WebView work while preserving the same logical CSS viewport and session. */
 final class HeadlessWebViewPowerPolicy {
     static final int MAX_RASTER_DENSITY_DPI = 320;
 
@@ -18,6 +18,14 @@ final class HeadlessWebViewPowerPolicy {
                 Math.max(1, (int) Math.round(safeWidth * scale)),
                 Math.max(1, (int) Math.round(safeHeight * scale)),
                 MAX_RASTER_DENSITY_DPI);
+    }
+
+    static boolean isCompletionObserverHealthcheck(String script) {
+        return script != null && script.contains("return armCompletionObserver(");
+    }
+
+    static boolean isObserverArmedResult(String result) {
+        return result != null && result.contains("OBSERVER_ARMED");
     }
 
     static final class RasterSize {
