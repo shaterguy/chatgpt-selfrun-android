@@ -1,0 +1,80 @@
+name: Publish verified SelfRun Drive TEST APK direct
+run-name: Publish verified Drive TEST APK (${{ github.ref_name }})
+
+on:
+  push:
+    branches:
+      - 'delivery/selfrun-drive-v2.2.1-dev14-fb195d1'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish-direct-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download verified canonical TEST artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: chatgpt-selfrun-drive-test-build
+          path: verified-candidate
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33363931153
+
+      - name: Verify source provenance and prepare identical direct APK
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA='fb195d1d56373f2525e465d88f357cfe25f8258b'
+          VERSION_NAME='2.2.1-dev14'
+          APK="verified-candidate/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
+          SUM_FILE='verified-candidate/SHA256SUMS.txt'
+          SOURCE_FILE='verified-candidate/SOURCE_COMMIT.txt'
+          test -s "$APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$SOURCE_SHA" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          mkdir -p direct-delivery
+          DIRECT="direct-delivery/chatgpt-selfrun-drive-test-v${VERSION_NAME}-${SOURCE_SHA}.apk"
+          cp "$APK" "$DIRECT"
+          cmp "$APK" "$DIRECT"
+          DIRECT_SHA="$(sha256sum "$DIRECT" | awk '{print $1}')"
+          [[ "$DIRECT_SHA" == "$EXPECTED_SHA" ]]
+          echo "apk=$DIRECT" >> "$GITHUB_OUTPUT"
+          echo "sha256=$DIRECT_SHA" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "DIRECT_APK_SHA256=$DIRECT_SHA"
+          echo "DIRECT_SOURCE_SHA=$SOURCE_SHA"
+
+      - name: Upload direct APK without archive
+        id: direct
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: ${{ steps.prepare.outputs.apk }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify direct artifact identity output
+        shell: bash
+        env:
+          DIRECT_ARTIFACT_ID: ${{ steps.direct.outputs.artifact-id }}
+          DIRECT_ARTIFACT_URL: ${{ steps.direct.outputs.artifact-url }}
+          DIRECT_ARTIFACT_DIGEST: ${{ steps.direct.outputs.artifact-digest }}
+          DIRECT_APK_SHA256: ${{ steps.prepare.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$DIRECT_ARTIFACT_ID"
+          test -n "$DIRECT_ARTIFACT_URL"
+          test -n "$DIRECT_ARTIFACT_DIGEST"
+          [[ "$DIRECT_ARTIFACT_DIGEST" == "sha256:$DIRECT_APK_SHA256" ]]
+          echo "DIRECT_ARTIFACT_ID=$DIRECT_ARTIFACT_ID"
+          echo "DIRECT_ARTIFACT_URL=$DIRECT_ARTIFACT_URL"
+          echo "DIRECT_ARTIFACT_DIGEST=$DIRECT_ARTIFACT_DIGEST"
