@@ -32,6 +32,8 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.ProEarlyCompleteFallbackWebViewTest";
     private static final String DRIVE_SIGNAL_IDENTITY_TEST =
             "com.shaterguy.chatgptselfrun.DriveSignalDocumentIdentityAndroidTest";
+    private static final String HEADLESS_WEBVIEW_POWER_TEST =
+            "com.shaterguy.chatgptselfrun.HeadlessWebViewPowerAndroidTest";
     private static final String SUBMISSION_WEBVIEW_METHODS = String.join(",",
             SUBMISSION_WEBVIEW_TEST + "#continuationClassifierIgnoresAStopOutsideTheComposerForm",
             SUBMISSION_WEBVIEW_TEST + "#continuationClassifierStillBlocksAStopInsideTheComposerForm",
@@ -55,6 +57,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             appendRequiredClass(effective, WORK_TURN_PROTOCOL_INGRESS_TEST);
             appendRequiredClass(effective, PRO_EARLY_COMPLETE_TEST);
             appendRequiredClass(effective, DRIVE_SIGNAL_IDENTITY_TEST);
+            appendRequiredClass(effective, HEADLESS_WEBVIEW_POWER_TEST);
             super.onCreate(effective);
             return;
         }
@@ -69,6 +72,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
         appendRequiredClass(effective, WORK_TURN_PROTOCOL_INGRESS_TEST);
         appendRequiredClass(effective, PRO_EARLY_COMPLETE_TEST);
         appendRequiredClass(effective, DRIVE_SIGNAL_IDENTITY_TEST);
+        appendRequiredClass(effective, HEADLESS_WEBVIEW_POWER_TEST);
         super.onCreate(effective);
     }
 
