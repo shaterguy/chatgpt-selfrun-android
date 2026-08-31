@@ -56,7 +56,9 @@ public final class UserNextInputLateEditPolicyTest {
         String dom = src("SelfRunContinuationDom.java");
         String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
         assertTrue(click.contains("UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)"));
-        assertTrue(click.contains("if (!plan.clickAllowed) return preflightPreparedDriveTurn"));
+        assertTrue(click.contains("if (!plan.clickAllowed) {"));
+        assertTrue(click.contains("return preflightPreparedDriveTurn("));
+        assertTrue(click.contains("preferSendWhenStopCoexists);"));
         assertTrue(click.contains("c.send.click()"));
         assertTrue(click.contains("return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED"));
     }

@@ -41,9 +41,14 @@ public final class UserImmediateInputPolicyTest {
         String host = src("HeadlessWebViewHost.java");
         String activity = src("MainActivity.java");
 
-        int existingStop = existingDom.indexOf("const stop=controls.find(isStop);if(stop)return");
+        int existingStop = existingDom.indexOf("const stop=controls.find(isStop);");
         int existingSend = existingDom.indexOf("const send=calibrated", existingStop);
-        assertTrue(existingStop >= 0 && existingSend > existingStop);
+        int strictStopGate = existingDom.indexOf(
+                "if(stop&&!(preferSendWhenStopCoexists&&send))", existingSend);
+        assertTrue(existingStop >= 0 && existingSend > existingStop
+                && strictStopGate > existingSend);
+        assertTrue(existingDom.contains(
+                "const controlState=(preferSendWhenStopCoexists=false)=>"));
         assertTrue(immediateDom.contains("const runningStop=()=>"));
         assertTrue(immediateDom.contains("if(!runningStop())"));
         assertTrue(immediateDom.contains("const forceSend=()=>"));
