@@ -28,8 +28,10 @@ public final class TurnCompletionWatchdogPolicyTest {
         String observer = section(source("SelfRunContinuationDom.java"),
                 "private static String completionObserver", "private static String conversationGuard");
         assertTrue(observer.contains("const noteStop="));
-        assertTrue(observer.contains("if(current.state==='\" + STOP + \"'){noteStop();return;}"));
-        assertTrue(observer.contains("if(confirmed.state==='\" + STOP + \"'){noteStop();return;}"));
+        assertTrue(observer.contains(
+                "if(current.state==='\" + STOP + \"'){if(staleCompletedStop()){resetIdle();return;}noteStop();return;}"));
+        assertTrue(observer.contains(
+                "if(confirmed.state==='\" + STOP + \"'){if(staleCompletedStop()){resetIdle();return;}noteStop();return;}"));
         assertTrue(observer.indexOf("const confirmed=controlState()")
                 < observer.indexOf("location.href=observerCallback"));
     }
