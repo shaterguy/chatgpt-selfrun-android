@@ -57,11 +57,12 @@ public final class LoginActivity extends Activity {
         LinearLayout heading = new LinearLayout(this);
         heading.setOrientation(LinearLayout.VERTICAL);
         heading.addView(Ui.topBar(this, "ChatGPT 세션 · 프로젝트", "프로젝트를 직접 열어 등록합니다",
-                Ui.textButton(this, "뒤로", v -> navigateBack())));
+                Ui.textButton(this, "닫기", v -> finish())));
         status = Ui.muted(this, "프로젝트 방문 대기");
         status.setTextIsSelectable(false);
         heading.addView(status);
         heading.addView(Ui.actionStrip(this,
+                Ui.textButton(this, "뒤로", v -> navigateBack()),
                 Ui.textButton(this, "새로고침", v -> webView.reload()),
                 Ui.outlinedButton(this, "ChatGPT 홈", v -> webView.loadUrl("https://chatgpt.com/"))));
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(
