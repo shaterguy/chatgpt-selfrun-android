@@ -67,6 +67,6 @@ public final class HeadlessDisplayOutputWiringTest {
         if (!Files.exists(path)) {
             path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
         }
-        return Files.readString(path, StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
