@@ -250,23 +250,14 @@ final class WorkTurnProtocolIngressScript {
                   }
                   const decodeFrame=(frame,source)=>{
                     const p=protocol();if(!p)return false;encodedItemBudget=0;
-                    const before=(()=>{try{return p.snapshot?.()||{};}catch(_){return{};}})();
-                    try{
-                      const legacy=typeof p.observeWorkFrame==='function'?p.observeWorkFrame:(typeof p.observeSocketFrame==='function'?p.observeSocketFrame:null);
-                      if(legacy){legacy.call(p,frame);count('forwardedFrames');}
-                    }catch(_){count('decodeErrors');diagnostic('WORK_PROTOCOL_DECODE_ERROR',{source,reason:'legacy_forward_failed'});}
-                    const afterLegacy=(()=>{try{return p.snapshot?.()||{};}catch(_){return{};}})();
-                    if(safe(before.phase)&&safe(afterLegacy.phase)&&safe(before.phase)!==safe(afterLegacy.phase)){
-                      diagnostic('WORK_PROTOCOL_TRANSITION',{source,decoder:'legacy',transition:safe(before.phase)+'>'+safe(afterLegacy.phase),completion:safe(afterLegacy.completionSource||'')});
-                    }
                     let root=frame;
                     if(typeof frame==='string'){
-                      if(looksSse(frame)){processSse(frame,source,{},'outer-sse');return true;}
+                      if(looksSse(frame)){processSse(frame,source,{},'outer-sse');count('forwardedFrames');return true;}
                       try{root=JSON.parse(frame);}catch(_){count('decodeErrors');diagnostic('WORK_PROTOCOL_DECODE_ERROR',{source,reason:'outer_json_parse'});return false;}
                     }
                     if(!root||typeof root!=='object')return false;
                     const topKeys=Object.keys(root).filter(key=>/^[A-Za-z0-9_.:/-]{1,80}$/.test(key)).slice(0,10).join(',');
-                    visitDecoded(root,source,{},'outer-json',0);
+                    visitDecoded(root,source,{},'outer-json',0);count('forwardedFrames');
                     diagnostic('WORK_PROTOCOL_FRAME',{source,topKeys,encodedItemFound:encodedItemBudget>0});
                     return true;
                   };
@@ -292,7 +283,7 @@ final class WorkTurnProtocolIngressScript {
                       try{socket.addEventListener('message',event=>{count('webSocketMessages');void observeTransportData(event.data,'work-websocket');});}catch(_){}
                       return socket;
                     };
-                    WrappedWebSocket.prototype=NativeWebSocket.prototype;try{Object.setPrototypeOf(WrappedWebSocket,NativeWebSocket);Object.defineProperty(WrappedWebSocket,'name',{value:NativeWebSocket.name});Object.defineProperty(WrappedWebSocket,'length',{value:NativeWebSocket.length});WrappedWebSocket.toString=NativeWebSocket.toString.bind(NativeWebSocket);}catch(_){}
+                    WrappedWebSocket.prototype=NativeWebSocket.prototype;try{Object.setPrototypeOf(WrappedWebSocket,NativeWebSocket);Object.defineProperty(WrappedWebSocket,'name',{value:NativeWebSocket.name});Object.defineProperty(wrappedFetch,'length',{value:nativeFetch.length});WrappedWebSocket.toString=NativeWebSocket.toString.bind(NativeWebSocket);}catch(_){}
                     window.WebSocket=WrappedWebSocket;transportAvailability.websocket=true;
                   }
                   const NativeWorker=window.Worker;
