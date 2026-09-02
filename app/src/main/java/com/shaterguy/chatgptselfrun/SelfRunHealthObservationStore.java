@@ -78,6 +78,10 @@ final class SelfRunHealthObservationStore {
         } catch (Throwable ignored) { }
     }
 
+    void observeNetwork(boolean known, boolean validated) {
+        observeNetwork(known, validated, System.currentTimeMillis());
+    }
+
     void observeNetwork(boolean known, boolean validated, long observedAt) {
         if (!enabled()) return;
         try {

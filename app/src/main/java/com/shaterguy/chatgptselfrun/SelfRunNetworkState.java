@@ -65,7 +65,7 @@ final class SelfRunNetworkState {
         validated = next;
         healthKnown = known;
         if (previous != next || previousKnown != known) {
-            try { health.observeNetwork(known, next, System.currentTimeMillis()); }
+            try { health.observeNetwork(known, next); }
             catch (Throwable ignored) { }
         }
     }
