@@ -59,6 +59,8 @@ final class SelfRunWebDiagnostics {
         return "status=TARGET_ERROR;phase=" + phaseKind(phase) + ";reason=" + reason;
     }
 
+    static String phaseKindForHealth(String phase) { return phaseKind(phase); }
+
     private static String phaseKind(String phase) {
         if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) return "bootstrap_send";
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) return "wait_turn_completion";

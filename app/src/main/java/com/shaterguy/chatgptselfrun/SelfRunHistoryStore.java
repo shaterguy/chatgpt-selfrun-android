@@ -14,10 +14,12 @@ final class SelfRunHistoryStore {
 
     private final Context app;
     private final SharedPreferences prefs;
+    private final SelfRunHealthObservationStore health;
 
     SelfRunHistoryStore(Context context) {
         app = context.getApplicationContext();
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        health = new SelfRunHealthObservationStore(app);
     }
 
     synchronized boolean sync(SelfRunStore store) {
@@ -73,6 +75,7 @@ final class SelfRunHistoryStore {
             item.put("runId", store.runId());
             item.put("createdAt", store.createdAt());
             item.put("updatedAt", System.currentTimeMillis());
+            item.put("phaseStartedAt", store.phaseStartedAt());
             item.put("mode", store.mode());
             item.put("projectUrl", store.projectUrl());
             item.put("requirement", bounded(store.requirement(), 4_000));
@@ -112,6 +115,8 @@ final class SelfRunHistoryStore {
                     && !store.pendingDriveSignalRaw().isEmpty();
             item.put("rolloverProgressObserved", priorProgress || currentProgress);
             item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || SelfRunRolloverCoordinator.PHASE_ROLLED_OVER.equals(store.phase()) || store.userStopped());
+            SelfRunHealthSnapshot healthSnapshot = health.updateFromStore(store);
+            if (healthSnapshot != null) item.put("health", healthSnapshot.toJson());
             BootstrapRunStateStore.appendHistory(app, store.runId(), item);
         } catch (Exception ignored) {
         }

@@ -15,6 +15,7 @@ import java.util.Date;
 
 public final class SelfRunHistoryActivity extends Activity {
     private SelfRunHistoryStore history;
+    private SelfRunHealthObservationStore health;
     private LinearLayout detailPane;
     private String selectedRunId = "";
 
@@ -22,6 +23,7 @@ public final class SelfRunHistoryActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         history = new SelfRunHistoryStore(this);
+        health = new SelfRunHealthObservationStore(this);
         render();
     }
 
@@ -100,12 +102,15 @@ public final class SelfRunHistoryActivity extends Activity {
     private void addRunRow(LinearLayout list, JSONObject item) {
         String runId = item.optString("runId");
         String status = item.optString("status", "-");
+        SelfRunHealthSnapshot runHealth = health.currentFor(item);
+        String title = runHealth == null ? status : runHealth.rowLabel();
         String supporting = "Turn " + item.optInt("turn")
                 + " · " + item.optString("mode", "-")
                 + " · " + time(item.optLong("updatedAt"))
+                + (runHealth == null ? "" : "\n" + runHealth.description)
                 + "\n" + shortId(runId);
         LinearLayout row = Ui.listItem(this,
-                status,
+                title,
                 preview(item.optString("requirement")),
                 supporting,
                 v -> {
@@ -125,8 +130,17 @@ public final class SelfRunHistoryActivity extends Activity {
         if (detailPane == null) return;
         detailPane.removeAllViews();
         String runId = item.optString("runId");
-        detailPane.addView(Ui.statusPill(this, item.optString("status", "STATE")));
+        SelfRunHealthSnapshot runHealth = health.currentFor(item);
+        detailPane.addView(Ui.statusPill(this, runHealth == null ? item.optString("status", "STATE") : runHealth.rowLabel()));
         detailPane.addView(Ui.headline(this, preview(item.optString("requirement"))));
+        if (runHealth != null) {
+            detailPane.addView(Ui.section(this, "RUN HEALTH"));
+            detailPane.addView(Ui.keyValue(this, "현재 상태", runHealth.title));
+            detailPane.addView(Ui.keyValue(this, "설명", runHealth.description));
+            detailPane.addView(Ui.keyValue(this, "필요한 행동", runHealth.recommendedAction));
+            detailPane.addView(Ui.keyValue(this, "신뢰도", runHealth.confidence));
+            detailPane.addView(Ui.keyValue(this, "상태 변경", time(runHealth.observedAt)));
+        }
         detailPane.addView(Ui.keyValue(this, "Run ID", runId));
         detailPane.addView(Ui.keyValue(this, "Phase", item.optString("phase", "-")));
         detailPane.addView(Ui.keyValue(this, "Turn", String.valueOf(item.optInt("turn"))));

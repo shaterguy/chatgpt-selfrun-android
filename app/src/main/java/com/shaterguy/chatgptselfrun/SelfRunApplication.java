@@ -18,5 +18,6 @@ public final class SelfRunApplication extends Application {
         ChatReasoningPreferenceStore.initialize(context);
         UserNextInputStore.initialize(context);
         WorkProtocolNativeObserver.installProcess(context);
+        SelfRunProcessExitDiagnostics.capture(context);
     }
 }

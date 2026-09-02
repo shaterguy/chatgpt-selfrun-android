@@ -36,11 +36,24 @@ public final class SelfRunDetailActivity extends Activity {
             return;
         }
 
+        SelfRunHealthSnapshot runHealth = new SelfRunHealthObservationStore(this).currentFor(item);
         String status = item.optString("status", "STATE");
         page.addView(Ui.heroSurface(this,
-                Ui.statusPill(this, status),
+                Ui.statusPill(this, runHealth == null ? status : runHealth.rowLabel()),
                 Ui.headline(this, preview(item.optString("requirement"))),
                 Ui.muted(this, item.optString("runId"))));
+
+        if (runHealth != null) {
+            page.addView(Ui.section(this, "RUN HEALTH"));
+            LinearLayout health = new LinearLayout(this);
+            health.setOrientation(LinearLayout.VERTICAL);
+            health.addView(Ui.keyValue(this, "현재 상태", runHealth.title));
+            health.addView(Ui.keyValue(this, "설명", runHealth.description));
+            health.addView(Ui.keyValue(this, "마지막 상태 변경", time(runHealth.observedAt)));
+            health.addView(Ui.keyValue(this, "필요한 사용자 행동", runHealth.recommendedAction));
+            health.addView(Ui.keyValue(this, "진단 신뢰도", runHealth.confidence));
+            page.addView(health);
+        }
 
         page.addView(Ui.section(this, "EXECUTION SNAPSHOT"));
         LinearLayout snapshot = new LinearLayout(this);
@@ -59,6 +72,12 @@ public final class SelfRunDetailActivity extends Activity {
         source.addView(Ui.keyValue(this, "Project", empty(item.optString("projectUrl"))));
         source.addView(Ui.keyValue(this, "Conversation", empty(item.optString("conversationUrl"))));
         source.addView(Ui.keyValue(this, "Error", error(item)));
+        if (runHealth != null) {
+            source.addView(Ui.keyValue(this, "Health category", runHealth.category));
+            source.addView(Ui.keyValue(this, "Health reason", empty(runHealth.internalReason)));
+            source.addView(Ui.keyValue(this, "Health phase", empty(runHealth.phase)));
+            source.addView(Ui.keyValue(this, "Health observed", time(runHealth.observedAt)));
+        }
         page.addView(source);
 
         page.addView(Ui.section(this, "ORIGINAL MISSION"));

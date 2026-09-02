@@ -31,13 +31,16 @@ final class SelfRunRunLog {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
     private final File directory;
+    private final SelfRunHealthObservationStore health;
     private String lastEvaluatePhase = "";
     private long lastEvaluateAt;
     private String lastResultDetail = "";
     private long lastResultAt;
 
     SelfRunRunLog(Context context) {
-        directory = new File(context.getNoBackupFilesDir(), DIR);
+        Context app = context.getApplicationContext();
+        directory = new File(app.getNoBackupFilesDir(), DIR);
+        health = new SelfRunHealthObservationStore(app);
     }
 
     synchronized void record(SelfRunStore store, String event, String detail) {
@@ -47,6 +50,8 @@ final class SelfRunRunLog {
             String safeEvent = safeEvent(event);
             String safeDetail = sanitize(detail);
             if (suppressNoisyDuplicate(store, safeEvent, safeDetail)) return;
+            try { health.observeRunLog(store, safeEvent, safeDetail, System.currentTimeMillis()); }
+            catch (Throwable ignored) { }
             JSONObject item = new JSONObject();
             item.put("timestamp_kst", OffsetDateTime.now(KST).format(TIME));
             item.put("client", "selfrun-drive");
