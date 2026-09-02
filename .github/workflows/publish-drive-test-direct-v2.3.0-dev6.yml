@@ -1,0 +1,89 @@
+name: Publish SelfRun Drive TEST dev6 direct APK
+
+on:
+  push:
+    branches:
+      - delivery/selfrun-drive-v2.3.0-dev6
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-selfrun-drive-test-dev6
+  cancel-in-progress: false
+
+jobs:
+  publish-direct-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: '33619983987'
+      SOURCE_COMMIT: '1a1f7ae5ebefeaa76fc513369f6a0b818f2b9d21'
+      SOURCE_ARTIFACT_ID: '9842557361'
+      RELEASE_TAG: 'drive-test-v2.3.0-dev6'
+      RELEASE_TITLE: 'SelfRun Drive TEST 2.3.0-dev6'
+      RELEASE_ASSET: 'chatgpt-selfrun-drive-test-v2.3.0-dev6.apk'
+    steps:
+      - name: Download exact verified TEST artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name chatgpt-selfrun-drive-test-build \
+            --dir artifact
+
+      - name: Verify source and APK checksum
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find artifact -type f -name 'chatgpt-selfrun-drive-test-v2.3.0-dev6.apk' -print -quit)"
+          SUM_FILE="$(find artifact -type f -name 'SHA256SUMS.txt' -print -quit)"
+          SOURCE_FILE="$(find artifact -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          test -s "$APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$SOURCE_COMMIT" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          SIZE="$(stat -c '%s' "$APK")"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "sha256=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Create or verify TEST-only prerelease
+        shell: bash
+        env:
+          APK: ${{ steps.verify.outputs.apk }}
+          APK_SHA256: ${{ steps.verify.outputs.sha256 }}
+          APK_SIZE: ${{ steps.verify.outputs.size }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<EOF
+          TEST-only direct-install asset for SelfRun Drive 2.3.0-dev6.
+
+          This is the exact signed APK validated in GitHub Actions run ${SOURCE_RUN_ID} (artifact ${SOURCE_ARTIFACT_ID}); no rebuild or resign was performed.
+          Source commit: ${SOURCE_COMMIT}
+          APK SHA-256: ${APK_SHA256}
+          APK size: ${APK_SIZE} bytes
+          This is not the formal/stable release.
+          EOF
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            IS_PRE="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')"
+            [[ "$IS_PRE" == 'true' ]]
+          else
+            gh release create "$RELEASE_TAG" "$APK#$RELEASE_ASSET" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_COMMIT" \
+              --title "$RELEASE_TITLE" \
+              --prerelease \
+              --notes-file "$NOTES"
+          fi
+          ASSETS="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          grep -Fxq "$RELEASE_ASSET" <<<"$ASSETS"
