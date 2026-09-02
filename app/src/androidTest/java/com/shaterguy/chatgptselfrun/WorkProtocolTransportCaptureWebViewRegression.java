@@ -46,7 +46,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
     private static void serviceWorkerAndPortReuseExistingDecoderWithoutEarlyComplete() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = load(scenario);prepare(scenario, web, "work");install(scenario, web);xhrPost(scenario, web);
-            callTransport(scenario, web, "observeServiceWorkerData", encodedFrame("data: [DONE]\\n\\n", "sw-turn"));
+            callTransport(scenario, web, "observeServiceWorkerData", encodedFrame("data: [DONE]\n\n", "sw-turn"));
             eventuallyPhase(scenario, web, "THINKING");
             callTransport(scenario, web, "observeServiceWorkerData", outerDoneFrame("sw-turn"));
             assertEquals("THINKING", snapshot(scenario, web).getString("phase"));
@@ -90,7 +90,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
 
     private static JSONObject marker(String marker,String event)throws Exception{return new JSONObject().put("type","message_marker")
             .put("marker",marker).put("event",event).put("conversation_id",CONVERSATION_ID);}
-    private static String streamFrame(JSONObject semantic,String turnId)throws Exception{return encodedFrame("data: "+semantic+"\\n\\n",turnId);}
+    private static String streamFrame(JSONObject semantic,String turnId)throws Exception{return encodedFrame("data: "+semantic+"\n\n",turnId);}
     private static String encodedFrame(String encoded,String turnId)throws Exception{JSONObject payload=new JSONObject().put("type","stream-item")
             .put("conversation_id",CONVERSATION_ID).put("turn_id",turnId).put("encoded_item",encoded);
         return new JSONObject().put("payload",new JSONObject().put("payload",payload)).toString();}
