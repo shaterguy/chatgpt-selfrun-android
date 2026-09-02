@@ -283,7 +283,7 @@ final class WorkTurnProtocolIngressScript {
                       try{socket.addEventListener('message',event=>{count('webSocketMessages');void observeTransportData(event.data,'work-websocket');});}catch(_){}
                       return socket;
                     };
-                    WrappedWebSocket.prototype=NativeWebSocket.prototype;try{Object.setPrototypeOf(WrappedWebSocket,NativeWebSocket);Object.defineProperty(WrappedWebSocket,'name',{value:NativeWebSocket.name});Object.defineProperty(wrappedFetch,'length',{value:nativeFetch.length});WrappedWebSocket.toString=NativeWebSocket.toString.bind(NativeWebSocket);}catch(_){}
+                    WrappedWebSocket.prototype=NativeWebSocket.prototype;try{Object.setPrototypeOf(WrappedWebSocket,NativeWebSocket);Object.defineProperty(WrappedWebSocket,'name',{value:NativeWebSocket.name});Object.defineProperty(WrappedWebSocket,'length',{value:NativeWebSocket.length});WrappedWebSocket.toString=NativeWebSocket.toString.bind(NativeWebSocket);}catch(_){}
                     window.WebSocket=WrappedWebSocket;transportAvailability.websocket=true;
                   }
                   const NativeWorker=window.Worker;
