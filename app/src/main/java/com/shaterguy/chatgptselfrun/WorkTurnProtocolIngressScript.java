@@ -176,7 +176,7 @@ final class WorkTurnProtocolIngressScript {
                   const semanticCandidate=node=>{
                     if(!node||typeof node!=='object'||Array.isArray(node))return false;
                     const type=safe(node.type);
-                    return ['message_marker','message_stream_complete','message_start','message_delta','message_update','stream_handoff','done','error'].includes(type)
+                    return ['message_marker','message_stream_complete','message_start','message_delta','message_update','stream_handoff','error'].includes(type)
                       ||(node.status==='finished_successfully'&&node.end_turn===true)||!!(node.message&&typeof node.message==='object')||!!(node.v?.message&&typeof node.v.message==='object');
                   };
                   const processSemantic=(node,source,context,decoder)=>{
@@ -237,7 +237,11 @@ final class WorkTurnProtocolIngressScript {
                     if(depth>MAX_DECODE_DEPTH||node==null)return;
                     if(Array.isArray(node)){for(const child of node)visitDecoded(child,source,parentContext,decoder,depth+1);return;}
                     if(typeof node!=='object')return;
-                    const context=contextFor(node,parentContext);
+                    const context=contextFor(node,parentContext),type=safe(node.type);
+                    if(type==='done'){
+                      diagnostic('WORK_PROTOCOL_SIGNAL',{source,decoder,semantic:'outer_done_ignored',binding:'transport_boundary'});
+                      return;
+                    }
                     if(semanticCandidate(node))processSemantic(node,source,context,decoder);
                     for(const [key,child] of Object.entries(node)){
                       if(key==='encoded_item'&&typeof child==='string'){inspectEncodedItem(child,source,context);continue;}
@@ -262,8 +266,9 @@ final class WorkTurnProtocolIngressScript {
                     }
                     if(!root||typeof root!=='object')return false;
                     const topKeys=Object.keys(root).filter(key=>/^[A-Za-z0-9_.:/-]{1,80}$/.test(key)).slice(0,10).join(',');
-                    diagnostic('WORK_PROTOCOL_FRAME',{source,topKeys,encodedItemFound:JSON.stringify(root).includes('"encoded_item"')});
-                    visitDecoded(root,source,{},'outer-json',0);return true;
+                    visitDecoded(root,source,{},'outer-json',0);
+                    diagnostic('WORK_PROTOCOL_FRAME',{source,topKeys,encodedItemFound:encodedItemBudget>0});
+                    return true;
                   };
                   const observeTransportData=async(data,source)=>{
                     if(!workMode())return false;ensureInstallDiagnostic();
