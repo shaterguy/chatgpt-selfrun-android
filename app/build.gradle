@@ -97,6 +97,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (!webConfig.contains('WorkTurnProtocolIngressScript.installDocumentStart')) {
             throw new GradleException('Work transport protocol ingress document-start interceptor is required')
         }
+        if (!webConfig.contains('WorkProtocolTransportCaptureScript.installDocumentStart')) {
+            throw new GradleException('Work transport capture and relay document-start interceptor is required')
+        }
     }
 }
 

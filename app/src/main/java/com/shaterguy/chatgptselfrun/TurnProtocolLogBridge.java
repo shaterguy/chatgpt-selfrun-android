@@ -53,6 +53,7 @@ final class TurnProtocolLogBridge {
                         if (WORK_DIAGNOSTIC_STAGES.contains(stage)) {
                             if (!SelfRunStore.MODE_WORK.equals(store.mode())) return;
                             item.put("frame", isMainFrame ? "main" : "subframe");
+                            WorkProtocolCoverageTracker.observeDiagnostic(context, store, item, isMainFrame);
                             String details = workDiagnosticDetails(item);
                             if (!details.isEmpty()) log.record(store, stage, details);
                             return;
@@ -61,6 +62,7 @@ final class TurnProtocolLogBridge {
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
                         TurnProtocolUiState.record(context, eventRunId, stage, phase);
+                        WorkProtocolCoverageTracker.observeProtocol(context, store, stage, source, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
                                 + ";phase=" + phase);
                     } catch (Throwable ignored) {
@@ -111,6 +113,7 @@ final class TurnProtocolLogBridge {
         appendBoolean(out, "subframeSeen", item, "subframeSeen");
         appendBoolean(out, "serviceWorkerRequestSeen", item, "serviceWorkerRequestSeen");
         appendBoolean(out, "serviceWorkerMessageSeen", item, "serviceWorkerMessageSeen");
+        appendBoolean(out, "serviceWorkerControllerSeen", item, "serviceWorkerControllerSeen");
         return out.toString();
     }
 

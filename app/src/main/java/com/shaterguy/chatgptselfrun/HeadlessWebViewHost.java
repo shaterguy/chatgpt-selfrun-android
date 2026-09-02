@@ -15,6 +15,7 @@ import android.view.Surface;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
 /** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
@@ -144,6 +145,11 @@ final class HeadlessWebViewHost {
 
     private static final class FocusPreservingWebView extends WebView {
         FocusPreservingWebView(Context context) { super(context); }
+
+        @Override public void setWebViewClient(WebViewClient client) {
+            super.setWebViewClient(client == null ? null
+                    : new WorkProtocolObservingWebViewClient(getContext(), client));
+        }
 
         @Override public void onResume() {
             super.onResume();

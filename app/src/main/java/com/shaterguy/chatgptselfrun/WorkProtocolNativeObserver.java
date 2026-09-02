@@ -1,6 +1,8 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.WebResourceRequest;
@@ -22,6 +24,7 @@ final class WorkProtocolNativeObserver {
     static final String ROUTE_CANONICAL_CONVERSATION = "canonical_conversation";
     private static final Set<String> CHATGPT_HOSTS = Set.of("chatgpt.com", "www.chatgpt.com");
     private static volatile boolean serviceWorkerClientInstalled;
+    private static String environmentRunId = "";
 
     private WorkProtocolNativeObserver() {}
 
@@ -45,7 +48,7 @@ final class WorkProtocolNativeObserver {
                         });
                 serviceWorkerClientInstalled = true;
             } catch (Throwable ignored) {
-                // The observer is optional. DOM fallback and the existing WebView path remain intact.
+                // Optional observation failure must never disable DOM fallback or normal Chat.
             }
         }
     }
@@ -96,6 +99,8 @@ final class WorkProtocolNativeObserver {
         main.post(() -> {
             SelfRunStore current = new SelfRunStore(app);
             if (!runId.equals(current.runId()) || !eligible(current)) return;
+            recordEnvironment(app, current);
+            WorkProtocolCoverageTracker.observeNativeRequest(app, current, source);
             new SelfRunRunLog(app).record(current, "WORK_PROTOCOL_TRANSPORT",
                     "source=" + source + ";transport=" + source
                             + ";route=" + ROUTE_CANONICAL_CONVERSATION
@@ -103,11 +108,40 @@ final class WorkProtocolNativeObserver {
             WebView active = HeadlessWebViewHost.activeWebView();
             WebView target = callbackView != null ? callbackView : active;
             if (target == null || target != active) return;
-            String script = "(()=>{const ingress=window.__selfRunWorkTurnProtocolIngress;"
-                    + "if(!ingress||typeof ingress.observeNativeCanonical!=='function')return false;"
-                    + "return !!ingress.observeNativeCanonical("
+            String script = "(()=>{const capture=window.__selfRunWorkProtocolTransportCapture;"
+                    + "if(!capture||typeof capture.observeNativeCanonical!=='function')return false;"
+                    + "return !!capture.observeNativeCanonical("
                     + SelfRunScript.quote(source) + "," + SelfRunScript.quote(runId) + ");})()";
             try { target.evaluateJavascript(script, null); } catch (Throwable ignored) {}
         });
+    }
+
+    private static synchronized void recordEnvironment(Context context, SelfRunStore store) {
+        String runId = store.runId();
+        if (runId.equals(environmentRunId)) return;
+        environmentRunId = runId;
+        PackageInfo info = null;
+        try { info = WebView.getCurrentWebViewPackage(); } catch (Throwable ignored) {}
+        String packageName = info == null ? "unavailable" : safe(info.packageName);
+        String version = info == null ? "unavailable" : safe(info.versionName);
+        String detail = "apiLevel=" + Build.VERSION.SDK_INT
+                + ";webViewPackage=" + packageName
+                + ";webViewVersion=" + version
+                + ";documentStart=" + supported(WebViewFeature.DOCUMENT_START_SCRIPT)
+                + ";webMessageListener=" + supported(WebViewFeature.WEB_MESSAGE_LISTENER)
+                + ";serviceWorker=" + supported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)
+                + ";serviceWorkerIntercept=" + supported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)
+                + ";serviceWorkerClientInstalled=" + serviceWorkerClientInstalled;
+        new SelfRunRunLog(context).record(store, "WORK_PROTOCOL_ENV", detail);
+    }
+
+    private static boolean supported(String feature) {
+        try { return WebViewFeature.isFeatureSupported(feature); } catch (Throwable ignored) { return false; }
+    }
+
+    private static String safe(String value) {
+        if (value == null) return "";
+        String safe = value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        return safe.length() > 120 ? safe.substring(0, 120) : safe;
     }
 }

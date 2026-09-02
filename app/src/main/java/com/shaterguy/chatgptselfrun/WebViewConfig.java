@@ -32,6 +32,7 @@ final class WebViewConfig {
         if (protocolObservable) {
             ChatGptTurnProtocolScript.installDocumentStart(webView);
             WorkTurnProtocolIngressScript.installDocumentStart(webView);
+            WorkProtocolTransportCaptureScript.installDocumentStart(webView);
         }
     }
 
