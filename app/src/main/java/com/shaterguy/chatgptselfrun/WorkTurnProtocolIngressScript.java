@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** Work-only transport adapter for the shared response protocol state machine. */
 final class WorkTurnProtocolIngressScript {
-    static final String ENGINE_VERSION = "work-turn-ingress-v1";
+    static final String ENGINE_VERSION = "work-turn-ingress-v2";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -31,6 +31,9 @@ final class WorkTurnProtocolIngressScript {
                   const target=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const workMode=()=>safe(target()?.mode).toLowerCase()==='work';
                   const protocol=()=>{try{return window.__selfRunTurnProtocol||null;}catch(_){return null;}};
+                  const counters={webSocketMessages:0,workerMessages:0,sharedWorkerMessages:0,
+                    binaryDecoded:0,forwardedFrames:0,ignoredTransport:0,decodeErrors:0};
+                  const count=key=>{if(Object.prototype.hasOwnProperty.call(counters,key))counters[key]++;};
                   const canonicalConversation=(method,url)=>{
                     if(String(method??'').toUpperCase()!=='POST')return false;
                     try{
@@ -55,43 +58,78 @@ final class WorkTurnProtocolIngressScript {
                     if(eligible)observeRequest(meta.method,meta.url);
                     return result;
                   };
-                  const findDone=node=>{
-                    if(Array.isArray(node)){for(const item of node){const found=findDone(item);if(found)return found;}return null;}
-                    if(!node||typeof node!=='object')return null;
-                    if(safe(node.type).toLowerCase()==='done'){
-                      const conversationId=safe(node.conversation_id),workTurnId=safe(node.turn_id);
-                      if(conversationId&&workTurnId)return{conversationId,workTurnId};
-                    }
-                    for(const child of Object.values(node))if(child&&typeof child==='object'){
-                      const found=findDone(child);if(found)return found;
-                    }
-                    return null;
-                  };
-                  const observeSocketFrame=frame=>{
-                    if(!workMode())return false;
-                    let root;try{root=typeof frame==='string'?JSON.parse(frame):frame;}catch(_){return false;}
-                    const done=findDone(root);if(!done)return false;
+                  const forwardFrame=(frame,source)=>{
+                    if(!workMode()){count('ignoredTransport');return false;}
                     try{
-                      const p=protocol();if(!p||typeof p.observeSseText!=='function')return false;
-                      const semantic=JSON.stringify({type:'message_stream_complete',conversation_id:done.conversationId,turn_id:done.workTurnId});
-                      p.observeSseText('data: '+semantic+'\\n\\n','work-websocket-done',
-                        {conversationId:done.conversationId,workTurnId:done.workTurnId});
-                      return true;
-                    }catch(_){return false;}
+                      const p=protocol();if(!p){count('ignoredTransport');return false;}
+                      const observe=typeof p.observeWorkFrame==='function'?p.observeWorkFrame:
+                        (typeof p.observeSocketFrame==='function'?p.observeSocketFrame:null);
+                      if(!observe){count('ignoredTransport');return false;}
+                      observe.call(p,frame);count('forwardedFrames');return true;
+                    }catch(_){count('decodeErrors');return false;}
+                  };
+                  const blobText=blob=>{
+                    if(blob&&typeof blob.text==='function')return blob.text();
+                    return new Promise((resolve,reject)=>{
+                      try{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result??''));reader.onerror=()=>reject(reader.error);reader.readAsText(blob);}catch(error){reject(error);}
+                    });
+                  };
+                  const decodeBytes=async view=>{
+                    if(typeof TextDecoder==='function')return new TextDecoder().decode(view);
+                    return blobText(new Blob([view]));
+                  };
+                  const observeTransportData=async(data,source)=>{
+                    if(!workMode())return false;
+                    try{
+                      if(typeof data==='string')return forwardFrame(data,source);
+                      if(typeof Blob!=='undefined'&&data instanceof Blob){
+                        count('binaryDecoded');return forwardFrame(await blobText(data),source);
+                      }
+                      if(typeof ArrayBuffer!=='undefined'&&data instanceof ArrayBuffer){
+                        count('binaryDecoded');return forwardFrame(await decodeBytes(new Uint8Array(data)),source);
+                      }
+                      if(typeof ArrayBuffer!=='undefined'&&typeof ArrayBuffer.isView==='function'&&ArrayBuffer.isView(data)){
+                        count('binaryDecoded');return forwardFrame(await decodeBytes(new Uint8Array(data.buffer,data.byteOffset,data.byteLength)),source);
+                      }
+                      if(data&&typeof data==='object')return forwardFrame(data,source);
+                    }catch(_){count('decodeErrors');return false;}
+                    count('ignoredTransport');return false;
                   };
                   const NativeWebSocket=window.WebSocket;
                   if(typeof NativeWebSocket==='function'){
                     const WrappedWebSocket=function(...args){
                       const socket=Reflect.construct(NativeWebSocket,args,NativeWebSocket);
-                      try{socket.addEventListener('message',event=>{if(typeof event.data==='string')observeSocketFrame(event.data);});}catch(_){}
+                      try{socket.addEventListener('message',event=>{count('webSocketMessages');void observeTransportData(event.data,'work-websocket');});}catch(_){}
                       return socket;
                     };
                     WrappedWebSocket.prototype=NativeWebSocket.prototype;try{Object.setPrototypeOf(WrappedWebSocket,NativeWebSocket);}catch(_){}
                     window.WebSocket=WrappedWebSocket;
                   }
+                  const NativeWorker=window.Worker;
+                  if(typeof NativeWorker==='function'){
+                    const WrappedWorker=function(...args){
+                      const worker=Reflect.construct(NativeWorker,args,NativeWorker);
+                      try{worker.addEventListener('message',event=>{count('workerMessages');void observeTransportData(event.data,'work-worker');});}catch(_){}
+                      return worker;
+                    };
+                    WrappedWorker.prototype=NativeWorker.prototype;try{Object.setPrototypeOf(WrappedWorker,NativeWorker);}catch(_){}
+                    window.Worker=WrappedWorker;
+                  }
+                  const NativeSharedWorker=window.SharedWorker;
+                  if(typeof NativeSharedWorker==='function'){
+                    const WrappedSharedWorker=function(...args){
+                      const shared=Reflect.construct(NativeSharedWorker,args,NativeSharedWorker);
+                      try{shared?.port?.addEventListener?.('message',event=>{count('sharedWorkerMessages');void observeTransportData(event.data,'work-shared-worker');});}catch(_){}
+                      return shared;
+                    };
+                    WrappedSharedWorker.prototype=NativeSharedWorker.prototype;try{Object.setPrototypeOf(WrappedSharedWorker,NativeSharedWorker);}catch(_){}
+                    window.SharedWorker=WrappedSharedWorker;
+                  }
                   window.__selfRunWorkTurnProtocolIngress={
-                    version:ENGINE_VERSION,observeRequest,observeSocketFrame,
-                    diagnostics:()=>({mode:safe(target()?.mode),protocol:!!protocol()})
+                    version:ENGINE_VERSION,observeRequest,
+                    observeSocketFrame:frame=>observeTransportData(frame,'work-manual'),
+                    observeTransportData,
+                    diagnostics:()=>({mode:safe(target()?.mode),protocol:!!protocol(),...counters})
                   };
                 })();
                 """.replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION));

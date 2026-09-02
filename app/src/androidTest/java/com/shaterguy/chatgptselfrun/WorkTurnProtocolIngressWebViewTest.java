@@ -19,14 +19,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Exercises the Work-only XHR/WebSocket adapter against the shared protocol state machine. */
+/** Exercises actual Work transport wrappers against the shared protocol state machine. */
 @RunWith(AndroidJUnit4.class)
 public final class WorkTurnProtocolIngressWebViewTest {
     private static final String ORIGIN = "https://chatgpt.com/";
     private static final String CONVERSATION_ID = "fixture-conversation";
     private static final String WORK_TURN_ID = "fixture-work-turn";
 
-    @Test public void workXhrStartAndNestedDoneReachSharedProtocol() throws Exception {
+    @Test public void workWebSocketUsesSemanticFramesNotOuterDone() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web);
@@ -35,32 +35,77 @@ public final class WorkTurnProtocolIngressWebViewTest {
 
             JSONObject started = xhrPost(scenario, web);
             assertEquals("THINKING", started.getString("phase"));
-            String identity = started.getString("requestIdentity");
-            assertFalse(identity.isEmpty());
+            assertFalse(started.getString("requestIdentity").isEmpty());
+            newWebSocket(scenario, web);
 
-            JSONObject marker = new JSONObject().put("type", "message_marker")
-                    .put("marker", "final_channel_token").put("event", "first")
-                    .put("conversation_id", CONVERSATION_ID);
-            JSONObject answering = state(scenario, web,
-                    "window.__selfRunTurnProtocol.observeSseText("
-                            + JSONObject.quote("data: " + marker + "\n\n")
-                            + ",'fixture',{requestIdentity:" + JSONObject.quote(identity) + "})");
+            assertEquals("THINKING", emitSocketString(scenario, web,
+                    streamFrame(marker("user_visible_token", "first"))).getString("phase"));
+            assertEquals("THINKING", emitSocketString(scenario, web,
+                    streamFrame(marker("cot_token", "first"))).getString("phase"));
+            assertEquals("THINKING", emitSocketString(scenario, web,
+                    encodedFrame("data: [DONE]\n\n")).getString("phase"));
+
+            JSONObject answering = emitSocketString(scenario, web,
+                    streamFrame(marker("final_channel_token", "first")));
             assertEquals("ANSWERING", answering.getString("phase"));
             assertTrue(answering.getBoolean("sawVisibleAnswer"));
 
-            JSONObject done = new JSONObject().put("type", "done")
-                    .put("conversation_id", CONVERSATION_ID).put("turn_id", WORK_TURN_ID);
-            JSONObject frame = new JSONObject().put("payload", new JSONObject().put("payload", done));
-            JSONObject complete = state(scenario, web,
-                    "(()=>{window.__selfRunWorkTurnProtocolIngress.observeSocketFrame("
-                            + JSONObject.quote(frame.toString())
-                            + ");return window.__selfRunTurnProtocol.snapshot();})()");
+            JSONObject afterOuterDone = emitSocketString(scenario, web, outerDoneFrame());
+            assertEquals("ANSWERING", afterOuterDone.getString("phase"));
+            assertFalse(afterOuterDone.getBoolean("sawStreamComplete"));
+
+            JSONObject complete = emitSocketString(scenario, web,
+                    streamFrame(new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID)));
             assertEquals("COMPLETE", complete.getString("phase"));
             assertTrue(complete.getBoolean("sawStreamComplete"));
+
+            JSONObject ingress = diagnostics(scenario, web);
+            assertTrue(ingress.getInt("webSocketMessages") >= 6);
+            assertTrue(ingress.getInt("forwardedFrames") >= 6);
         }
     }
 
-    @Test public void chatTargetIgnoresWorkOnlyXhrAndDoneIngress() throws Exception {
+    @Test public void workIngressDecodesBinaryAndObservesWorkerChannels() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web);
+            prepare(scenario, web, "work");
+            install(scenario, web);
+
+            xhrPost(scenario, web);
+            newWebSocket(scenario, web);
+            emitSocketExpression(scenario, web,
+                    "new Blob([" + JSONObject.quote(streamFrame(marker("final_channel_token", "first"))) + "])" );
+            eventuallyPhase(scenario, web, "ANSWERING");
+            emitSocketExpression(scenario, web,
+                    "new TextEncoder().encode(" + JSONObject.quote(streamFrame(
+                            new JSONObject().put("type", "message_stream_complete")
+                                    .put("conversation_id", CONVERSATION_ID))) + ").buffer");
+            eventuallyPhase(scenario, web, "COMPLETE");
+            assertTrue(diagnostics(scenario, web).getInt("binaryDecoded") >= 2);
+
+            xhrPost(scenario, web);
+            newWorker(scenario, web);
+            assertEquals("ANSWERING", emitWorkerString(scenario, web,
+                    streamFrame(marker("final_channel_token", "first"))).getString("phase"));
+            assertEquals("COMPLETE", emitWorkerString(scenario, web,
+                    streamFrame(new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID))).getString("phase"));
+            assertTrue(diagnostics(scenario, web).getInt("workerMessages") >= 2);
+
+            xhrPost(scenario, web);
+            newSharedWorker(scenario, web);
+            assertEquals("ANSWERING", emitSharedWorkerString(scenario, web,
+                    streamFrame(marker("final_channel_token", "first"))).getString("phase"));
+            assertEquals("COMPLETE", emitSharedWorkerString(scenario, web,
+                    streamFrame(new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID))).getString("phase"));
+            assertTrue(diagnostics(scenario, web).getInt("sharedWorkerMessages") >= 2);
+        }
+    }
+
+    @Test public void chatTargetLeavesWorkOnlyIngressInactive() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web);
@@ -68,17 +113,35 @@ public final class WorkTurnProtocolIngressWebViewTest {
             install(scenario, web);
 
             assertEquals("IDLE", xhrPost(scenario, web).getString("phase"));
-
-            JSONObject done = new JSONObject().put("type", "done")
-                    .put("conversation_id", CONVERSATION_ID).put("turn_id", WORK_TURN_ID);
-            JSONObject frame = new JSONObject().put("payload", new JSONObject().put("payload", done));
-            JSONObject unchanged = state(scenario, web,
-                    "(()=>{window.__selfRunWorkTurnProtocolIngress.observeSocketFrame("
-                            + JSONObject.quote(frame.toString())
-                            + ");return window.__selfRunTurnProtocol.snapshot();})()");
+            newWebSocket(scenario, web);
+            JSONObject unchanged = emitSocketString(scenario, web,
+                    streamFrame(marker("final_channel_token", "first")));
             assertEquals("IDLE", unchanged.getString("phase"));
             assertFalse(unchanged.getBoolean("sawStreamComplete"));
+            assertEquals(0, diagnostics(scenario, web).getInt("forwardedFrames"));
         }
+    }
+
+    private static JSONObject marker(String marker, String event) throws Exception {
+        return new JSONObject().put("type", "message_marker").put("marker", marker)
+                .put("event", event).put("conversation_id", CONVERSATION_ID);
+    }
+
+    private static String streamFrame(JSONObject semantic) throws Exception {
+        return encodedFrame("data: " + semantic + "\n\n");
+    }
+
+    private static String encodedFrame(String encodedItem) throws Exception {
+        JSONObject payload = new JSONObject().put("type", "stream-item")
+                .put("conversation_id", CONVERSATION_ID).put("turn_id", WORK_TURN_ID)
+                .put("encoded_item", encodedItem);
+        return new JSONObject().put("payload", new JSONObject().put("payload", payload)).toString();
+    }
+
+    private static String outerDoneFrame() throws Exception {
+        JSONObject done = new JSONObject().put("type", "done")
+                .put("conversation_id", CONVERSATION_ID).put("turn_id", WORK_TURN_ID);
+        return new JSONObject().put("payload", new JSONObject().put("payload", done)).toString();
     }
 
     private static void prepare(ActivityScenario<SelfRunNewActivity> scenario,
@@ -87,7 +150,13 @@ public final class WorkTurnProtocolIngressWebViewTest {
                 "window.__selfRunRequestProfileEngine={target:()=>({mode:"
                         + JSONObject.quote(mode) + ",runId:'fixture-run'})};"
                         + "XMLHttpRequest.prototype.open=function(method,url){this.__fixtureOpen=[method,url];};"
-                        + "XMLHttpRequest.prototype.send=function(body){this.__fixtureBody=body;};");
+                        + "XMLHttpRequest.prototype.send=function(body){this.__fixtureBody=body;};"
+                        + "window.__fixtureSocket=null;window.__fixtureWorker=null;window.__fixtureSharedWorker=null;"
+                        + "class FixtureWebSocket extends EventTarget{constructor(url){super();this.url=url;window.__fixtureSocket=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}"
+                        + "FixtureWebSocket.CONNECTING=0;FixtureWebSocket.OPEN=1;FixtureWebSocket.CLOSING=2;FixtureWebSocket.CLOSED=3;window.WebSocket=FixtureWebSocket;"
+                        + "class FixtureWorker extends EventTarget{constructor(url){super();this.url=url;window.__fixtureWorker=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}window.Worker=FixtureWorker;"
+                        + "class FixturePort extends EventTarget{start(){}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}"
+                        + "class FixtureSharedWorker{constructor(url){this.url=url;this.port=new FixturePort();window.__fixtureSharedWorker=this;}}window.SharedWorker=FixtureSharedWorker;");
     }
 
     private static void install(ActivityScenario<SelfRunNewActivity> scenario,
@@ -105,6 +174,64 @@ public final class WorkTurnProtocolIngressWebViewTest {
         return state(scenario, web,
                 "(()=>{const xhr=new XMLHttpRequest();xhr.open('POST','https://chatgpt.com/backend-api/f/conversation');"
                         + "xhr.send('{}');return window.__selfRunTurnProtocol.snapshot();})()");
+    }
+
+    private static void newWebSocket(ActivityScenario<SelfRunNewActivity> scenario,
+                                     AtomicReference<WebView> web) throws Exception {
+        evaluateRaw(scenario, web, "new WebSocket('wss://chatgpt.com/p19/ws/user/fixture');");
+    }
+
+    private static void newWorker(ActivityScenario<SelfRunNewActivity> scenario,
+                                  AtomicReference<WebView> web) throws Exception {
+        evaluateRaw(scenario, web, "new Worker('fixture-worker.js');");
+    }
+
+    private static void newSharedWorker(ActivityScenario<SelfRunNewActivity> scenario,
+                                        AtomicReference<WebView> web) throws Exception {
+        evaluateRaw(scenario, web, "new SharedWorker('fixture-shared-worker.js');");
+    }
+
+    private static JSONObject emitSocketString(ActivityScenario<SelfRunNewActivity> scenario,
+                                               AtomicReference<WebView> web, String frame) throws Exception {
+        return state(scenario, web,
+                "(()=>{window.__fixtureSocket.emit(" + JSONObject.quote(frame)
+                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+    }
+
+    private static void emitSocketExpression(ActivityScenario<SelfRunNewActivity> scenario,
+                                             AtomicReference<WebView> web, String expression) throws Exception {
+        evaluateRaw(scenario, web, "window.__fixtureSocket.emit(" + expression + ");");
+    }
+
+    private static JSONObject emitWorkerString(ActivityScenario<SelfRunNewActivity> scenario,
+                                               AtomicReference<WebView> web, String frame) throws Exception {
+        return state(scenario, web,
+                "(()=>{window.__fixtureWorker.emit(" + JSONObject.quote(frame)
+                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+    }
+
+    private static JSONObject emitSharedWorkerString(ActivityScenario<SelfRunNewActivity> scenario,
+                                                     AtomicReference<WebView> web, String frame) throws Exception {
+        return state(scenario, web,
+                "(()=>{window.__fixtureSharedWorker.port.emit(" + JSONObject.quote(frame)
+                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+    }
+
+    private static JSONObject diagnostics(ActivityScenario<SelfRunNewActivity> scenario,
+                                          AtomicReference<WebView> web) throws Exception {
+        return state(scenario, web, "window.__selfRunWorkTurnProtocolIngress.diagnostics()");
+    }
+
+    private static void eventuallyPhase(ActivityScenario<SelfRunNewActivity> scenario,
+                                        AtomicReference<WebView> web, String expected) throws Exception {
+        JSONObject last = null;
+        for (int i = 0; i < 80; i++) {
+            last = state(scenario, web, "window.__selfRunTurnProtocol.snapshot()");
+            if (expected.equals(last.getString("phase"))) return;
+            Thread.sleep(25L);
+        }
+        throw new AssertionError("Expected phase " + expected + " but was "
+                + (last == null ? "UNKNOWN" : last.optString("phase", "UNKNOWN")));
     }
 
     private static void load(ActivityScenario<SelfRunNewActivity> scenario,
