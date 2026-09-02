@@ -32,8 +32,10 @@ final class SelfRunHealthObservationStore {
         if (!enabled() || store == null || store.runId().isEmpty()) return null;
         try {
             JSONObject record = record(store.runId());
-            SelfRunHealthSnapshot next = SelfRunHealthEvaluator.evaluate(
-                    SelfRunHealthInput.fromStore(store, record), System.currentTimeMillis());
+            observeErrorState(record, store.lastErrorCode(), store.phase());
+            SelfRunHealthInput input = SelfRunHealthInput.fromStore(store, record);
+            suppressStaleError(input, record);
+            SelfRunHealthSnapshot next = SelfRunHealthEvaluator.evaluate(input, System.currentTimeMillis());
             recordSnapshot(record, next);
             save(record);
             return snapshot(record, "currentHealth", next);
@@ -48,8 +50,9 @@ final class SelfRunHealthObservationStore {
         if (runId.isEmpty()) return null;
         try {
             JSONObject record = record(runId);
-            SelfRunHealthSnapshot next = SelfRunHealthEvaluator.evaluate(
-                    SelfRunHealthInput.fromHistory(historyItem, record), System.currentTimeMillis());
+            SelfRunHealthInput input = SelfRunHealthInput.fromHistory(historyItem, record);
+            suppressStaleError(input, record);
+            SelfRunHealthSnapshot next = SelfRunHealthEvaluator.evaluate(input, System.currentTimeMillis());
             recordSnapshot(record, next);
             save(record);
             return snapshot(record, "currentHealth", next);
@@ -131,6 +134,32 @@ final class SelfRunHealthObservationStore {
             SelfRunStore current = new SelfRunStore(app);
             if (runId.equals(current.runId())) updateFromStore(current);
         } catch (Throwable ignored) { }
+    }
+
+    private static void observeErrorState(JSONObject record, String errorCode, String phase) throws Exception {
+        String safeCode = safeErrorCode(errorCode);
+        boolean initialized = record.optBoolean("errorObservationInitialized", false);
+        if (!initialized) {
+            record.put("errorObservationInitialized", true);
+            record.put("lastErrorCodeSeen", safeCode);
+            record.put("lastErrorPhase", "");
+            return;
+        }
+        String previous = record.optString("lastErrorCodeSeen");
+        if (safeCode.equals(previous)) return;
+        record.put("lastErrorCodeSeen", safeCode);
+        record.put("lastErrorPhase", safeCode.isEmpty() ? "" : safeRuntimePhase(phase));
+    }
+
+    static void suppressStaleError(SelfRunHealthInput input, JSONObject record) {
+        if (input == null || input.lastErrorCode == null || input.lastErrorCode.isEmpty()) return;
+        if (record == null) { input.lastErrorCode = ""; return; }
+        String code = safeErrorCode(input.lastErrorCode);
+        String seen = record.optString("lastErrorCodeSeen");
+        String errorPhase = record.optString("lastErrorPhase");
+        if (code.isEmpty() || !code.equals(seen) || errorPhase.isEmpty() || !errorPhase.equals(input.phase)) {
+            input.lastErrorCode = "";
+        }
     }
 
     private void recordSnapshot(JSONObject record, SelfRunHealthSnapshot candidate) throws Exception {
@@ -223,6 +252,16 @@ final class SelfRunHealthObservationStore {
             case "bootstrap_send", "wait_turn_completion", "apply_model", "apply_reasoning", "send_continue", "other" -> value;
             default -> "";
         };
+    }
+
+    private static String safeRuntimePhase(String value) {
+        if (value == null || value.isEmpty()) return "";
+        return value.matches("[A-Z0-9_]{1,64}") ? value : "";
+    }
+
+    private static String safeErrorCode(String value) {
+        if (value == null || value.isEmpty()) return "";
+        return value.matches("[A-Z0-9_]{1,64}") ? value : "";
     }
 
     private static String safeProcessCategory(String value) {
