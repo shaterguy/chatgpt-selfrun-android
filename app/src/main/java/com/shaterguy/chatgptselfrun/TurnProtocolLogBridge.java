@@ -18,7 +18,8 @@ final class TurnProtocolLogBridge {
             "https://chatgpt.com", "https://www.chatgpt.com");
     private static final Set<String> WORK_DIAGNOSTIC_STAGES = Set.of(
             "WORK_PROTOCOL_TRANSPORT", "WORK_PROTOCOL_FRAME", "WORK_PROTOCOL_SIGNAL",
-            "WORK_PROTOCOL_TRANSITION", "WORK_PROTOCOL_DECODE_ERROR");
+            "WORK_PROTOCOL_TRANSITION", "WORK_PROTOCOL_DECODE_ERROR",
+            "WORK_PROTOCOL_ENV", "WORK_PROTOCOL_COVERAGE");
 
     private TurnProtocolLogBridge() {}
 
@@ -40,7 +41,7 @@ final class TurnProtocolLogBridge {
         }
         WebViewCompat.addWebMessageListener(webView, JS_OBJECT, CHATGPT_ORIGINS,
                 (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
-                    if (!isMainFrame || message.getType() != WebMessageCompat.TYPE_STRING) return;
+                    if (message.getType() != WebMessageCompat.TYPE_STRING) return;
                     String raw = message.getData();
                     if (raw == null || raw.length() > 1024) return;
                     try {
@@ -50,10 +51,13 @@ final class TurnProtocolLogBridge {
                         String phase = item.optString("phase", "");
                         if (eventRunId.isEmpty() || !eventRunId.equals(store.runId())) return;
                         if (WORK_DIAGNOSTIC_STAGES.contains(stage)) {
+                            if (!SelfRunStore.MODE_WORK.equals(store.mode())) return;
+                            item.put("frame", isMainFrame ? "main" : "subframe");
                             String details = workDiagnosticDetails(item);
                             if (!details.isEmpty()) log.record(store, stage, details);
                             return;
                         }
+                        if (!isMainFrame) return;
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
                         TurnProtocolUiState.record(context, eventRunId, stage, phase);
@@ -75,7 +79,9 @@ final class TurnProtocolLogBridge {
         StringBuilder out = new StringBuilder();
         appendToken(out, "source", item.optString("source", ""));
         appendToken(out, "phase", item.optString("phase", ""));
+        appendToken(out, "frame", item.optString("frame", ""));
         appendToken(out, "transport", item.optString("transport", ""));
+        appendToken(out, "route", item.optString("route", ""));
         appendToken(out, "dataType", item.optString("dataType", ""));
         appendTokenList(out, "topKeys", item.optString("topKeys", ""));
         appendToken(out, "decoder", item.optString("decoder", ""));
@@ -85,11 +91,26 @@ final class TurnProtocolLogBridge {
         appendToken(out, "completion", item.optString("completion", ""));
         appendToken(out, "outcome", item.optString("outcome", ""));
         appendToken(out, "reason", item.optString("reason", ""));
+        appendToken(out, "requestSource", item.optString("requestSource", ""));
+        appendToken(out, "frameSource", item.optString("frameSource", ""));
+        appendToken(out, "semanticSource", item.optString("semanticSource", ""));
+        appendToken(out, "answeringSource", item.optString("answeringSource", ""));
+        appendToken(out, "completionSource", item.optString("completionSource", ""));
+        appendToken(out, "fallbackWinner", item.optString("fallbackWinner", ""));
+        appendToken(out, "failureClass", item.optString("failureClass", ""));
         appendNumber(out, "frameCount", item.optLong("frameCount", -1L));
         appendNumber(out, "byteLength", item.optLong("byteLength", -1L));
+        appendNumber(out, "createdCount", item.optLong("createdCount", -1L));
+        appendNumber(out, "messageReceivedCount", item.optLong("messageReceivedCount", -1L));
+        appendNumber(out, "frameDecodedCount", item.optLong("frameDecodedCount", -1L));
+        appendNumber(out, "semanticCandidateCount", item.optLong("semanticCandidateCount", -1L));
         appendBoolean(out, "encodedItemFound", item, "encodedItemFound");
         appendBoolean(out, "websocketCreated", item, "websocketCreated");
         appendBoolean(out, "staleRejected", item, "staleRejected");
+        appendBoolean(out, "mainFrameSeen", item, "mainFrameSeen");
+        appendBoolean(out, "subframeSeen", item, "subframeSeen");
+        appendBoolean(out, "serviceWorkerRequestSeen", item, "serviceWorkerRequestSeen");
+        appendBoolean(out, "serviceWorkerMessageSeen", item, "serviceWorkerMessageSeen");
         return out.toString();
     }
 

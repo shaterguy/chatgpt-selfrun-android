@@ -36,7 +36,7 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertTrue(protocol.contains("value.type==='message_stream_complete'"));
     }
 
-    @Test public void diagnosticsAreSanitizedAndDoNotEnterCanonicalTurnUiStatePath() throws Exception {
+    @Test public void workDiagnosticsCanSeeSubframesWithoutPromotingThemToTurnState() throws Exception {
         String work = source("WorkTurnProtocolIngressScript.java");
         String bridge = source("TurnProtocolLogBridge.java");
 
@@ -45,16 +45,37 @@ public final class WorkProtocolDiagnosticsContractTest {
             assertTrue(work.contains("'" + stage + "'"));
             assertTrue(bridge.contains("\"" + stage + "\""));
         }
+        assertTrue(bridge.contains("\"WORK_PROTOCOL_ENV\""));
+        assertTrue(bridge.contains("\"WORK_PROTOCOL_COVERAGE\""));
+        assertTrue(bridge.contains("item.put(\"frame\", isMainFrame ? \"main\" : \"subframe\")"));
+        assertFalse(bridge.contains("if (!isMainFrame || message.getType()"));
+        int diagnostic = bridge.indexOf("if (WORK_DIAGNOSTIC_STAGES.contains(stage))");
+        int mainFrameGate = bridge.indexOf("if (!isMainFrame) return;", diagnostic);
+        int stateMutation = bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, stage, phase)");
+        assertTrue(diagnostic >= 0);
+        assertTrue(mainFrameGate > diagnostic);
+        assertTrue(stateMutation > mainFrameGate);
         assertTrue(work.contains("topKeys"));
         assertTrue(work.contains("encodedItemFound"));
         assertTrue(work.contains("staleRejected"));
-        assertTrue(bridge.contains("if (WORK_DIAGNOSTIC_STAGES.contains(stage))"));
-        assertTrue(bridge.indexOf("if (WORK_DIAGNOSTIC_STAGES.contains(stage))")
-                < bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, stage, phase)"));
+    }
+
+    @Test public void diagnosticsAreSanitizedAndNativeObservationDoesNotPersistSensitiveTraffic() throws Exception {
+        String work = source("WorkTurnProtocolIngressScript.java");
+        String observer = source("WorkProtocolNativeObserver.java");
+        String bridge = source("TurnProtocolLogBridge.java");
+
+        assertTrue(bridge.contains("createdCount"));
+        assertTrue(bridge.contains("messageReceivedCount"));
+        assertTrue(bridge.contains("frameDecodedCount"));
+        assertTrue(bridge.contains("semanticCandidateCount"));
         assertFalse(work.contains("requestBody"));
         assertFalse(work.contains("responseBody"));
         assertFalse(work.contains("cookie"));
         assertFalse(work.contains("authorization"));
+        assertFalse(observer.contains("getRequestHeaders"));
+        assertFalse(observer.contains("Cookie"));
+        assertFalse(observer.contains("Authorization"));
     }
 
     private static String source(String file) throws Exception {
