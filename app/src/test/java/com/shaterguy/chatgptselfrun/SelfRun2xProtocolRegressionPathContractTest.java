@@ -25,6 +25,7 @@ public final class SelfRun2xProtocolRegressionPathContractTest {
         assertTrue(matrix.contains("arrayBufferViewQuotedAndBase64JsonPreserveStaleTurnFence()"));
         assertTrue(matrix.contains("chatAndWorkUseCanonicalPostVisibleAnswerAndSemanticComplete()"));
         assertTrue(matrix.contains("newestCanonicalPostSupersedesActiveResponseWithoutTurnNumbers()"));
+        assertTrue(matrix.contains("WorkProtocolTransportCaptureWebViewRegression.run()"));
     }
 
     private static String androidTestSource(String file) throws Exception {

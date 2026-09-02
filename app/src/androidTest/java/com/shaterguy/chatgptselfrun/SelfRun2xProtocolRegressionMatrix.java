@@ -26,5 +26,7 @@ final class SelfRun2xProtocolRegressionMatrix {
         state.chatAndWorkUseCanonicalPostVisibleAnswerAndSemanticComplete();
         state.proIgnoresHandoffAndInnerDoneThenUsesVisibleAnswer();
         state.newestCanonicalPostSupersedesActiveResponseWithoutTurnNumbers();
+
+        WorkProtocolTransportCaptureWebViewRegression.run();
     }
 }

@@ -45,7 +45,7 @@ final class WorkProtocolTransportCaptureScript {
                       for(const key of ['transport','route','semantic','binding','transition','completion','outcome','reason']){
                         if(fields[key]!=null&&safe(fields[key]))item[key]=token(fields[key],160);
                       }
-                      for(const key of ['serviceWorkerControllerSeen'])if(typeof fields[key]==='boolean')item[key]=fields[key];
+                      if(typeof fields.serviceWorkerControllerSeen==='boolean')item.serviceWorkerControllerSeen=fields.serviceWorkerControllerSeen;
                       sink.postMessage(JSON.stringify(item));
                     }catch(_){}
                   };
@@ -72,8 +72,8 @@ final class WorkProtocolTransportCaptureScript {
                   };
                   const acceptCanonical=(source,expectedRun)=>{
                     if(!mainFrame()||!workMode()||!runId()||safe(expectedRun||runId())!==runId())return false;emitEnvironment();
-                    const now=Date.now(),current=phase();
-                    if(admission.runId===runId()&&now-admission.at<=DUPLICATE_MS&&['THINKING','ANSWERING'].includes(current)){
+                    const now=Date.now(),current=phase(),sameWindow=admission.runId===runId()&&now-admission.at<=DUPLICATE_MS;
+                    if(sameWindow&&(admission.source.startsWith('main_')||['THINKING','ANSWERING'].includes(current))){
                       diagnostic('WORK_PROTOCOL_TRANSPORT',{source,transport:source,route:'canonical_conversation',outcome:'duplicate_observation'});return false;
                     }
                     admission={runId:runId(),at:now,source};
@@ -133,7 +133,7 @@ final class WorkProtocolTransportCaptureScript {
                         if(!workMode())return;emitEnvironment();
                         diagnostic('WORK_PROTOCOL_TRANSPORT',{source:'service_worker_message',transport:'service_worker_message',outcome:'message_received'});
                         try{void ingress()?.observeTransportData?.(event.data,'service_worker_message');}catch(_){}
-                        const ports=Array.from(event.ports||[]);for(const port of ports){try{
+                        for(const port of Array.from(event.ports||[])){try{
                           port.addEventListener('message',portEvent=>{if(!workMode())return;
                             diagnostic('WORK_PROTOCOL_TRANSPORT',{source:'service_worker_message_port',transport:'service_worker_message_port',outcome:'message_received'});
                             try{void ingress()?.observeTransportData?.(portEvent.data,'service_worker_message_port');}catch(_){};});port.start?.();}catch(_){}}
@@ -163,6 +163,10 @@ final class WorkProtocolTransportCaptureScript {
                   XMLHttpRequest.prototype.send=function(body){const meta=xhrMeta.get(this)||{method:'',url:''};
                     if(workMode()&&canonicalConversation(meta.method,meta.url)){if(mainFrame())recordMainCanonical('main_xhr');else relay('canonical',{route:'canonical_conversation'},'xhr');}
                     return downstreamSend.call(this,body);};
+                  const wrapCreated=(name,source)=>{const Native=window[name];if(typeof Native!=='function')return;
+                    const Wrapped=function(...args){const instance=Reflect.construct(Native,args,Native);if(workMode())diagnostic('WORK_PROTOCOL_TRANSPORT',{source,transport:source,outcome:'created'});return instance;};
+                    Wrapped.prototype=Native.prototype;try{Object.setPrototypeOf(Wrapped,Native);Object.defineProperty(Wrapped,'name',{value:Native.name});Object.defineProperty(Wrapped,'length',{value:Native.length});Wrapped.toString=Native.toString.bind(Native);}catch(_){}window[name]=Wrapped;};
+                  wrapCreated('Worker','worker');wrapCreated('SharedWorker','shared_worker');
                   const observeNativeCanonical=(source,expectedRun)=>acceptCanonical(token(source,48),safe(expectedRun));
                   const observeServiceWorkerData=data=>{if(!mainFrame()||!workMode())return false;emitEnvironment();
                     diagnostic('WORK_PROTOCOL_TRANSPORT',{source:'service_worker_message',transport:'service_worker_message',outcome:'message_received'});
