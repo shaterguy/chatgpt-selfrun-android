@@ -11,7 +11,7 @@ TEST_PREV_APK="$2"
 TEST_APK="$3"
 ADB_BINARY="${ADB:-adb}"
 ADB_COMMAND_TIMEOUT_SECONDS="${ADB_COMMAND_TIMEOUT_SECONDS:-60}"
-FORMAL_EXPECTED_VERSION="${FORMAL_EXPECTED_VERSION:-1.3.0}"
+FORMAL_EXPECTED_VERSION="${FORMAL_EXPECTED_VERSION:-2.2.2}"
 TEST_PREV_EXPECTED_VERSION="${TEST_PREV_EXPECTED_VERSION:-1.4.0-dev0}"
 TEST_EXPECTED_VERSION="${TEST_EXPECTED_VERSION:-1.4.0-dev1}"
 
@@ -90,7 +90,7 @@ require_file "$TEST_APK"
 "$ADB" uninstall "$FORMAL_PACKAGE" >/dev/null 2>&1 || true
 "$ADB" uninstall "$TEST_PACKAGE" >/dev/null 2>&1 || true
 
-echo "Installing formal SelfRun Drive 1.3.0 and current TEST app together"
+echo "Installing formal SelfRun Drive $FORMAL_EXPECTED_VERSION and current TEST app together"
 "$ADB" install -r "$FORMAL_APK" >/dev/null
 "$ADB" install -r "$TEST_APK" >/dev/null
 package_installed "$FORMAL_PACKAGE" || fail "formal Drive package not installed"

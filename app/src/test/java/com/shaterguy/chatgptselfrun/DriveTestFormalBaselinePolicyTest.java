@@ -23,5 +23,10 @@ public final class DriveTestFormalBaselinePolicyTest {
         assertTrue(workflow.contains("FORMAL_EXPECTED_VERSION=\"2.2.2\""));
         assertFalse(workflow.contains("drive-v1.6.0"));
         assertFalse(workflow.contains("versionCode='1000090'"));
+        Path script = Paths.get("tools/verify_drive_test_coinstall_emulator.sh");
+        if (!Files.exists(script)) script = Paths.get("../tools/verify_drive_test_coinstall_emulator.sh");
+        String tool = new String(Files.readAllBytes(script), StandardCharsets.UTF_8);
+        assertTrue(tool.contains("FORMAL_EXPECTED_VERSION=\"${FORMAL_EXPECTED_VERSION:-2.2.2}\""));
+        assertFalse(tool.contains("Installing formal SelfRun Drive 1.3.0"));
     }
 }

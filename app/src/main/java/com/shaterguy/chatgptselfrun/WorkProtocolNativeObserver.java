@@ -59,6 +59,13 @@ final class WorkProtocolNativeObserver {
         return null;
     }
 
+    static void recordEnvironmentIfWork(Context context) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        SelfRunStore store = new SelfRunStore(app);
+        if (store.active() && SelfRunStore.MODE_WORK.equals(store.mode())) recordEnvironment(app, store);
+    }
+
     static boolean isCanonical(String method, String rawUrl) {
         if (!"POST".equalsIgnoreCase(String.valueOf(method))) return false;
         try {

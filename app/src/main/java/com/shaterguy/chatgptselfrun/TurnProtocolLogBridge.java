@@ -52,6 +52,10 @@ final class TurnProtocolLogBridge {
                         if (eventRunId.isEmpty() || !eventRunId.equals(store.runId())) return;
                         if (WORK_DIAGNOSTIC_STAGES.contains(stage)) {
                             if (!SelfRunStore.MODE_WORK.equals(store.mode())) return;
+                            if (!isMainFrame) {
+                                String source = item.optString("source", "");
+                                if (!source.startsWith("subframe_")) item.put("source", "subframe_" + source);
+                            }
                             item.put("frame", isMainFrame ? "main" : "subframe");
                             WorkProtocolCoverageTracker.observeDiagnostic(context, store, item, isMainFrame);
                             String details = workDiagnosticDetails(item);

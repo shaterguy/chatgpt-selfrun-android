@@ -20,10 +20,8 @@ final class WorkProtocolCoverageTracker {
         if (!eligible(store)) return;
         State state = state(store);
         state.mainFrameSeen = true;
-        if (WorkProtocolNativeObserver.SOURCE_SERVICE_WORKER.equals(source)) {
-            state.serviceWorkerRequestSeen = true;
-        }
-        beginRequest(state, source);
+        if (WorkProtocolNativeObserver.SOURCE_SERVICE_WORKER.equals(source)) state.serviceWorkerRequestSeen = true;
+        beginRequest(state, normalizeSource(source));
     }
 
     static synchronized void observeDiagnostic(
@@ -32,7 +30,7 @@ final class WorkProtocolCoverageTracker {
         State state = state(store);
         if (mainFrame) state.mainFrameSeen = true; else state.subframeSeen = true;
         String stage = safe(item.optString("stage", ""));
-        String source = safe(item.optString("source", ""));
+        String source = normalizeSource(item.optString("source", ""));
         String outcome = safe(item.optString("outcome", ""));
         if ("WORK_PROTOCOL_TRANSPORT".equals(stage)) {
             if ("canonical_request".equals(outcome) || "accepted".equals(outcome)) beginRequest(state, source);
@@ -42,7 +40,9 @@ final class WorkProtocolCoverageTracker {
             if (WorkProtocolNativeObserver.SOURCE_SERVICE_WORKER.equals(source)) state.serviceWorkerRequestSeen = true;
         } else if ("WORK_PROTOCOL_FRAME".equals(stage)) {
             Counter counter = counters(state, source);
-            if (!item.optString("dataType", "").isEmpty()) counter.messageReceived++;
+            if (!item.optString("dataType", "").isEmpty() && !source.startsWith("service_worker_message")) {
+                counter.messageReceived++;
+            }
             if (!item.optString("topKeys", "").isEmpty() || item.has("encodedItemFound")) {
                 counter.frameDecoded++;
                 if (state.frameSource.isEmpty()) state.frameSource = source;
@@ -56,9 +56,7 @@ final class WorkProtocolCoverageTracker {
             if (item.optBoolean("staleRejected", false)) state.staleRejected = true;
         } else if ("WORK_PROTOCOL_TRANSITION".equals(stage)) {
             String transition = item.optString("transition", "");
-            if (transition.endsWith(">ANSWERING") && state.answeringSource.isEmpty()) {
-                state.answeringSource = source;
-            }
+            if (transition.endsWith(">ANSWERING") && state.answeringSource.isEmpty()) state.answeringSource = source;
             if (transition.endsWith(">COMPLETE") && state.completionSource.isEmpty()) {
                 String completion = safe(item.optString("completion", ""));
                 state.completionSource = completion.isEmpty() ? source : completion;
@@ -79,10 +77,8 @@ final class WorkProtocolCoverageTracker {
             state.answeringSource = safe(source);
             return;
         }
-        if ("complete".equals(stage)) {
-            state.completionSource = safe(source);
-            emit(context, store, state, "protocol");
-        }
+        if (("complete".equals(stage) || "completion_dispatch".equals(stage))
+                && state.completionSource.isEmpty()) state.completionSource = safe(source);
     }
 
     static synchronized void observeCompletionNavigation(Context context, Uri uri) {
@@ -113,7 +109,6 @@ final class WorkProtocolCoverageTracker {
     private static void emit(Context context, SelfRunStore store, State state, String winner) {
         if (state.coverageEmitted) return;
         state.coverageEmitted = true;
-        String failureClass = failureClass(state, winner);
         StringBuilder out = new StringBuilder();
         add(out, "requestSource", state.requestSource);
         add(out, "frameSource", state.frameSource);
@@ -121,7 +116,7 @@ final class WorkProtocolCoverageTracker {
         add(out, "answeringSource", state.answeringSource);
         add(out, "completionSource", state.completionSource);
         add(out, "fallbackWinner", winner);
-        add(out, "failureClass", failureClass);
+        add(out, "failureClass", failureClass(state, winner));
         add(out, "mainFrameSeen", Boolean.toString(state.mainFrameSeen));
         add(out, "subframeSeen", Boolean.toString(state.subframeSeen));
         add(out, "serviceWorkerRequestSeen", Boolean.toString(state.serviceWorkerRequestSeen));
@@ -148,9 +143,16 @@ final class WorkProtocolCoverageTracker {
     }
 
     private static Counter counters(State state, String source) {
-        String key = safe(source);
+        String key = normalizeSource(source);
         if (key.isEmpty()) key = "unknown";
         return state.counters.computeIfAbsent(key, ignored -> new Counter());
+    }
+
+    private static String normalizeSource(String value) {
+        String source = safe(value);
+        if (source.startsWith("subframe_work-")) return "subframe_" + source.substring("subframe_work-".length()).replace('-', '_');
+        if (source.startsWith("work-")) return source.substring(5).replace('-', '_');
+        return source;
     }
 
     private static String counterSummary(State state) {

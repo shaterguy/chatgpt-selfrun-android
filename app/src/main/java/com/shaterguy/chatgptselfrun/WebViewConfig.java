@@ -34,6 +34,7 @@ final class WebViewConfig {
             WorkTurnProtocolIngressScript.installDocumentStart(webView);
             WorkProtocolTransportCaptureScript.installDocumentStart(webView);
         }
+        WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")
