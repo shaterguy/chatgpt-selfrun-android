@@ -16,6 +16,9 @@ final class TurnProtocolLogBridge {
     static final String JS_OBJECT = "selfRunTurnLog";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
+    private static final Set<String> WORK_DIAGNOSTIC_STAGES = Set.of(
+            "WORK_PROTOCOL_TRANSPORT", "WORK_PROTOCOL_FRAME", "WORK_PROTOCOL_SIGNAL",
+            "WORK_PROTOCOL_TRANSITION", "WORK_PROTOCOL_DECODE_ERROR");
 
     private TurnProtocolLogBridge() {}
 
@@ -45,8 +48,13 @@ final class TurnProtocolLogBridge {
                         String eventRunId = item.optString("runId", "");
                         String stage = item.optString("stage", "");
                         String phase = item.optString("phase", "");
-                        String source = normalizedSource(stage, item.optString("source", ""));
                         if (eventRunId.isEmpty() || !eventRunId.equals(store.runId())) return;
+                        if (WORK_DIAGNOSTIC_STAGES.contains(stage)) {
+                            String details = workDiagnosticDetails(item);
+                            if (!details.isEmpty()) log.record(store, stage, details);
+                            return;
+                        }
+                        String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
                         TurnProtocolUiState.record(context, eventRunId, stage, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
@@ -61,6 +69,67 @@ final class TurnProtocolLogBridge {
                     "path=PROTOCOL_PRIMARY;fallback=DOM;bridge=web_message_listener;document_start=1");
         }
         return true;
+    }
+
+    private static String workDiagnosticDetails(JSONObject item) {
+        StringBuilder out = new StringBuilder();
+        appendToken(out, "source", item.optString("source", ""));
+        appendToken(out, "phase", item.optString("phase", ""));
+        appendToken(out, "transport", item.optString("transport", ""));
+        appendToken(out, "dataType", item.optString("dataType", ""));
+        appendTokenList(out, "topKeys", item.optString("topKeys", ""));
+        appendToken(out, "decoder", item.optString("decoder", ""));
+        appendToken(out, "semantic", item.optString("semantic", ""));
+        appendToken(out, "binding", item.optString("binding", ""));
+        appendToken(out, "transition", item.optString("transition", ""));
+        appendToken(out, "completion", item.optString("completion", ""));
+        appendToken(out, "outcome", item.optString("outcome", ""));
+        appendToken(out, "reason", item.optString("reason", ""));
+        appendNumber(out, "frameCount", item.optLong("frameCount", -1L));
+        appendNumber(out, "byteLength", item.optLong("byteLength", -1L));
+        appendBoolean(out, "encodedItemFound", item, "encodedItemFound");
+        appendBoolean(out, "websocketCreated", item, "websocketCreated");
+        appendBoolean(out, "staleRejected", item, "staleRejected");
+        return out.toString();
+    }
+
+    private static void appendToken(StringBuilder out, String key, String value) {
+        if (value == null || value.isEmpty()) return;
+        String safe = value.replaceAll("[^A-Za-z0-9_.:/,>-]", "_");
+        if (safe.length() > 160) safe = safe.substring(0, 160);
+        append(out, key, safe);
+    }
+
+    private static void appendTokenList(StringBuilder out, String key, String value) {
+        if (value == null || value.isEmpty()) return;
+        String[] parts = value.split(",");
+        StringBuilder safe = new StringBuilder();
+        for (String part : parts) {
+            String token = part.replaceAll("[^A-Za-z0-9_.:/-]", "_");
+            if (token.isEmpty()) continue;
+            if (token.length() > 48) token = token.substring(0, 48);
+            if (safe.length() > 0) safe.append(',');
+            safe.append(token);
+            if (safe.length() >= 160) break;
+        }
+        if (safe.length() > 160) safe.setLength(160);
+        append(out, key, safe.toString());
+    }
+
+    private static void appendNumber(StringBuilder out, String key, long value) {
+        if (value < 0) return;
+        append(out, key, Long.toString(value));
+    }
+
+    private static void appendBoolean(StringBuilder out, String key, JSONObject item, String field) {
+        if (!item.has(field)) return;
+        append(out, key, Boolean.toString(item.optBoolean(field, false)));
+    }
+
+    private static void append(StringBuilder out, String key, String value) {
+        if (value == null || value.isEmpty()) return;
+        if (out.length() > 0) out.append(';');
+        out.append(key).append('=').append(value);
     }
 
     private static boolean validPhaseForStage(String stage, String phase) {

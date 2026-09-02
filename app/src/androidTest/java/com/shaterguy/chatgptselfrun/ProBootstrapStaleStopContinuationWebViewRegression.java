@@ -30,6 +30,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
         proBootstrapUsesFormSubmitWhenStaleStopOutlivesSend();
         nonProBootstrapKeepsStopPriority();
         proBootstrapStillBlocksWithoutARealSubmitPath();
+        SelfRun2xProtocolRegressionMatrix.run();
     }
 
     private static void proBootstrapUsesRealSendWhenStaleStopCoexists() throws Exception {
