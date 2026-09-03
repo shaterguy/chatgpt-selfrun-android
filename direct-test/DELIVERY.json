@@ -1,0 +1,16 @@
+{
+  "delivery_kind": "TEST_DIRECT_APK_EXACT_VALIDATED_ARTIFACT",
+  "version": "2.3.1-dev1",
+  "package": "com.shaterguy.chatgptselfrun.drive.test",
+  "source_commit": "0e831b7c65fbc1adb4a4c82d667b591a8de569a1",
+  "source_run_id": "33771360540",
+  "source_artifact_id": "9899786726",
+  "source_artifact_digest": "sha256:5aa2031d94b6bd65db0a386b2e638d3b046db15204816ecfa68372fe373b1dd4",
+  "apk_name": "chatgpt-selfrun-drive-test-v2.3.1-dev1.apk",
+  "apk_sha256": "db6e2510587580335adcc00ff703f2864f8e395c3f224116326dfffc77700a29",
+  "apk_size": 6435725,
+  "test_cert_sha256": "2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e",
+  "rebuilt": false,
+  "resigned": false,
+  "formal_release": false
+}
