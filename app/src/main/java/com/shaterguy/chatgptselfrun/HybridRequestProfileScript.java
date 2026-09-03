@@ -38,13 +38,16 @@ final class HybridRequestProfileScript {
                   const CONTINUATION=__CONTINUATION__;
                   const SWITCH_KEY='selfrun-drive:hybrid-switched:'+RUN_ID;
                   const BOOTSTRAP_SEEN_KEY='selfrun-drive:hybrid-bootstrap-seen:'+RUN_ID;
+                  const BOOTSTRAP_FINGERPRINT_KEY='selfrun-drive:hybrid-bootstrap-fingerprint:'+RUN_ID;
                   const norm=v=>String(v??'').trim().toLowerCase();
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
                   const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/[/]+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
+                  const fingerprint=value=>{const text=String(value??'');let hash=2166136261;for(let i=0;i<text.length;i++){hash^=text.charCodeAt(i);hash=Math.imul(hash,16777619);}return(hash>>>0).toString(16);};
                   let switched=__INITIAL_CONTINUATION__;
                   let bootstrapSeen=__INITIAL_CONTINUATION__;
-                  try{if(localStorage.getItem(SWITCH_KEY)==='1')switched=true;if(localStorage.getItem(BOOTSTRAP_SEEN_KEY)==='1')bootstrapSeen=true;}catch(_){}
-                  const markBootstrapSeen=()=>{bootstrapSeen=true;try{localStorage.setItem(BOOTSTRAP_SEEN_KEY,'1');}catch(_){}};
+                  let bootstrapFingerprint='';
+                  try{if(localStorage.getItem(SWITCH_KEY)==='1')switched=true;if(localStorage.getItem(BOOTSTRAP_SEEN_KEY)==='1')bootstrapSeen=true;bootstrapFingerprint=String(localStorage.getItem(BOOTSTRAP_FINGERPRINT_KEY)||'');}catch(_){}
+                  const markBootstrapSeen=value=>{bootstrapSeen=true;bootstrapFingerprint=value||bootstrapFingerprint;try{localStorage.setItem(BOOTSTRAP_SEEN_KEY,'1');if(bootstrapFingerprint)localStorage.setItem(BOOTSTRAP_FINGERPRINT_KEY,bootstrapFingerprint);}catch(_){}};
                   const markSwitched=()=>{bootstrapSeen=true;switched=true;try{localStorage.setItem(BOOTSTRAP_SEEN_KEY,'1');localStorage.setItem(SWITCH_KEY,'1');}catch(_){}};
                   const endpointMatches=(t,e)=>!!t&&t.ready===true&&t.mode===e.mode&&norm(t.reasoning)===e.reasoning&&(e.mode==='chat'||norm(t.model)===e.model);
                   const configure=e=>{
@@ -63,14 +66,16 @@ final class HybridRequestProfileScript {
                   const messageBatchText=body=>{try{return Array.isArray(body?.messages)?JSON.stringify(body.messages):'';}catch(_){return'';}};
                   const decisionForBody=body=>{
                     const batch=messageBatchText(body);
+                    const batchFingerprint=fingerprint(batch);
                     const ownRun=batch.includes(RUN_ID);
                     const isContinue=ownRun&&batch.includes('SELF_RUN_CONTINUE');
                     const isBootstrap=ownRun&&batch.includes('SELF_RUN_BOOTSTRAP');
-                    if(switched)return{endpoint:CONTINUATION,stage:'continuation',reason:'already-switched',mark:''};
-                    if(isContinue)return{endpoint:CONTINUATION,stage:'continuation',reason:'explicit-continue',mark:'switch'};
-                    if(isBootstrap)return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'explicit-bootstrap',mark:'bootstrap'};
-                    if(bootstrapSeen)return{endpoint:CONTINUATION,stage:'continuation',reason:'post-bootstrap-submission',mark:'switch'};
-                    return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'first-submission',mark:'bootstrap'};
+                    if(switched)return{endpoint:CONTINUATION,stage:'continuation',reason:'already-switched',mark:'',fingerprint:batchFingerprint};
+                    if(isContinue)return{endpoint:CONTINUATION,stage:'continuation',reason:'explicit-continue',mark:'switch',fingerprint:batchFingerprint};
+                    if(isBootstrap)return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'explicit-bootstrap',mark:'bootstrap',fingerprint:batchFingerprint};
+                    if(bootstrapSeen&&bootstrapFingerprint&&batchFingerprint===bootstrapFingerprint)return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'bootstrap-retry',mark:'',fingerprint:batchFingerprint};
+                    if(bootstrapSeen)return{endpoint:CONTINUATION,stage:'continuation',reason:'post-bootstrap-submission',mark:'switch',fingerprint:batchFingerprint};
+                    return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'first-submission',mark:'bootstrap',fingerprint:batchFingerprint};
                   };
                   let lastDecision={stage:switched?'continuation':'bootstrap',reason:switched?'restored-continuation':'initial'};
                   const prepare=text=>{
@@ -78,7 +83,7 @@ final class HybridRequestProfileScript {
                     if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))return;
                     const decision=decisionForBody(body);
                     configure(decision.endpoint);
-                    if(decision.mark==='switch')markSwitched();else if(decision.mark==='bootstrap')markBootstrapSeen();
+                    if(decision.mark==='switch')markSwitched();else if(decision.mark==='bootstrap')markBootstrapSeen(decision.fingerprint);
                     lastDecision={stage:decision.stage,reason:decision.reason};
                   };
                   if(switched)try{configure(CONTINUATION);}catch(_){}

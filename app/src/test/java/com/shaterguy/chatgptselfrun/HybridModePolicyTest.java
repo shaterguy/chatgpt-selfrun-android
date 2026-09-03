@@ -36,10 +36,14 @@ public final class HybridModePolicyTest {
         assertTrue(script.contains("SELF_RUN_BOOTSTRAP"));
         assertTrue(script.contains("SELF_RUN_CONTINUE"));
         assertTrue(script.contains("hybrid-bootstrap-seen"));
+        assertTrue(script.contains("hybrid-bootstrap-fingerprint"));
         assertTrue(script.contains("messageBatchText"));
+        assertTrue(script.contains("const fingerprint=value=>"));
+        assertTrue(script.contains("bootstrap-retry"));
+        assertTrue(script.contains("batchFingerprint===bootstrapFingerprint"));
         assertTrue(script.contains("post-bootstrap-submission"));
         assertTrue(script.contains("first-submission"));
-        assertTrue(script.contains("markBootstrapSeen()"));
+        assertTrue(script.contains("markBootstrapSeen(decision.fingerprint)"));
         assertTrue(script.contains("markSwitched()"));
         assertTrue(script.contains("configure(decision.endpoint)"));
         assertTrue(script.indexOf("configure(decision.endpoint)") < script.indexOf("if(decision.mark==='switch')markSwitched()"));
