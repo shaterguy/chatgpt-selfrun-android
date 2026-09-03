@@ -39,7 +39,7 @@ final class HybridRequestProfileScript {
                   const SWITCH_KEY='selfrun-drive:hybrid-switched:'+RUN_ID;
                   const norm=v=>String(v??'').trim().toLowerCase();
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
-                  const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/\/+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
+                  const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/[/]+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
                   let switched=__INITIAL_CONTINUATION__;
                   try{if(localStorage.getItem(SWITCH_KEY)==='1')switched=true;}catch(_){}
                   const markSwitched=()=>{switched=true;try{localStorage.setItem(SWITCH_KEY,'1');}catch(_){}};
