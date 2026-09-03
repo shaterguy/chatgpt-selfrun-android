@@ -21,7 +21,8 @@ public final class TurnCompletionAssistantFallbackPolicyTest {
         assertTrue(script.contains("STABILITY_MS=5000"));
         assertTrue(script.contains("source=dom_assistant_final_ui"));
         assertTrue(script.contains("protocol?.phase==='ERROR'"));
-        assertFalse(script.contains("protocol?.phase==='THINKING'"));
+        assertTrue(script.contains("protocolActiveForToken"));
+        assertTrue(script.contains("protocol?.phase==='THINKING'||protocol?.phase==='ANSWERING'"));
         assertFalse(script.contains("setInterval("));
         assertFalse(script.contains("offsetParent"));
     }

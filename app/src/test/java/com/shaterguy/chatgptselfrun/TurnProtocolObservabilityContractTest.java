@@ -31,6 +31,7 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(protocol.contains("emitLog('complete',source)"));
         assertTrue(protocol.contains("emitLog('completion_dispatch',source)"));
         assertTrue(protocol.contains("runId:safe(state.runId)"));
+        assertTrue(protocol.contains("observerToken:currentObserverToken()"));
         assertFalse(protocol.contains("turnSequence"));
         assertFalse(protocol.contains("turnKind"));
         assertTrue(bridge.contains("static boolean install(WebView webView)"));
@@ -41,11 +42,14 @@ public final class TurnProtocolObservabilityContractTest {
         assertTrue(bridge.contains("DETECTOR_PROTOCOL_PRIMARY"));
         assertTrue(bridge.contains("DETECTOR_DOM_FALLBACK_ONLY"));
         assertTrue(bridge.contains("eventRunId.equals(store.runId())"));
-        assertTrue(bridge.contains("TurnProtocolUiState.record(context, eventRunId, stage, phase)"));
+        assertTrue(bridge.contains("\"observer_bound\".equals(stage)"));
+        assertTrue(bridge.contains("TurnProtocolUiState.recordObserver(context, eventRunId, observerToken, phase)"));
+        assertTrue(bridge.contains("TurnProtocolUiState.record(context, eventRunId, stage, phase, observerToken)"));
         assertFalse(bridge.contains("optInt(\"sequence\""));
         assertFalse(bridge.contains("FIRST_TURN"));
         assertTrue(ui.contains("프로토콜 우선 / DOM fallback 병행"));
         assertTrue(ui.contains("응답 감지 중 · DOM fallback"));
+        assertTrue(ui.contains("activeGenerationForCurrentObserver"));
         assertFalse(ui.contains("KEY_SEQUENCE"));
         assertFalse(ui.contains("int sequence"));
     }

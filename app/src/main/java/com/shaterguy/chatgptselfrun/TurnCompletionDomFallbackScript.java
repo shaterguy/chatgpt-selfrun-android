@@ -107,8 +107,10 @@ final class TurnCompletionDomFallbackScript {
                   };
                   const protocolDiagnostics=()=>{try{return window.__selfRunTurnProtocol?.diagnostics?.()||null;}catch(_){return null;}};
                   const runId=()=>{try{return safe(window.__selfRunRequestProfileEngine?.target?.()?.runId||'');}catch(_){return'';}};
+                  const emitObserverBound=token=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;const protocol=protocolDiagnostics();sink.postMessage(JSON.stringify({runId:runId(),stage:'observer_bound',source:'dom_fallback_binding',phase:safe(protocol?.phase||'IDLE'),observerToken:safe(token)}));}catch(_){}};
                   let timer=0,scheduled=false,observerSlot=window.__selfRunDriveTurnObserver;
                   let state={token:'',baselineUser:null,baselineAssistant:null,assistant:null,scope:null,lastMutationAt:0,candidateSince:0,fired:false};
+                  const protocolActiveForToken=protocol=>{const token=safe(protocol?.observerToken||'');return !!token&&token===state.token&&(protocol?.phase==='THINKING'||protocol?.phase==='ANSWERING');};
                   const cancelTimer=()=>{if(timer)clearTimeout(timer);timer=0;};
                   const resetCandidate=()=>{state.candidateSince=0;cancelTimer();};
                   const reset=()=>{cancelTimer();state={token:'',baselineUser:null,baselineAssistant:null,assistant:null,scope:null,lastMutationAt:0,candidateSince:0,fired:false};};
@@ -122,7 +124,7 @@ final class TurnCompletionDomFallbackScript {
                     if(state.fired)return false;
                     const current=observerState(),token=safe(current?.token||'');const run=runId();
                     if(!token||token!==state.token||!run)return false;
-                    const protocol=protocolDiagnostics();if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true)return false;
+                    const protocol=protocolDiagnostics();if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true||protocolActiveForToken(protocol))return false;
                     state.fired=true;cancelTimer();
                     try{current.fired=true;current.observer?.disconnect?.();if(current.timer)clearTimeout(current.timer);}catch(_){}
                     try{window.__selfRunDriveTurnObserver=null;}catch(_){}
@@ -136,7 +138,7 @@ final class TurnCompletionDomFallbackScript {
                     if(token!==state.token)arm(token);
                     if(state.fired)return;
                     const protocol=protocolDiagnostics();
-                    if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true){resetCandidate();return;}
+                    if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true||protocolActiveForToken(protocol)){resetCandidate();return;}
                     const pair=currentTurnPair(),assistant=pair.assistant;
                     if(!pair.user||!assistant){state.assistant=null;state.scope=null;resetCandidate();return;}
                     const belongsToCurrentTurn=pair.user!==state.baselineUser||assistant!==state.baselineAssistant;
@@ -162,7 +164,7 @@ final class TurnCompletionDomFallbackScript {
                       observerSlot=window.__selfRunDriveTurnObserver;
                       Object.defineProperty(window,'__selfRunDriveTurnObserver',{configurable:true,enumerable:false,
                         get(){return observerSlot;},set(value){const priorToken=safe(observerSlot?.token||'');observerSlot=value;
-                          const nextToken=safe(value?.token||'');if(nextToken&&nextToken!==priorToken)arm(nextToken);if(!nextToken&&state.token)reset();schedule();}});
+                          const nextToken=safe(value?.token||'');if(nextToken!==priorToken)emitObserverBound(nextToken);if(nextToken&&nextToken!==priorToken)arm(nextToken);if(!nextToken&&state.token)reset();schedule();}});
                     }
                   }catch(_){}
                   window.__selfRunDomAssistantFallback={version:ENGINE_VERSION,evaluate,diagnostics:()=>({
