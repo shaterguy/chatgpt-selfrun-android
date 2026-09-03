@@ -97,6 +97,8 @@ final class DriveSignalParser {
                     + "([A-Za-z0-9._-]{1,128})(?:\\s+([^\\]]*))?]$");
     private static final Pattern RECOVERY_FIELD = Pattern.compile(
             "(?:^|\\s)RECOVERY_ID=", Pattern.CASE_INSENSITIVE);
+    private static final Pattern WORK_FIELD = Pattern.compile(
+            "(?:^|\\s)(?:MODEL|REASONING)=", Pattern.CASE_INSENSITIVE);
     private static final Pattern RETIRED_CURSOR_LINE = Pattern.compile(
             "^\\[\\d{4}\\.\\d{2}\\.\\d{2} \\| \\d{2}:\\d{2}:\\d{2}] "
                     + "\\[SELF_RUN_COMMAND_RECEIVED ([A-Za-z0-9._-]{1,128})]$");
@@ -117,7 +119,14 @@ final class DriveSignalParser {
 
     private static Scan scanInternal(String text, String jobId, int consumed, String mode,
                                      boolean useDocumentIdentity) {
-        boolean work = SelfRunStore.MODE_WORK.equals(mode);
+        boolean hybrid = HybridRunProfileStore.MODE_HYBRID.equals(mode);
+        HybridRunProfileStore.Selection hybridSelection = hybrid
+                ? HybridRunProfileStore.selectionForRun(jobId) : null;
+        boolean hybridValid = !hybrid || (hybridSelection != null && hybridSelection.valid());
+        boolean hybridBootstrap = hybrid && hybridValid && !hybridSelection.continuationStage();
+        boolean hybridContinuationWork = hybrid && hybridValid && hybridSelection.continuationStage()
+                && hybridSelection.continuation.isWork();
+        boolean work = SelfRunStore.MODE_WORK.equals(mode) || hybridContinuationWork;
         DriveSignalDocumentIdentity.Resolver resolver = useDocumentIdentity
                 ? DriveSignalDocumentIdentity.resolver(jobId, consumed)
                 : new DriveSignalDocumentIdentity.Resolver(false, Collections.emptySet(), Collections.emptyMap());
@@ -137,9 +146,29 @@ final class DriveSignalParser {
             if (type != Type.TURN_COMPLETED) {
                 if (!tail.isEmpty()) continue;
                 event = new Event(type, matcher.group(1), matcher.group(0), absoluteCursor);
+            } else if (hybrid && !hybridValid) {
+                event = invalidCompletion(matcher.group(1), matcher.group(0), absoluteCursor,
+                        "HYBRID_PROFILE_STATE_MISSING");
+            } else if (hybridBootstrap && hasWorkFields(tail)) {
+                event = invalidCompletion(matcher.group(1), matcher.group(0), absoluteCursor,
+                        "HYBRID_BOOTSTRAP_PROFILE_FIELDS_FORBIDDEN");
+            } else if (hybrid && !hybridBootstrap && !hybridContinuationWork && hasWorkFields(tail)) {
+                event = invalidCompletion(matcher.group(1), matcher.group(0), absoluteCursor,
+                        "HYBRID_CHAT_PROFILE_FIELDS_FORBIDDEN");
             } else {
                 event = completion(matcher.group(1), matcher.group(0), absoluteCursor, tail, work);
                 if (event == null) continue;
+                if (hybridContinuationWork && event.protocolError.isEmpty()) {
+                    WorkProfile profile = workProfile(event.raw);
+                    if (!profile.valid) {
+                        event = invalidCompletion(event.timestamp, event.raw, event.cursor,
+                                "HYBRID_WORK_PROFILE_REQUIRED");
+                    } else if (!HybridRunProfileStore.matchesContinuationWork(
+                            jobId, profile.model, profile.reasoning)) {
+                        event = invalidCompletion(event.timestamp, event.raw, event.cursor,
+                                "HYBRID_WORK_PROFILE_MISMATCH");
+                    }
+                }
             }
             if (resolver.enabled()) {
                 String documentId = resolver.documentId(event.raw);
@@ -313,6 +342,16 @@ final class DriveSignalParser {
     static String historySafeRaw(String raw) {
         if (raw == null || raw.isEmpty()) return "";
         return raw.replaceAll("(?i)NEXT_INPUT_B64URL=[^\\s\\]]*", "NEXT_INPUT_B64URL=<redacted>");
+    }
+
+    static boolean hasWorkFields(String tail) {
+        return WORK_FIELD.matcher(tail == null ? "" : tail).find();
+    }
+
+    static boolean hybridWorkProfileMatches(String raw, String model, String reasoning) {
+        WorkProfile profile = workProfile(raw);
+        return profile.valid && profile.model.equals(DriveSignalFields.lower(model))
+                && profile.reasoning.equals(DriveSignalFields.lower(reasoning));
     }
 
     private static Event completion(String timestamp, String raw, int cursor, String tail, boolean work) {

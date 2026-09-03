@@ -15,6 +15,7 @@ public final class SelfRunApplication extends Application {
 
     static void initializeProcess(Context context) {
         ProfileRegistry.initialize(context);
+        HybridRunProfileStore.initialize(context);
         ChatReasoningPreferenceStore.initialize(context);
         UserNextInputStore.initialize(context);
         WorkProtocolNativeObserver.installProcess(context);

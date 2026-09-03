@@ -29,6 +29,7 @@ final class WebViewConfig {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         boolean protocolObservable = TurnProtocolLogBridge.install(webView);
         RequestProfileScript.installDocumentStart(webView);
+        HybridRequestProfileScript.installDocumentStart(webView);
         if (protocolObservable) {
             ChatGptTurnProtocolScript.installDocumentStart(webView);
             WorkTurnProtocolIngressScript.installDocumentStart(webView);

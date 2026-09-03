@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020025
-def selfRunDriveVersionName = '2.3.0-dev6'
+def selfRunDriveVersionCode = 2020026
+def selfRunDriveVersionName = '2.3.0-dev7'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.3.0-dev6') {
-            throw new GradleException('SelfRun Drive development version must be 2.3.0-dev6')
+        if (selfRunDriveVersionName != '2.3.0-dev7') {
+            throw new GradleException('SelfRun Drive development version must be 2.3.0-dev7')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -87,6 +87,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def webConfig = file('src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java').getText('UTF-8')
         if (!webConfig.contains('RequestProfileScript.installDocumentStart')) {
             throw new GradleException('SelfRun 2.0 request profile document-start interceptor is required')
+        }
+        if (!webConfig.contains('HybridRequestProfileScript.installDocumentStart')) {
+            throw new GradleException('SelfRun HYBRID request profile bridge is required')
         }
         if (!webConfig.contains('TurnProtocolLogBridge.install')) {
             throw new GradleException('response protocol observability bridge is required')

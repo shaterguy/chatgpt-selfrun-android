@@ -8,12 +8,17 @@ final class SelfRunDom {
         String projectId = SelfRunScript.projectId(projectUrl);
         String project = q(projectId);
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
+        boolean hybrid = HybridRunProfileStore.MODE_HYBRID.equals(mode);
         boolean general = SelfRunScript.GENERAL_CHAT_SCOPE.equals(projectId);
         String requested = work ? "work" : "chat";
         String chatReasoning = work ? ChatReasoningPreferenceStore.KEEP
                 : ChatReasoningPreferenceStore.selectionForRun(runId);
         String newChatTarget = general ? WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT : WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT;
         String composerTarget = general ? WebUiCalibrationStore.TARGET_GENERAL_COMPOSER : WebUiCalibrationStore.TARGET_PROJECT_COMPOSER;
+        String profileSetup = hybrid
+                ? HybridBootstrapDom.inline(runId)
+                : BootstrapModeDom.inline(requested, runId) + ChatReasoningOptionDom.inline(chatReasoning, runId);
+        String profileDetail = hybrid ? q("HYBRID") : q(ChatReasoningPreferenceStore.label(chatReasoning));
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,url:location.href,diagnostics});"
                 + projectGuard(project) + authGuard() + calibration()
                 + "const parts=location.pathname.split('/').filter(Boolean),after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};const actualConversation=after('c');"
@@ -21,9 +26,8 @@ final class SelfRunDom {
                 + "const newChatKey='selfrun-drive:new-chat:" + esc(runId) + "';const newChatNow=Date.now(),newChatRetryMs=1800,newChatFailureMs=10000;let newChatState={startedAt:0,lastClickAt:0,clicks:0};try{const raw=sessionStorage.getItem(newChatKey)||localStorage.getItem(newChatKey)||'';if(raw)newChatState={...newChatState,...JSON.parse(raw)};}catch(_){}if(!(Number(newChatState.startedAt)>0))newChatState.startedAt=newChatNow;const newChatElapsed=Math.max(0,newChatNow-Number(newChatState.startedAt||newChatNow)),recentNewChat=Number(newChatState.lastClickAt)>0&&newChatNow-Number(newChatState.lastClickAt)<newChatRetryMs;const saveNewChat=()=>{const value=JSON.stringify(newChatState);try{sessionStorage.setItem(newChatKey,value);}catch(_){}try{localStorage.setItem(newChatKey,value);}catch(_){}};const clearNewChat=()=>{try{sessionStorage.removeItem(newChatKey);}catch(_){}try{localStorage.removeItem(newChatKey);}catch(_){}};"
                 + "if(actualConversation){if(newChatControl&&!recentNewChat&&Number(newChatState.clicks)<2){newChatState.clicks=Math.max(0,Number(newChatState.clicks)||0)+1;newChatState.lastClickAt=newChatNow;saveNewChat();newChatControl.focus?.();newChatControl.click();return result('UI_WAIT','보정된 새 대화 전환 반영 대기',{actualConversation,newChatSource:__srFind(" + q(newChatTarget) + ")?'calibrated':'heuristic',newChatClicks:newChatState.clicks,newChatElapsedMs:newChatElapsed});}saveNewChat();if(newChatElapsed>=newChatFailureMs||(Number(newChatState.clicks)>=2&&Number(newChatState.lastClickAt)>0&&newChatNow-Number(newChatState.lastClickAt)>=2500))return result('CHAT_BOOTSTRAP_NEW_CHAT_FAILED','새 대화 화면 전환을 제한시간 안에 확인하지 못했습니다.',{actualConversation,newChatControl:!!newChatControl,recentNewChat,newChatClicks:newChatState.clicks,newChatElapsedMs:newChatElapsed});return result('UI_WAIT','새 대화 화면 전환 확인 대기',{actualConversation,newChatControl:!!newChatControl,recentNewChat,newChatClicks:newChatState.clicks,newChatElapsedMs:newChatElapsed});}clearNewChat();"
                 + composer(composerTarget)
-                + BootstrapModeDom.inline(requested, runId)
-                + ChatReasoningOptionDom.inline(chatReasoning, runId)
-                + "return result('READY','새 대화 화면 확인 · '+modeDiag(),{...diagnostics,composer:true,chatReasoning:" + q(ChatReasoningPreferenceStore.label(chatReasoning)) + "});})()";
+                + profileSetup
+                + "return result('READY','새 대화 화면 확인 · '+modeDiag(),{...diagnostics,composer:true,chatReasoning:" + profileDetail + "});})()";
     }
 
     /** Stage the continuation line while keeping the Drive commit ID internal. */
