@@ -1,0 +1,118 @@
+name: Publish SelfRun Drive TEST dev9 direct APK
+
+on:
+  push:
+    branches:
+      - delivery/selfrun-drive-v2.3.0-dev9
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-selfrun-drive-test-dev9
+  cancel-in-progress: false
+
+jobs:
+  publish-direct-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: '33741113028'
+      SOURCE_COMMIT: 'e146f62f7e1f85e8cffe1722d742779f1f02b0e9'
+      SOURCE_ARTIFACT_ID: '9887787927'
+      SOURCE_ARTIFACT_NAME: 'chatgpt-selfrun-drive-test-build'
+      EXPECTED_TEST_CERT_SHA256: '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e'
+      RELEASE_TAG: 'drive-test-v2.3.0-dev9'
+      RELEASE_TITLE: 'SelfRun Drive TEST 2.3.0-dev9'
+      RELEASE_ASSET: 'chatgpt-selfrun-drive-test-v2.3.0-dev9.apk'
+    steps:
+      - name: Verify canonical source run and artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}")"
+          [[ "$(jq -r '.head_sha' <<<"$RUN_JSON")" == "$SOURCE_COMMIT" ]]
+          [[ "$(jq -r '.conclusion' <<<"$RUN_JSON")" == 'success' ]]
+          ART_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}")"
+          [[ "$(jq -r '.name' <<<"$ART_JSON")" == "$SOURCE_ARTIFACT_NAME" ]]
+          [[ "$(jq -r '.expired' <<<"$ART_JSON")" == 'false' ]]
+          [[ "$(jq -r '.workflow_run.id' <<<"$ART_JSON")" == "$SOURCE_RUN_ID" ]]
+          [[ "$(jq -r '.workflow_run.head_sha' <<<"$ART_JSON")" == "$SOURCE_COMMIT" ]]
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::TEST prerelease tag already exists: $RELEASE_TAG"
+            exit 1
+          fi
+
+      - name: Download exact verified TEST artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$SOURCE_ARTIFACT_NAME" \
+            --dir artifact
+
+      - name: Verify source, APK checksum, and TEST signer evidence
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find artifact -type f -name "$RELEASE_ASSET" -print -quit)"
+          SUM_FILE="$(find artifact -type f -name 'SHA256SUMS.txt' -print -quit)"
+          SOURCE_FILE="$(find artifact -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          CERT_FILE="$(find artifact -type f -name 'APK_CERT.txt' -print -quit)"
+          test -s "$APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          test -s "$CERT_FILE"
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$SOURCE_COMMIT" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          grep -Fqi "$EXPECTED_TEST_CERT_SHA256" "$CERT_FILE"
+          SIZE="$(stat -c '%s' "$APK")"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "sha256=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exact APK as TEST-only prerelease
+        shell: bash
+        env:
+          APK: ${{ steps.verify.outputs.apk }}
+          APK_SHA256: ${{ steps.verify.outputs.sha256 }}
+          APK_SIZE: ${{ steps.verify.outputs.size }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<EOF
+          TEST-only direct-install asset for SelfRun Drive 2.3.0-dev9.
+
+          This is the exact signed APK validated in GitHub Actions run ${SOURCE_RUN_ID} (artifact ${SOURCE_ARTIFACT_ID}); no rebuild or resign was performed.
+          Source commit: ${SOURCE_COMMIT}
+          APK SHA-256: ${APK_SHA256}
+          APK size: ${APK_SIZE} bytes
+          This is not the formal/stable release.
+          EOF
+          gh release create "$RELEASE_TAG" "$APK#$RELEASE_ASSET" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_COMMIT" \
+            --title "$RELEASE_TITLE" \
+            --prerelease \
+            --notes-file "$NOTES"
+
+      - name: Verify TEST prerelease target and direct asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE="$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
+          [[ "$(jq -r '.prerelease' <<<"$RELEASE")" == 'true' ]]
+          [[ "$(jq -r '.draft' <<<"$RELEASE")" == 'false' ]]
+          [[ "$(jq -r '.target_commitish' <<<"$RELEASE")" == "$SOURCE_COMMIT" ]]
+          ASSET_COUNT="$(jq --arg name "$RELEASE_ASSET" '[.assets[] | select(.name == $name)] | length' <<<"$RELEASE")"
+          [[ "$ASSET_COUNT" == '1' ]]
+          URL="$(jq -r --arg name "$RELEASE_ASSET" '.assets[] | select(.name == $name) | .browser_download_url' <<<"$RELEASE")"
+          test -n "$URL"
+          echo "Direct TEST APK: $URL"
