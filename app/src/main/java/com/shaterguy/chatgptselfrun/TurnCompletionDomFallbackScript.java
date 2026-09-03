@@ -31,6 +31,12 @@ final class TurnCompletionDomFallbackScript {
     }
 
     static String documentStartScript() {
+        return documentStartScript(STABILITY_MS);
+    }
+
+    /** Test hook keeps production behavior identical while allowing deterministic WebView regression timing. */
+    static String documentStartScript(long stabilityMs) {
+        long stable = Math.max(1L, stabilityMs);
         return """
                 (()=>{
                   const ENGINE_VERSION=__ENGINE_VERSION__,STABILITY_MS=__STABILITY_MS__;
@@ -166,6 +172,6 @@ final class TurnCompletionDomFallbackScript {
                 })();
                 """
                 .replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION))
-                .replace("__STABILITY_MS__", String.valueOf(STABILITY_MS));
+                .replace("__STABILITY_MS__", String.valueOf(stable));
     }
 }
