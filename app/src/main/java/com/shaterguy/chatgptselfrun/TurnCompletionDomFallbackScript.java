@@ -123,6 +123,7 @@ final class TurnCompletionDomFallbackScript {
                   };
                   const protocolDiagnostics=()=>{try{return window.__selfRunTurnProtocol?.diagnostics?.()||null;}catch(_){return null;}};
                   const runId=()=>{try{return safe(window.__selfRunRequestProfileEngine?.target?.()?.runId||'');}catch(_){return'';}};
+                  const emitObserverBound=token=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;const protocol=protocolDiagnostics();sink.postMessage(JSON.stringify({runId:runId(),stage:'observer_bound',source:'dom_fallback_binding',phase:safe(protocol?.phase||'IDLE'),observerToken:safe(token)}));}catch(_){}};
                   const readJson=key=>{try{const raw=localStorage.getItem(key)||'';return raw?JSON.parse(raw):null;}catch(_){return null;}};
                   const writeJson=(key,value)=>{try{localStorage.setItem(key,JSON.stringify(value));}catch(_){}};
                   const removeKey=key=>{try{localStorage.removeItem(key);}catch(_){}};
@@ -131,6 +132,7 @@ final class TurnCompletionDomFallbackScript {
                   let state={token:'',baselineUserCount:0,baselineAssistantCount:0,baselineAssistantHadText:false,
                     assistant:null,scope:null,lastMutationAt:0,candidateSince:0,ambiguousSince:0,
                     rebindSent:false,probeSent:false,probeSentAt:0,probeComplete:false,recoverSent:false,fired:false};
+                  const protocolActiveForToken=protocol=>{const token=safe(protocol?.observerToken||'');return !!token&&token===state.token&&(protocol?.phase==='THINKING'||protocol?.phase==='ANSWERING');};
                   const cancelTimer=()=>{if(timer)clearTimeout(timer);timer=0;};
                   const persistWatch=()=>{if(!state.token)return;writeJson(watchKey(state.token),{
                     ambiguousSince:state.ambiguousSince,rebindSent:state.rebindSent,probeSent:state.probeSent,
@@ -162,7 +164,7 @@ final class TurnCompletionDomFallbackScript {
                     if(state.fired)return false;
                     const current=observerState(),token=safe(current?.token||'');const run=runId();
                     if(!token||token!==state.token||!run)return false;
-                    const protocol=protocolDiagnostics();if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true)return false;
+                    const protocol=protocolDiagnostics();if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true||protocolActiveForToken(protocol))return false;
                     state.fired=true;cancelTimer();removeKey(baselineKey(token));removeKey(watchKey(token));
                     try{current.fired=true;current.observer?.disconnect?.();if(current.timer)clearTimeout(current.timer);}catch(_){}
                     try{window.__selfRunDriveTurnObserver=null;}catch(_){}
@@ -189,7 +191,7 @@ final class TurnCompletionDomFallbackScript {
                     if(token!==state.token)arm(token);
                     if(state.fired)return;
                     const protocol=protocolDiagnostics();
-                    if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true){clearAmbiguous();resetCandidate();return;}
+                    if(protocol?.phase==='ERROR'||protocol?.completionDispatched===true||protocolActiveForToken(protocol)){clearAmbiguous();resetCandidate();return;}
                     const pair=currentTurnPair(),assistant=pair.assistant,assistantCount=countRole(pair.nodes,'assistant');
                     if(!pair.user||!assistant){state.assistant=null;state.scope=null;clearAmbiguous();resetCandidate();return;}
                     const assistantText=textOf(assistant);
@@ -222,7 +224,7 @@ final class TurnCompletionDomFallbackScript {
                       observerSlot=window.__selfRunDriveTurnObserver;
                       Object.defineProperty(window,'__selfRunDriveTurnObserver',{configurable:true,enumerable:false,
                         get(){return observerSlot;},set(value){const priorToken=safe(observerSlot?.token||'');observerSlot=value;
-                          const nextToken=safe(value?.token||'');if(nextToken&&nextToken!==priorToken)arm(nextToken);if(!nextToken&&state.token)reset(true);schedule();}});
+                          const nextToken=safe(value?.token||'');if(nextToken!==priorToken)emitObserverBound(nextToken);if(nextToken&&nextToken!==priorToken)arm(nextToken);if(!nextToken&&state.token)reset(true);schedule();}});
                     }
                   }catch(_){}
                   const driveProbeResult=result=>{if(!state.token||!state.probeSent)return false;state.probeComplete=true;persistWatch();schedule();return result==='completion';};

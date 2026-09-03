@@ -159,6 +159,14 @@ final class TurnCompletionRecoveryCoordinator {
 
     private static void controlledRecover(Context app, WebView view, SelfRunStore store,
                                           String token, SelfRunRunLog log) {
+        if (TurnProtocolUiState.activeGenerationFor(token)) {
+            forceObserverRebind(view, store, token);
+            try { view.evaluateJavascript("window.__selfRunDomAssistantFallback?.evaluate?.()", null); }
+            catch (Throwable ignored) { }
+            log.record(store, "DOM_COMPLETION_WATCHDOG",
+                    "stage=recover;result=deferred_active_protocol");
+            return;
+        }
         try { view.evaluateJavascript(SelfRunContinuationDom.cancelTurnCompletionObserver(token), null); }
         catch (Throwable ignored) { }
         HeadlessWebViewHost.detachOutputFor(view);

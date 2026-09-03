@@ -46,6 +46,7 @@ final class ChatGptTurnProtocolScript {
                     completionDispatched:false,completionSource:'',lastError:'',lastSource:''
                   });
                   const safe=value=>String(value??'').slice(0,256);
+                  const currentObserverToken=()=>safe(window.__selfRunDriveTurnObserver?.token||'');
                   const nonEmptyText=value=>typeof value==='string'&&value.trim().length>0;
                   const requestIdentity=()=>{try{return safe(crypto.randomUUID());}catch(_){return safe(Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));}};
                   const restore=()=>{
@@ -59,7 +60,7 @@ final class ChatGptTurnProtocolScript {
                   let state=restore(),pendingTimer=0;
                   const retiredWorkTurnIds=[];
                   const save=()=>{try{sessionStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(_){}};
-                  const emitLog=(stage,source)=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;sink.postMessage(JSON.stringify({runId:safe(state.runId),stage:safe(stage),source:safe(source),phase:state.phase}));}catch(_){}};
+                  const emitLog=(stage,source)=>{try{const sink=window.selfRunTurnLog;if(!sink||typeof sink.postMessage!=='function')return;sink.postMessage(JSON.stringify({runId:safe(state.runId),stage:safe(stage),source:safe(source),phase:state.phase,observerToken:currentObserverToken()}));}catch(_){}};
                   const profileTarget=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const resetForRun=run=>{state=blank();state.runId=safe(run);retiredWorkTurnIds.length=0;save();};
                   const alignRun=()=>{
@@ -286,6 +287,7 @@ final class ChatGptTurnProtocolScript {
                     observeRequest,observeSseText,observeSocketFrame,observeWorkFrame:observeSocketFrame,
                     diagnostics:()=>({phase:state.phase,requestIdentity:state.requestIdentity,
                       conversationId:state.canonicalConversationId,workTurnId:state.currentWorkTurnId,
+                      observerToken:currentObserverToken(),
                       sawFinalChannelToken:state.sawFinalChannelToken,sawVisibleAnswer:state.sawVisibleAnswer,
                       sawAssistantFinalText:state.sawAssistantFinalText,sawStreamComplete:state.sawStreamComplete,
                       completionDispatched:state.completionDispatched,lastError:state.lastError})

@@ -13,21 +13,43 @@ final class TurnProtocolUiState {
     private static final String KEY_STAGE = "stage";
     private static final String KEY_PHASE = "phase";
     private static final String KEY_DETECTOR = "detector";
+    private static final String KEY_OBSERVER_TOKEN = "observerToken";
+    private static final String KEY_PROTOCOL_OBSERVER_TOKEN = "protocolObserverToken";
     private static final String KEY_UPDATED_AT = "updatedAt";
+
+    private static volatile String processRunId = "";
+    private static volatile String processPhase = "IDLE";
+    private static volatile String processObserverToken = "";
+    private static volatile String processProtocolObserverToken = "";
 
     static final class Snapshot {
         final boolean present;
         final String stage;
         final String phase;
         final String detector;
+        final String observerToken;
+        final String protocolObserverToken;
         final long updatedAt;
 
         Snapshot(boolean present, String stage, String phase, String detector, long updatedAt) {
+            this(present, stage, phase, detector, "", "", updatedAt);
+        }
+
+        Snapshot(boolean present, String stage, String phase, String detector,
+                 String observerToken, String protocolObserverToken, long updatedAt) {
             this.present = present;
             this.stage = safe(stage);
             this.phase = safe(phase);
             this.detector = safe(detector);
+            this.observerToken = safe(observerToken);
+            this.protocolObserverToken = safe(protocolObserverToken);
             this.updatedAt = Math.max(0L, updatedAt);
+        }
+
+        boolean activeGenerationFor(String token) {
+            String expected = safe(token);
+            return present && activePhase(phase) && !expected.isEmpty()
+                    && expected.equals(observerToken) && expected.equals(protocolObserverToken);
         }
 
         String headline() {
@@ -49,9 +71,16 @@ final class TurnProtocolUiState {
         if (context == null || runId == null || runId.isEmpty() || !validDetector(detector)) return;
         SharedPreferences prefs = context.getApplicationContext()
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        boolean newRun = !runId.equals(prefs.getString(KEY_RUN_ID, ""));
         SharedPreferences.Editor edit = prefs.edit();
-        if (!runId.equals(prefs.getString(KEY_RUN_ID, ""))) {
-            edit.putString(KEY_STAGE, "").putString(KEY_PHASE, "IDLE");
+        if (newRun) {
+            edit.putString(KEY_STAGE, "").putString(KEY_PHASE, "IDLE")
+                    .putString(KEY_OBSERVER_TOKEN, "").putString(KEY_PROTOCOL_OBSERVER_TOKEN, "");
+            setProcess(runId, "IDLE", "", "");
+        } else {
+            setProcess(runId, normalizedPhase(prefs.getString(KEY_PHASE, "IDLE")),
+                    prefs.getString(KEY_OBSERVER_TOKEN, ""),
+                    prefs.getString(KEY_PROTOCOL_OBSERVER_TOKEN, ""));
         }
         edit.putString(KEY_RUN_ID, runId)
                 .putString(KEY_DETECTOR, detector)
@@ -59,15 +88,42 @@ final class TurnProtocolUiState {
                 .apply();
     }
 
+    static void recordObserver(Context context, String runId, String observerToken, String protocolPhase) {
+        if (context == null || runId == null || runId.isEmpty()) return;
+        SharedPreferences prefs = context.getApplicationContext()
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!runId.equals(prefs.getString(KEY_RUN_ID, ""))) return;
+        String token = safe(observerToken);
+        String phase = normalizedPhase(protocolPhase);
+        String protocolToken = prefs.getString(KEY_PROTOCOL_OBSERVER_TOKEN, "");
+        if (activePhase(phase) && !token.isEmpty()) protocolToken = token;
+        prefs.edit().putString(KEY_OBSERVER_TOKEN, token)
+                .putString(KEY_PROTOCOL_OBSERVER_TOKEN, protocolToken)
+                .putLong(KEY_UPDATED_AT, System.currentTimeMillis()).apply();
+        setProcess(runId, normalizedPhase(prefs.getString(KEY_PHASE, "IDLE")), token, protocolToken);
+    }
+
     static void record(Context context, String runId, String stage, String phase) {
+        record(context, runId, stage, phase, "");
+    }
+
+    static void record(Context context, String runId, String stage, String phase, String observerToken) {
         if (context == null || runId == null || runId.isEmpty() || !validPhase(phase)) return;
-        context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        SharedPreferences prefs = context.getApplicationContext()
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String token = safe(observerToken);
+        String currentObserver = prefs.getString(KEY_OBSERVER_TOKEN, "");
+        if (!token.isEmpty() && currentObserver.isEmpty()) currentObserver = token;
+        prefs.edit()
                 .putString(KEY_RUN_ID, runId)
                 .putString(KEY_STAGE, safe(stage))
                 .putString(KEY_PHASE, safe(phase))
                 .putString(KEY_DETECTOR, DETECTOR_PROTOCOL_PRIMARY)
+                .putString(KEY_OBSERVER_TOKEN, currentObserver)
+                .putString(KEY_PROTOCOL_OBSERVER_TOKEN, token)
                 .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
                 .apply();
+        setProcess(runId, phase, currentObserver, token);
     }
 
     static Snapshot read(Context context, String runId) {
@@ -76,11 +132,25 @@ final class TurnProtocolUiState {
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!runId.equals(prefs.getString(KEY_RUN_ID, ""))) return empty();
         String detector = prefs.getString(KEY_DETECTOR, "");
-        String phase = prefs.getString(KEY_PHASE, "IDLE");
-        if (!validPhase(phase)) phase = "IDLE";
+        String phase = normalizedPhase(prefs.getString(KEY_PHASE, "IDLE"));
         if (!validDetector(detector) && "IDLE".equals(phase)) return empty();
+        String observerToken = prefs.getString(KEY_OBSERVER_TOKEN, "");
+        String protocolObserverToken = prefs.getString(KEY_PROTOCOL_OBSERVER_TOKEN, "");
+        setProcess(runId, phase, observerToken, protocolObserverToken);
         return new Snapshot(true, prefs.getString(KEY_STAGE, ""), phase, detector,
-                prefs.getLong(KEY_UPDATED_AT, 0L));
+                observerToken, protocolObserverToken, prefs.getLong(KEY_UPDATED_AT, 0L));
+    }
+
+    static boolean activeGenerationForCurrentObserver() {
+        String token = processObserverToken;
+        return !processRunId.isEmpty() && !token.isEmpty() && activePhase(processPhase)
+                && token.equals(processProtocolObserverToken);
+    }
+
+    static boolean activeGenerationFor(String observerToken) {
+        String token = safe(observerToken);
+        return !processRunId.isEmpty() && !token.isEmpty() && activePhase(processPhase)
+                && token.equals(processObserverToken) && token.equals(processProtocolObserverToken);
     }
 
     static String headlineFor(String stage, String phase) {
@@ -120,6 +190,17 @@ final class TurnProtocolUiState {
         return "실행";
     }
 
+    private static void setProcess(String runId, String phase, String observerToken, String protocolObserverToken) {
+        processRunId = safe(runId);
+        processPhase = normalizedPhase(phase);
+        processObserverToken = safe(observerToken);
+        processProtocolObserverToken = safe(protocolObserverToken);
+    }
+
+    private static boolean activePhase(String phase) {
+        return "THINKING".equals(phase) || "ANSWERING".equals(phase);
+    }
+
     private static boolean validDetector(String detector) {
         return DETECTOR_PROTOCOL_PRIMARY.equals(detector) || DETECTOR_DOM_FALLBACK_ONLY.equals(detector);
     }
@@ -129,6 +210,10 @@ final class TurnProtocolUiState {
                 || "COMPLETE".equals(phase) || "ERROR".equals(phase);
     }
 
-    private static Snapshot empty() { return new Snapshot(false, "", "", "", 0L); }
+    private static String normalizedPhase(String phase) {
+        return validPhase(phase) ? phase : "IDLE";
+    }
+
+    private static Snapshot empty() { return new Snapshot(false, "", "", "", "", "", 0L); }
     private static String safe(String value) { return value == null ? "" : value; }
 }

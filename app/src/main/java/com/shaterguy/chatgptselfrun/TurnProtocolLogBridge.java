@@ -63,9 +63,17 @@ final class TurnProtocolLogBridge {
                             return;
                         }
                         if (!isMainFrame) return;
+                        String observerToken = item.optString("observerToken", "");
+                        if ("observer_bound".equals(stage)) {
+                            TurnProtocolUiState.recordObserver(context, eventRunId, observerToken, phase);
+                            log.record(store, "TURN_PROTOCOL_OBSERVER",
+                                    "binding=" + (observerToken.isEmpty() ? "cleared" : "current")
+                                            + ";phase=" + BootstrapResultPolicy.safe(phase, 24));
+                            return;
+                        }
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
-                        TurnProtocolUiState.record(context, eventRunId, stage, phase);
+                        TurnProtocolUiState.record(context, eventRunId, stage, phase, observerToken);
                         WorkProtocolCoverageTracker.observeProtocol(context, store, stage, source, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
                                 + ";phase=" + phase);

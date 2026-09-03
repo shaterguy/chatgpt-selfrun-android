@@ -81,6 +81,34 @@ public final class TurnCompletionDomFallbackWebViewTest {
         }
     }
 
+    @Test public void correlatedThinkingSuppressesAmbiguityWatchdogUntilGenerationStops() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> callback = new AtomicReference<>("");
+            load(scenario, web, callback);
+
+            evaluateRaw(scenario, web, TurnCompletionDomFallbackScript.documentStartScript(20L, 60L, 120L, 220L));
+            assertEquals("old-appended", evaluate(scenario, web, appendTurn("old user", "old assistant", true)));
+            String token = TOKEN + "-active";
+            evaluateRaw(scenario, web,
+                    "window.__selfRunRequestProfileEngine={target:()=>({runId:'" + RUN_ID + "'})};"
+                            + "window.__selfRunProtocolPhase='THINKING';window.__selfRunProtocolToken='" + token + "';"
+                            + "window.__selfRunTurnProtocol={diagnostics:()=>({phase:window.__selfRunProtocolPhase,observerToken:window.__selfRunProtocolToken,completionDispatched:false})};'ready';");
+            assertEquals("armed", evaluate(scenario, web, arm(token)));
+            assertEquals("new-appended", evaluate(scenario, web, appendTurn("new user", "new assistant", false)));
+
+            Thread.sleep(450L);
+            assertEquals("", callback.get());
+            assertFalse(Boolean.parseBoolean(evaluate(scenario, web,
+                    "String(window.__selfRunDomAssistantFallback.diagnostics().ambiguous)")));
+
+            evaluateRaw(scenario, web,
+                    "window.__selfRunProtocolPhase='IDLE';window.__selfRunDomAssistantFallback.evaluate();'idle';");
+            waitForCallback(callback, "selfrun-drive://turn-watchdog-rebind?", 1_500L);
+            assertTrue(callback.get().contains("token=" + token));
+        }
+    }
+
     private static void installProtocolFixture(ActivityScenario<SelfRunNewActivity> scenario,
                                                AtomicReference<WebView> web) throws Exception {
         evaluateRaw(scenario, web,
