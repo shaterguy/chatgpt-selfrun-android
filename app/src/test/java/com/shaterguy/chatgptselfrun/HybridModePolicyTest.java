@@ -27,7 +27,7 @@ public final class HybridModePolicyTest {
                 HybridRunProfileStore.STAGE_BOOTSTRAP, work, work).valid());
     }
 
-    @Test public void requestBridgeSwitchesOnlyOnContinuationBoundaryAndKeepsBothEndpoints() {
+    @Test public void requestBridgeSwitchesAfterBootstrapSubmissionWithoutLastMessageDependency() {
         HybridRunProfileStore.Endpoint chat = chatEndpoint();
         HybridRunProfileStore.Endpoint work = workEndpoint();
         HybridRunProfileStore.Selection selection = new HybridRunProfileStore.Selection(
@@ -35,13 +35,35 @@ public final class HybridModePolicyTest {
         String script = HybridRequestProfileScript.documentStartScript(selection);
         assertTrue(script.contains("SELF_RUN_BOOTSTRAP"));
         assertTrue(script.contains("SELF_RUN_CONTINUE"));
-        assertTrue(script.contains("if(!switched)markSwitched()"));
+        assertTrue(script.contains("hybrid-bootstrap-seen"));
+        assertTrue(script.contains("messageBatchText"));
+        assertTrue(script.contains("post-bootstrap-submission"));
+        assertTrue(script.contains("first-submission"));
+        assertTrue(script.contains("markBootstrapSeen()"));
+        assertTrue(script.contains("markSwitched()"));
+        assertTrue(script.contains("configure(decision.endpoint)"));
+        assertTrue(script.indexOf("configure(decision.endpoint)") < script.indexOf("if(decision.mark==='switch')markSwitched()"));
+        assertTrue(script.contains("bootstrapSeen:()=>bootstrapSeen"));
+        assertTrue(script.contains("lastDecision:()=>({...lastDecision})"));
         assertTrue(script.contains("const BOOTSTRAP="));
         assertTrue(script.contains("const CONTINUATION="));
         assertTrue(script.contains("engine.begin(e.mode,RUN_ID)"));
         assertTrue(script.contains("endpointMatches(current,e)"));
+        assertFalse(script.contains("latestMessageText"));
+        assertFalse(script.contains("list[list.length-1]"));
         assertFalse(script.contains("querySelectorAll('button"));
         assertFalse(script.contains(".click()"));
+    }
+
+    @Test public void continuationStageRestoresContinuationImmediatelyAfterWebViewRecreation() {
+        HybridRunProfileStore.Endpoint chat = chatEndpoint();
+        HybridRunProfileStore.Endpoint work = workEndpoint();
+        HybridRunProfileStore.Selection selection = new HybridRunProfileStore.Selection(
+                RUN_ID, HybridRunProfileStore.STAGE_CONTINUATION, work, chat);
+        String script = HybridRequestProfileScript.documentStartScript(selection);
+        assertTrue(script.contains("let switched=true"));
+        assertTrue(script.contains("let bootstrapSeen=true"));
+        assertTrue(script.contains("if(switched)try{configure(CONTINUATION);}"));
     }
 
     @Test public void hybridWorkTitleMatchingIsExact() {
