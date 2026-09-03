@@ -31,7 +31,6 @@ jobs:
       EXPECTED_PACKAGE: 'com.shaterguy.chatgptselfrun.drive.test'
       APK_NAME: 'chatgpt-selfrun-drive-test-v2.3.1-dev1.apk'
       DELIVERY_DIR: 'direct-test'
-      WORKFLOW_PATH: '.github/workflows/publish-drive-test-direct-v2.3.1-dev1.yml'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -107,8 +106,8 @@ jobs:
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add "$DELIVERY_DIR/$APK_NAME" "$DELIVERY_DIR/DELIVERY.json"
-          git rm "$WORKFLOW_PATH"
+          git add "$DELIVERY_DIR/DELIVERY.json"
+          git add -f "$DELIVERY_DIR/$APK_NAME"
           git commit -m 'delivery: attach verified 2.3.1-dev1 TEST APK'
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
