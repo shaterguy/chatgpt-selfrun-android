@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.junit.After;
 import org.junit.Before;
@@ -29,10 +30,15 @@ public final class TurnDocumentRetryAndroidTest {
     @Before public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         clearAll();
+        awaitMainQueue();
         UserNextInputStore.initialize(context);
+        awaitMainQueue();
     }
 
-    @After public void tearDown() { clearAll(); }
+    @After public void tearDown() {
+        clearAll();
+        awaitMainQueue();
+    }
 
     @Test public void firstTimeoutRequestsDocumentRetryInsteadOfRollover() {
         SelfRunStore store = eligibleRun();
@@ -120,6 +126,7 @@ public final class TurnDocumentRetryAndroidTest {
         assertEquals("late user next input", UserNextInputStore.current(runId));
 
         store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
+        awaitMainQueue();
         String normal = SelfRunProtocol.driveContinuation(runId);
         assertTrue(normal.contains("[SELF_RUN_CONTINUE " + runId + "]"));
         assertTrue(normal.endsWith("late user next input"));
@@ -321,6 +328,7 @@ public final class TurnDocumentRetryAndroidTest {
                 DriveSignalParser.Type.TURN_COMPLETED, timestamp, raw, cursor,
                 false, "", "");
         store.applyDriveSignals(Collections.singletonList(completion), System.currentTimeMillis());
+        awaitMainQueue();
     }
 
     private SelfRunStore eligibleRun() {
@@ -366,6 +374,10 @@ public final class TurnDocumentRetryAndroidTest {
 
     private String retryOwner() {
         return retryPrefs().getString("turnDocumentRetryOwner", "");
+    }
+
+    private void awaitMainQueue() {
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
     private void clearAll() {
