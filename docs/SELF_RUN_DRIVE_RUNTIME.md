@@ -45,7 +45,9 @@ WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습�
 
 `NEXT_INPUT_B64URL=BODY` marker가 없는 signal은 제목만 사용하므로 Docs 본문을 열지 않습니다. marker가 있는 문서만 Docs API로 본문을 읽고, 정확한 `NEXT_INPUT_B64URL=<Base64URL>` 한 줄을 제목에 materialize한 뒤 기존 parser에 넘깁니다. 제목은 canonical이지만 본문이 아직 쓰이지 않았거나 malformed인 NEXT_INPUT 문서는 정상 signal로 소비하지 않고 현재 합성 로그에서 건너뜁니다. 같은 fileId의 본문이 완성되면 `modifiedTime`이 synthetic version을 바꾸므로 다음 동기화에서 다시 검증합니다. 이후 더 최신한 정상 signal이 생성된 경우에도 오래된 malformed BODY 문서가 새 signal 처리를 영구 차단하지 않습니다. 다른 Run, 다른 parent, shared/trashed 항목도 fail closed합니다.
 
-`POST_DOM_DRIVE_SYNC`에서 3분 동안 TURN_COMPLETED가 없으면 문서 재생성 요청의 1회 기회를 먼저 사용합니다. 그 재생성 요청이 아직 PENDING인 같은 Run에 동일 timeout이 중복 진입해도 PENDING 상태를 멱등 게이트로 유지해 자동 successor 승계를 시작하지 않습니다. 재생성 요청 제출이 확인되어 PENDING이 해제된 뒤 다시 3분 누락이 발생한 경우에만 기존 두 번째 timeout 자동 승계 경로를 사용합니다.
+`POST_DOM_DRIVE_SYNC`에서 3분 동안 `TURN_COMPLETED`가 없으면 현재 답변 완료 사이클의 문서 재생성 요청 기회를 먼저 사용합니다. 이 retry budget은 Run 전체가 아니라 각 독립적인 답변 완료 사이클마다 1회입니다. 첫 누락에서는 `[SELF_RUN_TURN_DOCUMENT_RETRY <RUN_ID>]`를 한 번 준비하고, 같은 prompt가 아직 `PENDING`인 동안 중복 timeout이 들어오면 동일 prompt를 유지합니다. `PENDING` 해제는 prompt lifecycle 정리이며 재요청 제출 확인, `WAIT_TURN_COMPLETION` 재진입, `POST_DOM_DRIVE_SYNC` 재진입 또는 DOM 답변완료 재감지만으로 `USED`를 복구하지 않습니다. 같은 사이클에서 retry가 제출된 뒤에도 프로토콜상 유효한 `TURN_COMPLETED`가 실제 소비되지 않은 채 다시 3분 timeout에 도달하면 두 번째 retry를 보내지 않고 기존 rollover 경로를 사용합니다.
+
+`USED` 복구는 정상 `TURN_COMPLETED` 소비 성공 경계에만 귀속됩니다. 현재 Run의 유효 completion을 Drive에서 실제로 소비하고 durable pending signal·cursor를 저장한 뒤 `POST_DOM_DRIVE_SYNC`를 정상적으로 벗어날 때, CHAT은 `SEND_CONTINUE`, WORK는 `APPLY_PREFS` 전이를 동일한 성공 경계로 취급하여 이전 완료 사이클의 `OWNER/USED/PENDING` retry 상태를 내구적으로 종료합니다. 이후 같은 Run의 다음 답변 완료 사이클은 다시 1회의 retry budget을 가집니다. 프로세스 또는 Service가 이 성공 상태 저장 직후 재생성되더라도 durable consumed-completion 상태를 확인해 동일 복구를 마칠 수 있으며, 반대로 유효 completion을 소비하지 않은 `USED` 상태는 재생성만으로 초기화되지 않습니다. malformed/protocol-error completion, 단순 문서 존재, phase 변경, USER_ACTION_REQUIRED/PAUSED/DONE, 비-timeout rollover는 이 reset 경계가 아닙니다.
 
 `RESUME_BASELINE`도 같은 Run-folder signal 목록을 다시 합성해 최신 cursor 이후의 completion을 확인합니다. signal 문서가 아직 없으면 5초 간격으로 최대 5분 재확인합니다. STOP/SEND 완료 감지에 짧은 주기의 반복 polling은 사용하지 않습니다.
 

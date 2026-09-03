@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TurnDocumentRetryWiringTest {
-    @Test public void threeMinuteSignalMissRoutesToOneShotRepairBeforeExistingRollover() throws Exception {
+    @Test public void threeMinuteSignalMissRoutesToOneRetryPerCompletionCycleBeforeExistingRollover() throws Exception {
         String service = src("SelfRunService.java");
         String coordinator = src("SelfRunRolloverCoordinator.java");
         String protocol = src("SelfRunProtocol.java");
@@ -25,6 +25,21 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(coordinator.contains("store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE)"));
         assertTrue(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
         assertTrue(protocol.contains("turnDocumentRetryPromptPending(runId)"));
+    }
+
+    @Test public void retryPromptCleanupAndBudgetRestoreAreSeparateDurableTransitions() throws Exception {
+        String coordinator = src("SelfRunRolloverCoordinator.java");
+
+        assertTrue(coordinator.contains("cleanupTurnDocumentRetryPrompt()"));
+        assertTrue(coordinator.contains("restoreTurnDocumentRetryBudgetAfterConsumedCompletion"));
+        assertTrue(coordinator.contains("pendingDriveSignalType"));
+        assertTrue(coordinator.contains("pendingDriveSignalRaw"));
+        assertTrue(coordinator.contains("commitDetectedAt"));
+        assertTrue(coordinator.contains("SelfRunStore.PHASE_SEND_CONTINUE"));
+        assertTrue(coordinator.contains("SelfRunStore.PHASE_APPLY_PREFS"));
+        assertTrue(coordinator.contains("DriveSignalParser.Type.TURN_COMPLETED.name()"));
+        assertTrue(coordinator.contains("remove(TURN_DOCUMENT_RETRY_USED)"));
+        assertTrue(coordinator.contains("retryPrefs.getBoolean(TURN_DOCUMENT_RETRY_PENDING, false)"));
     }
 
     @Test public void repairProfileTargetSurvivesTheWebViewRecreationDoneBeforeRetry() throws Exception {
@@ -42,20 +57,33 @@ public final class TurnDocumentRetryWiringTest {
         String nextInput = src("UserNextInputStore.java");
         String runner = androidTest("SelfRunAndroidTestRunner.java");
         String regression = androidTest("TurnDocumentRetryAndroidTest.java");
+        String workflow = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
 
         assertTrue(nextInput.contains("!SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId)"));
         assertTrue(runner.contains("TurnDocumentRetryAndroidTest"));
         assertTrue(regression.contains("duplicateTimeoutWhileRetryPendingKeepsSameRunAndRetryPrompt"));
+        assertTrue(regression.contains("secondTimeoutWithoutValidCompletionRollsOver"));
+        assertTrue(regression.contains("consumedChatCompletionRestoresSameRunRetryBudgetForNextCycle"));
+        assertTrue(regression.contains("nextCycleStillAllowsOnlyOneRetryBeforeRollover"));
+        assertTrue(regression.contains("usedBudgetSurvivesCoordinatorRecreationWithoutValidCompletion"));
+        assertTrue(regression.contains("restoredBudgetSurvivesCoordinatorRecreation"));
+        assertTrue(regression.contains("consumedWorkCompletionRestoresSameRunRetryBudget"));
+        assertTrue(regression.contains("malformedCompletionDoesNotRestoreRetryBudget"));
         assertTrue(regression.contains("transportRetryDoesNotConsumeLateUserNextInput"));
-        assertTrue(regression.contains("secondTimeoutRollsOverAndSuccessorGetsFreshRetryBudget"));
+        assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest"));
     }
 
-    @Test public void repositoryProtocolStatesRepairIsNotANewDriveSignalType() throws Exception {
+    @Test public void repositoryProtocolStatesRetryBudgetIsPerCompletionCycle() throws Exception {
         String protocolDoc = read("docs/SELF_RUN_DRIVE_V1_PROTOCOL.md", "../docs/SELF_RUN_DRIVE_V1_PROTOCOL.md");
+        String runtimeDoc = read("docs/SELF_RUN_DRIVE_RUNTIME.md", "../docs/SELF_RUN_DRIVE_RUNTIME.md");
         assertTrue(protocolDoc.contains("[SELF_RUN_TURN_DOCUMENT_RETRY <RUN_ID>]"));
         assertTrue(protocolDoc.contains("작업 진행용 CONTINUE가 아니며"));
         assertTrue(protocolDoc.contains("기존 `SELF_RUN_TURN_COMPLETED` signal document만 다시 생성"));
-        assertTrue(protocolDoc.contains("새로운 RUN_ID이므로 문서 누락 복구 횟수를 predecessor에서 상속하지 않고"));
+        assertTrue(protocolDoc.contains("각 독립적인 답변 완료 사이클마다 1회"));
+        assertTrue(protocolDoc.contains("`SEND_CONTINUE`"));
+        assertTrue(protocolDoc.contains("`APPLY_PREFS`"));
+        assertTrue(runtimeDoc.contains("`PENDING` 해제는 prompt lifecycle 정리"));
+        assertTrue(runtimeDoc.contains("`USED` 복구는 정상 `TURN_COMPLETED` 소비 성공 경계"));
     }
 
     private static String src(String file) throws Exception {

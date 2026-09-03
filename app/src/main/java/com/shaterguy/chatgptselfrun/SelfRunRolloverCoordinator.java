@@ -186,6 +186,31 @@ final class SelfRunRolloverCoordinator {
         }
     }
 
+    /**
+     * Restores the retry budget only after a protocol-valid TURN_COMPLETED has been durably consumed
+     * and the current run has left POST_DOM_DRIVE_SYNC through its normal CHAT/WORK success path.
+     * Prompt lifecycle cleanup remains intentionally separate in cleanupTurnDocumentRetryPrompt().
+     */
+    static boolean restoreTurnDocumentRetryBudgetAfterConsumedCompletion(String runId) {
+        synchronized (SelfRunRolloverCoordinator.class) {
+            if (retryPrefs == null || runStatePrefs == null || !SelfRunProtocolRules.validRunId(runId)) return false;
+            String owner = retryPrefs.getString(TURN_DOCUMENT_RETRY_OWNER, "");
+            String currentRunId = runStatePrefs.getString("runId", "");
+            if (!runId.equals(owner) || !runId.equals(currentRunId)
+                    || !retryPrefs.getBoolean(TURN_DOCUMENT_RETRY_USED, false)
+                    || retryPrefs.getBoolean(TURN_DOCUMENT_RETRY_PENDING, false)) return false;
+            String phase = runStatePrefs.getString("phase", SelfRunStore.PHASE_IDLE);
+            if (!SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
+                    && !SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) return false;
+            if (!DriveSignalParser.Type.TURN_COMPLETED.name().equals(
+                    runStatePrefs.getString("pendingDriveSignalType", ""))
+                    || runStatePrefs.getString("pendingDriveSignalRaw", "").isEmpty()
+                    || runStatePrefs.getLong("commitDetectedAt", 0L) <= 0L) return false;
+            return retryPrefs.edit().remove(TURN_DOCUMENT_RETRY_OWNER)
+                    .remove(TURN_DOCUMENT_RETRY_USED).remove(TURN_DOCUMENT_RETRY_PENDING).commit();
+        }
+    }
+
     private static void initializeTurnDocumentRetryState(Context app, SharedPreferences rolloverPrefs) {
         synchronized (SelfRunRolloverCoordinator.class) {
             retryPrefs = rolloverPrefs;
@@ -193,13 +218,20 @@ final class SelfRunRolloverCoordinator {
             if (runStateListener == null) {
                 runStateListener = (sharedPreferences, key) -> {
                     if ("phase".equals(key) || "runId".equals(key)
-                            || "active".equals(key) || "userStopped".equals(key)) {
+                            || "active".equals(key) || "userStopped".equals(key)
+                            || "pendingDriveSignalType".equals(key)
+                            || "pendingDriveSignalRaw".equals(key)
+                            || "commitDetectedAt".equals(key)) {
                         cleanupTurnDocumentRetryPrompt();
+                        restoreTurnDocumentRetryBudgetAfterConsumedCompletion(
+                                runStatePrefs.getString("runId", ""));
                     }
                 };
                 runStatePrefs.registerOnSharedPreferenceChangeListener(runStateListener);
             }
             cleanupTurnDocumentRetryPrompt();
+            restoreTurnDocumentRetryBudgetAfterConsumedCompletion(
+                    runStatePrefs.getString("runId", ""));
         }
     }
 

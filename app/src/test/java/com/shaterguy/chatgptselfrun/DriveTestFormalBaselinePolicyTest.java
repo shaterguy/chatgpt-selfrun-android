@@ -12,7 +12,7 @@ import static org.junit.Assert.assertTrue;
 
 /** Ensures TEST co-install always uses the current stable SelfRun Drive baseline. */
 public final class DriveTestFormalBaselinePolicyTest {
-    @Test public void dev12UsesCurrentStable230FormalFixture() throws Exception {
+    @Test public void dev231UsesCurrentStable230FormalFixtureAndDev12TestPredecessor() throws Exception {
         Path path = Paths.get(".github/workflows/build-drive-test.yml");
         if (!Files.exists(path)) path = Paths.get("../.github/workflows/build-drive-test.yml");
         String workflow = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
@@ -21,6 +21,8 @@ public final class DriveTestFormalBaselinePolicyTest {
         assertTrue(workflow.contains("versionCode='2020030'"));
         assertTrue(workflow.contains("versionName='2.3.0'"));
         assertTrue(workflow.contains("FORMAL_EXPECTED_VERSION=\"2.3.0\""));
+        assertTrue(workflow.contains("PREV_BRANCH='selfrun-drive/v2.3.0-dev12'"));
+        assertTrue(workflow.contains("immutable 2.3.0-dev12 TEST artifact unavailable"));
         assertFalse(workflow.contains("drive-v2.2.2"));
         assertFalse(workflow.contains("versionCode='2020019'"));
         Path script = Paths.get("tools/verify_drive_test_coinstall_emulator.sh");
