@@ -58,13 +58,15 @@ public final class HybridModePolicyTest {
         String activity = src("SelfRunNewActivity.java");
         String dom = src("SelfRunDom.java");
         String protocol = src("SelfRunProtocol.java");
+        String hybridStore = src("HybridRunProfileStore.java");
         assertTrue(activity.contains("store.startWork(runId, project, request, new ArrayList<>(selectedAttachments),"));
         assertTrue(activity.contains("store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments))"));
         assertTrue(activity.contains("HybridRunProfileStore.MODE_HYBRID"));
         assertTrue(dom.contains("BootstrapModeDom.inline(requested, runId) + ChatReasoningOptionDom.inline(chatReasoning, runId)"));
         assertTrue(dom.contains("HybridBootstrapDom.inline(runId)"));
-        assertTrue(protocol.contains("SELF_RUN_HYBRID_STAGE="));
-        assertTrue(protocol.contains("SELF_RUN_HYBRID_CONTINUATION_MODEL="));
+        assertTrue(protocol.contains("HybridRunProfileStore.metadata(runId)"));
+        assertTrue(hybridStore.contains("SELF_RUN_HYBRID_STAGE="));
+        assertTrue(hybridStore.contains("SELF_RUN_HYBRID_CONTINUATION_MODEL="));
     }
 
     private static HybridRunProfileStore.Endpoint chatEndpoint() {
