@@ -1,0 +1,127 @@
+name: Publish SelfRun Drive TEST 2.3.1-dev1 direct APK
+
+on:
+  push:
+    branches:
+      - delivery/selfrun-drive-v2.3.1-dev1
+    paths:
+      - .github/workflows/publish-drive-test-direct-v2.3.1-dev1.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-selfrun-drive-test-2.3.1-dev1-direct
+  cancel-in-progress: false
+
+jobs:
+  publish-direct-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: '33771360540'
+      SOURCE_COMMIT: '0e831b7c65fbc1adb4a4c82d667b591a8de569a1'
+      SOURCE_ARTIFACT_ID: '9899786726'
+      SOURCE_ARTIFACT_NAME: 'chatgpt-selfrun-drive-test-build'
+      SOURCE_ARTIFACT_DIGEST: 'sha256:5aa2031d94b6bd65db0a386b2e638d3b046db15204816ecfa68372fe373b1dd4'
+      EXPECTED_TEST_CERT_SHA256: '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e'
+      EXPECTED_VERSION: '2.3.1-dev1'
+      EXPECTED_PACKAGE: 'com.shaterguy.chatgptselfrun.drive.test'
+      APK_NAME: 'chatgpt-selfrun-drive-test-v2.3.1-dev1.apk'
+      DELIVERY_DIR: 'direct-test'
+      WORKFLOW_PATH: '.github/workflows/publish-drive-test-direct-v2.3.1-dev1.yml'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+
+      - name: Verify immutable validated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}")"
+          [[ "$(jq -r '.head_sha' <<<"$RUN_JSON")" == "$SOURCE_COMMIT" ]]
+          [[ "$(jq -r '.conclusion' <<<"$RUN_JSON")" == 'success' ]]
+          [[ "$(jq -r '.run_attempt' <<<"$RUN_JSON")" == '1' ]]
+          ART_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}")"
+          [[ "$(jq -r '.name' <<<"$ART_JSON")" == "$SOURCE_ARTIFACT_NAME" ]]
+          [[ "$(jq -r '.expired' <<<"$ART_JSON")" == 'false' ]]
+          [[ "$(jq -r '.workflow_run.id' <<<"$ART_JSON")" == "$SOURCE_RUN_ID" ]]
+          [[ "$(jq -r '.workflow_run.head_sha' <<<"$ART_JSON")" == "$SOURCE_COMMIT" ]]
+          [[ "$(jq -r '.digest' <<<"$ART_JSON")" == "$SOURCE_ARTIFACT_DIGEST" ]]
+
+      - name: Download exact validated TEST artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifact
+          mkdir artifact
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$SOURCE_ARTIFACT_NAME" \
+            --dir artifact
+
+      - name: Verify and expose exact APK without rebuild or resign
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find artifact -type f -name "$APK_NAME" -print -quit)"
+          SUM_FILE="$(find artifact -type f -name 'SHA256SUMS.txt' -print -quit)"
+          SOURCE_FILE="$(find artifact -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
+          CERT_FILE="$(find artifact -type f -name 'APK_CERT.txt' -print -quit)"
+          test -s "$APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          test -s "$CERT_FILE"
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$SOURCE_COMMIT" ]]
+          EXPECTED_APK_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          ACTUAL_APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          [[ "$ACTUAL_APK_SHA" == "$EXPECTED_APK_SHA" ]]
+          grep -Fqi "$EXPECTED_TEST_CERT_SHA256" "$CERT_FILE"
+          APK_SIZE="$(stat -c '%s' "$APK")"
+
+          mkdir -p "$DELIVERY_DIR"
+          cp "$APK" "$DELIVERY_DIR/$APK_NAME"
+          [[ "$(sha256sum "$DELIVERY_DIR/$APK_NAME" | awk '{print $1}')" == "$ACTUAL_APK_SHA" ]]
+
+          cat > "$DELIVERY_DIR/DELIVERY.json" <<EOF
+          {
+            "delivery_kind": "TEST_DIRECT_APK_EXACT_VALIDATED_ARTIFACT",
+            "version": "$EXPECTED_VERSION",
+            "package": "$EXPECTED_PACKAGE",
+            "source_commit": "$SOURCE_COMMIT",
+            "source_run_id": "$SOURCE_RUN_ID",
+            "source_artifact_id": "$SOURCE_ARTIFACT_ID",
+            "source_artifact_digest": "$SOURCE_ARTIFACT_DIGEST",
+            "apk_name": "$APK_NAME",
+            "apk_sha256": "$ACTUAL_APK_SHA",
+            "apk_size": $APK_SIZE,
+            "test_cert_sha256": "$EXPECTED_TEST_CERT_SHA256",
+            "rebuilt": false,
+            "resigned": false,
+            "formal_release": false
+          }
+          EOF
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$DELIVERY_DIR/$APK_NAME" "$DELIVERY_DIR/DELIVERY.json"
+          git rm "$WORKFLOW_PATH"
+          git commit -m 'delivery: attach verified 2.3.1-dev1 TEST APK'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Verify committed delivery metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$GITHUB_REF_NAME"
+          git reset --hard "origin/$GITHUB_REF_NAME"
+          test -s "$DELIVERY_DIR/$APK_NAME"
+          test -s "$DELIVERY_DIR/DELIVERY.json"
+          jq -e --arg c "$SOURCE_COMMIT" '.source_commit == $c and .rebuilt == false and .resigned == false and .formal_release == false' "$DELIVERY_DIR/DELIVERY.json" >/dev/null
+          MANIFEST_SHA="$(jq -r '.apk_sha256' "$DELIVERY_DIR/DELIVERY.json")"
+          [[ "$(sha256sum "$DELIVERY_DIR/$APK_NAME" | awk '{print $1}')" == "$MANIFEST_SHA" ]]
+          echo "DIRECT_APK_DELIVERY_PASS"
+          echo "DIRECT_APK_RAW_URL=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/${DELIVERY_DIR}/${APK_NAME}"
