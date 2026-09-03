@@ -21,7 +21,6 @@ import android.widget.FrameLayout;
 /** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
 final class HeadlessWebViewHost {
     private static volatile WebView activeWebView;
-    private static volatile HeadlessWebViewHost activeHost;
 
     private final WebView webView;
     private final Presentation presentation;
@@ -46,7 +45,6 @@ final class HeadlessWebViewHost {
         this.drainState = drainState;
         this.outputAttached = virtualDisplay != null && surface != null;
         activeWebView = webView;
-        activeHost = this;
     }
 
     static HeadlessWebViewHost create(Context context) {
@@ -170,20 +168,6 @@ final class HeadlessWebViewHost {
 
     static WebView activeWebView() { return activeWebView; }
 
-    static boolean attachOutputFor(WebView view) {
-        HeadlessWebViewHost host = activeHost;
-        if (host == null || host.webView != view) return false;
-        try { return host.attachOutput(); }
-        catch (Throwable ignored) { return false; }
-    }
-
-    static boolean detachOutputFor(WebView view) {
-        HeadlessWebViewHost host = activeHost;
-        if (host == null || host.webView != view) return false;
-        try { return host.detachOutput(); }
-        catch (Throwable ignored) { return false; }
-    }
-
     WebView webView() { return webView; }
 
     boolean hasDetachableOutput() {
@@ -234,7 +218,6 @@ final class HeadlessWebViewHost {
     }
 
     void destroy() {
-        if (activeHost == this) activeHost = null;
         if (activeWebView == webView) activeWebView = null;
         try {
             webView.setWebViewClient(null);

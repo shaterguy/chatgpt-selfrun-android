@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# Dev4 Work transport capture and current-stable co-install verification
+# 2.3.1-dev1 retry-cycle regression and current-stable co-install verification
 
 on:
   push:
@@ -158,11 +158,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p formal-baseline
-          gh release download drive-v2.2.2 \
+          gh release download drive-v2.3.0 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v2.2.2.apk' \
+            --pattern 'chatgpt-selfrun-drive-v2.3.0.apk' \
             --dir formal-baseline
-          test -s formal-baseline/chatgpt-selfrun-drive-v2.2.2.apk
+          test -s formal-baseline/chatgpt-selfrun-drive-v2.3.0.apk
       - name: Find actual previous TEST artifact
         id: previous_test_run
         shell: bash
@@ -174,6 +174,19 @@ jobs:
             PREV_ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}/artifacts?per_page=100" \
               --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-test-build" and (.expired | not))][0].id // empty')"
             [[ -n "$PREV_ARTIFACT_ID" ]] || { echo 'immutable 1.4.2-dev10 TEST artifact unavailable' >&2; exit 1; }
+            echo "run_id=$PREV_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF_NAME" == 'selfrun-drive/v2.3.1-dev1' ]]; then
+            PREV_BRANCH='selfrun-drive/v2.3.0-dev12'
+            PREV_RUN_ID="$(gh api --method GET "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-test.yml/runs" \
+              -f branch="$PREV_BRANCH" -f status=success -f per_page=20 \
+              --jq '.workflow_runs[0].id // empty')"
+            [[ -n "$PREV_RUN_ID" ]] || { echo 'immutable 2.3.0-dev12 TEST run unavailable' >&2; exit 1; }
+            PREV_ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-test-build" and (.expired | not))][0].id // empty')"
+            [[ -n "$PREV_ARTIFACT_ID" ]] || { echo 'immutable 2.3.0-dev12 TEST artifact unavailable' >&2; exit 1; }
             echo "run_id=$PREV_RUN_ID" >> "$GITHUB_OUTPUT"
             echo 'available=true' >> "$GITHUB_OUTPUT"
             exit 0
@@ -282,7 +295,7 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           CURRENT_APK=current-candidate/current-test.apk
           PREV_APK=predecessor/previous-test.apk
-          FORMAL_APK=formal-baseline/chatgpt-selfrun-drive-v2.2.2.apk
+          FORMAL_APK=formal-baseline/chatgpt-selfrun-drive-v2.3.0.apk
           test -s "$CURRENT_APK" || fail 'canonical current TEST APK missing'
           test -s "$PREV_APK" || fail 'previous TEST APK missing'
           test -s "$FORMAL_APK" || fail 'formal baseline APK missing'
@@ -301,8 +314,8 @@ jobs:
           grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING" || fail 'current TEST versionName mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$PREV_BADGING" || fail 'previous TEST package mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING" || fail 'formal package mismatch'
-          grep -Fq "versionCode='2020019'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionCode mismatch'
-          grep -Fq "versionName='2.2.2'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionName mismatch'
+          grep -Fq "versionCode='2020030'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionCode mismatch'
+          grep -Fq "versionName='2.3.0'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionName mismatch'
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > coinstall-current-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$PREV_APK" > coinstall-test-prev-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$FORMAL_APK" > coinstall-formal-cert.txt
@@ -314,7 +327,7 @@ jobs:
           [[ "$FORMAL_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]] || fail 'formal signer mismatch'
           echo "TEST_PREV_VERSION_NAME=$PREV_VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_PREV_VERSION_CODE=$PREV_VERSION_CODE" >> "$GITHUB_ENV"
-          note "formal fixture: 2.2.2 / 2020019"
+          note "formal fixture: 2.3.0 / 2020030"
           note "TEST predecessor: $PREV_VERSION_NAME / $PREV_VERSION_CODE / source=$PREDECESSOR_SOURCE"
           note "TEST current: $CURRENT_VERSION_NAME / $CURRENT_VERSION_CODE / source=$GITHUB_SHA"
           note 'preflight: PASS'
@@ -325,7 +338,7 @@ jobs:
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
           if [[ "$VERSION_NAME" == 2.* ]]; then
-            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest'
+            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest,com.shaterguy.chatgptselfrun.TurnCompletionDomFallbackWebViewTest,com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest'
           else
             INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest'
           fi
@@ -348,7 +361,7 @@ jobs:
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
           script: >-
-            gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=$TEST_INSTRUMENTATION_CLASS && adb shell dumpsys webviewupdate > drive-test-webview-evidence.txt && cat drive-test-webview-evidence.txt && FORMAL_EXPECTED_VERSION="2.2.2" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v2.2.2.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1 && cat drive-test-coinstall-evidence.txt
+            gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=$TEST_INSTRUMENTATION_CLASS && adb shell dumpsys webviewupdate > drive-test-webview-evidence.txt && cat drive-test-webview-evidence.txt && FORMAL_EXPECTED_VERSION="2.3.0" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v2.3.0.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1 && cat drive-test-coinstall-evidence.txt
       - name: Upload TEST verification evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
