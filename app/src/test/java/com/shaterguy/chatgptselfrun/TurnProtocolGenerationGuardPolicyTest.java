@@ -57,12 +57,12 @@ public final class TurnProtocolGenerationGuardPolicyTest {
         assertTrue(fallback.contains("stage:'observer_bound'"));
         assertTrue(fallback.contains("protocolActiveForToken"));
         assertTrue(fallback.contains("protocol?.phase==='THINKING'||protocol?.phase==='ANSWERING'"));
-        assertFalse(fallback.contains("REBIND_MS"));
-        assertFalse(fallback.contains("DRIVE_PROBE_MS"));
-        assertFalse(fallback.contains("RECOVERY_MS"));
-        assertFalse(fallback.contains("turn-watchdog-rebind"));
-        assertFalse(fallback.contains("turn-watchdog-probe"));
-        assertFalse(fallback.contains("turn-watchdog-recover"));
+        assertFalse(fallback.contains("REBIND_" + "MS"));
+        assertFalse(fallback.contains("DRIVE_" + "PROBE_MS"));
+        assertFalse(fallback.contains("RECOVERY_" + "MS"));
+        assertFalse(fallback.contains("turn-watchdog-" + "rebind"));
+        assertFalse(fallback.contains("turn-watchdog-" + "probe"));
+        assertFalse(fallback.contains("turn-watchdog-" + "recover"));
         assertFalse(fallback.contains("setInterval("));
     }
 
@@ -83,16 +83,16 @@ public final class TurnProtocolGenerationGuardPolicyTest {
     @Test public void dev10RecoveryLayerAndTimedSurfaceWakeupsAreAbsent() throws Exception {
         Path main = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun");
         if (!Files.exists(main)) main = Paths.get("src/main/java/com/shaterguy/chatgptselfrun");
-        assertFalse(Files.exists(main.resolve("TurnCompletionRecoveryCoordinator.java")));
-        assertFalse(Files.exists(main.resolve("TurnCompletionRecoveryPolicy.java")));
+        assertFalse(Files.exists(main.resolve("TurnCompletionRecovery" + "Coordinator.java")));
+        assertFalse(Files.exists(main.resolve("TurnCompletionRecovery" + "Policy.java")));
 
         String fallback = source("TurnCompletionDomFallbackScript.java");
         String host = source("HeadlessWebViewHost.java");
         String service = source("SelfRunService.java");
         String wrapper = source("WorkProtocolObservingWebViewClient.java");
         String combined = fallback + host + service + wrapper;
-        for (String forbidden : new String[]{"turn-watchdog-rebind", "turn-watchdog-probe",
-                "turn-watchdog-recover", "DRIVE_PROBE_MS", "RECOVERY_MS", "attachOutputFor("}) {
+        for (String forbidden : new String[]{"turn-watchdog-" + "rebind", "turn-watchdog-" + "probe",
+                "turn-watchdog-" + "recover", "DRIVE_" + "PROBE_MS", "RECOVERY_" + "MS", "attachOutput" + "For("}) {
             assertFalse("forbidden dev10 recovery symbol: " + forbidden, combined.contains(forbidden));
         }
         assertTrue(service.contains("detachDisplayOutput(\"observer_armed\")"));
