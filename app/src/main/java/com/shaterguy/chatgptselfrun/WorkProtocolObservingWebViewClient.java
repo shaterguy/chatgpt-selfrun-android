@@ -11,7 +11,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-/** Adds Work-only native request observation without replacing existing WebViewClient behavior. */
+/** Adds Work-only native request observation and bounded completion recovery without replacing delegate behavior. */
 final class WorkProtocolObservingWebViewClient extends WebViewClient {
     private final Context context;
     private final WebViewClient delegate;
@@ -28,6 +28,8 @@ final class WorkProtocolObservingWebViewClient extends WebViewClient {
     }
 
     @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        if (request != null && request.isForMainFrame()
+                && TurnCompletionRecoveryCoordinator.handleNavigation(context, view, request.getUrl())) return true;
         if (request != null) WorkProtocolCoverageTracker.observeCompletionNavigation(context, request.getUrl());
         return delegate.shouldOverrideUrlLoading(view, request);
     }
