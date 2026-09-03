@@ -30,6 +30,7 @@ final class WebViewConfig {
         boolean protocolObservable = TurnProtocolLogBridge.install(webView);
         RequestProfileScript.installDocumentStart(webView);
         HybridRequestProfileScript.installDocumentStart(webView);
+        TurnCompletionDomFallbackScript.installDocumentStart(webView);
         if (protocolObservable) {
             ChatGptTurnProtocolScript.installDocumentStart(webView);
             WorkTurnProtocolIngressScript.installDocumentStart(webView);

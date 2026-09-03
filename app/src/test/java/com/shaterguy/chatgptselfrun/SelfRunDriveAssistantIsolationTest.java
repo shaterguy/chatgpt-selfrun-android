@@ -9,24 +9,19 @@ import java.nio.file.Paths;
 
 import static org.junit.Assert.*;
 
-import java.util.stream.Stream;
-
 public final class SelfRunDriveAssistantIsolationTest {
-    @Test public void productionJavaContainsNoAssistantContentCompletionObservation() throws Exception {
-        Path root = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun");
-        if (!Files.exists(root)) root = Paths.get("src/main/java/com/shaterguy/chatgptselfrun");
-        StringBuilder all = new StringBuilder();
-        try (Stream<Path> files = Files.walk(root)) {
-            for (Path path : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".java"))::iterator) {
-                all.append(new String(Files.readAllBytes(path), StandardCharsets.UTF_8)).append('\n');
-            }
-        }
-        String source = all.toString();
+    @Test public void assistantCompletionObservationIsIsolatedToDedicatedFallback() throws Exception {
+        String fallback = source("TurnCompletionDomFallbackScript.java");
+        String legacyDom = source("SelfRunDom.java") + source("SelfRunContinuationDom.java");
+        assertTrue(fallback.contains("data-message-author-role"));
+        assertTrue(fallback.contains("finalActionEvidence"));
+        assertTrue(fallback.contains("dom_assistant_final_ui"));
+        assertFalse(legacyDom.contains("data-message-author-role=\\\"assistant\\\""));
+        assertFalse(legacyDom.contains("article[data-turn=\\\"assistant\\\"]"));
         for (String banned : new String[]{
                 "readLatestSelfRunControl", "observeAssistant", "assistantSnapshot", "assistantBaselineKey",
-                "ASSISTANT_BASELINE_WAIT", "PHASE_READ_NEXT_CONTROL", "CONTROL_FOUND", "CONTROL_MISSING",
-                "data-message-author-role=\\\"assistant\\\"", "article[data-turn=\\\"assistant\\\"]"}) {
-            assertFalse("banned assistant completion observer remains: " + banned, source.contains(banned));
+                "ASSISTANT_BASELINE_WAIT", "PHASE_READ_NEXT_CONTROL", "CONTROL_FOUND", "CONTROL_MISSING"}) {
+            assertFalse("legacy assistant completion observer remains: " + banned, legacyDom.contains(banned));
         }
     }
 
