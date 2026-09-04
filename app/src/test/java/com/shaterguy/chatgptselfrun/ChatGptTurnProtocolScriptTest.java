@@ -9,7 +9,7 @@ import static org.junit.Assert.*;
 
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalPostAndProtocolSemanticsOwnTurnState() {
-        assertEquals("turn-protocol-v8",ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v9",ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
         assertTrue(script.contains("state.phase='THINKING'"));
@@ -19,17 +19,30 @@ public final class ChatGptTurnProtocolScriptTest {
         assertFalse(script.contains("turnSequence"));
         assertFalse(script.contains("turnKind"));
     }
+
     @Test public void protocolOwnsTokenAndArmsOnlyAfterNativeWait() {
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("turnToken:''"));
         assertTrue(script.contains("const bindTurn=(run,token)=>"));
         assertTrue(script.contains("const armCompletion=(run,token)=>"));
         assertTrue(script.contains("completionArmed:false"));
-        assertTrue(script.contains("selfrun-drive:response-protocol-state:v8"));
+        assertTrue(script.contains("selfrun-drive:response-protocol-state:v9"));
         assertFalse(script.contains("__selfRunDriveTurnObserver"));
         assertFalse(script.contains("DomFallback"));
     }
-    @Test public void lateAndStaleFramesAreFencedAndLateEvidenceIsReevaluated() {
+
+    @Test public void terminalProtocolEventCompletesWithoutAuxiliaryFinalEvidence() {
+        String script=ChatGptTurnProtocolScript.documentStartScript();
+        assertTrue(script.contains("if(value.type==='message_stream_complete'){\n                      complete('message_stream_complete');return;"));
+        assertTrue(script.contains("const complete=source=>"));
+        assertTrue(script.contains("return finalizeComplete(completionSource);"));
+        assertFalse(script.contains("completionEvidence"));
+        assertFalse(script.contains("sawTerminalComplete"));
+        assertFalse(script.contains("completion_without_final_answer_evidence"));
+        assertFalse(script.contains("completeAfterLateEvidence"));
+    }
+
+    @Test public void lateAndStaleFramesRemainFencedByActiveTurnOwnership() {
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("identity&&identity!==state.requestIdentity"));
         assertTrue(script.contains("context.requestIdentity!==state.requestIdentity"));
@@ -37,12 +50,10 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("if(sameRun)retireWorkTurn(state.currentWorkTurnId)"));
         assertTrue(script.contains("else retiredWorkTurnIds.length=0"));
         assertTrue(script.contains("if(retiredWorkTurnIds.length>8)retiredWorkTurnIds.shift()"));
-        assertTrue(script.contains("const completeAfterLateEvidence=()=>"));
-        assertTrue(script.contains("completeAfterLateEvidence();"));
-        assertTrue(script.contains("state.sawTerminalComplete&&state.sawVisibleAnswer&&!!state.currentFinalMessageId"));
         assertTrue(script.contains("if(!identity&&(!safe(context?.conversationId||'')||!safe(context?.workTurnId||'')))return false"));
         assertTrue(script.contains("state.lastError='active_turn_overlap'"));
     }
+
     private static String source(String name) throws Exception {
         Path path=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+name);
         if(!Files.exists(path))path=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+name);
