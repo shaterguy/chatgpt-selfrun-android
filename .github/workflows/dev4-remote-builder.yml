@@ -27,7 +27,10 @@ jobs:
           gradle-version: '9.5.0'
           cache-read-only: false
       - name: Apply protocol-only dev4 patch
-        run: python3 tools/dev4_protocol_only_patch.py
+        run: |
+          set -euo pipefail
+          rm -f app/src/main/java/com/shaterguy/chatgptselfrun/TurnCompletionDomFallbackScript.java
+          python3 tools/dev4_protocol_only_patch.py
       - name: Verify policy, unit tests, and TEST assemble
         run: |
           set -euo pipefail
