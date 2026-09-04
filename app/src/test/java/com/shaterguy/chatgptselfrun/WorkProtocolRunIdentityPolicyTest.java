@@ -36,7 +36,9 @@ public final class WorkProtocolRunIdentityPolicyTest {
         assertTrue(web.indexOf("RequestProfileScript.installDocumentStart(webView)")
                 < web.indexOf("HybridRequestProfileScript.installDocumentStart(webView)"));
         assertTrue(hybrid.contains("configure(decision.endpoint)"));
-        assertTrue(hybrid.lastIndexOf("try{prepare(text);") < hybrid.lastIndexOf("return innerFetch(input,init)"));
+        int prepare = hybrid.indexOf("try{prepare(text);");
+        assertTrue(prepare >= 0);
+        assertTrue(hybrid.indexOf("return innerFetch(input,init);", prepare) > prepare);
         assertTrue(profile.contains("const planned=profileForBody(body)"));
         assertTrue(profile.contains("const t=state.target"));
     }
