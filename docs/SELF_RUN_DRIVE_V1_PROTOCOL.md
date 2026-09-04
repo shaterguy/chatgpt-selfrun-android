@@ -107,17 +107,17 @@ marker가 없는 signal document의 본문은 signal 판정에 사용하지 않�
 
 ## Android 진행 기준
 
-앱은 composer의 정확한 전문 readback과 활성 SEND를 확인한 뒤 명령을 클릭합니다. 제출 클릭과 같은 JavaScript 실행에서 STOP/SEND 영역에 `MutationObserver`를 설치하고, 클릭 결과를 곧바로 완료 관찰 상태로 전이합니다. 전송 이후 별도 STOP/SEND polling으로 제출을 재확인하지 않습니다. STOP을 처음 관찰하면 현재 run/token 범위의 내구 증거를 기록합니다. 그 증거가 있는 경우에만 WebView·renderer 복구 뒤의 idle baseline을 허용합니다. STOP을 본 뒤 완료 상태가 나타나면 5초를 기다리고 버튼 상태를 한 번 더 확인하며, 여전히 완료 상태일 때만 native 완료 콜백을 보냅니다. STOP이 돌아오면 타이머를 취소하고 관찰을 계속합니다.
+앱은 composer의 정확한 전문 readback과 활성 SEND를 확인한 뒤, 현재 runId+turnToken을 response protocol에 먼저 bind하고 명령을 클릭합니다. 제출 확인 후 Surface를 detach하고 protocol COMPLETE callback을 수동 대기합니다. DOM의 STOP, idle, assistant UI 또는 action UI는 turn 상태와 완료 증거로 사용하지 않습니다.
 
 native 완료 콜백 직후 앱은 실행턴 문서 본문 변경을 기다리지 않고 Run 폴더의 signal document metadata를 즉시 조회합니다. 마지막으로 소비한 signal cursor 이후 `TURN_COMPLETED`가 있으면 NEXT_INPUT과 Work profile을 적용합니다. 없으면 5초 간격으로 최대 3분 재확인합니다. `createdTime`과 제목 timestamp는 최신 signal 선택에 사용하고, 기존 실행턴 문서 `modifiedTime`은 legacy 호환 경로 외에는 신규 signal 상태가 아닙니다.
 
 3분이 지나도 `TURN_COMPLETED`를 찾지 못한 경우, signal-document transport를 사용하는 현재 Run의 각 독립적인 답변 완료 사이클마다 1회의 문서 누락 복구 기회를 허용합니다. 해당 사이클에서 아직 retry budget을 사용하지 않았다면 자동 승계 전에 정확히 한 번 `[SELF_RUN_TURN_DOCUMENT_RETRY <RUN_ID>]`를 같은 conversation에 제출합니다. 이 제어신호는 작업 진행용 CONTINUE가 아니며, ChatGPT는 canonical SelfRun 운영문서에 따라 직전 정상 턴에서 누락된 기존 `SELF_RUN_TURN_COMPLETED` signal document만 다시 생성합니다. 복구 요청이 제출되기 전 `TURN_DOCUMENT_RETRY`가 `PENDING`인 동안 동일한 `TURN_COMPLETION_SIGNAL_TIMEOUT`이 다시 들어오면 같은 Run의 동일 재생성 요청 상태를 멱등하게 유지하고 successor 자동 승계로 넘어가지 않습니다.
 
-복구 요청 제출 확인은 `PENDING` prompt lifecycle만 끝내며 retry budget 자체를 초기화하지 않습니다. `WAIT_TURN_COMPLETION` 또는 `POST_DOM_DRIVE_SYNC` 재진입, DOM 답변완료 재감지, 단순 phase 변경이나 signal 문서 존재만으로도 budget을 복구하지 않습니다. 같은 완료 사이클에서 retry를 이미 사용한 뒤 프로토콜상 유효한 `TURN_COMPLETED`를 실제 소비하지 못하고 다시 3분 누락에 도달하면 복구신호를 반복하지 않고 기존 `TURN_COMPLETION_SIGNAL_TIMEOUT` rollover 경로를 사용합니다.
+복구 요청 제출 확인은 `PENDING` prompt lifecycle만 끝내며 retry budget 자체를 초기화하지 않습니다. `WAIT_TURN_COMPLETION` 또는 `POST_PROTOCOL_DRIVE_SYNC` 재진입, DOM 답변완료 재감지, 단순 phase 변경이나 signal 문서 존재만으로도 budget을 복구하지 않습니다. 같은 완료 사이클에서 retry를 이미 사용한 뒤 프로토콜상 유효한 `TURN_COMPLETED`를 실제 소비하지 못하고 다시 3분 누락에 도달하면 복구신호를 반복하지 않고 기존 `TURN_COMPLETION_SIGNAL_TIMEOUT` rollover 경로를 사용합니다.
 
-반대로 해당 사이클의 정상 `TURN_COMPLETED`를 Drive에서 실제 읽고 소비해 `POST_DOM_DRIVE_SYNC`를 정상적으로 벗어나면 그 성공 경계에서 이전 사이클의 retry budget을 종료하고 같은 Run의 다음 완료 사이클용 1회 budget을 복구합니다. CHAT의 `SEND_CONTINUE` 전이와 WORK의 `APPLY_PREFS` 전이를 동일한 성공 경계로 취급합니다. 이 복구 상태와 아직 사용 중인 `USED` 상태는 모두 내구 저장되므로 프로세스/Service 재생성만으로 의미가 바뀌지 않습니다. malformed/protocol-error completion은 정상 소비로 인정하지 않습니다. 자동승계 successor는 새로운 RUN_ID이므로 자체 첫 완료 사이클의 새 1회 기회를 가집니다. 복구 제어신호 자체는 NEXT_INPUT을 소비하거나 덧붙이지 않으며, 보류 중인 사용자 NEXT_INPUT은 다음 정상 CONTINUE까지 보존합니다.
+반대로 해당 사이클의 정상 `TURN_COMPLETED`를 Drive에서 실제 읽고 소비해 `POST_PROTOCOL_DRIVE_SYNC`를 정상적으로 벗어나면 그 성공 경계에서 이전 사이클의 retry budget을 종료하고 같은 Run의 다음 완료 사이클용 1회 budget을 복구합니다. CHAT의 `SEND_CONTINUE` 전이와 WORK의 `APPLY_PREFS` 전이를 동일한 성공 경계로 취급합니다. 이 복구 상태와 아직 사용 중인 `USED` 상태는 모두 내구 저장되므로 프로세스/Service 재생성만으로 의미가 바뀌지 않습니다. malformed/protocol-error completion은 정상 소비로 인정하지 않습니다. 자동승계 successor는 새로운 RUN_ID이므로 자체 첫 완료 사이클의 새 1회 기회를 가집니다. 복구 제어신호 자체는 NEXT_INPUT을 소비하거나 덧붙이지 않으며, 보류 중인 사용자 NEXT_INPUT은 다음 정상 CONTINUE까지 보존합니다.
 
-제출 성공과 답변 완료는 내부 WebView DOM으로 확정하며 Drive의 별도 수신확인 신호를 기다리거나 재제출 게이트로 사용하지 않습니다. STOP/SEND 완료 판정에 짧은 주기의 반복 polling을 사용하지 않습니다. 입력 전문 readback 뒤 SEND가 활성화된 경우에만 다음 프롬프트를 클릭합니다.
+제출 성공은 composer readback·SEND·일회성 submission verification으로 확인하고, 답변 완료는 현재 turnToken의 response protocol COMPLETE로만 확정합니다. 입력 전문 readback 뒤 SEND가 활성화된 경우에만 다음 프롬프트를 클릭합니다.
 
 ## Runs folder binding과 OAuth
 
@@ -133,7 +133,7 @@ OAuth는 다음 최소 조합을 사용합니다.
 
 ## WebView 책임
 
-Drive V1의 WebView 책임은 canonical conversation의 composer 제어권 확보, 명령 제출, STOP/SEND 영역의 완료 상태 감지입니다. assistant 메시지 본문이나 SELF_RUN 제어문구는 완료 판정에 사용하지 않습니다. 입력창을 찾지 못하거나 renderer/WebView가 소실되면 저장된 conversation URL을 다시 열어 composer를 재획득합니다. 복구 가능한 WebView·네트워크 오류를 Job 종료 사유로 승격하지 않습니다.
+Drive V1의 DOM 책임은 canonical conversation의 composer 제어권 확보와 명령 제출·일회성 제출 확인입니다. response protocol은 turnToken, requestIdentity, conversationId, workTurnId로 stale event를 fence하며 turn 상태를 단독 소유합니다. 실제 renderer 종료만 별도 복구하고 Surface detach는 renderer 사망으로 취급하지 않습니다.
 
 WORK 모드의 다음 모델·추론 설정은 DOM에서 assistant 제어문구를 읽어 결정하지 않습니다. Drive signal document title의 MODEL·REASONING을 권위 원본으로 사용합니다.
 

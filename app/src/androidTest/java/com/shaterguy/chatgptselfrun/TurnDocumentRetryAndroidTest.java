@@ -96,7 +96,7 @@ public final class TurnDocumentRetryAndroidTest {
         assertTrue(SelfRunProtocol.driveContinuation(runId).contains("SELF_RUN_TURN_DOCUMENT_RETRY"));
 
         String observer = "retryobserver";
-        store.prepareTurnObserver(observer);
+        store.prepareTurnProtocolToken(observer);
         store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
         coordinator = new SelfRunRolloverCoordinator(context);
 
@@ -121,7 +121,7 @@ public final class TurnDocumentRetryAndroidTest {
         assertEquals("late user next input", UserNextInputStore.current(runId));
 
         String observer = "retryobserver";
-        store.prepareTurnObserver(observer);
+        store.prepareTurnProtocolToken(observer);
         store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
         assertEquals("late user next input", UserNextInputStore.current(runId));
 
@@ -139,7 +139,7 @@ public final class TurnDocumentRetryAndroidTest {
         assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
                 coordinator.beginOrResume(store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
 
-        submitRetryAndEnterPostDom(store, "retryobserver");
+        submitRetryAndEnterPostProtocol(store, "retryobserver");
         assertTrue(retryUsed());
 
         SelfRunRolloverCoordinator.Result rollover = coordinator.beginOrResume(
@@ -156,7 +156,7 @@ public final class TurnDocumentRetryAndroidTest {
         assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
                 coordinator.beginOrResume(store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
 
-        submitRetryAndEnterPostDom(store, "retryobserver");
+        submitRetryAndEnterPostProtocol(store, "retryobserver");
         SelfRunRolloverCoordinator.Result rollover = coordinator.beginOrResume(
                 store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT);
         assertEquals(SelfRunRolloverCoordinator.RESULT_STARTED, rollover.status);
@@ -179,7 +179,7 @@ public final class TurnDocumentRetryAndroidTest {
     @Test public void consumedChatCompletionRestoresSameRunRetryBudgetForNextCycle() {
         SelfRunStore store = eligibleRun();
         String runId = store.runId();
-        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostDom(store, "retryobserver");
+        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostProtocol(store, "retryobserver");
         assertTrue(retryUsed());
 
         consumeValidCompletion(store, 1);
@@ -199,14 +199,14 @@ public final class TurnDocumentRetryAndroidTest {
     @Test public void nextCycleStillAllowsOnlyOneRetryBeforeRollover() {
         SelfRunStore store = eligibleRun();
         String runId = store.runId();
-        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostDom(store, "retryobserver");
+        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostProtocol(store, "retryobserver");
         consumeValidCompletion(store, 1);
         beginNextCompletionCycle(store, "nextobserver");
 
         assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
                 coordinator.beginOrResume(store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
         assertEquals(runId, store.runId());
-        submitRetryAndEnterPostDom(store, "secondretryobserver");
+        submitRetryAndEnterPostProtocol(store, "secondretryobserver");
 
         SelfRunRolloverCoordinator.Result rollover = coordinator.beginOrResume(
                 store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT);
@@ -217,7 +217,7 @@ public final class TurnDocumentRetryAndroidTest {
     @Test public void usedBudgetSurvivesCoordinatorRecreationWithoutValidCompletion() {
         SelfRunStore store = eligibleRun();
         String runId = store.runId();
-        useRetryAndEnterPostDom(store, "retryobserver");
+        useRetryAndEnterPostProtocol(store, "retryobserver");
         assertTrue(retryUsed());
 
         SelfRunRolloverCoordinator recreated = new SelfRunRolloverCoordinator(context);
@@ -231,7 +231,7 @@ public final class TurnDocumentRetryAndroidTest {
     @Test public void restoredBudgetSurvivesCoordinatorRecreation() {
         SelfRunStore store = eligibleRun();
         String runId = store.runId();
-        useRetryAndEnterPostDom(store, "retryobserver");
+        useRetryAndEnterPostProtocol(store, "retryobserver");
         consumeValidCompletion(store, 1);
         assertFalse(retryUsed());
 
@@ -250,7 +250,7 @@ public final class TurnDocumentRetryAndroidTest {
     @Test public void consumedWorkCompletionRestoresSameRunRetryBudget() {
         SelfRunStore store = eligibleWorkRun();
         String runId = store.runId();
-        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostDom(store, "workretryobserver");
+        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostProtocol(store, "workretryobserver");
         assertTrue(retryUsed());
 
         consumeValidCompletion(store, 1);
@@ -269,7 +269,7 @@ public final class TurnDocumentRetryAndroidTest {
     @Test public void malformedCompletionDoesNotRestoreRetryBudget() {
         SelfRunStore store = eligibleRun();
         String runId = store.runId();
-        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostDom(store, "retryobserver");
+        SelfRunRolloverCoordinator coordinator = useRetryAndEnterPostProtocol(store, "retryobserver");
         String raw = "[2026.09.04 | 00:10:00] [SELF_RUN_TURN_COMPLETED " + runId
                 + " NEXT_INPUT_B64URL=INVALID]";
         DriveSignalParser.Event malformed = new DriveSignalParser.Event(
@@ -278,7 +278,7 @@ public final class TurnDocumentRetryAndroidTest {
 
         store.applyDriveSignals(Collections.singletonList(malformed), System.currentTimeMillis());
 
-        assertEquals(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC, store.phase());
+        assertEquals(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC, store.phase());
         assertTrue(retryUsed());
         coordinator = new SelfRunRolloverCoordinator(context);
         SelfRunRolloverCoordinator.Result secondMiss = coordinator.beginOrResume(
@@ -296,26 +296,26 @@ public final class TurnDocumentRetryAndroidTest {
         assertFalse(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(result.successorRunId));
     }
 
-    private SelfRunRolloverCoordinator useRetryAndEnterPostDom(SelfRunStore store, String observer) {
+    private SelfRunRolloverCoordinator useRetryAndEnterPostProtocol(SelfRunStore store, String observer) {
         SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
         assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
                 coordinator.beginOrResume(store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
-        submitRetryAndEnterPostDom(store, observer);
+        submitRetryAndEnterPostProtocol(store, observer);
         return coordinator;
     }
 
-    private void submitRetryAndEnterPostDom(SelfRunStore store, String observer) {
-        store.prepareTurnObserver(observer);
+    private void submitRetryAndEnterPostProtocol(SelfRunStore store, String observer) {
+        store.prepareTurnProtocolToken(observer);
         store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
         assertFalse(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(store.runId()));
         assertTrue(retryUsed());
-        store.setPhase(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC);
+        store.setPhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
     }
 
     private void beginNextCompletionCycle(SelfRunStore store, String observer) {
-        store.prepareTurnObserver(observer);
+        store.prepareTurnProtocolToken(observer);
         store.beginTurnCompletionWait(observer, "다음 턴 제출 확인 · 답변 완료 감지 중");
-        store.setPhase(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC);
+        store.setPhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
     }
 
     private void consumeValidCompletion(SelfRunStore store, int cursor) {

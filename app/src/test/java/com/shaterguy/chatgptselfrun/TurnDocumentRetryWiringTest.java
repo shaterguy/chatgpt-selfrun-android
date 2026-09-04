@@ -15,7 +15,7 @@ public final class TurnDocumentRetryWiringTest {
         String coordinator = src("SelfRunRolloverCoordinator.java");
         String protocol = src("SelfRunProtocol.java");
 
-        assertEquals(3 * 60_000L, SelfRunService.POST_DOM_DRIVE_MAX_WAIT_MS);
+        assertEquals(3 * 60_000L, SelfRunService.POST_PROTOCOL_DRIVE_MAX_WAIT_MS);
         assertTrue(service.contains("rolloverConversation(SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT)"));
         assertTrue(coordinator.contains("RESULT_TURN_DOCUMENT_RETRY"));
         assertTrue(coordinator.contains("TURN_DOCUMENT_RETRY_USED"));
@@ -57,8 +57,6 @@ public final class TurnDocumentRetryWiringTest {
         String nextInput = src("UserNextInputStore.java");
         String runner = androidTest("SelfRunAndroidTestRunner.java");
         String regression = androidTest("TurnDocumentRetryAndroidTest.java");
-        String workflow = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
-
         assertTrue(nextInput.contains("!SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId)"));
         assertTrue(runner.contains("TurnDocumentRetryAndroidTest"));
         assertTrue(regression.contains("duplicateTimeoutWhileRetryPendingKeepsSameRunAndRetryPrompt"));
@@ -70,7 +68,6 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(regression.contains("consumedWorkCompletionRestoresSameRunRetryBudget"));
         assertTrue(regression.contains("malformedCompletionDoesNotRestoreRetryBudget"));
         assertTrue(regression.contains("transportRetryDoesNotConsumeLateUserNextInput"));
-        assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest"));
     }
 
     @Test public void repositoryProtocolStatesRetryBudgetIsPerCompletionCycle() throws Exception {

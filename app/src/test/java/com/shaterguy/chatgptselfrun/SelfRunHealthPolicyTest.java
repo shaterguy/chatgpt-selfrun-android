@@ -84,8 +84,8 @@ public final class SelfRunHealthPolicyTest {
 
     @Test public void developmentIdentityIs232Dev2() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2020035"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.3.2-dev2'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2020037"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.3.2-dev5'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
     }
 

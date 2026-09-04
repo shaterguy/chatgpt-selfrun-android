@@ -188,7 +188,7 @@ final class SelfRunRolloverCoordinator {
 
     /**
      * Restores the retry budget only after a protocol-valid TURN_COMPLETED has been durably consumed
-     * and the current run has left POST_DOM_DRIVE_SYNC through its normal CHAT/WORK success path.
+     * and the current run has left POST_PROTOCOL_DRIVE_SYNC through its normal CHAT/WORK success path.
      * Prompt lifecycle cleanup remains intentionally separate in cleanupTurnDocumentRetryPrompt().
      */
     static boolean restoreTurnDocumentRetryBudgetAfterConsumedCompletion(String runId) {
@@ -243,7 +243,7 @@ final class SelfRunRolloverCoordinator {
         if (owner.isEmpty() || !owner.equals(currentRunId)) return;
         String phase = runStatePrefs.getString("phase", SelfRunStore.PHASE_IDLE);
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
-                || SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)
+                || SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)
                 || SelfRunStore.PHASE_DONE.equals(phase)
                 || SelfRunStore.PHASE_IDLE.equals(phase)) {
             retryPrefs.edit().putBoolean(TURN_DOCUMENT_RETRY_PENDING, false).commit();

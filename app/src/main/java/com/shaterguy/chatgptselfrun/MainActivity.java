@@ -243,7 +243,7 @@ public final class MainActivity extends Activity {
         if (SelfRunStore.PHASE_DONE.equals(phase)) return "작업 완료";
         if (SelfRunStore.PHASE_IDLE.equals(phase)) return "실행 종료";
         if (!store.lastErrorCode().isEmpty()) return "오류 확인 필요";
-        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)) return "답변 완료 · 새 Drive 신호 확인 중";
+        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)) return "답변 완료 · 새 Drive 신호 확인 중";
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
                 || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "다음 요청 설정 중";
         if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "CONTINUE 전송 중";

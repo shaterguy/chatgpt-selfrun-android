@@ -274,7 +274,7 @@ final class UserNextInputStore {
         if (bound.isEmpty()) return false;
         String current = safe(currentIdentity);
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
-                || SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)
+                || SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)
                 || SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
                 || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)
                 || SelfRunStore.PHASE_DONE.equals(phase)) return true;
@@ -306,7 +306,7 @@ final class UserNextInputStore {
         String preflight = safe(prefs.getString(PREFLIGHT_CONTINUATION, ""));
         if (preflight.isEmpty()) return;
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
-                || SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)
+                || SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)
                 || SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
                 || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)
                 || (SelfRunStore.PHASE_PAUSED.equals(phase)

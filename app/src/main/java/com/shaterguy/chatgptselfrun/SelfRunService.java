@@ -37,22 +37,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** Drive V1 runtime. STOP/SEND mutations detect completion; Drive synchronizes the completed turn payload. */
+/** Drive V1 runtime. DOM submits messages; the ChatGPT response protocol alone detects turn state. */
 public final class SelfRunService extends Service {
     static final String ACTION_RUN = BuildConfig.APPLICATION_ID + ".RUN";
     static final String ACTION_PAUSE = BuildConfig.APPLICATION_ID + ".PAUSE";
     static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME";
     private static final int NOTIFICATION_ID = 17021;
-    static final long TURN_COMPLETION_STABILITY_MS = 5_000L;
-    /** MutationObserver is immediate; this low-frequency pass only repairs a detached DOM binding. */
-    static final long TURN_OBSERVER_HEALTHCHECK_MS = 15_000L;
-    static final long POST_DOM_DRIVE_RETRY_MS = 5_000L;
-    static final long POST_DOM_DRIVE_MAX_WAIT_MS = 3 * 60_000L;
+    static final long POST_PROTOCOL_DRIVE_RETRY_MS = 5_000L;
+    static final long POST_PROTOCOL_DRIVE_MAX_WAIT_MS = 3 * 60_000L;
     private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
     static final long CONTINUATION_VERIFY_INTERVAL_MS = 250L;
     static final long CONTINUATION_CALLBACK_TIMEOUT_MS = 5_000L;
-    static final long DETACHED_OBSERVER_RETRY_MS = 800L;
-    static final int DETACHED_OBSERVER_MAX_RECOVERIES = 2;
     static final long BOOTSTRAP_SEND_MAX_WAIT_MS = 60_000L;
     static final long BOOTSTRAP_SEND_POLL_MS = 1_000L;
     static final int BOOTSTRAP_SEND_MAX_CALLBACK_RECOVERIES = 3;
@@ -69,6 +64,7 @@ public final class SelfRunService extends Service {
     private final Runnable driveRunnable = this::pollDrive;
     private final Runnable driveRetryRunnable = this::retryDrive;
     private final Runnable webRunnable = this::runWebStep;
+    private final Runnable turnStartGuardRunnable = this::checkTurnStartGuard;
     private SelfRunStore store;
     private SelfRunRolloverCoordinator rollover;
     private SelfRunNetworkState networkState;
@@ -98,12 +94,7 @@ public final class SelfRunService extends Service {
     private String postDispatchRunId = "";
     private boolean postDispatchTransientSeen;
     private String postDispatchTransientKind = "";
-    private boolean turnObserverNeedsIdleBaseline = false;
-    private String loggedTurnObserverToken = "";
     private int bootstrapSendCallbackRecoveries;
-    private int detachedObserverRecoveries;
-    private boolean detachedObserverRecoveryActive;
-    private boolean keepDisplayAttachedForTurn;
     private volatile boolean destroyed;
     /** Serializes pause/stop epoch changes with application of Drive results to durable state. */
     private final Object automationStateLock = new Object();
@@ -154,7 +145,7 @@ public final class SelfRunService extends Service {
             verifiedDriveAccountId = "";
             accessToken = "";
             bootstrapSendCallbackRecoveries = 0;
-            resetDetachedObserverFallback();
+            
         }
         if (ACTION_RESUME.equals(action)) {
             if (resumePendingRollover) { if (canRun()) handler.post(this::resumeStateMachine); return store.active() ? START_STICKY : START_NOT_STICKY; }
@@ -179,7 +170,7 @@ public final class SelfRunService extends Service {
         accessToken = "";
         retryAttempt = 0;
         bootstrapSendCallbackRecoveries = 0;
-        resetDetachedObserverFallback();
+        
         clearContinuationAttempt();
         resetPostDispatchNoStartState();
     }
@@ -218,16 +209,16 @@ static boolean shouldCleanupCompletedRun(String ownerRunId, String currentRunId,
 
 private void resumeStateMachine(){if(!canRun())return;String phase=store.phase();if(drivePhase(phase))authorizeAndRunDrive();else ensureWebView();}
 
-private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)||SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)||SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)||SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)||SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(phase)||SelfRunStore.PHASE_RESUME_BASELINE.equals(phase);}
+private static boolean drivePhase(String phase){return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)||SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)||SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)||SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)||SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)||SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)||SelfRunStore.PHASE_RESUME_BASELINE.equals(phase);}
 
 static boolean shouldContinueSamePhaseDriveStep(String phase, boolean hasUncommittedAttachment) {
     return SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase) && hasUncommittedAttachment;
 }
 
-static boolean shouldGuardContinuationCallback(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
+static boolean shouldGuardContinuationCallback(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 static boolean bootstrapSendTimedOut(long startedAt,long now){return startedAt<=0L||now<=0L||now<startedAt||now-startedAt>=BOOTSTRAP_SEND_MAX_WAIT_MS;}
 static boolean bootstrapSendCallbackRecoveryExhausted(int recoveries){return recoveries>=BOOTSTRAP_SEND_MAX_CALLBACK_RECOVERIES;}
-static boolean postDomDriveSyncTimedOut(long startedAt,long now){return startedAt>0L&&now>=startedAt&&now-startedAt>=POST_DOM_DRIVE_MAX_WAIT_MS;}
+static boolean postProtocolDriveSyncTimedOut(long startedAt,long now){return startedAt>0L&&now>=startedAt&&now-startedAt>=POST_PROTOCOL_DRIVE_MAX_WAIT_MS;}
 static boolean isChatReasoningFailureStatus(String status){return switch(status){case "CHAT_REASONING_TRIGGER_NOT_FOUND","CHAT_REASONING_SLIDER_NOT_FOUND","CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND","CHAT_REASONING_OPTION_UNAVAILABLE","CHAT_REASONING_READBACK_MISMATCH","CHAT_REASONING_MENU_CLOSE_FAILED"->true;default->false;};}
 static String chatReasoningFailureMessage(String status){return switch(status){case "CHAT_REASONING_TRIGGER_NOT_FOUND"->"Chat 추론 선택기를 찾지 못했습니다. ChatGPT 화면 구조를 확인하세요.";case "CHAT_REASONING_SLIDER_NOT_FOUND"->"구버전 Chat 추론 슬라이더를 찾지 못했습니다.";case "CHAT_REASONING_ADVANCED_CONTROL_NOT_FOUND"->"Chat 추론 슬라이드에서 고급 버튼을 찾지 못했습니다.";case "CHAT_REASONING_OPTION_UNAVAILABLE"->"선택한 Chat 추론 단계가 현재 계정 또는 워크스페이스에서 제공되지 않습니다.";case "CHAT_REASONING_READBACK_MISMATCH"->"Chat 추론 적용 결과가 요청한 의미값과 일치하지 않습니다.";case "CHAT_REASONING_MENU_CLOSE_FAILED"->"Chat 추론 적용 후 메뉴를 닫지 못했습니다.";default->"Chat 추론 설정을 적용하지 못했습니다.";};}
 static boolean isWorkPreferenceFailureStatus(String status){return switch(status){case "WORK_MODEL_SELECTION_TIMEOUT","WORK_MODEL_READBACK_MISMATCH","WORK_REASONING_SELECTION_TIMEOUT","WORK_REASONING_READBACK_MISMATCH"->true;default->false;};}
@@ -294,7 +285,7 @@ static String bootstrapFailureMessage(String status){if(isChatReasoningFailureSt
                     }
                     if (!applyDriveResult(epoch, () -> verifiedDriveAccountId = accountId)) return;
                 }
-                if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(store.phase()) || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) {
+                if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(store.phase()) || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) {
                     pollDriveNow(epoch);
                     retryAttempt = 0;
                     return;
@@ -307,7 +298,7 @@ static String bootstrapFailureMessage(String status){if(isChatReasoningFailureSt
                         if (shouldContinueSamePhaseDriveStep(prior, store.nextUncommittedAttachment() != null)) continue;
                         break;
                     }
-                    if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(store.phase())
+                    if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(store.phase())
                             || SelfRunStore.PHASE_RESUME_BASELINE.equals(store.phase())) break;
                 } while (canApplyDriveResult(epoch) && drivePhase(store.phase()));
                 retryAttempt = 0;
@@ -351,7 +342,7 @@ static String bootstrapFailureMessage(String status){if(isChatReasoningFailureSt
 
 private DriveStateSnapshot driveState(int expectedEpoch){synchronized(automationStateLock){synchronized(SelfRunStore.RUN_STATE_LOCK){if(destroyed||expectedEpoch!=automationEpoch||!canRun()||!driveOperationRunId.equals(store.runId())||!drivePhase(store.phase()))return null;return new DriveStateSnapshot(store.phase(),store.runId(),store.runBaseFolderId(),store.jobFolderId(),store.turnDocumentId(),store.creationStage(),store.driveSignalCursor(),store.driveSignalCursorSchemaVersion(),store.lastDriveSignalRaw(),store.lastDriveSignalTimestamp(),store.lastDriveSignalType(),store.mode(),store.lastSeenDriveVersion(),store.lastSeenModifiedTime());}}}
 
-private void runDriveStep(int epoch)throws Exception{if(!canApplyDriveResult(epoch))return;switch(store.phase()){case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK,"Drive 기준 폴더 확인 중","account_authorized"));case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK->checkBaseFolder(epoch);case SelfRunStore.PHASE_JOB_ID_CREATE->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE,"Drive Job 폴더 생성 중","job_id_persisted"));case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE->createOrRecoverJobFolder(epoch);case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch);case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT->initializeDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK->verifyInitialDocument(epoch);case SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC,SelfRunStore.PHASE_RESUME_BASELINE->pollDriveNow(epoch);default->scheduleDriveRecovery("DRIVE_STATE_RECHECK","알 수 없는 Drive 단계를 자동 재확인합니다: "+store.phase(),epoch);}}
+private void runDriveStep(int epoch)throws Exception{if(!canApplyDriveResult(epoch))return;switch(store.phase()){case SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK,"Drive 기준 폴더 확인 중","account_authorized"));case SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK->checkBaseFolder(epoch);case SelfRunStore.PHASE_JOB_ID_CREATE->applyDriveResult(epoch,()->transition(SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE,"Drive Job 폴더 생성 중","job_id_persisted"));case SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE->createOrRecoverJobFolder(epoch);case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch);case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT->initializeDocument(epoch);case SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK->verifyInitialDocument(epoch);case SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,SelfRunStore.PHASE_RESUME_BASELINE->pollDriveNow(epoch);default->scheduleDriveRecovery("DRIVE_STATE_RECHECK","알 수 없는 Drive 단계를 자동 재확인합니다: "+store.phase(),epoch);}}
 
     private void checkBaseFolder(int epoch) throws Exception {
         String base = driveOperationBaseFolderId;
@@ -583,39 +574,39 @@ private void verifyInitialDocument(int epoch)throws Exception{
     applyDriveResult(epoch,()->{store.baselineDriveSignals(scan.totalCount,scan.latest);store.updateDriveSeen(metadata.version,metadata.modifiedTime);transition(SelfRunStore.PHASE_BOOTSTRAP,"Drive 준비 완료 · ChatGPT 새 대화 준비","legacy_signal_log_readback_verified");handler.post(()->{if(epoch==automationEpoch&&canRun())ensureWebView();});});
 }
 
-private void pollDrive(){if(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(store.phase())&&canRun())authorizeAndRunDrive();}
+private void pollDrive(){if(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(store.phase())&&canRun())authorizeAndRunDrive();}
 
 private void postDriveOutcome(){handler.post(()->{String phase=store.phase();if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))ensureWebView();else if(SelfRunStore.PHASE_PAUSED.equals(phase)||SelfRunStore.PHASE_DONE.equals(phase)){if(store.terminalSideEffectPending())replayTerminalSideEffect();}});}
 
 private static java.util.List<DriveSignalParser.Event> normalDriveEvents(java.util.List<DriveSignalParser.Event> events){java.util.ArrayList<DriveSignalParser.Event> result=new java.util.ArrayList<>();if(events!=null)for(DriveSignalParser.Event event:events){if(event.type==DriveSignalParser.Type.TURN_COMPLETED&&DriveSignalParser.hasRecoveryIdField(event.raw))continue;result.add(event);}return result;}
 
-static boolean shouldReadDriveSnapshot(boolean postDom,boolean resume,String lastSeenVersion,String currentVersion){if(resume||!postDom)return true;return lastSeenVersion==null||lastSeenVersion.isEmpty()||currentVersion==null||currentVersion.isEmpty()||!currentVersion.equals(lastSeenVersion);}
-static boolean shouldReadDriveSnapshot(boolean postDom,boolean resume,String lastSeenVersion,String currentVersion,boolean cursorMigrationRequired){return cursorMigrationRequired||shouldReadDriveSnapshot(postDom,resume,lastSeenVersion,currentVersion);}
+static boolean shouldReadDriveSnapshot(boolean postProtocol,boolean resume,String lastSeenVersion,String currentVersion){if(resume||!postProtocol)return true;return lastSeenVersion==null||lastSeenVersion.isEmpty()||currentVersion==null||currentVersion.isEmpty()||!currentVersion.equals(lastSeenVersion);}
+static boolean shouldReadDriveSnapshot(boolean postProtocol,boolean resume,String lastSeenVersion,String currentVersion,boolean cursorMigrationRequired){return cursorMigrationRequired||shouldReadDriveSnapshot(postProtocol,resume,lastSeenVersion,currentVersion);}
 static boolean isDominantCanonicalControl(DriveSignalParser.Event event){return event!=null&&(event.type==DriveSignalParser.Type.DONE||event.type==DriveSignalParser.Type.PAUSED||event.type==DriveSignalParser.Type.USER_ACTION_REQUIRED);}
 
 private void pollDriveNow(int epoch)throws Exception{
     DriveStateSnapshot snapshot=driveState(epoch);if(snapshot==null)return;
     DriveApiClient.Metadata metadata=drive.getPollMetadata(accessToken,snapshot.turnDocumentId,SelfRunSignalTransport.isSignalDocumentRun(this,snapshot.runId));if(!canApplyDriveResult(epoch))return;
     if(metadata.trashed||metadata.shared||!DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)||!snapshot.jobFolderId.equals(metadata.parentId)){scheduleDriveRecovery("DRIVE_DOCUMENT_RECHECK","실행턴 문서 상태가 기대값과 달라 동일 문서를 다시 확인합니다.",epoch);return;}
-    boolean postDom=SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(snapshot.phase);
+    boolean postProtocol=SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(snapshot.phase);
     boolean resume=SelfRunStore.PHASE_RESUME_BASELINE.equals(snapshot.phase);
-    if(!postDom&&!resume)return;
+    if(!postProtocol&&!resume)return;
     boolean migrationRequired=snapshot.driveSignalCursorSchemaVersion!=SelfRunStore.DRIVE_SIGNAL_CURSOR_SCHEMA_PHYSICAL;
     if(migrationRequired&&snapshot.driveSignalCursorSchemaVersion!=SelfRunStore.DRIVE_SIGNAL_CURSOR_SCHEMA_LEGACY){pauseError("DRIVE_SIGNAL_CURSOR_SCHEMA_UNSUPPORTED","저장된 Drive signal cursor schema를 안전하게 해석할 수 없습니다.",epoch,snapshot.runId,snapshot.phase);return;}
-    if(!shouldReadDriveSnapshot(postDom,resume,snapshot.lastSeenVersion,metadata.version,migrationRequired)){
+    if(!shouldReadDriveSnapshot(postProtocol,resume,snapshot.lastSeenVersion,metadata.version,migrationRequired)){
         if(!applyDriveResult(epoch,()->store.updateDriveSeen(metadata.version,metadata.modifiedTime)))return;
         long now=System.currentTimeMillis();
-        if(postDomDriveSyncTimedOut(store.postDomDriveSyncStartedAt(),now)){
-        handlePostDomDriveTimeout(epoch,snapshot);return;
+        if(postProtocolDriveSyncTimedOut(store.postProtocolDriveSyncStartedAt(),now)){
+        handlePostProtocolDriveTimeout(epoch,snapshot);return;
         }
         applyDriveResult(epoch,()->store.setStatus("답변 완료 확인 · Drive TURN_COMPLETED 재확인 대기"));
-        runLog.record(store,"POST_DOM_DRIVE_SYNC","result=version_unchanged;retryMs="+POST_DOM_DRIVE_RETRY_MS);
-        schedulePostDomDriveSync(POST_DOM_DRIVE_RETRY_MS);return;
+        runLog.record(store,"POST_PROTOCOL_DRIVE_SYNC","result=version_unchanged;retryMs="+POST_PROTOCOL_DRIVE_RETRY_MS);
+        schedulePostProtocolDriveSync(POST_PROTOCOL_DRIVE_RETRY_MS);return;
     }
     DriveApiClient.DocumentSnapshot document=drive.readDocumentSnapshot(accessToken,snapshot.turnDocumentId);if(!canApplyDriveResult(epoch))return;
     DriveSignalParser.Scan documentScan=DriveSignalParser.scan(document.text,snapshot.runId,0,snapshot.mode);
     DriveSignalParser.Event latestCanonical=documentScan.latestCanonical;
-    if(isDominantCanonicalControl(latestCanonical)&&(postDom||latestCanonical.type==DriveSignalParser.Type.DONE)){
+    if(isDominantCanonicalControl(latestCanonical)&&(postProtocol||latestCanonical.type==DriveSignalParser.Type.DONE)){
         DriveSignalParser.Event dominant=latestCanonical;
         if(!applyDriveResult(epoch,()->{store.applyDriveSignals(Collections.singletonList(dominant),System.currentTimeMillis());store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
         runLog.record(store,"DRIVE_SIGNAL_DOMINANCE","type="+dominant.type.name()+";cursor="+dominant.cursor+";consumed="+snapshot.driveSignalCursor);
@@ -639,23 +630,23 @@ private void pollDriveNow(int epoch)throws Exception{
     if(latestCompletion!=null&&!latestCompletion.protocolError.isEmpty()&&(latestBlocking==null||latestCompletion.cursor>latestBlocking.cursor)){pauseError("DRIVE_NEXT_INPUT_PROTOCOL_ERROR",latestCompletion.protocolError,epoch,snapshot.runId,snapshot.phase);return;}
     if(resume){if(applyDriveResult(epoch,()->{store.baselineManualResume(scan.totalCount,scan.latest,latestCompletion);store.updateDriveSeen(metadata.version,metadata.modifiedTime);}))handler.post(this::ensureWebView);return;}
     if(!applyDriveResult(epoch,()->{if(!normalUnseen.isEmpty())store.applyDriveSignals(normalUnseen,System.currentTimeMillis());if(normalUnseen.size()!=scan.unseen.size())store.baselineDriveSignals(scan.totalCount,scan.latest);store.updateDriveSeen(metadata.version,metadata.modifiedTime);} ))return;
-    if(!SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(store.phase())){postDriveOutcome();return;}
+    if(!SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(store.phase())){postDriveOutcome();return;}
     long now=System.currentTimeMillis();
-    if(postDomDriveSyncTimedOut(store.postDomDriveSyncStartedAt(),now)){
-        handlePostDomDriveTimeout(epoch,snapshot);return;
+    if(postProtocolDriveSyncTimedOut(store.postProtocolDriveSyncStartedAt(),now)){
+        handlePostProtocolDriveTimeout(epoch,snapshot);return;
     }
     applyDriveResult(epoch,()->store.setStatus("답변 완료 확인 · Drive TURN_COMPLETED 재확인 대기"));
-    runLog.record(store,"POST_DOM_DRIVE_SYNC","result=signal_missing;retryMs="+POST_DOM_DRIVE_RETRY_MS);
-    schedulePostDomDriveSync(POST_DOM_DRIVE_RETRY_MS);
+    runLog.record(store,"POST_PROTOCOL_DRIVE_SYNC","result=signal_missing;retryMs="+POST_PROTOCOL_DRIVE_RETRY_MS);
+    schedulePostProtocolDriveSync(POST_PROTOCOL_DRIVE_RETRY_MS);
 }
 
-private void handlePostDomDriveTimeout(int epoch,DriveStateSnapshot snapshot){
+private void handlePostProtocolDriveTimeout(int epoch,DriveStateSnapshot snapshot){
     if(SelfRunSignalTransport.isSignalDocumentRun(this,snapshot.runId)&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-        runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=rollover");
+        runLog.record(store,"POST_PROTOCOL_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_PROTOCOL_DRIVE_MAX_WAIT_MS+";action=rollover");
         handler.post(()->rolloverConversation(SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT));
     }else{
-        runLog.record(store,"POST_DOM_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_DOM_DRIVE_MAX_WAIT_MS+";action=pause_fail_closed");
-        pauseError("POST_DOM_DRIVE_SYNC_TIMEOUT","Drive 완료 신호를 제한시간 내 확정하지 못해 자동 CONTINUE를 차단했습니다.",epoch,snapshot.runId,snapshot.phase);
+        runLog.record(store,"POST_PROTOCOL_DRIVE_SYNC","result=timeout;maxWaitMs="+POST_PROTOCOL_DRIVE_MAX_WAIT_MS+";action=pause_fail_closed");
+        pauseError("POST_PROTOCOL_DRIVE_SYNC_TIMEOUT","Drive 완료 신호를 제한시간 내 확정하지 못해 자동 CONTINUE를 차단했습니다.",epoch,snapshot.runId,snapshot.phase);
     }
 }
 
@@ -697,96 +688,169 @@ private void cleanupAfterCompletedRun(String ownerRunId) {
 
 private void finishPersistedTerminalPause(String cause, String alertTitle, String ownerRunId,String commitId, String type) {if (!store.terminalSideEffectOwnedBy(ownerRunId, commitId, type)) return;stopAutomationCallbacks();releaseWakeLock();pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");NotificationHelper.notifyUser(this, alertTitle, store.status());store.acknowledgeTerminalSideEffect(ownerRunId,commitId,type);}
 
-private void ensureWebView(){if(!canRun()||!isWebAutomationPhase(store.phase()))return;String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();if(target.isEmpty()||!validAutomationTarget(target)){store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");handler.postDelayed(this::ensureWebView,WEB_RECOVERY_DELAY_MS);return;}acquireWakeLock();if(webView!=null){if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))resumeWebView();maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())?0L:250L);return;}launchWebView(target);}
-
-    private void launchWebView(String target) {
-        cleanupWebView();
-        try {
-            String launchedRunId = store.runId();
-            host = HeadlessWebViewHost.create(this); webView = host.webView(); WebViewConfig.applyAutomation(webView);
-            webView.setWebViewClient(new WebViewClient() {
-                @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {if (!launchedRunId.equals(store.runId())) return;generation++;domInFlight=false;maybeCaptureConversationUrl(url);}
-                @Override public void onPageFinished(WebView view, String url) {if (!launchedRunId.equals(store.runId())) return;maybeCaptureConversationUrl(url);if (isWebAutomationPhase(store.phase())) scheduleWeb(800L);}
-                @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                    if (!launchedRunId.equals(store.runId())) return true;
-                    if (!request.isForMainFrame()) return false;
-                    String requested=String.valueOf(request.getUrl());
-                    if(isTurnCompletionCallback(requested,launchedRunId))return true;
-                    boolean allowed=store.conversationUrl().isEmpty()?sameProject(store.projectUrl(),requested):sameConversation(store.conversationUrl(),requested);
-                    if(!allowed){
-                        recordContinuationRouteMismatch(requested);
-                        if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-                            if(networkState.isValidated()) rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH); else scheduleWeb(5_000L);
-                        }else postWebCallback(SelfRunService.this::restoreCanonical,800L);
-                    }
-                    return !allowed;
-                }
-                @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {
-                    if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
-                    int status=response.getStatusCode();
-                    if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive()) markPostDispatchTransient("HTTP_"+status);
-                    if(!r.isForMainFrame())return;
-                    if(SelfRunRolloverPolicy.rolloverHttpStatus(store.conversationUrl(),networkState.isValidated(),status)){
-                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_HTTP_GONE);return;
-                    }
-                    if(SelfRunRolloverPolicy.retryHttpStatus(status)) scheduleWeb(30_000L);
-                }
-                @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                    if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
-                    int code=e.getErrorCode();
-                    if(SelfRunRolloverPolicy.transientWebError(code)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive()) markPostDispatchTransient("WEB_"+code);
-                    if(!r.isForMainFrame())return;
-                    if(SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){
-                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);return;
-                    }
-                    postWebCallback(()->{
-                        if(v!=webView)return;
-                        if(!SelfRunRolloverPolicy.transientWebError(code)&&SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)) rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);
-                        else v.loadUrl(canonicalUrl());
-                    },3_000L);
-                }
-                @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {h.cancel();if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {if(postDispatchWindowActive()&&trustedChatgptServiceUrl(e==null?"":e.getUrl()))markPostDispatchTransient("SSL");runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);}}
-                @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
-                    if(!ownsRendererCallback(v,webView,launchedRunId,store.runId()))return true;
-                    if(!detail.didCrash()&&postDispatchWindowActive())markPostDispatchTransient("RENDERER_KILLED");
-                    cleanupWebView();
-                    if(!store.paused()&&isWebAutomationPhase(store.phase())){
-                        if(SelfRunRolloverPolicy.rolloverRenderer(store.conversationUrl(),detail.didCrash())) rolloverConversation(SelfRunRolloverPolicy.RENDERER_CRASH);
-                        else postWebCallback(SelfRunService.this::ensureWebView,2_000L);
-                    }
-                    return true;
-                }
-            });
-            webView.loadUrl(target);
-        } catch (Throwable error) {
-            cleanupWebView();
-            int failures=rollover.incrementLocalFailure(store.runId());
-            if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())&&networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)) rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_CREATE_FAILURE);
-            else postWebCallback(this::ensureWebView,2_500L);
-        }
+private void ensureWebView(){
+    if(!canRun()||!isWebAutomationPhase(store.phase()))return;
+    String target=store.conversationUrl().isEmpty()?store.projectUrl():store.conversationUrl();
+    if(target.isEmpty()||!validAutomationTarget(target)){
+        store.setLastError("TARGET_MISSING_RETRY","ChatGPT 대상 URL을 안전하게 재확인합니다.");
+        handler.postDelayed(this::ensureWebView,WEB_RECOVERY_DELAY_MS);return;
     }
+    acquireWakeLock();
+    if(webView!=null){
+        if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())){
+            detachDisplayOutput("protocol_wait");
+            restoreWaitingProtocol();
+            releaseWakeLock();
+            return;
+        }
+        resumeWebView();maybeCaptureConversationUrl(webView.getUrl());scheduleWeb(250L);return;
+    }
+    launchWebView(target);
+}
+
+private void launchWebView(String target) {
+    cleanupWebView();
+    try {
+        String launchedRunId = store.runId();
+        host = HeadlessWebViewHost.create(this);
+        webView = host.webView();
+        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())) {
+            detachDisplayOutput("renderer_recovery_wait");
+        }
+        if (!WebViewConfig.applyAutomation(webView)) {
+            cleanupWebView();
+            pauseError("TURN_PROTOCOL_UNAVAILABLE",
+                    "이 WebView는 필수 응답 프로토콜 기능을 지원하지 않습니다.");
+            return;
+        }
+        webView.setWebViewClient(new WebViewClient() {
+            @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                if (!launchedRunId.equals(store.runId())) return;
+                generation++;domInFlight=false;maybeCaptureConversationUrl(url);
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                if (!launchedRunId.equals(store.runId())) return;
+                maybeCaptureConversationUrl(url);
+                if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())) {
+                    detachDisplayOutput("protocol_wait_document_ready");
+                    restoreWaitingProtocol();
+                    releaseWakeLock();
+                } else if (isWebAutomationPhase(store.phase())) {
+                    scheduleWeb(800L);
+                }
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (!launchedRunId.equals(store.runId())) return true;
+                if (!request.isForMainFrame()) return false;
+                String requested=String.valueOf(request.getUrl());
+                if(isTurnCompletionCallback(requested,launchedRunId))return true;
+                boolean allowed=store.conversationUrl().isEmpty()
+                        ?sameProject(store.projectUrl(),requested):sameConversation(store.conversationUrl(),requested);
+                if(!allowed){
+                    recordContinuationRouteMismatch(requested);
+                    if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+                        if(networkState.isValidated()) rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH);
+                        else if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))scheduleWeb(5_000L);
+                    }else postWebCallback(SelfRunService.this::restoreCanonical,800L);
+                }
+                return !allowed;
+            }
+            @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {
+                if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
+                int status=response.getStatusCode();
+                if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)
+                        &&postDispatchWindowActive())markPostDispatchTransient("HTTP_"+status);
+                if(!r.isForMainFrame())return;
+                if(SelfRunRolloverPolicy.rolloverHttpStatus(store.conversationUrl(),networkState.isValidated(),status)){
+                    rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_HTTP_GONE);return;
+                }
+                if(SelfRunRolloverPolicy.retryHttpStatus(status)
+                        &&!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))scheduleWeb(30_000L);
+            }
+            @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+                if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
+                int code=e.getErrorCode();
+                if(SelfRunRolloverPolicy.transientWebError(code)&&trustedChatgptServiceResource(r)
+                        &&postDispatchWindowActive())markPostDispatchTransient("WEB_"+code);
+                if(!r.isForMainFrame())return;
+                if(SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){
+                    rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);return;
+                }
+                if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))postWebCallback(()->{
+                    if(v!=webView)return;
+                    if(!SelfRunRolloverPolicy.transientWebError(code)
+                            &&SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){
+                        rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);
+                    }else v.loadUrl(canonicalUrl());
+                },3_000L);
+            }
+            @Override public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {
+                h.cancel();
+                if (launchedRunId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) {
+                    if(postDispatchWindowActive()&&trustedChatgptServiceUrl(e==null?"":e.getUrl()))markPostDispatchTransient("SSL");
+                    runLog.record(store, "WEBVIEW_SSL_RETRY", "cancelled;retry_in=300000");
+                    if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())){
+                        postWebCallback(SelfRunService.this::restoreCanonical, WEB_RECOVERY_DELAY_MS);
+                    }
+                }
+            }
+            @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
+                if(!ownsRendererCallback(v,webView,launchedRunId,store.runId()))return true;
+                boolean waiting=SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase());
+                if(!detail.didCrash()&&postDispatchWindowActive())markPostDispatchTransient("RENDERER_KILLED");
+                runLog.record(store,"RENDERER_GONE","didCrash="+detail.didCrash()+";protocolWait="+waiting);
+                if(waiting){
+                    handler.removeCallbacks(turnStartGuardRunnable);
+                    resetPostDispatchNoStartState();
+                }
+                cleanupWebView();
+                if(!store.paused()&&isWebAutomationPhase(store.phase())){
+                    if(waiting){
+                        postWebCallback(SelfRunService.this::ensureWebView,2_000L);
+                    }else if(SelfRunRolloverPolicy.rolloverRenderer(store.conversationUrl(),detail.didCrash())){
+                        rolloverConversation(SelfRunRolloverPolicy.RENDERER_CRASH);
+                    }else postWebCallback(SelfRunService.this::ensureWebView,2_000L);
+                }
+                return true;
+            }
+        });
+        webView.loadUrl(target);
+    } catch (Throwable error) {
+        cleanupWebView();
+        int failures=rollover.incrementLocalFailure(store.runId());
+        if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())&&networkState.isValidated()
+                &&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){
+            rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_CREATE_FAILURE);
+        }else postWebCallback(this::ensureWebView,2_500L);
+    }
+}
 
 private boolean isTurnCompletionCallback(String requested,String launchedRunId){
     Uri uri;try{uri=Uri.parse(requested);}catch(Throwable ignored){return false;}
-    if(!SelfRunContinuationDom.TURN_COMPLETION_SCHEME.equals(uri.getScheme()))return false;
-    String host=uri.getHost(),run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");
-    if(SelfRunContinuationDom.TURN_STOP_SEEN_HOST.equals(host)){
-        if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())||!SelfRunStore.isActiveTurnObserverCallbackPhase(store.phase())||token==null||!token.equals(store.turnObserverToken())){
-            runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stop_callback_rejected");return true;
-        }
-        if(store.markTurnObserverStopSeen(token))runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stop_seen");
-        return true;
-    }
-    if(!SelfRunContinuationDom.TURN_COMPLETION_HOST.equals(host))return false;
-    if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())||token==null||!token.equals(store.turnObserverToken())){
-        runLog.record(store,"TURN_COMPLETION_OBSERVER","result=callback_rejected");return true;
+    if(!ChatGptTurnProtocolScript.COMPLETION_SCHEME.equals(uri.getScheme())
+            ||!ChatGptTurnProtocolScript.COMPLETION_HOST.equals(uri.getHost()))return false;
+    String run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");
+    String source=uri.getQueryParameter("source");
+    if(!launchedRunId.equals(run)||!launchedRunId.equals(store.runId())
+            ||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())
+            ||token==null||!token.equals(store.turnProtocolToken())
+            ||!TurnProtocolLogBridge.isAllowedCompletionSource(source)
+            ||store.turnProtocolCompletionConsumed()){
+        runLog.record(store,"TURN_PROTOCOL_COMPLETE","result=callback_rejected");return true;
     }
     maybeCaptureConversationUrl(webView==null?"":webView.getUrl());
-    if(!store.beginPostDomDriveSync(token))return true;
+    if(!store.beginPostProtocolDriveSync(token,source))return true;
     resetPostDispatchNoStartState();
-    turnObserverNeedsIdleBaseline=false;
-    runLog.record(store,"TURN_COMPLETION_OBSERVER","result=stable_idle;stabilityMs="+TURN_COMPLETION_STABILITY_MS+";action=drive_immediate");
+    handler.removeCallbacks(turnStartGuardRunnable);
+    runLog.record(store,"TURN_PROTOCOL_COMPLETE","result=accepted;source="+source+";action=drive_immediate");
     releaseWakeLock();handler.post(this::authorizeAndRunDrive);return true;
+}
+
+private void restoreWaitingProtocol(){
+    WebView active=webView;String run=store.runId(),token=store.turnProtocolToken();
+    if(active==null||token.isEmpty()||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))return;
+    try{active.evaluateJavascript(ChatGptTurnProtocolScript.restoreTurn(run,token),null);}
+    catch(Throwable error){runLog.record(store,"TURN_PROTOCOL_REBIND","result=failed;error="+error.getClass().getSimpleName());}
 }
 
 private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
@@ -805,27 +869,26 @@ private void runWebStep(){
     if(!canRun()||!isWebAutomationPhase(store.phase())||webView==null||domInFlight)return;
     String phase=store.phase();
     recordDisplayDrainFailure();
-    if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)
-            && SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-        long nowElapsed=SystemClock.elapsedRealtime();
-        int noStartAction=SelfRunRolloverPolicy.postDispatchNoStartAction(ensurePostDispatchNoStartWindow(),
-                store.turnObserverSawStop(),networkState.validatedSinceElapsed(),nowElapsed,postDispatchTransientSeen);
-        if(noStartAction==SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT){
-            String kind=postDispatchTransientKind.isEmpty()?"UNKNOWN":postDispatchTransientKind;
-            runLog.record(store,"POST_DISPATCH_NO_START","action=pause_transient;kind="+kind);
-            enterPreservedPause("CHATGPT_POST_DISPATCH_TRANSIENT","ChatGPT 일시적 서비스 오류가 관찰되어 자동 승계를 보류했습니다.",false);
-            NotificationHelper.notifyUser(this,"일시정지",store.status());return;
-        }
-        if(noStartAction==SelfRunRolloverPolicy.NO_START_ROLLOVER){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);return;}
+    if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
+        detachDisplayOutput("protocol_wait");
+        releaseWakeLock();
+        return;
     }
-    if(!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase))resumeWebView();
+    resumeWebView();
     maybeCaptureConversationUrl(webView.getUrl());
-    if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;}
-    if((SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))&&store.conversationUrl().isEmpty()){scheduleWeb(2000L);return;}
+    if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
+            &&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){
+        failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;
+    }
+    if((SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)
+            ||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))&&store.conversationUrl().isEmpty()){
+        scheduleWeb(2000L);return;
+    }
     if(!routeAcceptable(webView.getUrl())){
         recordContinuationRouteMismatch(webView.getUrl());
         if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-            if(networkState.isValidated())rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH);else scheduleWeb(5_000L);
+            if(networkState.isValidated())rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH);
+            else scheduleWeb(5_000L);
         }else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);
         return;
     }
@@ -835,7 +898,6 @@ private void runWebStep(){
         case SelfRunStore.PHASE_BOOTSTRAP_MODEL->script=WorkPreferenceDom.modelForProject(store.projectUrl(),store.pendingModel());
         case SelfRunStore.PHASE_BOOTSTRAP_REASONING->script=WorkPreferenceDom.reasoningForProject(store.projectUrl(),store.pendingReasoning());
         case SelfRunStore.PHASE_BOOTSTRAP_SEND->{String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);script=SelfRunContinuationDom.prepareBootstrap(store.projectUrl(),prompt,store.commandMarkerId());}
-        case SelfRunStore.PHASE_WAIT_TURN_COMPLETION->{String token=ensureTurnObserverToken();script=SelfRunContinuationDom.observeTurnCompletion(store.conversationUrl(),store.runId(),token,TURN_COMPLETION_STABILITY_MS,turnObserverNeedsIdleBaseline || store.turnObserverSawStop());}
         case SelfRunStore.PHASE_APPLY_PREFS->script=WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel());
         case SelfRunStore.PHASE_APPLY_REASONING->script=WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning());
         case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());}
@@ -844,7 +906,14 @@ private void runWebStep(){
     evaluate(phase,script);
 }
 
-private String ensureTurnObserverToken(){String token=store.turnObserverToken();if(token.isEmpty()){resetDetachedObserverFallback();token=UUID.randomUUID().toString().replace("-","");store.prepareTurnObserver(token);}return token;}
+private String ensureTurnProtocolToken(){
+    String token=store.turnProtocolToken();
+    if(token.isEmpty()||store.turnProtocolCompletionConsumed()){
+        token=UUID.randomUUID().toString().replace("-","");
+        store.prepareTurnProtocolToken(token);
+    }
+    return token;
+}
 
 private void evaluate(String phase,String script){
     WebView active=webView;int webGeneration=generation;String runId=store.runId();int evaluationId=++webEvaluationId;
@@ -860,61 +929,105 @@ private void evaluate(String phase,String script){
     else if(shouldGuardContinuationCallback(phase))scheduleContinuationCallbackDeadline(active,webGeneration,runId,evaluationId,phase);
     try{
         active.evaluateJavascript(script,raw->{
-  if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId)return;
-  domInFlight=false;if(!canRun())return;
-  if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;}
-  BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
-  JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
-  if(isContinuationDiagnosticPhase(phase)&&SelfRunRolloverPolicy.continuationProgressStatus(status))rollover.clearLocalFailures(runId);
-  if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
-      BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
-      runLog.record(store,"DOM_RESULT",BootstrapResultPolicy.logDetail(parsed,current,webGeneration,bootstrapScope()));
-      if(!current.persisted){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap result persistence failed",result.optJSONObject("diagnostics"));return;}
-      String fatal=BootstrapResultPolicy.fatalStatus(parsed,current.deadlineAt,System.currentTimeMillis());
-      if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
-  }
-  if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)){
-      if("OBSERVER_ARMED".equals(status)){turnObserverNeedsIdleBaseline=false;store.setStatus("STOP/SEND 영역 이벤트 관찰 중 · 답변 완료 후 5초 재확인");String observerToken=store.turnObserverToken();boolean firstArm=!observerToken.isEmpty()&&!observerToken.equals(loggedTurnObserverToken);boolean rebound=detail.contains("bindingChanged=1");if(firstArm||rebound){runLog.record(store,"TURN_COMPLETION_OBSERVER","result="+(rebound&&!firstArm?"rebound":"armed")+";detail="+BootstrapResultPolicy.safe(detail,180));loggedTurnObserverToken=observerToken;}if(!keepDisplayAttachedForTurn){detachDisplayOutput("observer_armed");detachedObserverRecoveryActive=false;}releaseWakeLock();scheduleWeb(TURN_OBSERVER_HEALTHCHECK_MS);return;}
-      if("OBSERVER_UNAVAILABLE".equals(status)){if(recoverDetachedObserverOutput("observer_unavailable")){scheduleWeb(DETACHED_OBSERVER_RETRY_MS);return;}runLog.record(store,"TURN_COMPLETION_OBSERVER","result=arm_retry");scheduleWeb(1200L);return;}
-  }
-  if("TARGET_ERROR".equals(status)){
-      recordContinuationTargetError(phase,detail);
-      if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){if(networkState.isValidated())rolloverConversation(SelfRunRolloverPolicy.TARGET_ERROR);else scheduleWeb(5_000L);}
-      else if(!isContinuationDiagnosticPhase(phase))restoreCanonical();else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);
-      return;
-  }
-  if("AUTH_REQUIRED".equals(status)){enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);NotificationHelper.notifyUser(this,"확인 필요",store.status());return;}
-  if(isWorkPreferenceFailureStatus(status)){runLog.record(store,"WORK_PREFERENCE_FAILURE","status="+BootstrapResultPolicy.safe(status,80)+";detail="+BootstrapResultPolicy.safe(detail,180)+BootstrapResultPolicy.compactDiagnostics(result.optJSONObject("diagnostics")));pauseError(status,workPreferenceFailureMessage(status));return;}
-  if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){
-      if("BOOTSTRAP_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){bootstrapSubmitted(detail);return;}
-      if("SUBMISSION_FAILED".equals(status)||SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(BOOTSTRAP_SEND_POLL_MS);return;}
-  }
-  if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){
-      if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)||"VERIFY_REQUIRED".equals(status)){rollover.clearLocalFailures(runId);continuationSubmitted(detail);return;}
-      if(SelfRunRolloverPolicy.shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis())&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-          recordContinuationWait(phase,status,detail);
-          if(!networkState.isValidated()){rollover.clearLocalFailures(runId);scheduleWeb(1200L);return;}
-          int failures=rollover.recordLocalFailure(runId,status);
-          if(SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_PROGRESS);return;}
-          scheduleWeb(1200L);return;
-      }
-      if("SUBMISSION_FAILED".equals(status)||SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
-  }
-  if("UI_WAIT".equals(status)||"WAIT".equals(status)){recordContinuationWait(phase,status,detail);scheduleWeb(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?BOOTSTRAP_SEND_POLL_MS:("WAIT".equals(status)?2000L:1200L));return;}
-  if(isConversationLocalFailureStatus(status)&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
-      int failures=rollover.recordLocalFailure(runId,status);
-      if(networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);return;}
-      scheduleWeb(1200L);return;
-  }
-  handleWebResult(phase,status,result);
+            if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId)return;
+            domInFlight=false;if(!canRun())return;
+            if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
+                    &&bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){
+                failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");return;
+            }
+            BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
+            JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
+            if(isContinuationDiagnosticPhase(phase)&&SelfRunRolloverPolicy.continuationProgressStatus(status))rollover.clearLocalFailures(runId);
+            if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
+                BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
+                runLog.record(store,"DOM_RESULT",BootstrapResultPolicy.logDetail(parsed,current,webGeneration,bootstrapScope()));
+                if(!current.persisted){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap result persistence failed",result.optJSONObject("diagnostics"));return;}
+                String fatal=BootstrapResultPolicy.fatalStatus(parsed,current.deadlineAt,System.currentTimeMillis());
+                if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
+            }
+            if("TURN_PROTOCOL_UNAVAILABLE".equals(status)){
+                pauseError("TURN_PROTOCOL_UNAVAILABLE","응답 프로토콜을 제출 전에 준비하지 못했습니다.");return;
+            }
+            if("TARGET_ERROR".equals(status)){
+                recordContinuationTargetError(phase,detail);
+                if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+                    if(networkState.isValidated())rolloverConversation(SelfRunRolloverPolicy.TARGET_ERROR);
+                    else scheduleWeb(5_000L);
+                }else if(!isContinuationDiagnosticPhase(phase))restoreCanonical();
+                else scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);
+                return;
+            }
+            if("AUTH_REQUIRED".equals(status)){
+                enterPreservedPause("CHATGPT_AUTH_REQUIRED","ChatGPT 로그인 필요 · 사용자 조치 대기",false);
+                NotificationHelper.notifyUser(this,"확인 필요",store.status());return;
+            }
+            if(isWorkPreferenceFailureStatus(status)){
+                runLog.record(store,"WORK_PREFERENCE_FAILURE","status="+BootstrapResultPolicy.safe(status,80)
+                        +";detail="+BootstrapResultPolicy.safe(detail,180)
+                        +BootstrapResultPolicy.compactDiagnostics(result.optJSONObject("diagnostics")));
+                pauseError(status,workPreferenceFailureMessage(status));return;
+            }
+            if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){
+                if("BOOTSTRAP_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)
+                        ||"VERIFY_REQUIRED".equals(status)){bootstrapSubmitted(detail);return;}
+                if("SUBMISSION_FAILED".equals(status)||SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)
+                        ||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)
+                        ||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)
+                        ||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){
+                    recordContinuationWait(phase,status,detail);scheduleWeb(BOOTSTRAP_SEND_POLL_MS);return;
+                }
+            }
+            if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){
+                if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)
+                        ||"VERIFY_REQUIRED".equals(status)){
+                    rollover.clearLocalFailures(runId);continuationSubmitted(detail);return;
+                }
+                if(SelfRunRolloverPolicy.shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis())
+                        &&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+                    recordContinuationWait(phase,status,detail);
+                    if(!networkState.isValidated()){rollover.clearLocalFailures(runId);scheduleWeb(1200L);return;}
+                    int failures=rollover.recordLocalFailure(runId,status);
+                    if(SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){
+                        rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_PROGRESS);return;
+                    }
+                    scheduleWeb(1200L);return;
+                }
+                if("SUBMISSION_FAILED".equals(status)||SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)
+                        ||"COMPOSER_CLEARING".equals(status)||"COMPOSER_INPUTTING".equals(status)
+                        ||SelfRunContinuationDom.STOP.equals(status)||SelfRunContinuationDom.SEND_DISABLED.equals(status)
+                        ||SelfRunContinuationDom.UNKNOWN.equals(status)||"SCRIPT_ERROR".equals(status)){
+                    recordContinuationWait(phase,status,detail);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;
+                }
+            }
+            if("UI_WAIT".equals(status)||"WAIT".equals(status)){
+                recordContinuationWait(phase,status,detail);
+                scheduleWeb(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
+                        ?BOOTSTRAP_SEND_POLL_MS:("WAIT".equals(status)?2000L:1200L));return;
+            }
+            if(isConversationLocalFailureStatus(status)&&SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+                int failures=rollover.recordLocalFailure(runId,status);
+                if(networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){
+                    rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);return;
+                }
+                scheduleWeb(1200L);return;
+            }
+            handleWebResult(phase,status,result);
         });
     }catch(Throwable error){
         if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId)return;
         domInFlight=false;
-        if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase))failBootstrap(BootstrapResultPolicy.SCRIPT_ERROR,error.getClass().getSimpleName(),null);
-        else if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){if(bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis()))failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");else scheduleWeb(BOOTSTRAP_SEND_POLL_MS);}
-        else if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){int failures=rollover.incrementLocalFailure(runId);if(networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures))rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);else scheduleWeb(2000L);}
-        else scheduleWeb(2000L);
+        if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
+            failBootstrap(BootstrapResultPolicy.SCRIPT_ERROR,error.getClass().getSimpleName(),null);
+        }else if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){
+            if(bootstrapSendTimedOut(store.phaseStartedAt(),System.currentTimeMillis())){
+                failBootstrapSubmissionTimeout("deadline_invalid_or_elapsed");
+            }else scheduleWeb(BOOTSTRAP_SEND_POLL_MS);
+        }else if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())){
+            int failures=rollover.incrementLocalFailure(runId);
+            if(networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){
+                rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);
+            }else scheduleWeb(2000L);
+        }else scheduleWeb(2000L);
     }
 }
 
@@ -932,14 +1045,13 @@ private void scheduleContinuationCallbackDeadline(WebView active,int webGenerati
         if(active!=webView||webGeneration!=generation||!runId.equals(store.runId())||evaluationId!=webEvaluationId||!domInFlight||!canRun()||!phase.equals(store.phase())||!shouldGuardContinuationCallback(phase))return;
         domInFlight=false;webEvaluationId++;
         if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)){recoverBootstrapSendCallback();return;}
-        if(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)&&recoverDetachedObserverOutput("callback_timeout")){scheduleWeb(DETACHED_OBSERVER_RETRY_MS);return;}
         runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.callbackTimeoutDetail(phase));
         int failures=rollover.incrementLocalFailure(runId);
         if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())&&networkState.isValidated()&&SelfRunRolloverPolicy.localFailureBudgetExhausted(failures)){
             rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_CALLBACK_TIMEOUT);return;
         }
         releaseWakeLock();
-        scheduleWeb(SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)?TURN_OBSERVER_HEALTHCHECK_MS:1200L);
+        scheduleWeb(1200L);
     },CONTINUATION_CALLBACK_TIMEOUT_MS);
 }
 
@@ -1006,10 +1118,10 @@ private void handleWebResult(String phase,String status,JSONObject result){
     if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)&&"READY".equals(status)){if(!completeBootstrap(result))return;transition(SelfRunStore.MODE_WORK.equals(store.mode())?SelfRunStore.PHASE_BOOTSTRAP_MODEL:SelfRunStore.PHASE_BOOTSTRAP_SEND,"ChatGPT bootstrap 설정 준비","context_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_BOOTSTRAP_REASONING,"첫 턴 Work 추론 적용","model_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_BOOTSTRAP_SEND,"첫 프롬프트 전송 준비","reasoning_ready");scheduleWeb(250L);return;}
-    if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnObserverToken();beginPostDispatchNoStartWindow();evaluate(phase,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}
+    if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnProtocolToken();beginPostDispatchNoStartWindow();evaluate(phase,ChatGptTurnProtocolScript.bindTurnAndThen(store.runId(),token,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId())));return;}
     if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_APPLY_REASONING,"다음 턴 추론 적용","model_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_SEND_CONTINUE,"Work MODEL/REASONING 적용 완료 · 다음 턴 전송 준비","reasoning_ready_for_send");scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
-    if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnObserverToken();beginPostDispatchNoStartWindow();evaluate(phase,SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId(),token,TURN_COMPLETION_STABILITY_MS));return;}
+    if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnProtocolToken();beginPostDispatchNoStartWindow();evaluate(phase,ChatGptTurnProtocolScript.bindTurnAndThen(store.runId(),token,SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId())));return;}
     scheduleWeb(750L);
 }
 
@@ -1017,14 +1129,52 @@ private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRA
 private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
 private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
-private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 답변 완료 감지 중");turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
-private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnObserverToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);turnObserverNeedsIdleBaseline=false;releaseWakeLock();scheduleWeb(0L);}
+private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 응답 프로토콜 대기 중");detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
+private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
+
+private void armProtocolCompletion(String token){
+    WebView active=webView;
+    if(active==null||token.isEmpty()||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))return;
+    try{active.evaluateJavascript(ChatGptTurnProtocolScript.armCompletion(store.runId(),token),null);}
+    catch(Throwable error){
+        runLog.record(store,"TURN_PROTOCOL_ARM","result=failed;error="+error.getClass().getSimpleName());
+        enterPreservedPause("TURN_PROTOCOL_UNAVAILABLE",
+                "제출 후 응답 프로토콜 callback을 준비하지 못해 자동 실행을 일시정지했습니다.",false);
+    }
+}
+
+private void scheduleTurnStartGuard(){
+    handler.removeCallbacks(turnStartGuardRunnable);
+    handler.postDelayed(turnStartGuardRunnable,SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS);
+}
+
+private void checkTurnStartGuard(){
+    if(!canRun()||!SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase()))return;
+    String run=store.runId(),token=store.turnProtocolToken();
+    if(token.isEmpty())return;
+    if(TurnProtocolUiState.generationStartedFor(this,run,token)){
+        runLog.record(store,"POST_DISPATCH_NO_START","action=wait;reason=protocol_generation_started");
+        return;
+    }
+    int action=SelfRunRolloverPolicy.postDispatchNoStartAction(ensurePostDispatchNoStartWindow(),
+            networkState.validatedSinceElapsed(),SystemClock.elapsedRealtime(),
+            postDispatchTransientSeen,false);
+    if(action==SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT){
+        String kind=postDispatchTransientKind.isEmpty()?"UNKNOWN":postDispatchTransientKind;
+        runLog.record(store,"POST_DISPATCH_NO_START","action=pause_transient;kind="+kind);
+        enterPreservedPause("CHATGPT_POST_DISPATCH_TRANSIENT",
+                "ChatGPT 일시적 서비스 오류가 관찰되어 자동 승계를 보류했습니다.",false);
+        NotificationHelper.notifyUser(this,"일시정지",store.status());
+    }else if(action==SelfRunRolloverPolicy.NO_START_ROLLOVER){
+        rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_START_TIMEOUT);
+    }
+}
 
 private String commandPrompt(String kind){if(!kind.equals(store.activeCommandKind())||store.activeCommandPrompt().isEmpty()){String prompt=SelfRunStore.RETRY_BOOTSTRAP.equals(kind)?rollover.bootstrapPrompt(store):SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());store.beginCommandAttempt(kind,prompt);}return store.activeCommandPrompt();}
 private static String kindForPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)?SelfRunStore.RETRY_BOOTSTRAP:SelfRunStore.RETRY_CONTINUE;}
 
     private static boolean isSubmissionPhase(String phase) {return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase) || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
-private void schedulePostDomDriveSync(long requestedDelay){handler.removeCallbacks(driveRunnable);releaseWakeLock();if(!canRun()||!SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(store.phase()))return;handler.postDelayed(driveRunnable,Math.max(0L,requestedDelay));}
+private void schedulePostProtocolDriveSync(long requestedDelay){handler.removeCallbacks(driveRunnable);releaseWakeLock();if(!canRun()||!SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(store.phase()))return;handler.postDelayed(driveRunnable,Math.max(0L,requestedDelay));}
 private void scheduleWeb(long delay){handler.removeCallbacks(webRunnable);if(webView!=null&&canRun()&&isWebAutomationPhase(store.phase()))handler.postDelayed(webRunnable,delay);}
 private static boolean isWebAutomationPhase(String phase){return SelfRunStore.PHASE_BOOTSTRAP.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)||SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)||SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)||SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_APPLY_REASONING.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase);}
 
@@ -1114,14 +1264,11 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
         removeAutomationCallbacks(); resetPostDispatchNoStartState(); releaseWakeLock(); pauseWebView();runLog.record(store, "PAUSED", cause + ";webview=preserved;drive_ids=preserved");
     }
 
-    private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable); handler.removeCallbacks(webRunnable);handler.removeCallbacks(driveRetryRunnable);}
-    private void stopAutomationCallbacks() {disconnectTurnObserver();removeAutomationCallbacks();clearContinuationAttempt();resetPostDispatchNoStartState();turnObserverNeedsIdleBaseline=false;synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
-    private void disconnectTurnObserver(){String token=store==null?"":store.turnObserverToken();WebView active=webView;if(active==null||token.isEmpty())return;try{active.evaluateJavascript(SelfRunContinuationDom.cancelTurnCompletionObserver(token),null);}catch(Throwable ignored){}}
-    private void resetDetachedObserverFallback() {detachedObserverRecoveries=0;detachedObserverRecoveryActive=false;keepDisplayAttachedForTurn=false;}
+    private void removeAutomationCallbacks() {handler.removeCallbacks(driveRunnable);handler.removeCallbacks(webRunnable);handler.removeCallbacks(driveRetryRunnable);handler.removeCallbacks(turnStartGuardRunnable);}
+    private void stopAutomationCallbacks() {removeAutomationCallbacks();clearContinuationAttempt();resetPostDispatchNoStartState();synchronized (automationStateLock) {automationEpoch++; generation++; webEvaluationId++; authorizationInFlight = false; domInFlight = false;}}
     private void recordDisplayDrainFailure() {if(host==null)return;String failure=host.takeDisplayDrainFailure();if(!failure.isEmpty()&&runLog!=null)runLog.record(store,"DISPLAY_DRAIN_FAILURE","error="+BootstrapResultPolicy.safe(failure,80));}
     private boolean detachDisplayOutput(String reason) {if(host==null||!host.hasDetachableOutput())return false;try{boolean changed=host.detachOutput();recordDisplayDrainFailure();if(changed&&runLog!=null)runLog.record(store,"DISPLAY_OUTPUT_DETACHED","reason="+reason);return changed;}catch(Throwable error){if(runLog!=null)runLog.record(store,"DISPLAY_DRAIN_FAILURE","action=detach;error="+error.getClass().getSimpleName());return false;}}
     private boolean attachDisplayOutput(String reason) {if(host==null||!host.hasDetachableOutput())return false;try{boolean changed=host.attachOutput();recordDisplayDrainFailure();if(changed&&runLog!=null)runLog.record(store,"DISPLAY_OUTPUT_ATTACHED","reason="+reason);return host.isOutputAttached();}catch(Throwable error){if(runLog!=null)runLog.record(store,"DISPLAY_DRAIN_FAILURE","action=attach;error="+error.getClass().getSimpleName());return false;}}
-    private boolean recoverDetachedObserverOutput(String cause) {if(host==null||!host.hasDetachableOutput()||keepDisplayAttachedForTurn)return false;if(host.isOutputAttached()&&!detachedObserverRecoveryActive)return false;detachedObserverRecoveries++;boolean attached=host.isOutputAttached()||attachDisplayOutput("detached_observer_fallback");if(!attached)return false;detachedObserverRecoveryActive=true;if(detachedObserverRecoveries>=DETACHED_OBSERVER_MAX_RECOVERIES){keepDisplayAttachedForTurn=true;detachedObserverRecoveryActive=false;}if(runLog!=null)runLog.record(store,"DETACHED_OBSERVER_FALLBACK","cause="+cause+";attempt="+detachedObserverRecoveries+";mode="+(keepDisplayAttachedForTurn?"attached_for_turn":"retry_attached"));return true;}
     private void pauseWebView() { if(webView==null)return;detachDisplayOutput("webview_pause");if(webViewPaused)return;try{webView.onPause();webViewPaused=true;}catch(Throwable ignored){} }
     private void resumeWebView() { if(webView==null)return;attachDisplayOutput("active_automation");if(!webViewPaused)return;try{webView.onResume();}catch(Throwable ignored){}finally{webViewPaused=false;} }
     private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target)) { resumeWebView(); webView.loadUrl(target); } }
@@ -1134,7 +1281,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private JSONObject parse(String raw) {try { Object outer = new JSONTokener(raw == null ? "" : raw).nextValue(); return new JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer)); }catch (Throwable error) { return new JSONObject(); }}
     private void acquireWakeLock() { if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(2 * 60_000L); }
     private void releaseWakeLock() { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); }
-    private void cleanupWebView() {handler.removeCallbacks(webRunnable);turnObserverNeedsIdleBaseline=store!=null&&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())&&store.turnObserverSawStop();generation++; webEvaluationId++; domInFlight = false;webViewPaused=false;resetDetachedObserverFallback();if (host != null) { host.destroy(); host = null; } webView = null;}
+    private void cleanupWebView() {handler.removeCallbacks(webRunnable);generation++;webEvaluationId++;domInFlight=false;webViewPaused=false;if(host!=null){host.destroy();host=null;}webView=null;}
     private void stopRuntime() {stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock();stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();}
 
     @Override public void onDestroy() {destroyed = true;stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock(); if(networkState!=null)networkState.stop(); io.shutdownNow();super.onDestroy();}

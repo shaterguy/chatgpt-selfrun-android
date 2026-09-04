@@ -35,7 +35,7 @@ public final class WorkProtocolNativeObserverTest {
         assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
         assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_BOOTSTRAP));
         assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_APPLY_PREFS));
-        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC));
+        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC));
     }
 
     @Test public void nativeObserversAreReadOnlyAndDoNotTouchSensitiveRequestMaterial() throws Exception {

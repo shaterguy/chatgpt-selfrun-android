@@ -52,7 +52,7 @@ public final class WorkProtocolDiagnosticsContractTest {
         int diagnostic = bridge.indexOf("if (WORK_DIAGNOSTIC_STAGES.contains(stage))");
         int mainFrameGate = bridge.indexOf("if (!isMainFrame) return;", diagnostic);
         int observerBinding = bridge.indexOf("if (\"observer_bound\".equals(stage))", mainFrameGate);
-        int stateMutation = bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, stage, phase, observerToken)");
+        int stateMutation = bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase)");
         assertTrue(diagnostic >= 0);
         assertTrue(mainFrameGate > diagnostic);
         assertTrue(observerBinding > mainFrameGate);

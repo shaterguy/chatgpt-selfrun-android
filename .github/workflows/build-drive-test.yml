@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# 2.3.2-dev1 Work protocol run-identity regression and current-stable co-install verification
+# 2.3.2-dev5 protocol-only turn state, detached Surface, and TEST lineage verification
 
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           tools/verify_drive_variant.sh
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest :app:assembleQaApp
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:verifyDriveVariantIdentity :app:testDebugUnitTest :app:assembleQaApp
           BT="$ANDROID_HOME/build-tools/36.0.0"
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
@@ -114,10 +114,11 @@ jobs:
 
   verify-drive-test-coinstall:
     needs: build-test-app
+    outputs:
+      predecessor_source: ${{ steps.verified_lineage.outputs.source }}
+      predecessor_lineage: ${{ steps.verified_lineage.outputs.lineage }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Download canonical TEST candidate from this run
@@ -155,6 +156,8 @@ jobs:
           cache-read-only: false
       - name: Download immutable formal baseline
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p formal-baseline
@@ -166,6 +169,8 @@ jobs:
       - name: Find actual previous TEST artifact
         id: previous_test_run
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           echo 'available=false' >> "$GITHUB_OUTPUT"
@@ -200,6 +205,19 @@ jobs:
             PREV_ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}/artifacts?per_page=100" \
               --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-test-build" and (.expired | not))][0].id // empty')"
             [[ -n "$PREV_ARTIFACT_ID" ]] || { echo 'immutable 2.3.0-dev12 TEST artifact unavailable' >&2; exit 1; }
+            echo "run_id=$PREV_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF_NAME" == 'selfrun-drive/v2.3.2-dev5' ]]; then
+            PREV_BRANCH='selfrun-drive/v2.3.2-dev3'
+            PREV_RUN_ID="$(gh api --method GET "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-drive-test.yml/runs" \
+              -f branch="$PREV_BRANCH" -f status=success -f per_page=20 \
+              --jq '.workflow_runs[0].id // empty')"
+            [[ -n "$PREV_RUN_ID" ]] || exit 0
+            PREV_ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-test-build" and (.expired | not))][0].id // empty')"
+            [[ -n "$PREV_ARTIFACT_ID" ]] || exit 0
             echo "run_id=$PREV_RUN_ID" >> "$GITHUB_OUTPUT"
             echo 'available=true' >> "$GITHUB_OUTPUT"
             exit 0
@@ -241,6 +259,7 @@ jobs:
           cp "$ACTUAL_PREV" predecessor/previous-test.apk
           echo 'available=true' >> "$GITHUB_OUTPUT"
           echo 'PREDECESSOR_SOURCE=artifact' >> "$GITHUB_ENV"
+          echo 'PREDECESSOR_LINEAGE_EVIDENCE=verified-dev3-artifact' >> "$GITHUB_ENV"
       - name: Build predecessor only when no immutable TEST artifact exists
         if: ${{ steps.previous_test.outputs.available != 'true' }}
         shell: bash
@@ -270,6 +289,7 @@ jobs:
           echo "TEST_PREV_VERSION_CODE=${PREV_VERSION_CODE}" >> "$GITHUB_ENV"
           echo "TEST_PREV_VERSION_NAME=${PREV_VERSION_NAME}" >> "$GITHUB_ENV"
           echo 'PREDECESSOR_SOURCE=synthetic-fallback' >> "$GITHUB_ENV"
+          echo 'PREDECESSOR_LINEAGE_EVIDENCE=not-verified-synthetic-fallback' >> "$GITHUB_ENV"
           git worktree remove --force "$PREV_SRC"
       - name: Install signing dependencies for predecessor fallback
         if: ${{ steps.previous_test.outputs.available != 'true' }}
@@ -298,6 +318,7 @@ jobs:
             predecessor/previous-test-aligned.apk "$PASS_FILE" predecessor/previous-test.apk >/dev/null
           test -s predecessor/previous-test.apk
       - name: Validate canonical candidate and immutable fixtures
+        id: verified_lineage
         shell: bash
         run: |
           set -euo pipefail
@@ -321,6 +342,12 @@ jobs:
           PREV_VERSION_CODE="$(sed -n "s/package:.*versionCode='\([^']*\)'.*/\1/p" <<<"$PREV_BADGING" | head -1)"
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
+          if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
+            [[ "$PREV_VERSION_NAME" == '2.3.2-dev3' ]] || fail 'actual predecessor is not the required dev3 TEST artifact'
+            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-dev3-artifact' ]] || fail 'actual dev3 lineage evidence missing'
+          else
+            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]] || fail 'synthetic predecessor mislabeled as lineage evidence'
+          fi
           (( CURRENT_VERSION_CODE > PREV_VERSION_CODE )) || fail 'current TEST versionCode is not newer than predecessor'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$CURRENT_BADGING" || fail 'current TEST package mismatch'
           grep -Fq "versionCode='$CURRENT_VERSION_CODE'" <<<"$CURRENT_BADGING" || fail 'current TEST versionCode mismatch'
@@ -341,20 +368,18 @@ jobs:
           echo "TEST_PREV_VERSION_NAME=$PREV_VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_PREV_VERSION_CODE=$PREV_VERSION_CODE" >> "$GITHUB_ENV"
           note "formal fixture: 2.3.1 / 2020033"
-          note "TEST predecessor: $PREV_VERSION_NAME / $PREV_VERSION_CODE / source=$PREDECESSOR_SOURCE"
+          note "TEST predecessor: $PREV_VERSION_NAME / $PREV_VERSION_CODE / source=$PREDECESSOR_SOURCE / lineage=$PREDECESSOR_LINEAGE_EVIDENCE"
           note "TEST current: $CURRENT_VERSION_NAME / $CURRENT_VERSION_CODE / source=$GITHUB_SHA"
           note 'preflight: PASS'
+          echo "source=$PREDECESSOR_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "lineage=$PREDECESSOR_LINEAGE_EVIDENCE" >> "$GITHUB_OUTPUT"
       - name: Resolve TEST instrumentation profile
         shell: bash
         run: |
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
-          if [[ "$VERSION_NAME" == 2.* ]]; then
-            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest,com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest,com.shaterguy.chatgptselfrun.TurnCompletionDomFallbackWebViewTest,com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest'
-          else
-            INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.WorkPreferenceDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningDelayedDomWebViewTest,com.shaterguy.chatgptselfrun.ChatReasoningHierarchicalMenuAndroidTest,com.shaterguy.chatgptselfrun.WorkAdvancedMenuAndroidTest,com.shaterguy.chatgptselfrun.SelfRunRolloverCoordinatorAndroidTest'
-          fi
+          INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest'
           echo "TEST_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_INSTRUMENTATION_CLASS=$INSTRUMENTATION_CLASS" >> "$GITHUB_ENV"
       - name: Enable hardware acceleration
@@ -389,3 +414,109 @@ jobs:
             coinstall-formal-cert.txt
           if-no-files-found: warn
           retention-days: 30
+
+  publish-direct-test-apk:
+    needs: [build-test-app, verify-drive-test-coinstall]
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Download verified canonical TEST candidate
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: chatgpt-selfrun-drive-test-build
+          path: current-candidate
+      - name: Prepare immutable direct TEST APK objects
+        id: prepare_publish
+        shell: bash
+        env:
+          PREDECESSOR_SOURCE: ${{ needs['verify-drive-test-coinstall'].outputs.predecessor_source }}
+          PREDECESSOR_LINEAGE_EVIDENCE: ${{ needs['verify-drive-test-coinstall'].outputs.predecessor_lineage }}
+        run: |
+          set -euo pipefail
+          ARTIFACT_BRANCH='artifacts/selfrun-drive-v2.3.2-dev5'
+          APK='current-candidate/chatgpt-selfrun-drive-test-v2.3.2-dev5.apk'
+          SUM_FILE='current-candidate/SHA256SUMS.txt'
+          SOURCE_FILE='current-candidate/SOURCE_COMMIT.txt'
+          CERT_FILE='current-candidate/APK_CERT.txt'
+          test -s "$APK"
+          test -s "$SUM_FILE"
+          test -s "$SOURCE_FILE"
+          test -s "$CERT_FILE"
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$GITHUB_SHA" ]]
+          EXPECTED_SHA="$(awk '{print $1; exit}' "$SUM_FILE")"
+          APK_SHA256="$(sha256sum "$APK" | awk '{print $1}')"
+          [[ -n "$EXPECTED_SHA" && "$APK_SHA256" == "$EXPECTED_SHA" ]]
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$CERT_FILE"
+          [[ "$PREDECESSOR_SOURCE" == 'artifact' || "$PREDECESSOR_SOURCE" == 'synthetic-fallback' ]]
+          if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
+            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-dev3-artifact' ]]
+          else
+            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]]
+          fi
+          if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
+            echo "immutable artifact branch already exists: $ARTIFACT_BRANCH" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_INDEX_FILE="$RUNNER_TEMP/selfrun-direct-apk.index"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree --empty
+          APK_BLOB="$(git hash-object -w "$APK")"
+          git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
+          APK_TREE="$(git write-tree)"
+          APK_COMMIT="$(printf '%s\n' 'publish: SelfRun Drive 2.3.2-dev5 TEST APK' | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
+          RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/current-test.apk"
+          {
+            echo "SOURCE_SHA=$GITHUB_SHA"
+            echo "ARTIFACT_COMMIT_SHA=$APK_COMMIT"
+            echo "APK_SHA256=$APK_SHA256"
+            echo "APK_URL=$RAW_URL"
+            echo "PREDECESSOR_SOURCE=$PREDECESSOR_SOURCE"
+            echo "PREDECESSOR_LINEAGE_EVIDENCE=$PREDECESSOR_LINEAGE_EVIDENCE"
+          } > direct-apk.txt
+          META_BLOB="$(git hash-object -w direct-apk.txt)"
+          git update-index --add --cacheinfo 100644,"$META_BLOB",deliverables/direct-apk.txt
+          META_TREE="$(git write-tree)"
+          META_COMMIT="$(printf '%s\n' 'docs: record immutable TEST APK identity' | git commit-tree "$META_TREE" -p "$APK_COMMIT")"
+          echo "meta_commit=$META_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "artifact_branch=$ARTIFACT_BRANCH" >> "$GITHUB_OUTPUT"
+          {
+            echo '### SelfRun Drive TEST direct APK'
+            echo
+            echo "- Source SHA: `$GITHUB_SHA`"
+            echo "- Artifact commit: `$APK_COMMIT`"
+            echo "- SHA-256: `$APK_SHA256`"
+            echo "- Direct APK: $RAW_URL"
+            echo "- Predecessor source: `$PREDECESSOR_SOURCE`"
+            echo "- Predecessor lineage evidence: `$PREDECESSOR_LINEAGE_EVIDENCE`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload direct APK identity evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chatgpt-selfrun-drive-direct-apk-evidence
+          path: direct-apk.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish immutable artifact ref
+        shell: bash
+        env:
+          META_COMMIT: ${{ steps.prepare_publish.outputs.meta_commit }}
+          ARTIFACT_BRANCH: ${{ steps.prepare_publish.outputs.artifact_branch }}
+        run: |
+          set -euo pipefail
+          test -n "$META_COMMIT"
+          [[ "$ARTIFACT_BRANCH" == 'artifacts/selfrun-drive-v2.3.2-dev5' ]]
+          if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
+            echo "immutable artifact branch already exists: $ARTIFACT_BRANCH" >&2
+            exit 1
+          fi
+          git push origin "$META_COMMIT:refs/heads/$ARTIFACT_BRANCH"
+

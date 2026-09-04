@@ -48,7 +48,7 @@ final class WorkProtocolNativeObserver {
                         });
                 serviceWorkerClientInstalled = true;
             } catch (Throwable ignored) {
-                // Optional observation failure must never disable DOM fallback or normal Chat.
+                // Optional Work observation failure must never disable the response protocol or normal Chat.
             }
         }
     }

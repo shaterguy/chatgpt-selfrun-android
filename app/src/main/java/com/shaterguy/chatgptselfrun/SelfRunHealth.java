@@ -334,7 +334,7 @@ final class SelfRunHealthEvaluator {
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(p)) return waiting("WAITING_CHATGPT", "ChatGPT 응답 대기", "요청 전송은 완료되었으며 현재 ChatGPT 응답을 기다리고 있습니다.", at, "", p);
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(p) || SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(p)) return waiting("WAITING_MODEL", "모델 설정 적용 중", "선택한 모델 설정이 적용되기를 기다리고 있습니다.", at, "", p);
         if (SelfRunStore.PHASE_APPLY_REASONING.equals(p) || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(p)) return waiting("WAITING_REASONING", "추론 설정 적용 중", "선택한 추론 설정이 적용되기를 기다리고 있습니다.", at, "", p);
-        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(p) || SelfRunStore.PHASE_RESUME_BASELINE.equals(p)) {
+        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(p) || SelfRunStore.PHASE_RESUME_BASELINE.equals(p)) {
             return snap(SelfRunHealthSnapshot.WAITING, "WAITING_DRIVE", "Drive 응답 대기",
                     "SelfRun 실행 신호가 Google Drive에 반영되기를 기다리고 있습니다.", "DRIVE", SelfRunHealthSnapshot.CONFIRMED,
                     "아무 작업 필요 없음", at, "", p);
@@ -441,13 +441,13 @@ final class SelfRunHealthEvaluator {
 
     private static String recoveryReason(SelfRunHealthInput in) {
         if (upper(in.lastErrorCode).contains("NETWORK")) return "network_recovery";
-        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(in.phase) || SelfRunStore.PHASE_RESUME_BASELINE.equals(in.phase)) return "drive_recovery";
+        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(in.phase) || SelfRunStore.PHASE_RESUME_BASELINE.equals(in.phase)) return "drive_recovery";
         return "automatic_recovery";
     }
 
     private static String recoveryDescription(SelfRunHealthInput in) {
         if (upper(in.lastErrorCode).contains("NETWORK")) return "네트워크 연결을 기다리고 있습니다.";
-        if (SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC.equals(in.phase) || SelfRunStore.PHASE_RESUME_BASELINE.equals(in.phase)) return "Drive signal을 다시 확인하고 있습니다.";
+        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(in.phase) || SelfRunStore.PHASE_RESUME_BASELINE.equals(in.phase)) return "Drive signal을 다시 확인하고 있습니다.";
         return "ChatGPT 화면과 실행 상태를 다시 확인하고 있습니다.";
     }
 

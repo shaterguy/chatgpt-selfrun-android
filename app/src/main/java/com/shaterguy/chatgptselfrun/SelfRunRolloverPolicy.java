@@ -86,37 +86,35 @@ final class SelfRunRolloverPolicy {
         return softContinuationStallStatus(status) && elapsed >= CONTINUATION_SOFT_STALL_GRACE_MS;
     }
 
-    static int postDispatchNoStartAction(long dispatchStartedElapsed, boolean sawStop,
-                                         long validatedSinceElapsed, long nowElapsed,
-                                         boolean transientSeen) {
-        return postDispatchNoStartAction(dispatchStartedElapsed, sawStop, validatedSinceElapsed, nowElapsed,
-                transientSeen, TurnProtocolUiState.activeGenerationForCurrentObserver());
-    }
-
-    static int postDispatchNoStartAction(long dispatchStartedElapsed, boolean sawStop,
+    static int postDispatchNoStartAction(long dispatchStartedElapsed,
                                          long validatedSinceElapsed, long nowElapsed,
                                          boolean transientSeen, boolean protocolGenerationActive) {
         if (dispatchStartedElapsed <= 0L || validatedSinceElapsed <= 0L
-                || nowElapsed < dispatchStartedElapsed || nowElapsed < validatedSinceElapsed) return NO_START_WAIT;
-        // STOP and a token-correlated protocol THINKING/ANSWERING state are direct evidence that the
-        // submitted generation started. Retryable WebView resource errors remain diagnostic only.
-        if (sawStop || protocolGenerationActive || transientSeen) return NO_START_WAIT;
+                || nowElapsed < dispatchStartedElapsed || nowElapsed < validatedSinceElapsed) {
+            return NO_START_WAIT;
+        }
+        // A token-correlated protocol THINKING or ANSWERING state is authoritative start evidence.
+        // Retryable resource failures are diagnostic and pause rather than imply completion.
+        if (protocolGenerationActive) return NO_START_WAIT;
         long continuouslyValidatedStart = Math.max(dispatchStartedElapsed, validatedSinceElapsed);
-        if (nowElapsed - continuouslyValidatedStart < CONTINUATION_NO_START_MAX_WAIT_MS) return NO_START_WAIT;
-        return NO_START_ROLLOVER;
+        if (nowElapsed - continuouslyValidatedStart < CONTINUATION_NO_START_MAX_WAIT_MS) {
+            return NO_START_WAIT;
+        }
+        return transientSeen ? NO_START_PAUSE_TRANSIENT : NO_START_ROLLOVER;
     }
 
-    static boolean postDispatchNoStartTimedOut(long dispatchStartedElapsed, boolean sawStop,
-                                                long validatedSinceElapsed, long nowElapsed) {
-        return postDispatchNoStartAction(dispatchStartedElapsed, sawStop, validatedSinceElapsed,
-                nowElapsed, false) == NO_START_ROLLOVER;
+    static boolean postDispatchNoStartTimedOut(long dispatchStartedElapsed,
+                                                long validatedSinceElapsed, long nowElapsed,
+                                                boolean protocolGenerationActive) {
+        return postDispatchNoStartAction(dispatchStartedElapsed, validatedSinceElapsed,
+                nowElapsed, false, protocolGenerationActive) == NO_START_ROLLOVER;
     }
 
     static boolean continuationProgressStatus(String status) {
         return "READY".equals(status) || "READY_TO_SUBMIT".equals(status)
                 || SelfRunContinuationDom.SUBMISSION_PENDING.equals(status)
                 || "CONTINUE_CLICKED".equals(status) || "SUBMISSION_CONFIRMED".equals(status)
-                || "VERIFY_REQUIRED".equals(status) || "OBSERVER_ARMED".equals(status);
+                || "VERIFY_REQUIRED".equals(status);
     }
 
     static boolean localFailureBudgetExhausted(int failures) {

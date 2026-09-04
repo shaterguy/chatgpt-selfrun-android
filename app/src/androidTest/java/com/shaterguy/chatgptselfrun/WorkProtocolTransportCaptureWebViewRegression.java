@@ -28,6 +28,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
         duplicateNativeObservationDoesNotRestartMainTurn();
         serviceWorkerAndPortReuseExistingDecoderWithoutEarlyComplete();
         relayedSemanticUsesMainAuthorityAndRejectsStaleTurn();
+        sameRunNewTokenRejectsRetiredWorkTurn();
         chatModeIgnoresNewWorkSources();
     }
 
@@ -77,6 +78,29 @@ final class WorkProtocolTransportCaptureWebViewRegression {
         }
     }
 
+    private static void sameRunNewTokenRejectsRetiredWorkTurn() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web=load(scenario);prepare(scenario,web,"work");install(scenario,web);
+            xhrPost(scenario,web);
+            assertTrue(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","retired-turn")));
+            assertEquals("ANSWERING",snapshot(scenario,web).getString("phase"));
+            assertEquals("true",read(scenario,web,
+                    "String(window.__selfRunTurnProtocol.bindTurn('fixture-run','fixture-token-2'))"));
+            JSONObject current=xhrPost(scenario,web);
+            assertEquals("fixture-token-2",current.getString("turnToken"));
+            assertEquals("THINKING",current.getString("phase"));
+            assertFalse(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","retired-turn")));
+            assertFalse(relayAccepted(scenario,web,new JSONObject().put("type","message_stream_complete")
+                    .put("conversation_id",CONVERSATION_ID).put("turn_id","retired-turn")));
+            assertEquals("THINKING",snapshot(scenario,web).getString("phase"));
+            assertTrue(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","current-turn")));
+            assertEquals("ANSWERING",snapshot(scenario,web).getString("phase"));
+            assertTrue(relayAccepted(scenario,web,new JSONObject().put("type","message_stream_complete")
+                    .put("conversation_id",CONVERSATION_ID).put("turn_id","current-turn")));
+            assertEquals("COMPLETE",snapshot(scenario,web).getString("phase"));
+        }
+    }
+
     private static void chatModeIgnoresNewWorkSources() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = load(scenario);prepare(scenario, web, "chat");install(scenario, web);
@@ -109,7 +133,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
                 +"class FWS extends EventTarget{constructor(url){super();}}FWS.CONNECTING=0;FWS.OPEN=1;FWS.CLOSING=2;FWS.CLOSED=3;window.WebSocket=FWS;"
                 +"class FW extends EventTarget{constructor(url){super();}}window.Worker=FW;class FP extends EventTarget{start(){}};class FSW{constructor(url){this.port=new FP();}}window.SharedWorker=FSW;");}
     private static void install(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web)throws Exception{
-        eval(scenario,web,ChatGptTurnProtocolScript.documentStartScript());eval(scenario,web,WorkTurnProtocolIngressScript.documentStartScript());
+        eval(scenario,web,ChatGptTurnProtocolScript.documentStartScript());eval(scenario,web,"window.__selfRunTurnProtocol.bindTurn(\'fixture-run\',\'fixture-token\');");eval(scenario,web,WorkTurnProtocolIngressScript.documentStartScript());
         eval(scenario,web,WorkProtocolTransportCaptureScript.documentStartScript());
         assertEquals(WorkProtocolTransportCaptureScript.ENGINE_VERSION,read(scenario,web,"window.__selfRunWorkProtocolTransportCapture.version"));}
     private static JSONObject xhrPost(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web)throws Exception{return state(scenario,web,
@@ -117,8 +141,11 @@ final class WorkProtocolTransportCaptureWebViewRegression {
     private static JSONObject snapshot(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web)throws Exception{return state(scenario,web,"window.__selfRunTurnProtocol.snapshot()");}
     private static boolean callTransport(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web,String method,String frame)throws Exception{
         return Boolean.parseBoolean(read(scenario,web,"String(window.__selfRunWorkProtocolTransportCapture."+method+"("+JSONObject.quote(frame)+"))"));}
+    private static boolean relayAccepted(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web,JSONObject semantic)throws Exception{
+        return Boolean.parseBoolean(read(scenario,web,
+                "String(window.__selfRunWorkProtocolTransportCapture.observeRelayedSemantic("+semantic+",'subframe_websocket'))"));}
     private static void relay(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web,JSONObject semantic)throws Exception{
-        assertEquals("true",read(scenario,web,"String(window.__selfRunWorkProtocolTransportCapture.observeRelayedSemantic("+semantic+",'subframe_websocket'))"));}
+        assertTrue(relayAccepted(scenario,web,semantic));}
     private static void eventuallyPhase(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web,String expected)throws Exception{
         for(int i=0;i<80;i++){if(expected.equals(snapshot(scenario,web).optString("phase")))return;Thread.sleep(25L);}throw new AssertionError("phase != "+expected);}
     private static JSONObject state(ActivityScenario<SelfRunNewActivity> scenario,AtomicReference<WebView> web,String expression)throws Exception{

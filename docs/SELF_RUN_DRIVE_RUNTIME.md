@@ -4,7 +4,7 @@
 
 ## 책임 경계
 
-Android 앱은 Run ID·Run 작업폴더·실행턴 문서를 만들고 같은 ChatGPT conversation의 composer에 bootstrap/CONTINUE를 제출하며 STOP/SEND DOM 변화로 답변 완료를 감지한 뒤 Run 폴더의 Drive signal document를 동기화합니다. 앱은 SelfRun 운영문서의 내용을 읽거나 파싱하지 않고, `SelfRunProtocol.SELF_RUN_SKILL_DOCUMENT_ID` 값을 prompt metadata로 전달하기만 합니다. Project 판정·Project SKILL 탐색·규칙 충돌 해석도 수행하지 않습니다.
+Android 앱은 Run ID·Run 작업폴더·실행턴 문서를 만들고 같은 ChatGPT conversation의 composer에 bootstrap/CONTINUE를 제출하며 ChatGPT response protocol로 답변 완료를 감지한 뒤 Run 폴더의 Drive signal document를 동기화합니다. 앱은 SelfRun 운영문서의 내용을 읽거나 파싱하지 않고, `SelfRunProtocol.SELF_RUN_SKILL_DOCUMENT_ID` 값을 prompt metadata로 전달하기만 합니다. Project 판정·Project SKILL 탐색·규칙 충돌 해석도 수행하지 않습니다.
 
 신규 Run의 bootstrap에는 `DRIVE_JOB_FOLDER_ID`가 포함됩니다. ChatGPT는 이 폴더 바로 아래에 한 signal당 한 native Google Doc을 생성합니다. 실행턴 문서는 초기 Run 객체·첨부파일 경계·legacy 호환을 위해 계속 생성하지만 신규 transport의 signal append target이 아닙니다.
 
@@ -16,24 +16,24 @@ Drive V1은 background WebView를 private virtual display에 호스팅하는 구
 
 보정 프로파일은 app-private SharedPreferences를 내구 원본으로 유지하고 같은 ChatGPT origin의 Web Storage에도 주입합니다. 런타임 DOM 코드는 보정 target을 우선 사용하되 매칭하지 못하면 v1.2.2의 기존 semantic/testid/role 휴리스틱으로 후퇴합니다. 보정 로그는 purpose별 arm/candidate/confirm/save/reset 상태만 기록하며 사용자가 테스트로 입력한 문구 내용은 기록하지 않습니다. `addJavascriptInterface`는 사용하지 않습니다.
 
-WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습니다. 역할은 새 conversation 진입, 저장된 canonical conversation URL 복구, composer·STOP/SEND 영역 탐색, 명령 제출과 완료 상태 감지입니다. 정확한 전문 readback과 활성 SEND를 확인한 제출 클릭과 같은 JavaScript 실행에서 `MutationObserver`를 설치하고, 클릭 결과를 곧바로 완료 관찰 상태로 전이합니다. 전송 뒤 별도 버튼 polling은 하지 않습니다. STOP을 처음 관찰하면 현재 run/token에만 유효한 native callback으로 내구 증거를 기록하고, 그 뒤 SEND/비활성 SEND/idle composer 상태가 나타나면 5초 단발 타이머를 시작합니다. 타이머 종료 시 `controlState()`를 한 번 더 호출해 여전히 완료 상태인 경우에만 Observer를 해제하고 native callback을 보냅니다. STOP이 돌아오면 타이머를 취소하고 계속 관찰합니다. renderer 소실이나 composer 재획득 실패 뒤 idle baseline은 이 내구 STOP 증거가 있을 때만 허용합니다.
+WebView DOM adapter는 새 conversation 진입, canonical conversation URL 복구, composer 탐색, 정확한 입력 readback, SEND 탐색·클릭, 제출 직전·직후의 일회성 확인만 담당합니다. turn state의 단일 권위 원본은 response protocol이며, 현재 runId+turnToken에 귀속된 canonical POST, final semantic, 검증된 stream completion만 THINKING·ANSWERING·COMPLETE를 전이합니다.
 
 ## Foreground Service와 WakeLock
 
-실행 중 Job은 Android Foreground Service로 유지합니다. WakeLock은 Drive 요청, WebView 복구, 명령 제출처럼 실제 작업이 필요한 짧은 구간에만 사용하고 단순 polling 대기·guard 대기에는 유지하지 않는 것을 원칙으로 합니다. TURN_COMPLETION observer가 arm된 뒤에는 `WebView.onPause()`로 안전한 렌더링·애니메이션 처리를 멈추되 JavaScript observer와 15초 healthcheck는 유지하며, 다음 상호작용·복구 단계에서만 `onResume()`합니다. 알림 채널, pause/resume 동작과 서비스 상태는 `SelfRunService`와 `NotificationHelper`가 소유합니다.
+실행 중 Job은 Android Foreground Service로 유지합니다. 제출 확인 직후 `virtualDisplay.setSurface(null)`로 출력만 detach하며 WebView와 renderer, protocol bridge는 계속 실행합니다. 정상 WAIT에서는 `onPause()`, `pauseTimers()`, `stopLoading()`, `destroy()`를 호출하지 않고 다음 UI 조작 단계에서만 Surface를 attach합니다. 알림 채널, pause/resume 동작과 서비스 상태는 `SelfRunService`와 `NotificationHelper`가 소유합니다.
 
 ## 완료 감지와 Drive 동기화 state machine
 
 현재 구현의 주요 값은 다음과 같습니다.
 
 - 답변 완료 안정성 재확인: 5초 단발 타이머
-- DOM 완료 뒤 Drive 첫 확인: 즉시 1회
+- Protocol COMPLETE callback 뒤 Drive 첫 확인: 즉시 1회
 - signal 부재 시 Drive 재확인: 5초
 - signal 대기 제한시간: 3분
 - 네트워크 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
 - authoritative progress: Run 폴더 signal document의 정렬된 logical cursor
 
-정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback이 `WAIT_TURN_COMPLETION`의 현재 run/token과 일치할 때만 `POST_DOM_DRIVE_SYNC`로 전이합니다.
+정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback의 runId·turnToken·허용 source가 `WAIT_TURN_COMPLETION`과 일치하고 아직 소비되지 않았을 때만 `POST_PROTOCOL_DRIVE_SYNC`로 전이합니다.
 
 `DriveApiClient.getPollMetadata()`는 기존 실행턴 문서의 정확한 parent와 RUN_ID를 기준으로 같은 job folder의 native Google Docs를 조회합니다. `DriveSignalDocumentTransport`가 현재 RUN_ID의 canonical signal title만 선별하고 다음 순서로 정렬합니다.
 
@@ -45,11 +45,11 @@ WebView는 assistant 메시지 본문이나 제어문구를 관찰하지 않습�
 
 `NEXT_INPUT_B64URL=BODY` marker가 없는 signal은 제목만 사용하므로 Docs 본문을 열지 않습니다. marker가 있는 문서만 Docs API로 본문을 읽고, 정확한 `NEXT_INPUT_B64URL=<Base64URL>` 한 줄을 제목에 materialize한 뒤 기존 parser에 넘깁니다. 제목은 canonical이지만 본문이 아직 쓰이지 않았거나 malformed인 NEXT_INPUT 문서는 정상 signal로 소비하지 않고 현재 합성 로그에서 건너뜁니다. 같은 fileId의 본문이 완성되면 `modifiedTime`이 synthetic version을 바꾸므로 다음 동기화에서 다시 검증합니다. 이후 더 최신한 정상 signal이 생성된 경우에도 오래된 malformed BODY 문서가 새 signal 처리를 영구 차단하지 않습니다. 다른 Run, 다른 parent, shared/trashed 항목도 fail closed합니다.
 
-`POST_DOM_DRIVE_SYNC`에서 3분 동안 `TURN_COMPLETED`가 없으면 현재 답변 완료 사이클의 문서 재생성 요청 기회를 먼저 사용합니다. 이 retry budget은 Run 전체가 아니라 각 독립적인 답변 완료 사이클마다 1회입니다. 첫 누락에서는 `[SELF_RUN_TURN_DOCUMENT_RETRY <RUN_ID>]`를 한 번 준비하고, 같은 prompt가 아직 `PENDING`인 동안 중복 timeout이 들어오면 동일 prompt를 유지합니다. `PENDING` 해제는 prompt lifecycle 정리이며 재요청 제출 확인, `WAIT_TURN_COMPLETION` 재진입, `POST_DOM_DRIVE_SYNC` 재진입 또는 DOM 답변완료 재감지만으로 `USED`를 복구하지 않습니다. 같은 사이클에서 retry가 제출된 뒤에도 프로토콜상 유효한 `TURN_COMPLETED`가 실제 소비되지 않은 채 다시 3분 timeout에 도달하면 두 번째 retry를 보내지 않고 기존 rollover 경로를 사용합니다.
+`POST_PROTOCOL_DRIVE_SYNC`에서 3분 동안 `TURN_COMPLETED`가 없으면 현재 답변 완료 사이클의 문서 재생성 요청 기회를 먼저 사용합니다. 이 retry budget은 Run 전체가 아니라 각 독립적인 답변 완료 사이클마다 1회입니다. 첫 누락에서는 `[SELF_RUN_TURN_DOCUMENT_RETRY <RUN_ID>]`를 한 번 준비하고, 같은 prompt가 아직 `PENDING`인 동안 중복 timeout이 들어오면 동일 prompt를 유지합니다. `PENDING` 해제는 prompt lifecycle 정리이며 재요청 제출 확인, `WAIT_TURN_COMPLETION` 재진입, `POST_PROTOCOL_DRIVE_SYNC` 재진입 또는 DOM 답변완료 재감지만으로 `USED`를 복구하지 않습니다. 같은 사이클에서 retry가 제출된 뒤에도 프로토콜상 유효한 `TURN_COMPLETED`가 실제 소비되지 않은 채 다시 3분 timeout에 도달하면 두 번째 retry를 보내지 않고 기존 rollover 경로를 사용합니다.
 
-`USED` 복구는 정상 `TURN_COMPLETED` 소비 성공 경계에만 귀속됩니다. 현재 Run의 유효 completion을 Drive에서 실제로 소비하고 durable pending signal·cursor를 저장한 뒤 `POST_DOM_DRIVE_SYNC`를 정상적으로 벗어날 때, CHAT은 `SEND_CONTINUE`, WORK는 `APPLY_PREFS` 전이를 동일한 성공 경계로 취급하여 이전 완료 사이클의 `OWNER/USED/PENDING` retry 상태를 내구적으로 종료합니다. 이후 같은 Run의 다음 답변 완료 사이클은 다시 1회의 retry budget을 가집니다. 프로세스 또는 Service가 이 성공 상태 저장 직후 재생성되더라도 durable consumed-completion 상태를 확인해 동일 복구를 마칠 수 있으며, 반대로 유효 completion을 소비하지 않은 `USED` 상태는 재생성만으로 초기화되지 않습니다. malformed/protocol-error completion, 단순 문서 존재, phase 변경, USER_ACTION_REQUIRED/PAUSED/DONE, 비-timeout rollover는 이 reset 경계가 아닙니다.
+`USED` 복구는 정상 `TURN_COMPLETED` 소비 성공 경계에만 귀속됩니다. 현재 Run의 유효 completion을 Drive에서 실제로 소비하고 durable pending signal·cursor를 저장한 뒤 `POST_PROTOCOL_DRIVE_SYNC`를 정상적으로 벗어날 때, CHAT은 `SEND_CONTINUE`, WORK는 `APPLY_PREFS` 전이를 동일한 성공 경계로 취급하여 이전 완료 사이클의 `OWNER/USED/PENDING` retry 상태를 내구적으로 종료합니다. 이후 같은 Run의 다음 답변 완료 사이클은 다시 1회의 retry budget을 가집니다. 프로세스 또는 Service가 이 성공 상태 저장 직후 재생성되더라도 durable consumed-completion 상태를 확인해 동일 복구를 마칠 수 있으며, 반대로 유효 completion을 소비하지 않은 `USED` 상태는 재생성만으로 초기화되지 않습니다. malformed/protocol-error completion, 단순 문서 존재, phase 변경, USER_ACTION_REQUIRED/PAUSED/DONE, 비-timeout rollover는 이 reset 경계가 아닙니다.
 
-`RESUME_BASELINE`도 같은 Run-folder signal 목록을 다시 합성해 최신 cursor 이후의 completion을 확인합니다. signal 문서가 아직 없으면 5초 간격으로 최대 5분 재확인합니다. STOP/SEND 완료 감지에 짧은 주기의 반복 polling은 사용하지 않습니다.
+`RESUME_BASELINE`도 같은 Run-folder signal 목록을 다시 합성해 최신 cursor 이후의 completion을 확인합니다. signal 문서가 아직 없으면 5초 간격으로 최대 5분 재확인합니다. WAIT_TURN_COMPLETION에서는 DOM evaluateJavascript polling, observer healthcheck, Surface recovery를 수행하지 않습니다.
 
 Drive write/readback, 생성 도중 중단, 409/404, 오래된 실행과 새 실행의 경합은 영속 상태와 실제 객체 readback을 기준으로 복구합니다. 구체 상태 전이와 race 방지 lock은 `SelfRunService`, `SelfRunStore`, `DriveApiClient`, `DriveSignalDocumentTransport`, `DriveSignalParser`의 현재 코드가 권위 원본입니다.
 

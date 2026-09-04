@@ -16,7 +16,7 @@ public final class SelfRunHealthStaleErrorContractTest {
         in.lastErrorCode = "DRIVE_OPERATION_RETRY";
         JSONObject record = new JSONObject()
                 .put("lastErrorCodeSeen", "DRIVE_OPERATION_RETRY")
-                .put("lastErrorPhase", SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC);
+                .put("lastErrorPhase", SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
         SelfRunHealthObservationStore.suppressStaleError(in, record);
         SelfRunHealthSnapshot h = SelfRunHealthEvaluator.evaluate(in, 10_000L);
         assertEquals(SelfRunHealthSnapshot.WAITING, h.level);
@@ -24,11 +24,11 @@ public final class SelfRunHealthStaleErrorContractTest {
     }
 
     @Test public void freshRetryCodeStillShowsRecovery() throws Exception {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC);
+        SelfRunHealthInput in = base(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
         in.lastErrorCode = "DRIVE_OPERATION_RETRY";
         JSONObject record = new JSONObject()
                 .put("lastErrorCodeSeen", "DRIVE_OPERATION_RETRY")
-                .put("lastErrorPhase", SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC);
+                .put("lastErrorPhase", SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
         SelfRunHealthObservationStore.suppressStaleError(in, record);
         SelfRunHealthSnapshot h = SelfRunHealthEvaluator.evaluate(in, 10_000L);
         assertEquals(SelfRunHealthSnapshot.RECOVERING, h.level);

@@ -16,7 +16,7 @@ public final class UserImmediateInputPolicyTest {
                 true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
                 "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC,
+                true, false, false, SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,
                 "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
                 true, true, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,

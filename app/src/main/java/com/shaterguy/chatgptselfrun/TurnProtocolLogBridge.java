@@ -32,10 +32,9 @@ final class TurnProtocolLogBridge {
         boolean documentStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT);
         if (!messageBridge || !documentStart) {
             if (!runId.isEmpty()) {
-                TurnProtocolUiState.recordDetector(context, runId,
-                        TurnProtocolUiState.DETECTOR_DOM_FALLBACK_ONLY);
-                log.record(store, "TURN_DETECTOR", "path=DOM_FALLBACK_ONLY;reason="
-                        + (!messageBridge ? "web_message_listener_unavailable" : "document_start_script_unavailable"));
+                log.record(store, "TURN_PROTOCOL_UNAVAILABLE", "reason="
+                        + (!messageBridge ? "web_message_listener_unavailable"
+                        : "document_start_script_unavailable"));
             }
             return false;
         }
@@ -63,28 +62,21 @@ final class TurnProtocolLogBridge {
                             return;
                         }
                         if (!isMainFrame) return;
-                        String observerToken = item.optString("observerToken", "");
-                        if ("observer_bound".equals(stage)) {
-                            TurnProtocolUiState.recordObserver(context, eventRunId, observerToken, phase);
-                            log.record(store, "TURN_PROTOCOL_OBSERVER",
-                                    "binding=" + (observerToken.isEmpty() ? "cleared" : "current")
-                                            + ";phase=" + BootstrapResultPolicy.safe(phase, 24));
-                            return;
-                        }
+                        String turnToken = item.optString("turnToken", "");
+                        if (turnToken.isEmpty() || !turnToken.equals(store.turnProtocolToken())) return;
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
-                        TurnProtocolUiState.record(context, eventRunId, stage, phase, observerToken);
+                        TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase);
                         WorkProtocolCoverageTracker.observeProtocol(context, store, stage, source, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
-                                + ";phase=" + phase);
+                                + ";phase=" + phase + ";token=current");
                     } catch (Throwable ignored) {
                     }
                 });
         if (!runId.isEmpty()) {
-            TurnProtocolUiState.recordDetector(context, runId,
-                    TurnProtocolUiState.DETECTOR_PROTOCOL_PRIMARY);
+            TurnProtocolUiState.recordDetector(context, runId);
             log.record(store, "TURN_DETECTOR",
-                    "path=PROTOCOL_PRIMARY;fallback=DOM;bridge=web_message_listener;document_start=1");
+                    "path=PROTOCOL;bridge=web_message_listener;document_start=1");
         }
         return true;
     }
@@ -178,6 +170,11 @@ final class TurnProtocolLogBridge {
         };
     }
 
+    static boolean isAllowedCompletionSource(String source) {
+        return "message_stream_complete".equals(source)
+                || "finished_successfully_end_turn".equals(source);
+    }
+
     private static String normalizedSource(String stage, String source) {
         if ("turn_request".equals(stage)) return "canonical_post";
         if ("answering_started".equals(stage)) {
@@ -189,7 +186,7 @@ final class TurnProtocolLogBridge {
         if ("completion_ignored".equals(stage)) {
             return switch (source) {
                 case "message_stream_complete", "finished_successfully_end_turn" -> source;
-                default -> "protocol_unknown";
+                default -> "";
             };
         }
         if ("error".equals(stage)) {
@@ -198,8 +195,8 @@ final class TurnProtocolLogBridge {
         }
         if (!("complete".equals(stage) || "completion_dispatch".equals(stage))) return "";
         return switch (source) {
-            case "message_stream_complete", "finished_successfully_end_turn", "restored_complete" -> source;
-            default -> "protocol_unknown";
+            case "message_stream_complete", "finished_successfully_end_turn" -> source;
+            default -> "";
         };
     }
 }

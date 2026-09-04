@@ -166,6 +166,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
     private static void install(ActivityScenario<SelfRunNewActivity> scenario,
                                 AtomicReference<WebView> web) throws Exception {
         evaluateRaw(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
+        evaluateRaw(scenario, web, "window.__selfRunTurnProtocol.bindTurn(\'fixture-run\',\'fixture-token\');");
         evaluateRaw(scenario, web, WorkTurnProtocolIngressScript.documentStartScript());
         assertEquals(ChatGptTurnProtocolScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunTurnProtocol.version"));

@@ -89,7 +89,7 @@ public final class UserNextInputStoreTest {
         assertTrue(UserNextInputStore.shouldConsumeBoundReservation(
                 SelfRunStore.PHASE_PAUSED, SelfRunStore.PHASE_WAIT_TURN_COMPLETION, bound, ""));
         assertTrue(UserNextInputStore.shouldConsumeBoundReservation(
-                SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC, "", bound, ""));
+                SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC, "", bound, ""));
         assertTrue(UserNextInputStore.shouldConsumeBoundReservation(
                 SelfRunStore.PHASE_SEND_CONTINUE, "", bound, "8:223456"));
     }

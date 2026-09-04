@@ -83,17 +83,15 @@ final class WorkProtocolCoverageTracker {
 
     static synchronized void observeCompletionNavigation(Context context, Uri uri) {
         if (context == null || uri == null) return;
-        if (!SelfRunContinuationDom.TURN_COMPLETION_SCHEME.equals(uri.getScheme())
-                || !SelfRunContinuationDom.TURN_COMPLETION_HOST.equals(uri.getHost())) return;
+        if (!ChatGptTurnProtocolScript.COMPLETION_SCHEME.equals(uri.getScheme())
+                || !ChatGptTurnProtocolScript.COMPLETION_HOST.equals(uri.getHost())) return;
         SelfRunStore store = new SelfRunStore(context.getApplicationContext());
         if (!eligible(store)) return;
         State state = state(store);
         String source = safe(uri.getQueryParameter("source"));
-        if (source.isEmpty()) emit(context, store, state, "stable_idle");
-        else {
-            if (state.completionSource.isEmpty()) state.completionSource = source;
-            emit(context, store, state, "protocol");
-        }
+        if (!TurnProtocolLogBridge.isAllowedCompletionSource(source)) return;
+        if (state.completionSource.isEmpty()) state.completionSource = source;
+        emit(context, store, state, "protocol");
     }
 
     private static void beginRequest(State state, String source) {
@@ -106,7 +104,7 @@ final class WorkProtocolCoverageTracker {
         }
     }
 
-    private static void emit(Context context, SelfRunStore store, State state, String winner) {
+    private static void emit(Context context, SelfRunStore store, State state, String detector) {
         if (state.coverageEmitted) return;
         state.coverageEmitted = true;
         StringBuilder out = new StringBuilder();
@@ -115,8 +113,8 @@ final class WorkProtocolCoverageTracker {
         add(out, "semanticSource", state.semanticSource);
         add(out, "answeringSource", state.answeringSource);
         add(out, "completionSource", state.completionSource);
-        add(out, "fallbackWinner", winner);
-        add(out, "failureClass", failureClass(state, winner));
+        add(out, "detector", detector);
+        add(out, "failureClass", failureClass(state, detector));
         add(out, "mainFrameSeen", Boolean.toString(state.mainFrameSeen));
         add(out, "subframeSeen", Boolean.toString(state.subframeSeen));
         add(out, "serviceWorkerRequestSeen", Boolean.toString(state.serviceWorkerRequestSeen));
@@ -125,8 +123,8 @@ final class WorkProtocolCoverageTracker {
         new SelfRunRunLog(context.getApplicationContext()).record(store, "WORK_PROTOCOL_COVERAGE", out.toString());
     }
 
-    private static String failureClass(State state, String winner) {
-        if ("protocol".equals(winner) && !state.completionSource.isEmpty()) return "protocol_complete";
+    private static String failureClass(State state, String detector) {
+        if ("protocol".equals(detector) && !state.completionSource.isEmpty()) return "protocol_complete";
         if (state.requestSource.isEmpty()) return "canonical_request_missing";
         if (state.frameSource.isEmpty() && state.requestSource.startsWith("native_")) return "native_request_only";
         if (state.frameSource.isEmpty()) return "response_transport_missing";

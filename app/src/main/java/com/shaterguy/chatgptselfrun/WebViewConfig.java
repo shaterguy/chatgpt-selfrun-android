@@ -10,7 +10,7 @@ final class WebViewConfig {
 
     /** Shared by the visible calibration WebView and the background automation WebView. */
     @SuppressWarnings("SetJavaScriptEnabled")
-    static void applyAutomation(WebView webView) {
+    static boolean applyAutomation(WebView webView) {
         ChatReasoningPreferenceStore.initialize(webView.getContext());
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(false);
@@ -27,16 +27,18 @@ final class WebViewConfig {
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
-        boolean protocolObservable = TurnProtocolLogBridge.install(webView);
+        boolean protocolAvailable = TurnProtocolLogBridge.install(webView);
+        if (!protocolAvailable) {
+            WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
+            return false;
+        }
         RequestProfileScript.installDocumentStart(webView);
         HybridRequestProfileScript.installDocumentStart(webView);
-        TurnCompletionDomFallbackScript.installDocumentStart(webView);
-        if (protocolObservable) {
-            ChatGptTurnProtocolScript.installDocumentStart(webView);
-            WorkTurnProtocolIngressScript.installDocumentStart(webView);
-            WorkProtocolTransportCaptureScript.installDocumentStart(webView);
-        }
+        ChatGptTurnProtocolScript.installDocumentStart(webView);
+        WorkTurnProtocolIngressScript.installDocumentStart(webView);
+        WorkProtocolTransportCaptureScript.installDocumentStart(webView);
         WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
+        return true;
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")

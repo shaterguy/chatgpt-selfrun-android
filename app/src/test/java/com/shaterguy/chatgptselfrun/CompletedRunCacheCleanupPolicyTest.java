@@ -14,7 +14,7 @@ public class CompletedRunCacheCleanupPolicyTest {
     @Test public void nonFinalOrUnacknowledgedStatesAreIneligible() {
         String[] nonFinal = {
                 SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
-                SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC,
+                SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,
                 SelfRunStore.PHASE_APPLY_PREFS,
                 SelfRunStore.PHASE_APPLY_REASONING,
                 SelfRunStore.PHASE_SEND_CONTINUE,

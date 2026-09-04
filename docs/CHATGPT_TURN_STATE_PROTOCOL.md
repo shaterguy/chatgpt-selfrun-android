@@ -19,7 +19,7 @@ SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive 
 
 `user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`은 전체 응답 COMPLETE를 직접 만들지 않는다.
 
-Pro에서 final answer evidence보다 `message_stream_complete`가 먼저 관찰되면 THINKING을 유지하고 `completion_ignored`를 기록하되 STOP/SEND DOM fallback을 중단하지 않는다. 이후 final answer 또는 안정된 DOM 완료가 확인되면 정상 완료 경로로 수렴한다.
+final answer evidence보다 `message_stream_complete`가 먼저 관찰되면 동일 requestIdentity와 turnToken에 completion evidence를 보존합니다. 이후 final_channel, visible_answer 또는 assistant_final_text가 도착할 때 protocol COMPLETE로 수렴하며 DOM 상태는 사용하지 않습니다.
 
 ## Drive signal document 현재성
 
@@ -65,6 +65,6 @@ ChatGPT 응답 COMPLETE가 확인되면 앱은 Job 폴더를 조회한다.
 ## 회귀 검증
 
 - `TurnProtocolStateWebViewTest`: 활성 응답 중 새 canonical POST가 들어왔을 때 최신 요청으로 교체되고 이전 fetch/WebSocket 데이터가 폐기되는지 검증한다.
-- `ProEarlyCompleteFallbackWebViewTest`: Pro 조기 semantic completion이 DOM fallback을 파괴하지 않는지 검증한다.
+- `ProtocolDetachedSurfaceWebViewTest`: Surface detach 상태에서 token-correlated THINKING→ANSWERING→COMPLETE와 native callback을 검증합니다.
 - `DriveSignalDocumentIdentityAndroidTest`: 비정상적으로 큰 과거 cursor, 파일 정렬 변화, 재개 시 신규 ID 부재에서도 Drive file ID 기준으로 unseen signal을 계산하는지 검증한다.
 - `SelfRunAndroidTestRunner`: 2.x TEST canonical instrumentation 경로에 위 회귀 테스트를 강제로 포함한다.

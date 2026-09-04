@@ -41,7 +41,7 @@ public final class SelfRunHealthEvaluatorTest {
     }
 
     @Test public void driveSyncIsNormalWaiting() {
-        SelfRunHealthSnapshot h = evaluate(base(SelfRunStore.PHASE_POST_DOM_DRIVE_SYNC));
+        SelfRunHealthSnapshot h = evaluate(base(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC));
         assertEquals(SelfRunHealthSnapshot.WAITING, h.level);
         assertEquals("WAITING_DRIVE", h.category);
     }

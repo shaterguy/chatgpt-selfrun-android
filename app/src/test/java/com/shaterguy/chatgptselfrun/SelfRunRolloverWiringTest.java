@@ -14,7 +14,7 @@ public final class SelfRunRolloverWiringTest {
         assertTrue(launch.contains("rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH)"));
         assertTrue(launch.contains("rolloverConversation(SelfRunRolloverPolicy.RENDERER_CRASH)"));
         assertTrue(launch.contains("detail.didCrash()"));
-        String step=between(service,"private void runWebStep","private String ensureTurnObserverToken");
+        String step=between(service,"private void runWebStep","private String ensureTurnProtocolToken");
         assertTrue(step.contains("rolloverConversation(SelfRunRolloverPolicy.ROUTE_MISMATCH)"));
         assertFalse(step.contains("restoreCanonical()"));
     }

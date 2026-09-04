@@ -32,23 +32,21 @@ public final class UserNextInputLateEditPolicyTest {
         String dom = src("SelfRunContinuationDom.java");
         String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
         String probe = between(dom, "private static String probeLockedDriveTurn", "private static String preflightPreparedDriveTurn");
-        String preflight = between(dom, "private static String preflightPreparedDriveTurn", "static String observeTurnCompletion");
+        String preflight = between(dom, "private static String preflightPreparedDriveTurn", "private static String conversationGuard");
         assertTrue(click.contains("c.send.click()"));
         assertTrue(click.contains("requestComposerSubmit()"));
         assertTrue(click.indexOf("c.send.click()") < click.indexOf("requestComposerSubmit()"));
-        assertTrue(click.contains("armCompletionObserver(false)"));
         assertTrue(click.contains("dispatch=CONTINUE_CLICKED"));
         assertTrue(click.contains("verification=pending"));
+        assertFalse(click.contains("MutationObserver"));
         assertFalse(click.contains("return result('CONTINUE_CLICKED'"));
         assertFalse(click.contains("SUBMISSION_CONFIRMED"));
         assertFalse(probe.contains("c.send.click()"));
         assertFalse(probe.contains("requestComposerSubmit()"));
-        assertFalse(probe.contains("armCompletionObserver(false)"));
         assertTrue(probe.contains("continuationClickedVerification()"));
         assertTrue(probe.contains("definite no-dispatch evidence"));
         assertFalse(preflight.contains("c.send.click()"));
         assertFalse(preflight.contains("requestComposerSubmit()"));
-        assertFalse(preflight.contains("armCompletionObserver(false)"));
         assertTrue(preflight.contains("READY_TO_SUBMIT"));
     }
 

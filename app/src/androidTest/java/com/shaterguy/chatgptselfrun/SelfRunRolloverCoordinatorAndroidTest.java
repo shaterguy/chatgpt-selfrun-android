@@ -237,10 +237,10 @@ public final class SelfRunRolloverCoordinatorAndroidTest {
     @Test public void postDispatchNoStartPolicyDoesNotCountUnvalidatedOrStartedGeneration() {
         long start = 1_000L;
         long deadline = start + SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS;
-        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, false, 0L, deadline + 1L));
-        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, true, start, deadline + 1L));
-        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER, SelfRunRolloverPolicy.postDispatchNoStartAction(start, false, start, deadline, false));
-        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT, SelfRunRolloverPolicy.postDispatchNoStartAction(start, false, start, deadline, true));
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, 0L, deadline + 1L, false));
+        assertFalse(SelfRunRolloverPolicy.postDispatchNoStartTimedOut(start, start, deadline + 1L, true));
+        assertEquals(SelfRunRolloverPolicy.NO_START_ROLLOVER, SelfRunRolloverPolicy.postDispatchNoStartAction(start, start, deadline, false, false));
+        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT, SelfRunRolloverPolicy.postDispatchNoStartAction(start, start, deadline, true, false));
     }
 
     private SelfRunStore predecessor() {
