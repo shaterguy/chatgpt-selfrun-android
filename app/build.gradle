@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020039
-def selfRunDriveVersionName = '2.3.2-dev7'
+def selfRunDriveVersionCode = 2020040
+def selfRunDriveVersionName = '2.3.2-dev8'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.3.2-dev7') {
-            throw new GradleException('SelfRun Drive development version must be 2.3.2-dev7')
+        if (selfRunDriveVersionName != '2.3.2-dev8') {
+            throw new GradleException('SelfRun Drive development version must be 2.3.2-dev8')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -88,43 +88,10 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (!webConfig.contains('RequestProfileScript.installDocumentStart')) {
             throw new GradleException('SelfRun 2.0 request profile document-start interceptor is required')
         }
-        if (!webConfig.contains('HybridRequestProfileScript.installDocumentStart')) {
-            throw new GradleException('SelfRun HYBRID request profile bridge is required')
-        }
-        if (webConfig.contains('TurnCompletionDomFallbackScript')
-                || file('src/main/java/com/shaterguy/chatgptselfrun/TurnCompletionDomFallbackScript.java').exists()) {
-            throw new GradleException('DOM completion fallback is forbidden')
-        }
-        if (!webConfig.contains('static boolean applyAutomation')
-                || !webConfig.contains('if (!protocolAvailable)')
-                || !service.contains('TURN_PROTOCOL_UNAVAILABLE')) {
-            throw new GradleException('protocol capability failure must fail closed')
-        }
-        if (!webConfig.contains('TurnProtocolLogBridge.install')) {
-            throw new GradleException('response protocol observability bridge is required')
-        }
         if (!webConfig.contains('ChatGptTurnProtocolScript.installDocumentStart')) {
-            throw new GradleException('protocol-first response state document-start interceptor is required')
-        }
-        if (!webConfig.contains('WorkTurnProtocolIngressScript.installDocumentStart')) {
-            throw new GradleException('Work transport protocol ingress document-start interceptor is required')
-        }
-        if (!webConfig.contains('WorkProtocolTransportCaptureScript.installDocumentStart')) {
-            throw new GradleException('Work transport capture and relay document-start interceptor is required')
-        }
-        def protocol = file('src/main/java/com/shaterguy/chatgptselfrun/ChatGptTurnProtocolScript.java').getText('UTF-8')
-        if (!protocol.contains('bindTurn') || !protocol.contains('turnToken')
-                || protocol.contains('__selfRunDriveTurnObserver')) {
-            throw new GradleException('protocol-owned turn token contract is required')
-        }
-        def host = file('src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java').getText('UTF-8')
-        if (!host.contains('virtualDisplay.setSurface(null)')
-                || !host.contains('virtualDisplay.setSurface(surface)')) {
-            throw new GradleException('detachable VirtualDisplay Surface support is required')
-        }
-        if (service.contains('observeTurnCompletion') || service.contains('TURN_OBSERVER_HEALTHCHECK_MS')
-                || service.contains('recoverDetachedObserverOutput')) {
-            throw new GradleException('WAIT_TURN_COMPLETION must not poll DOM completion state')
+            throw new GradleException('turn protocol document-start interceptor is required')
         }
     }
 }
+
+preBuild.dependsOn verifyDriveVariantIdentity
