@@ -16,6 +16,7 @@ public final class PostDriveConfirmationDelayPolicyTest {
         assertTrue(service.contains("POST_DRIVE_CONFIRMATION_DELAY_MS = 5_000L"));
         String outcome = section(service, "private void postDriveOutcome()", "private static java.util.List<DriveSignalParser.Event> normalDriveEvents");
         assertTrue(outcome.contains("handler.postDelayed"));
+        assertFalse(outcome.contains("handler.post(()->"));
         assertTrue(outcome.contains("POST_DRIVE_CONFIRMATION_DELAY_MS"));
         assertTrue(outcome.contains("SelfRunStore.PHASE_APPLY_PREFS"));
         assertTrue(outcome.contains("SelfRunStore.PHASE_SEND_CONTINUE"));
