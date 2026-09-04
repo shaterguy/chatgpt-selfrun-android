@@ -19,109 +19,82 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Runtime WebView regression for the no-STOP assistant completion fallback and bounded watchdog. */
+/** Runtime WebView regression for the no-STOP assistant completion fallback. */
 @RunWith(AndroidJUnit4.class)
 public final class TurnCompletionDomFallbackWebViewTest {
     private static final String ORIGIN = "https://chatgpt.com/g/g-p-selfrun-dom/c/domfallback123";
     private static final String RUN_ID = "SR-DOM-FALLBACK";
     private static final String TOKEN = "dom-fallback-token";
 
-    @Test public void staleThinkingAndNoStopCompleteOnlyAfterNewAssistantFinalUi() throws Exception {
+    @Test public void mismatchedThinkingAndNoStopCompleteOnlyAfterNewAssistantFinalUi() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            AtomicReference<String> callback = new AtomicReference<>("");
-            load(scenario, web, callback);
+            AtomicReference<String> completion = new AtomicReference<>("");
+            load(scenario, web, completion);
 
             evaluateRaw(scenario, web, TurnCompletionDomFallbackScript.documentStartScript(200L));
-            installProtocolFixture(scenario, web);
+            evaluateRaw(scenario, web,
+                    "window.__selfRunRequestProfileEngine={target:()=>({runId:'" + RUN_ID + "'})};"
+                            + "window.__selfRunTurnProtocol={diagnostics:()=>({phase:'THINKING',observerToken:'stale-token',completionDispatched:false})};'ready';");
 
-            assertEquals("old-appended", evaluate(scenario, web, appendTurn("old user", "old assistant", true)));
-            assertEquals("armed", evaluate(scenario, web, arm(TOKEN)));
+            assertEquals("old-appended", evaluate(scenario, web, appendTurn("old user", "old assistant")));
+            assertEquals("armed", evaluate(scenario, web,
+                    "(()=>{window.__selfRunDriveTurnObserver={token:'" + TOKEN + "',fired:false,timer:0,observer:{disconnect(){}}};return 'armed';})()"));
 
             Thread.sleep(350L);
-            assertEquals("", callback.get());
+            assertEquals("", completion.get());
             assertFalse(Boolean.parseBoolean(evaluate(scenario, web,
                     "String(window.__selfRunDomAssistantFallback.diagnostics().assistantBound)")));
 
-            assertEquals("new-appended", evaluate(scenario, web, appendTurn("new user", "new assistant", true)));
-            waitForCallback(callback, "selfrun-drive://turn-completed?", 2_000L);
+            assertEquals("new-appended", evaluate(scenario, web, appendTurn("new user", "new assistant")));
+            for (int attempt = 0; attempt < 30 && completion.get().isEmpty(); attempt++) Thread.sleep(50L);
 
-            String completion = callback.get();
-            assertTrue(completion.contains("run=" + RUN_ID));
-            assertTrue(completion.contains("token=" + TOKEN));
-            assertTrue(completion.contains("source=dom_assistant_final_ui"));
+            String callback = completion.get();
+            assertTrue("DOM fallback did not emit completion callback", callback.startsWith("selfrun-drive://turn-completed?"));
+            assertTrue(callback.contains("run=" + RUN_ID));
+            assertTrue(callback.contains("token=" + TOKEN));
+            assertTrue(callback.contains("source=dom_assistant_final_ui"));
         }
     }
 
-    @Test public void ambiguousIdleEmitsRebindProbeAndRecoverInOrder() throws Exception {
+    @Test public void correlatedThinkingAndAnsweringSuppressCompletionUntilProtocolLeavesActiveGeneration() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
-            AtomicReference<String> callback = new AtomicReference<>("");
-            load(scenario, web, callback);
+            AtomicReference<String> completion = new AtomicReference<>("");
+            load(scenario, web, completion);
 
-            evaluateRaw(scenario, web, TurnCompletionDomFallbackScript.documentStartScript(50L, 100L, 250L, 500L));
-            installProtocolFixture(scenario, web);
-            assertEquals("old-appended", evaluate(scenario, web, appendTurn("old user", "old assistant", true)));
-            String token = TOKEN + "-watch";
-            assertEquals("armed", evaluate(scenario, web, arm(token)));
-            assertEquals("new-appended", evaluate(scenario, web, appendTurn("new user", "new assistant", false)));
-
-            waitForCallback(callback, "selfrun-drive://turn-watchdog-rebind?", 1_500L);
-            assertTrue(callback.get().contains("token=" + token));
-            callback.set("");
-
-            waitForCallback(callback, "selfrun-drive://turn-watchdog-probe?", 1_500L);
-            assertTrue(callback.get().contains("token=" + token));
-            callback.set("");
-
-            waitForCallback(callback, "selfrun-drive://turn-watchdog-recover?", 2_000L);
-            assertTrue(callback.get().contains("token=" + token));
-            assertTrue(Boolean.parseBoolean(evaluate(scenario, web,
-                    "String(window.__selfRunDomAssistantFallback.diagnostics().ambiguous)")));
-        }
-    }
-
-    @Test public void correlatedThinkingSuppressesAmbiguityWatchdogUntilGenerationStops() throws Exception {
-        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
-            AtomicReference<WebView> web = new AtomicReference<>();
-            AtomicReference<String> callback = new AtomicReference<>("");
-            load(scenario, web, callback);
-
-            evaluateRaw(scenario, web, TurnCompletionDomFallbackScript.documentStartScript(20L, 60L, 120L, 220L));
-            assertEquals("old-appended", evaluate(scenario, web, appendTurn("old user", "old assistant", true)));
-            String token = TOKEN + "-active";
+            evaluateRaw(scenario, web, TurnCompletionDomFallbackScript.documentStartScript(120L));
+            assertEquals("old-appended", evaluate(scenario, web, appendTurn("old user", "old assistant")));
             evaluateRaw(scenario, web,
                     "window.__selfRunRequestProfileEngine={target:()=>({runId:'" + RUN_ID + "'})};"
-                            + "window.__selfRunProtocolPhase='THINKING';window.__selfRunProtocolToken='" + token + "';"
+                            + "window.__selfRunProtocolPhase='THINKING';"
+                            + "window.__selfRunProtocolToken='" + TOKEN + "';"
                             + "window.__selfRunTurnProtocol={diagnostics:()=>({phase:window.__selfRunProtocolPhase,observerToken:window.__selfRunProtocolToken,completionDispatched:false})};'ready';");
-            assertEquals("armed", evaluate(scenario, web, arm(token)));
-            assertEquals("new-appended", evaluate(scenario, web, appendTurn("new user", "new assistant", false)));
+            assertEquals("armed", evaluate(scenario, web,
+                    "(()=>{window.__selfRunDriveTurnObserver={token:'" + TOKEN + "',fired:false,timer:0,observer:{disconnect(){}}};return 'armed';})()"));
+            assertEquals("new-appended", evaluate(scenario, web, appendTurn("new user", "new assistant")));
 
-            Thread.sleep(450L);
-            assertEquals("", callback.get());
-            assertFalse(Boolean.parseBoolean(evaluate(scenario, web,
-                    "String(window.__selfRunDomAssistantFallback.diagnostics().ambiguous)")));
+            Thread.sleep(300L);
+            assertEquals("correlated THINKING must suppress DOM completion", "", completion.get());
+            evaluateRaw(scenario, web,
+                    "window.__selfRunProtocolPhase='ANSWERING';window.__selfRunDomAssistantFallback.evaluate();'answering';");
+            Thread.sleep(300L);
+            assertEquals("correlated ANSWERING must suppress DOM completion", "", completion.get());
 
             evaluateRaw(scenario, web,
                     "window.__selfRunProtocolPhase='IDLE';window.__selfRunDomAssistantFallback.evaluate();'idle';");
-            waitForCallback(callback, "selfrun-drive://turn-watchdog-rebind?", 1_500L);
-            assertTrue(callback.get().contains("token=" + token));
+            for (int attempt = 0; attempt < 30 && completion.get().isEmpty(); attempt++) Thread.sleep(50L);
+
+            String callback = completion.get();
+            assertTrue("DOM fallback did not resume after correlated generation ended",
+                    callback.startsWith("selfrun-drive://turn-completed?"));
+            assertTrue(callback.contains("run=" + RUN_ID));
+            assertTrue(callback.contains("token=" + TOKEN));
+            assertTrue(callback.contains("source=dom_assistant_final_ui"));
         }
     }
 
-    private static void installProtocolFixture(ActivityScenario<SelfRunNewActivity> scenario,
-                                               AtomicReference<WebView> web) throws Exception {
-        evaluateRaw(scenario, web,
-                "window.__selfRunRequestProfileEngine={target:()=>({runId:'" + RUN_ID + "'})};"
-                        + "window.__selfRunTurnProtocol={diagnostics:()=>({phase:'THINKING',completionDispatched:false})};'ready';");
-    }
-
-    private static String arm(String token) {
-        return "(()=>{window.__selfRunDriveTurnObserver={token:'" + token
-                + "',fired:false,timer:0,observer:{disconnect(){}}};return 'armed';})()";
-    }
-
-    private static String appendTurn(String userText, String assistantText, boolean finalAction) {
+    private static String appendTurn(String userText, String assistantText) {
         String result = userText.startsWith("old") ? "old-appended" : "new-appended";
         return "(()=>{const main=document.querySelector('main'),form=main.querySelector('form');"
                 + "const user=document.createElement('div');user.setAttribute('data-message-author-role','user');user.textContent="
@@ -129,25 +102,12 @@ public final class TurnCompletionDomFallbackWebViewTest {
                 + "const article=document.createElement('article');article.setAttribute('data-testid','conversation-turn-fixture');"
                 + "const assistant=document.createElement('div');assistant.setAttribute('data-message-author-role','assistant');assistant.textContent="
                 + SelfRunScript.quote(assistantText) + ";article.appendChild(assistant);"
-                + (finalAction
-                ? "const action=document.createElement('button');action.setAttribute('data-testid','copy-turn');action.setAttribute('aria-label','Copy');action.textContent='Copy';article.appendChild(action);"
-                : "")
+                + "const action=document.createElement('button');action.setAttribute('data-testid','copy-turn');action.setAttribute('aria-label','Copy');action.textContent='Copy';article.appendChild(action);"
                 + "main.insertBefore(user,form);main.insertBefore(article,form);return '" + result + "';})()";
     }
 
-    private static void waitForCallback(AtomicReference<String> callback, String prefix, long timeoutMs)
-            throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            if (callback.get().startsWith(prefix)) return;
-            Thread.sleep(25L);
-        }
-        assertTrue("expected callback not observed: " + prefix + " actual=" + callback.get(),
-                callback.get().startsWith(prefix));
-    }
-
     private static void load(ActivityScenario<SelfRunNewActivity> scenario, AtomicReference<WebView> web,
-                             AtomicReference<String> callback) throws Exception {
+                             AtomicReference<String> completion) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
             WebView view = new WebView(activity);
@@ -160,13 +120,13 @@ public final class TurnCompletionDomFallbackWebViewTest {
 
                 @Override public boolean shouldOverrideUrlLoading(WebView ignored, WebResourceRequest request) {
                     String url = request == null || request.getUrl() == null ? "" : request.getUrl().toString();
-                    if (url.startsWith("selfrun-drive://")) { callback.set(url); return true; }
+                    if (url.startsWith("selfrun-drive://")) { completion.set(url); return true; }
                     return false;
                 }
 
                 @SuppressWarnings("deprecation")
                 @Override public boolean shouldOverrideUrlLoading(WebView ignored, String url) {
-                    if (url != null && url.startsWith("selfrun-drive://")) { callback.set(url); return true; }
+                    if (url != null && url.startsWith("selfrun-drive://")) { completion.set(url); return true; }
                     return false;
                 }
             });

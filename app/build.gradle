@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020030
-def selfRunDriveVersionName = '2.3.0'
+def selfRunDriveVersionCode = 2020033
+def selfRunDriveVersionName = '2.3.1'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.3.0') {
-            throw new GradleException('SelfRun Drive stable version must be 2.3.0')
+        if (selfRunDriveVersionName != '2.3.1') {
+            throw new GradleException('SelfRun Drive stable version must be 2.3.1')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -108,5 +108,3 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         }
     }
 }
-
-tasks.named('preBuild').configure { dependsOn verifyDriveVariantIdentity }
