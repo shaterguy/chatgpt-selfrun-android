@@ -39,7 +39,7 @@ public final class WorkProtocolRunIdentityPolicyTest {
         int prepare = hybrid.indexOf("try{prepare(text);");
         assertTrue(prepare >= 0);
         assertTrue(hybrid.indexOf("return innerFetch(input,init);", prepare) > prepare);
-        assertTrue(profile.contains("const planned=profileForBody(body)"));
+        assertTrue(profile.contains("planned=profileForBody(body)"));
         assertTrue(profile.contains("const t=state.target"));
     }
 
