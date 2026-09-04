@@ -15,7 +15,7 @@ import java.util.Set;
  * DOM state is never consulted for THINKING, ANSWERING, or COMPLETE.</p>
  */
 final class ChatGptTurnProtocolScript {
-    static final String ENGINE_VERSION = "turn-protocol-v8";
+    static final String ENGINE_VERSION = "turn-protocol-v9";
     static final String COMPLETION_SCHEME = "selfrun-drive";
     static final String COMPLETION_HOST = "turn-completed";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
@@ -59,7 +59,7 @@ final class ChatGptTurnProtocolScript {
                   if(window.__selfRunTurnProtocol?.version===ENGINE_VERSION)return;
                   const COMPLETION_SCHEME=__COMPLETION_SCHEME__;
                   const COMPLETION_HOST=__COMPLETION_HOST__;
-                  const STORE_KEY='selfrun-drive:response-protocol-state:v8';
+                  const STORE_KEY='selfrun-drive:response-protocol-state:v9';
                   const VALID_PHASES=new Set(['IDLE','THINKING','ANSWERING','COMPLETE','ERROR']);
                   const COMPLETE_SOURCES=new Set(['message_stream_complete','finished_successfully_end_turn']);
                   const blank=()=>({
@@ -67,7 +67,7 @@ final class ChatGptTurnProtocolScript {
                     canonicalConversationId:'',currentWorkTurnId:'',
                     currentFinalMessageId:'',finalMessageActive:false,
                     sawFinalChannelToken:false,sawVisibleAnswer:false,
-                    sawAssistantFinalText:false,sawStreamComplete:false,sawTerminalComplete:false,
+                    sawAssistantFinalText:false,sawStreamComplete:false,
                     completionArmed:false,completionDispatched:false,completionSource:'',
                     lastError:'',lastSource:''
                   });
@@ -165,7 +165,6 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     return bindConversation(context?.conversationId||'')&&bindWorkTurn(context?.workTurnId||'');
                   };
-                  const completionEvidence=()=>state.sawTerminalComplete&&state.sawVisibleAnswer&&!!state.currentFinalMessageId;
                   function schedulePendingDispatch(source){
                     const completionSource=safe(source);
                     if(pendingTimer||state.completionDispatched||!state.completionArmed
@@ -179,7 +178,7 @@ final class ChatGptTurnProtocolScript {
                   function dispatchCompletion(source,allowRetry=true){
                     const completionSource=safe(source),run=alignRun(),token=safe(state.turnToken);
                     if(state.phase!=='COMPLETE'||state.completionDispatched||!state.completionArmed
-                            ||!completionEvidence()||!COMPLETE_SOURCES.has(completionSource))return false;
+                            ||!COMPLETE_SOURCES.has(completionSource))return false;
                     if(!run||!token){if(allowRetry)schedulePendingDispatch(completionSource);return false;}
                     state.completionDispatched=true;state.completionSource=completionSource;save();
                     emitLog('completion_dispatch',completionSource);
@@ -188,7 +187,7 @@ final class ChatGptTurnProtocolScript {
                   }
                   const finalizeComplete=source=>{
                     const completionSource=safe(source);
-                    if(!COMPLETE_SOURCES.has(completionSource)||!completionEvidence())return false;
+                    if(!COMPLETE_SOURCES.has(completionSource))return false;
                     state.phase='COMPLETE';state.completionSource=completionSource;
                     state.lastSource=completionSource;state.lastError='';save();
                     emitLog('complete',completionSource);dispatchCompletion(completionSource,true);return true;
@@ -197,23 +196,13 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     const completionSource=safe(source);if(!COMPLETE_SOURCES.has(completionSource))return false;
                     state.sawStreamComplete=true;state.completionSource=completionSource;
-                    if(!completionEvidence()){
-                      state.lastSource=completionSource;state.lastError='completion_without_final_answer_evidence';save();
-                      emitLog('completion_ignored',completionSource);return false;
-                    }
                     return finalizeComplete(completionSource);
-                  };
-                  const completeAfterLateEvidence=()=>{
-                    if(state.sawStreamComplete&&(state.phase==='THINKING'||state.phase==='ANSWERING')
-                            &&completionEvidence()){
-                      finalizeComplete(state.completionSource||'message_stream_complete');
-                    }
                   };
                   const noteAnswering=source=>{
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return;
                     const first=state.phase==='THINKING';if(first)state.phase='ANSWERING';
                     state.lastSource=safe(source);state.lastError='';save();
-                    if(first)emitLog('answering_started',source);completeAfterLateEvidence();
+                    if(first)emitLog('answering_started',source);
                   };
                   const noteVisibleAnswer=source=>{
                     if(!state.sawVisibleAnswer)state.sawVisibleAnswer=true;
@@ -274,14 +263,11 @@ final class ChatGptTurnProtocolScript {
                     const finalMessage=directMessage||deltaMessage;if(finalMessage)markFinalMessage(finalMessage);
                     observeFinalTextDelta(value);
                     if(value.type==='message_stream_complete'){
-                      state.sawStreamComplete=true;
-                      if(value.status==='finished_successfully'&&value.end_turn===true)state.sawTerminalComplete=true;
-                      save();complete('message_stream_complete');return;
+                      complete('message_stream_complete');return;
                     }
                     if(finalMessage&&safe(finalMessage.author?.role).toLowerCase()==='assistant'
                             &&safe(finalMessage.channel).toLowerCase()==='final'
                             &&finalMessage.status==='finished_successfully'&&finalMessage.end_turn===true){
-                      state.sawTerminalComplete=true;save();
                       complete('finished_successfully_end_turn');return;
                     }
                     if(directMessage&&directMessage!==value)inspectSemantic(directMessage,source,context);
@@ -353,14 +339,13 @@ final class ChatGptTurnProtocolScript {
                       requestIdentity:state.requestIdentity,conversationId:state.canonicalConversationId,
                       workTurnId:state.currentWorkTurnId,sawFinalChannelToken:state.sawFinalChannelToken,
                       sawVisibleAnswer:state.sawVisibleAnswer,sawAssistantFinalText:state.sawAssistantFinalText,
-                      sawStreamComplete:state.sawStreamComplete,sawTerminalComplete:state.sawTerminalComplete,
-                      completionArmed:state.completionArmed,
+                      sawStreamComplete:state.sawStreamComplete,completionArmed:state.completionArmed,
                       completionDispatched:state.completionDispatched,completionSource:state.completionSource,
                       lastError:state.lastError})
                   };
                   alignRun();
                   if(state.phase==='COMPLETE'&&state.completionArmed&&!state.completionDispatched
-                          &&completionEvidence()&&COMPLETE_SOURCES.has(state.completionSource)){
+                          &&COMPLETE_SOURCES.has(state.completionSource)){
                     schedulePendingDispatch(state.completionSource);
                   }
                 })();
