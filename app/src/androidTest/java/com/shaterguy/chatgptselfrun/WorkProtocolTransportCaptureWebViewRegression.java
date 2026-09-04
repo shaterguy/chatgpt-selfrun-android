@@ -89,10 +89,24 @@ final class WorkProtocolTransportCaptureWebViewRegression {
             JSONObject current=xhrPost(scenario,web);
             assertEquals("fixture-token-2",current.getString("turnToken"));
             assertEquals("THINKING",current.getString("phase"));
-            assertFalse(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","retired-turn")));
-            assertFalse(relayAccepted(scenario,web,new JSONObject().put("type","message_stream_complete")
+            String currentIdentity=current.getString("requestIdentity");
+            String currentWorkTurn=current.getString("currentWorkTurnId");
+            assertTrue(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","retired-turn")));
+            JSONObject afterStaleFinal=snapshot(scenario,web);
+            assertEquals("fixture-token-2",afterStaleFinal.getString("turnToken"));
+            assertEquals(currentIdentity,afterStaleFinal.getString("requestIdentity"));
+            assertEquals(currentWorkTurn,afterStaleFinal.getString("currentWorkTurnId"));
+            assertEquals("THINKING",afterStaleFinal.getString("phase"));
+            assertFalse(afterStaleFinal.getBoolean("sawFinalChannelToken"));
+            assertTrue(relayAccepted(scenario,web,new JSONObject().put("type","message_stream_complete")
                     .put("conversation_id",CONVERSATION_ID).put("turn_id","retired-turn")));
-            assertEquals("THINKING",snapshot(scenario,web).getString("phase"));
+            JSONObject afterStaleComplete=snapshot(scenario,web);
+            assertEquals("fixture-token-2",afterStaleComplete.getString("turnToken"));
+            assertEquals(currentIdentity,afterStaleComplete.getString("requestIdentity"));
+            assertEquals(currentWorkTurn,afterStaleComplete.getString("currentWorkTurnId"));
+            assertEquals("THINKING",afterStaleComplete.getString("phase"));
+            assertFalse(afterStaleComplete.getBoolean("sawStreamComplete"));
+            assertEquals("",afterStaleComplete.getString("completionSource"));
             assertTrue(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","current-turn")));
             assertEquals("ANSWERING",snapshot(scenario,web).getString("phase"));
             assertTrue(relayAccepted(scenario,web,new JSONObject().put("type","message_stream_complete")
