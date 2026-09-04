@@ -36,7 +36,10 @@ final class WorkPreferenceDom {
                 ? RequestProfileScript.setWorkModel(wanted)
                 : RequestProfileScript.setWorkReasoning(wanted);
         String begin = "model".equals(kind)
-                ? RequestProfileScript.beginTarget("work", resetKey)
+                ? "const previousTarget=profileEngine.target();"
+                    + "const previousRunId=String(previousTarget?.runId||'');"
+                    + "const workRunId=previousRunId&&!previousRunId.startsWith('project:')&&!previousRunId.startsWith('conversation:')?previousRunId:" + q(resetKey) + ";"
+                    + "profileEngine.begin('work',workRunId);"
                 : "";
         String failure = "model".equals(kind) ? "WORK_MODEL_READBACK_MISMATCH" : "WORK_REASONING_READBACK_MISMATCH";
         String engineAvailable = RequestProfileScript.engineAvailableExpression();
@@ -47,7 +50,7 @@ final class WorkPreferenceDom {
                 + "if(!enginePresent)return result('" + failure + "','request profile engine absent',profileAvailability);"
                 + "if(!engineVersionMatch)return result('" + failure + "','request profile engine version mismatch',profileAvailability);"
                 + "try{" + begin + action + "const t=profileEngine.target();return result('READY','absolute Work target profile staged',{strategy:'request-profile',kind:"
-                + q(kind) + ",requested:" + q(wanted) + ",targetMode:t?.mode||'',targetModel:t?.model||'',targetReasoning:t?.reasoning||'',targetReady:!!t?.ready,uiClicks:0});}catch(_){return result('"
+                + q(kind) + ",requested:" + q(wanted) + ",targetMode:t?.mode||'',targetModel:t?.model||'',targetReasoning:t?.reasoning||'',targetRunId:t?.runId||'',targetReady:!!t?.ready,uiClicks:0});}catch(_){return result('"
                 + failure + "','request profile target rejected',{strategy:'request-profile',profileStage:'target',enginePresent:true,engineVersionMatch:true,operationOk:false});}})()";
     }
 

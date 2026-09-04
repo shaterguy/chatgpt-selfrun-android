@@ -12,23 +12,24 @@ import static org.junit.Assert.assertTrue;
 
 /** Ensures TEST co-install always uses the current stable SelfRun Drive baseline. */
 public final class DriveTestFormalBaselinePolicyTest {
-    @Test public void dev231UsesCurrentStable230FormalFixtureAndDev12TestPredecessor() throws Exception {
+    @Test public void dev232UsesCurrentStable231FormalFixtureAndRc3TestPredecessor() throws Exception {
         Path path = Paths.get(".github/workflows/build-drive-test.yml");
         if (!Files.exists(path)) path = Paths.get("../.github/workflows/build-drive-test.yml");
         String workflow = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-        assertTrue(workflow.contains("gh release download drive-v2.3.0"));
-        assertTrue(workflow.contains("chatgpt-selfrun-drive-v2.3.0.apk"));
-        assertTrue(workflow.contains("versionCode='2020030'"));
-        assertTrue(workflow.contains("versionName='2.3.0'"));
-        assertTrue(workflow.contains("FORMAL_EXPECTED_VERSION=\"2.3.0\""));
-        assertTrue(workflow.contains("PREV_BRANCH='selfrun-drive/v2.3.0-dev12'"));
-        assertTrue(workflow.contains("immutable 2.3.0-dev12 TEST artifact unavailable"));
-        assertFalse(workflow.contains("drive-v2.2.2"));
-        assertFalse(workflow.contains("versionCode='2020019'"));
+        assertTrue(workflow.contains("gh release download drive-v2.3.1"));
+        assertTrue(workflow.contains("chatgpt-selfrun-drive-v2.3.1.apk"));
+        assertTrue(workflow.contains("versionCode='2020033'"));
+        assertTrue(workflow.contains("versionName='2.3.1'"));
+        assertTrue(workflow.contains("FORMAL_EXPECTED_VERSION=\"2.3.1\""));
+        assertTrue(workflow.contains("if [[ \"$GITHUB_REF_NAME\" == 'selfrun-drive/v2.3.2-dev1' ]]"));
+        assertTrue(workflow.contains("PREV_BRANCH='selfrun-drive/v2.3.1-rc3'"));
+        assertTrue(workflow.contains("immutable 2.3.1-rc3 TEST artifact unavailable"));
+        assertFalse(workflow.contains("gh release download drive-v2.3.0"));
+        assertFalse(workflow.contains("versionCode='2020030'"));
         Path script = Paths.get("tools/verify_drive_test_coinstall_emulator.sh");
         if (!Files.exists(script)) script = Paths.get("../tools/verify_drive_test_coinstall_emulator.sh");
         String tool = new String(Files.readAllBytes(script), StandardCharsets.UTF_8);
-        assertTrue(tool.contains("FORMAL_EXPECTED_VERSION=\"${FORMAL_EXPECTED_VERSION:-2.3.0}\""));
-        assertFalse(tool.contains("FORMAL_EXPECTED_VERSION=\"${FORMAL_EXPECTED_VERSION:-2.2.2}\""));
+        assertTrue(tool.contains("FORMAL_EXPECTED_VERSION=\"${FORMAL_EXPECTED_VERSION:-2.3.1}\""));
+        assertFalse(tool.contains("FORMAL_EXPECTED_VERSION=\"${FORMAL_EXPECTED_VERSION:-2.3.0}\""));
     }
 }

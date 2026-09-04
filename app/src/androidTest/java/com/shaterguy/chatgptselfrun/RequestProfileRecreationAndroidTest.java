@@ -54,6 +54,43 @@ public final class RequestProfileRecreationAndroidTest {
         }
     }
 
+    @Test public void workRetargetPreservesSelfRunIdentityAcrossRecreation() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = loadFixture(scenario);
+            evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
+            read(scenario, web, "(()=>{" + RequestProfileScript.beginTarget("work", RUN_ID) + "return 'seeded';})()");
+
+            JSONObject modelResult = new JSONObject(read(scenario, web,
+                    WorkPreferenceDom.modelForProject(BASE_URL, "luna")));
+            assertEquals("READY", modelResult.getString("status"));
+            assertEquals(RUN_ID, modelResult.getJSONObject("diagnostics").getString("targetRunId"));
+
+            JSONObject reasoningResult = new JSONObject(read(scenario, web,
+                    WorkPreferenceDom.reasoningForProject(BASE_URL, "max")));
+            assertEquals("READY", reasoningResult.getString("status"));
+            assertEquals(RUN_ID, reasoningResult.getJSONObject("diagnostics").getString("targetRunId"));
+
+            JSONObject target = new JSONObject(read(scenario, web,
+                    "JSON.stringify(window.__selfRunRequestProfileEngine.target())"));
+            assertEquals("work", target.getString("mode"));
+            assertEquals("luna", target.getString("model"));
+            assertEquals("max", target.getString("reasoning"));
+            assertEquals(RUN_ID, target.getString("runId"));
+            assertTrue(target.getBoolean("ready"));
+
+            recreateFixture(scenario, web);
+            evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
+            JSONObject restored = new JSONObject(read(scenario, web,
+                    "JSON.stringify(window.__selfRunRequestProfileEngine.target())"));
+            assertEquals("work", restored.getString("mode"));
+            assertEquals("luna", restored.getString("model"));
+            assertEquals("max", restored.getString("reasoning"));
+            assertEquals(RUN_ID, restored.getString("runId"));
+            assertTrue(restored.getBoolean("ready"));
+            read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v3');return 'cleared';})()");
+        }
+    }
+
     private static AtomicReference<WebView> loadFixture(ActivityScenario<SelfRunNewActivity> scenario) throws Exception {
         AtomicReference<WebView> web = new AtomicReference<>();
         CountDownLatch loaded = new CountDownLatch(1);
