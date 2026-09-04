@@ -203,11 +203,17 @@ final class ChatGptTurnProtocolScript {
                     }
                     return finalizeComplete(completionSource);
                   };
+                  const completeAfterLateEvidence=()=>{
+                    if(state.sawStreamComplete&&(state.phase==='THINKING'||state.phase==='ANSWERING')
+                            &&completionEvidence()){
+                      finalizeComplete(state.completionSource||'message_stream_complete');
+                    }
+                  };
                   const noteAnswering=source=>{
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return;
                     const first=state.phase==='THINKING';if(first)state.phase='ANSWERING';
                     state.lastSource=safe(source);state.lastError='';save();
-                    if(first)emitLog('answering_started',source);
+                    if(first)emitLog('answering_started',source);completeAfterLateEvidence();
                   };
                   const noteVisibleAnswer=source=>{
                     if(!state.sawVisibleAnswer)state.sawVisibleAnswer=true;
@@ -222,7 +228,6 @@ final class ChatGptTurnProtocolScript {
                     const role=safe(message.author?.role).toLowerCase(),channel=safe(message.channel).toLowerCase();
                     if(role!=='assistant'||channel!=='final')return false;
                     state.finalMessageActive=true;if(message.id)state.currentFinalMessageId=safe(message.id);
-                    if(message.status==='finished_successfully'&&message.end_turn===true)state.sawTerminalComplete=true;
                     save();noteVisibleAnswer('visible_answer');
                     const parts=Array.isArray(message.content?.parts)?message.content.parts:[];
                     if(parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');return true;
@@ -276,6 +281,7 @@ final class ChatGptTurnProtocolScript {
                     if(finalMessage&&safe(finalMessage.author?.role).toLowerCase()==='assistant'
                             &&safe(finalMessage.channel).toLowerCase()==='final'
                             &&finalMessage.status==='finished_successfully'&&finalMessage.end_turn===true){
+                      state.sawTerminalComplete=true;save();
                       complete('finished_successfully_end_turn');return;
                     }
                     if(directMessage&&directMessage!==value)inspectSemantic(directMessage,source,context);
