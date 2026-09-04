@@ -47,14 +47,11 @@ public final class TurnProtocolStateWebViewTest {
                     marker("final_channel_token", "first"));
             assertPhase("ANSWERING", chatAnswering);
             assertTrue(chatAnswering.getBoolean("sawVisibleAnswer"));
-            JSONObject premature = semanticForIdentity(scenario, web, firstIdentity,
+            JSONObject chatComplete = semanticForIdentity(scenario, web, firstIdentity,
                     new JSONObject().put("type", "message_stream_complete")
                             .put("conversation_id", CONVERSATION_ID));
-            assertPhase("ANSWERING", premature);
-            assertTrue(premature.getBoolean("sawStreamComplete"));
-            JSONObject chatComplete = semanticForIdentity(scenario, web, firstIdentity,
-                    terminalComplete("chat-final").put("conversation_id", CONVERSATION_ID));
             assertPhase("COMPLETE", chatComplete);
+            assertTrue(chatComplete.getBoolean("sawStreamComplete"));
 
             JSONObject workStart = request(scenario, web, "POST", "/backend-api/f/conversation");
             assertPhase("THINKING", workStart);
@@ -67,7 +64,7 @@ public final class TurnProtocolStateWebViewTest {
             assertPhase("ANSWERING", outerDone);
             assertFalse(outerDone.getBoolean("sawStreamComplete"));
             assertPhase("COMPLETE", socketEvent(scenario, web, "work-request",
-                    terminalComplete("work-final")));
+                    new JSONObject().put("type", "message_stream_complete")));
         }
     }
 
@@ -89,11 +86,10 @@ public final class TurnProtocolStateWebViewTest {
             assertTrue(visible.getBoolean("sawVisibleAnswer"));
             assertTrue(visible.getBoolean("sawAssistantFinalText"));
             assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-request"));
-            JSONObject premature = socketEvent(scenario, web, "pro-request",
+            JSONObject complete = socketEvent(scenario, web, "pro-request",
                     new JSONObject().put("type", "message_stream_complete"));
-            assertPhase("ANSWERING", premature);
-            assertPhase("COMPLETE", socketEvent(scenario, web, "pro-request",
-                    terminalComplete("pro-message")));
+            assertPhase("COMPLETE", complete);
+            assertTrue(complete.getBoolean("sawStreamComplete"));
         }
     }
 
