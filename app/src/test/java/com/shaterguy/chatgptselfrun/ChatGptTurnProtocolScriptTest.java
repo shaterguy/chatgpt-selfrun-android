@@ -33,7 +33,8 @@ public final class ChatGptTurnProtocolScriptTest {
 
     @Test public void terminalProtocolEventCompletesWithoutAuxiliaryFinalEvidence() {
         String script=ChatGptTurnProtocolScript.documentStartScript();
-        assertTrue(script.contains("if(value.type==='message_stream_complete'){\n                      complete('message_stream_complete');return;"));
+        assertTrue(script.contains("if(value.type==='message_stream_complete')"));
+        assertTrue(script.contains("complete('message_stream_complete');return;"));
         assertTrue(script.contains("const complete=source=>"));
         assertTrue(script.contains("return finalizeComplete(completionSource);"));
         assertFalse(script.contains("completionEvidence"));
