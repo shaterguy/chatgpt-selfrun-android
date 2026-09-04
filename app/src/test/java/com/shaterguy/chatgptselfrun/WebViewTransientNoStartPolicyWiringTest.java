@@ -42,4 +42,10 @@ public final class WebViewTransientNoStartPolicyWiringTest {
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) count++;
+        return count;
+    }
 }
