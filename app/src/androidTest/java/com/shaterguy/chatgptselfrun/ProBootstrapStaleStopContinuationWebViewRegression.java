@@ -27,7 +27,8 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
 
     static void run() throws Exception {
         proBootstrapUsesRealSendWhenStaleStopCoexists();
-        proBootstrapUsesFormSubmitWhenStaleStopOutlivesSend();
+        proBootstrapBlocksFormSubmitWhileStaleStopOutlivesSend();
+        proBootstrapUsesFormSubmitWithoutStop();
         nonProBootstrapKeepsStopPriority();
         proBootstrapStillBlocksWithoutARealSubmitPath();
         SelfRun2xProtocolRegressionMatrix.run();
@@ -37,7 +38,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
         String runId = "SR-PRO-STALE-SEND";
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             persistRun(scenario, runId, "pro");
-            AtomicReference<WebView> web = loadFixture(scenario, true, true);
+            AtomicReference<WebView> web = loadFixture(scenario, true, true, true);
             JSONObject prepared = prepareUntilTerminal(scenario, web, runId);
             assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
 
@@ -51,11 +52,22 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
         }
     }
 
-    private static void proBootstrapUsesFormSubmitWhenStaleStopOutlivesSend() throws Exception {
+    private static void proBootstrapBlocksFormSubmitWhileStaleStopOutlivesSend() throws Exception {
         String runId = "SR-PRO-STALE-FORM";
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             persistRun(scenario, runId, "pro");
-            AtomicReference<WebView> web = loadFixture(scenario, false, true);
+            AtomicReference<WebView> web = loadFixture(scenario, false, true, true);
+            JSONObject blocked = prepareUntilTerminal(scenario, web, runId);
+            assertEquals(SelfRunContinuationDom.STOP, blocked.getString("status"));
+            assertEquals("0", read(scenario, web, "String(window.submitCount)"));
+        }
+    }
+
+    private static void proBootstrapUsesFormSubmitWithoutStop() throws Exception {
+        String runId = "SR-PRO-FORM-NO-STOP";
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            persistRun(scenario, runId, "pro");
+            AtomicReference<WebView> web = loadFixture(scenario, false, true, false);
             JSONObject prepared = prepareUntilTerminal(scenario, web, runId);
             assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
 
@@ -73,7 +85,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
         String runId = "SR-MEDIUM-STALE-SEND";
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             persistRun(scenario, runId, ChatReasoningPreferenceStore.MEDIUM);
-            AtomicReference<WebView> web = loadFixture(scenario, true, true);
+            AtomicReference<WebView> web = loadFixture(scenario, true, true, true);
             JSONObject blocked = prepareUntilTerminal(scenario, web, runId);
             assertEquals(SelfRunContinuationDom.STOP, blocked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.submitCount)"));
@@ -84,7 +96,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
         String runId = "SR-PRO-STALE-NO-PATH";
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             persistRun(scenario, runId, "pro");
-            AtomicReference<WebView> web = loadFixture(scenario, false, false);
+            AtomicReference<WebView> web = loadFixture(scenario, false, false, true);
             JSONObject blocked = prepareUntilTerminal(scenario, web, runId);
             assertEquals(SelfRunContinuationDom.STOP, blocked.getString("status"));
             assertEquals("0", read(scenario, web, "String(window.submitCount)"));
@@ -127,7 +139,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
 
     private static AtomicReference<WebView> loadFixture(
             ActivityScenario<SelfRunNewActivity> scenario, boolean includeSend,
-            boolean includeForm) throws Exception {
+            boolean includeForm, boolean includeStop) throws Exception {
         AtomicReference<WebView> web = new AtomicReference<>();
         CountDownLatch loaded = new CountDownLatch(1);
         scenario.onActivity(activity -> {
@@ -141,7 +153,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
             });
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(CONVERSATION_URL, fixture(includeSend, includeForm),
+            view.loadDataWithBaseURL(CONVERSATION_URL, fixture(includeSend, includeForm, includeStop),
                     "text/html", "UTF-8", null);
         });
         assertTrue("Stale STOP continuation fixture did not load",
@@ -149,7 +161,10 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
         return web;
     }
 
-    private static String fixture(boolean includeSend, boolean includeForm) {
+    private static String fixture(boolean includeSend, boolean includeForm, boolean includeStop) {
+        String stop = includeStop
+                ? "<button type=\"button\" data-testid=\"stop-button\" aria-label=\"Stop generating\">Stop generating</button>"
+                : "";
         String send = includeSend
                 ? "<button type=\"submit\" data-testid=\"send-button\" aria-label=\"Send\">Send</button>"
                 : "";
@@ -165,8 +180,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
                 + "button{display:block;margin:8px}</style></head><body><main>"
                 + openContainer
                 + "<div id=\"prompt-textarea\" contenteditable=\"true\" data-lexical-editor=\"true\"><p><br></p></div>"
-                + "<button type=\"button\" data-testid=\"stop-button\" aria-label=\"Stop generating\">Stop generating</button>"
-                + send + closeContainer
+                + stop + send + closeContainer
                 + "</main><script>window.submitCount=0;" + submitListener
                 + "</script></body></html>";
     }
