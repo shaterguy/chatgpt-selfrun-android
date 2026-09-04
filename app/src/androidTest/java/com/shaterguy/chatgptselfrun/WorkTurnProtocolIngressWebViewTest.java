@@ -66,7 +66,9 @@ public final class WorkTurnProtocolIngressWebViewTest {
 
             JSONObject ingress = diagnostics(scenario, web);
             assertTrue(ingress.getInt("webSocketMessages") >= 6);
-            assertTrue(ingress.getInt("forwardedFrames") >= 6);
+            assertTrue(ingress.getInt("forwardedFrames") >= 5);
+            assertTrue("protocol-primary completion must suppress redundant Work decode",
+                    ingress.getInt("forwardedFrames") < ingress.getInt("webSocketMessages"));
             assertTrue(ingress.getInt("maxSynchronousBatch") <= 4);
         }
     }
