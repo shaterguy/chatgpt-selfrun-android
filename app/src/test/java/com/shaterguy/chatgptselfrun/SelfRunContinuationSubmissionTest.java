@@ -20,9 +20,10 @@ public final class SelfRunContinuationSubmissionTest {
         assertFalse(dom.contains("assistant_final"));
     }
     @Test public void stopOnlyNeverEnablesComposerMutationOrSubmit() throws Exception {
-        String dom=source("SelfRunContinuationDom.java");
+        String dom=SelfRunContinuationDom.prepareDriveTurn(
+                "https://chatgpt.com/c/conversation-a","next","SR-NORMAL:continue:1");
         assertTrue(dom.contains("const submissionControl=()=>"));
-        assertTrue(dom.contains("preferred.state==='SEND_ENABLED'?preferred:strict"));
+        assertTrue(dom.contains("return false&&preferred.state==='SEND_ENABLED'?preferred:strict"));
         assertTrue(dom.contains("const c0=submissionControl();if(c0.state!=='SEND_ENABLED'"));
         assertFalse(dom.contains("c0.state!=='STOP'"));
     }

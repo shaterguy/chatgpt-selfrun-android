@@ -165,7 +165,7 @@ final class ChatGptTurnProtocolScript {
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     return bindConversation(context?.conversationId||'')&&bindWorkTurn(context?.workTurnId||'');
                   };
-                  const completionEvidence=()=>state.sawTerminalComplete&&state.sawAssistantFinalText&&!!state.currentFinalMessageId;
+                  const completionEvidence=()=>state.sawTerminalComplete&&state.sawVisibleAnswer&&!!state.currentFinalMessageId;
                   function schedulePendingDispatch(source){
                     const completionSource=safe(source);
                     if(pendingTimer||state.completionDispatched||!state.completionArmed
@@ -224,7 +224,6 @@ final class ChatGptTurnProtocolScript {
                     state.finalMessageActive=true;if(message.id)state.currentFinalMessageId=safe(message.id);
                     if(message.status==='finished_successfully'&&message.end_turn===true)state.sawTerminalComplete=true;
                     save();noteVisibleAnswer('visible_answer');
-                    if(message.has_text===true)noteAssistantFinalText('assistant_final_text');
                     const parts=Array.isArray(message.content?.parts)?message.content.parts:[];
                     if(parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');return true;
                   };

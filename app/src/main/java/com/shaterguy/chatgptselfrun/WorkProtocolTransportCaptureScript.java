@@ -86,7 +86,7 @@ final class WorkProtocolTransportCaptureScript {
                     if(!message||typeof message!=='object')return null;const out={};
                     if(message.id)out.id=safe(message.id);if(message.author?.role)out.author={role:token(message.author.role,32)};
                     if(message.channel)out.channel=token(message.channel,32);if(message.status)out.status=token(message.status,48);
-                    if(message.end_turn===true)out.end_turn=true;const parts=Array.isArray(message.content?.parts)?message.content.parts:[];if(parts.some(value=>typeof value==='string'&&value.trim()))out.has_text=true;return Object.keys(out).length?out:null;
+                    if(message.end_turn===true)out.end_turn=true;return Object.keys(out).length?out:null;
                   };
                   const minimalSemantic=node=>{
                     if(!node||typeof node!=='object'||Array.isArray(node))return null;const out={};

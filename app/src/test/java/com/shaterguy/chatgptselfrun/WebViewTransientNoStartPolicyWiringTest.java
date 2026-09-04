@@ -19,7 +19,10 @@ public final class WebViewTransientNoStartPolicyWiringTest {
         long expired = started + SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS + 1L;
 
         assertTrue(SelfRunRolloverPolicy.retryHttpStatus(429));
-        assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status)"));
+        assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status,r)"));
+        assertTrue(service.contains("\"canonical_conversation\":\"other_service_resource\""));
+        assertTrue(service.contains("key.equals(postDispatchTransientLogKey)"));
+        assertFalse(service.contains("rawUrl"));
         assertEquals(SelfRunRolloverPolicy.NO_START_WAIT,
                 SelfRunRolloverPolicy.postDispatchNoStartAction(
                         started, started, expired, false, true));

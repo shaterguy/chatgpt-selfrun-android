@@ -38,7 +38,7 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("else retiredWorkTurnIds.length=0"));
         assertTrue(script.contains("if(retiredWorkTurnIds.length>8)retiredWorkTurnIds.shift()"));
         assertFalse(script.contains("completeAfterLateEvidence"));
-        assertTrue(script.contains("state.sawTerminalComplete&&state.sawAssistantFinalText&&!!state.currentFinalMessageId"));
+        assertTrue(script.contains("state.sawTerminalComplete&&state.sawVisibleAnswer&&!!state.currentFinalMessageId"));
         assertTrue(script.contains("if(!identity&&(!safe(context?.conversationId||'')||!safe(context?.workTurnId||'')))return false"));
         assertTrue(script.contains("state.lastError='active_turn_overlap'"));
     }
