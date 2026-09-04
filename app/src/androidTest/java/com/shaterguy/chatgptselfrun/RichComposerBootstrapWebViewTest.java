@@ -60,7 +60,7 @@ public final class RichComposerBootstrapWebViewTest {
 
             JSONObject dispatched = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedBootstrap(
-                            PROJECT_URL, PROMPT, "rich-bootstrap", "SR-RICH", "rich-token", 5000L));
+                            PROJECT_URL, PROMPT, "rich-bootstrap"));
             assertEquals(SelfRunContinuationDom.SUBMISSION_PENDING, dispatched.getString("status"));
             assertTrue(dispatched.getString("detail").contains("dispatch=BOOTSTRAP_CLICKED"));
             assertEquals("1", read(scenario, web, "String(window.submitCount)"));
@@ -173,7 +173,7 @@ public final class RichComposerBootstrapWebViewTest {
             assertEquals("READY_TO_SUBMIT", state.getString("status"));
             JSONObject dispatched = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedBootstrap(
-                            PROJECT_URL, PROMPT, "rejected-bootstrap", "SR-REJECT", "reject-token", 5000L));
+                            PROJECT_URL, PROMPT, "rejected-bootstrap"));
             assertEquals(SelfRunContinuationDom.SUBMISSION_PENDING, dispatched.getString("status"));
 
             for (int attempt = 0; attempt < 40; attempt++) {

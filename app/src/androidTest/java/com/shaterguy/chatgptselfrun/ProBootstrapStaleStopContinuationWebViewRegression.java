@@ -43,8 +43,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
 
             JSONObject dispatched = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(
-                            CONVERSATION_URL, prompt(runId), marker(runId), runId,
-                            "pro-stale-stop-button-token", 5_000L));
+                            CONVERSATION_URL, prompt(runId), marker(runId), runId));
             assertEquals(SelfRunContinuationDom.SUBMISSION_PENDING,
                     dispatched.getString("status"));
             assertTrue(dispatched.getString("detail").contains("submit=button"));
@@ -62,8 +61,7 @@ final class ProBootstrapStaleStopContinuationWebViewRegression {
 
             JSONObject dispatched = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(
-                            CONVERSATION_URL, prompt(runId), marker(runId), runId,
-                            "pro-stale-stop-form-token", 5_000L));
+                            CONVERSATION_URL, prompt(runId), marker(runId), runId));
             assertEquals(SelfRunContinuationDom.SUBMISSION_PENDING,
                     dispatched.getString("status"));
             assertTrue(dispatched.getString("detail").contains("submit=form_request_submit"));

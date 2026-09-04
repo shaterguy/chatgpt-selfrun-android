@@ -81,7 +81,7 @@ public final class CompletedRunCacheCleanupNextRunWebViewTest {
 
             JSONObject dispatched = evaluate(nextRunWebView,
                     SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, PROMPT,
-                            "cleanup-next-run-marker", "SR-CLEANUP-NEXT-RUN", "cleanup-next-run-token", 5000L));
+                            "cleanup-next-run-marker"));
             assertEquals(SelfRunContinuationDom.SUBMISSION_PENDING, dispatched.getString("status"));
 
             JSONObject confirmed = dispatched;

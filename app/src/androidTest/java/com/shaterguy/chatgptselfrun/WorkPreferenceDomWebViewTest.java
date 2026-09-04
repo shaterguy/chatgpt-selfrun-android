@@ -26,9 +26,7 @@ public final class WorkPreferenceDomWebViewTest {
     private static final String PROJECT_URL = "https://chatgpt.com/g/g-p-test";
     private static final String CONVERSATION_URL = "https://chatgpt.com/c/conversation123";
     private static final String CONTINUE_PROMPT = "SELF_RUN_CONTINUE_PROBE";
-    private static final String OBSERVER_RUN_ID = "SR-WEBVIEW-TEST";
-    private static final String OBSERVER_TOKEN = "observer-token";
-    private static final long OBSERVER_STABILITY_MS = 5_000L;
+    private static final String RUN_ID = "SR-WEBVIEW-TEST";
 
     @Test public void continuationClassifierIgnoresAStopOutsideTheComposerForm() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
@@ -50,7 +48,7 @@ public final class WorkPreferenceDomWebViewTest {
 
             JSONObject pending = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT,
-                            "global-stop-probe", OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+                            "global-stop-probe", RUN_ID));
             assertEquals("SUBMISSION_PENDING", pending.getString("status"));
             assertTrue(pending.getString("detail").contains("dispatch=CONTINUE_CLICKED"));
             assertEquals("0", read(scenario, web, "String(window.stopClicks)"));
@@ -108,7 +106,7 @@ public final class WorkPreferenceDomWebViewTest {
 
             JSONObject pending = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT,
-                            "voice-idle-probe", OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+                            "voice-idle-probe", RUN_ID));
             assertEquals("SUBMISSION_PENDING", pending.getString("status"));
             assertTrue(pending.getString("detail").contains("dispatch=CONTINUE_CLICKED"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
@@ -142,7 +140,7 @@ public final class WorkPreferenceDomWebViewTest {
 
             JSONObject pending = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedBootstrap(PROJECT_URL, CONTINUE_PROMPT,
-                            "bootstrap-voice-probe", OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+                            "bootstrap-voice-probe"));
             assertEquals("SUBMISSION_PENDING", pending.getString("status"));
             assertTrue(pending.getString("detail").contains("dispatch=BOOTSTRAP_CLICKED"));
             assertEquals("0", read(scenario, web, "String(window.voiceClicks)"));
@@ -175,7 +173,7 @@ public final class WorkPreferenceDomWebViewTest {
                             + CONTINUE_PROMPT + "';return JSON.stringify({status:'READY'});})()");
             JSONObject result = evaluate(scenario, web,
                     SelfRunContinuationDom.clickPreparedDriveTurn(CONVERSATION_URL, CONTINUE_PROMPT,
-                            markerId, OBSERVER_RUN_ID, OBSERVER_TOKEN, OBSERVER_STABILITY_MS));
+                            markerId, RUN_ID));
             boolean dispatchExpected = SelfRunContinuationDom.SEND_ENABLED.equals(expected)
                     || SelfRunContinuationDom.COMPOSER_IDLE.equals(expected);
             String expectedResult = dispatchExpected ? "SUBMISSION_PENDING" : expected;

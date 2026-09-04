@@ -9,8 +9,7 @@ public final class BootstrapSendFallbackPolicyTest {
         String prepare = SelfRunContinuationDom.prepareBootstrap(
                 "https://chatgpt.com/", "private bootstrap text", "marker-a");
         String click = SelfRunContinuationDom.clickPreparedBootstrap(
-                "https://chatgpt.com/", "private bootstrap text", "marker-a",
-                "run-a", "observer-a", 5_000L);
+                "https://chatgpt.com/", "private bootstrap text", "marker-a");
 
         assertTrue(prepare.contains("new InputEvent('beforeinput'"));
         assertTrue(prepare.contains("composer.ownerDocument||document"));
@@ -32,7 +31,7 @@ public final class BootstrapSendFallbackPolicyTest {
                 "https://chatgpt.com/c/conversation-a", "private continuation text", "marker-b");
         String click = SelfRunContinuationDom.clickPreparedDriveTurn(
                 "https://chatgpt.com/c/conversation-a", "private continuation text", "marker-b",
-                "run-b", "observer-b", 5_000L);
+                "run-b");
 
         assertTrue(prepare.contains("new InputEvent('beforeinput'"));
         assertTrue(prepare.contains("c.state!=='SEND_ENABLED'&&c.state!=='COMPOSER_IDLE'"));

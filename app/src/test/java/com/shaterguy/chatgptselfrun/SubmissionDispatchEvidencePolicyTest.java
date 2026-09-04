@@ -12,7 +12,7 @@ public final class SubmissionDispatchEvidencePolicyTest {
     @Test public void bootstrapRequiresDurableConversationRouteBeforeConfirmation() {
         String prepare = SelfRunContinuationDom.prepareBootstrap(PROJECT, PROMPT, "bootstrap-marker");
         String click = SelfRunContinuationDom.clickPreparedBootstrap(
-                PROJECT, PROMPT, "bootstrap-marker", "SR-TEST", "observer-token", 5000L);
+                PROJECT, PROMPT, "bootstrap-marker");
         assertTrue(prepare.contains("bootstrap conversation route confirmed"));
         assertTrue(prepare.contains("conversation route pending"));
         assertTrue(prepare.contains("after('c')"));
@@ -35,7 +35,7 @@ public final class SubmissionDispatchEvidencePolicyTest {
     @Test public void continuationDispatchUsesUserMessageOrStopAsEvidence() {
         String prepare = SelfRunContinuationDom.prepareDriveTurn(CONVERSATION, PROMPT, "continuation-marker");
         String click = SelfRunContinuationDom.clickPreparedDriveTurn(
-                CONVERSATION, PROMPT, "continuation-marker", "SR-TEST", "observer-token", 5000L);
+                CONVERSATION, PROMPT, "continuation-marker", "SR-TEST");
         assertTrue(prepare.contains("continuation submission evidence confirmed"));
         assertTrue(prepare.contains("users>baseline"));
         assertTrue(prepare.contains("c.state==='STOP'"));
