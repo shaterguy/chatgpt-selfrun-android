@@ -67,6 +67,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
             JSONObject ingress = diagnostics(scenario, web);
             assertTrue(ingress.getInt("webSocketMessages") >= 6);
             assertTrue(ingress.getInt("forwardedFrames") >= 6);
+            assertTrue(ingress.getInt("maxSynchronousBatch") <= 4);
         }
     }
 
@@ -106,6 +107,31 @@ public final class WorkTurnProtocolIngressWebViewTest {
                     streamFrame(new JSONObject().put("type", "message_stream_complete")
                             .put("conversation_id", CONVERSATION_ID), SHARED_WORKER_TURN_ID)).getString("phase"));
             assertTrue(diagnostics(scenario, web).getInt("sharedWorkerMessages") >= 2);
+        }
+    }
+
+    @Test public void stalePriorWorkTurnFrameIsRejectedAfterNextCanonicalRequest() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web);
+            prepare(scenario, web, "work");
+            install(scenario, web);
+
+            xhrPost(scenario, web);
+            newWebSocket(scenario, web);
+            assertEquals("ANSWERING", emitSocketString(scenario, web,
+                    streamFrame(marker("final_channel_token", "first"), WEBSOCKET_TURN_ID)).getString("phase"));
+            xhrPost(scenario, web);
+            assertEquals("THINKING", state(scenario, web,
+                    "window.__selfRunTurnProtocol.snapshot()").getString("phase"));
+
+            int staleBefore = diagnostics(scenario, web).getInt("staleFrames");
+            emitSocketString(scenario, web,
+                    streamFrame(new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID), WEBSOCKET_TURN_ID));
+            JSONObject after = state(scenario, web, "window.__selfRunTurnProtocol.snapshot()");
+            assertEquals("THINKING", after.getString("phase"));
+            assertTrue(diagnostics(scenario, web).getInt("staleFrames") > staleBefore);
         }
     }
 
@@ -167,10 +193,13 @@ public final class WorkTurnProtocolIngressWebViewTest {
                                 AtomicReference<WebView> web) throws Exception {
         evaluateRaw(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
         evaluateRaw(scenario, web, WorkTurnProtocolIngressScript.documentStartScript());
+        evaluateRaw(scenario, web, WorkProtocolTransportCaptureScript.documentStartScript());
         assertEquals(ChatGptTurnProtocolScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunTurnProtocol.version"));
         assertEquals(WorkTurnProtocolIngressScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunWorkTurnProtocolIngress.version"));
+        assertEquals(WorkProtocolTransportCaptureScript.ENGINE_VERSION,
+                readString(scenario, web, "window.__selfRunWorkProtocolTransportCapture.version"));
     }
 
     private static JSONObject xhrPost(ActivityScenario<SelfRunNewActivity> scenario,
@@ -197,9 +226,8 @@ public final class WorkTurnProtocolIngressWebViewTest {
 
     private static JSONObject emitSocketString(ActivityScenario<SelfRunNewActivity> scenario,
                                                AtomicReference<WebView> web, String frame) throws Exception {
-        return state(scenario, web,
-                "(()=>{window.__fixtureSocket.emit(" + JSONObject.quote(frame)
-                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+        evaluateRaw(scenario, web, "window.__fixtureSocket.emit(" + JSONObject.quote(frame) + ");'emitted';");
+        return eventuallyQueueIdleState(scenario, web);
     }
 
     private static void emitSocketExpression(ActivityScenario<SelfRunNewActivity> scenario,
@@ -209,16 +237,27 @@ public final class WorkTurnProtocolIngressWebViewTest {
 
     private static JSONObject emitWorkerString(ActivityScenario<SelfRunNewActivity> scenario,
                                                AtomicReference<WebView> web, String frame) throws Exception {
-        return state(scenario, web,
-                "(()=>{window.__fixtureWorker.emit(" + JSONObject.quote(frame)
-                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+        evaluateRaw(scenario, web, "window.__fixtureWorker.emit(" + JSONObject.quote(frame) + ");'emitted';");
+        return eventuallyQueueIdleState(scenario, web);
     }
 
     private static JSONObject emitSharedWorkerString(ActivityScenario<SelfRunNewActivity> scenario,
                                                      AtomicReference<WebView> web, String frame) throws Exception {
-        return state(scenario, web,
-                "(()=>{window.__fixtureSharedWorker.port.emit(" + JSONObject.quote(frame)
-                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+        evaluateRaw(scenario, web, "window.__fixtureSharedWorker.port.emit(" + JSONObject.quote(frame) + ");'emitted';");
+        return eventuallyQueueIdleState(scenario, web);
+    }
+
+    private static JSONObject eventuallyQueueIdleState(ActivityScenario<SelfRunNewActivity> scenario,
+                                                        AtomicReference<WebView> web) throws Exception {
+        JSONObject ingress = null;
+        for (int i = 0; i < 100; i++) {
+            ingress = diagnostics(scenario, web);
+            if (ingress.optInt("queueDepth", -1) == 0 && !ingress.optBoolean("queueRunning", true)) {
+                return state(scenario, web, "window.__selfRunTurnProtocol.snapshot()");
+            }
+            Thread.sleep(25L);
+        }
+        throw new AssertionError("Work decoder queue did not become idle: " + ingress);
     }
 
     private static JSONObject diagnostics(ActivityScenario<SelfRunNewActivity> scenario,
@@ -229,7 +268,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
     private static void eventuallyPhase(ActivityScenario<SelfRunNewActivity> scenario,
                                         AtomicReference<WebView> web, String expected) throws Exception {
         JSONObject last = null;
-        for (int i = 0; i < 80; i++) {
+        for (int i = 0; i < 100; i++) {
             last = state(scenario, web, "window.__selfRunTurnProtocol.snapshot()");
             if (expected.equals(last.getString("phase"))) return;
             Thread.sleep(25L);
