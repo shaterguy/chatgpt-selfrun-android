@@ -84,6 +84,15 @@ final class WorkProtocolTransportCaptureWebViewRegression {
             xhrPost(scenario,web);
             assertTrue(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","retired-turn")));
             assertEquals("ANSWERING",snapshot(scenario,web).getString("phase"));
+            assertEquals("false",read(scenario,web,
+                    "String(window.__selfRunTurnProtocol.bindTurn('fixture-run','fixture-token-2'))"));
+            JSONObject rejected=snapshot(scenario,web);
+            assertEquals("fixture-token",rejected.getString("turnToken"));
+            assertEquals("ANSWERING",rejected.getString("phase"));
+            assertEquals("active_turn_overlap",rejected.getString("lastError"));
+            assertTrue(relayAccepted(scenario,web,terminalComplete("retired-final")
+                    .put("conversation_id",CONVERSATION_ID).put("turn_id","retired-turn")));
+            assertEquals("COMPLETE",snapshot(scenario,web).getString("phase"));
             assertEquals("true",read(scenario,web,
                     "String(window.__selfRunTurnProtocol.bindTurn('fixture-run','fixture-token-2'))"));
             JSONObject current=xhrPost(scenario,web);
