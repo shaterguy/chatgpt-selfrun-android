@@ -141,10 +141,13 @@ public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
                                 AtomicReference<WebView> web) throws Exception {
         evaluateRaw(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
         evaluateRaw(scenario, web, WorkTurnProtocolIngressScript.documentStartScript());
+        evaluateRaw(scenario, web, WorkProtocolTransportCaptureScript.documentStartScript());
         assertEquals(ChatGptTurnProtocolScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunTurnProtocol.version"));
         assertEquals(WorkTurnProtocolIngressScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunWorkTurnProtocolIngress.version"));
+        assertEquals(WorkProtocolTransportCaptureScript.ENGINE_VERSION,
+                readString(scenario, web, "window.__selfRunWorkProtocolTransportCapture.version"));
     }
 
     private static JSONObject xhrPost(ActivityScenario<SelfRunNewActivity> scenario,
@@ -161,14 +164,27 @@ public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
 
     private static JSONObject emitString(ActivityScenario<SelfRunNewActivity> scenario,
                                          AtomicReference<WebView> web, String frame) throws Exception {
-        return state(scenario, web,
-                "(()=>{window.__fixtureSocket.emit(" + JSONObject.quote(frame)
-                        + ");return window.__selfRunTurnProtocol.snapshot();})()");
+        evaluateRaw(scenario, web,
+                "window.__fixtureSocket.emit(" + JSONObject.quote(frame) + ");'emitted';");
+        return eventuallyQueueIdleState(scenario, web);
     }
 
     private static void emitExpression(ActivityScenario<SelfRunNewActivity> scenario,
                                        AtomicReference<WebView> web, String expression) throws Exception {
         evaluateRaw(scenario, web, "window.__fixtureSocket.emit(" + expression + ");");
+    }
+
+    private static JSONObject eventuallyQueueIdleState(ActivityScenario<SelfRunNewActivity> scenario,
+                                                        AtomicReference<WebView> web) throws Exception {
+        JSONObject ingress = null;
+        for (int i = 0; i < 100; i++) {
+            ingress = diagnostics(scenario, web);
+            if (ingress.optInt("queueDepth", -1) == 0 && !ingress.optBoolean("queueRunning", true)) {
+                return state(scenario, web, "window.__selfRunTurnProtocol.snapshot()");
+            }
+            Thread.sleep(25L);
+        }
+        throw new AssertionError("Work decoder queue did not become idle: " + ingress);
     }
 
     private static JSONObject diagnostics(ActivityScenario<SelfRunNewActivity> scenario,
