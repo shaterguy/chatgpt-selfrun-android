@@ -47,6 +47,7 @@ public final class SelfRunService extends Service {
     private static final int NOTIFICATION_ID = 17021;
     static final long POST_PROTOCOL_DRIVE_RETRY_MS = 5_000L;
     static final long POST_PROTOCOL_DRIVE_MAX_WAIT_MS = 3 * 60_000L;
+    static final long POST_DRIVE_CONFIRMATION_DELAY_MS = 5_000L;
     private static final long WEB_RECOVERY_DELAY_MS = 5 * 60_000L;
     static final long CONTINUATION_VERIFY_INTERVAL_MS = 250L;
     static final long CONTINUATION_CALLBACK_TIMEOUT_MS = 5_000L;
@@ -579,7 +580,7 @@ private void verifyInitialDocument(int epoch)throws Exception{
 
 private void pollDrive(){if(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(store.phase())&&canRun())authorizeAndRunDrive();}
 
-private void postDriveOutcome(){handler.post(()->{String phase=store.phase();if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))ensureWebView();else if(SelfRunStore.PHASE_PAUSED.equals(phase)||SelfRunStore.PHASE_DONE.equals(phase)){if(store.terminalSideEffectPending())replayTerminalSideEffect();}});}
+private void postDriveOutcome(){handler.postDelayed(()->{String phase=store.phase();if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)||SelfRunStore.PHASE_SEND_CONTINUE.equals(phase))ensureWebView();else if(SelfRunStore.PHASE_PAUSED.equals(phase)||SelfRunStore.PHASE_DONE.equals(phase)){if(store.terminalSideEffectPending())replayTerminalSideEffect();}},POST_DRIVE_CONFIRMATION_DELAY_MS);}
 
 private static java.util.List<DriveSignalParser.Event> normalDriveEvents(java.util.List<DriveSignalParser.Event> events){java.util.ArrayList<DriveSignalParser.Event> result=new java.util.ArrayList<>();if(events!=null)for(DriveSignalParser.Event event:events){if(event.type==DriveSignalParser.Type.TURN_COMPLETED&&DriveSignalParser.hasRecoveryIdField(event.raw))continue;result.add(event);}return result;}
 

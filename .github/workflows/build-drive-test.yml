@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# 2.3.2-dev8 terminal-protocol direct completion, detached-surface protocol verification, and TEST lineage verification
+# 2.3.2-dev9 post-Drive confirmation delay, terminal-protocol verification, and TEST lineage verification
 
 on:
   push:
@@ -343,7 +343,7 @@ jobs:
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$PREV_VERSION_NAME" == '2.3.2-dev7' ]] || fail 'actual predecessor is not the required dev7 TEST artifact'
+            [[ "$PREV_VERSION_NAME" == '2.3.2-dev8' ]] || fail 'actual predecessor is not the required dev8 TEST artifact'
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]] || fail 'actual previous TEST lineage evidence missing'
           else
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]] || fail 'synthetic predecessor mislabeled as lineage evidence'
@@ -440,8 +440,8 @@ jobs:
           PREDECESSOR_LINEAGE_EVIDENCE: ${{ needs['verify-drive-test-coinstall'].outputs.predecessor_lineage }}
         run: |
           set -euo pipefail
-          ARTIFACT_BRANCH='artifacts/selfrun-drive-v2.3.2-dev8'
-          APK='current-candidate/chatgpt-selfrun-drive-test-v2.3.2-dev8.apk'
+          ARTIFACT_BRANCH='artifacts/selfrun-drive-v2.3.2-dev9'
+          APK='current-candidate/chatgpt-selfrun-drive-test-v2.3.2-dev9.apk'
           SUM_FILE='current-candidate/SHA256SUMS.txt'
           SOURCE_FILE='current-candidate/SOURCE_COMMIT.txt'
           CERT_FILE='current-candidate/APK_CERT.txt'
@@ -472,7 +472,7 @@ jobs:
           APK_BLOB="$(git hash-object -w "$APK")"
           git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
           APK_TREE="$(git write-tree)"
-          APK_COMMIT="$(printf '%s\n' 'publish: SelfRun Drive 2.3.2-dev8 TEST APK' | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
+          APK_COMMIT="$(printf '%s\n' 'publish: SelfRun Drive 2.3.2-dev9 TEST APK' | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
           RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/current-test.apk"
           {
             echo "SOURCE_SHA=$GITHUB_SHA"
@@ -513,7 +513,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$META_COMMIT"
-          [[ "$ARTIFACT_BRANCH" == 'artifacts/selfrun-drive-v2.3.2-dev8' ]]
+          [[ "$ARTIFACT_BRANCH" == 'artifacts/selfrun-drive-v2.3.2-dev9' ]]
           if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
             echo "immutable artifact branch already exists: $ARTIFACT_BRANCH" >&2
             exit 1
