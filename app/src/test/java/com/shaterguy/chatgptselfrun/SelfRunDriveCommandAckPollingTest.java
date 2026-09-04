@@ -10,18 +10,20 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class SelfRunDriveCommandAckPollingTest {
-    @Test public void bootstrapSubmissionStartsDomCompletionObservation() throws Exception {
+    @Test public void bootstrapSubmissionStartsProtocolOwnedWait() throws Exception {
         String service = source("SelfRunService.java");
         String store = source("SelfRunStore.java");
         String submitted = section(service, "private void bootstrapSubmitted", "private String commandPrompt");
         assertTrue(submitted.contains("store.bootstrapSubmissionConfirmed(token)"));
-        assertTrue(store.contains("void bootstrapSubmissionConfirmed(String observerToken)"));
-        assertTrue(store.contains("첫 요청 제출 확인 · 답변 완료 감지 중"));
+        assertTrue(store.contains("void bootstrapSubmissionConfirmed(String turnToken)"));
+        assertTrue(store.contains("beginTurnCompletionWait(turnToken,\"첫 요청 제출 확인 · 응답 프로토콜 대기 중\")"));
+        assertFalse(store.contains("String observerToken"));
+        assertFalse(store.contains("답변 완료 감지 중"));
         assertFalse(submitted.contains("authorizeAndRunDrive"));
         assertFalse(submitted.contains("command_received_ack"));
     }
 
-    @Test public void legacyDriveWaitMigratesToObserverWaitWithoutResubmitting() throws Exception {
+    @Test public void legacyDriveWaitMigratesToProtocolWaitWithoutResubmitting() throws Exception {
         String store = source("SelfRunStore.java");
         String migration = section(store, "private void migrateLegacyTurnCompletionFlow", "private void migrateRetiredSignalDisplay");
         assertTrue(migration.contains("LEGACY_PHASE_WAIT_DRIVE_COMMIT"));

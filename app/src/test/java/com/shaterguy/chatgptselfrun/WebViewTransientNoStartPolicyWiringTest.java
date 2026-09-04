@@ -7,18 +7,28 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class WebViewTransientNoStartPolicyWiringTest {
-    @Test public void retryableResourceErrorsAreDiagnosticAndCannotPauseNoStartFlow() throws Exception {
+    @Test public void retryableResourceErrorsPauseNoStartWithoutCompleting() throws Exception {
         String service = src("SelfRunService.java");
         String policy = src("SelfRunRolloverPolicy.java");
+        long started = 1_000L;
+        long expired = started + SelfRunRolloverPolicy.CONTINUATION_NO_START_MAX_WAIT_MS + 1L;
 
-        assertTrue(service.contains("if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)&&postDispatchWindowActive())"));
+        assertTrue(SelfRunRolloverPolicy.retryHttpStatus(429));
         assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status)"));
-        assertTrue(policy.contains("if (sawStop || protocolGenerationActive || transientSeen) return NO_START_WAIT;"));
-        assertFalse(policy.contains("if (transientSeen) return NO_START_PAUSE_TRANSIENT;"));
+        assertEquals(SelfRunRolloverPolicy.NO_START_WAIT,
+                SelfRunRolloverPolicy.postDispatchNoStartAction(
+                        started, started, expired, false, true));
+        assertEquals(SelfRunRolloverPolicy.NO_START_PAUSE_TRANSIENT,
+                SelfRunRolloverPolicy.postDispatchNoStartAction(
+                        started, started, expired, true, false));
+        assertFalse(policy.contains("sawStop"));
+        assertFalse(policy.contains("turnObserverSawStop"));
+        assertFalse(policy.contains("NO_START_COMPLETE"));
     }
 
     private static String src(String file) throws Exception {

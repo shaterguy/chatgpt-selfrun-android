@@ -96,8 +96,8 @@ public final class TurnDocumentRetryAndroidTest {
         assertTrue(SelfRunProtocol.driveContinuation(runId).contains("SELF_RUN_TURN_DOCUMENT_RETRY"));
 
         String observer = "retryobserver";
-        store.prepareTurnProtocolToken(observer);
-        store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
+        store.prepareTurnProtocolToken(token);
+        store.beginTurnCompletionWait(token, "문서 재생성 요청 제출 확인");
         coordinator = new SelfRunRolloverCoordinator(context);
 
         assertFalse(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(runId));
@@ -121,8 +121,8 @@ public final class TurnDocumentRetryAndroidTest {
         assertEquals("late user next input", UserNextInputStore.current(runId));
 
         String observer = "retryobserver";
-        store.prepareTurnProtocolToken(observer);
-        store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
+        store.prepareTurnProtocolToken(token);
+        store.beginTurnCompletionWait(token, "문서 재생성 요청 제출 확인");
         assertEquals("late user next input", UserNextInputStore.current(runId));
 
         store.setPhase(SelfRunStore.PHASE_SEND_CONTINUE);
@@ -296,7 +296,7 @@ public final class TurnDocumentRetryAndroidTest {
         assertFalse(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(result.successorRunId));
     }
 
-    private SelfRunRolloverCoordinator useRetryAndEnterPostProtocol(SelfRunStore store, String observer) {
+    private SelfRunRolloverCoordinator useRetryAndEnterPostProtocol(SelfRunStore store, String token) {
         SelfRunRolloverCoordinator coordinator = new SelfRunRolloverCoordinator(context);
         assertEquals(SelfRunRolloverCoordinator.RESULT_TURN_DOCUMENT_RETRY,
                 coordinator.beginOrResume(store, SelfRunRolloverPolicy.TURN_COMPLETION_SIGNAL_TIMEOUT).status);
@@ -304,17 +304,17 @@ public final class TurnDocumentRetryAndroidTest {
         return coordinator;
     }
 
-    private void submitRetryAndEnterPostProtocol(SelfRunStore store, String observer) {
-        store.prepareTurnProtocolToken(observer);
-        store.beginTurnCompletionWait(observer, "문서 재생성 요청 제출 확인");
+    private void submitRetryAndEnterPostProtocol(SelfRunStore store, String token) {
+        store.prepareTurnProtocolToken(token);
+        store.beginTurnCompletionWait(token, "문서 재생성 요청 제출 확인");
         assertFalse(SelfRunRolloverCoordinator.turnDocumentRetryPromptPending(store.runId()));
         assertTrue(retryUsed());
         store.setPhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
     }
 
-    private void beginNextCompletionCycle(SelfRunStore store, String observer) {
-        store.prepareTurnProtocolToken(observer);
-        store.beginTurnCompletionWait(observer, "다음 턴 제출 확인 · 답변 완료 감지 중");
+    private void beginNextCompletionCycle(SelfRunStore store, String token) {
+        store.prepareTurnProtocolToken(token);
+        store.beginTurnCompletionWait(token, "다음 턴 제출 확인 · 응답 프로토콜 대기 중");
         store.setPhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
     }
 
