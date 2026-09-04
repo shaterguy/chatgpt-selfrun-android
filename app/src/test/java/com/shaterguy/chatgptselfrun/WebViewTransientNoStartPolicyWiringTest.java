@@ -21,7 +21,10 @@ public final class WebViewTransientNoStartPolicyWiringTest {
         assertTrue(SelfRunRolloverPolicy.retryHttpStatus(429));
         assertTrue(service.contains("markPostDispatchTransient(\"HTTP_\"+status,r)"));
         assertTrue(service.contains("\"canonical_conversation\":\"other_service_resource\""));
-        assertTrue(service.contains("postDispatchTransientLogKeys.add(key)"));
+        assertEquals(2, occurrences(service, "if(!postDispatchTransientLogKeys.add(key))return;"));
+        assertEquals(2, occurrences(service, "postDispatchTransientLogKeys.clear();"));
+        assertFalse(service.contains("postDispatchTransientLogKey=\\\"\\\""));
+        assertFalse(service.contains("key.equals(postDispatchTransientLogKey)"));
         assertFalse(service.contains("rawUrl"));
         assertEquals(SelfRunRolloverPolicy.NO_START_WAIT,
                 SelfRunRolloverPolicy.postDispatchNoStartAction(
