@@ -7,6 +7,7 @@ import android.webkit.WebViewClient;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
+import org.json.JSONObject;
 import org.json.JSONTokener;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -92,6 +93,86 @@ public final class TurnCompletionDomFallbackWebViewTest {
             assertTrue(callback.contains("token=" + TOKEN));
             assertTrue(callback.contains("source=dom_assistant_final_ui"));
         }
+    }
+
+    @Test public void tokenlessMutationBurstIsDormantAndActiveBurstIsCoalesced() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> completion = new AtomicReference<>("");
+            load(scenario, web, completion);
+
+            evaluateRaw(scenario, web, TurnCompletionDomFallbackScript.documentStartScript(1_000L));
+            evaluateRaw(scenario, web,
+                    "window.__selfRunRequestProfileEngine={target:()=>({runId:'" + RUN_ID + "'})};"
+                            + "window.__selfRunProtocolPhase='THINKING';"
+                            + "window.__selfRunProtocolToken='';"
+                            + "window.__selfRunTurnProtocol={diagnostics:()=>({phase:window.__selfRunProtocolPhase,observerToken:window.__selfRunProtocolToken,completionDispatched:false})};'ready';");
+
+            evaluateRaw(scenario, web, mutationBurst(400));
+            Thread.sleep(350L);
+            JSONObject dormant = new JSONObject(evaluate(scenario, web,
+                    "JSON.stringify(window.__selfRunDomAssistantFallback.diagnostics())"));
+            assertFalse(dormant.getBoolean("observerConnected"));
+            assertEquals(0, dormant.getInt("mutationCallbacks"));
+            assertEquals(0, dormant.getInt("expensiveEvaluations"));
+
+            evaluateRaw(scenario, web,
+                    "window.__selfRunProtocolToken='" + TOKEN + "';"
+                            + "window.__selfRunDriveTurnObserver={token:'" + TOKEN + "',fired:false,timer:0,observer:{disconnect(){}}};'armed';");
+            evaluateRaw(scenario, web, mutationBurst(400));
+            Thread.sleep(600L);
+            JSONObject active = new JSONObject(evaluate(scenario, web,
+                    "JSON.stringify(window.__selfRunDomAssistantFallback.diagnostics())"));
+            assertTrue(active.getBoolean("observerConnected"));
+            assertTrue(active.getInt("mutationCallbacks") > 0);
+            assertTrue("mutation burst must be coalesced", active.getInt("evaluations") <= 3);
+            assertEquals("healthy protocol must suppress expensive fallback scan", 0,
+                    active.getInt("expensiveEvaluations"));
+            assertEquals("", completion.get());
+        }
+    }
+
+    @Test public void workDecoderFrameBurstPreservesOrderAndYieldsBetweenBoundedBatches() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            AtomicReference<String> completion = new AtomicReference<>("");
+            load(scenario, web, completion);
+
+            evaluateRaw(scenario, web,
+                    "window.__workOrder=[];window.__workPosts=0;window.__workDone=false;"
+                            + "window.selfRunTurnLog={postMessage:()=>{window.__workPosts++;}};"
+                            + "window.__selfRunRequestProfileEngine={target:()=>({mode:'work',runId:'SR-WORK-STRESS'})};"
+                            + "window.__selfRunTurnProtocol={"
+                            + "snapshot:()=>({phase:'THINKING',completionDispatched:false}),"
+                            + "diagnostics:()=>({workTurnId:'WT-1'}),"
+                            + "observeRequest:()=>true,"
+                            + "observeSseText:(text)=>{const node=JSON.parse(String(text).slice(6).trim());window.__workOrder.push(node.seq);return {};}};'ready';");
+            evaluateRaw(scenario, web, WorkTurnProtocolIngressScript.documentStartScript());
+            evaluateRaw(scenario, web,
+                    "(()=>{const p=[];for(let i=0;i<40;i++){p.push(window.__selfRunWorkTurnProtocolIngress.observeTransportData({type:'message_delta',turn_id:'WT-1',seq:i},'fixture'));}"
+                            + "Promise.all(p).then(()=>{window.__workDone=true;});return 'queued';})()" );
+
+            for (int attempt = 0; attempt < 100; attempt++) {
+                if (Boolean.parseBoolean(evaluate(scenario, web, "String(window.__workDone)"))) break;
+                Thread.sleep(50L);
+            }
+            assertTrue(Boolean.parseBoolean(evaluate(scenario, web, "String(window.__workDone)")));
+            JSONObject result = new JSONObject(evaluate(scenario, web,
+                    "JSON.stringify({diag:window.__selfRunWorkTurnProtocolIngress.diagnostics(),order:window.__workOrder,posts:window.__workPosts})"));
+            JSONObject diag = result.getJSONObject("diag");
+            assertEquals(40, diag.getInt("framesSeen"));
+            assertTrue(diag.getInt("maxSynchronousBatch") <= 4);
+            assertTrue("40 frames at batch 4 must yield repeatedly", diag.getInt("eventLoopYields") >= 9);
+            assertTrue(diag.getInt("maxQueueDepth") >= 36);
+            assertTrue("diagnostic bridge must be aggregated", result.getInt("posts") <= 4);
+            assertEquals(40, result.getJSONArray("order").length());
+            for (int i = 0; i < 40; i++) assertEquals(i, result.getJSONArray("order").getInt(i));
+        }
+    }
+
+    private static String mutationBurst(int count) {
+        return "(()=>{const main=document.querySelector('main');for(let i=0;i<" + count
+                + ";i++){const n=document.createElement('span');n.textContent='s'+i;main.appendChild(n);}return 'mutated';})()";
     }
 
     private static String appendTurn(String userText, String assistantText) {

@@ -23,6 +23,9 @@ public final class TurnCompletionAssistantFallbackPolicyTest {
         assertTrue(script.contains("protocol?.phase==='ERROR'"));
         assertTrue(script.contains("protocolActiveForToken"));
         assertTrue(script.contains("protocol?.phase==='THINKING'||protocol?.phase==='ANSWERING'"));
+        assertTrue(script.contains("if(!state.token||state.fired||observerConnected)return"));
+        assertTrue(script.contains("EVALUATION_DELAY_MS=250"));
+        assertTrue(script.contains("expensiveEvaluations"));
         assertFalse(script.contains("setInterval("));
         assertFalse(script.contains("offsetParent"));
     }
@@ -36,13 +39,14 @@ public final class TurnCompletionAssistantFallbackPolicyTest {
         assertTrue(script.contains("좋은 답변"));
     }
 
-    @Test public void automationWebViewAlwaysInstallsFallback() throws Exception {
+    @Test public void automationWebViewAlwaysInstallsFallbackForBackgroundRuns() throws Exception {
         String config = source("WebViewConfig.java");
-        assertTrue(config.contains("TurnCompletionDomFallbackScript.installDocumentStart(webView)"));
-        int fallback = config.indexOf("TurnCompletionDomFallbackScript.installDocumentStart(webView)");
-        int protocolGate = config.indexOf("if (protocolObservable)");
-        assertTrue("fallback must remain available even when protocol bridge is unavailable",
-                fallback >= 0 && protocolGate >= 0 && fallback < protocolGate);
+        assertTrue(config.contains("if (plan.domFallback) TurnCompletionDomFallbackScript.installDocumentStart(webView)"));
+        int plan = config.indexOf("AutomationPlan plan = automationPlan");
+        int fallback = config.indexOf("if (plan.domFallback) TurnCompletionDomFallbackScript.installDocumentStart(webView)");
+        int protocolGate = config.indexOf("if (protocolObservable)", fallback);
+        assertTrue("background fallback must remain available even when protocol bridge is unavailable",
+                plan >= 0 && fallback > plan && protocolGate > fallback);
     }
 
     private static String source(String name) throws Exception {
