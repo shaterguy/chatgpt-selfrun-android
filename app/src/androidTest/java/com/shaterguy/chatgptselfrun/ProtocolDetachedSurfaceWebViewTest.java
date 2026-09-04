@@ -7,7 +7,6 @@ import android.webkit.WebViewClient;
 
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.json.JSONObject;
 import org.junit.Test;
@@ -25,7 +24,7 @@ public final class ProtocolDetachedSurfaceWebViewTest {
     private static final String TOKEN="protocol-token-current";
     private static final String ORIGIN="https://chatgpt.com/";
 
-    @Test public void detachedSurfaceCarriesThinkingAnsweringAndCompleteToNative() throws Exception {
+    @Test public void detachedSurfaceCompletesFromTerminalProtocolEventAlone() throws Exception {
         try(ActivityScenario<SelfRunNewActivity> scenario=ActivityScenario.launch(SelfRunNewActivity.class)){
             AtomicReference<HeadlessWebViewHost> hostRef=new AtomicReference<>();
             AtomicReference<WebView> webRef=new AtomicReference<>();
@@ -86,34 +85,19 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             JSONObject thinking=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeRequest('POST','/backend-api/f/conversation')");
             assertEquals("THINKING",thinking.getString("phase"));
-            eventuallyNativePhase(scenario,storeRef,"THINKING");
-            scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
-
-            JSONObject terminalBeforeFinal=state(scenario,webRef,
-                    "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\",\\\"status\\\":\\\"finished_successfully\\\",\\\"end_turn\\\":true}\\n\\n',"
-                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
-            assertEquals("THINKING",terminalBeforeFinal.getString("phase"));
-            assertTrue(terminalBeforeFinal.getBoolean("sawStreamComplete"));
-            assertTrue(terminalBeforeFinal.getBoolean("sawTerminalComplete"));
-            assertFalse(terminalBeforeFinal.getBoolean("sawVisibleAnswer"));
+            assertFalse(thinking.getBoolean("sawVisibleAnswer"));
+            assertEquals("",thinking.getString("currentFinalMessageId"));
             assertEquals("",callbackRef.get());
-
-            JSONObject answering=state(scenario,webRef,
-                    "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_marker\\\",\\\"marker\\\":\\\"final_channel_token\\\",\\\"event\\\":\\\"first\\\"}\\n\\n',"
-                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
-            assertEquals("ANSWERING",answering.getString("phase"));
-            assertEquals("",answering.getString("currentFinalMessageId"));
-            eventuallyNativePhase(scenario,storeRef,"ANSWERING");
             scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
-            assertEquals("",callbackRef.get());
 
             JSONObject complete=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_start\\\",\\\"message\\\":{\\\"id\\\":\\\"detached-final\\\",\\\"author\\\":{\\\"role\\\":\\\"assistant\\\"},\\\"channel\\\":\\\"final\\\",\\\"content\\\":{\\\"parts\\\":[\\\"terminal answer\\\"]}}}\\n\\n',"
+                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertEquals("COMPLETE",complete.getString("phase"));
+            assertTrue(complete.getBoolean("sawStreamComplete"));
+            assertFalse(complete.getBoolean("sawVisibleAnswer"));
+            assertEquals("",complete.getString("currentFinalMessageId"));
             assertEquals("message_stream_complete",complete.getString("completionSource"));
             assertTrue("protocol completion callback timed out",completed.await(15,TimeUnit.SECONDS));
             scenario.onActivity(activity->{
@@ -127,19 +111,6 @@ public final class ProtocolDetachedSurfaceWebViewTest {
 
             scenario.onActivity(activity->hostRef.get().destroy());
         }
-    }
-
-    private static void eventuallyNativePhase(ActivityScenario<SelfRunNewActivity> scenario,
-                                               AtomicReference<SelfRunStore> storeRef,
-                                               String expected) throws Exception {
-        for(int i=0;i<100;i++){
-            AtomicReference<String> phase=new AtomicReference<>("");
-            scenario.onActivity(activity->phase.set(TurnProtocolUiState.read(activity,RUN_ID).phase));
-            if(expected.equals(phase.get()))return;
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-            Thread.sleep(25L);
-        }
-        fail("native protocol phase != "+expected);
     }
 
     private static JSONObject state(ActivityScenario<SelfRunNewActivity> scenario,
