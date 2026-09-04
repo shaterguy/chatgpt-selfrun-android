@@ -2,7 +2,7 @@
 
 SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive signal cursor를 권위 기준으로 사용하지 않는다. 런타임은 다음 두 가지 현재성 규칙만 사용한다.
 
-1. ChatGPT에서는 가장 최근 `POST /backend-api/f/conversation`이 현재 응답 요청이다.
+1. ChatGPT에서는 현재 run·turn token에 처음 허용된 `POST /backend-api/f/conversation` 하나가 terminal COMPLETE까지 현재 응답 요청이다.
 2. Drive에서는 현재 Job 폴더에 존재하는 canonical signal Google Docs 중 아직 인식하지 않은 **Drive file ID**가 새 결과다.
 
 ## ChatGPT 응답 상태
@@ -11,15 +11,15 @@ SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive 
 | --- | --- |
 | 임의 상태 → THINKING | 가장 최근 `POST /backend-api/f/conversation` |
 | THINKING → ANSWERING | `message_marker(final_channel_token, first)` 또는 final assistant message 기반 `visible_answer` |
-| ANSWERING → COMPLETE | `message_stream_complete` 또는 final assistant message의 `finished_successfully + end_turn=true` |
+| ANSWERING → COMPLETE | 현재 final assistant message와 결합된 `finished_successfully + end_turn=true` 종결 증거 |
 
-새 canonical POST는 기존 응답이 THINKING/ANSWERING 중이어도 현재 요청을 즉시 교체한다. 이는 즉시 강제입력처럼 기존 응답 도중 새 사용자 요청이 실제 제출되는 경우를 정상 흐름으로 취급하기 위함이다.
+동일 run에서 THINKING/ANSWERING 중 새 turn token 바인딩은 거부한다. 앱은 현재 응답의 terminal COMPLETE 전에는 다음 canonical POST를 제출하지 않으며, 충돌이 감지되면 같은 conversation을 보존한 채 일시정지한다.
 
-이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. Work/Pro WebSocket은 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
+이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. identity 없는 socket/subframe payload는 conversation ID와 work turn ID가 모두 현재 요청에 결합된 경우에만 허용한다. Work/Pro WebSocket은 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
 
 `user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`은 전체 응답 COMPLETE를 직접 만들지 않는다.
 
-final answer evidence보다 `message_stream_complete`가 먼저 관찰되면 동일 requestIdentity와 turnToken에 completion evidence를 보존합니다. 이후 final_channel, visible_answer 또는 assistant_final_text가 도착할 때 protocol COMPLETE로 수렴하며 DOM 상태는 사용하지 않습니다.
+`message_stream_complete`가 final message ID·assistant text·terminal 상태보다 먼저 관찰되면 COMPLETE로 승격하지 않는다. 늦게 도착한 visible evidence와 과거 stream-complete를 결합하는 소급 완료도 금지한다. 동일 final message의 terminal event가 현재 요청/turn identity와 함께 확인된 뒤에만 COMPLETE가 되며 DOM 상태는 사용하지 않는다.
 
 ## Drive signal document 현재성
 
@@ -68,3 +68,8 @@ ChatGPT 응답 COMPLETE가 확인되면 앱은 Job 폴더를 조회한다.
 - `ProtocolDetachedSurfaceWebViewTest`: Surface detach 상태에서 token-correlated THINKING→ANSWERING→COMPLETE와 native callback을 검증합니다.
 - `DriveSignalDocumentIdentityAndroidTest`: 비정상적으로 큰 과거 cursor, 파일 정렬 변화, 재개 시 신규 ID 부재에서도 Drive file ID 기준으로 unseen signal을 계산하는지 검증한다.
 - `SelfRunAndroidTestRunner`: 2.x TEST canonical instrumentation 경로에 위 회귀 테스트를 강제로 포함한다.
+
+
+## 제출 확인과 대화 보존
+
+현재 run의 clicked marker와 신뢰된 project/general route에서 새 `/c/<id>`가 확인되면 composer가 추론 중 숨겨져 있어도 bootstrap 제출을 확정한다. current-token protocol generation이 확인된 60초 경계는 같은 conversation의 WAIT로 승격하며, route만 확인되었거나 결과가 불확실하면 같은 conversation을 보존한 채 일시정지한다. `BOOTSTRAP_SUBMISSION_TIMEOUT`과 HTTP 429는 successor run이나 새 conversation을 생성하지 않는다.

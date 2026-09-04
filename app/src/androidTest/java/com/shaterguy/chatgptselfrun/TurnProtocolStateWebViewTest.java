@@ -47,9 +47,13 @@ public final class TurnProtocolStateWebViewTest {
                     marker("final_channel_token", "first"));
             assertPhase("ANSWERING", chatAnswering);
             assertTrue(chatAnswering.getBoolean("sawVisibleAnswer"));
-            JSONObject chatComplete = semanticForIdentity(scenario, web, firstIdentity,
+            JSONObject premature = semanticForIdentity(scenario, web, firstIdentity,
                     new JSONObject().put("type", "message_stream_complete")
                             .put("conversation_id", CONVERSATION_ID));
+            assertPhase("ANSWERING", premature);
+            assertTrue(premature.getBoolean("sawStreamComplete"));
+            JSONObject chatComplete = semanticForIdentity(scenario, web, firstIdentity,
+                    terminalComplete("chat-final").put("conversation_id", CONVERSATION_ID));
             assertPhase("COMPLETE", chatComplete);
 
             JSONObject workStart = request(scenario, web, "POST", "/backend-api/f/conversation");
@@ -63,7 +67,7 @@ public final class TurnProtocolStateWebViewTest {
             assertPhase("ANSWERING", outerDone);
             assertFalse(outerDone.getBoolean("sawStreamComplete"));
             assertPhase("COMPLETE", socketEvent(scenario, web, "work-request",
-                    new JSONObject().put("type", "message_stream_complete")));
+                    terminalComplete("work-final")));
         }
     }
 
@@ -85,8 +89,11 @@ public final class TurnProtocolStateWebViewTest {
             assertTrue(visible.getBoolean("sawVisibleAnswer"));
             assertTrue(visible.getBoolean("sawAssistantFinalText"));
             assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-request"));
+            JSONObject premature = socketEvent(scenario, web, "pro-request",
+                    new JSONObject().put("type", "message_stream_complete"));
+            assertPhase("ANSWERING", premature);
             assertPhase("COMPLETE", socketEvent(scenario, web, "pro-request",
-                    new JSONObject().put("type", "message_stream_complete")));
+                    terminalComplete("pro-message")));
         }
     }
 
@@ -120,7 +127,7 @@ public final class TurnProtocolStateWebViewTest {
             assertPhase("ANSWERING", replacementAnswer);
             assertTrue(replacementAnswer.getBoolean("sawVisibleAnswer"));
             assertPhase("COMPLETE", semanticForIdentity(scenario, web, newIdentity,
-                    new JSONObject().put("type", "message_stream_complete")
+                    terminalComplete("replacement-final")
                             .put("conversation_id", CONVERSATION_ID)));
         }
     }
@@ -136,6 +143,12 @@ public final class TurnProtocolStateWebViewTest {
                 .put("channel", "final")
                 .put("content", new JSONObject().put("parts",
                         text.isEmpty() ? new org.json.JSONArray() : new org.json.JSONArray().put(text)));
+    }
+
+    private static JSONObject terminalComplete(String id) throws Exception {
+        return new JSONObject().put("type", "message_stream_complete")
+                .put("status", "finished_successfully").put("end_turn", true)
+                .put("message", finalAssistant(id, "terminal answer"));
     }
 
     private static JSONObject request(ActivityScenario<SelfRunNewActivity> scenario,

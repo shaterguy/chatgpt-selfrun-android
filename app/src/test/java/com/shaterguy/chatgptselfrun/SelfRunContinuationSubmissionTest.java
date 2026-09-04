@@ -19,6 +19,13 @@ public final class SelfRunContinuationSubmissionTest {
         assertFalse(dom.contains("armCompletionObserver"));
         assertFalse(dom.contains("assistant_final"));
     }
+    @Test public void stopOnlyNeverEnablesComposerMutationOrSubmit() throws Exception {
+        String dom=source("SelfRunContinuationDom.java");
+        assertTrue(dom.contains("const submissionControl=()=>"));
+        assertTrue(dom.contains("preferred.state==='SEND_ENABLED'?preferred:strict"));
+        assertTrue(dom.contains("const c0=submissionControl();if(c0.state!=='SEND_ENABLED'"));
+        assertFalse(dom.contains("c0.state!=='STOP'"));
+    }
     @Test public void nativeBindsProtocolBeforeEitherSubmitPath() throws Exception {
         String service=source("SelfRunService.java");
         assertTrue(service.contains("ChatGptTurnProtocolScript.bindTurnAndThen"));

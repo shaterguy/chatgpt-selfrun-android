@@ -52,8 +52,7 @@ public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
             JSONObject answering = emitString(scenario, web, nestedEncoded(urlJson, turnId));
             assertEquals("ANSWERING", answering.getString("phase"));
 
-            String completeSse = sse(new JSONObject().put("type", "message_stream_complete")
-                    .put("conversation_id", CONVERSATION_ID));
+            String completeSse = sse(terminalComplete().put("conversation_id", CONVERSATION_ID));
             String b64Sse = Base64.getEncoder().encodeToString(
                     completeSse.getBytes(StandardCharsets.UTF_8));
             JSONObject complete = emitString(scenario, web, nestedEncoded(b64Sse, turnId));
@@ -97,8 +96,7 @@ public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
             assertEquals("ANSWERING", emitString(scenario, web,
                     nestedEncoded(b64Json, newTurnId)).getString("phase"));
             assertEquals("COMPLETE", emitString(scenario, web, nestedEncoded(
-                    new JSONObject().put("type", "message_stream_complete")
-                            .put("conversation_id", CONVERSATION_ID).toString(), newTurnId))
+                    terminalComplete().put("conversation_id", CONVERSATION_ID).toString(), newTurnId))
                     .getString("phase"));
 
             JSONObject ingress = diagnostics(scenario, web);
@@ -112,6 +110,15 @@ public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
     private static JSONObject marker(String marker, String event) throws Exception {
         return new JSONObject().put("type", "message_marker").put("marker", marker)
                 .put("event", event).put("conversation_id", CONVERSATION_ID);
+    }
+
+    private static JSONObject terminalComplete() throws Exception {
+        return new JSONObject().put("type", "message_stream_complete")
+                .put("status", "finished_successfully").put("end_turn", true)
+                .put("message", new JSONObject().put("id", "terminal-final")
+                        .put("author", new JSONObject().put("role", "assistant"))
+                        .put("channel", "final").put("content",
+                                new JSONObject().put("parts", new org.json.JSONArray().put("terminal answer"))));
     }
 
     private static String sse(JSONObject semantic) {

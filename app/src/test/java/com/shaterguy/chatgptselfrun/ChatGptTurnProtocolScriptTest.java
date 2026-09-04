@@ -9,7 +9,7 @@ import static org.junit.Assert.*;
 
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalPostAndProtocolSemanticsOwnTurnState() {
-        assertEquals("turn-protocol-v7",ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v8",ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
         assertTrue(script.contains("state.phase='THINKING'"));
@@ -25,7 +25,7 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("const bindTurn=(run,token)=>"));
         assertTrue(script.contains("const armCompletion=(run,token)=>"));
         assertTrue(script.contains("completionArmed:false"));
-        assertTrue(script.contains("selfrun-drive:response-protocol-state:v7"));
+        assertTrue(script.contains("selfrun-drive:response-protocol-state:v8"));
         assertFalse(script.contains("__selfRunDriveTurnObserver"));
         assertFalse(script.contains("DomFallback"));
     }
@@ -37,8 +37,10 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("if(sameRun)retireWorkTurn(state.currentWorkTurnId)"));
         assertTrue(script.contains("else retiredWorkTurnIds.length=0"));
         assertTrue(script.contains("if(retiredWorkTurnIds.length>8)retiredWorkTurnIds.shift()"));
-        assertTrue(script.contains("completeAfterLateEvidence"));
-        assertTrue(script.contains("state.sawStreamComplete&&state.phase!=='COMPLETE'"));
+        assertFalse(script.contains("completeAfterLateEvidence"));
+        assertTrue(script.contains("state.sawTerminalComplete&&state.sawAssistantFinalText&&!!state.currentFinalMessageId"));
+        assertTrue(script.contains("if(!identity&&(!safe(context?.conversationId||'')||!safe(context?.workTurnId||'')))return false"));
+        assertTrue(script.contains("state.lastError='active_turn_overlap'"));
     }
     private static String source(String name) throws Exception {
         Path path=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+name);

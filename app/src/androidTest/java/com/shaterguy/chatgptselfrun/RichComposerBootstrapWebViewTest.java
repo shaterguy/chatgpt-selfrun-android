@@ -65,15 +65,17 @@ public final class RichComposerBootstrapWebViewTest {
             assertTrue(dispatched.getString("detail").contains("dispatch=BOOTSTRAP_CLICKED"));
             assertEquals("1", read(scenario, web, "String(window.submitCount)"));
 
-            JSONObject confirmed = dispatched;
             for (int attempt = 0; attempt < 40; attempt++) {
-                confirmed = evaluate(scenario, web,
-                        SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, PROMPT, "rich-bootstrap"));
-                if ("SUBMISSION_CONFIRMED".equals(confirmed.getString("status"))) break;
+                if (SLUGGED_CONVERSATION_PATH.equals(read(scenario, web, "location.pathname"))) break;
                 Thread.sleep(100L);
             }
-            assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
             assertEquals(SLUGGED_CONVERSATION_PATH, read(scenario, web, "location.pathname"));
+            assertEquals("removed", read(scenario, web,
+                    "(()=>{document.querySelector('form')?.remove();return 'removed';})()"));
+            JSONObject confirmed = evaluate(scenario, web,
+                    SelfRunContinuationDom.prepareBootstrap(PROJECT_URL, PROMPT, "rich-bootstrap"));
+            assertEquals("SUBMISSION_CONFIRMED", confirmed.getString("status"));
+            assertTrue(confirmed.getString("detail").contains("control=UNAVAILABLE"));
             assertEquals("true", read(scenario, web, "String(window.submitFetchOk)"));
             assertEquals("/backend-api/conversation/", read(scenario, web,
                     "window.fetchRecords.find(r=>r.path==='/backend-api/conversation/').path"));

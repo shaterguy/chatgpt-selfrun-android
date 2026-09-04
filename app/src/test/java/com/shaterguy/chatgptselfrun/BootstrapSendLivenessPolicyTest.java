@@ -18,6 +18,16 @@ public final class BootstrapSendLivenessPolicyTest {
         assertTrue(SelfRunService.bootstrapSendTimedOut(1_000L,61_000L));
         assertEquals(60_000L,SelfRunService.BOOTSTRAP_SEND_MAX_WAIT_MS);
     }
+    @Test public void capturedRouteIsCheckedBeforeComposerAndTimeoutNeverRollsOver() throws Exception {
+        String dom=source("SelfRunContinuationDom.java");
+        String prepare=dom.substring(dom.indexOf("static String prepareBootstrap"),dom.indexOf("static String clickPreparedBootstrap"));
+        assertTrue(prepare.indexOf("bootstrapRouteVerification")<prepare.indexOf("bootstrap composer unavailable"));
+        String service=source("SelfRunService.java");
+        String timeout=service.substring(service.indexOf("private void failBootstrapSubmissionTimeout"),service.indexOf("private void failBootstrap("));
+        assertTrue(timeout.contains("BOOTSTRAP_SUBMISSION_RECOVERED"));
+        assertTrue(timeout.contains("action=pause_same_conversation"));
+        assertFalse(timeout.contains("rolloverConversation"));
+    }
     @Test public void confirmedSubmissionPersistsWaitThenDetachesThenArms() throws Exception {
         String service=source("SelfRunService.java");
         String method=service.substring(service.indexOf("private void continuationSubmitted"),service.indexOf("private void armProtocolCompletion"));

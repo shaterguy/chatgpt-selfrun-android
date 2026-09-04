@@ -59,8 +59,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
             assertFalse(afterOuterDone.getBoolean("sawStreamComplete"));
 
             JSONObject complete = emitSocketString(scenario, web,
-                    streamFrame(new JSONObject().put("type", "message_stream_complete")
-                            .put("conversation_id", CONVERSATION_ID), WEBSOCKET_TURN_ID));
+                    streamFrame(terminalComplete().put("conversation_id", CONVERSATION_ID), WEBSOCKET_TURN_ID));
             assertEquals("COMPLETE", complete.getString("phase"));
             assertTrue(complete.getBoolean("sawStreamComplete"));
 
@@ -84,8 +83,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
             eventuallyPhase(scenario, web, "ANSWERING");
             emitSocketExpression(scenario, web,
                     "new TextEncoder().encode(" + JSONObject.quote(streamFrame(
-                            new JSONObject().put("type", "message_stream_complete")
-                                    .put("conversation_id", CONVERSATION_ID), BINARY_TURN_ID)) + ").buffer");
+                            terminalComplete().put("conversation_id", CONVERSATION_ID), BINARY_TURN_ID)) + ").buffer");
             eventuallyPhase(scenario, web, "COMPLETE");
             assertTrue(diagnostics(scenario, web).getInt("binaryDecoded") >= 2);
 
@@ -94,8 +92,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
             assertEquals("ANSWERING", emitWorkerString(scenario, web,
                     streamFrame(marker("final_channel_token", "first"), WORKER_TURN_ID)).getString("phase"));
             assertEquals("COMPLETE", emitWorkerString(scenario, web,
-                    streamFrame(new JSONObject().put("type", "message_stream_complete")
-                            .put("conversation_id", CONVERSATION_ID), WORKER_TURN_ID)).getString("phase"));
+                    streamFrame(terminalComplete().put("conversation_id", CONVERSATION_ID), WORKER_TURN_ID)).getString("phase"));
             assertTrue(diagnostics(scenario, web).getInt("workerMessages") >= 2);
 
             xhrPost(scenario, web);
@@ -103,8 +100,7 @@ public final class WorkTurnProtocolIngressWebViewTest {
             assertEquals("ANSWERING", emitSharedWorkerString(scenario, web,
                     streamFrame(marker("final_channel_token", "first"), SHARED_WORKER_TURN_ID)).getString("phase"));
             assertEquals("COMPLETE", emitSharedWorkerString(scenario, web,
-                    streamFrame(new JSONObject().put("type", "message_stream_complete")
-                            .put("conversation_id", CONVERSATION_ID), SHARED_WORKER_TURN_ID)).getString("phase"));
+                    streamFrame(terminalComplete().put("conversation_id", CONVERSATION_ID), SHARED_WORKER_TURN_ID)).getString("phase"));
             assertTrue(diagnostics(scenario, web).getInt("sharedWorkerMessages") >= 2);
         }
     }
@@ -129,6 +125,15 @@ public final class WorkTurnProtocolIngressWebViewTest {
     private static JSONObject marker(String marker, String event) throws Exception {
         return new JSONObject().put("type", "message_marker").put("marker", marker)
                 .put("event", event).put("conversation_id", CONVERSATION_ID);
+    }
+
+    private static JSONObject terminalComplete() throws Exception {
+        return new JSONObject().put("type", "message_stream_complete")
+                .put("status", "finished_successfully").put("end_turn", true)
+                .put("message", new JSONObject().put("id", "terminal-final")
+                        .put("author", new JSONObject().put("role", "assistant"))
+                        .put("channel", "final").put("content",
+                                new JSONObject().put("parts", new org.json.JSONArray().put("terminal answer"))));
     }
 
     private static String streamFrame(JSONObject semantic, String turnId) throws Exception {

@@ -94,6 +94,7 @@ public final class SelfRunService extends Service {
     private String postDispatchRunId = "";
     private boolean postDispatchTransientSeen;
     private String postDispatchTransientKind = "";
+    private String postDispatchTransientLogKey = "";
     private int bootstrapSendCallbackRecoveries;
     private volatile boolean destroyed;
     /** Serializes pause/stop epoch changes with application of Drive results to durable state. */
@@ -759,7 +760,7 @@ private void launchWebView(String target) {
                 if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
                 int status=response.getStatusCode();
                 if(SelfRunRolloverPolicy.retryHttpStatus(status)&&trustedChatgptServiceResource(r)
-                        &&postDispatchWindowActive())markPostDispatchTransient("HTTP_"+status);
+                        &&postDispatchWindowActive())markPostDispatchTransient("HTTP_"+status,r);
                 if(!r.isForMainFrame())return;
                 if(SelfRunRolloverPolicy.rolloverHttpStatus(store.conversationUrl(),networkState.isValidated(),status)){
                     rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_HTTP_GONE);return;
@@ -771,7 +772,7 @@ private void launchWebView(String target) {
                 if(!launchedRunId.equals(store.runId())||!canRun()||!isWebAutomationPhase(store.phase()))return;
                 int code=e.getErrorCode();
                 if(SelfRunRolloverPolicy.transientWebError(code)&&trustedChatgptServiceResource(r)
-                        &&postDispatchWindowActive())markPostDispatchTransient("WEB_"+code);
+                        &&postDispatchWindowActive())markPostDispatchTransient("WEB_"+code,r);
                 if(!r.isForMainFrame())return;
                 if(SelfRunRolloverPolicy.rolloverMainFrameError(store.conversationUrl(),networkState.isValidated(),code)){
                     rolloverConversation(SelfRunRolloverPolicy.WEBVIEW_MAIN_FRAME_LOCAL_ERROR);return;
@@ -855,13 +856,15 @@ private void restoreWaitingProtocol(){
 
 private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
 
-private void beginPostDispatchNoStartWindow(){postDispatchRunId=store.runId();postDispatchStartedElapsed=SystemClock.elapsedRealtime();postDispatchTransientSeen=false;postDispatchTransientKind="";}
+private void beginPostDispatchNoStartWindow(){postDispatchRunId=store.runId();postDispatchStartedElapsed=SystemClock.elapsedRealtime();postDispatchTransientSeen=false;postDispatchTransientKind="";postDispatchTransientLogKey="";}
 private boolean postDispatchWindowActive(){return postDispatchStartedElapsed>0L&&store.runId().equals(postDispatchRunId);}
 private long ensurePostDispatchNoStartWindow(){if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();return postDispatchStartedElapsed;}
-private void resetPostDispatchNoStartState(){postDispatchStartedElapsed=0L;postDispatchRunId="";postDispatchTransientSeen=false;postDispatchTransientKind="";}
+private void resetPostDispatchNoStartState(){postDispatchStartedElapsed=0L;postDispatchRunId="";postDispatchTransientSeen=false;postDispatchTransientKind="";postDispatchTransientLogKey="";}
 private boolean trustedChatgptServiceResource(WebResourceRequest request){if(request==null||request.getUrl()==null)return false;return "https".equalsIgnoreCase(request.getUrl().getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(request.getUrl().getHost());}
 private boolean trustedChatgptServiceUrl(String raw){try{Uri uri=Uri.parse(raw);return "https".equalsIgnoreCase(uri.getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(uri.getHost());}catch(Throwable ignored){return false;}}
-private void markPostDispatchTransient(String kind){if(!postDispatchWindowActive())return;postDispatchTransientSeen=true;postDispatchTransientKind=BootstrapResultPolicy.safe(kind,48);runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+postDispatchTransientKind);}
+private static boolean canonicalConversationRequest(WebResourceRequest request){if(request==null||request.getUrl()==null||!"POST".equalsIgnoreCase(request.getMethod()))return false;String path=request.getUrl().getPath();if(path==null)return false;while(path.length()>1&&path.endsWith("/"))path=path.substring(0,path.length()-1);return "/backend-api/f/conversation".equals(path);}
+private void markPostDispatchTransient(String kind,WebResourceRequest request){if(!postDispatchWindowActive())return;String safeKind=BootstrapResultPolicy.safe(kind,48),endpoint=canonicalConversationRequest(request)?"canonical_conversation":"other_service_resource",key=safeKind+":"+endpoint+":"+(request!=null&&request.isForMainFrame()?"main":"subframe");if(endpoint.equals("canonical_conversation")){postDispatchTransientSeen=true;postDispatchTransientKind=safeKind;}if(key.equals(postDispatchTransientLogKey))return;postDispatchTransientLogKey=key;runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+safeKind+";endpoint="+endpoint+";mainFrame="+(request!=null&&request.isForMainFrame()?1:0));}
+private void markPostDispatchTransient(String kind){if(!postDispatchWindowActive())return;String safeKind=BootstrapResultPolicy.safe(kind,48),key=safeKind+":runtime";postDispatchTransientSeen=true;postDispatchTransientKind=safeKind;if(key.equals(postDispatchTransientLogKey))return;postDispatchTransientLogKey=key;runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+safeKind+";endpoint=runtime;mainFrame=0");}
 
     private void postWebCallback(Runnable callback, long delay) {int epoch = automationEpoch;String runId=store.runId();handler.postDelayed(() -> {if (epoch == automationEpoch && runId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) callback.run();}, delay);}
 
@@ -944,6 +947,10 @@ private void evaluate(String phase,String script){
                 if(!current.persisted){failBootstrap(BootstrapResultPolicy.STATE_PERSIST_FAILED,"bootstrap result persistence failed",result.optJSONObject("diagnostics"));return;}
                 String fatal=BootstrapResultPolicy.fatalStatus(parsed,current.deadlineAt,System.currentTimeMillis());
                 if(!fatal.isEmpty()){failBootstrap(fatal,detail,result.optJSONObject("diagnostics"));return;}
+            }
+            if("TURN_PROTOCOL_BUSY".equals(status)){
+                enterPreservedPause("CHATGPT_TURN_STILL_ACTIVE","이전 ChatGPT 응답이 아직 종료되지 않아 새 요청 전송을 차단했습니다.",false);
+                NotificationHelper.notifyUser(this,"일시정지",store.status());return;
             }
             if("TURN_PROTOCOL_UNAVAILABLE".equals(status)){
                 pauseError("TURN_PROTOCOL_UNAVAILABLE","응답 프로토콜을 제출 전에 준비하지 못했습니다.");return;
@@ -1066,12 +1073,17 @@ private void recoverBootstrapSendCallback(){
 
 private void failBootstrapSubmissionTimeout(String reason){
     if(!canRun()||!SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(store.phase()))return;
-    String message="첫 요청 제출 확인 제한시간을 초과했습니다.";
-    store.setLastError(CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT,message);
-    runLog.record(store,"BOOTSTRAP_FAILURE","code="+CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT+";phase=bootstrap_send;reason="+reason);
-    if(SelfRunRolloverPolicy.knownConversation(store.conversationUrl())&&networkState.isValidated()){
-        rolloverConversation(SelfRunRolloverPolicy.BOOTSTRAP_SUBMISSION_TIMEOUT);return;
+    String token=store.turnProtocolToken();
+    boolean generationStarted=!token.isEmpty()&&TurnProtocolUiState.generationStartedFor(this,store.runId(),token);
+    if(generationStarted){
+        runLog.record(store,"BOOTSTRAP_SUBMISSION_RECOVERED","evidence=current_token_protocol_generation;action=wait_same_conversation");
+        bootstrapSubmitted("current-token protocol generation confirmed at bootstrap deadline");return;
     }
+    String message="첫 요청 제출 확인 제한시간을 초과해 기존 대화에서 실행을 보존했습니다.";
+    store.setLastError(CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT,message);
+    String evidence=SelfRunRolloverPolicy.knownConversation(store.conversationUrl())?"conversation_route":"none";
+    String transientKind=postDispatchTransientKind.isEmpty()?"none":postDispatchTransientKind;
+    runLog.record(store,"BOOTSTRAP_FAILURE","code="+CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT+";phase=bootstrap_send;reason="+reason+";evidence="+evidence+";transient="+transientKind+";action=pause_same_conversation");
     enterPreservedPause(CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT,CHAT_BOOTSTRAP_SUBMISSION_TIMEOUT+" · "+message,false);
     NotificationHelper.notifyUser(this,"확인 필요",store.status());
 }

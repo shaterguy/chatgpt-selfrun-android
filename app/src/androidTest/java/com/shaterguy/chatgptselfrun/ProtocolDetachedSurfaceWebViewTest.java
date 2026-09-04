@@ -99,7 +99,11 @@ public final class ProtocolDetachedSurfaceWebViewTest {
 
             state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',"
+                            +"'data: {\\\"type\\\":\\\"message_start\\\",\\\"message\\\":{\\\"id\\\":\\\"detached-final\\\",\\\"author\\\":{\\\"role\\\":\\\"assistant\\\"},\\\"channel\\\":\\\"final\\\",\\\"content\\\":{\\\"parts\\\":[\\\"terminal answer\\\"]}}}\\n\\n',"
+                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            state(scenario,webRef,
+                    "window.__selfRunTurnProtocol.observeSseText("
+                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\",\\\"status\\\":\\\"finished_successfully\\\",\\\"end_turn\\\":true}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertTrue("protocol completion callback timed out",completed.await(15,TimeUnit.SECONDS));
             scenario.onActivity(activity->{

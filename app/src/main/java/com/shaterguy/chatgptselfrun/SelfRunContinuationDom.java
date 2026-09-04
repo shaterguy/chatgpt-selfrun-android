@@ -24,11 +24,11 @@ final class SelfRunContinuationDom {
         String composerKey = composerKey(projectUrl);
         String sendKey = sendKey(projectUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + projectGuard(project) + authGuard() + calibration() + textHelpers(expected)
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','bootstrap composer unavailable');"
-                + composerOps() + controls(sendKey) + markerOps(marker)
-                + "let m=readMarker();" + bootstrapClickedVerification()
+                + projectGuard(project) + authGuard() + calibration() + textHelpers(expected) + markerOps(marker)
+                + "let m=readMarker();" + bootstrapRouteVerification()
                 + "if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','bootstrap submission was already confirmed');"
+                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','bootstrap composer unavailable');"
+                + composerOps() + controls(sendKey) + bootstrapClickedVerification()
                 + "if(m.state==='failed'&&m.failure==='request_profile_rejected')return result('SUBMISSION_FAILED','request_profile_rejected');"
                 + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "'&&c0.state!=='" + SEND_DISABLED + "'&&c0.state!=='" + COMPOSER_IDLE + "')return result(c0.state,'bootstrap waits for an idle editable composer before mutation');"
                 + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','bootstrap composer cleared');}"
@@ -75,17 +75,18 @@ final class SelfRunContinuationDom {
         String composerKey = composerKey(conversationUrl);
         String sendKey = sendKey(conversationUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
-                + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','continuation composer unavailable');"
-                + composerOps() + controls(sendKey) + markerOps(marker)
-                + "let m=readMarker();" + continuationClickedVerification()
+                + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected) + markerOps(marker)
+                + "let m=readMarker();" + continuationUserEvidenceVerification()
                 + "if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','submission was already confirmed');"
+                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','continuation composer unavailable');"
+                + composerOps() + controls(sendKey) + submissionControl(preferSendWhenStopCoexists)
+                + continuationClickedVerification()
                 + "if(m.state==='failed'&&m.failure==='request_profile_rejected')return result('SUBMISSION_FAILED','request_profile_rejected');"
-                + "const c0=controlState();if(c0.state!=='" + SEND_ENABLED + "'&&c0.state!=='" + SEND_DISABLED + "'&&c0.state!=='" + COMPOSER_IDLE + "'&&c0.state!=='" + STOP + "')return result(c0.state,'continuation waits for an editable composer before mutation');"
+                + "const c0=submissionControl();if(c0.state!=='" + SEND_ENABLED + "'&&c0.state!=='" + SEND_DISABLED + "'&&c0.state!=='" + COMPOSER_IDLE + "')return result(c0.state,'continuation waits for an editable composer before mutation');"
                 + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','existing composer content cleared');}"
                 + "if(m.state==='clearing'){if(!empty()){clearComposer();return result('COMPOSER_CLEARING','waiting for empty composer readback');}writeMarker({state:'inputting',at:Date.now()});inputComposer();return result('COMPOSER_INPUTTING','fresh continuation inserted');}"
-                + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact continuation readback');}const c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'waiting for enabled SEND after exact readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact continuation prepared');}"
-                + "if(m.state==='prepared'){if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','prepared composer changed; restarting input');}const c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'prepared continuation waiting for SEND');return result('READY_TO_SUBMIT','exact continuation prepared');}"
+                + "if(m.state==='inputting'){if(!same()){if(empty())inputComposer();else{writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','composer diverged; clearing again');}return result('COMPOSER_INPUTTING','waiting for exact continuation readback');}const c=submissionControl();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'waiting for enabled SEND after exact readback');writeMarker({state:'prepared',at:Date.now()});return result('READY_TO_SUBMIT','exact continuation prepared');}"
+                + "if(m.state==='prepared'){if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','prepared composer changed; restarting input');}const c=submissionControl();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'prepared continuation waiting for SEND');return result('READY_TO_SUBMIT','exact continuation prepared');}"
                 + "writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','unknown marker state reset');})()";
     }
 
@@ -110,11 +111,11 @@ final class SelfRunContinuationDom {
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
                 + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before click');"
-                + composerOps() + controls(sendKey) + markerOps(marker)
+                + composerOps() + controls(sendKey) + markerOps(marker) + submissionControl(preferSendWhenStopCoexists)
                 + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('SUBMISSION_PENDING','continuation submission verification already pending');"
                 + "if(m.state!=='prepared'){if(!m.state)writeMarker({state:'clearing',at:Date.now()});return result('COMPOSER_INPUTTING','prepared marker unavailable before click');}"
                 + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','exact continuation readback lost before click');}"
-                + "const strictBeforeClick=controlState(),baselineStop=strictBeforeClick.state==='" + STOP + "',c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled');"
+                + "const strictBeforeClick=controlState(),baselineStop=strictBeforeClick.state==='" + STOP + "',c=submissionControl();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'SEND no longer enabled');"
                 + "const baselineUserCount=userMessageCount(),clickedAt=Date.now();writeMarker({state:'clicked',clickedAt,baselineUserCount,baselineStop,submitPath:'pending'});let submitPath='';if(c.send){c.send.focus?.();c.send.click();submitPath='button';}else if(requestComposerSubmit()){submitPath='form_request_submit';}else{writeMarker({state:'prepared',at:Date.now()});return result('SEND_DISABLED','verified continuation text has no submit path');}writeMarker({state:'clicked',clickedAt,baselineUserCount,baselineStop,submitPath});return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED;submit='+submitPath+';verification=pending');})()";
     }
 
@@ -144,11 +145,11 @@ final class SelfRunContinuationDom {
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
                 + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before submission preflight');"
-                + composerOps() + controls(sendKey) + markerOps(marker)
+                + composerOps() + controls(sendKey) + markerOps(marker) + submissionControl(preferSendWhenStopCoexists)
                 + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('SUBMISSION_PENDING','prior dispatch awaits submission evidence');"
                 + "if(m.state!=='prepared')return result('COMPOSER_INPUTTING','submission preflight waits for prepared continuation');"
                 + "if(!same()){writeMarker({state:'clearing',at:Date.now()});clearComposer();return result('COMPOSER_CLEARING','user next-input changed before submission; rebuilding composer');}"
-                + "const c=controlState(" + preferSendWhenStopCoexists + ");if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'submission preflight waits for enabled SEND');"
+                + "const c=submissionControl();if(c.state!=='" + SEND_ENABLED + "'&&c.state!=='" + COMPOSER_IDLE + "')return result(c.state,'submission preflight waits for enabled SEND');"
                 + "return result('READY_TO_SUBMIT','latest continuation verified before submission lock');})()";
     }
 
@@ -220,6 +221,18 @@ final class SelfRunContinuationDom {
 
     private static String markerOps(String marker) {
         return "const markerKey=" + marker + ";const markerCache=window.__selfRunDriveMarkers||(window.__selfRunDriveMarkers={});const readMarker=()=>{let raw='';try{raw=localStorage.getItem(markerKey)||'';}catch(_){}if(!raw){try{raw=sessionStorage.getItem(markerKey)||'';}catch(_){}}if(!raw)raw=markerCache[markerKey]||'';try{return raw?JSON.parse(raw):{};}catch(_){return{};}};const writeMarker=data=>{const raw=JSON.stringify(data);markerCache[markerKey]=raw;let ok=false;try{localStorage.setItem(markerKey,raw);ok=localStorage.getItem(markerKey)===raw;}catch(_){}if(!ok){try{sessionStorage.setItem(markerKey,raw);}catch(_){}}};";
+    }
+
+    private static String bootstrapRouteVerification() {
+        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const users=userMessageCount(),baseline=Number(m.baselineUserCount),conversation=after('c');if(conversation){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','bootstrap conversation route confirmed;users='+users+';baseline='+baseline+';control=UNAVAILABLE;conversation=1');}}";
+    }
+
+    private static String continuationUserEvidenceVerification() {
+        return "if(m.state==='clicked'){const profile=window.__selfRunRequestProfileEngine?.diagnostics?.();if(profile&&profile.ok===false&&profile.reason!=='not_attempted'){writeMarker({...m,state:'failed',failure:'request_profile_rejected',failedAt:Date.now()});return result('SUBMISSION_FAILED','request_profile_rejected');}const users=userMessageCount(),baseline=Number(m.baselineUserCount);if(Number.isFinite(baseline)&&users>baseline){writeMarker({...m,state:'confirmed',confirmedAt:Date.now()});return result('SUBMISSION_CONFIRMED','continuation user-message evidence confirmed;users='+users+';baseline='+baseline+';control=UNAVAILABLE');}}";
+    }
+
+    private static String submissionControl(boolean preferSendWhenStopCoexists) {
+        return "const submissionControl=()=>{const strict=controlState();if(strict.state!=='" + STOP + "')return strict;const preferred=controlState(true);return " + preferSendWhenStopCoexists + "&&preferred.state==='" + SEND_ENABLED + "'?preferred:strict;};";
     }
 
     private static String bootstrapClickedVerification() {

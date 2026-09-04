@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# 2.3.2-dev5 protocol-only turn state, detached Surface, and TEST lineage verification
+# 2.3.2-dev6 terminal-correlated turn state, same-conversation bootstrap recovery, and TEST lineage verification
 
 on:
   push:
@@ -259,7 +259,7 @@ jobs:
           cp "$ACTUAL_PREV" predecessor/previous-test.apk
           echo 'available=true' >> "$GITHUB_OUTPUT"
           echo 'PREDECESSOR_SOURCE=artifact' >> "$GITHUB_ENV"
-          echo 'PREDECESSOR_LINEAGE_EVIDENCE=verified-dev3-artifact' >> "$GITHUB_ENV"
+          echo 'PREDECESSOR_LINEAGE_EVIDENCE=verified-previous-test-artifact' >> "$GITHUB_ENV"
       - name: Build predecessor only when no immutable TEST artifact exists
         if: ${{ steps.previous_test.outputs.available != 'true' }}
         shell: bash
@@ -343,8 +343,8 @@ jobs:
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$PREV_VERSION_NAME" == '2.3.2-dev3' ]] || fail 'actual predecessor is not the required dev3 TEST artifact'
-            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-dev3-artifact' ]] || fail 'actual dev3 lineage evidence missing'
+            [[ "$PREV_VERSION_NAME" == '2.3.2-dev5' ]] || fail 'actual predecessor is not the required dev5 TEST artifact'
+            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]] || fail 'actual previous TEST lineage evidence missing'
           else
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]] || fail 'synthetic predecessor mislabeled as lineage evidence'
           fi
@@ -440,8 +440,8 @@ jobs:
           PREDECESSOR_LINEAGE_EVIDENCE: ${{ needs['verify-drive-test-coinstall'].outputs.predecessor_lineage }}
         run: |
           set -euo pipefail
-          ARTIFACT_BRANCH='artifacts/selfrun-drive-v2.3.2-dev5'
-          APK='current-candidate/chatgpt-selfrun-drive-test-v2.3.2-dev5.apk'
+          ARTIFACT_BRANCH='artifacts/selfrun-drive-v2.3.2-dev6'
+          APK='current-candidate/chatgpt-selfrun-drive-test-v2.3.2-dev6.apk'
           SUM_FILE='current-candidate/SHA256SUMS.txt'
           SOURCE_FILE='current-candidate/SOURCE_COMMIT.txt'
           CERT_FILE='current-candidate/APK_CERT.txt'
@@ -456,7 +456,7 @@ jobs:
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$CERT_FILE"
           [[ "$PREDECESSOR_SOURCE" == 'artifact' || "$PREDECESSOR_SOURCE" == 'synthetic-fallback' ]]
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-dev3-artifact' ]]
+            [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]]
           else
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]]
           fi
@@ -472,7 +472,7 @@ jobs:
           APK_BLOB="$(git hash-object -w "$APK")"
           git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
           APK_TREE="$(git write-tree)"
-          APK_COMMIT="$(printf '%s\n' 'publish: SelfRun Drive 2.3.2-dev5 TEST APK' | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
+          APK_COMMIT="$(printf '%s\n' 'publish: SelfRun Drive 2.3.2-dev6 TEST APK' | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
           RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/current-test.apk"
           {
             echo "SOURCE_SHA=$GITHUB_SHA"
@@ -513,7 +513,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$META_COMMIT"
-          [[ "$ARTIFACT_BRANCH" == 'artifacts/selfrun-drive-v2.3.2-dev5' ]]
+          [[ "$ARTIFACT_BRANCH" == 'artifacts/selfrun-drive-v2.3.2-dev6' ]]
           if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
             echo "immutable artifact branch already exists: $ARTIFACT_BRANCH" >&2
             exit 1

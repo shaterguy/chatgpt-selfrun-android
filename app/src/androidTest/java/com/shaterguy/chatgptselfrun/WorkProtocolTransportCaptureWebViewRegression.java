@@ -54,7 +54,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
             callTransport(scenario, web, "observeServiceWorkerData", streamFrame(marker("final_channel_token", "first"), "sw-turn"));
             eventuallyPhase(scenario, web, "ANSWERING");
             callTransport(scenario, web, "observeServiceWorkerPortData",
-                    streamFrame(new JSONObject().put("type", "message_stream_complete").put("conversation_id", CONVERSATION_ID), "sw-turn"));
+                    streamFrame(terminalComplete("sw-final").put("conversation_id", CONVERSATION_ID), "sw-turn"));
             eventuallyPhase(scenario, web, "COMPLETE");
         }
     }
@@ -72,7 +72,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
             assertEquals("THINKING",snapshot(scenario, web).getString("phase"));
             relay(scenario, web, marker("final_channel_token", "first").put("turn_id", "relay-current"));
             assertEquals("ANSWERING",snapshot(scenario, web).getString("phase"));
-            relay(scenario, web, new JSONObject().put("type","message_stream_complete")
+            relay(scenario, web, terminalComplete("relay-final")
                     .put("conversation_id",CONVERSATION_ID).put("turn_id","relay-current"));
             assertEquals("COMPLETE",snapshot(scenario, web).getString("phase"));
         }
@@ -109,7 +109,7 @@ final class WorkProtocolTransportCaptureWebViewRegression {
             assertEquals("",afterStaleComplete.getString("completionSource"));
             assertTrue(relayAccepted(scenario,web,marker("final_channel_token","first").put("turn_id","current-turn")));
             assertEquals("ANSWERING",snapshot(scenario,web).getString("phase"));
-            assertTrue(relayAccepted(scenario,web,new JSONObject().put("type","message_stream_complete")
+            assertTrue(relayAccepted(scenario,web,terminalComplete("current-final")
                     .put("conversation_id",CONVERSATION_ID).put("turn_id","current-turn")));
             assertEquals("COMPLETE",snapshot(scenario,web).getString("phase"));
         }
@@ -128,6 +128,10 @@ final class WorkProtocolTransportCaptureWebViewRegression {
 
     private static JSONObject marker(String marker,String event)throws Exception{return new JSONObject().put("type","message_marker")
             .put("marker",marker).put("event",event).put("conversation_id",CONVERSATION_ID);}
+    private static JSONObject terminalComplete(String id)throws Exception{return new JSONObject().put("type","message_stream_complete")
+            .put("status","finished_successfully").put("end_turn",true)
+            .put("message",new JSONObject().put("id",id).put("author",new JSONObject().put("role","assistant"))
+                    .put("channel","final").put("content",new JSONObject().put("parts",new org.json.JSONArray().put("terminal answer"))));}
     private static String streamFrame(JSONObject semantic,String turnId)throws Exception{return encodedFrame("data: "+semantic+"\n\n",turnId);}
     private static String encodedFrame(String encoded,String turnId)throws Exception{JSONObject payload=new JSONObject().put("type","stream-item")
             .put("conversation_id",CONVERSATION_ID).put("turn_id",turnId).put("encoded_item",encoded);

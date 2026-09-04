@@ -15,7 +15,7 @@ import java.util.Set;
  * DOM state is never consulted for THINKING, ANSWERING, or COMPLETE.</p>
  */
 final class ChatGptTurnProtocolScript {
-    static final String ENGINE_VERSION = "turn-protocol-v7";
+    static final String ENGINE_VERSION = "turn-protocol-v8";
     static final String COMPLETION_SCHEME = "selfrun-drive";
     static final String COMPLETION_HOST = "turn-completed";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
@@ -34,7 +34,7 @@ final class ChatGptTurnProtocolScript {
         return "(()=>{const protocol=window.__selfRunTurnProtocol;"
                 + "if(!protocol||typeof protocol.bindTurn!=='function')return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE',detail:'turn protocol bind API unavailable'});"
                 + "if(!protocol.bindTurn(" + SelfRunScript.quote(runId) + "," + SelfRunScript.quote(turnToken) + "))"
-                + "return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE',detail:'turn protocol bind rejected'});"
+                + "return JSON.stringify({status:'TURN_PROTOCOL_BUSY',detail:'active protocol turn has not reached terminal completion'});"
                 + "return (" + actionScript + ");})()";
     }
 
@@ -59,7 +59,7 @@ final class ChatGptTurnProtocolScript {
                   if(window.__selfRunTurnProtocol?.version===ENGINE_VERSION)return;
                   const COMPLETION_SCHEME=__COMPLETION_SCHEME__;
                   const COMPLETION_HOST=__COMPLETION_HOST__;
-                  const STORE_KEY='selfrun-drive:response-protocol-state:v7';
+                  const STORE_KEY='selfrun-drive:response-protocol-state:v8';
                   const VALID_PHASES=new Set(['IDLE','THINKING','ANSWERING','COMPLETE','ERROR']);
                   const COMPLETE_SOURCES=new Set(['message_stream_complete','finished_successfully_end_turn']);
                   const blank=()=>({
@@ -67,7 +67,7 @@ final class ChatGptTurnProtocolScript {
                     canonicalConversationId:'',currentWorkTurnId:'',
                     currentFinalMessageId:'',finalMessageActive:false,
                     sawFinalChannelToken:false,sawVisibleAnswer:false,
-                    sawAssistantFinalText:false,sawStreamComplete:false,
+                    sawAssistantFinalText:false,sawStreamComplete:false,sawTerminalComplete:false,
                     completionArmed:false,completionDispatched:false,completionSource:'',
                     lastError:'',lastSource:''
                   });
@@ -104,6 +104,9 @@ final class ChatGptTurnProtocolScript {
                     const nextRun=safe(run),nextToken=safe(token);if(!nextRun||!nextToken)return false;
                     if(state.runId===nextRun&&state.turnToken===nextToken)return true;
                     const sameRun=state.runId===nextRun;
+                    if(sameRun&&(state.phase==='THINKING'||state.phase==='ANSWERING')){
+                      state.lastError='active_turn_overlap';save();return false;
+                    }
                     if(sameRun)retireWorkTurn(state.currentWorkTurnId);
                     else retiredWorkTurnIds.length=0;
                     state=blank();state.runId=nextRun;state.turnToken=nextToken;
@@ -158,10 +161,11 @@ final class ChatGptTurnProtocolScript {
                     if(!state.runId||!state.turnToken)return false;
                     const identity=safe(context?.requestIdentity||'');
                     if(identity&&identity!==state.requestIdentity)return false;
+                    if(!identity&&(!safe(context?.conversationId||'')||!safe(context?.workTurnId||'')))return false;
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return false;
                     return bindConversation(context?.conversationId||'')&&bindWorkTurn(context?.workTurnId||'');
                   };
-                  const completionEvidence=()=>state.sawVisibleAnswer||state.sawFinalChannelToken||state.sawAssistantFinalText;
+                  const completionEvidence=()=>state.sawTerminalComplete&&state.sawAssistantFinalText&&!!state.currentFinalMessageId;
                   function schedulePendingDispatch(source){
                     const completionSource=safe(source);
                     if(pendingTimer||state.completionDispatched||!state.completionArmed
@@ -199,16 +203,11 @@ final class ChatGptTurnProtocolScript {
                     }
                     return finalizeComplete(completionSource);
                   };
-                  const completeAfterLateEvidence=()=>{
-                    if(state.sawStreamComplete&&state.phase!=='COMPLETE'&&completionEvidence()){
-                      finalizeComplete(state.completionSource||'message_stream_complete');
-                    }
-                  };
                   const noteAnswering=source=>{
                     if(state.phase!=='THINKING'&&state.phase!=='ANSWERING')return;
                     const first=state.phase==='THINKING';if(first)state.phase='ANSWERING';
                     state.lastSource=safe(source);state.lastError='';save();
-                    if(first)emitLog('answering_started',source);completeAfterLateEvidence();
+                    if(first)emitLog('answering_started',source);
                   };
                   const noteVisibleAnswer=source=>{
                     if(!state.sawVisibleAnswer)state.sawVisibleAnswer=true;
@@ -223,7 +222,9 @@ final class ChatGptTurnProtocolScript {
                     const role=safe(message.author?.role).toLowerCase(),channel=safe(message.channel).toLowerCase();
                     if(role!=='assistant'||channel!=='final')return false;
                     state.finalMessageActive=true;if(message.id)state.currentFinalMessageId=safe(message.id);
+                    if(message.status==='finished_successfully'&&message.end_turn===true)state.sawTerminalComplete=true;
                     save();noteVisibleAnswer('visible_answer');
+                    if(message.has_text===true)noteAssistantFinalText('assistant_final_text');
                     const parts=Array.isArray(message.content?.parts)?message.content.parts:[];
                     if(parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');return true;
                   };
@@ -268,7 +269,11 @@ final class ChatGptTurnProtocolScript {
                     const deltaMessage=value.v?.message&&typeof value.v.message==='object'?value.v.message:null;
                     const finalMessage=directMessage||deltaMessage;if(finalMessage)markFinalMessage(finalMessage);
                     observeFinalTextDelta(value);
-                    if(value.type==='message_stream_complete'){complete('message_stream_complete');return;}
+                    if(value.type==='message_stream_complete'){
+                      state.sawStreamComplete=true;
+                      if(value.status==='finished_successfully'&&value.end_turn===true)state.sawTerminalComplete=true;
+                      save();complete('message_stream_complete');return;
+                    }
                     if(finalMessage&&safe(finalMessage.author?.role).toLowerCase()==='assistant'
                             &&safe(finalMessage.channel).toLowerCase()==='final'
                             &&finalMessage.status==='finished_successfully'&&finalMessage.end_turn===true){
@@ -343,7 +348,8 @@ final class ChatGptTurnProtocolScript {
                       requestIdentity:state.requestIdentity,conversationId:state.canonicalConversationId,
                       workTurnId:state.currentWorkTurnId,sawFinalChannelToken:state.sawFinalChannelToken,
                       sawVisibleAnswer:state.sawVisibleAnswer,sawAssistantFinalText:state.sawAssistantFinalText,
-                      sawStreamComplete:state.sawStreamComplete,completionArmed:state.completionArmed,
+                      sawStreamComplete:state.sawStreamComplete,sawTerminalComplete:state.sawTerminalComplete,
+                      completionArmed:state.completionArmed,
                       completionDispatched:state.completionDispatched,completionSource:state.completionSource,
                       lastError:state.lastError})
                   };
