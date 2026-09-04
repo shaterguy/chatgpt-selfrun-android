@@ -10,6 +10,7 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
             "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest",
             "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest",
+            "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest",
             "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest",
             "com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest",
             "com.shaterguy.chatgptselfrun.DriveSignalDocumentIdentityAndroidTest"
