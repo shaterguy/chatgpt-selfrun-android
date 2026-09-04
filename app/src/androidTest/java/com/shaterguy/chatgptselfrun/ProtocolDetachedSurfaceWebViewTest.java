@@ -89,22 +89,32 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             eventuallyNativePhase(scenario,storeRef,"THINKING");
             scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
 
+            JSONObject terminalBeforeFinal=state(scenario,webRef,
+                    "window.__selfRunTurnProtocol.observeSseText("
+                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\",\\\"status\\\":\\\"finished_successfully\\\",\\\"end_turn\\\":true}\\n\\n',"
+                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            assertEquals("THINKING",terminalBeforeFinal.getString("phase"));
+            assertTrue(terminalBeforeFinal.getBoolean("sawStreamComplete"));
+            assertTrue(terminalBeforeFinal.getBoolean("sawTerminalComplete"));
+            assertFalse(terminalBeforeFinal.getBoolean("sawVisibleAnswer"));
+            assertEquals("",callbackRef.get());
+
             JSONObject answering=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
                             +"'data: {\\\"type\\\":\\\"message_marker\\\",\\\"marker\\\":\\\"final_channel_token\\\",\\\"event\\\":\\\"first\\\"}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertEquals("ANSWERING",answering.getString("phase"));
+            assertEquals("",answering.getString("currentFinalMessageId"));
             eventuallyNativePhase(scenario,storeRef,"ANSWERING");
             scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
+            assertEquals("",callbackRef.get());
 
-            state(scenario,webRef,
+            JSONObject complete=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
                             +"'data: {\\\"type\\\":\\\"message_start\\\",\\\"message\\\":{\\\"id\\\":\\\"detached-final\\\",\\\"author\\\":{\\\"role\\\":\\\"assistant\\\"},\\\"channel\\\":\\\"final\\\",\\\"content\\\":{\\\"parts\\\":[\\\"terminal answer\\\"]}}}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
-            state(scenario,webRef,
-                    "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\",\\\"status\\\":\\\"finished_successfully\\\",\\\"end_turn\\\":true}\\n\\n',"
-                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            assertEquals("COMPLETE",complete.getString("phase"));
+            assertEquals("message_stream_complete",complete.getString("completionSource"));
             assertTrue("protocol completion callback timed out",completed.await(15,TimeUnit.SECONDS));
             scenario.onActivity(activity->{
                 assertEquals(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,storeRef.get().phase());
