@@ -168,7 +168,8 @@ final class SelfRunContinuationDom {
         return "const authVisible=e=>!!e&&e.isConnected&&e.offsetParent!==null;const auth=[...document.querySelectorAll('[data-testid*=login],a[href*=\"/auth/login\"],button')].filter(authVisible).some(e=>/^(log in|sign up|로그인|가입)$/i.test(String(e.innerText||e.getAttribute('aria-label')||'').trim()));if(auth)return result('AUTH_REQUIRED','ChatGPT login required');";
     }
 
-    private static String calibration() { return WebUiCalibrationDom.runtimePrelude(); }
+    private static String calibration() { return WebUiCalibrationDom.runtimePrelude()
+            + "const userMessageCount=()=>document.querySelectorAll('[data-message-author-role=\\\"user\\\"]').length;"; }
 
     private static String textHelpers(String expected) {
         return "const norm=s=>String(s??'').replace(/[\\u200B-\\u200D\\uFEFF]/g,'').replace(/\\u00a0/g,' ').replace(/\\r\\n?/g,'\\n').trim();const canonical=s=>norm(s).replace(/[ \\t]+/g,' ').replace(/ *\\n+ */g,'\\n');const expected=norm(" + expected + ");";
@@ -195,7 +196,6 @@ final class SelfRunContinuationDom {
                 + "const isVoice=e=>!!e&&buttonLike(e)&&inComposer(e)&&voiceSemantic(e);"
                 + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
                 + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&sendSemantic(e);"
-                + "const userMessageCount=()=>document.querySelectorAll('[data-message-author-role=\"user\"]').length;"
                 + "const controlState=(preferSendWhenStopCoexists=false)=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));const form=composer?.closest?.('form'),formSubmitReady=!!form&&typeof form.requestSubmit==='function';if(stop&&!preferSendWhenStopCoexists)return{state:'" + STOP + "',send:null};if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(stop&&!(composerEditable()&&formSubmitReady))return{state:'" + STOP + "',send:null};if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};if(stop)return{state:'" + STOP + "',send:null};return{state:'" + UNKNOWN + "',send:null};};";
     }
 
