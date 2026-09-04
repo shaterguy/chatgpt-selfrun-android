@@ -32,6 +32,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -94,7 +96,7 @@ public final class SelfRunService extends Service {
     private String postDispatchRunId = "";
     private boolean postDispatchTransientSeen;
     private String postDispatchTransientKind = "";
-    private String postDispatchTransientLogKey = "";
+    private final Set<String> postDispatchTransientLogKeys = new HashSet<>();
     private int bootstrapSendCallbackRecoveries;
     private volatile boolean destroyed;
     /** Serializes pause/stop epoch changes with application of Drive results to durable state. */
@@ -856,14 +858,14 @@ private void restoreWaitingProtocol(){
 
 private void maybeCaptureConversationUrl(String url){if(store.conversationUrl().isEmpty()&&sameProject(store.projectUrl(),url)&&!SelfRunScript.conversationId(url).isEmpty()){store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))runLog.record(store,"CONVERSATION_CAPTURED",SelfRunScript.isGeneralChatUrl(url)?"trusted_general_route":"trusted_project_route");}}
 
-private void beginPostDispatchNoStartWindow(){postDispatchRunId=store.runId();postDispatchStartedElapsed=SystemClock.elapsedRealtime();postDispatchTransientSeen=false;postDispatchTransientKind="";postDispatchTransientLogKey="";}
+private void beginPostDispatchNoStartWindow(){postDispatchRunId=store.runId();postDispatchStartedElapsed=SystemClock.elapsedRealtime();postDispatchTransientSeen=false;postDispatchTransientKind="";postDispatchTransientLogKeys.clear();}
 private boolean postDispatchWindowActive(){return postDispatchStartedElapsed>0L&&store.runId().equals(postDispatchRunId);}
 private long ensurePostDispatchNoStartWindow(){if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();return postDispatchStartedElapsed;}
 private void resetPostDispatchNoStartState(){postDispatchStartedElapsed=0L;postDispatchRunId="";postDispatchTransientSeen=false;postDispatchTransientKind="";postDispatchTransientLogKey="";}
 private boolean trustedChatgptServiceResource(WebResourceRequest request){if(request==null||request.getUrl()==null)return false;return "https".equalsIgnoreCase(request.getUrl().getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(request.getUrl().getHost());}
 private boolean trustedChatgptServiceUrl(String raw){try{Uri uri=Uri.parse(raw);return "https".equalsIgnoreCase(uri.getScheme())&&SelfRunRolloverPolicy.trustedChatgptServiceHost(uri.getHost());}catch(Throwable ignored){return false;}}
 private static boolean canonicalConversationRequest(WebResourceRequest request){if(request==null||request.getUrl()==null||!"POST".equalsIgnoreCase(request.getMethod()))return false;String path=request.getUrl().getPath();if(path==null)return false;while(path.length()>1&&path.endsWith("/"))path=path.substring(0,path.length()-1);return "/backend-api/f/conversation".equals(path);}
-private void markPostDispatchTransient(String kind,WebResourceRequest request){if(!postDispatchWindowActive())return;String safeKind=BootstrapResultPolicy.safe(kind,48),endpoint=canonicalConversationRequest(request)?"canonical_conversation":"other_service_resource",key=safeKind+":"+endpoint+":"+(request!=null&&request.isForMainFrame()?"main":"subframe");if(endpoint.equals("canonical_conversation")){postDispatchTransientSeen=true;postDispatchTransientKind=safeKind;}if(key.equals(postDispatchTransientLogKey))return;postDispatchTransientLogKey=key;runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+safeKind+";endpoint="+endpoint+";mainFrame="+(request!=null&&request.isForMainFrame()?1:0));}
+private void markPostDispatchTransient(String kind,WebResourceRequest request){if(!postDispatchWindowActive())return;String safeKind=BootstrapResultPolicy.safe(kind,48),endpoint=canonicalConversationRequest(request)?"canonical_conversation":"other_service_resource",key=safeKind+":"+endpoint+":"+(request!=null&&request.isForMainFrame()?"main":"subframe");if(endpoint.equals("canonical_conversation")){postDispatchTransientSeen=true;postDispatchTransientKind=safeKind;}if(!postDispatchTransientLogKeys.add(key))return;runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+safeKind+";endpoint="+endpoint+";mainFrame="+(request!=null&&request.isForMainFrame()?1:0));}
 private void markPostDispatchTransient(String kind){if(!postDispatchWindowActive())return;String safeKind=BootstrapResultPolicy.safe(kind,48),key=safeKind+":runtime";postDispatchTransientSeen=true;postDispatchTransientKind=safeKind;if(key.equals(postDispatchTransientLogKey))return;postDispatchTransientLogKey=key;runLog.record(store,"POST_DISPATCH_TRANSIENT","kind="+safeKind+";endpoint=runtime;mainFrame=0");}
 
     private void postWebCallback(Runnable callback, long delay) {int epoch = automationEpoch;String runId=store.runId();handler.postDelayed(() -> {if (epoch == automationEpoch && runId.equals(store.runId()) && canRun() && isWebAutomationPhase(store.phase())) callback.run();}, delay);}
