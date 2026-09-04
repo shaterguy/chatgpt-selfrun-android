@@ -27,6 +27,7 @@ import static org.junit.Assert.assertTrue;
 public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
     private static final String ORIGIN = "https://chatgpt.com/";
     private static final String CONVERSATION_ID = "inspector-compat-conversation";
+    private static final String TURN_TOKEN = "compat-turn-token";
 
     @Test public void nestedEncodedItemsSupportInspectorJsonUrlBase64AndSseWithoutEarlyComplete()
             throws Exception {
@@ -143,6 +144,12 @@ public final class WorkTurnProtocolInspectorCompatibilityWebViewTest {
         evaluateRaw(scenario, web, WorkTurnProtocolIngressScript.documentStartScript());
         assertEquals(ChatGptTurnProtocolScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunTurnProtocol.version"));
+        assertEquals("true", readString(scenario, web,
+                "String(window.__selfRunTurnProtocol.bindTurn('compat-run','" + TURN_TOKEN + "'))"));
+        assertEquals("compat-run",
+                state(scenario, web, "window.__selfRunTurnProtocol.snapshot()").getString("runId"));
+        assertEquals(TURN_TOKEN,
+                state(scenario, web, "window.__selfRunTurnProtocol.snapshot()").getString("turnToken"));
         assertEquals(WorkTurnProtocolIngressScript.ENGINE_VERSION,
                 readString(scenario, web, "window.__selfRunWorkTurnProtocolIngress.version"));
     }
