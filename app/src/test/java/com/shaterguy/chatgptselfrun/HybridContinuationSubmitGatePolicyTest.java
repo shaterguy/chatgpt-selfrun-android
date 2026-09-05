@@ -8,9 +8,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Keeps the HYBRID UI-mode gate ahead of composer mutation and final dispatch. */
+/** Keeps API-profile activation ahead of composer mutation and final dispatch. */
 public final class HybridContinuationSubmitGatePolicyTest {
     @Test public void serviceGatesBothPrepareAndSubmitBoundaries() throws Exception {
         String service = source("SelfRunService.java");
@@ -23,30 +24,25 @@ public final class HybridContinuationSubmitGatePolicyTest {
         assertTrue(service.contains(
                 "action=HybridRequestProfileScript.selectContinuationAndThen(store.runId(),action);"
                         + "beginPostDispatchNoStartWindow();evaluate(phase"));
-        assertTrue(service.contains("\"HYBRID_MODE_UNAVAILABLE\".equals(status)"));
         assertTrue(service.contains("\"HYBRID_PROFILE_UNAVAILABLE\".equals(status)"));
         assertTrue(service.contains("pauseError(status"));
     }
 
-    @Test public void gateUsesExactSemanticRadioAndDualSelectedStateReadback() throws Exception {
+    @Test public void gateUsesApiProfileReadbackWithoutAnyModeUiDependency() throws Exception {
         String gate = source("HybridRequestProfileScript.java");
-        assertTrue(gate.contains("button[role=\"radio\"][data-tpp-toggle-value]"));
-        assertTrue(gate.contains("getAttribute('aria-checked')"));
-        assertTrue(gate.contains("getAttribute('data-state')"));
-        assertTrue(gate.contains("groupRadios.length!==2"));
-        assertTrue(gate.contains("MODE_WAIT_MS=10000"));
-        assertTrue(gate.contains("state.boundary!==BOUNDARY"));
-        assertTrue(gate.contains("unavailableAfterWait('target_obstructed'"));
-        assertTrue(gate.contains("if(on(target)&&!off(counterpart))"));
-        assertTrue(gate.contains("if(!off(target)||!on(counterpart))"));
-        assertTrue(gate.contains("aria-disabled"));
-        assertTrue(gate.contains("elementFromPoint"));
-        assertTrue(gate.contains("hybridModeOutcome"));
+        assertTrue(gate.contains("hybrid-request-profile-v6"));
         assertTrue(gate.contains("bridge.selectStage('continuation')"));
-        assertTrue(gate.indexOf("if(on(target))")
-                < gate.indexOf("bridge.selectStage('continuation')"));
+        assertTrue(gate.contains("bridge.target()"));
+        assertTrue(gate.contains("profileMatches(target,endpoint)"));
+        assertTrue(gate.contains("target.bootstrapReasoning"));
+        assertTrue(gate.contains("target.continuationReasoning"));
+        assertTrue(gate.contains("hybridProfileOutcome"));
         assertTrue(gate.indexOf("bridge.selectStage('continuation')")
                 < gate.indexOf("forwarded=(__ACTION__)"));
+        assertFalse(gate.contains("button[role=\"radio\"]"));
+        assertFalse(gate.contains("MODE_WAIT_MS"));
+        assertFalse(gate.contains("__CALIBRATION_PRELUDE__"));
+        assertFalse(gate.contains("target.click()"));
     }
 
     private static String source(String file) throws Exception {

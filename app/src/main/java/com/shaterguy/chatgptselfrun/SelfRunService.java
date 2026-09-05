@@ -943,7 +943,7 @@ private void evaluate(String phase,String script){
             }
             BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
             JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
-            recordHybridModeUiResult(phase,result);
+            recordHybridProfileResult(phase,result);
             if(isContinuationDiagnosticPhase(phase)&&SelfRunRolloverPolicy.continuationProgressStatus(status))rollover.clearLocalFailures(runId);
             if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
                 BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
@@ -959,8 +959,8 @@ private void evaluate(String phase,String script){
             if("TURN_PROTOCOL_UNAVAILABLE".equals(status)){
                 pauseError("TURN_PROTOCOL_UNAVAILABLE","응답 프로토콜을 제출 전에 준비하지 못했습니다.");return;
             }
-            if("HYBRID_MODE_UNAVAILABLE".equals(status)||"HYBRID_PROFILE_UNAVAILABLE".equals(status)){
-                pauseError(status,"HYBRID 후속 턴의 목표 UI 모드와 요청 프로필을 제출 전에 확인하지 못했습니다.");return;
+            if("HYBRID_PROFILE_UNAVAILABLE".equals(status)){
+                pauseError(status,"HYBRID 후속 턴의 API 요청 프로필을 제출 전에 확인하지 못했습니다.");return;
             }
             if("TARGET_ERROR".equals(status)){
                 recordContinuationTargetError(phase,detail);
@@ -1110,21 +1110,20 @@ private String bootstrapScope(){return SelfRunScript.isGeneralChatUrl(store.proj
 
 private static boolean isConversationLocalFailureStatus(String status){return SelfRunRolloverPolicy.hardContinuationFailureStatus(status);}
 
-private void recordHybridModeUiResult(String phase,JSONObject result){
+private void recordHybridProfileResult(String phase,JSONObject result){
     if(!HybridRunProfileStore.MODE_HYBRID.equals(store.mode())
             ||!SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)||result==null)return;
     JSONObject diagnostics=result.optJSONObject("diagnostics");
-    if(diagnostics==null||!diagnostics.optBoolean("hybridModeGate",false))return;
-    String boundary=hybridModeDiagnosticToken(diagnostics,"hybridModeBoundary");
-    String source=hybridModeDiagnosticToken(diagnostics,"hybridModeSource");
-    String target=hybridModeDiagnosticToken(diagnostics,"hybridModeTarget");
-    String observed=hybridModeDiagnosticToken(diagnostics,"hybridModeObserved");
-    String outcome=hybridModeDiagnosticToken(diagnostics,"hybridModeOutcome");
-    String reason=hybridModeDiagnosticToken(diagnostics,"hybridModeReason");
-    runLog.record(store,"HYBRID_MODE_UI","boundary="+boundary+";source="+source
+    if(diagnostics==null||!diagnostics.optBoolean("hybridProfileGate",false))return;
+    String boundary=hybridProfileDiagnosticToken(diagnostics,"hybridProfileBoundary");
+    String target=hybridProfileDiagnosticToken(diagnostics,"hybridProfileTarget");
+    String observed=hybridProfileDiagnosticToken(diagnostics,"hybridProfileObserved");
+    String outcome=hybridProfileDiagnosticToken(diagnostics,"hybridProfileOutcome");
+    String reason=hybridProfileDiagnosticToken(diagnostics,"hybridProfileReason");
+    runLog.record(store,"HYBRID_REQUEST_PROFILE","boundary="+boundary
             +";target="+target+";observed="+observed+";outcome="+outcome+";reason="+reason);
 }
-private static String hybridModeDiagnosticToken(JSONObject diagnostics,String key){
+private static String hybridProfileDiagnosticToken(JSONObject diagnostics,String key){
     String value=diagnostics.optString(key,"");
     return value.matches("[A-Za-z0-9_.-]{1,64}")?value:"invalid";
 }

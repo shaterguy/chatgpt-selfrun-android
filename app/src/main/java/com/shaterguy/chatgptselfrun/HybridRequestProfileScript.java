@@ -7,9 +7,9 @@ import androidx.webkit.WebViewFeature;
 
 import java.util.Set;
 
-/** HYBRID profile stage plus a verified ChatGPT mode-radio gate for continuation. */
+/** HYBRID profile stage plus an API-profile readback gate for continuation. */
 final class HybridRequestProfileScript {
-    private static final String VERSION = "hybrid-request-profile-v5";
+    private static final String VERSION = "hybrid-request-profile-v6";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -38,134 +38,67 @@ final class HybridRequestProfileScript {
             throw new IllegalArgumentException("valid HYBRID run id required");
         }
         if (!"prepare".equals(boundary) && !"submit".equals(boundary)) {
-            throw new IllegalArgumentException("valid HYBRID mode boundary required");
+            throw new IllegalArgumentException("valid HYBRID profile boundary required");
         }
         if (actionScript == null || actionScript.isEmpty()) {
             throw new IllegalArgumentException("continuation action required");
         }
         String script = """
-                (()=>{__CALIBRATION_PRELUDE__
+                (()=>{
                   const RUN_ID=__RUN_ID__,BOUNDARY=__BOUNDARY__,BRIDGE_VERSION=__VERSION__;
-                  const MODE_WAIT_MS=10000;
                   const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,diagnostics,url:location.href});
                   const norm=value=>String(value??'').trim().toLowerCase();
                   const bridge=window.__selfRunHybridProfileBridge;
                   if(!bridge||bridge.version!==BRIDGE_VERSION||bridge.runId!==RUN_ID
-                    ||typeof bridge.selectStage!=='function'||typeof bridge.continuation!=='function')
+                    ||typeof bridge.selectStage!=='function'||typeof bridge.continuation!=='function'
+                    ||typeof bridge.target!=='function')
                     return result('HYBRID_PROFILE_UNAVAILABLE','native HYBRID stage bridge unavailable');
                   const endpoint=bridge.continuation(),desired=norm(endpoint?.mode);
                   if(desired!=='chat'&&desired!=='work')
                     return result('HYBRID_PROFILE_UNAVAILABLE','continuation endpoint unavailable');
-                  const wantedValue=desired==='chat'?'chatgpt':'work';
-                  const calibrationKey=desired==='chat'?'MODE_CHAT':'MODE_WORK';
-                  const radioSelector='button[role="radio"][data-tpp-toggle-value]';
-                  const exact=e=>!!e&&__srVisible(e)&&e.matches?.(radioSelector)
-                    &&norm(e.getAttribute('data-tpp-toggle-value'))===wantedValue;
-                  const calibrated=typeof __srFind==='function'?__srFind(calibrationKey):null;
-                  const exactNodes=[...document.querySelectorAll(radioSelector)]
-                    .filter(__srVisible).filter(exact);
-                  let target=null,source='';
-                  if(exact(calibrated)){target=calibrated;source='calibration';}
-                  else if(exactNodes.length===1){target=exactNodes[0];source='semantic';}
-                  const state=window.__selfRunHybridModeUi;
-                  const fresh=!state||state.runId!==RUN_ID||state.desired!==desired
-                    ||state.boundary!==BOUNDARY||!Number.isFinite(state.startedAt);
-                  const gate=fresh
-                    ?(window.__selfRunHybridModeUi={runId:RUN_ID,desired,boundary:BOUNDARY,
-                        startedAt:Date.now(),clicks:0,lastClickAt:0})
-                    :state;
+                  const profileMatches=(target,expected)=>!!target&&target.ready===true
+                    &&target.runId===RUN_ID&&norm(target.mode)===norm(expected.mode)
+                    &&norm(target.reasoning)===norm(expected.reasoning)
+                    &&(expected.mode!=='chat'||(
+                      norm(target.bootstrapReasoning)===norm(expected.reasoning)
+                      &&norm(target.continuationReasoning)===norm(expected.reasoning)))
+                    &&(expected.mode==='chat'||norm(target.model)===norm(expected.model));
                   const diagnostics=(outcome,reason,observed='unknown')=>({
-                    hybridModeGate:true,hybridModeBoundary:BOUNDARY,hybridModeSource:source||'none',
-                    hybridModeTarget:desired,hybridModeObserved:observed,
-                    hybridModeOutcome:outcome,hybridModeReason:reason
+                    hybridProfileGate:true,hybridProfileBoundary:BOUNDARY,
+                    hybridProfileTarget:desired,hybridProfileObserved:observed,
+                    hybridProfileOutcome:outcome,hybridProfileReason:reason
                   });
-                  const unavailableAfterWait=(reason,detail)=>{
-                    const waiting=Date.now()-gate.startedAt<MODE_WAIT_MS;
-                    return result(waiting?'UI_WAIT':'HYBRID_MODE_UNAVAILABLE',detail,
-                      diagnostics(waiting?'waiting':'blocked',reason));
-                  };
-                  if(!target){
-                    const reason=exactNodes.length>1?'ambiguous_target':'target_missing';
-                    if(reason==='target_missing')
-                      return unavailableAfterWait(reason,'HYBRID continuation mode radio unavailable');
-                    return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode radio unavailable',
-                      diagnostics('blocked',reason));
+                  try{bridge.selectStage('continuation');}
+                  catch(_){return result('HYBRID_PROFILE_UNAVAILABLE','continuation profile activation failed',
+                    diagnostics('blocked','profile_activation_failed'));}
+                  if(bridge.stage?.()!=='continuation')
+                    return result('HYBRID_PROFILE_UNAVAILABLE','continuation stage readback failed',
+                      diagnostics('blocked','stage_readback_failed'));
+                  const target=bridge.target();
+                  if(!profileMatches(target,endpoint))
+                    return result('HYBRID_PROFILE_UNAVAILABLE','continuation profile readback failed',
+                      diagnostics('blocked','profile_readback_failed',norm(target?.mode)||'unknown'));
+                  let forwarded;
+                  try{forwarded=(__ACTION__);}catch(_){
+                    return result('SCRIPT_ERROR','continuation action failed',
+                      diagnostics('blocked','action_exception',desired));
                   }
-                  const group=target.closest?.('[role="radiogroup"]');
-                  if(!group||!__srVisible(group))
-                    return unavailableAfterWait('group_missing',
-                      'HYBRID continuation mode group unavailable');
-                  const groupRadios=[...group.querySelectorAll(radioSelector)].filter(__srVisible);
-                  const chatRadios=groupRadios.filter(e=>norm(e.getAttribute('data-tpp-toggle-value'))==='chatgpt');
-                  const workRadios=groupRadios.filter(e=>norm(e.getAttribute('data-tpp-toggle-value'))==='work');
-                  if(groupRadios.length!==2||chatRadios.length!==1||workRadios.length!==1)
-                    return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode group is ambiguous',
-                      diagnostics('blocked','group_ambiguous'));
-                  const chat=chatRadios[0],work=workRadios[0];
-                  const counterpart=desired==='chat'?work:chat;
-                  const on=e=>norm(e.getAttribute('aria-checked'))==='true'
-                    &&norm(e.getAttribute('data-state'))==='on';
-                  const off=e=>norm(e.getAttribute('aria-checked'))==='false'
-                    &&norm(e.getAttribute('data-state'))==='off';
-                  const observed=on(chat)&&off(work)?'chat':on(work)&&off(chat)?'work':'conflict';
-                  if(on(target)&&!off(counterpart))
-                    return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode state conflicts',
-                      diagnostics('blocked','state_conflict',observed));
-                  if(on(target)){
-                    gate.clicks=0;gate.lastClickAt=0;
-                    try{bridge.selectStage('continuation');}
-                    catch(_){return result('HYBRID_PROFILE_UNAVAILABLE','continuation profile activation failed',
-                      diagnostics('blocked','profile_activation_failed',observed));}
-                    if(bridge.stage?.()!=='continuation')
-                      return result('HYBRID_PROFILE_UNAVAILABLE','continuation stage readback failed',
-                        diagnostics('blocked','profile_readback_failed',observed));
-                    let forwarded;
-                    try{forwarded=(__ACTION__);}catch(_){
-                      return result('SCRIPT_ERROR','continuation action failed',
-                        diagnostics('blocked','action_exception',observed));
-                    }
-                    try{
-                      const parsed=typeof forwarded==='string'?JSON.parse(forwarded):forwarded;
-                      if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
-                        return result('SCRIPT_ERROR','continuation action result invalid',
-                          diagnostics('blocked','action_result_invalid',observed));
-                      const prior=parsed.diagnostics&&typeof parsed.diagnostics==='object'
-                        &&!Array.isArray(parsed.diagnostics)?parsed.diagnostics:{};
-                      parsed.diagnostics={...prior,...diagnostics('verified','checked_readback',observed)};
-                      return JSON.stringify(parsed);
-                    }catch(_){
-                      return result('SCRIPT_ERROR','continuation action result unreadable',
-                        diagnostics('blocked','action_result_unreadable',observed));
-                    }
+                  try{
+                    const parsed=typeof forwarded==='string'?JSON.parse(forwarded):forwarded;
+                    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
+                      return result('SCRIPT_ERROR','continuation action result invalid',
+                        diagnostics('blocked','action_result_invalid',desired));
+                    const prior=parsed.diagnostics&&typeof parsed.diagnostics==='object'
+                      &&!Array.isArray(parsed.diagnostics)?parsed.diagnostics:{};
+                    parsed.diagnostics={...prior,...diagnostics('verified','profile_readback',desired)};
+                    return JSON.stringify(parsed);
+                  }catch(_){
+                    return result('SCRIPT_ERROR','continuation action result unreadable',
+                      diagnostics('blocked','action_result_unreadable',desired));
                   }
-                  if(!off(target)||!on(counterpart))
-                    return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode state unreadable',
-                      diagnostics('blocked','state_invalid',observed));
-                  if(target.disabled||norm(target.getAttribute('aria-disabled'))==='true')
-                    return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode radio disabled',
-                      diagnostics('blocked','target_disabled',observed));
-                  const rect=target.getBoundingClientRect(),hit=document.elementFromPoint(
-                    rect.left+rect.width/2,rect.top+rect.height/2);
-                  if(!hit||!(hit===target||target.contains(hit)||hit.contains(target)))
-                    return unavailableAfterWait('target_obstructed',
-                      'HYBRID continuation mode radio obstructed');
-                  const now=Date.now();
-                  if(gate.clicks>=3)
-                    return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode did not switch',
-                      diagnostics('blocked','click_not_applied',observed));
-                  if(now-gate.lastClickAt<1000)
-                    return result('UI_WAIT','HYBRID continuation mode readback pending',
-                      diagnostics('waiting','readback_pending',observed));
-                  gate.clicks+=1;gate.lastClickAt=now;
-                  try{target.click();}
-                  catch(_){return result('HYBRID_MODE_UNAVAILABLE','HYBRID continuation mode click failed',
-                    diagnostics('blocked','click_exception',observed));}
-                  return result('UI_WAIT','HYBRID continuation mode switching',
-                    diagnostics('switching','radio_clicked',observed));
                 })()
                 """;
         return script
-                .replace("__CALIBRATION_PRELUDE__", WebUiCalibrationDom.runtimePrelude())
                 .replace("__RUN_ID__", q(runId))
                 .replace("__BOUNDARY__", q(boundary))
                 .replace("__VERSION__", q(VERSION))
@@ -192,7 +125,11 @@ final class HybridRequestProfileScript {
                   engine.installRegistry(REGISTRY);
                   let stage=__INITIAL_STAGE__;
                   let lastDecision={stage,reason:'native-stage-initial'};
-                  const endpointMatches=(t,e)=>!!t&&t.ready===true&&t.runId===RUN_ID&&t.mode===e.mode&&norm(t.reasoning)===e.reasoning&&(e.mode==='chat'||norm(t.model)===e.model);
+                  const endpointMatches=(t,e)=>!!t&&t.ready===true&&t.runId===RUN_ID&&t.mode===e.mode
+                    &&norm(t.reasoning)===e.reasoning
+                    &&(e.mode!=='chat'||(norm(t.bootstrapReasoning)===e.reasoning
+                      &&norm(t.continuationReasoning)===e.reasoning))
+                    &&(e.mode==='chat'||norm(t.model)===e.model);
                   const configure=(e,envelope)=>{
                     const expectedEnvelope=envelope===true;
                     const current=engine.target();
@@ -234,7 +171,7 @@ final class HybridRequestProfileScript {
                   const innerOpen=XMLHttpRequest.prototype.open,innerSend=XMLHttpRequest.prototype.send,xhrMeta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){xhrMeta.set(this,{method:String(method||''),url:String(url||'')});return innerOpen.call(this,method,url,...rest);};
                   XMLHttpRequest.prototype.send=function(body){const m=xhrMeta.get(this)||{method:'',url:''};if(norm(m.method)==='post'&&sameOrigin(m.url)&&conversationRoute(m.url)){prepare();}return innerSend.call(this,body);};
-                  window.__selfRunHybridProfileBridge={version:__VERSION__,runId:RUN_ID,stage:()=>stage,selectStage,lastDecision:()=>({...lastDecision}),bootstrap:()=>({...BOOTSTRAP}),continuation:()=>({...CONTINUATION})};
+                  window.__selfRunHybridProfileBridge={version:__VERSION__,runId:RUN_ID,stage:()=>stage,selectStage,lastDecision:()=>({...lastDecision}),bootstrap:()=>({...BOOTSTRAP}),continuation:()=>({...CONTINUATION}),target:()=>({...engine.target()})};
                 })();
                 """
                 .replace("__VERSION__", q(VERSION))

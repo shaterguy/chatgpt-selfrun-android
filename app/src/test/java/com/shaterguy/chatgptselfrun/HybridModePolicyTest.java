@@ -44,6 +44,8 @@ public final class HybridModePolicyTest {
         assertTrue(script.contains("const CONTINUATION="));
         assertTrue(script.contains("engine.begin(e.mode,RUN_ID)"));
         assertTrue(script.contains("endpointMatches(current,e)"));
+        assertTrue(script.contains("bootstrapReasoning"));
+        assertTrue(script.contains("continuationReasoning"));
         assertTrue(script.contains("engine.setHybridContinuationEnvelope(expectedEnvelope)"));
         assertTrue(script.contains("next.hybridContinuation!==expectedEnvelope"));
         assertFalse(script.contains("SELF_RUN_BOOTSTRAP"));
@@ -68,14 +70,16 @@ public final class HybridModePolicyTest {
         assertTrue(script.contains("stage:()=>stage"));
     }
 
-    @Test public void nativeContinuationSelectionWrapsTheActualSubmitAction() {
+    @Test public void nativeContinuationProfileWrapsTheActualSubmitAction() {
         String action = "window.__submitted=true";
         String script = HybridRequestProfileScript.selectContinuationAndThen(RUN_ID, action);
         assertTrue(script.contains("const RUN_ID=" + SelfRunScript.quote(RUN_ID)));
         assertTrue(script.contains("bridge.runId!==RUN_ID"));
         assertTrue(script.contains("bridge.selectStage('continuation')"));
+        assertTrue(script.contains("bridge.target()"));
         assertTrue(script.indexOf("bridge.selectStage('continuation')")
                 < script.indexOf(action));
+        assertFalse(script.contains("button[role=\"radio\"]"));
     }
 
     @Test public void hybridWorkTitleMatchingIsExact() {

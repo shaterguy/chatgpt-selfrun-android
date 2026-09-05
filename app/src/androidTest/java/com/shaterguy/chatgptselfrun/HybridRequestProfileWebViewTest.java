@@ -185,6 +185,14 @@ public final class HybridRequestProfileWebViewTest {
         }
         assertEquals("true", read(scenario, web, "String(window.hybridPairDone)"));
         assertEquals("", read(scenario, web, "String(window.hybridPairError||'')"));
+        JSONObject prepared = new JSONObject(read(scenario, web,
+                HybridRequestProfileScript.prepareContinuationAndThen(selection.runId,
+                        "(()=>JSON.stringify({status:'READY_TO_SUBMIT'}))()")));
+        assertEquals("READY_TO_SUBMIT", prepared.getString("status"));
+        JSONObject submitted = new JSONObject(read(scenario, web,
+                HybridRequestProfileScript.selectContinuationAndThen(selection.runId,
+                        "(()=>{window.sendXhr('continuation');return JSON.stringify({status:'CONTINUE_CLICKED'});})()")));
+        assertEquals("CONTINUE_CLICKED", submitted.getString("status"));
         String records = read(scenario, web,
                 "JSON.stringify(window.records.map(record=>({url:new URL(record.url).pathname,body:JSON.parse(record.body)})))");
         JSONArray result = new JSONArray(records);
@@ -249,21 +257,19 @@ public final class HybridRequestProfileWebViewTest {
                   conversation_mode:{kind:'primary_assistant'},custom:{value:'preserve-me'},
                   model:'source-model',thinking_effort:'source-effort',
                   conversation_origin:'source-origin',service_tier:'source-tier'};
-                const sendFetch=opaque=>{
+                window.sendFetch=opaque=>{
                   const source=new Request('/backend-api/f/conversation',{method:'POST',
                     headers:{'Content-Type':'application/json'},
                     body:JSON.stringify({...base,opaque:'request-source'})});
                   return fetch(source,{method:'POST',headers:{'Content-Type':'application/json'},
                     body:JSON.stringify({...base,opaque})});
                 };
-                const sendXhr=opaque=>{const xhr=new XMLHttpRequest();
+                window.sendXhr=opaque=>{const xhr=new XMLHttpRequest();
                   xhr.open('POST','/backend-api/f/conversation');
                   xhr.setRequestHeader?.('Content-Type','application/json');
                   xhr.send(JSON.stringify({...base,opaque}));};
                 (async()=>{
-                  await sendFetch('bootstrap');
-                  window.__selfRunHybridProfileBridge.selectStage('continuation');
-                  sendXhr('continuation');
+                  await window.sendFetch('bootstrap');
                   window.hybridPairDone=true;
                 })().catch(error=>{window.hybridPairError=String(error?.message||error);window.hybridPairDone=true;});
                 return 'started';})()
