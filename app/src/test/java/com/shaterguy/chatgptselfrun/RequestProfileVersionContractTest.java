@@ -12,9 +12,9 @@ import static org.junit.Assert.*;
 /** Prevents producer/consumer registry engine drift. */
 public final class RequestProfileVersionContractTest {
     @Test public void producerOwnsOneCanonicalRegistryEngineVersion() throws Exception {
-        assertEquals("profile-registry-v2", RequestProfileScript.ENGINE_VERSION);
+        assertEquals("profile-registry-v3", RequestProfileScript.ENGINE_VERSION);
         String producer = source("RequestProfileScript.java");
-        assertEquals(1, occurrences(producer, "profile-registry-v2"));
+        assertEquals(1, occurrences(producer, "profile-registry-v3"));
         assertTrue(producer.contains("static final String ENGINE_VERSION"));
         assertTrue(producer.contains("__ENGINE_VERSION__"));
         assertTrue(producer.contains("ProfileRegistry.runtimeJson()"));
@@ -60,7 +60,11 @@ public final class RequestProfileVersionContractTest {
         assertTrue(script.contains("if(state.target&&!targetValid(state.target))"));
         assertTrue(script.contains("target_deleted_or_unsupported"));
         assertTrue(script.contains("profile_deleted_or_unsupported"));
-        assertTrue(script.contains("profileForBody=body=>"));
+        assertTrue(script.contains("profileForBody=(body,t)=>"));
+        assertTrue(script.contains("const targetSnapshot=()=>"));
+        assertTrue(script.contains("const target=targetSnapshot();"));
+        assertTrue(script.indexOf("const target=targetSnapshot();") < script.indexOf("await request.clone().text()"));
+        assertTrue(script.contains("patchObject(parsed,targetSnapshot())"));
         assertTrue(script.contains("latestMessageText"));
         assertTrue(script.contains("setChatProfiles"));
     }

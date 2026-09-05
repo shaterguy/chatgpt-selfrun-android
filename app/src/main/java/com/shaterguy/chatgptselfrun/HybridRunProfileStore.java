@@ -246,8 +246,7 @@ final class HybridRunProfileStore {
             if (!preferences.edit().putString(KEY_CURRENT_RUN, runId).commit()) return;
         }
         if (!selection.continuationStage()
-                && SelfRunStore.PHASE_SEND_CONTINUE.equals(runState.getString("phase", ""))
-                && DriveSignalParser.Type.TURN_COMPLETED.name().equals(runState.getString("pendingDriveSignalType", ""))) {
+                && SelfRunStore.PHASE_SEND_CONTINUE.equals(runState.getString("phase", ""))) {
             Selection continued = selection.withStage(STAGE_CONTINUATION);
             preferences.edit().putString(RUN_PREFIX + runId, continued.toJson(true).toString()).commit();
         }

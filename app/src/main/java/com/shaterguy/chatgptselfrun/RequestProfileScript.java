@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** Document-start request profile registry executor plus one-shot outgoing submission capture. */
 final class RequestProfileScript {
-    static final String ENGINE_VERSION = "profile-registry-v2";
+    static final String ENGINE_VERSION = "profile-registry-v3";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -149,7 +149,8 @@ final class RequestProfileScript {
                   const setWorkReasoning=reasoning=>{refreshRegistry();const t=requireTarget('work'),r=norm(reasoning);if(!t.model)fail('work_model_missing');if(!resolveProfile('work',t.model,r))fail('unsupported_work_profile');t.reasoning=r;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'work',model:t.model,reasoning:r};return true;};
                   const latestMessageText=body=>{try{const list=Array.isArray(body?.messages)?body.messages:[];return list.length?JSON.stringify(list[list.length-1]):'';}catch(_){return'';}};
                   const chatReasoningForBody=(body,t)=>{const latest=latestMessageText(body);const bootstrap=latest.includes('SELF_RUN_BOOTSTRAP')&&(!t.runId||latest.includes(t.runId));return bootstrap?norm(t.bootstrapReasoning||t.reasoning):norm(t.continuationReasoning||t.reasoning);};
-                  const profileForBody=body=>{refreshRegistry();const t=state.target;if(!t||!t.ready)fail('target_not_ready');if(t.mode==='chat'){const reasoning=chatReasoningForBody(body,t),p=resolveProfile('chat','',reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:reasoning};}const p=resolveProfile('work',t.model,t.reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:t.reasoning};};
+                  const targetSnapshot=()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning,runId:state.target.runId,ready:state.target.ready}:null;
+                  const profileForBody=(body,t)=>{refreshRegistry();if(!t||!t.ready)fail('target_not_ready');if(t.mode==='chat'){const reasoning=chatReasoningForBody(body,t),p=resolveProfile('chat','',reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:reasoning};}const p=resolveProfile('work',t.model,t.reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:t.reasoning};};
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
                   const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/\\/+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
                   const strip=obj=>{const copy={...obj};for(const key of CONTROL)delete copy[key];return copy;};
@@ -175,22 +176,23 @@ final class RequestProfileScript {
                   const cancelCapture=()=>{state.capture={armed:false,mode:'',value:null};state.last={ok:true,reason:'capture_cancelled'};return true;};
                   const consumeCapture=()=>{const value=state.capture.value;state.capture.value=null;return value;};
                   const parseSubmission=text=>{if(typeof text!=='string')fail('non_text_conversation_body');let body;try{body=JSON.parse(text);}catch(_){fail('invalid_conversation_json');}if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))fail('unknown_conversation_schema');return body;};
-                  const patchObject=body=>{const before=JSON.stringify(strip(body)),out={...body},planned=profileForBody(body),ops=planned.profile.operations;for(const op of ops){if(!CONTROL.includes(op.path))fail('control_allowlist_violation');if(op.op==='SET')out[op.path]=op.value;else if(op.op==='REMOVE')delete out[op.path];else fail('unknown_operation');}if(JSON.stringify(strip(out))!==before)fail('data_plane_changed');const t=state.target;state.last={ok:true,reason:'patched',mode:t.mode,model:t.model,reasoning:planned.effectiveReasoning,bootstrapReasoning:t.bootstrapReasoning,continuationReasoning:t.continuationReasoning,ops:ops.map(op=>op.op+':'+op.path),schema:'messages-array'};return out;};
+                  const patchObject=(body,t)=>{const before=JSON.stringify(strip(body)),out={...body},planned=profileForBody(body,t),ops=planned.profile.operations;for(const op of ops){if(!CONTROL.includes(op.path))fail('control_allowlist_violation');if(op.op==='SET')out[op.path]=op.value;else if(op.op==='REMOVE')delete out[op.path];else fail('unknown_operation');}if(JSON.stringify(strip(out))!==before)fail('data_plane_changed');state.last={ok:true,reason:'patched',mode:t.mode,model:t.model,reasoning:planned.effectiveReasoning,bootstrapReasoning:t.bootstrapReasoning,continuationReasoning:t.continuationReasoning,ops:ops.map(op=>op.op+':'+op.path),schema:'messages-array'};return out;};
                   const nativeFetch=window.fetch.bind(window);
                   const fetchProbe=(input,init)=>{try{const isReq=typeof Request!=='undefined'&&input instanceof Request;const url=isReq?input.url:String(input??'');const method=init&&init.method!==undefined?init.method:(isReq?input.method:'GET');return{url,method,eligible:norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url)};}catch(_){return{url:'',method:'',eligible:false};}};
                   window.fetch=async function(input,init){
                     const probe=fetchProbe(input,init);if(!probe.eligible)return nativeFetch(input,init);
+                    const target=targetSnapshot();
                     let request;try{const source=typeof Request!=='undefined'&&input instanceof Request?input.clone():input;request=new Request(source,init);}catch(_){try{fail('request_construction_failed');}catch(error){return Promise.reject(error);}}
                     let text='';try{text=await request.clone().text();}catch(_){try{fail('request_body_unreadable');}catch(error){return Promise.reject(error);}}
                     let body;try{body=parseSubmission(text);}catch(error){return Promise.reject(error);}
                     if(state.capture.armed){try{captureBody(body);}catch(error){return Promise.reject(error);}return nativeFetch(input,init);}
-                    let patched;try{patched=JSON.stringify(patchObject(body));}catch(error){return Promise.reject(error);}
+                    let patched;try{patched=JSON.stringify(patchObject(body,target));}catch(error){return Promise.reject(error);}
                     try{return nativeFetch(new Request(request,{body:patched}));}catch(_){try{fail('patched_request_construction_failed');}catch(error){return Promise.reject(error);}}
                   };
                   const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send,meta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){meta.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
-                  XMLHttpRequest.prototype.send=function(body){const m=meta.get(this)||{method:'',url:''};if(norm(m.method)!=='post'||!sameOrigin(m.url)||!conversationRoute(m.url))return nativeSend.call(this,body);let parsed=parseSubmission(body);if(state.capture.armed){captureBody(parsed);return nativeSend.call(this,body);}return nativeSend.call(this,JSON.stringify(patchObject(parsed)));};
-                  window.__selfRunRequestProfileEngine={version:__ENGINE_VERSION__,installRegistry,begin,setChatReasoning,setChatProfiles,setWorkModel,setWorkReasoning,armCapture,cancelCapture,consumeCapture,diagnostics:()=>({...state.last}),target:()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning,runId:state.target.runId,ready:state.target.ready}:null};
+                  XMLHttpRequest.prototype.send=function(body){const m=meta.get(this)||{method:'',url:''};if(norm(m.method)!=='post'||!sameOrigin(m.url)||!conversationRoute(m.url))return nativeSend.call(this,body);let parsed=parseSubmission(body);if(state.capture.armed){captureBody(parsed);return nativeSend.call(this,body);}return nativeSend.call(this,JSON.stringify(patchObject(parsed,targetSnapshot())));};
+                  window.__selfRunRequestProfileEngine={version:__ENGINE_VERSION__,installRegistry,begin,setChatReasoning,setChatProfiles,setWorkModel,setWorkReasoning,armCapture,cancelCapture,consumeCapture,diagnostics:()=>({...state.last}),target:targetSnapshot};
                 })();
                 """.replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION));
     }

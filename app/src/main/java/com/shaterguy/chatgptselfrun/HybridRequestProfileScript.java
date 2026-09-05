@@ -7,9 +7,9 @@ import androidx.webkit.WebViewFeature;
 
 import java.util.Set;
 
-/** HYBRID first-submission bootstrap -> durable continuation request-profile switch. */
+/** HYBRID request profiles selected only by the durable native bootstrap/continuation stage. */
 final class HybridRequestProfileScript {
-    private static final String VERSION = "hybrid-request-profile-v2";
+    private static final String VERSION = "hybrid-request-profile-v3";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -24,6 +24,23 @@ final class HybridRequestProfileScript {
         WebViewCompat.addDocumentStartJavaScript(webView, documentStartScript(selection), CHATGPT_ORIGINS);
     }
 
+    static String selectContinuationAndThen(String runId, String actionScript) {
+        if (!SelfRunProtocolRules.validRunId(runId)) {
+            throw new IllegalArgumentException("valid HYBRID run id required");
+        }
+        if (actionScript == null || actionScript.isEmpty()) {
+            throw new IllegalArgumentException("continuation action required");
+        }
+        return "(()=>{const bridge=window.__selfRunHybridProfileBridge;"
+                + "if(!bridge||bridge.version!==" + q(VERSION)
+                + "||bridge.runId!==" + q(runId)
+                + "||typeof bridge.selectStage!=='function')"
+                + "return JSON.stringify({status:'HYBRID_PROFILE_UNAVAILABLE',detail:'native HYBRID stage bridge unavailable'});"
+                + "if(!bridge.selectStage('continuation'))"
+                + "return JSON.stringify({status:'HYBRID_PROFILE_UNAVAILABLE',detail:'continuation profile activation failed'});"
+                + "return (" + actionScript + ");})()";
+    }
+
     static String documentStartScript(HybridRunProfileStore.Selection selection) {
         if (selection == null || !selection.valid()) throw new IllegalArgumentException("valid HYBRID selection required");
         HybridRunProfileStore.Endpoint bootstrap = selection.bootstrap;
@@ -31,29 +48,21 @@ final class HybridRequestProfileScript {
         boolean initialContinuation = selection.continuationStage();
         return """
                 (()=>{
-                  if(window.__selfRunHybridProfileBridge?.version===__VERSION__)return;
+                  if(window.__selfRunHybridProfileBridge?.version===__VERSION__&&window.__selfRunHybridProfileBridge?.runId===__RUN_ID__)return;
                   const RUN_ID=__RUN_ID__;
                   const REGISTRY=__REGISTRY__;
                   const BOOTSTRAP=__BOOTSTRAP__;
                   const CONTINUATION=__CONTINUATION__;
-                  const SWITCH_KEY='selfrun-drive:hybrid-switched:'+RUN_ID;
-                  const BOOTSTRAP_SEEN_KEY='selfrun-drive:hybrid-bootstrap-seen:'+RUN_ID;
-                  const BOOTSTRAP_FINGERPRINT_KEY='selfrun-drive:hybrid-bootstrap-fingerprint:'+RUN_ID;
                   const norm=v=>String(v??'').trim().toLowerCase();
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
                   const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/[/]+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
-                  const fingerprint=value=>{const text=String(value??'');let hash=2166136261;for(let i=0;i<text.length;i++){hash^=text.charCodeAt(i);hash=Math.imul(hash,16777619);}return(hash>>>0).toString(16);};
-                  let switched=__INITIAL_CONTINUATION__;
-                  let bootstrapSeen=__INITIAL_CONTINUATION__;
-                  let bootstrapFingerprint='';
-                  try{if(localStorage.getItem(SWITCH_KEY)==='1')switched=true;if(localStorage.getItem(BOOTSTRAP_SEEN_KEY)==='1')bootstrapSeen=true;bootstrapFingerprint=String(localStorage.getItem(BOOTSTRAP_FINGERPRINT_KEY)||'');}catch(_){}
-                  const markBootstrapSeen=value=>{bootstrapSeen=true;bootstrapFingerprint=value||bootstrapFingerprint;try{localStorage.setItem(BOOTSTRAP_SEEN_KEY,'1');if(bootstrapFingerprint)localStorage.setItem(BOOTSTRAP_FINGERPRINT_KEY,bootstrapFingerprint);}catch(_){}};
-                  const markSwitched=()=>{bootstrapSeen=true;switched=true;try{localStorage.setItem(BOOTSTRAP_SEEN_KEY,'1');localStorage.setItem(SWITCH_KEY,'1');}catch(_){}};
-                  const endpointMatches=(t,e)=>!!t&&t.ready===true&&t.mode===e.mode&&norm(t.reasoning)===e.reasoning&&(e.mode==='chat'||norm(t.model)===e.model);
+                  const engine=window.__selfRunRequestProfileEngine;
+                  if(!engine||engine.version!==__ENGINE_VERSION__)throw new Error('SELFRUN_HYBRID:profile_engine_unavailable');
+                  engine.installRegistry(REGISTRY);
+                  let stage=__INITIAL_STAGE__;
+                  let lastDecision={stage,reason:'native-stage-initial'};
+                  const endpointMatches=(t,e)=>!!t&&t.ready===true&&t.runId===RUN_ID&&t.mode===e.mode&&norm(t.reasoning)===e.reasoning&&(e.mode==='chat'||norm(t.model)===e.model);
                   const configure=e=>{
-                    const engine=window.__selfRunRequestProfileEngine;
-                    if(!engine||engine.version!==__ENGINE_VERSION__)throw new Error('SELFRUN_HYBRID:profile_engine_unavailable');
-                    engine.installRegistry(REGISTRY);
                     const current=engine.target();
                     if(endpointMatches(current,e))return false;
                     engine.begin(e.mode,RUN_ID);
@@ -63,44 +72,33 @@ final class HybridRequestProfileScript {
                     if(!endpointMatches(next,e))throw new Error('SELFRUN_HYBRID:target_readback_mismatch');
                     return true;
                   };
-                  const messageBatchText=body=>{try{return Array.isArray(body?.messages)?JSON.stringify(body.messages):'';}catch(_){return'';}};
-                  const decisionForBody=body=>{
-                    const batch=messageBatchText(body);
-                    const batchFingerprint=fingerprint(batch);
-                    const ownRun=batch.includes(RUN_ID);
-                    const isContinue=ownRun&&batch.includes('SELF_RUN_CONTINUE');
-                    const isBootstrap=ownRun&&batch.includes('SELF_RUN_BOOTSTRAP');
-                    if(switched)return{endpoint:CONTINUATION,stage:'continuation',reason:'already-switched',mark:'',fingerprint:batchFingerprint};
-                    if(isContinue)return{endpoint:CONTINUATION,stage:'continuation',reason:'explicit-continue',mark:'switch',fingerprint:batchFingerprint};
-                    if(isBootstrap)return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'explicit-bootstrap',mark:'bootstrap',fingerprint:batchFingerprint};
-                    if(bootstrapSeen&&bootstrapFingerprint&&batchFingerprint===bootstrapFingerprint)return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'bootstrap-retry',mark:'',fingerprint:batchFingerprint};
-                    if(bootstrapSeen)return{endpoint:CONTINUATION,stage:'continuation',reason:'post-bootstrap-submission',mark:'switch',fingerprint:batchFingerprint};
-                    return{endpoint:BOOTSTRAP,stage:'bootstrap',reason:'first-submission',mark:'bootstrap',fingerprint:batchFingerprint};
+                  const stageEndpoint=()=>stage==='continuation'?CONTINUATION:BOOTSTRAP;
+                  const selectStage=value=>{
+                    const next=norm(value);
+                    if(next!=='bootstrap'&&next!=='continuation')throw new Error('SELFRUN_HYBRID:invalid_native_stage');
+                    const endpoint=next==='continuation'?CONTINUATION:BOOTSTRAP;
+                    configure(endpoint);
+                    stage=next;
+                    lastDecision={stage,reason:'native-stage-selected'};
+                    return true;
                   };
-                  let lastDecision={stage:switched?'continuation':'bootstrap',reason:switched?'restored-continuation':'initial'};
-                  const prepare=text=>{
-                    let body;try{body=JSON.parse(String(text??''));}catch(_){return;}
-                    if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))return;
-                    const decision=decisionForBody(body);
-                    configure(decision.endpoint);
-                    if(decision.mark==='switch')markSwitched();else if(decision.mark==='bootstrap')markBootstrapSeen(decision.fingerprint);
-                    lastDecision={stage:decision.stage,reason:decision.reason};
+                  const prepare=()=>{
+                    configure(stageEndpoint());
+                    lastDecision={stage,reason:'native-stage-request'};
                   };
-                  if(switched)try{configure(CONTINUATION);}catch(_){}
+                  configure(stageEndpoint());
                   const innerFetch=window.fetch.bind(window);
-                  window.fetch=async function(input,init){
-                    let probe={eligible:false};
-                    try{const isReq=typeof Request!=='undefined'&&input instanceof Request;const url=isReq?input.url:String(input??'');const method=init&&init.method!==undefined?init.method:(isReq?input.method:'GET');probe={eligible:norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url)};}catch(_){}
-                    if(!probe.eligible)return innerFetch(input,init);
-                    let request;try{const source=typeof Request!=='undefined'&&input instanceof Request?input.clone():input;request=new Request(source,init);}catch(_){return innerFetch(input,init);}
-                    let text='';try{text=await request.clone().text();}catch(_){return innerFetch(input,init);}
-                    try{prepare(text);}catch(error){return Promise.reject(error);}
+                  window.fetch=function(input,init){
+                    let eligible=false;
+                    try{const isReq=typeof Request!=='undefined'&&input instanceof Request;const url=isReq?input.url:String(input??'');const method=init&&init.method!==undefined?init.method:(isReq?input.method:'GET');eligible=norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url);}catch(_){}
+                    if(!eligible)return innerFetch(input,init);
+                    try{prepare();}catch(error){return Promise.reject(error);}
                     return innerFetch(input,init);
                   };
                   const innerOpen=XMLHttpRequest.prototype.open,innerSend=XMLHttpRequest.prototype.send,xhrMeta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){xhrMeta.set(this,{method:String(method||''),url:String(url||'')});return innerOpen.call(this,method,url,...rest);};
-                  XMLHttpRequest.prototype.send=function(body){const m=xhrMeta.get(this)||{method:'',url:''};if(norm(m.method)==='post'&&sameOrigin(m.url)&&conversationRoute(m.url)){try{prepare(body);}catch(error){throw error;}}return innerSend.call(this,body);};
-                  window.__selfRunHybridProfileBridge={version:__VERSION__,runId:RUN_ID,switched:()=>switched,bootstrapSeen:()=>bootstrapSeen,lastDecision:()=>({...lastDecision}),bootstrap:()=>({...BOOTSTRAP}),continuation:()=>({...CONTINUATION})};
+                  XMLHttpRequest.prototype.send=function(body){const m=xhrMeta.get(this)||{method:'',url:''};if(norm(m.method)==='post'&&sameOrigin(m.url)&&conversationRoute(m.url)){prepare();}return innerSend.call(this,body);};
+                  window.__selfRunHybridProfileBridge={version:__VERSION__,runId:RUN_ID,stage:()=>stage,selectStage,lastDecision:()=>({...lastDecision}),bootstrap:()=>({...BOOTSTRAP}),continuation:()=>({...CONTINUATION})};
                 })();
                 """
                 .replace("__VERSION__", q(VERSION))
@@ -108,7 +106,7 @@ final class HybridRequestProfileScript {
                 .replace("__REGISTRY__", q(ProfileRegistry.runtimeJson()))
                 .replace("__BOOTSTRAP__", endpointJson(bootstrap))
                 .replace("__CONTINUATION__", endpointJson(continuation))
-                .replace("__INITIAL_CONTINUATION__", initialContinuation ? "true" : "false")
+                .replace("__INITIAL_STAGE__", q(initialContinuation ? "continuation" : "bootstrap"))
                 .replace("__ENGINE_VERSION__", q(RequestProfileScript.ENGINE_VERSION));
     }
 

@@ -27,34 +27,30 @@ public final class HybridModePolicyTest {
                 HybridRunProfileStore.STAGE_BOOTSTRAP, work, work).valid());
     }
 
-    @Test public void requestBridgeSwitchesAfterBootstrapSubmissionWithoutLastMessageDependency() {
+    @Test public void requestBridgeUsesOnlyNativeStageForProfileSelection() {
         HybridRunProfileStore.Endpoint chat = chatEndpoint();
         HybridRunProfileStore.Endpoint work = workEndpoint();
         HybridRunProfileStore.Selection selection = new HybridRunProfileStore.Selection(
                 RUN_ID, HybridRunProfileStore.STAGE_BOOTSTRAP, work, chat);
         String script = HybridRequestProfileScript.documentStartScript(selection);
-        assertTrue(script.contains("SELF_RUN_BOOTSTRAP"));
-        assertTrue(script.contains("SELF_RUN_CONTINUE"));
-        assertTrue(script.contains("hybrid-bootstrap-seen"));
-        assertTrue(script.contains("hybrid-bootstrap-fingerprint"));
-        assertTrue(script.contains("messageBatchText"));
-        assertTrue(script.contains("const fingerprint=value=>"));
-        assertTrue(script.contains("bootstrap-retry"));
-        assertTrue(script.contains("batchFingerprint===bootstrapFingerprint"));
-        assertTrue(script.contains("post-bootstrap-submission"));
-        assertTrue(script.contains("first-submission"));
-        assertTrue(script.contains("markBootstrapSeen(decision.fingerprint)"));
-        assertTrue(script.contains("markSwitched()"));
-        assertTrue(script.contains("configure(decision.endpoint)"));
-        assertTrue(script.indexOf("configure(decision.endpoint)") < script.indexOf("if(decision.mark==='switch')markSwitched()"));
-        assertTrue(script.contains("bootstrapSeen:()=>bootstrapSeen"));
+        assertTrue(script.contains("let stage='bootstrap'"));
+        assertTrue(script.contains("selectStage"));
+        assertTrue(script.contains("native-stage-selected"));
+        assertTrue(script.contains("native-stage-request"));
+        assertTrue(script.contains("configure(stageEndpoint())"));
+        assertTrue(script.contains("t.runId===RUN_ID"));
         assertTrue(script.contains("lastDecision:()=>({...lastDecision})"));
         assertTrue(script.contains("const BOOTSTRAP="));
         assertTrue(script.contains("const CONTINUATION="));
         assertTrue(script.contains("engine.begin(e.mode,RUN_ID)"));
         assertTrue(script.contains("endpointMatches(current,e)"));
-        assertFalse(script.contains("latestMessageText"));
-        assertFalse(script.contains("list[list.length-1]"));
+        assertFalse(script.contains("SELF_RUN_BOOTSTRAP"));
+        assertFalse(script.contains("SELF_RUN_CONTINUE"));
+        assertFalse(script.contains("messageBatchText"));
+        assertFalse(script.contains("fingerprint"));
+        assertFalse(script.contains("bootstrapSeen"));
+        assertFalse(script.contains("post-bootstrap-submission"));
+        assertFalse(script.contains("first-submission"));
         assertFalse(script.contains("querySelectorAll('button"));
         assertFalse(script.contains(".click()"));
     }
@@ -65,9 +61,18 @@ public final class HybridModePolicyTest {
         HybridRunProfileStore.Selection selection = new HybridRunProfileStore.Selection(
                 RUN_ID, HybridRunProfileStore.STAGE_CONTINUATION, work, chat);
         String script = HybridRequestProfileScript.documentStartScript(selection);
-        assertTrue(script.contains("let switched=true"));
-        assertTrue(script.contains("let bootstrapSeen=true"));
-        assertTrue(script.contains("if(switched)try{configure(CONTINUATION);}"));
+        assertTrue(script.contains("let stage='continuation'"));
+        assertTrue(script.contains("configure(stageEndpoint())"));
+        assertTrue(script.contains("stage:()=>stage"));
+    }
+
+    @Test public void nativeContinuationSelectionWrapsTheActualSubmitAction() {
+        String action = "window.__submitted=true";
+        String script = HybridRequestProfileScript.selectContinuationAndThen(RUN_ID, action);
+        assertTrue(script.contains("bridge.runId===" + SelfRunScript.quote(RUN_ID)));
+        assertTrue(script.contains("bridge.selectStage('continuation')"));
+        assertTrue(script.indexOf("bridge.selectStage('continuation')")
+                < script.indexOf(action));
     }
 
     @Test public void hybridWorkTitleMatchingIsExact() {
