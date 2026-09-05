@@ -394,6 +394,7 @@ public final class SelfRunRestartActivity extends Activity {
                     .putLong("createdAt", createdAt > 0L ? createdAt : now)
                     .putLong("phaseStartedAt", now)
                     .putString("mode", mode)
+                    .putBoolean("legacyChatSelectionPending:" + runId, snapshot.optBoolean("legacyChatSelectionPending", false))
                     .putString("projectUrl", snapshot.optString("projectUrl", ""))
                     .putString("requirement", snapshot.optString("requirement", ""))
                     .putString("conversationUrl", snapshot.optString("conversationUrl", ""))
@@ -459,6 +460,7 @@ public final class SelfRunRestartActivity extends Activity {
             String role = snapshot.optString("role", "");
             if (role.isEmpty()) editor.remove("role"); else editor.putString("role", role);
             if (!editor.commit()) throw new IllegalStateException("historical run state was not persisted");
+            LegacyRunModeMigration.persistCurrentChatSelection(this, runId);
             history.sync(new SelfRunStore(this));
         }
     }

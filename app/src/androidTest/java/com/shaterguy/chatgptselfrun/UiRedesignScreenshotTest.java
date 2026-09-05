@@ -40,6 +40,7 @@ public final class UiRedesignScreenshotTest {
     private String originalImeWithHardware;
     private final Map<String, Map<String, ?>> saved = new HashMap<>();
     private static final String RUN = "SR-20260905-000000-UI0001";
+    private static final String RETAINED_EVIDENCE = "/data/local/tmp/selfrun-ui-evidence";
     @Before public void setUp() throws Exception {
         context = ApplicationProvider.getApplicationContext();
         evidence = new File(context.getExternalFilesDir(null), "ui-evidence");
@@ -239,6 +240,7 @@ public final class UiRedesignScreenshotTest {
         try (FileOutputStream out = new FileOutputStream(file)) {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out));
         }
+        exportEvidence(file);
         android.content.res.Configuration actual = context.getResources().getConfiguration();
         record(name + ".png " + bitmap.getWidth() + "x" + bitmap.getHeight()
                 + "; widthDp=" + actual.screenWidthDp + "; fontScale=" + actual.fontScale
@@ -279,8 +281,21 @@ public final class UiRedesignScreenshotTest {
         }
     }
     private void record(String line) throws Exception {
-        try (FileOutputStream out = new FileOutputStream(new File(evidence, "manifest.txt"), true)) {
+        File manifest = new File(evidence, "manifest.txt");
+        try (FileOutputStream out = new FileOutputStream(manifest, true)) {
             out.write(line.getBytes(StandardCharsets.UTF_8));
         }
+        exportEvidence(manifest);
+    }
+    private void exportEvidence(File file) throws Exception {
+        // Shell-owned storage survives AGP uninstall/cleanup, including after a later assertion fails.
+        String result = shell("mkdir -p " + RETAINED_EVIDENCE + " && cp -f "
+                + shellQuote(file.getAbsolutePath()) + " " + RETAINED_EVIDENCE + "/"
+                + shellQuote(file.getName()) + " && echo SELF_RUN_EVIDENCE_EXPORTED");
+        assertTrue("Evidence export failed: " + file.getName() + ": " + result,
+                result.contains("SELF_RUN_EVIDENCE_EXPORTED"));
+    }
+    private static String shellQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 }

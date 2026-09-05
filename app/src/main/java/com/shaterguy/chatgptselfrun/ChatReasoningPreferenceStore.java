@@ -56,6 +56,24 @@ final class ChatReasoningPreferenceStore {
                 .commit();
     }
 
+    /** Migration only: the caller owns the current run lock; bootstrap evidence is immutable here. */
+    static boolean saveMigratedSelection(Context context, String runId, String selection) {
+        if (!Thread.holdsLock(SelfRunStore.RUN_STATE_LOCK))
+            throw new IllegalStateException("run-state ownership required for Chat migration");
+        initialize(context);
+        SharedPreferences state = appContext.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE);
+        if (!runId.equals(state.getString("runId", ""))
+                || !SelfRunStore.MODE_CHAT.equals(state.getString("mode", ""))) return false;
+        String normalized = normalize(selection);
+        if (!validSelection(normalized)) return false;
+        return preferences.edit()
+                .putString(KEY_RUN_ID, runId)
+                .putString(KEY_SELECTION, normalized)
+                .putString(KEY_BOOTSTRAP_SELECTION, normalized)
+                .putString(KEY_CONTINUATION_SELECTION, normalized)
+                .commit();
+    }
+
     static String selectionForRun(Context context, String runId) {
         if (context == null || runId == null || runId.isEmpty()) return KEEP;
         initialize(context);

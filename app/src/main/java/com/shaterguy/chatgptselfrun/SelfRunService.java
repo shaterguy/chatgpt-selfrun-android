@@ -1145,7 +1145,7 @@ private void handleWebResult(String phase,String status,JSONObject result){
 }
 
 private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);}
-private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=LegacyRunModeMigration.appendNotice(store.runId(),SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput()));return continuationAttemptPrompt;}
+private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
 private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
 private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 응답 프로토콜 대기 중",true);detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}

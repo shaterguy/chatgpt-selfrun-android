@@ -69,6 +69,7 @@ final class SelfRunContinuationDom {
                 }
             }
         }
+        effectivePrompt = LegacyRunModeMigration.appendNotice(runId, effectivePrompt);
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(effectivePrompt);
         String marker = q("selfrun-drive:verified-continuation:" + markerId);
@@ -94,14 +95,17 @@ final class SelfRunContinuationDom {
                                            String runId) {
         boolean preferSendWhenStopCoexists = proBootstrapRun(runId);
         String effectivePrompt = prompt;
+        boolean clickAllowed = true;
         if (UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)) {
             UserNextInputStore.ClickPlan plan = UserNextInputStore.nextClickPlan(
                     runId, continuationIdentityFromMarker(markerId), prompt);
             effectivePrompt = plan.prompt;
-            if (!plan.clickAllowed) {
-                return preflightPreparedDriveTurn(
-                        conversationUrl, effectivePrompt, markerId, preferSendWhenStopCoexists);
-            }
+            clickAllowed = plan.clickAllowed;
+        }
+        effectivePrompt = LegacyRunModeMigration.appendNotice(runId, effectivePrompt);
+        if (!clickAllowed) {
+            return preflightPreparedDriveTurn(
+                    conversationUrl, effectivePrompt, markerId, preferSendWhenStopCoexists);
         }
         String conversation = q(SelfRunScript.conversationId(conversationUrl));
         String expected = q(effectivePrompt);

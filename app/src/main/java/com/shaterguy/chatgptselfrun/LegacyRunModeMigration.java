@@ -72,8 +72,12 @@ final class LegacyRunModeMigration {
     static void migrateCurrent(Context context, SharedPreferences state) {
         synchronized (SelfRunStore.RUN_STATE_LOCK) {
         initialize(context);
-        if (!"HYBRID".equals(state.getString("mode", ""))) return;
         String runId = state.getString("runId", "");
+        if (SelfRunStore.MODE_CHAT.equals(state.getString("mode", ""))) {
+            persistCurrentChatSelection(context, runId);
+            return;
+        }
+        if (!"HYBRID".equals(state.getString("mode", ""))) return;
         Endpoint endpoint = freeze(runId);
         if (endpoint == null) {
             // Preserve phase, paused state and every payload; the service refuses unknown modes.
@@ -82,14 +86,13 @@ final class LegacyRunModeMigration {
                 throw new IllegalStateException("legacy mode error persistence failed");
             return;
         }
-        if (SelfRunStore.MODE_CHAT.equals(endpoint.mode)
-                && !ChatReasoningPreferenceStore.save(context, runId, endpoint.reasoning, endpoint.reasoning))
-            throw new IllegalStateException("legacy Chat profile persistence failed");
         SharedPreferences.Editor editor = state.edit().putString("mode", endpoint.mode)
-                .putString("pendingModel", endpoint.model).putString("pendingReasoning", endpoint.reasoning);
+                .putString("pendingModel", endpoint.model).putString("pendingReasoning", endpoint.reasoning)
+                .putBoolean("legacyChatSelectionPending:" + runId, SelfRunStore.MODE_CHAT.equals(endpoint.mode));
         if ("LEGACY_MODE_UNRESOLVED".equals(state.getString("lastErrorCode", "")))
             editor.putString("lastErrorCode", "").putString("lastErrorMessage", "");
         if (!editor.commit()) throw new IllegalStateException("legacy mode persistence failed");
+        persistCurrentChatSelection(context, runId);
         }
     }
 
@@ -99,13 +102,31 @@ final class LegacyRunModeMigration {
         String runId = snapshot.optString("runId", "");
         Endpoint endpoint = freeze(runId);
         if (endpoint == null) throw new IllegalStateException("legacy mode unresolved");
-        if (SelfRunStore.MODE_CHAT.equals(endpoint.mode)
-                && !ChatReasoningPreferenceStore.save(context, runId, endpoint.reasoning, endpoint.reasoning))
-            throw new IllegalStateException("legacy Chat profile persistence failed");
         try {
             return new JSONObject(snapshot.toString()).put("mode", endpoint.mode)
-                    .put("pendingModel", endpoint.model).put("pendingReasoning", endpoint.reasoning);
+                    .put("pendingModel", endpoint.model).put("pendingReasoning", endpoint.reasoning)
+                    .put("legacyChatSelectionPending", SelfRunStore.MODE_CHAT.equals(endpoint.mode));
         } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
+    /** Recover only the marked, same-run gap between the run commit and Chat preference commit. */
+    static void persistCurrentChatSelection(Context context, String runId) {
+        if (!Thread.holdsLock(SelfRunStore.RUN_STATE_LOCK))
+            throw new IllegalStateException("run-state ownership required for Chat migration");
+        initialize(context);
+        String key = "legacyChatSelectionPending:" + runId;
+        if (!runState.getBoolean(key, false)) return;
+        if (!runId.equals(runState.getString("runId", ""))
+                || !SelfRunStore.MODE_CHAT.equals(runState.getString("mode", "")))
+            throw new IllegalStateException("current Chat run required for migration");
+        Endpoint endpoint;
+        try { endpoint = readEndpoint(new JSONObject(migration.getString("endpoint:" + runId, ""))); }
+        catch (Exception invalid) { throw new IllegalStateException("frozen Chat endpoint unavailable", invalid); }
+        if (endpoint == null || !SelfRunStore.MODE_CHAT.equals(endpoint.mode)
+                || !ChatReasoningPreferenceStore.saveMigratedSelection(context, runId, endpoint.reasoning))
+            throw new IllegalStateException("legacy Chat profile persistence failed");
+        if (!runState.edit().remove(key).commit())
+            throw new IllegalStateException("legacy Chat migration acknowledgement failed");
     }
 
     static synchronized Endpoint pendingEndpoint(String runId) {
