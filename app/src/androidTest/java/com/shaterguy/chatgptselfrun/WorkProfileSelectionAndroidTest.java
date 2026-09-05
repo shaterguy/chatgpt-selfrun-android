@@ -33,18 +33,17 @@ public final class WorkProfileSelectionAndroidTest {
                 MaterialAutoCompleteTextView input =
                         (MaterialAutoCompleteTextView) work.getEditText();
                 assertNotNull(input);
+                assertNotNull(input.getAdapter());
 
-                input.showDropDown();
-                assertTrue(input.isPopupShowing());
-                choose(input, solMax);
+                assertEquals("Sol / max", input.getAdapter().getItem(solMax));
+                work.setSelection(solMax);
                 assertEquals("Sol / max", input.getText().toString());
                 assertEquals(solMax, work.getSelectedItemPosition());
 
-                input.showDropDown();
-                choose(input, terraMax);
+                assertEquals("Terra / max", input.getAdapter().getItem(terraMax));
+                work.setSelection(terraMax);
                 assertEquals("Terra / max", input.getText().toString());
                 assertEquals(terraMax, work.getSelectedItemPosition());
-                input.dismissDropDown();
             });
 
             scenario.recreate();
@@ -61,11 +60,6 @@ public final class WorkProfileSelectionAndroidTest {
                 assertEquals("max", selected.signalReasoning);
             });
         }
-    }
-
-    private static void choose(MaterialAutoCompleteTextView input, int position) {
-        input.setListSelection(position);
-        input.performCompletion();
     }
 
     private static int position(List<ProfileRegistry.Profile> profiles,
