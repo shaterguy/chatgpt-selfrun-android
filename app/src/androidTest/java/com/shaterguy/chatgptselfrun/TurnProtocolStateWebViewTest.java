@@ -68,6 +68,34 @@ public final class TurnProtocolStateWebViewTest {
         }
     }
 
+    @Test public void proPrematureStreamCompleteWaitsForFinalEvidence() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web); install(scenario, web);
+
+            assertPhase("THINKING", request(scenario, web, "POST", "/backend-api/f/conversation"));
+            JSONObject early = socketEvent(scenario, web, "pro-early",
+                    new JSONObject().put("type", "message_stream_complete"));
+            assertPhase("THINKING", early);
+            assertTrue(early.getBoolean("sawStreamComplete"));
+            assertEquals("completion_without_final_answer_evidence", early.getString("lastError"));
+
+            assertPhase("THINKING", socketEvent(scenario, web, "pro-early",
+                    marker("cot_token", "first")));
+            JSONObject answering = socketEvent(scenario, web, "pro-early",
+                    messageStart(message("pro-final", "assistant", null, "Pro 최종 답변")));
+            assertPhase("ANSWERING", answering);
+            assertTrue(answering.getBoolean("sawAssistantFinalText"));
+            assertEquals("", answering.getString("lastError"));
+            assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-early"));
+
+            JSONObject complete = socketEvent(scenario, web, "pro-early",
+                    new JSONObject().put("type", "message_stream_complete"));
+            assertPhase("COMPLETE", complete);
+            assertTrue(complete.getBoolean("sawStreamComplete"));
+        }
+    }
+
     @Test public void proIgnoresNonTerminalPayloadsThenUsesMarkerlessVisibleAnswer() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();

@@ -9,7 +9,7 @@ import static org.junit.Assert.*;
 
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalPostAndProtocolSemanticsOwnTurnState() {
-        assertEquals("turn-protocol-v9",ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v10",ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
         assertTrue(script.contains("state.phase='THINKING'"));
@@ -23,7 +23,6 @@ public final class ChatGptTurnProtocolScriptTest {
         assertFalse(script.contains("turnKind"));
     }
 
-
     @Test public void nativeBridgeAllowsOnlyAuthoritativeStreamCompletion() {
         assertTrue(TurnProtocolLogBridge.isAllowedCompletionSource("message_stream_complete"));
         assertFalse(TurnProtocolLogBridge.isAllowedCompletionSource("finished_successfully_end_turn"));
@@ -36,20 +35,20 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("const bindTurn=(run,token)=>"));
         assertTrue(script.contains("const armCompletion=(run,token)=>"));
         assertTrue(script.contains("completionArmed:false"));
-        assertTrue(script.contains("selfrun-drive:response-protocol-state:v9"));
+        assertTrue(script.contains("selfrun-drive:response-protocol-state:v10"));
         assertFalse(script.contains("__selfRunDriveTurnObserver"));
         assertFalse(script.contains("DomFallback"));
     }
 
-    @Test public void terminalProtocolEventCompletesWithoutAuxiliaryFinalEvidence() {
+    @Test public void streamCompletionRequiresFinalAnswerEvidence() {
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("if(value.type==='message_stream_complete')"));
         assertTrue(script.contains("complete('message_stream_complete');return;"));
-        assertTrue(script.contains("const complete=source=>"));
+        assertTrue(script.contains("const completionEvidence=()=>state.sawFinalChannelToken||state.sawAssistantFinalText"));
+        assertTrue(script.contains("if(!completionEvidence())"));
+        assertTrue(script.contains("state.lastError='completion_without_final_answer_evidence'"));
+        assertTrue(script.contains("emitLog('completion_ignored',completionSource)"));
         assertTrue(script.contains("return finalizeComplete(completionSource);"));
-        assertFalse(script.contains("completionEvidence"));
-        assertFalse(script.contains("sawTerminalComplete"));
-        assertFalse(script.contains("completion_without_final_answer_evidence"));
         assertFalse(script.contains("completeAfterLateEvidence"));
     }
 
