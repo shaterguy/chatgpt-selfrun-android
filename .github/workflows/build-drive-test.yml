@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# 2.3.2-dev14 HYBRID continuation API-profile verification and TEST lineage verification
+# SelfRun Drive TEST FAIL_EARLY validation and TEST lineage verification
 
 on:
   push:
@@ -36,12 +36,22 @@ jobs:
         with:
           gradle-version: '9.5.0'
           cache-read-only: false
-      - name: Verify policy, test, and build canonical TEST candidate
+      - name: STATIC_PREFLIGHT - verify variant and compile instrumentation sources
         shell: bash
         run: |
           set -euo pipefail
           tools/verify_drive_variant.sh
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:verifyDriveVariantIdentity :app:testDebugUnitTest :app:assembleQaApp
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:verifyDriveVariantIdentity :app:compileDebugAndroidTestJavaWithJavac
+      - name: FAST_TEST - run local unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+      - name: ARTIFACT_BUILD - build instrumentation and canonical TEST candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:assembleDebugAndroidTest :app:assembleQaApp
           BT="$ANDROID_HOME/build-tools/36.0.0"
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
@@ -358,8 +368,12 @@ jobs:
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$PREV_VERSION_NAME" == '2.3.2-dev13' ]] || fail 'actual predecessor is not the required dev13 TEST artifact'
-            [[ "$PREV_VERSION_CODE" == '2020045' ]] || fail 'actual predecessor versionCode is not 2020045'
+            [[ "$CURRENT_VERSION_NAME" =~ ^(.+)-dev([0-9]+)$ ]] || fail 'current TEST version is not a dev lineage candidate'
+            (( ${BASH_REMATCH[2]} > 1 )) || fail 'current TEST dev lineage has no predecessor'
+            EXPECTED_PREV_VERSION_NAME="${BASH_REMATCH[1]}-dev$((${BASH_REMATCH[2]} - 1))"
+            EXPECTED_PREV_VERSION_CODE="$((CURRENT_VERSION_CODE - 1))"
+            [[ "$PREV_VERSION_NAME" == "$EXPECTED_PREV_VERSION_NAME" ]] || fail "actual predecessor is not the required ${EXPECTED_PREV_VERSION_NAME} TEST artifact"
+            [[ "$PREV_VERSION_CODE" == "$EXPECTED_PREV_VERSION_CODE" ]] || fail "actual predecessor versionCode is not ${EXPECTED_PREV_VERSION_CODE}"
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]] || fail 'actual previous TEST lineage evidence missing'
           else
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]] || fail 'synthetic predecessor mislabeled as lineage evidence'
@@ -402,7 +416,7 @@ jobs:
         run: |
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
-      - name: Verify formal co-install, TEST update, and WebView instrumentation
+      - name: EXPENSIVE_RUNTIME - verify formal co-install, TEST update, and WebView instrumentation
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 36
@@ -456,8 +470,10 @@ jobs:
           PREDECESSOR_LINEAGE_EVIDENCE: ${{ needs['verify-drive-test-coinstall'].outputs.predecessor_lineage }}
         run: |
           set -euo pipefail
-          ARTIFACT_BRANCH='artifacts/selfrun-drive-v2.3.2-dev14'
-          APK='current-candidate/chatgpt-selfrun-drive-test-v2.3.2-dev14.apk'
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          test -n "$VERSION_NAME"
+          ARTIFACT_BRANCH="artifacts/selfrun-drive-v${VERSION_NAME}"
+          APK="current-candidate/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
           SUM_FILE='current-candidate/SHA256SUMS.txt'
           SOURCE_FILE='current-candidate/SOURCE_COMMIT.txt'
           CERT_FILE='current-candidate/APK_CERT.txt'
@@ -488,7 +504,7 @@ jobs:
           APK_BLOB="$(git hash-object -w "$APK")"
           git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
           APK_TREE="$(git write-tree)"
-          APK_COMMIT="$(printf '%s\n' 'publish: SelfRun Drive 2.3.2-dev14 TEST APK' | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
+          APK_COMMIT="$(printf '%s\n' "publish: SelfRun Drive ${VERSION_NAME} TEST APK" | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
           RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/current-test.apk"
           {
             echo "SOURCE_SHA=$GITHUB_SHA"
@@ -521,7 +537,7 @@ jobs:
           path: direct-apk.txt
           if-no-files-found: error
           retention-days: 30
-      - name: Publish immutable artifact ref
+      - name: PUBLISH_DELIVER - publish immutable artifact ref
         shell: bash
         env:
           META_COMMIT: ${{ steps.prepare_publish.outputs.meta_commit }}
@@ -529,7 +545,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$META_COMMIT"
-          [[ "$ARTIFACT_BRANCH" == 'artifacts/selfrun-drive-v2.3.2-dev14' ]]
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          test -n "$VERSION_NAME"
+          [[ "$ARTIFACT_BRANCH" == "artifacts/selfrun-drive-v${VERSION_NAME}" ]]
           if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
             echo "immutable artifact branch already exists: $ARTIFACT_BRANCH" >&2
             exit 1
