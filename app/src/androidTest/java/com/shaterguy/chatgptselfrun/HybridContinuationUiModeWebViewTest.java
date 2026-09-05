@@ -169,7 +169,7 @@ public final class HybridContinuationUiModeWebViewTest {
             String action = "(()=>{window.prepareCount+=1;return JSON.stringify({status:'READY_TO_SUBMIT'});})()";
 
             read(scenario, web,
-                    "window.selectFixtureMode('chat');"
+                    "window.selectFixtureMode('chatgpt');"
                             + "document.querySelector('[data-tpp-toggle-value=work]').dataset.state='on'");
             JSONObject conflict = evaluate(scenario, web,
                     HybridRequestProfileScript.prepareContinuationAndThen(RUN, action));
