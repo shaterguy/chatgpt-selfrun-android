@@ -16,7 +16,7 @@ Drive V1은 background WebView를 private virtual display에 호스팅하는 구
 
 보정 프로파일은 app-private SharedPreferences를 내구 원본으로 유지하고 같은 ChatGPT origin의 Web Storage에도 주입합니다. 런타임 DOM 코드는 보정 target을 우선 사용하되 매칭하지 못하면 v1.2.2의 기존 semantic/testid/role 휴리스틱으로 후퇴합니다. 보정 로그는 purpose별 arm/candidate/confirm/save/reset 상태만 기록하며 사용자가 테스트로 입력한 문구 내용은 기록하지 않습니다. `addJavascriptInterface`는 사용하지 않습니다.
 
-WebView DOM adapter는 새 conversation 진입, canonical conversation URL 복구, composer 탐색, 정확한 입력 readback, SEND 탐색·클릭, 제출 직전·직후의 일회성 확인만 담당합니다. turn state의 단일 권위 원본은 response protocol이며, 현재 runId+turnToken에 귀속된 canonical POST, final semantic, 검증된 stream completion만 THINKING·ANSWERING·COMPLETE를 전이합니다.
+WebView DOM adapter는 새 conversation 진입, canonical conversation URL 복구, composer 탐색, 정확한 입력 readback, SEND 탐색·클릭, 제출 직전·직후의 일회성 확인만 담당합니다. turn state의 단일 권위 원본은 response protocol이며, 현재 runId+turnToken에 귀속된 canonical POST가 THINKING을 시작하고, 일반 Chat·Work의 final marker 또는 Pro의 non-empty assistant visible text가 ANSWERING을 시작하며, 상관된 message_stream_complete만 COMPLETE를 전이합니다.
 
 ## Foreground Service와 WakeLock
 
@@ -33,7 +33,7 @@ WebView DOM adapter는 새 conversation 진입, canonical conversation URL 복�
 - 네트워크 복구 backoff 배열: 15초, 30초, 60초, 120초, 240초
 - authoritative progress: Run 폴더 signal document의 정렬된 logical cursor
 
-정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback의 runId·turnToken·허용 source가 `WAIT_TURN_COMPLETION`과 일치하고 아직 소비되지 않았을 때만 `POST_PROTOCOL_DRIVE_SYNC`로 전이합니다.
+정상 턴 완료는 Drive polling으로 판정하지 않습니다. native callback의 runId·turnToken이 `WAIT_TURN_COMPLETION`과 일치하고 허용 source가 `message_stream_complete`이며 아직 소비되지 않았을 때만 `POST_PROTOCOL_DRIVE_SYNC`로 전이합니다. encoded-item의 `[DONE]`, outer WebSocket `done`, `finished_successfully + end_turn=true`는 완료 source가 아닙니다.
 
 `DriveApiClient.getPollMetadata()`는 기존 실행턴 문서의 정확한 parent와 RUN_ID를 기준으로 같은 job folder의 native Google Docs를 조회합니다. `DriveSignalDocumentTransport`가 현재 RUN_ID의 canonical signal title만 선별하고 다음 순서로 정렬합니다.
 

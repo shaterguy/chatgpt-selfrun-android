@@ -10,16 +10,16 @@ SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive 
 | 상태 전이 | 권위 신호 |
 | --- | --- |
 | 임의 상태 → THINKING | 가장 최근 `POST /backend-api/f/conversation` |
-| THINKING → ANSWERING | `message_marker(final_channel_token, first)` 또는 final assistant message 기반 `visible_answer` |
-| ANSWERING → COMPLETE | 현재 final assistant message와 결합된 `finished_successfully + end_turn=true` 종결 증거 |
+| THINKING → ANSWERING | 일반 Chat·Work는 `message_marker(final_channel_token, first)`; Pro는 현재 assistant message의 실제 non-empty text snapshot 또는 해당 message의 text delta |
+| THINKING/ANSWERING → COMPLETE | 현재 요청과 상관된 `message_stream_complete` |
 
 동일 run에서 THINKING/ANSWERING 중 새 turn token 바인딩은 거부한다. 앱은 현재 응답의 terminal COMPLETE 전에는 다음 canonical POST를 제출하지 않으며, 충돌이 감지되면 같은 conversation을 보존한 채 일시정지한다.
 
 이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. identity 없는 socket/subframe payload는 conversation ID와 work turn ID가 모두 현재 요청에 결합된 경우에만 허용한다. Work/Pro WebSocket은 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
 
-`user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`은 전체 응답 COMPLETE를 직접 만들지 않는다.
+`user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`, `finished_successfully + end_turn=true`는 전체 응답 COMPLETE를 만들지 않는다. Pro의 ANSWERING 보조 신호는 assistant role이며 channel이 없거나 `final`인 message의 실제 non-empty string text로 제한한다. empty/whitespace text와 user/tool/analysis/commentary payload는 제외한다.
 
-`message_stream_complete`가 final message ID·assistant text·terminal 상태보다 먼저 관찰되면 COMPLETE로 승격하지 않는다. 늦게 도착한 visible evidence와 과거 stream-complete를 결합하는 소급 완료도 금지한다. 동일 final message의 terminal event가 현재 요청/turn identity와 함께 확인된 뒤에만 COMPLETE가 되며 DOM 상태는 사용하지 않는다.
+현재 request identity 또는 conversation ID·work turn ID fence를 통과한 `message_stream_complete`는 ANSWERING 증거보다 먼저 도착해도 COMPLETE의 권위 신호다. 늦은 이전 요청과 폐기된 turn ID의 payload는 계속 무시하며 DOM 상태는 사용하지 않는다.
 
 ## Drive signal document 현재성
 

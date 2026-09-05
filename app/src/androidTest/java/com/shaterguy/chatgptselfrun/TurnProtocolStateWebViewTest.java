@@ -68,7 +68,7 @@ public final class TurnProtocolStateWebViewTest {
         }
     }
 
-    @Test public void proIgnoresHandoffAndInnerDoneThenUsesVisibleAnswer() throws Exception {
+    @Test public void proIgnoresNonTerminalPayloadsThenUsesMarkerlessVisibleAnswer() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = new AtomicReference<>();
             load(scenario, web); install(scenario, web);
@@ -79,17 +79,62 @@ public final class TurnProtocolStateWebViewTest {
                     .put("turn_id", "pro-request")));
             assertPhase("THINKING", socketEncoded(scenario, web, "pro-request", "data: [DONE]\n\n"));
 
-            JSONObject visible = socketEvent(scenario, web, "pro-request", new JSONObject()
-                    .put("type", "message_start")
-                    .put("message", finalAssistant("pro-message", "Pro 답변")));
+            JSONObject blank = socketEvent(scenario, web, "pro-request",
+                    messageStart(message("blank", "assistant", null, "   ")));
+            assertPhase("THINKING", blank);
+            assertFalse(blank.getBoolean("sawVisibleAnswer"));
+            assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
+                    messageStart(message("user", "user", null, "사용자"))));
+            assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
+                    messageStart(message("tool", "tool", null, "도구"))));
+            assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
+                    messageStart(message("analysis", "assistant", "analysis", "분석"))));
+            assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
+                    messageStart(message("commentary", "assistant", "commentary", "중간"))));
+
+            JSONObject fallback = message("finished", "assistant", "final", null)
+                    .put("status", "finished_successfully").put("end_turn", true);
+            JSONObject ignoredFallback = socketEvent(scenario, web, "pro-request", messageStart(fallback));
+            assertPhase("THINKING", ignoredFallback);
+            assertFalse(ignoredFallback.getBoolean("sawStreamComplete"));
+
+            JSONObject visible = socketEvent(scenario, web, "pro-request",
+                    messageStart(message("pro-message", "assistant", null, "Pro 답변")));
             assertPhase("ANSWERING", visible);
             assertTrue(visible.getBoolean("sawVisibleAnswer"));
             assertTrue(visible.getBoolean("sawAssistantFinalText"));
+
+            JSONObject finished = message("finished-visible", "assistant", "final", "완료 직전")
+                    .put("status", "finished_successfully").put("end_turn", true);
+            JSONObject stillAnswering = socketEvent(scenario, web, "pro-request", messageStart(finished));
+            assertPhase("ANSWERING", stillAnswering);
+            assertFalse(stillAnswering.getBoolean("sawStreamComplete"));
             assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-request"));
+
             JSONObject complete = socketEvent(scenario, web, "pro-request",
                     new JSONObject().put("type", "message_stream_complete"));
             assertPhase("COMPLETE", complete);
             assertTrue(complete.getBoolean("sawStreamComplete"));
+        }
+    }
+
+    @Test public void proMarkerlessAssistantTextDeltaStartsAnswering() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web); install(scenario, web);
+
+            assertPhase("THINKING", request(scenario, web, "POST", "/backend-api/f/conversation"));
+            assertPhase("THINKING", socketEvent(scenario, web, "pro-delta",
+                    messageStart(message("pro-delta-message", "assistant", null, null))));
+            JSONObject answering = socketEvent(scenario, web, "pro-delta", new JSONObject()
+                    .put("type", "message_delta")
+                    .put("p", "/message/content/parts/0")
+                    .put("v", "Pro delta 답변"));
+            assertPhase("ANSWERING", answering);
+            assertTrue(answering.getBoolean("sawVisibleAnswer"));
+            assertTrue(answering.getBoolean("sawAssistantFinalText"));
+            assertPhase("COMPLETE", socketEvent(scenario, web, "pro-delta",
+                    new JSONObject().put("type", "message_stream_complete")));
         }
     }
 
@@ -133,18 +178,24 @@ public final class TurnProtocolStateWebViewTest {
                 .put("event", event).put("conversation_id", CONVERSATION_ID);
     }
 
-    private static JSONObject finalAssistant(String id, String text) throws Exception {
-        return new JSONObject().put("id", id)
-                .put("author", new JSONObject().put("role", "assistant"))
-                .put("channel", "final")
-                .put("content", new JSONObject().put("parts",
-                        text.isEmpty() ? new org.json.JSONArray() : new org.json.JSONArray().put(text)));
+    private static JSONObject messageStart(JSONObject message) throws Exception {
+        return new JSONObject().put("type", "message_start").put("message", message);
+    }
+
+    private static JSONObject message(String id, String role, String channel, String text) throws Exception {
+        org.json.JSONArray parts = new org.json.JSONArray();
+        if (text != null) parts.put(text);
+        JSONObject message = new JSONObject().put("id", id)
+                .put("author", new JSONObject().put("role", role))
+                .put("content", new JSONObject().put("parts", parts));
+        if (channel != null) message.put("channel", channel);
+        return message;
     }
 
     private static JSONObject terminalComplete(String id) throws Exception {
         return new JSONObject().put("type", "message_stream_complete")
                 .put("status", "finished_successfully").put("end_turn", true)
-                .put("message", finalAssistant(id, "terminal answer"));
+                .put("message", message(id, "assistant", "final", "terminal answer"));
     }
 
     private static JSONObject request(ActivityScenario<SelfRunNewActivity> scenario,

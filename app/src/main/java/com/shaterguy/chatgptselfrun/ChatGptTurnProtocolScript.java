@@ -61,7 +61,7 @@ final class ChatGptTurnProtocolScript {
                   const COMPLETION_HOST=__COMPLETION_HOST__;
                   const STORE_KEY='selfrun-drive:response-protocol-state:v9';
                   const VALID_PHASES=new Set(['IDLE','THINKING','ANSWERING','COMPLETE','ERROR']);
-                  const COMPLETE_SOURCES=new Set(['message_stream_complete','finished_successfully_end_turn']);
+                  const COMPLETE_SOURCES=new Set(['message_stream_complete']);
                   const blank=()=>({
                     runId:'',turnToken:'',phase:'IDLE',requestIdentity:'',
                     canonicalConversationId:'',currentWorkTurnId:'',
@@ -212,14 +212,16 @@ final class ChatGptTurnProtocolScript {
                     if(!state.sawAssistantFinalText){state.sawAssistantFinalText=true;save();}
                     noteVisibleAnswer(source);
                   };
-                  const markFinalMessage=message=>{
+                  const markAssistantMessage=message=>{
                     if(!message||typeof message!=='object')return false;
                     const role=safe(message.author?.role).toLowerCase(),channel=safe(message.channel).toLowerCase();
-                    if(role!=='assistant'||channel!=='final')return false;
-                    state.finalMessageActive=true;if(message.id)state.currentFinalMessageId=safe(message.id);
-                    save();noteVisibleAnswer('visible_answer');
+                    const visible=role==='assistant'&&(channel===''||channel==='final');
+                    state.finalMessageActive=visible;
+                    state.currentFinalMessageId=visible&&message.id?safe(message.id):'';
+                    save();if(!visible)return false;
                     const parts=Array.isArray(message.content?.parts)?message.content.parts:[];
-                    if(parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');return true;
+                    if(parts.some(nonEmptyText)){noteAssistantFinalText('visible_answer');return true;}
+                    return false;
                   };
                   const observeFinalTextDelta=value=>{
                     if(!state.finalMessageActive||!value||typeof value!=='object')return;
@@ -260,15 +262,13 @@ final class ChatGptTurnProtocolScript {
                     }
                     const directMessage=value.message&&typeof value.message==='object'?value.message:null;
                     const deltaMessage=value.v?.message&&typeof value.v.message==='object'?value.v.message:null;
-                    const finalMessage=directMessage||deltaMessage;if(finalMessage)markFinalMessage(finalMessage);
+                    const rawMessage=value.author&&typeof value.author==='object'
+                            &&value.content&&typeof value.content==='object'?value:null;
+                    const assistantMessage=directMessage||deltaMessage||rawMessage;
+                    if(assistantMessage)markAssistantMessage(assistantMessage);
                     observeFinalTextDelta(value);
                     if(value.type==='message_stream_complete'){
                       complete('message_stream_complete');return;
-                    }
-                    if(finalMessage&&safe(finalMessage.author?.role).toLowerCase()==='assistant'
-                            &&safe(finalMessage.channel).toLowerCase()==='final'
-                            &&finalMessage.status==='finished_successfully'&&finalMessage.end_turn===true){
-                      complete('finished_successfully_end_turn');return;
                     }
                     if(directMessage&&directMessage!==value)inspectSemantic(directMessage,source,context);
                     if(deltaMessage&&deltaMessage!==value)inspectSemantic(deltaMessage,source,context);

@@ -409,7 +409,7 @@ jobs:
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
-          INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest,com.shaterguy.chatgptselfrun.LegacyModeMigrationAndroidTest,com.shaterguy.chatgptselfrun.UiRedesignScreenshotTest'
+          INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest,com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest,com.shaterguy.chatgptselfrun.WorkProfileSelectionAndroidTest,com.shaterguy.chatgptselfrun.LegacyModeMigrationAndroidTest,com.shaterguy.chatgptselfrun.UiRedesignScreenshotTest'
           echo "TEST_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_INSTRUMENTATION_CLASS=$INSTRUMENTATION_CLASS" >> "$GITHUB_ENV"
       - name: Enable hardware acceleration

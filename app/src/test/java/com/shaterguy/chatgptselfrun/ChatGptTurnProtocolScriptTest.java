@@ -15,9 +15,19 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("state.phase='THINKING'"));
         assertTrue(script.contains("state.phase='ANSWERING'"));
         assertTrue(script.contains("value.type==='message_stream_complete'"));
-        assertTrue(script.contains("finished_successfully_end_turn"));
+        assertTrue(script.contains("const COMPLETE_SOURCES=new Set(['message_stream_complete'])"));
+        assertFalse(script.contains("finished_successfully_end_turn"));
+        assertTrue(script.contains("role==='assistant'&&(channel===''||channel==='final')"));
+        assertTrue(script.contains("if(parts.some(nonEmptyText))"));
         assertFalse(script.contains("turnSequence"));
         assertFalse(script.contains("turnKind"));
+    }
+
+
+    @Test public void nativeBridgeAllowsOnlyAuthoritativeStreamCompletion() {
+        assertTrue(TurnProtocolLogBridge.isAllowedCompletionSource("message_stream_complete"));
+        assertFalse(TurnProtocolLogBridge.isAllowedCompletionSource("finished_successfully_end_turn"));
+        assertFalse(TurnProtocolLogBridge.isAllowedCompletionSource("done"));
     }
 
     @Test public void protocolOwnsTokenAndArmsOnlyAfterNativeWait() {
