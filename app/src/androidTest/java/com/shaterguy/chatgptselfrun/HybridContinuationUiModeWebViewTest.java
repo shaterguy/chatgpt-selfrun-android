@@ -66,6 +66,8 @@ public final class HybridContinuationUiModeWebViewTest {
             assertEquals("gpt-5-6", payload.getString("model"));
             assertTrue(!payload.has("thinking_effort"));
             assertEquals("conversation-fixed", payload.getString("conversation_id"));
+            assertEquals("message-fixed", payload.getJSONArray("messages")
+                    .getJSONObject(0).getString("id"));
             assertEquals("preserve-me", payload.getJSONObject("custom").getString("value"));
         }
     }
@@ -176,9 +178,12 @@ public final class HybridContinuationUiModeWebViewTest {
                 <!doctype html><html><body><script>
                 window.records=[];window.prepareCount=0;window.submitCount=0;
                 const base={action:'next',conversation_id:'conversation-fixed',
-                  parent_message_id:'parent-fixed',custom:{value:'preserve-me'},
-                  model:'source-model',thinking_effort:'source-effort',
-                  conversation_origin:'source-origin',service_tier:'source-tier'};
+                  parent_message_id:'parent-fixed',
+                  messages:[{id:'message-fixed',author:{role:'user'},
+                    content:{content_type:'text',parts:['[SELF_RUN_CONTINUE fixture]']}}],
+                  custom:{value:'preserve-me'},model:'source-model',
+                  thinking_effort:'source-effort',conversation_origin:'source-origin',
+                  service_tier:'source-tier'};
                 window.fetch=async function(input,init){
                   const request=input instanceof Request?new Request(input,init):new Request(input,init);
                   const body=await request.clone().text();
