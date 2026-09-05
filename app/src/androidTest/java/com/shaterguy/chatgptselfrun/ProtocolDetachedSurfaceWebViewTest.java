@@ -24,7 +24,7 @@ public final class ProtocolDetachedSurfaceWebViewTest {
     private static final String TOKEN="protocol-token-current";
     private static final String ORIGIN="https://chatgpt.com/";
 
-    @Test public void detachedSurfaceCompletesFromTerminalProtocolEventAlone() throws Exception {
+    @Test public void detachedSurfaceWaitsForFinalEvidenceBeforeProtocolCompletion() throws Exception {
         try(ActivityScenario<SelfRunNewActivity> scenario=ActivityScenario.launch(SelfRunNewActivity.class)){
             AtomicReference<HeadlessWebViewHost> hostRef=new AtomicReference<>();
             AtomicReference<WebView> webRef=new AtomicReference<>();
@@ -90,14 +90,36 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             assertEquals("",callbackRef.get());
             scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
 
+            JSONObject premature=state(scenario,webRef,
+                    "window.__selfRunTurnProtocol.observeSseText("
+                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',"
+                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            assertEquals("THINKING",premature.getString("phase"));
+            assertTrue(premature.getBoolean("sawStreamComplete"));
+            assertFalse(premature.getBoolean("sawVisibleAnswer"));
+            assertEquals("completion_without_final_answer_evidence",premature.getString("lastError"));
+            assertEquals("",callbackRef.get());
+            scenario.onActivity(activity->{
+                assertEquals(SelfRunStore.PHASE_WAIT_TURN_COMPLETION,storeRef.get().phase());
+                assertFalse(hostRef.get().isOutputAttached());
+            });
+
+            JSONObject answering=state(scenario,webRef,
+                    "window.__selfRunTurnProtocol.observeSseText("
+                            +"'data: {\\\"type\\\":\\\"message_marker\\\",\\\"marker\\\":\\\"final_channel_token\\\",\\\"event\\\":\\\"first\\\"}\\n\\n',"
+                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            assertEquals("ANSWERING",answering.getString("phase"));
+            assertTrue(answering.getBoolean("sawFinalChannelToken"));
+            assertEquals("",answering.getString("lastError"));
+            assertEquals("",callbackRef.get());
+
             JSONObject complete=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
                             +"'data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertEquals("COMPLETE",complete.getString("phase"));
             assertTrue(complete.getBoolean("sawStreamComplete"));
-            assertFalse(complete.getBoolean("sawVisibleAnswer"));
-            assertEquals("",complete.getString("currentFinalMessageId"));
+            assertTrue(complete.getBoolean("sawVisibleAnswer"));
             assertEquals("message_stream_complete",complete.getString("completionSource"));
             assertTrue("protocol completion callback timed out",completed.await(15,TimeUnit.SECONDS));
             scenario.onActivity(activity->{
