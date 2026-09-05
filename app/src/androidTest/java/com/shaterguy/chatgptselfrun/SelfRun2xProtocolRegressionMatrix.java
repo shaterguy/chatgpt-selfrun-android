@@ -24,7 +24,7 @@ final class SelfRun2xProtocolRegressionMatrix {
 
         TurnProtocolStateWebViewTest state = new TurnProtocolStateWebViewTest();
         state.chatAndWorkUseCanonicalPostVisibleAnswerAndSemanticComplete();
-        state.proIgnoresHandoffAndInnerDoneThenUsesVisibleAnswer();
+        state.proIgnoresNonTerminalPayloadsThenUsesMarkerlessVisibleAnswer();
         state.newestCanonicalPostSupersedesActiveResponseWithoutTurnNumbers();
 
         WorkProtocolTransportCaptureWebViewRegression.run();
