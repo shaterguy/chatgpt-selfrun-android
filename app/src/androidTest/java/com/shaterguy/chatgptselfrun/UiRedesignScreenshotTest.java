@@ -39,6 +39,7 @@ public final class UiRedesignScreenshotTest {
     private String originalFont;
     private String originalImeWithHardware;
     private final Map<String, Map<String, ?>> saved = new HashMap<>();
+    private final Map<String, AssertionError> clippingFailures = new java.util.LinkedHashMap<>();
     private static final String RUN = "SR-20260905-000000-UI0001";
     private static final String RETAINED_EVIDENCE = "/data/local/tmp/selfrun-ui-evidence";
     @Before public void setUp() throws Exception {
@@ -177,6 +178,12 @@ public final class UiRedesignScreenshotTest {
                 }
             }
         }
+        if (!clippingFailures.isEmpty()) {
+            AssertionError failure = new AssertionError("Text clipping after completed layout: "
+                    + String.join(", ", clippingFailures.keySet()));
+            for (AssertionError original : clippingFailures.values()) failure.addSuppressed(original);
+            throw failure;
+        }
     }
     private void awaitImeVisible(ActivityScenario<SelfRunNewActivity> scenario) {
         java.util.concurrent.atomic.AtomicBoolean visible = new java.util.concurrent.atomic.AtomicBoolean();
@@ -227,9 +234,74 @@ public final class UiRedesignScreenshotTest {
     }
     private void captureActivity(Class<? extends Activity> type, String name) throws Exception {
         try (ActivityScenario<?> scenario = ActivityScenario.launch(new Intent(context, type))) {
-            scenario.onActivity(activity -> validateLayout(activity.getWindow().getDecorView()));
-            capture(name);
+            java.util.concurrent.CountDownLatch drawn = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<AssertionError> clipping = new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicReference<View> observed = new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicReference<android.view.ViewTreeObserver.OnPreDrawListener> observer =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            StringBuilder geometry = new StringBuilder();
+            scenario.onActivity(activity -> {
+                View root = activity.getWindow().getDecorView();
+                observed.set(root);
+                android.view.ViewTreeObserver.OnPreDrawListener listener = new android.view.ViewTreeObserver.OnPreDrawListener() {
+                    @Override public boolean onPreDraw() {
+                        if (!completedLayout(root)) return true;
+                        root.getViewTreeObserver().removeOnPreDrawListener(this);
+                        android.content.res.Configuration config = activity.getResources().getConfiguration();
+                        geometry.append("screen=").append(name)
+                                .append("; widthDp=").append(config.screenWidthDp)
+                                .append("; heightDp=").append(config.screenHeightDp)
+                                .append("; fontScale=").append(config.fontScale)
+                                .append("; uiMode=").append(config.uiMode)
+                                .append("; densityDpi=").append(config.densityDpi).append('\n');
+                        try { validateLayout(root, geometry); }
+                        catch (AssertionError original) { clipping.set(original); }
+                        finally { drawn.countDown(); }
+                        return true;
+                    }
+                };
+                observer.set(listener);
+                root.getViewTreeObserver().addOnPreDrawListener(listener);
+                root.invalidate();
+            });
+            try {
+                assertTrue("Layout did not complete before validation: " + name,
+                        drawn.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            } finally {
+                scenario.onActivity(activity -> {
+                    View root = observed.get();
+                    if (root != null && observer.get() != null && root.getViewTreeObserver().isAlive())
+                        root.getViewTreeObserver().removeOnPreDrawListener(observer.get());
+                });
+            }
+            AssertionError original = clipping.get();
+            if (original == null) {
+                capture(name);
+                return;
+            }
+            // Preserve both evidence files before aggregating this exact clipping failure.
+            try {
+                File metrics = new File(evidence, name + "-layout.txt");
+                try (FileOutputStream out = new FileOutputStream(metrics)) {
+                    out.write(geometry.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                exportEvidence(metrics);
+                record("layout_failure=" + name + "; geometry=" + metrics.getName()
+                        + "; assertion=" + original.getMessage().replace('\n', ' ') + "\n");
+                capture(name);
+            } catch (Exception | AssertionError evidenceFailure) {
+                original.addSuppressed(evidenceFailure);
+                throw original;
+            }
+            clippingFailures.put(name, original);
         }
+    }
+    private boolean completedLayout(View view) {
+        if (view.getVisibility() != View.VISIBLE) return true;
+        if (!view.isLaidOut() || view.isLayoutRequested()) return false;
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++)
+            if (!completedLayout(((ViewGroup) view).getChildAt(i))) return false;
+        return true;
     }
     private void capture(String name) throws Exception {
         instrumentation.waitForIdleSync();
@@ -247,16 +319,33 @@ public final class UiRedesignScreenshotTest {
                 + "; night=" + (actual.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) + "\n");
         bitmap.recycle();
     }
-    private void validateLayout(View view) {
+    private void validateLayout(View view, StringBuilder geometry) {
         if (view.getVisibility() != View.VISIBLE) return;
         if (view instanceof TextView && !(view instanceof EditText)) {
             TextView text = (TextView) view;
-            if (text.getLayout() != null && text.getMaxLines() > 2)
-                assertTrue("Text clipped: " + text.getText(), text.getHeight() + 1 >=
+            if (text.getLayout() != null && text.getMaxLines() > 2) {
+                geometry.append("text=").append(text.getText()).append('\n')
+                        .append("height=").append(text.getHeight())
+                        .append("; measuredHeight=").append(text.getMeasuredHeight())
+                        .append("; layoutHeight=").append(text.getLayout().getHeight())
+                        .append("; lineCount=").append(text.getLayout().getLineCount())
+                        .append("; width=").append(text.getWidth())
+                        .append("; measuredWidth=").append(text.getMeasuredWidth())
+                        .append("; textSizePx=").append(text.getTextSize())
+                        .append("; maxLines=").append(text.getMaxLines())
+                        .append("; layoutParamsHeight=").append(text.getLayoutParams() == null ? "null" : String.valueOf(text.getLayoutParams().height))
+                        .append("; padding=").append(text.getPaddingLeft()).append(',').append(text.getPaddingTop())
+                        .append(',').append(text.getPaddingRight()).append(',').append(text.getPaddingBottom())
+                        .append("; compoundPadding=").append(text.getCompoundPaddingLeft()).append(',').append(text.getCompoundPaddingTop())
+                        .append(',').append(text.getCompoundPaddingRight()).append(',').append(text.getCompoundPaddingBottom())
+                        .append("; isLaidOut=").append(text.isLaidOut())
+                        .append("; isLayoutRequested=").append(text.isLayoutRequested()).append('\n');
+                assertTrue("Text clipped: " + text.getText() + "\n" + geometry, text.getHeight() + 1 >=
                         text.getLayout().getHeight() + text.getCompoundPaddingTop() + text.getCompoundPaddingBottom());
+            }
         }
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++)
-            validateLayout(((ViewGroup) view).getChildAt(i));
+            validateLayout(((ViewGroup) view).getChildAt(i), geometry);
     }
     private static TextView findText(View view, String label) {
         if (view instanceof TextView && label.contentEquals(((TextView) view).getText())) return (TextView) view;
