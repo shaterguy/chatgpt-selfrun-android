@@ -906,7 +906,7 @@ private void runWebStep(){
         case SelfRunStore.PHASE_BOOTSTRAP_SEND->{String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);script=SelfRunContinuationDom.prepareBootstrap(store.projectUrl(),prompt,store.commandMarkerId());}
         case SelfRunStore.PHASE_APPLY_PREFS->script=WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel());
         case SelfRunStore.PHASE_APPLY_REASONING->script=WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning());
-        case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());}
+        case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());if(HybridRunProfileStore.MODE_HYBRID.equals(store.mode()))script=HybridRequestProfileScript.prepareContinuationAndThen(store.runId(),script);}
         default->{store.setLastError("WEB_STATE_RETRY","Drive V1 WebView 단계를 자동 재확인합니다: "+phase);scheduleWeb(2000L);return;}
     }
     evaluate(phase,script);
@@ -943,6 +943,7 @@ private void evaluate(String phase,String script){
             }
             BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
             JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
+            recordHybridModeUiResult(phase,result);
             if(isContinuationDiagnosticPhase(phase)&&SelfRunRolloverPolicy.continuationProgressStatus(status))rollover.clearLocalFailures(runId);
             if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
                 BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
@@ -957,6 +958,9 @@ private void evaluate(String phase,String script){
             }
             if("TURN_PROTOCOL_UNAVAILABLE".equals(status)){
                 pauseError("TURN_PROTOCOL_UNAVAILABLE","응답 프로토콜을 제출 전에 준비하지 못했습니다.");return;
+            }
+            if("HYBRID_MODE_UNAVAILABLE".equals(status)||"HYBRID_PROFILE_UNAVAILABLE".equals(status)){
+                pauseError(status,"HYBRID 후속 턴의 목표 UI 모드와 요청 프로필을 제출 전에 확인하지 못했습니다.");return;
             }
             if("TARGET_ERROR".equals(status)){
                 recordContinuationTargetError(phase,detail);
@@ -1105,6 +1109,25 @@ private String bootstrapScope(){return SelfRunScript.isGeneralChatUrl(store.proj
 
 
 private static boolean isConversationLocalFailureStatus(String status){return SelfRunRolloverPolicy.hardContinuationFailureStatus(status);}
+
+private void recordHybridModeUiResult(String phase,JSONObject result){
+    if(!HybridRunProfileStore.MODE_HYBRID.equals(store.mode())
+            ||!SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)||result==null)return;
+    JSONObject diagnostics=result.optJSONObject("diagnostics");
+    if(diagnostics==null||!diagnostics.optBoolean("hybridModeGate",false))return;
+    String boundary=hybridModeDiagnosticToken(diagnostics,"hybridModeBoundary");
+    String source=hybridModeDiagnosticToken(diagnostics,"hybridModeSource");
+    String target=hybridModeDiagnosticToken(diagnostics,"hybridModeTarget");
+    String observed=hybridModeDiagnosticToken(diagnostics,"hybridModeObserved");
+    String outcome=hybridModeDiagnosticToken(diagnostics,"hybridModeOutcome");
+    String reason=hybridModeDiagnosticToken(diagnostics,"hybridModeReason");
+    runLog.record(store,"HYBRID_MODE_UI","boundary="+boundary+";source="+source
+            +";target="+target+";observed="+observed+";outcome="+outcome+";reason="+reason);
+}
+private static String hybridModeDiagnosticToken(JSONObject diagnostics,String key){
+    String value=diagnostics.optString(key,"");
+    return value.matches("[A-Za-z0-9_.-]{1,64}")?value:"invalid";
+}
 
 private void recordContinuationWait(String phase,String status,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.waitDetail(phase,status,detail));}
 private void recordContinuationState(String phase,String status){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.stateDetail(phase,status));}

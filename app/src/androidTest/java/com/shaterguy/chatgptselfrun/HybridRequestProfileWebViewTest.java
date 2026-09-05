@@ -22,7 +22,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Executes both HYBRID directions against real WebView fetch request bodies. */
+/** Executes HYBRID profiles across WebView fetch Request/init and XHR request bodies. */
 @RunWith(AndroidJUnit4.class)
 public final class HybridRequestProfileWebViewTest {
     private static final String CHAT_URL = "https://chatgpt.com/";
@@ -36,8 +36,10 @@ public final class HybridRequestProfileWebViewTest {
 
     @Test public void bothDirectionsBindEachFetchToNativeStageAndPreserveDataPlane() throws Exception {
         AtomicReference<ProfileRegistry.Profile> work = new AtomicReference<>();
+        AtomicReference<ProfileRegistry.Profile> lunaMax = new AtomicReference<>();
         AtomicReference<ProfileRegistry.Profile> removeTierWork = new AtomicReference<>();
         AtomicReference<ProfileRegistry.Profile> chat = new AtomicReference<>();
+        AtomicReference<ProfileRegistry.Profile> chatInstant = new AtomicReference<>();
         AtomicBoolean removeCaptured = new AtomicBoolean(false);
         AtomicBoolean removeTierCaptured = new AtomicBoolean(false);
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
@@ -67,31 +69,41 @@ public final class HybridRequestProfileWebViewTest {
                         ProfileRegistry.registerCaptured(capturedRemoveTier, "astra-fixture", "max");
                 removeTierCaptured.set(ProfileRegistry.RegisterResult.ADDED.equals(removeTierResult.status));
                 removeTierWork.set(removeTierResult.profile);
+                lunaMax.set(ProfileRegistry.resolveWork("luna", "max"));
                 chat.set(ProfileRegistry.resolveChat("xhigh"));
+                chatInstant.set(ProfileRegistry.resolveChat("instant"));
                 assertTrue(work.get() != null);
+                assertTrue(lunaMax.get() != null);
                 assertTrue(removeTierWork.get() != null);
                 assertTrue(chat.get() != null);
+                assertTrue(chatInstant.get() != null);
             });
 
             HybridRunProfileStore.Endpoint workEndpoint =
                     HybridRunProfileStore.Endpoint.fromProfile(work.get());
+            HybridRunProfileStore.Endpoint lunaMaxEndpoint =
+                    HybridRunProfileStore.Endpoint.fromProfile(lunaMax.get());
             HybridRunProfileStore.Endpoint chatEndpoint =
                     HybridRunProfileStore.Endpoint.fromProfile(chat.get());
+            HybridRunProfileStore.Endpoint chatInstantEndpoint =
+                    HybridRunProfileStore.Endpoint.fromProfile(chatInstant.get());
             HybridRunProfileStore.Endpoint removeTierWorkEndpoint =
                     HybridRunProfileStore.Endpoint.fromProfile(removeTierWork.get());
 
             JSONArray workToChat = runDirection(scenario,
                     new HybridRunProfileStore.Selection(WORK_TO_CHAT_RUN,
-                            HybridRunProfileStore.STAGE_BOOTSTRAP, workEndpoint, chatEndpoint));
+                            HybridRunProfileStore.STAGE_BOOTSTRAP,
+                            lunaMaxEndpoint, chatInstantEndpoint));
             assertWork(body(workToChat, "bootstrap"));
-            assertChat(body(workToChat, "continuation"));
+            assertChatInstant(body(workToChat, "continuation"));
             assertPreserved(workToChat);
 
             JSONArray chatToWork = runDirection(scenario,
                     new HybridRunProfileStore.Selection(CHAT_TO_WORK_RUN,
                             HybridRunProfileStore.STAGE_BOOTSTRAP, chatEndpoint, workEndpoint));
             assertChat(body(chatToWork, "bootstrap"));
-            assertWork(body(chatToWork, "continuation"));
+            assertWork(body(chatToWork, "continuation"),
+                    "gpt-5.6-luna-wm", "standard");
             assertPreserved(chatToWork);
 
             JSONArray sameWork = runDirection(scenario,
@@ -189,7 +201,7 @@ public final class HybridRequestProfileWebViewTest {
     }
 
     private static void assertWork(JSONObject body) throws Exception {
-        assertWork(body, "gpt-5.6-luna-wm", "standard");
+        assertWork(body, "gpt-5.6-luna-wm", "max");
     }
 
     private static void assertWork(JSONObject body, String model, String effort) throws Exception {
@@ -202,6 +214,13 @@ public final class HybridRequestProfileWebViewTest {
     private static void assertChat(JSONObject body) throws Exception {
         assertEquals("gpt-5-6-thinking", body.getString("model"));
         assertEquals("max", body.getString("thinking_effort"));
+        assertFalse(body.has("conversation_origin"));
+        assertFalse(body.has("service_tier"));
+    }
+
+    private static void assertChatInstant(JSONObject body) throws Exception {
+        assertEquals("gpt-5-6", body.getString("model"));
+        assertFalse(body.has("thinking_effort"));
         assertFalse(body.has("conversation_origin"));
         assertFalse(body.has("service_tier"));
     }
@@ -230,13 +249,21 @@ public final class HybridRequestProfileWebViewTest {
                   conversation_mode:{kind:'primary_assistant'},custom:{value:'preserve-me'},
                   model:'source-model',thinking_effort:'source-effort',
                   conversation_origin:'source-origin',service_tier:'source-tier'};
-                const send=opaque=>fetch('/backend-api/f/conversation',{method:'POST',
-                  headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,opaque})});
+                const sendFetch=opaque=>{
+                  const source=new Request('/backend-api/f/conversation',{method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({...base,opaque:'request-source'})});
+                  return fetch(source,{method:'POST',headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({...base,opaque})});
+                };
+                const sendXhr=opaque=>{const xhr=new XMLHttpRequest();
+                  xhr.open('POST','/backend-api/f/conversation');
+                  xhr.setRequestHeader?.('Content-Type','application/json');
+                  xhr.send(JSON.stringify({...base,opaque}));};
                 (async()=>{
-                  const first=send('bootstrap');
+                  await sendFetch('bootstrap');
                   window.__selfRunHybridProfileBridge.selectStage('continuation');
-                  const second=send('continuation');
-                  await Promise.all([first,second]);
+                  sendXhr('continuation');
                   window.hybridPairDone=true;
                 })().catch(error=>{window.hybridPairError=String(error?.message||error);window.hybridPairDone=true;});
                 return 'started';})()
@@ -292,6 +319,12 @@ public final class HybridRequestProfileWebViewTest {
                   window.records.push({url:request.url,body});
                   return new Response('{}',{status:200,headers:{'Content-Type':'application/json'}});
                 };
+                class FixtureXHR {
+                  open(method,url){this.method=method;this.url=new URL(url,location.href).href;}
+                  setRequestHeader(){}
+                  send(body){window.records.push({url:this.url,body});}
+                }
+                window.XMLHttpRequest=FixtureXHR;
                 </script></body></html>
                 """;
     }

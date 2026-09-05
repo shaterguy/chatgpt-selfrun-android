@@ -38,12 +38,21 @@ public final class WorkProtocolNativeObserverTest {
         assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC));
     }
 
+    @Test public void workAndHybridRunsAreObservableButPlainChatIsNot() {
+        assertTrue(WorkProtocolNativeObserver.observableMode(SelfRunStore.MODE_WORK));
+        assertTrue(WorkProtocolNativeObserver.observableMode(HybridRunProfileStore.MODE_HYBRID));
+        assertFalse(WorkProtocolNativeObserver.observableMode(SelfRunStore.MODE_CHAT));
+        assertFalse(WorkProtocolNativeObserver.observableMode(""));
+    }
+
     @Test public void nativeObserversAreReadOnlyAndDoNotTouchSensitiveRequestMaterial() throws Exception {
         String source = source("WorkProtocolNativeObserver.java");
         assertTrue(source.contains("return null;"));
         assertTrue(source.contains("SOURCE_WEBVIEW = \"native_webview\""));
         assertTrue(source.contains("SOURCE_SERVICE_WORKER = \"native_service_worker\""));
         assertTrue(source.contains("ROUTE_CANONICAL_CONVERSATION = \"canonical_conversation\""));
+        assertTrue(source.contains("\"HYBRID_REQUEST_TRANSPORT\""));
+        assertTrue(source.contains("\"body=unavailable\""));
         assertFalse(source.contains("getRequestHeaders"));
         assertFalse(source.contains("WebResourceResponse("));
         assertFalse(source.contains("Cookie"));

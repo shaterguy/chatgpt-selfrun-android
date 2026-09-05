@@ -17,7 +17,7 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Set;
 
-/** Work-only native request observer. It never intercepts, proxies, or reconstructs traffic. */
+/** Work/HYBRID native request observer. It never intercepts, proxies, or reconstructs traffic. */
 final class WorkProtocolNativeObserver {
     static final String SOURCE_WEBVIEW = "native_webview";
     static final String SOURCE_SERVICE_WORKER = "native_service_worker";
@@ -63,7 +63,7 @@ final class WorkProtocolNativeObserver {
         if (context == null) return;
         Context app = context.getApplicationContext();
         SelfRunStore store = new SelfRunStore(app);
-        if (store.active() && SelfRunStore.MODE_WORK.equals(store.mode())) recordEnvironment(app, store);
+        if (store.active() && observableMode(store.mode())) recordEnvironment(app, store);
     }
 
     static boolean isCanonical(String method, String rawUrl) {
@@ -88,8 +88,13 @@ final class WorkProtocolNativeObserver {
                 || SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase);
     }
 
+    static boolean observableMode(String mode) {
+        return SelfRunStore.MODE_WORK.equals(mode)
+                || HybridRunProfileStore.MODE_HYBRID.equals(mode);
+    }
+
     private static boolean eligible(SelfRunStore store) {
-        return store != null && store.active() && SelfRunStore.MODE_WORK.equals(store.mode())
+        return store != null && store.active() && observableMode(store.mode())
                 && observablePhase(store.phase());
     }
 
@@ -107,6 +112,13 @@ final class WorkProtocolNativeObserver {
             SelfRunStore current = new SelfRunStore(app);
             if (!runId.equals(current.runId()) || !eligible(current)) return;
             recordEnvironment(app, current);
+            if (HybridRunProfileStore.MODE_HYBRID.equals(current.mode())) {
+                new SelfRunRunLog(app).record(current, "HYBRID_REQUEST_TRANSPORT",
+                        "source=" + source + ";transport=" + source
+                                + ";route=" + ROUTE_CANONICAL_CONVERSATION
+                                + ";outcome=canonical_request;body=unavailable");
+                return;
+            }
             WorkProtocolCoverageTracker.observeNativeRequest(app, current, source);
             new SelfRunRunLog(app).record(current, "WORK_PROTOCOL_TRANSPORT",
                     "source=" + source + ";transport=" + source
@@ -139,7 +151,9 @@ final class WorkProtocolNativeObserver {
                 + ";serviceWorker=" + supported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)
                 + ";serviceWorkerIntercept=" + supported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)
                 + ";serviceWorkerClientInstalled=" + serviceWorkerClientInstalled;
-        new SelfRunRunLog(context).record(store, "WORK_PROTOCOL_ENV", detail);
+        new SelfRunRunLog(context).record(store,
+                HybridRunProfileStore.MODE_HYBRID.equals(store.mode())
+                        ? "HYBRID_REQUEST_ENV" : "WORK_PROTOCOL_ENV", detail);
     }
 
     private static boolean supported(String feature) {
