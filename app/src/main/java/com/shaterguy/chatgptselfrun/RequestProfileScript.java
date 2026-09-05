@@ -79,7 +79,7 @@ final class RequestProfileScript {
                   if(window.__selfRunRequestProfileEngine?.version===__ENGINE_VERSION__)return;
                   const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
                   const REGISTRY_STORE='selfrun-drive:profile-registry-runtime:v1';
-                  const TARGET_STORE='selfrun-drive:request-profile-target:v4';
+                  const TARGET_STORE='selfrun-drive:request-profile-target:v3';
                   const state={registry:[],target:null,capture:{armed:false,mode:'',value:null},last:{ok:false,reason:'not_attempted'}};
                   const norm=v=>String(v??'').trim().toLowerCase();
                   const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,160)};throw new Error('SELFRUN_PROFILE:'+state.last.reason);};
@@ -127,7 +127,7 @@ final class RequestProfileScript {
                   const persistRegistry=()=>{try{localStorage.setItem(REGISTRY_STORE,JSON.stringify(state.registry));}catch(_){}};
                   const restoreRegistry=()=>{try{const raw=localStorage.getItem(REGISTRY_STORE);if(!raw)return[];const list=JSON.parse(raw);if(!Array.isArray(list))return[];return list.map(normalizeProfile);}catch(_){return[];}};
                   const persistTarget=()=>{try{if(targetValid(state.target))localStorage.setItem(TARGET_STORE,JSON.stringify(state.target));else localStorage.removeItem(TARGET_STORE);}catch(_){}};
-                  const restoreTarget=()=>{try{const raw=localStorage.getItem(TARGET_STORE);if(!raw)return null;const t=JSON.parse(raw);if(!targetValid(t)){localStorage.removeItem(TARGET_STORE);return null;}return{mode:t.mode,model:t.model,reasoning:t.reasoning,bootstrapReasoning:norm(t.bootstrapReasoning||t.reasoning),continuationReasoning:norm(t.continuationReasoning||t.reasoning),runId:t.runId,ready:t.ready,hybridContinuation:t.hybridContinuation===true};}catch(_){return null;}};
+                  const restoreTarget=()=>{try{const raw=localStorage.getItem(TARGET_STORE);if(!raw)return null;const t=JSON.parse(raw);const restored={mode:t.mode,model:t.model,reasoning:t.reasoning,bootstrapReasoning:norm(t.bootstrapReasoning||t.reasoning),continuationReasoning:norm(t.continuationReasoning||t.reasoning),runId:t.runId,ready:t.ready,hybridContinuation:t.hybridContinuation===true};if(!targetValid(restored)){localStorage.removeItem(TARGET_STORE);return null;}return restored;}catch(_){return null;}};
                   state.registry=restoreRegistry();
                   state.target=restoreTarget();
                   if(state.target)state.last={ok:true,reason:'target_restored',mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning,hybridContinuation:state.target.hybridContinuation};

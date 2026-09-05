@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /** Reproduces request-profile lifetime across WebView destruction and recreation. */
@@ -49,6 +50,33 @@ public final class RequestProfileRecreationAndroidTest {
             assertEquals("medium", restored.getString("bootstrapReasoning"));
             assertEquals("medium", restored.getString("continuationReasoning"));
             assertTrue(restored.getBoolean("ready"));
+            assertEquals("target_restored", diagnostics.getString("reason"));
+            read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v3');return 'cleared';})()");
+        }
+    }
+
+    @Test public void legacyV3TargetWithoutHybridFlagRestoresAsNormalMode() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = loadFixture(scenario);
+            evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
+            assertEquals("legacy-seeded", read(scenario, web,
+                    "(()=>{" + RequestProfileScript.beginTarget("chat", RUN_ID)
+                            + RequestProfileScript.setChatReasoning("medium")
+                            + "localStorage.setItem('selfrun-drive:request-profile-target:v3',JSON.stringify({"
+                            + "mode:'chat',model:'',reasoning:'medium',bootstrapReasoning:'medium',"
+                            + "continuationReasoning:'medium',runId:'" + RUN_ID + "',ready:true}));"
+                            + "return 'legacy-seeded';})()"));
+
+            recreateFixture(scenario, web);
+            evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
+            JSONObject restored = new JSONObject(read(scenario, web,
+                    "JSON.stringify(window.__selfRunRequestProfileEngine.target())"));
+            JSONObject diagnostics = new JSONObject(read(scenario, web,
+                    "JSON.stringify(window.__selfRunRequestProfileEngine.diagnostics())"));
+            assertEquals("chat", restored.getString("mode"));
+            assertEquals("medium", restored.getString("reasoning"));
+            assertTrue(restored.getBoolean("ready"));
+            assertFalse(restored.getBoolean("hybridContinuation"));
             assertEquals("target_restored", diagnostics.getString("reason"));
             read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v3');return 'cleared';})()");
         }

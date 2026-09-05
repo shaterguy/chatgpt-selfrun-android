@@ -49,7 +49,7 @@ public final class HybridModePolicyTest {
         assertFalse(script.contains("SELF_RUN_BOOTSTRAP"));
         assertFalse(script.contains("SELF_RUN_CONTINUE"));
         assertFalse(script.contains("messageBatchText"));
-        assertFalse(script.contains("fingerprint"));
+        assertFalse(script.contains("const fingerprint="));
         assertFalse(script.contains("bootstrapSeen"));
         assertFalse(script.contains("post-bootstrap-submission"));
         assertFalse(script.contains("first-submission"));

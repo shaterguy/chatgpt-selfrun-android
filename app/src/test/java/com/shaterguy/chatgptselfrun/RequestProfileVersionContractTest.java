@@ -22,7 +22,7 @@ public final class RequestProfileVersionContractTest {
         String script = RequestProfileScript.documentStartScript();
         assertEquals(2, occurrences(script, RequestProfileScript.ENGINE_VERSION));
         assertTrue(script.contains("selfrun-drive:profile-registry-runtime:v1"));
-        assertTrue(script.contains("selfrun-drive:request-profile-target:v4"));
+        assertTrue(script.contains("selfrun-drive:request-profile-target:v3"));
         assertTrue(script.contains("p==='/backend-api/conversation'||p==='/backend-api/f/conversation'"));
         assertTrue(script.contains("if(!probe.eligible)return nativeFetch(input,init)"));
     }
@@ -57,6 +57,8 @@ public final class RequestProfileVersionContractTest {
     @Test public void restoredTargetMustStillResolveAgainstCurrentRegistry() {
         String script = RequestProfileScript.documentStartScript();
         assertTrue(script.contains("state.target=restoreTarget();"));
+        assertTrue(script.contains("hybridContinuation:t.hybridContinuation===true"));
+        assertTrue(script.contains("targetValid(restored)"));
         assertTrue(script.contains("if(state.target&&!targetValid(state.target))"));
         assertTrue(script.contains("target_deleted_or_unsupported"));
         assertTrue(script.contains("profile_deleted_or_unsupported"));
