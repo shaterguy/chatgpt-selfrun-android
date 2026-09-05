@@ -194,7 +194,8 @@ public final class SelfRunService extends Service {
     }
 
     private boolean canRun() {
-        return store.active() && !store.paused() && !store.userStopped()
+        return (SelfRunStore.MODE_CHAT.equals(store.mode()) || SelfRunStore.MODE_WORK.equals(store.mode()))
+                && store.active() && !store.paused() && !store.userStopped()
                 && !SelfRunStore.PHASE_DONE.equals(store.phase())
                 && !SelfRunStore.PHASE_IDLE.equals(store.phase());
     }
@@ -906,7 +907,7 @@ private void runWebStep(){
         case SelfRunStore.PHASE_BOOTSTRAP_SEND->{String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);script=SelfRunContinuationDom.prepareBootstrap(store.projectUrl(),prompt,store.commandMarkerId());}
         case SelfRunStore.PHASE_APPLY_PREFS->script=WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel());
         case SelfRunStore.PHASE_APPLY_REASONING->script=WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning());
-        case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());if(HybridRunProfileStore.MODE_HYBRID.equals(store.mode()))script=HybridRequestProfileScript.prepareContinuationAndThen(store.runId(),script);}
+        case SelfRunStore.PHASE_SEND_CONTINUE->{String prompt=continuationPrompt();script=SelfRunContinuationDom.prepareDriveTurn(store.conversationUrl(),prompt,continuationMarkerId());script=LegacyRunModeMigration.prepareContinuation(store.runId(),script);}
         default->{store.setLastError("WEB_STATE_RETRY","Drive V1 WebView 단계를 자동 재확인합니다: "+phase);scheduleWeb(2000L);return;}
     }
     evaluate(phase,script);
@@ -943,7 +944,6 @@ private void evaluate(String phase,String script){
             }
             BootstrapResultPolicy.Parsed parsed=BootstrapResultPolicy.parse(raw);
             JSONObject result=parsed.result;String status=parsed.status,detail=parsed.detail;
-            recordHybridProfileResult(phase,result);
             if(isContinuationDiagnosticPhase(phase)&&SelfRunRolloverPolicy.continuationProgressStatus(status))rollover.clearLocalFailures(runId);
             if(SelfRunStore.PHASE_BOOTSTRAP.equals(phase)){
                 BootstrapRunStateStore.Window current=BootstrapRunStateStore.recordBootstrapResult(this,runId,status,detail,System.currentTimeMillis());
@@ -959,8 +959,8 @@ private void evaluate(String phase,String script){
             if("TURN_PROTOCOL_UNAVAILABLE".equals(status)){
                 pauseError("TURN_PROTOCOL_UNAVAILABLE","응답 프로토콜을 제출 전에 준비하지 못했습니다.");return;
             }
-            if("HYBRID_PROFILE_UNAVAILABLE".equals(status)){
-                pauseError(status,"HYBRID 후속 턴의 API 요청 프로필을 제출 전에 확인하지 못했습니다.");return;
+            if("LEGACY_MODE_UNRESOLVED".equals(status)){
+                pauseError(status,"이전 실행 프로필을 확인하지 못했습니다.");return;
             }
             if("TARGET_ERROR".equals(status)){
                 recordContinuationTargetError(phase,detail);
@@ -1110,24 +1110,6 @@ private String bootstrapScope(){return SelfRunScript.isGeneralChatUrl(store.proj
 
 private static boolean isConversationLocalFailureStatus(String status){return SelfRunRolloverPolicy.hardContinuationFailureStatus(status);}
 
-private void recordHybridProfileResult(String phase,JSONObject result){
-    if(!HybridRunProfileStore.MODE_HYBRID.equals(store.mode())
-            ||!SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)||result==null)return;
-    JSONObject diagnostics=result.optJSONObject("diagnostics");
-    if(diagnostics==null||!diagnostics.optBoolean("hybridProfileGate",false))return;
-    String boundary=hybridProfileDiagnosticToken(diagnostics,"hybridProfileBoundary");
-    String target=hybridProfileDiagnosticToken(diagnostics,"hybridProfileTarget");
-    String observed=hybridProfileDiagnosticToken(diagnostics,"hybridProfileObserved");
-    String outcome=hybridProfileDiagnosticToken(diagnostics,"hybridProfileOutcome");
-    String reason=hybridProfileDiagnosticToken(diagnostics,"hybridProfileReason");
-    runLog.record(store,"HYBRID_REQUEST_PROFILE","boundary="+boundary
-            +";target="+target+";observed="+observed+";outcome="+outcome+";reason="+reason);
-}
-private static String hybridProfileDiagnosticToken(JSONObject diagnostics,String key){
-    String value=diagnostics.optString(key,"");
-    return value.matches("[A-Za-z0-9_.-]{1,64}")?value:"invalid";
-}
-
 private void recordContinuationWait(String phase,String status,String detail){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.waitDetail(phase,status,detail));}
 private void recordContinuationState(String phase,String status){if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.stateDetail(phase,status));}
 private void recordContinuationRouteMismatch(String actual){String phase=store.phase();if(!isContinuationDiagnosticPhase(phase))return;runLog.record(store,"DOM_RESULT",SelfRunWebDiagnostics.routeMismatchDetail(phase,canonicalUrl(),actual));}
@@ -1158,15 +1140,15 @@ private void handleWebResult(String phase,String status,JSONObject result){
     if(SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=commandPrompt(SelfRunStore.RETRY_BOOTSTRAP),token=ensureTurnProtocolToken();beginPostDispatchNoStartWindow();evaluate(phase,ChatGptTurnProtocolScript.bindTurnAndThen(store.runId(),token,SelfRunContinuationDom.clickPreparedBootstrap(store.projectUrl(),prompt,store.commandMarkerId())));return;}
     if(SelfRunStore.PHASE_APPLY_PREFS.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_APPLY_REASONING,"다음 턴 추론 적용","model_ready");scheduleWeb(250L);return;}
     if(SelfRunStore.PHASE_APPLY_REASONING.equals(phase)&&"READY".equals(status)){transition(SelfRunStore.PHASE_SEND_CONTINUE,"Work MODEL/REASONING 적용 완료 · 다음 턴 전송 준비","reasoning_ready_for_send");scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
-    if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnProtocolToken();String action=SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId());if(HybridRunProfileStore.MODE_HYBRID.equals(store.mode()))action=HybridRequestProfileScript.selectContinuationAndThen(store.runId(),action);beginPostDispatchNoStartWindow();evaluate(phase,ChatGptTurnProtocolScript.bindTurnAndThen(store.runId(),token,action));return;}
+    if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)&&"READY_TO_SUBMIT".equals(status)){String prompt=continuationPrompt(),token=ensureTurnProtocolToken();String action=SelfRunContinuationDom.clickPreparedDriveTurn(store.conversationUrl(),prompt,continuationMarkerId(),store.runId());beginPostDispatchNoStartWindow();evaluate(phase,ChatGptTurnProtocolScript.bindTurnAndThen(store.runId(),token,action));return;}
     scheduleWeb(750L);
 }
 
 private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);}
-private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
+private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=LegacyRunModeMigration.appendNotice(store.runId(),SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput()));return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
 private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
-private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 응답 프로토콜 대기 중");detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
+private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 응답 프로토콜 대기 중",true);detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
 private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
 
 private void armProtocolCompletion(String token){

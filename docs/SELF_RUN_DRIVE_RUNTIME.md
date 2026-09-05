@@ -77,6 +77,18 @@ canonical 안내 경로는 `/GPT/Self Run/Runs/`이며, 기존 Runs 객체 ID `1
 
 ## 패키징과 서명
 
-Drive 계보의 Android application ID는 `com.shaterguy.chatgptselfrun.drive`입니다. WebView SelfRun 0.2.x 계보와 별도 설치·버전·릴리스 채널을 유지합니다. 개발 branch의 최종 사용자 테스트 APK도 CI debug key가 아니라 `tools/sign_release.sh`가 검증하는 고정 SelfRun 인증서로 서명해야 업데이트 설치 계보를 유지할 수 있습니다.
+Drive 계보의 Android application ID는 `com.shaterguy.chatgptselfrun.drive`입니다. WebView SelfRun 0.2.x 계보와 별도 설치·버전·릴리스 채널을 유지합니다. 개발 branch의 사용자 TEST APK는 별도 application ID와 `tools/sign_test.sh`의 고정 TEST 인증서를 사용하며 기존 TEST 설치본을 업데이트합니다. 정식 APK는 `tools/sign_release.sh`의 정식 인증서를 유지합니다.
 
 서명 인증서 기대 SHA-256, 파생 방식과 정식 릴리스 절차의 세부사항은 [SIGNING](SIGNING.md), `tools/sign_release.sh`, `release-drive-v1.yml`을 권위 원본으로 사용합니다.
+
+## 폐기 모드의 단회 정규화 (2.3.2-dev16)
+
+새 실행은 CHAT/WORK만 허용합니다. HybridRunProfileStore·HybridBootstrapDom·HybridRequestProfileScript 실행 계층은 제거했습니다. LegacyRunModeMigration은 구 SharedPreferences의 현재 stage endpoint를 단 한 번 읽어 고정된 일반 모드로 저장하는 호환 reader입니다. 두 단계 선택이나 단계 전환 기능은 없습니다.
+
+기존 runId·conversationUrl·turnProtocolToken·cursor·phase·paused와 보류 입력을 유지합니다. 기존 bare PLAN completion은 아직 모드 갱신 안내를 전송하지 않은 migration 경계에서만 해당 저장 프로필로 해석할 수 있습니다. 다음 실제 CONTINUE의 사용자 payload 뒤에 일반 모드 계약 안내를 붙이며, 실제 CONTINUE 제출 확인과 같은 SelfRunStore commit에서 consumed marker를 기록합니다. Bootstrap 확인이나 단순 전송 준비는 안내를 소비하지 않습니다. 기록 재시작은 원본 history를 수정하지 않고 복사한 snapshot만 정규화합니다. 유효 endpoint를 확인할 수 없으면 LEGACY_MODE_UNRESOLVED로 상태를 보존하고 서비스의 미지원 모드 실행을 차단합니다.
+
+RequestProfileScript profile-registry-v5는 기존 target:v3를 읽되 폐기된 hybridContinuation 필드를 무시합니다. registry operations만 네 가지 control field를 결정하고 data plane·capture one-shot·request snapshot 및 Chat 첫 턴/후속 추론 분기는 유지합니다.
+
+## 화면 증거
+
+UiRedesignScreenshotTest는 실제 Android View와 UiAutomation screenshot을 사용합니다. 같은 emulator 작업에서 source SHA, debug 변형, 360/840dp·light/dark·font100/200%·IME와 대표 실행 상태를 기록합니다. 이 캡처의 debug package와 canonical signed qaApp package는 구분하여 manifest에 남깁니다. APK는 기존 canonical 파일을 재사용하며 UI 증거를 위한 별도 빌드는 생성하지 않습니다.

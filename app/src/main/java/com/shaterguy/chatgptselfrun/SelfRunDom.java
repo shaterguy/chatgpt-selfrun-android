@@ -8,17 +8,14 @@ final class SelfRunDom {
         String projectId = SelfRunScript.projectId(projectUrl);
         String project = q(projectId);
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
-        boolean hybrid = HybridRunProfileStore.MODE_HYBRID.equals(mode);
         boolean general = SelfRunScript.GENERAL_CHAT_SCOPE.equals(projectId);
         String requested = work ? "work" : "chat";
         String chatReasoning = work ? ChatReasoningPreferenceStore.KEEP
                 : ChatReasoningPreferenceStore.selectionForRun(runId);
         String newChatTarget = general ? WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT : WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT;
         String composerTarget = general ? WebUiCalibrationStore.TARGET_GENERAL_COMPOSER : WebUiCalibrationStore.TARGET_PROJECT_COMPOSER;
-        String profileSetup = hybrid
-                ? HybridBootstrapDom.inline(runId)
-                : BootstrapModeDom.inline(requested, runId) + ChatReasoningOptionDom.inline(chatReasoning, runId);
-        String profileDetail = hybrid ? q("HYBRID") : q(ChatReasoningPreferenceStore.label(chatReasoning));
+        String profileSetup = BootstrapModeDom.inline(requested, runId) + ChatReasoningOptionDom.inline(chatReasoning, runId);
+        String profileDetail = q(ChatReasoningPreferenceStore.label(chatReasoning));
         return "(() =>{const result=(status,detail='',diagnostics={})=>JSON.stringify({status,detail,url:location.href,diagnostics});"
                 + projectGuard(project) + authGuard() + calibration()
                 + "const parts=location.pathname.split('/').filter(Boolean),after=k=>{const i=parts.indexOf(k);return i>=0&&i+1<parts.length?parts[i+1]:''};const actualConversation=after('c');"

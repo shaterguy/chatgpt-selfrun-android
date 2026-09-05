@@ -38,9 +38,9 @@ public final class WorkProtocolNativeObserverTest {
         assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC));
     }
 
-    @Test public void workAndHybridRunsAreObservableButPlainChatIsNot() {
+    @Test public void onlyWorkRunsAreObservable() {
         assertTrue(WorkProtocolNativeObserver.observableMode(SelfRunStore.MODE_WORK));
-        assertTrue(WorkProtocolNativeObserver.observableMode(HybridRunProfileStore.MODE_HYBRID));
+        assertFalse(WorkProtocolNativeObserver.observableMode("HYBRID"));
         assertFalse(WorkProtocolNativeObserver.observableMode(SelfRunStore.MODE_CHAT));
         assertFalse(WorkProtocolNativeObserver.observableMode(""));
     }
@@ -51,8 +51,8 @@ public final class WorkProtocolNativeObserverTest {
         assertTrue(source.contains("SOURCE_WEBVIEW = \"native_webview\""));
         assertTrue(source.contains("SOURCE_SERVICE_WORKER = \"native_service_worker\""));
         assertTrue(source.contains("ROUTE_CANONICAL_CONVERSATION = \"canonical_conversation\""));
-        assertTrue(source.contains("\"HYBRID_REQUEST_TRANSPORT\""));
-        assertTrue(source.contains(";outcome=canonical_request;body=unavailable"));
+        assertTrue(source.contains("\"WORK_PROTOCOL_TRANSPORT\""));
+        assertTrue(source.contains(";outcome=canonical_request"));
         assertFalse(source.contains("getRequestHeaders"));
         assertFalse(source.contains("WebResourceResponse("));
         assertFalse(source.contains("Cookie"));

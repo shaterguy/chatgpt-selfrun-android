@@ -33,7 +33,6 @@ final class WebViewConfig {
             return false;
         }
         RequestProfileScript.installDocumentStart(webView);
-        HybridRequestProfileScript.installDocumentStart(webView);
         ChatGptTurnProtocolScript.installDocumentStart(webView);
         WorkTurnProtocolIngressScript.installDocumentStart(webView);
         WorkProtocolTransportCaptureScript.installDocumentStart(webView);

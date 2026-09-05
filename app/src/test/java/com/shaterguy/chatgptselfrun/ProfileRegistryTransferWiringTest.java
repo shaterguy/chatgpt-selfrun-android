@@ -14,8 +14,8 @@ import static org.junit.Assert.assertTrue;
 public final class ProfileRegistryTransferWiringTest {
     @Test public void registryActivityExposesModeSpecificImportAndExportThroughSaf() throws Exception {
         String activity = source("ProfileRegistryActivity.java");
-        assertTrue(occurrences(activity, "등록 조합 내보내기") >= 2);
-        assertTrue(occurrences(activity, "등록 조합 가져오기") >= 2);
+        assertTrue(activity.contains("startExport(selectedMode)"));
+        assertTrue(activity.contains("startImport(selectedMode)"));
         assertTrue(activity.contains("Intent.ACTION_CREATE_DOCUMENT"));
         assertTrue(activity.contains("Intent.ACTION_OPEN_DOCUMENT"));
         assertTrue(activity.contains("CodingErrorAction.REPORT"));
@@ -38,8 +38,8 @@ public final class ProfileRegistryTransferWiringTest {
         String activity = source("SelfRunNewActivity.java");
         String preference = source("ChatReasoningPreferenceStore.java");
         String engine = source("RequestProfileScript.java");
-        assertTrue(activity.contains("작업 추론 정도 · 두 번째 턴부터"));
-        assertTrue(activity.contains("부트스트랩 전용 추론 정도"));
+        assertTrue(activity.contains("추론 정도"));
+        assertTrue(activity.contains("첫 턴 추론 정도"));
         assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)"));
         assertTrue(preference.contains("KEY_BOOTSTRAP_SELECTION"));
         assertTrue(preference.contains("KEY_CONTINUATION_SELECTION"));

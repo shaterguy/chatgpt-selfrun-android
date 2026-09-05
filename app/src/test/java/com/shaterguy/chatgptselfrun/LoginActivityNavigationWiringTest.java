@@ -12,7 +12,7 @@ import static org.junit.Assert.assertTrue;
 public class LoginActivityNavigationWiringTest {
     @Test public void topBarUsesDedicatedCloseAction() throws Exception {
         String source = src("LoginActivity.java");
-        assertTrue(source.contains("Ui.textButton(this, \"닫기\", v -> finish())"));
+        assertTrue(source.contains("menu.getMenu().add(\"닫기\")"));
     }
 
     @Test public void browserActionsPlaceBackImmediatelyBeforeRefresh() throws Exception {

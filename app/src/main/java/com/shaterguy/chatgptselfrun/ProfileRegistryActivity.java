@@ -48,6 +48,7 @@ public final class ProfileRegistryActivity extends Activity {
     private WebView webView;
     private ProfileRegistry.Mode captureMode;
     private boolean pageReady;
+    private ProfileRegistry.Mode selectedMode = ProfileRegistry.Mode.CHAT;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -73,40 +74,35 @@ public final class ProfileRegistryActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         LinearLayout page = Ui.page(this);
-        page.addView(Ui.topBar(this, "모델 및 추론수준 관리",
-                "운영 신호와 실제 ChatGPT request profile을 함께 관리합니다.",
-                Ui.textButton(this, "닫기", v -> finish())));
+        page.addView(Ui.toolbar(this, "모델 조합",
+                Ui.iconButton(this, R.drawable.ic_more_vert, "조합 관리", v -> showTransferMenu(v))));
         status = Ui.body(this, "");
         page.addView(status);
-
         registryScroll = new ScrollView(this);
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         registryScroll.addView(content);
-
-        content.addView(Ui.section(this, "일반 Chat"));
-        content.addView(Ui.muted(this,
-                "Chat은 현재 프로토콜에서 REASONING 신호만 사용합니다. 표시명은 읽기 전용이며 신호명 수정 기능은 없습니다."));
-        content.addView(Ui.outlinedButton(this, "새로운 조합 등록",
-                v -> startCapture(ProfileRegistry.Mode.CHAT)));
-        content.addView(Ui.actionStrip(this,
-                Ui.outlinedButton(this, "등록 조합 내보내기", v -> startExport(ProfileRegistry.Mode.CHAT)),
-                Ui.outlinedButton(this, "등록 조합 가져오기", v -> startImport(ProfileRegistry.Mode.CHAT))));
+        com.google.android.material.tabs.TabLayout tabs = new com.google.android.material.tabs.TabLayout(this);
+        tabs.addTab(tabs.newTab().setText("일반 채팅"));
+        tabs.addTab(tabs.newTab().setText("워크"));
+        content.addView(tabs);
+        content.addView(Ui.textButton(this, "조합 등록", v -> startCapture(selectedMode)));
         chatList = new LinearLayout(this);
         chatList.setOrientation(LinearLayout.VERTICAL);
-        content.addView(chatList);
-
-        content.addView(Ui.section(this, "Work"));
-        content.addView(Ui.muted(this,
-                "TURN_COMPLETED의 MODEL/REASONING 신호와 실제 outgoing request 조합을 동일 Registry에서 해석합니다."));
-        content.addView(Ui.outlinedButton(this, "새로운 조합 등록",
-                v -> startCapture(ProfileRegistry.Mode.WORK)));
-        content.addView(Ui.actionStrip(this,
-                Ui.outlinedButton(this, "등록 조합 내보내기", v -> startExport(ProfileRegistry.Mode.WORK)),
-                Ui.outlinedButton(this, "등록 조합 가져오기", v -> startImport(ProfileRegistry.Mode.WORK))));
         workList = new LinearLayout(this);
         workList.setOrientation(LinearLayout.VERTICAL);
+        content.addView(chatList);
         content.addView(workList);
+        workList.setVisibility(View.GONE);
+        tabs.addOnTabSelectedListener(new com.google.android.material.tabs.TabLayout.OnTabSelectedListener() {
+            @Override public void onTabSelected(com.google.android.material.tabs.TabLayout.Tab tab) {
+                selectedMode = tab.getPosition() == 0 ? ProfileRegistry.Mode.CHAT : ProfileRegistry.Mode.WORK;
+                chatList.setVisibility(selectedMode == ProfileRegistry.Mode.CHAT ? View.VISIBLE : View.GONE);
+                workList.setVisibility(selectedMode == ProfileRegistry.Mode.WORK ? View.VISIBLE : View.GONE);
+            }
+            @Override public void onTabUnselected(com.google.android.material.tabs.TabLayout.Tab tab) {}
+            @Override public void onTabReselected(com.google.android.material.tabs.TabLayout.Tab tab) {}
+        });
         page.addView(registryScroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -146,32 +142,35 @@ public final class ProfileRegistryActivity extends Activity {
         if (chatList == null || workList == null) return;
         chatList.removeAllViews();
         workList.removeAllViews();
-        for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) {
-            String title = profile.displayLabel() + " · 신호 REASONING=" + profile.signalReasoning;
-            String supporting = "실제 조합 " + profile.actualCombination()
-                    + (profile.builtIn ? " · 기본 등록" : " · 사용자 등록");
-            chatList.addView(Ui.settingsRow(this, title, supporting,
-                    Ui.dangerButton(this, "삭제", v -> confirmDelete(profile))));
-            chatList.addView(Ui.divider(this));
-        }
-        if (ProfileRegistry.listChat().isEmpty()) {
-            chatList.addView(Ui.muted(this, "등록된 Chat profile이 없습니다."));
-        }
+        for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) addProfile(chatList, profile);
+        for (ProfileRegistry.Profile profile : ProfileRegistry.listWork()) addProfile(workList, profile);
+        if (ProfileRegistry.listChat().isEmpty()) chatList.addView(Ui.muted(this, "등록된 조합이 없습니다."));
+        if (ProfileRegistry.listWork().isEmpty()) workList.addView(Ui.muted(this, "등록된 조합이 없습니다."));
+        status.setText(ProfileRegistry.storageHealthy() ? "" : "저장된 모델 조합을 읽을 수 없습니다.");
+        status.setVisibility(ProfileRegistry.storageHealthy() ? View.GONE : View.VISIBLE);
+    }
 
-        for (ProfileRegistry.Profile profile : ProfileRegistry.listWork()) {
-            String title = "MODEL=" + profile.signalModel + "  REASONING=" + profile.signalReasoning;
-            String supporting = "실제 조합 " + profile.actualCombination()
-                    + (profile.builtIn ? " · 기본 등록" : " · 사용자 등록");
-            workList.addView(Ui.settingsRow(this, title, supporting,
-                    Ui.dangerButton(this, "삭제", v -> confirmDelete(profile))));
-            workList.addView(Ui.divider(this));
-        }
-        if (ProfileRegistry.listWork().isEmpty()) {
-            workList.addView(Ui.muted(this, "등록된 Work profile이 없습니다."));
-        }
-        status.setText(ProfileRegistry.storageHealthy()
-                ? "Registry schema " + ProfileRegistry.SCHEMA + " · 등록값은 앱 업데이트 후에도 유지됩니다."
-                : "Registry 저장 데이터가 유효하지 않아 fail-closed 상태입니다.");
+    private void addProfile(LinearLayout list, ProfileRegistry.Profile profile) {
+        list.addView(Ui.setting(this, R.drawable.ic_settings, profile.displayLabel(),
+                profile.builtIn ? "기본 조합" : "사용자 조합", v -> showProfile(profile)));
+        list.addView(Ui.divider(this));
+    }
+
+    private void showProfile(ProfileRegistry.Profile profile) {
+        String signal = profile.mode == ProfileRegistry.Mode.WORK
+                ? "MODEL=" + profile.signalModel + " REASONING=" + profile.signalReasoning
+                : "REASONING=" + profile.signalReasoning;
+        new AlertDialog.Builder(this).setTitle(profile.displayLabel())
+                .setMessage(signal + "\n\n" + profile.actualCombination())
+                .setPositiveButton("닫기", null)
+                .setNeutralButton("삭제", (dialog, which) -> confirmDelete(profile)).show();
+    }
+
+    private void showTransferMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        menu.getMenu().add("조합 가져오기").setOnMenuItemClickListener(item -> { startImport(selectedMode); return true; });
+        menu.getMenu().add("조합 내보내기").setOnMenuItemClickListener(item -> { startExport(selectedMode); return true; });
+        menu.show();
     }
 
     private void confirmDelete(ProfileRegistry.Profile profile) {
@@ -195,6 +194,7 @@ public final class ProfileRegistryActivity extends Activity {
 
     private void startCapture(ProfileRegistry.Mode mode) {
         captureMode = mode;
+        status.setVisibility(View.VISIBLE);
         handler.removeCallbacks(pollRunnable);
         registryScroll.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
@@ -308,7 +308,7 @@ public final class ProfileRegistryActivity extends Activity {
         cancelCapture.setVisibility(View.GONE);
         registryScroll.setVisibility(View.VISIBLE);
         renderRegistry();
-        if (note != null && !note.isEmpty()) status.setText(note);
+        if (note != null && !note.isEmpty()) Toast.makeText(this, note, Toast.LENGTH_SHORT).show();
     }
 
     private void syncRegistryToWeb() {

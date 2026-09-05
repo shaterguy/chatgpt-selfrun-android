@@ -17,10 +17,10 @@ public final class PremiumUiPolicyTest {
         String night = read("app/src/main/res/values-night/styles.xml", "src/main/res/values-night/styles.xml");
         String application = src("SelfRunApplication.java");
         assertTrue(gradle.contains("com.google.android.material:material:1.14.0"));
-        assertTrue(styles.contains("Theme.Material3Expressive.DayNight.NoActionBar"));
-        assertTrue(night.contains("Theme.Material3Expressive.DayNight.NoActionBar"));
+        assertTrue(styles.contains("Theme.Material3.DayNight.NoActionBar"));
+        assertTrue(night.contains("Theme.Material3.DayNight.NoActionBar"));
         assertTrue(styles.contains("dynamicColorThemeOverlay"));
-        assertTrue(application.contains("DynamicColors.applyToActivitiesIfAvailable(this)"));
+        assertFalse(application.contains("DynamicColors.applyToActivitiesIfAvailable(this)"));
         assertTrue(application.contains("ProfileRegistry.initialize(context)"));
     }
 
@@ -63,7 +63,7 @@ public final class PremiumUiPolicyTest {
     @Test public void mainConsoleShowsSemanticStateWithoutTurnOrCursorCounters() throws Exception {
         String main = src("MainActivity.java"), runtime = src("TurnProtocolUiState.java");
         String tools = src("SelfRunLogMenuActivity.java");
-        assertTrue(main.contains("Run Console"));
+        assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
         assertTrue(main.contains("pauseSelfRun()"));
         assertTrue(main.contains("resumeSelfRun()"));
         assertTrue(main.contains("stopSelfRun()"));
@@ -72,7 +72,7 @@ public final class PremiumUiPolicyTest {
         assertTrue(runtime.contains("추론 중"));
         assertTrue(runtime.contains("답변 생성 중"));
         assertTrue(runtime.contains("답변 완료 · 차기 턴 대기"));
-        assertTrue(main.contains("CONTINUE 전송 중"));
+        assertTrue(main.contains("다음 턴 전송 중"));
         assertTrue(main.contains("마지막 인식 signal document ID"));
         assertFalse(main.contains("SelfRun Turn"));
         assertFalse(main.contains("ChatGPT Turn"));
@@ -81,7 +81,7 @@ public final class PremiumUiPolicyTest {
         assertFalse(main.contains("requestNotificationPermission()"));
         assertTrue(tools.contains("requestNotificationPermission()"));
         assertTrue(tools.contains("requestBatteryExemption()"));
-        assertTrue(tools.contains("모델 및 추론수준 관리"));
+        assertTrue(tools.contains("모델 조합"));
     }
 
     @Test public void uiChangeDoesNotExpandAndroidPermissionSurface() throws Exception {

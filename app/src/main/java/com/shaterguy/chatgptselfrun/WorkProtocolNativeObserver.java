@@ -17,7 +17,7 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Set;
 
-/** Work/HYBRID native request observer. It never intercepts, proxies, or reconstructs traffic. */
+/** Work native request observer. It never intercepts, proxies, or reconstructs traffic. */
 final class WorkProtocolNativeObserver {
     static final String SOURCE_WEBVIEW = "native_webview";
     static final String SOURCE_SERVICE_WORKER = "native_service_worker";
@@ -89,8 +89,7 @@ final class WorkProtocolNativeObserver {
     }
 
     static boolean observableMode(String mode) {
-        return SelfRunStore.MODE_WORK.equals(mode)
-                || HybridRunProfileStore.MODE_HYBRID.equals(mode);
+        return SelfRunStore.MODE_WORK.equals(mode);
     }
 
     private static boolean eligible(SelfRunStore store) {
@@ -112,13 +111,6 @@ final class WorkProtocolNativeObserver {
             SelfRunStore current = new SelfRunStore(app);
             if (!runId.equals(current.runId()) || !eligible(current)) return;
             recordEnvironment(app, current);
-            if (HybridRunProfileStore.MODE_HYBRID.equals(current.mode())) {
-                new SelfRunRunLog(app).record(current, "HYBRID_REQUEST_TRANSPORT",
-                        "source=" + source + ";transport=" + source
-                                + ";route=" + ROUTE_CANONICAL_CONVERSATION
-                                + ";outcome=canonical_request;body=unavailable");
-                return;
-            }
             WorkProtocolCoverageTracker.observeNativeRequest(app, current, source);
             new SelfRunRunLog(app).record(current, "WORK_PROTOCOL_TRANSPORT",
                     "source=" + source + ";transport=" + source
@@ -152,8 +144,7 @@ final class WorkProtocolNativeObserver {
                 + ";serviceWorkerIntercept=" + supported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)
                 + ";serviceWorkerClientInstalled=" + serviceWorkerClientInstalled;
         new SelfRunRunLog(context).record(store,
-                HybridRunProfileStore.MODE_HYBRID.equals(store.mode())
-                        ? "HYBRID_REQUEST_ENV" : "WORK_PROTOCOL_ENV", detail);
+                "WORK_PROTOCOL_ENV", detail);
     }
 
     private static boolean supported(String feature) {

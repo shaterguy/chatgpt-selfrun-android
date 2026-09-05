@@ -76,7 +76,7 @@ public final class RequestProfileRecreationAndroidTest {
             assertEquals("chat", restored.getString("mode"));
             assertEquals("medium", restored.getString("reasoning"));
             assertTrue(restored.getBoolean("ready"));
-            assertFalse(restored.getBoolean("hybridContinuation"));
+            assertFalse(restored.has("hybridContinuation"));
             assertEquals("target_restored", diagnostics.getString("reason"));
             read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v3');return 'cleared';})()");
         }

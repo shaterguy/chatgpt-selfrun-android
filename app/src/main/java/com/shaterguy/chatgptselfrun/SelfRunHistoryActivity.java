@@ -39,15 +39,12 @@ public final class SelfRunHistoryActivity extends Activity {
         screen.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout page = Ui.page(this);
-        page.addView(Ui.topBar(this, "작업 이력", "Run Browser",
-                Ui.textButton(this, "새로고침", v -> render())));
+        page.addView(Ui.topBar(this, "기록", "",
+                Ui.iconButton(this, R.drawable.ic_refresh, "새로고침", v -> render())));
 
         if (runs.length() == 0) {
-            page.addView(Ui.heroSurface(this,
-                    Ui.statusPill(this, "EMPTY"),
-                    Ui.headline(this, "저장된 SelfRun이 없습니다"),
-                    Ui.body(this, "새 작업을 시작하면 실행 상태와 지난 기록이 이곳에 쌓입니다."),
-                    Ui.button(this, "새 SelfRun 시작", v -> startActivity(new Intent(this, SelfRunNewActivity.class)))));
+            page.addView(Ui.card(this, Ui.headline(this, "아직 기록이 없습니다"),
+                    Ui.button(this, "새 작업", v -> startActivity(new Intent(this, SelfRunNewActivity.class)))));
             screen.addView(page, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             Ui.setPrimaryContent(this, screen, Ui.DEST_HISTORY);
@@ -85,7 +82,9 @@ public final class SelfRunHistoryActivity extends Activity {
             LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1.08f);
             detailParams.setMarginStart(Ui.dp(this, 20));
-            panes.addView(detailPane, detailParams);
+            ScrollView detailScroll = new ScrollView(this);
+            detailScroll.addView(detailPane);
+            panes.addView(detailScroll, detailParams);
             LinearLayout.LayoutParams panesParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
             page.addView(panes, panesParams);
@@ -104,13 +103,10 @@ public final class SelfRunHistoryActivity extends Activity {
         String status = item.optString("status", "-");
         SelfRunHealthSnapshot runHealth = health.currentFor(item);
         String title = runHealth == null ? status : runHealth.rowLabel();
-        String supporting = "Turn " + item.optInt("turn")
-                + " · " + item.optString("mode", "-")
-                + " · " + time(item.optLong("updatedAt"))
-                + (runHealth == null ? "" : "\n" + runHealth.description)
-                + "\n" + shortId(runId);
+        String supporting = title + " · " + time(item.optLong("updatedAt"))
+                + "\n" + item.optString("mode", "-") + " · " + item.optInt("turn") + "턴";
         LinearLayout row = Ui.listItem(this,
-                title,
+                "",
                 preview(item.optString("requirement")),
                 supporting,
                 v -> {
@@ -133,21 +129,12 @@ public final class SelfRunHistoryActivity extends Activity {
         SelfRunHealthSnapshot runHealth = health.currentFor(item);
         detailPane.addView(Ui.statusPill(this, runHealth == null ? item.optString("status", "STATE") : runHealth.rowLabel()));
         detailPane.addView(Ui.headline(this, preview(item.optString("requirement"))));
-        if (runHealth != null) {
-            detailPane.addView(Ui.section(this, "RUN HEALTH"));
-            detailPane.addView(Ui.keyValue(this, "현재 상태", runHealth.title));
-            detailPane.addView(Ui.keyValue(this, "설명", runHealth.description));
-            detailPane.addView(Ui.keyValue(this, "필요한 행동", runHealth.recommendedAction));
-            detailPane.addView(Ui.keyValue(this, "신뢰도", runHealth.confidence));
-            detailPane.addView(Ui.keyValue(this, "상태 변경", time(runHealth.observedAt)));
-        }
-        detailPane.addView(Ui.keyValue(this, "Run ID", runId));
-        detailPane.addView(Ui.keyValue(this, "Phase", item.optString("phase", "-")));
-        detailPane.addView(Ui.keyValue(this, "Turn", String.valueOf(item.optInt("turn"))));
-        detailPane.addView(Ui.keyValue(this, "Mode", item.optString("mode", "-")));
-        detailPane.addView(Ui.keyValue(this, "Profile", model(item)));
-        detailPane.addView(Ui.keyValue(this, "Updated", time(item.optLong("updatedAt"))));
-        detailPane.addView(Ui.section(this, "ACTIONS"));
+        if (runHealth != null && !runHealth.recommendedAction.isEmpty())
+            detailPane.addView(Ui.body(this, runHealth.recommendedAction));
+        detailPane.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
+        detailPane.addView(Ui.keyValue(this, "모델 조합", model(item)));
+        detailPane.addView(Ui.keyValue(this, "마지막 실행", time(item.optLong("updatedAt"))));
+        detailPane.addView(Ui.divider(this));
         detailPane.addView(Ui.actionStrip(this,
                 Ui.outlinedButton(this, "상세", v -> openDetail(runId)),
                 Ui.outlinedButton(this, "실행 로그", v -> openLogs(runId, SelfRunLogsActivity.KIND_EXECUTION)),

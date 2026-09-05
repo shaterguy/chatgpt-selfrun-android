@@ -34,7 +34,8 @@ public final class MainActivity extends Activity {
     private View runStage;
     private View composerPanel;
     private View supportingPane;
-    private TextView statusPill;
+    private TextView jobTitle;
+    private Button newRunButton;
     private TextView currentStatus;
     private TextView runMeta;
     private TextView technicalDetails;
@@ -82,100 +83,61 @@ public final class MainActivity extends Activity {
         LinearLayout console = new LinearLayout(this);
         console.setOrientation(LinearLayout.VERTICAL);
         console.setFocusableInTouchMode(true);
-
         ScrollView runScroll = new ScrollView(this);
         runScroll.setFillViewport(true);
         LinearLayout runPage = Ui.page(this);
         runScroll.addView(runPage);
-
-        Button newRun = Ui.button(this, "새 작업", v -> openNewRun());
-        runPage.addView(Ui.topBar(this, "SelfRun Drive", "v" + BuildConfig.VERSION_NAME + " · Run Console", newRun));
-
-        emptyStage = Ui.heroSurface(this,
-                Ui.statusPill(this, "대기"),
-                Ui.headline(this, "현재 실행 중인 SelfRun이 없습니다"),
-                Ui.body(this, "새 작업을 시작하거나 지난 작업을 확인할 수 있습니다."),
-                Ui.actionStrip(this,
-                        Ui.button(this, "새 SelfRun 시작", v -> openNewRun()),
-                        Ui.outlinedButton(this, "작업 이력", v -> startActivity(new Intent(this, SelfRunHistoryActivity.class)))));
-        LinearLayout.LayoutParams emptyParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        emptyParams.topMargin = Ui.dp(this, 10);
-        runPage.addView(emptyStage, emptyParams);
-
-        statusPill = Ui.statusPill(this, "실행");
-        currentStatus = Ui.headline(this, "");
-        runMeta = Ui.body(this, "");
+        newRunButton = Ui.textButton(this, "새 작업", v -> openNewRun());
+        runPage.addView(Ui.topBar(this, "SelfRun", "", newRunButton));
+        emptyStage = Ui.card(this, Ui.headline(this, "새 작업을 시작하세요"),
+                Ui.button(this, "새 작업", v -> openNewRun()));
+        runPage.addView(emptyStage);
+        jobTitle = Ui.headline(this, "");
+        jobTitle.setMaxLines(2);
+        jobTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        currentStatus = Ui.body(this, "");
+        currentStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        runMeta = Ui.muted(this, "");
         technicalDetails = Ui.muted(this, "");
         technicalDetails.setVisibility(View.GONE);
         technicalDetails.setTextIsSelectable(true);
-
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
         stopButton = Ui.dangerButton(this, "중지", v -> stopSelfRun());
-        currentLogsButton = Ui.outlinedButton(this, "로그", v -> openCurrentLogs());
+        currentLogsButton = Ui.textButton(this, "로그", v -> openCurrentLogs());
         Button detailsButton = Ui.textButton(this, "실행 정보", v -> {
             technicalDetails.setVisibility(technicalDetails.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
         });
-
-        runStage = Ui.heroSurface(this,
-                statusPill,
-                currentStatus,
-                runMeta,
-                Ui.actionStrip(this, pauseButton, resumeButton, stopButton, currentLogsButton),
-                detailsButton,
-                technicalDetails);
-        LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        stageParams.topMargin = Ui.dp(this, 10);
-        runPage.addView(runStage, stageParams);
-
+        runStage = Ui.card(this, jobTitle, currentStatus, runMeta,
+                Ui.actionStrip(this, pauseButton, resumeButton, stopButton),
+                Ui.divider(this), Ui.actionStrip(this, currentLogsButton, detailsButton), technicalDetails);
+        runPage.addView(runStage);
         nextInputStatus = Ui.muted(this, "");
         nextInputEditor = new EditText(this);
-        nextInputEditor.setHint("다음 턴에 추가하거나 즉시 강제입력할 사용자 입력");
+        nextInputEditor.setHint("지시를 입력하세요");
         nextInputEditor.setMinLines(Ui.isExpanded(this) ? 6 : 2);
         nextInputEditor.setMaxLines(Ui.isExpanded(this) ? 14 : 7);
-        nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        immediateInputButton = Ui.outlinedButton(this, "즉시 강제입력", v -> forceImmediateInput());
-        nextInputSaveButton = Ui.button(this, "차기턴 저장", v -> saveNextInput());
+        nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        immediateInputButton = Ui.outlinedButton(this, "즉시 보내기", v -> forceImmediateInput());
+        nextInputSaveButton = Ui.tonalButton(this, "다음 턴 예약", v -> saveNextInput());
         nextInputDeleteButton = Ui.textButton(this, "예약 삭제", v -> deleteNextInput());
-        composerPanel = Ui.card(this,
-                Ui.section(this, "USER INPUT"),
-                Ui.headline(this, "차기턴 예약 · 즉시 강제입력"),
-                nextInputStatus,
-                nextInputEditor,
-                Ui.actionStrip(this, nextInputDeleteButton, immediateInputButton, nextInputSaveButton));
-
+        composerPanel = Ui.card(this, Ui.section(this, "추가 지시"), nextInputStatus, nextInputEditor,
+                Ui.actionStrip(this, immediateInputButton, nextInputSaveButton), nextInputDeleteButton);
         if (Ui.isExpanded(this)) {
-            LinearLayout workspace = new LinearLayout(this);
-            workspace.setOrientation(LinearLayout.HORIZONTAL);
-            workspace.addView(runScroll, new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1.15f));
-
-            LinearLayout pane = new LinearLayout(this);
-            pane.setOrientation(LinearLayout.VERTICAL);
-            pane.setPadding(Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 28), Ui.dp(this, 24));
-            pane.addView(composerPanel, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            supportingPane = pane;
-            LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.MATCH_PARENT, 0.85f);
-            supportParams.setMarginStart(Ui.dp(this, 10));
-            workspace.addView(pane, supportParams);
-            console.addView(workspace, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            ScrollView paneScroll = new ScrollView(this);
+            LinearLayout pane = Ui.page(this);
+            pane.addView(composerPanel);
+            paneScroll.addView(pane);
+            supportingPane = paneScroll;
+            console.addView(Ui.twoPane(this, runScroll, paneScroll),
+                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         } else {
-            console.addView(runScroll, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
             LinearLayout.LayoutParams composerParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int side = Ui.isMedium(this) ? Ui.dp(this, 28) : Ui.dp(this, 18);
-            composerParams.setMargins(side, Ui.dp(this, 4), side, Ui.dp(this, 10));
-            console.addView(composerPanel, composerParams);
+            composerParams.topMargin = Ui.dp(this, 16);
+            runPage.addView(composerPanel, composerParams);
+            console.addView(runScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         }
-
         Ui.setPrimaryContent(this, console, Ui.DEST_RUN);
         console.requestFocus();
     }
@@ -185,6 +147,7 @@ public final class MainActivity extends Activity {
         String runId = store.runId();
         if (runId.isEmpty()) {
             emptyStage.setVisibility(View.VISIBLE);
+            newRunButton.setVisibility(View.GONE);
             runStage.setVisibility(View.GONE);
             composerPanel.setVisibility(View.GONE);
             if (supportingPane != null) supportingPane.setVisibility(View.GONE);
@@ -193,12 +156,14 @@ public final class MainActivity extends Activity {
         }
 
         emptyStage.setVisibility(View.GONE);
+        newRunButton.setVisibility(View.VISIBLE);
         runStage.setVisibility(View.VISIBLE);
         composerPanel.setVisibility(View.VISIBLE);
         if (supportingPane != null) supportingPane.setVisibility(View.VISIBLE);
 
+        ProfileRegistry.Profile selectedProfile = ProfileRegistry.resolveWork(store.pendingModel(), store.pendingReasoning());
         String prefs = SelfRunStore.MODE_WORK.equals(store.mode())
-                ? store.pendingModel() + " / " + store.pendingReasoning()
+                ? (selectedProfile == null ? store.pendingModel() + " / " + store.pendingReasoning() : selectedProfile.displayLabel())
                 : ChatReasoningPreferenceStore.summary(this, runId, store.phase(), store.lastErrorCode());
         boolean paused = store.paused() && !store.userStopped();
         boolean terminal = store.userStopped()
@@ -208,14 +173,16 @@ public final class MainActivity extends Activity {
         TurnProtocolUiState.Snapshot protocol = TurnProtocolUiState.read(this, runId);
         String displayStatus = displayRuntimeStatus(protocol, paused, terminal);
 
-        statusPill.setText(TurnProtocolUiState.pillFor(displayStatus));
-        currentStatus.setText(displayStatus);
-        String meta = store.mode() + " · " + prefs;
-        if (protocol.present) meta += "\nChatGPT 응답 상태  " + protocol.phase;
+        jobTitle.setText(store.requirement().trim().isEmpty() ? "현재 작업" : store.requirement());
+        if (!displayStatus.contentEquals(currentStatus.getText())) currentStatus.setText(displayStatus);
+        composerPanel.setVisibility(terminal ? View.GONE : View.VISIBLE);
+        if (supportingPane != null) supportingPane.setVisibility(terminal ? View.GONE : View.VISIBLE);
+        String meta = (SelfRunStore.MODE_WORK.equals(store.mode()) ? "워크" : SelfRunStore.MODE_CHAT.equals(store.mode()) ? "일반 채팅" : "모드 확인 필요") + " · " + prefs + " · " + store.turn() + "턴";
         if (!store.lastErrorCode().isEmpty()) meta += "\n오류  " + errorSummary();
         runMeta.setText(meta);
         technicalDetails.setText("Run ID  " + runId
                 + "\nconversation  " + dash(store.conversationUrl())
+                + "\n모델 / 추론  " + dash(store.pendingModel()) + " / " + dash(store.pendingReasoning())
                 + "\n내부 phase  " + dash(store.phase())
                 + "\n응답 프로토콜 phase  " + (protocol.present ? protocol.phase : "-")
                 + "\n응답 프로토콜 event  " + (protocol.present ? protocol.stage : "-")
@@ -246,7 +213,7 @@ public final class MainActivity extends Activity {
         if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)) return "답변 완료 · 새 Drive 신호 확인 중";
         if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
                 || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "다음 요청 설정 중";
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "CONTINUE 전송 중";
+        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "다음 턴 전송 중";
         if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) {
             String live = protocol.headline();
             return live.isEmpty() ? "응답 상태 확인 중" : live;
@@ -294,15 +261,15 @@ public final class MainActivity extends Activity {
         if (runId.isEmpty()) {
             nextInputStatus.setText("");
         } else if (immediateInputInFlight) {
-            nextInputStatus.setText("즉시 강제입력 가능 여부를 확인 중입니다. 전송할 수 없으면 다음 요청으로 예약합니다.");
+            nextInputStatus.setText("전송 중");
         } else if (editable && stored.isEmpty()) {
-            nextInputStatus.setText("다음 요청 예약 또는 현재 응답에 즉시 강제입력을 사용할 수 있습니다.");
+            nextInputStatus.setText("");
         } else if (editable) {
-            nextInputStatus.setText("다음 요청에 예약됨 · 즉시 강제입력을 선택하면 현재 입력을 먼저 시도합니다.");
+            nextInputStatus.setText("예약됨");
         } else if (locked) {
-            nextInputStatus.setText("다음 요청 제출이 시작되어 현재 예약 입력은 잠겼습니다.");
+            nextInputStatus.setText("전송 준비 중 · 수정할 수 없음");
         } else {
-            nextInputStatus.setText("현재 단계에서는 사용자 입력을 예약할 수 없습니다.");
+            nextInputStatus.setText("");
         }
     }
 
@@ -310,7 +277,7 @@ public final class MainActivity extends Activity {
         String runId = store.runId();
         String value = nextInputEditor.getText().toString();
         if (value.trim().isEmpty()) {
-            Toast.makeText(this, "강제입력할 내용을 입력하세요.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "지시를 입력하세요.", Toast.LENGTH_SHORT).show();
             return;
         }
         if (!UserNextInputStore.withinUtf8Limit(value, UserNextInputStore.MAX_USER_UTF8_BYTES)) {
@@ -326,9 +293,9 @@ public final class MainActivity extends Activity {
             immediateInputInFlight = false;
             String message;
             if (UserImmediateInputCoordinator.OUTCOME_SENT.equals(result.outcome)) {
-                message = "현재 응답에 즉시 강제입력했습니다.";
+                message = "전송했습니다.";
             } else if (UserImmediateInputCoordinator.OUTCOME_DEFERRED.equals(result.outcome)) {
-                message = "즉시 전송할 수 없어 다음 요청 입력으로 예약했습니다.";
+                message = "지금 전송할 수 없어 다음 턴에 예약했습니다.";
             } else {
                 message = "강제입력을 안전하게 확정하지 못했습니다. 로그를 확인하세요.";
             }

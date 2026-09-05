@@ -30,10 +30,8 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class SelfRunNewActivity extends Activity {
-    private static final String[] MODE_LABELS = {"일반 Chat · 추론 정도 선택", "Work · 모델/추론 동적 전환",
-            "하이브리드 · 부트스트랩/이후 독립 선택"};
-    private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK,
-            HybridRunProfileStore.MODE_HYBRID};
+    private static final String[] MODE_LABELS = {"일반 채팅", "워크"};
+    private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK};
     private static final String BOOTSTRAP_SAME_AS_TASK = "same";
     private static final int REQUEST_ATTACHMENTS = 3017;
     private static final String STATE_REQUIREMENT = "requirement";
@@ -45,8 +43,6 @@ public final class SelfRunNewActivity extends Activity {
     private static final String STATE_CHAT_ADVANCED_EXPANDED = "chatAdvancedExpanded";
     private static final String STATE_WORK_BOOTSTRAP_MODEL = "workBootstrapModel";
     private static final String STATE_WORK_BOOTSTRAP_REASONING = "workBootstrapReasoning";
-    private static final String STATE_HYBRID_BOOTSTRAP = "hybridBootstrapProfile";
-    private static final String STATE_HYBRID_CONTINUATION = "hybridContinuationProfile";
 
     private SelfRunStore store;
     private SelfRunHistoryStore history;
@@ -57,23 +53,16 @@ public final class SelfRunNewActivity extends Activity {
     private EditText requirement;
     private Ui.SelectionField mode;
     private Ui.SelectionField chatReasoning;
-    private TextView chatReasoningHelp;
     private Button chatAdvancedToggle;
     private LinearLayout chatAdvancedContainer;
     private Ui.SelectionField chatBootstrapReasoning;
-    private TextView chatBootstrapReasoningHelp;
     private Ui.SelectionField workBootstrapProfile;
-    private TextView workBootstrapHelp;
-    private Ui.SelectionField hybridBootstrapProfile;
-    private Ui.SelectionField hybridContinuationProfile;
-    private TextView hybridHelp;
     private LinearLayout attachmentListView;
     private TextView attachmentSummary;
     private final ArrayList<SelfRunStore.Attachment> selectedAttachments = new ArrayList<>();
     private final ArrayList<String> chatReasoningValues = new ArrayList<>();
     private final ArrayList<String> chatBootstrapReasoningValues = new ArrayList<>();
     private final ArrayList<ProfileRegistry.Profile> workBootstrapProfiles = new ArrayList<>();
-    private final ArrayList<HybridRunProfileStore.Endpoint> hybridProfiles = new ArrayList<>();
     private boolean chatAdvancedExpanded;
     private boolean attachmentsHandedOff;
     private boolean firstResume = true;
@@ -83,7 +72,6 @@ public final class SelfRunNewActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
                 | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         ProfileRegistry.initialize(this);
-        HybridRunProfileStore.initialize(this);
         store = new SelfRunStore(this);
         history = new SelfRunHistoryStore(this);
         runLog = new SelfRunRunLog(this);
@@ -95,149 +83,103 @@ public final class SelfRunNewActivity extends Activity {
     private void createViews() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout toolbar = Ui.toolbar(this, "새 작업", Ui.iconButton(this, R.drawable.ic_more_vert, "프로젝트 관리", v -> showProjectMenu(v)));
+        toolbar.setPadding(Ui.dp(this, 12), 0, Ui.dp(this, 12), 0);
+        shell.addView(toolbar);
         LinearLayout page = Ui.page(this);
         page.setFocusableInTouchMode(true);
         scroll.addView(page);
+        shell.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        page.addView(Ui.topBar(this, "새 SelfRun", "Launch Workspace",
-                Ui.textButton(this, "취소", v -> finish())));
-
-        LinearLayout destinationRuntime = new LinearLayout(this);
-        destinationRuntime.setOrientation(LinearLayout.VERTICAL);
-        destinationRuntime.addView(Ui.section(this, "DESTINATION"));
+        LinearLayout settings = new LinearLayout(this);
+        settings.setOrientation(LinearLayout.VERTICAL);
         project = Ui.selection(this, "프로젝트");
-        destinationRuntime.addView(project);
-        destinationRuntime.addView(Ui.muted(this,
-                "등록한 프로젝트 또는 일반채팅을 선택합니다. 프로젝트 등록은 실제 ChatGPT 화면을 직접 열어 수행합니다."));
-        destinationRuntime.addView(Ui.actionStrip(this,
-                Ui.outlinedButton(this, "프로젝트 등록 · 업데이트",
-                        v -> startActivity(new Intent(this, LoginActivity.class))),
-                Ui.textButton(this, "등록 목록 지우기", v -> {
-                    catalog.clear();
-                    store.setDefaultProjectUrl("");
-                    reloadProjects();
-                    Toast.makeText(this, "등록 프로젝트 목록을 지웠습니다.", Toast.LENGTH_SHORT).show();
-                })));
         reloadProjects();
-
-        destinationRuntime.addView(Ui.section(this, "RUNTIME"));
+        LinearLayout runtime = new LinearLayout(this);
+        runtime.setOrientation(LinearLayout.VERTICAL);
+        runtime.addView(Ui.section(this, "실행 설정"));
         mode = Ui.selection(this, "실행 모드");
         mode.setItems(MODE_LABELS);
-        destinationRuntime.addView(mode);
-        chatReasoning = Ui.selection(this, "작업 추론 정도 · 두 번째 턴부터");
+        runtime.addView(mode);
+        chatReasoning = Ui.selection(this, "추론 정도");
         refreshChatReasoningOptions(ChatReasoningPreferenceStore.EXTRA_HIGH);
-        LinearLayout.LayoutParams reasoningParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        reasoningParams.topMargin = Ui.dp(this, 10);
-        destinationRuntime.addView(chatReasoning, reasoningParams);
-        chatReasoningHelp = Ui.muted(this, "");
-        destinationRuntime.addView(chatReasoningHelp);
-
-        chatAdvancedToggle = Ui.textButton(this, "고급 옵션 펼치기", v -> {
+        LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gap.topMargin = Ui.dp(this, 12);
+        runtime.addView(chatReasoning, gap);
+        chatAdvancedToggle = Ui.textButton(this, "첫 턴 설정", v -> {
             chatAdvancedExpanded = !chatAdvancedExpanded;
             updateChatReasoningAvailability();
         });
-        destinationRuntime.addView(chatAdvancedToggle);
+        runtime.addView(chatAdvancedToggle);
         chatAdvancedContainer = new LinearLayout(this);
         chatAdvancedContainer.setOrientation(LinearLayout.VERTICAL);
-        chatBootstrapReasoning = Ui.selection(this, "부트스트랩 전용 추론 정도");
+        chatBootstrapReasoning = Ui.selection(this, "첫 턴 추론 정도");
         refreshChatBootstrapReasoningOptions(BOOTSTRAP_SAME_AS_TASK);
         chatAdvancedContainer.addView(chatBootstrapReasoning);
-        chatBootstrapReasoningHelp = Ui.muted(this,
-                "첫 부트스트랩 PLAN 메시지에만 적용합니다. 두 번째 턴부터는 작업 추론 정도를 다시 적용합니다.");
-        chatAdvancedContainer.addView(chatBootstrapReasoningHelp);
-        destinationRuntime.addView(chatAdvancedContainer);
-
-        workBootstrapProfile = Ui.selection(this, "첫 부트스트랩 Work 모델 · 추론 정도");
+        runtime.addView(chatAdvancedContainer);
+        workBootstrapProfile = Ui.selection(this, "첫 턴 모델 조합");
         WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
         refreshWorkBootstrapOptions(workDefault.model, workDefault.reasoning);
-        LinearLayout.LayoutParams workParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        workParams.topMargin = Ui.dp(this, 10);
-        destinationRuntime.addView(workBootstrapProfile, workParams);
-        workBootstrapHelp = Ui.muted(this,
-                "첫 부트스트랩 PLAN에 적용합니다. 이후 턴은 TURN_COMPLETED MODEL/REASONING 신호로 동적으로 전환합니다. 마지막 유효 선택은 다음 새 Work 작업의 기본값으로 저장됩니다.");
-        destinationRuntime.addView(workBootstrapHelp);
-
-        hybridBootstrapProfile = Ui.selection(this, "하이브리드 · 부트스트랩 프로필");
-        hybridContinuationProfile = Ui.selection(this, "하이브리드 · 두 번째 턴부터 프로필");
-        HybridRunProfileStore.Selection hybridDefault = HybridRunProfileStore.loadDefaults(this);
-        refreshHybridOptions(hybridDefault.bootstrap.key(), hybridDefault.continuation.key());
-        LinearLayout.LayoutParams hybridParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hybridParams.topMargin = Ui.dp(this, 10);
-        destinationRuntime.addView(hybridBootstrapProfile, hybridParams);
-        LinearLayout.LayoutParams hybridContinuationParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hybridContinuationParams.topMargin = Ui.dp(this, 8);
-        destinationRuntime.addView(hybridContinuationProfile, hybridContinuationParams);
-        hybridHelp = Ui.muted(this,
-                "부트스트랩과 이후 턴을 Chat/Work 등록 프로필 중에서 각각 독립 선택합니다. 첫 PLAN 완료 뒤 요청 프로필을 한 번만 전환하고 이후 선택을 고정합니다.");
-        destinationRuntime.addView(hybridHelp);
-
+        LinearLayout.LayoutParams workGap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        workGap.topMargin = Ui.dp(this, 12);
+        runtime.addView(workBootstrapProfile, workGap);
         mode.setOnSelectionChangedListener(position -> updateChatReasoningAvailability());
-        updateChatReasoningAvailability();
 
-        LinearLayout missionReferences = new LinearLayout(this);
-        missionReferences.setOrientation(LinearLayout.VERTICAL);
-        missionReferences.addView(Ui.section(this, "MISSION"));
-        missionReferences.addView(Ui.headline(this, "SelfRun이 끝까지 수행할 작업"));
+        LinearLayout request = new LinearLayout(this);
+        request.setOrientation(LinearLayout.VERTICAL);
+        request.addView(Ui.section(this, "요구사항"));
         requirement = new EditText(this);
-        requirement.setHint("작업 요구사항을 입력하세요");
+        requirement.setHint("어떤 작업을 할까요?");
         requirement.setSingleLine(false);
-        requirement.setMinLines(Ui.isExpanded(this) ? 13 : 9);
+        requirement.setMinLines(Ui.isExpanded(this) ? 12 : 6);
         requirement.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
-        requirement.setInputType(InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        requirement.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         requirement.setVerticalScrollBarEnabled(false);
         requirement.setHorizontalScrollBarEnabled(false);
         requirement.setHorizontallyScrolling(false);
         installCommandVisibilityTracking(requirement);
-        missionReferences.addView(requirement);
-
-        missionReferences.addView(Ui.section(this, "REFERENCES"));
-        missionReferences.addView(Ui.muted(this,
-                "첨부파일은 SelfRun 시작 후 해당 Run의 Drive Job 폴더로 전달됩니다."));
-        missionReferences.addView(Ui.outlinedButton(this, "파일 첨부", v -> openAttachmentPicker()),
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        attachmentSummary = Ui.muted(this, "선택된 파일이 없습니다.");
-        missionReferences.addView(attachmentSummary);
+        request.addView(requirement);
+        request.addView(Ui.actionStrip(this, Ui.textButton(this, "파일 첨부", v -> openAttachmentPicker())));
+        attachmentSummary = Ui.muted(this, "");
+        request.addView(attachmentSummary);
         attachmentListView = new LinearLayout(this);
         attachmentListView.setOrientation(LinearLayout.VERTICAL);
-        missionReferences.addView(attachmentListView);
+        request.addView(attachmentListView);
 
-        LinearLayout workspace = new LinearLayout(this);
         if (Ui.isExpanded(this)) {
-            workspace.setOrientation(LinearLayout.HORIZONTAL);
-            workspace.addView(destinationRuntime,
-                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.82f));
-            LinearLayout.LayoutParams missionParams = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.18f);
-            missionParams.setMarginStart(Ui.dp(this, 28));
-            workspace.addView(missionReferences, missionParams);
+            settings.addView(project);
+            settings.addView(runtime);
+            page.addView(Ui.twoPane(this, request, settings));
         } else {
-            workspace.setOrientation(LinearLayout.VERTICAL);
-            workspace.addView(destinationRuntime,
-                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            LinearLayout.LayoutParams missionParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            missionParams.topMargin = Ui.dp(this, 8);
-            workspace.addView(missionReferences, missionParams);
+            page.addView(project);
+            page.addView(request);
+            page.addView(runtime);
         }
-        page.addView(workspace, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout.LayoutParams launchParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        launchParams.topMargin = Ui.dp(this, 22);
-        page.addView(Ui.button(this, "SelfRun Drive 시작", v -> startSelfRun()), launchParams);
-        page.addView(Ui.muted(this, "새 작업은 항상 빈 요구사항에서 시작하며 이전 Run의 입력·신호·오류를 재사용하지 않습니다."));
-
-        Ui.setContent(this, scroll);
+        LinearLayout.LayoutParams launch = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        launch.setMargins(Ui.dp(this, 20), Ui.dp(this, 8), Ui.dp(this, 20), Ui.dp(this, 12));
+        shell.addView(Ui.button(this, "시작", v -> startSelfRun()), launch);
+        updateChatReasoningAvailability();
+        Ui.setContent(this, shell);
         project.clearFocus();
         requirement.clearFocus();
         page.requestFocus();
+    }
+
+    private void showProjectMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        menu.getMenu().add("프로젝트 관리").setOnMenuItemClickListener(item -> {
+            startActivity(new Intent(this, LoginActivity.class)); return true;
+        });
+        menu.getMenu().add("등록 목록 지우기").setOnMenuItemClickListener(item -> {
+            new android.app.AlertDialog.Builder(this).setTitle("등록 목록을 지울까요?")
+                    .setNegativeButton("취소", null).setPositiveButton("지우기", (dialog, which) -> {
+                        catalog.clear(); store.setDefaultProjectUrl(""); reloadProjects();
+                    }).show();
+            return true;
+        });
+        menu.show();
     }
 
     private void refreshChatReasoningOptions(String preferred) {
@@ -245,11 +187,11 @@ public final class SelfRunNewActivity extends Activity {
         String wanted = preferred == null || preferred.isEmpty() ? ChatReasoningPreferenceStore.KEEP : preferred;
         ArrayList<String> labels = new ArrayList<>();
         chatReasoningValues.clear();
-        labels.add("현재 Chat 설정 유지");
+        labels.add("현재 설정 유지");
         chatReasoningValues.add(ChatReasoningPreferenceStore.KEEP);
         int selected = 0;
         for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) {
-            labels.add(profile.displayLabel() + " · " + profile.actualCombination());
+            labels.add(profile.displayLabel());
             chatReasoningValues.add(profile.signalReasoning);
             if (profile.signalReasoning.equals(wanted)) selected = chatReasoningValues.size() - 1;
         }
@@ -272,7 +214,7 @@ public final class SelfRunNewActivity extends Activity {
         chatBootstrapReasoningValues.add(BOOTSTRAP_SAME_AS_TASK);
         int selected = 0;
         for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) {
-            labels.add(profile.displayLabel() + " · " + profile.actualCombination());
+            labels.add(profile.displayLabel());
             chatBootstrapReasoningValues.add(profile.signalReasoning);
             if (profile.signalReasoning.equals(wanted)) selected = chatBootstrapReasoningValues.size() - 1;
         }
@@ -293,8 +235,7 @@ public final class SelfRunNewActivity extends Activity {
         workBootstrapProfiles.clear();
         int selected = 0;
         for (ProfileRegistry.Profile profile : ProfileRegistry.listWork()) {
-            labels.add(workModelLabel(profile.signalModel) + " · " + profile.signalReasoning
-                    + " · " + profile.actualCombination());
+            labels.add(profile.displayLabel());
             workBootstrapProfiles.add(profile);
             if (profile.signalModel.equals(wantedModel) && profile.signalReasoning.equals(wantedReasoning)) {
                 selected = workBootstrapProfiles.size() - 1;
@@ -305,34 +246,6 @@ public final class SelfRunNewActivity extends Activity {
         workBootstrapProfile.setSelection(Math.max(0, Math.min(selected, labels.size() - 1)));
     }
 
-    private void refreshHybridOptions(String preferredBootstrap, String preferredContinuation) {
-        if (hybridBootstrapProfile == null || hybridContinuationProfile == null) return;
-        ArrayList<String> labels = new ArrayList<>();
-        hybridProfiles.clear();
-        for (ProfileRegistry.Profile profile : ProfileRegistry.listWork()) {
-            HybridRunProfileStore.Endpoint endpoint = HybridRunProfileStore.Endpoint.fromProfile(profile);
-            hybridProfiles.add(endpoint);
-            labels.add(endpoint.displayLabel());
-        }
-        for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) {
-            HybridRunProfileStore.Endpoint endpoint = HybridRunProfileStore.Endpoint.fromProfile(profile);
-            hybridProfiles.add(endpoint);
-            labels.add(endpoint.displayLabel());
-        }
-        if (labels.isEmpty()) labels.add("등록된 Chat/Work 조합이 없습니다.");
-        hybridBootstrapProfile.setItems(labels.toArray(new String[0]));
-        hybridContinuationProfile.setItems(labels.toArray(new String[0]));
-        hybridBootstrapProfile.setSelection(hybridProfilePosition(preferredBootstrap));
-        hybridContinuationProfile.setSelection(hybridProfilePosition(preferredContinuation));
-    }
-
-    private int hybridProfilePosition(String key) {
-        for (int i = 0; i < hybridProfiles.size(); i++) {
-            if (hybridProfiles.get(i).key().equals(key)) return i;
-        }
-        return 0;
-    }
-
     private static String workModelLabel(String model) {
         String value = model == null ? "" : model.trim();
         if (value.isEmpty()) return "Work";
@@ -340,33 +253,16 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void updateChatReasoningAvailability() {
-        if (mode == null || chatReasoning == null || chatReasoningHelp == null
-                || chatAdvancedToggle == null || chatAdvancedContainer == null
-                || chatBootstrapReasoning == null || workBootstrapProfile == null
-                || workBootstrapHelp == null || hybridBootstrapProfile == null
-                || hybridContinuationProfile == null || hybridHelp == null) return;
-        int selectedMode = mode.getSelectedItemPosition();
-        boolean chat = selectedMode == 0;
-        boolean work = selectedMode == 1;
-        boolean hybrid = selectedMode == 2;
+        if (mode == null || chatReasoning == null || workBootstrapProfile == null) return;
+        boolean chat = mode.getSelectedItemPosition() == 0;
         chatReasoning.setEnabled(chat);
         chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE);
-        chatReasoningHelp.setVisibility(chat ? View.VISIBLE : View.GONE);
-        chatAdvancedToggle.setEnabled(chat);
         chatAdvancedToggle.setVisibility(chat ? View.VISIBLE : View.GONE);
-        chatAdvancedToggle.setText(chatAdvancedExpanded ? "고급 옵션 접기" : "고급 옵션 펼치기");
+        chatAdvancedToggle.setText(chatAdvancedExpanded ? "첫 턴 설정 닫기" : "첫 턴 설정");
         chatAdvancedContainer.setVisibility(chat && chatAdvancedExpanded ? View.VISIBLE : View.GONE);
         chatBootstrapReasoning.setEnabled(chat && chatAdvancedExpanded);
-        chatReasoningHelp.setText(
-                "두 번째 턴부터 SelfRun 종료까지 사용할 일반 Chat 추론 정도입니다. 목록은 Profile Registry를 실시간 원본으로 사용합니다.");
-        workBootstrapProfile.setEnabled(work && !workBootstrapProfiles.isEmpty());
-        workBootstrapProfile.setVisibility(work ? View.VISIBLE : View.GONE);
-        workBootstrapHelp.setVisibility(work ? View.VISIBLE : View.GONE);
-        hybridBootstrapProfile.setEnabled(hybrid && !hybridProfiles.isEmpty());
-        hybridContinuationProfile.setEnabled(hybrid && !hybridProfiles.isEmpty());
-        hybridBootstrapProfile.setVisibility(hybrid ? View.VISIBLE : View.GONE);
-        hybridContinuationProfile.setVisibility(hybrid ? View.VISIBLE : View.GONE);
-        hybridHelp.setVisibility(hybrid ? View.VISIBLE : View.GONE);
+        workBootstrapProfile.setEnabled(!chat && !workBootstrapProfiles.isEmpty());
+        workBootstrapProfile.setVisibility(chat ? View.GONE : View.VISIBLE);
     }
 
     private String selectedChatReasoning() {
@@ -390,20 +286,6 @@ public final class SelfRunNewActivity extends Activity {
         int position = Math.max(0, Math.min(workBootstrapProfiles.size() - 1,
                 workBootstrapProfile.getSelectedItemPosition()));
         return workBootstrapProfiles.get(position);
-    }
-
-    private HybridRunProfileStore.Endpoint selectedHybridBootstrapProfile() {
-        return selectedHybridProfile(hybridBootstrapProfile);
-    }
-
-    private HybridRunProfileStore.Endpoint selectedHybridContinuationProfile() {
-        return selectedHybridProfile(hybridContinuationProfile);
-    }
-
-    private HybridRunProfileStore.Endpoint selectedHybridProfile(Ui.SelectionField field) {
-        if (field == null || hybridProfiles.isEmpty()) return new HybridRunProfileStore.Endpoint("", "", "");
-        int position = Math.max(0, Math.min(hybridProfiles.size() - 1, field.getSelectedItemPosition()));
-        return hybridProfiles.get(position);
     }
 
     private int chatReasoningPosition(String value) {
@@ -490,7 +372,7 @@ public final class SelfRunNewActivity extends Activity {
     private void renderAttachments() {
         if (attachmentListView == null || attachmentSummary == null) return;
         attachmentListView.removeAllViews();
-        if (selectedAttachments.isEmpty()) { attachmentSummary.setText("선택된 파일이 없습니다."); return; }
+        if (selectedAttachments.isEmpty()) { attachmentSummary.setText(""); return; }
         attachmentSummary.setText("첨부파일 " + selectedAttachments.size() + "개");
         for (SelfRunStore.Attachment item : new ArrayList<>(selectedAttachments)) {
             LinearLayout row = Ui.settingsRow(this, item.name,
@@ -627,21 +509,12 @@ public final class SelfRunNewActivity extends Activity {
             Toast.makeText(this, "먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.", Toast.LENGTH_LONG).show(); return;
         }
         String selectedMode = MODE_VALUES[mode.getSelectedItemPosition()];
-        boolean hybridMode = HybridRunProfileStore.MODE_HYBRID.equals(selectedMode);
         ProfileRegistry.Profile workProfile = SelfRunStore.MODE_WORK.equals(selectedMode)
                 ? selectedWorkBootstrapProfile() : null;
-        HybridRunProfileStore.Endpoint hybridBootstrap = hybridMode
-                ? selectedHybridBootstrapProfile() : new HybridRunProfileStore.Endpoint("", "", "");
-        HybridRunProfileStore.Endpoint hybridContinuation = hybridMode
-                ? selectedHybridContinuationProfile() : new HybridRunProfileStore.Endpoint("", "", "");
         if (SelfRunStore.MODE_WORK.equals(selectedMode)
                 && (workProfile == null || ProfileRegistry.resolveWork(
                 workProfile.signalModel, workProfile.signalReasoning) == null)) {
             Toast.makeText(this, "선택할 수 있는 Work bootstrap profile이 없거나 삭제되었습니다. Profile Registry를 확인하세요.", Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (hybridMode && (!hybridBootstrap.valid() || !hybridContinuation.valid())) {
-            Toast.makeText(this, "하이브리드 부트스트랩/이후 프로필이 삭제되었거나 지원되지 않습니다. Profile Registry를 확인하세요.", Toast.LENGTH_LONG).show();
             return;
         }
         String continuationReasoning = SelfRunStore.MODE_CHAT.equals(selectedMode)
@@ -650,12 +523,6 @@ public final class SelfRunNewActivity extends Activity {
                 ? selectedChatBootstrapReasoning() : BOOTSTRAP_SAME_AS_TASK;
         String bootstrapReasoning = BOOTSTRAP_SAME_AS_TASK.equals(bootstrapChoice)
                 ? continuationReasoning : bootstrapChoice;
-        if (hybridMode) {
-            bootstrapReasoning = hybridBootstrap.isChat()
-                    ? hybridBootstrap.reasoning : ChatReasoningPreferenceStore.KEEP;
-            continuationReasoning = hybridContinuation.isChat()
-                    ? hybridContinuation.reasoning : bootstrapReasoning;
-        }
         if (SelfRunStore.MODE_CHAT.equals(selectedMode)
                 && !ChatReasoningPreferenceStore.KEEP.equals(continuationReasoning)
                 && ProfileRegistry.resolveChat(continuationReasoning) == null) {
@@ -680,10 +547,6 @@ public final class SelfRunNewActivity extends Activity {
             return;
         }
         String runId = SelfRunRunId.create();
-        if (hybridMode && !HybridRunProfileStore.startRun(
-                this, runId, hybridBootstrap, hybridContinuation)) {
-            Toast.makeText(this, "하이브리드 실행 프로필 설정을 저장하지 못했습니다.", Toast.LENGTH_LONG).show(); return;
-        }
         if (!ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)) {
             Toast.makeText(this, "Chat 추론 profile 설정을 저장하지 못했습니다.", Toast.LENGTH_LONG).show(); return;
         }
@@ -722,8 +585,6 @@ public final class SelfRunNewActivity extends Activity {
                 + ";chatContinuationReasoning=" + continuationReasoning
                 + ";workBootstrapModel=" + (workProfile == null ? "" : workProfile.signalModel)
                 + ";workBootstrapReasoning=" + (workProfile == null ? "" : workProfile.signalReasoning)
-                + ";hybridBootstrap=" + (hybridMode ? hybridBootstrap.key() : "")
-                + ";hybridContinuation=" + (hybridMode ? hybridContinuation.key() : "")
                 + ";attachments=" + selectedAttachments.size());
         startRunner();
         Toast.makeText(this, "SelfRun Drive를 시작했습니다: " + runId, Toast.LENGTH_LONG).show();
@@ -748,13 +609,6 @@ public final class SelfRunNewActivity extends Activity {
             refreshWorkBootstrapOptions(selected == null ? fallback.model : selected.signalModel,
                     selected == null ? fallback.reasoning : selected.signalReasoning);
         }
-        if (hybridBootstrapProfile != null && hybridContinuationProfile != null) {
-            HybridRunProfileStore.Endpoint bootstrap = selectedHybridBootstrapProfile();
-            HybridRunProfileStore.Endpoint continuation = selectedHybridContinuationProfile();
-            HybridRunProfileStore.Selection fallback = HybridRunProfileStore.loadDefaults(this);
-            refreshHybridOptions(bootstrap.valid() ? bootstrap.key() : fallback.bootstrap.key(),
-                    continuation.valid() ? continuation.key() : fallback.continuation.key());
-        }
         updateChatReasoningAvailability();
         if (firstResume) { firstResume = false; return; }
         if (project != null) reloadProjects(selectedProjectUrl());
@@ -770,8 +624,6 @@ public final class SelfRunNewActivity extends Activity {
         ProfileRegistry.Profile workProfile = selectedWorkBootstrapProfile();
         outState.putString(STATE_WORK_BOOTSTRAP_MODEL, workProfile == null ? "" : workProfile.signalModel);
         outState.putString(STATE_WORK_BOOTSTRAP_REASONING, workProfile == null ? "" : workProfile.signalReasoning);
-        outState.putString(STATE_HYBRID_BOOTSTRAP, selectedHybridBootstrapProfile().key());
-        outState.putString(STATE_HYBRID_CONTINUATION, selectedHybridContinuationProfile().key());
         outState.putString(STATE_PROJECT, project == null ? SelfRunScript.GENERAL_CHAT_URL : selectedProjectUrl());
         outState.putString(STATE_ATTACHMENTS, SelfRunStore.encodeAttachmentDrafts(selectedAttachments));
     }
@@ -786,15 +638,14 @@ public final class SelfRunNewActivity extends Activity {
             refreshChatBootstrapReasoningOptions(BOOTSTRAP_SAME_AS_TASK);
             WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
             refreshWorkBootstrapOptions(workDefault.model, workDefault.reasoning);
-            HybridRunProfileStore.Selection hybridDefault = HybridRunProfileStore.loadDefaults(this);
-            refreshHybridOptions(hybridDefault.bootstrap.key(), hybridDefault.continuation.key());
             chatAdvancedExpanded = false;
             renderAttachments();
             updateChatReasoningAvailability();
             return;
         }
         requirement.setText(state.getString(STATE_REQUIREMENT, ""));
-        int modePosition = Math.max(0, Math.min(MODE_VALUES.length - 1, state.getInt(STATE_MODE, 0)));
+        int savedMode = state.getInt(STATE_MODE, 0);
+        int modePosition = savedMode >= 0 && savedMode < MODE_VALUES.length ? savedMode : 0;
         mode.setSelection(modePosition);
         String reasoning = state.getString(STATE_CHAT_REASONING, ChatReasoningPreferenceStore.KEEP);
         refreshChatReasoningOptions(reasoning);
@@ -804,9 +655,6 @@ public final class SelfRunNewActivity extends Activity {
         String workModel = state.getString(STATE_WORK_BOOTSTRAP_MODEL, workDefault.model);
         String workReasoning = state.getString(STATE_WORK_BOOTSTRAP_REASONING, workDefault.reasoning);
         refreshWorkBootstrapOptions(workModel, workReasoning);
-        HybridRunProfileStore.Selection hybridDefault = HybridRunProfileStore.loadDefaults(this);
-        refreshHybridOptions(state.getString(STATE_HYBRID_BOOTSTRAP, hybridDefault.bootstrap.key()),
-                state.getString(STATE_HYBRID_CONTINUATION, hybridDefault.continuation.key()));
         chatAdvancedExpanded = state.getBoolean(STATE_CHAT_ADVANCED_EXPANDED, false);
         selectedAttachments.clear();
         selectedAttachments.addAll(SelfRunStore.decodeAttachmentDrafts(state.getString(STATE_ATTACHMENTS, "")));

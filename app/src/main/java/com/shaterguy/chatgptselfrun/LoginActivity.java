@@ -56,15 +56,14 @@ public final class LoginActivity extends Activity {
 
         LinearLayout heading = new LinearLayout(this);
         heading.setOrientation(LinearLayout.VERTICAL);
-        heading.addView(Ui.topBar(this, "ChatGPT 세션 · 프로젝트", "프로젝트를 직접 열어 등록합니다",
-                Ui.textButton(this, "닫기", v -> finish())));
-        status = Ui.muted(this, "프로젝트 방문 대기");
+        LinearLayout toolbar = Ui.topBar(this, "ChatGPT", "",
+                Ui.iconButton(this, R.drawable.ic_more_vert, "메뉴", v -> showBrowserMenu(v)));
+        toolbar.addView(Ui.iconButton(this, R.drawable.ic_arrow_back, "이전 페이지", v -> navigateBack()), 0,
+                new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)));
+        heading.addView(toolbar);
+        status = Ui.muted(this, "프로젝트를 열면 목록에 등록됩니다.");
         status.setTextIsSelectable(false);
         heading.addView(status);
-        heading.addView(Ui.actionStrip(this,
-                Ui.textButton(this, "뒤로", v -> navigateBack()),
-                Ui.textButton(this, "새로고침", v -> webView.reload()),
-                Ui.outlinedButton(this, "ChatGPT 홈", v -> webView.loadUrl("https://chatgpt.com/"))));
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         headingParams.bottomMargin = Ui.dp(this, 6);
@@ -100,6 +99,14 @@ public final class LoginActivity extends Activity {
     @SuppressLint("GestureBackNavigation")
     public void onBackPressed() {
         navigateBack();
+    }
+
+    private void showBrowserMenu(android.view.View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        menu.getMenu().add("ChatGPT 홈").setOnMenuItemClickListener(item -> { webView.loadUrl("https://chatgpt.com/"); return true; });
+        menu.getMenu().add("새로고침").setOnMenuItemClickListener(item -> { webView.reload(); return true; });
+        menu.getMenu().add("닫기").setOnMenuItemClickListener(item -> { finish(); return true; });
+        menu.show();
     }
 
     private void navigateBack() {

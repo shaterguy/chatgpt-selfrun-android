@@ -67,7 +67,7 @@ public final class UserImmediateInputPolicyTest {
         assertFalse(coordinator.contains("void click(int retry)"));
         assertTrue(host.contains("static WebView activeWebView()"));
         assertTrue(host.contains("if (activeWebView == webView) activeWebView = null"));
-        assertTrue(activity.contains("\"즉시 강제입력\""));
+        assertTrue(activity.contains("\"즉시 보내기\""));
         assertTrue(activity.contains("UserImmediateInputCoordinator.submit"));
     }
 

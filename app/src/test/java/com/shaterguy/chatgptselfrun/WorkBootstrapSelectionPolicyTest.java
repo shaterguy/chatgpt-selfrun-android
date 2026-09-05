@@ -23,7 +23,7 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertFalse(activity.contains("store.setPendingWorkProfile("));
         assertFalse(activity.contains("store.setPendingModel(workProfile.signalModel)"));
         assertFalse(activity.contains("store.setPendingReasoning(workProfile.signalReasoning)"));
-        assertTrue(activity.contains("TURN_COMPLETED MODEL/REASONING"));
+        assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_REASONING"));
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_MODEL"));
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_REASONING"));
         assertFalse(activity.contains("Work 모드는 새 작업에서 수동 선택하지 않고"));

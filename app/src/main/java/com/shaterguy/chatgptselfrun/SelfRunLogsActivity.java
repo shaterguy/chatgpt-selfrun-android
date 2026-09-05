@@ -48,31 +48,17 @@ public final class SelfRunLogsActivity extends Activity {
         int horizontal = Ui.isMedium(this) ? Ui.dp(this, 24) : Ui.dp(this, 14);
         root.setPadding(horizontal, Ui.dp(this, 10), horizontal, Ui.dp(this, 14));
 
-        root.addView(Ui.topBar(this,
-                debug ? "디버그 로그" : "실행 로그",
-                runId.isEmpty() ? "Run ID 없음" : runId,
-                Ui.textButton(this, "닫기", v -> finish())));
-
-        TextView note = Ui.muted(this, debug
-                ? "진단용 redacted JSONL · 프롬프트 원문, URL, 쿠키, 토큰, 비밀번호는 기록하지 않습니다."
-                : "사용자에게 의미 있는 실행 단계와 상태 전이를 표시합니다.");
-        note.setTextIsSelectable(false);
-        root.addView(note);
-
-        LinearLayout actions = Ui.actionStrip(this,
-                Ui.textButton(this, "새로고침", v -> render()),
-                Ui.outlinedButton(this, "로그 저장", v -> exportLogs()));
-        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        actionParams.bottomMargin = Ui.dp(this, 8);
-        root.addView(actions, actionParams);
+        root.addView(Ui.toolbar(this, debug ? "디버그 로그" : "실행 로그",
+                Ui.actionStrip(this,
+                        Ui.iconButton(this, R.drawable.ic_refresh, "새로고침", v -> render()),
+                        Ui.iconButton(this, R.drawable.ic_download, "로그 저장", v -> exportLogs()))));
         root.addView(Ui.divider(this));
 
         SelfRunRunLog log = new SelfRunRunLog(this);
         List<String> lines = debug ? log.readDebug(runId, DISPLAY_LINES) : log.readExecution(runId, DISPLAY_LINES);
         TextView body = Ui.body(this, lines.isEmpty() ? "저장된 로그가 없습니다." : String.join("\n", lines));
         body.setTextIsSelectable(true);
-        body.setTextSize(debug ? 11f : 13f);
+        body.setTextSize(debug ? 13f : 16f);
         body.setGravity(Gravity.TOP | Gravity.START);
         if (debug) body.setTypeface(Typeface.MONOSPACE);
         body.setPadding(Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 18));

@@ -19,6 +19,11 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Space;
+import android.widget.ImageButton;
+import android.widget.ImageView;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.navigationrail.NavigationRailView;
+import com.google.android.material.navigation.NavigationBarView;
 import android.widget.TextView;
 
 import com.google.android.material.button.MaterialButton;
@@ -58,7 +63,9 @@ final class Ui {
             input = new MaterialAutoCompleteTextView(getContext());
             input.setRawInputType(android.text.InputType.TYPE_NULL);
             input.setKeyListener(null);
-            input.setSingleLine(true);
+            input.setSingleLine(false);
+            input.setMaxLines(2);
+            input.setTextSize(16f);
             input.setMinHeight(dp(context, 56));
             input.setOnItemClickListener((parent, view, position, id) -> {
                 if (items.length == 0) return;
@@ -134,13 +141,13 @@ final class Ui {
     }
 
     static TextView title(Context context, String text) {
-        TextView view = text(context, text, 28f, Typeface.BOLD);
+        TextView view = text(context, text, 20f, Typeface.NORMAL);
         view.setPadding(0, 0, 0, dp(context, 2));
         return view;
     }
 
     static TextView headline(Context context, String text) {
-        TextView view = text(context, text, 22f, Typeface.BOLD);
+        TextView view = text(context, text, 24f, Typeface.NORMAL);
         view.setPadding(0, 0, 0, dp(context, 4));
         return view;
     }
@@ -165,16 +172,16 @@ final class Ui {
     }
 
     static TextView body(Context context, String text) {
-        TextView view = text(context, text, 14.5f, Typeface.NORMAL);
+        TextView view = text(context, text, 16f, Typeface.NORMAL);
         view.setLineSpacing(dp(context, 2), 1.08f);
         view.setPadding(0, dp(context, 2), 0, dp(context, 4));
-        view.setTextIsSelectable(true);
+        view.setTextIsSelectable(false);
         return view;
     }
 
     static TextView muted(Context context, String text) {
         TextView view = body(context, text);
-        view.setTextSize(12.5f);
+        view.setTextSize(13f);
         view.setTextColor(onSurfaceVariant(context));
         return view;
     }
@@ -189,14 +196,10 @@ final class Ui {
     }
 
     static TextView statusPill(Context context, String text) {
-        TextView view = text(context, text, 12.5f, Typeface.BOLD);
-        view.setTextColor(themeColor(context, com.google.android.material.R.attr.colorOnPrimaryContainer, Color.BLACK));
-        view.setGravity(Gravity.CENTER);
-        view.setPadding(dp(context, 12), dp(context, 7), dp(context, 12), dp(context, 7));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(themeColor(context, com.google.android.material.R.attr.colorPrimaryContainer, 0xFFDCE6FF));
-        bg.setCornerRadius(dp(context, 99));
-        view.setBackground(bg);
+        TextView view = Ui.text(context, text, 14f, Typeface.NORMAL);
+        view.setTextColor(onSurfaceVariant(context));
+        view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        view.setPadding(0, dp(context, 4), 0, dp(context, 4));
         return view;
     }
 
@@ -233,6 +236,13 @@ final class Ui {
         MaterialButton button = new MaterialButton(context, null, styleAttr);
         button.setText(text);
         button.setAllCaps(false);
+        button.setCornerRadius(dp(context, 12));
+        int icon = "파일 첨부".equals(text) ? R.drawable.ic_attach_file
+                : "새 작업".equals(text) || "조합 등록".equals(text) ? R.drawable.ic_add
+                : "일시정지".equals(text) ? R.drawable.ic_pause
+                : "재개".equals(text) || "시작".equals(text) ? R.drawable.ic_play_arrow
+                : "중지".equals(text) ? R.drawable.ic_stop : 0;
+        if (icon != 0) { button.setIconResource(icon); button.setIconSize(dp(context, 20)); }
         button.setTextSize(14f);
         button.setMinHeight(dp(context, 48));
         button.setMinimumHeight(dp(context, 48));
@@ -259,20 +269,33 @@ final class Ui {
     }
 
     static LinearLayout actionStrip(Context context, View... children) {
-        boolean stack = context.getResources().getConfiguration().fontScale >= 1.6f && children.length > 1;
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(stack ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        row.setGravity(stack ? Gravity.END : Gravity.CENTER_VERTICAL | Gravity.END);
-        for (int i = 0; i < children.length; i++) {
-            View child = children[i];
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (i > 0) {
-                if (stack) params.topMargin = dp(context, 4);
-                else params.setMarginStart(dp(context, 8));
+        LinearLayout row = new LinearLayout(context) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                int available = View.MeasureSpec.getSize(widthSpec) - getPaddingLeft() - getPaddingRight();
+                int needed = 0, visible = 0;
+                for (int i = 0; i < getChildCount(); i++) {
+                    View child = getChildAt(i);
+                    if (child.getVisibility() == View.GONE) continue;
+                    child.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                    needed += child.getMeasuredWidth();
+                    visible++;
+                }
+                boolean stack = visible > 1 && (needed + dp(context, 8) * (visible - 1) > available
+                        || context.getResources().getConfiguration().fontScale >= 1.6f);
+                setOrientation(stack ? VERTICAL : HORIZONTAL);
+                for (int i = 0; i < getChildCount(); i++) {
+                    LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) getChildAt(i).getLayoutParams();
+                    lp.width = stack ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT;
+                    lp.setMarginStart(stack || i == 0 ? 0 : dp(context, 8));
+                    lp.topMargin = stack && i > 0 ? dp(context, 4) : 0;
+                }
+                super.onMeasure(widthSpec, heightSpec);
             }
-            row.addView(child, params);
-        }
+        };
+        row.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        for (View child : children) row.addView(child, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return row;
     }
 
@@ -286,19 +309,17 @@ final class Ui {
 
     private static MaterialCardView surface(Context context, boolean hero, View... children) {
         MaterialCardView card = new MaterialCardView(context);
-        card.setRadius(dp(context, hero ? 26 : 18));
+        card.setRadius(0);
         card.setCardElevation(0);
         card.setUseCompatPadding(false);
-        card.setStrokeWidth(hero ? 0 : dp(context, 1));
+        card.setStrokeWidth(0);
         card.setStrokeColor(themeColor(context, com.google.android.material.R.attr.colorOutlineVariant, 0xFFE0E2EC));
-        card.setCardBackgroundColor(hero
-                ? themeColor(context, com.google.android.material.R.attr.colorPrimaryContainer, 0xFFE8EEFF)
-                : themeColor(context, com.google.android.material.R.attr.colorSurface, Color.WHITE));
+        card.setCardBackgroundColor(themeColor(context, com.google.android.material.R.attr.colorSurface, Color.WHITE));
 
         LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
-        int horizontal = hero ? 20 : 16;
-        int vertical = hero ? 20 : 14;
+        int horizontal = 16;
+        int vertical = 16;
         content.setPadding(dp(context, horizontal), dp(context, vertical), dp(context, horizontal), dp(context, vertical));
         for (int i = 0; i < children.length; i++) {
             View child = children[i];
@@ -316,11 +337,12 @@ final class Ui {
         LinearLayout bar = new LinearLayout(context);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(0, dp(context, 4), 0, dp(context, 14));
+        bar.setMinimumHeight(dp(context, 56));
+        bar.setPadding(0, 0, 0, dp(context, 8));
         LinearLayout text = new LinearLayout(context);
         text.setOrientation(LinearLayout.VERTICAL);
         text.addView(title(context, title));
-        if (subtitle != null && !subtitle.isEmpty()) text.addView(muted(context, subtitle));
+        
         bar.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (action != null) {
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -333,15 +355,13 @@ final class Ui {
 
     static LinearLayout keyValue(Context context, String key, String value) {
         LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.TOP);
+        boolean stack = !isExpanded(context) || context.getResources().getConfiguration().fontScale >= 1.6f;
+        row.setOrientation(stack ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         TextView keyView = muted(context, key);
-        keyView.setTextIsSelectable(false);
-        TextView valueView = body(context, value == null || value.isEmpty() ? "-" : value);
-        row.addView(keyView, new LinearLayout.LayoutParams(dp(context, 116), ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        valueParams.setMarginStart(dp(context, 10));
-        row.addView(valueView, valueParams);
+        TextView valueView = body(context, value == null || value.isEmpty() ? "—" : value);
+        valueView.setTextIsSelectable(true);
+        row.addView(keyView, new LinearLayout.LayoutParams(stack ? ViewGroup.LayoutParams.MATCH_PARENT : dp(context, 116), ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(valueView, new LinearLayout.LayoutParams(stack ? ViewGroup.LayoutParams.MATCH_PARENT : 0, ViewGroup.LayoutParams.WRAP_CONTENT, stack ? 0f : 1f));
         return row;
     }
 
@@ -367,6 +387,8 @@ final class Ui {
         }
         TextView t = text(context, title, 16f, Typeface.BOLD);
         t.setTextIsSelectable(false);
+        t.setMaxLines(2);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         item.addView(t);
         if (supporting != null && !supporting.isEmpty()) {
             TextView s = muted(context, supporting);
@@ -422,7 +444,7 @@ final class Ui {
     static LinearLayout page(Context context) {
         LinearLayout page = new LinearLayout(context);
         page.setOrientation(LinearLayout.VERTICAL);
-        int horizontal = isMedium(context) ? 28 : 18;
+        int horizontal = isExpanded(context) ? 32 : isMedium(context) ? 28 : 20;
         page.setPadding(dp(context, horizontal), dp(context, 14), dp(context, horizontal), dp(context, 24));
         return page;
     }
@@ -430,9 +452,10 @@ final class Ui {
     static void styleInput(Context context, EditText editor) {
         GradientDrawable background = new GradientDrawable();
         background.setColor(themeColor(context, com.google.android.material.R.attr.colorSurfaceVariant, 0xFFF0F1FA));
-        background.setCornerRadius(dp(context, 14));
+        background.setCornerRadius(dp(context, 12));
         background.setStroke(dp(context, 1), themeColor(context, com.google.android.material.R.attr.colorOutline, 0xFF74777F));
         editor.setBackground(background);
+        editor.setTextSize(16f);
         editor.setTextColor(onSurface(context));
         editor.setHintTextColor(onSurfaceVariant(context));
         editor.setPadding(dp(context, 16), dp(context, 14), dp(context, 16), dp(context, 14));
@@ -464,55 +487,85 @@ final class Ui {
         return shell;
     }
 
-    private static LinearLayout navigationRail(Activity activity, int selected) {
-        LinearLayout rail = new LinearLayout(activity);
-        rail.setOrientation(LinearLayout.VERTICAL);
-        rail.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        rail.setPadding(dp(activity, 8), dp(activity, 16), dp(activity, 8), dp(activity, 12));
-        TextView mark = statusPill(activity, "SR");
-        mark.setTextSize(13f);
-        rail.addView(mark, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        Space spacer = new Space(activity);
-        rail.addView(spacer, new LinearLayout.LayoutParams(1, dp(activity, 22)));
-        rail.addView(navButton(activity, "실행", DEST_RUN, selected), navRailParams(activity));
-        rail.addView(navButton(activity, "이력", DEST_HISTORY, selected), navRailParams(activity));
-        rail.addView(navButton(activity, "도구", DEST_TOOLS, selected), navRailParams(activity));
-        return rail;
-    }
-
-    private static LinearLayout.LayoutParams navRailParams(Context context) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.bottomMargin = dp(context, 6);
-        return params;
-    }
-
-    private static LinearLayout bottomNavigation(Activity activity, int selected) {
-        LinearLayout nav = new LinearLayout(activity);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setGravity(Gravity.CENTER);
-        nav.setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 8), dp(activity, 6));
-        nav.setBackgroundColor(surfaceColor(activity));
-        nav.addView(navButton(activity, "실행", DEST_RUN, selected), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        nav.addView(navButton(activity, "이력", DEST_HISTORY, selected), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        nav.addView(navButton(activity, "도구", DEST_TOOLS, selected), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+    private static NavigationRailView navigationRail(Activity activity, int selected) {
+        NavigationRailView nav = new NavigationRailView(activity);
+        configureNavigation(activity, nav, selected);
         return nav;
     }
 
-    private static Button navButton(Activity activity, String label, int destination, int selected) {
-        MaterialButton button = materialButton(activity, label,
-                v -> navigate(activity, destination),
-                destination == selected
-                        ? com.google.android.material.R.attr.materialButtonTonalStyle
-                        : com.google.android.material.R.attr.materialButtonOutlinedStyle);
-        if (destination != selected) button.setStrokeWidth(0);
-        button.setEnabled(true);
-        button.setClickable(destination != selected);
-        button.setFocusable(destination != selected);
-        button.setSelected(destination == selected);
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
+    private static BottomNavigationView bottomNavigation(Activity activity, int selected) {
+        BottomNavigationView nav = new BottomNavigationView(activity);
+        nav.setLabelVisibilityMode(NavigationBarView.LABEL_VISIBILITY_LABELED);
+        configureNavigation(activity, nav, selected);
+        return nav;
+    }
+
+    private static void configureNavigation(Activity activity, NavigationBarView nav, int selected) {
+        nav.getMenu().add(0, DEST_RUN + 1, 0, "실행").setIcon(R.drawable.ic_play_circle);
+        nav.getMenu().add(0, DEST_HISTORY + 1, 1, "기록").setIcon(R.drawable.ic_history);
+        nav.getMenu().add(0, DEST_TOOLS + 1, 2, "설정").setIcon(R.drawable.ic_settings);
+        nav.setSelectedItemId(selected + 1);
+        nav.setBackgroundColor(themeColor(activity, com.google.android.material.R.attr.colorSurface, Color.WHITE));
+        nav.setElevation(0);
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(nav, (view, insets) -> insets);
+        nav.setOnItemSelectedListener(item -> {
+            navigate(activity, item.getItemId() - 1);
+            return true;
+        });
+    }
+
+    static ImageButton iconButton(Context context, int icon, String label, View.OnClickListener listener) {
+        ImageButton button = new ImageButton(context);
+        button.setImageResource(icon);
+        button.setImageTintList(ColorStateList.valueOf(onSurface(context)));
+        button.setContentDescription(label);
+        button.setMinimumWidth(dp(context, 48));
+        button.setMinimumHeight(dp(context, 48));
+        button.setPadding(dp(context, 12), dp(context, 12), dp(context, 12), dp(context, 12));
+        TypedValue ripple = new TypedValue();
+        context.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true);
+        if (ripple.resourceId != 0) button.setBackgroundResource(ripple.resourceId);
+        button.setOnClickListener(listener);
         return button;
+    }
+
+    static LinearLayout toolbar(Activity activity, String title, View action) {
+        LinearLayout bar = topBar(activity, title, "", action);
+        bar.addView(iconButton(activity, R.drawable.ic_arrow_back, "뒤로", v -> activity.finish()), 0,
+                new LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)));
+        return bar;
+    }
+
+    static LinearLayout setting(Context context, int icon, String title, String value, View.OnClickListener listener) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(context, 64));
+        row.setPadding(0, dp(context, 12), 0, dp(context, 12));
+        ImageView leading = new ImageView(context);
+        leading.setImageResource(icon);
+        leading.setImageTintList(ColorStateList.valueOf(onSurfaceVariant(context)));
+        leading.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        row.addView(leading, new LinearLayout.LayoutParams(dp(context, 24), dp(context, 24)));
+        LinearLayout labels = new LinearLayout(context);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.addView(body(context, title));
+        if (value != null && !value.isEmpty()) labels.addView(muted(context, value));
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        labelParams.setMarginStart(dp(context, 16));
+        row.addView(labels, labelParams);
+        ImageView chevron = new ImageView(context);
+        chevron.setImageResource(R.drawable.ic_chevron_right);
+        chevron.setImageTintList(ColorStateList.valueOf(onSurfaceVariant(context)));
+        chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        row.addView(chevron, new LinearLayout.LayoutParams(dp(context, 24), dp(context, 24)));
+        row.setOnClickListener(listener);
+        row.setFocusable(true);
+        row.setContentDescription(title + (value == null || value.isEmpty() ? "" : "，" + value));
+        TypedValue ripple = new TypedValue();
+        context.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        if (ripple.resourceId != 0) row.setBackgroundResource(ripple.resourceId);
+        return row;
     }
 
     private static void navigate(Activity activity, int destination) {
@@ -614,7 +667,7 @@ final class Ui {
     }
 
     private static int surfaceColor(Context context) {
-        return themeColor(context, com.google.android.material.R.attr.colorSurface, Color.WHITE);
+        return themeColor(context, android.R.attr.colorBackground, Color.WHITE);
     }
 
     private static int themeColor(Context context, int attr, int fallback) {

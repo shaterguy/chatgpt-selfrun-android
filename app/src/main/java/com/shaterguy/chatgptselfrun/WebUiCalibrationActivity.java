@@ -78,12 +78,10 @@ public final class WebUiCalibrationActivity extends Activity {
         root.setPadding(side, Ui.dp(this, 6), side, 0);
 
         manageButton = Ui.textButton(this, "관리", v -> showManageDialog());
-        root.addView(Ui.topBar(this, "웹 UI 보정", "ChatGPT 화면에서 목표 컨트롤을 직접 지정합니다", manageButton));
+        root.addView(Ui.toolbar(this, "화면 보정", manageButton));
 
         status = Ui.body(this, "보정 항목을 선택하세요");
         status.setTextIsSelectable(false);
-        status.setMaxLines(2);
-        status.setEllipsize(TextUtils.TruncateAt.END);
         root.addView(status);
 
         selectButton = Ui.button(this, "보정 항목 선택", v -> showPurposePicker());

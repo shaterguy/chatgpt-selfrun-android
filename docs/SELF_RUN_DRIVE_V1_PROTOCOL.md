@@ -152,3 +152,7 @@ Android 앱은 malformed signal document를 의미 추정으로 복구하지 않
 현재 `1.6.1-dev4`처럼 bootstrap에 `DRIVE_JOB_FOLDER_ID`가 없었던 기존 Run은 해당 클라이언트가 종료될 때까지 legacy turn-document signal 경로를 사용할 수 있습니다. `1.6.1-dev5` 이후 신규 Run은 job-folder signal document transport를 사용합니다.
 
 앱 내부 WebView host, Foreground Service, WakeLock, polling timer, backoff, 로컬 상태와 서명 구현은 [SELF_RUN_DRIVE_RUNTIME](SELF_RUN_DRIVE_RUNTIME.md)에 분리합니다.
+
+## 지원 실행 모드
+
+2.3.2-dev16부터 신규 bootstrap MODE는 CHAT 또는 WORK입니다. 하이브리드 선택과 프로필 단계 metadata는 생성하지 않습니다. 기존 하이브리드 Run은 저장된 현재 stage endpoint를 한 가지 일반 모드로 정규화합니다. 기존 대화와 실행 식별자를 유지하고 다음 실제 CONTINUE에서 모드 갱신을 알려 이후 HANDOFF·signal 계약을 정합화합니다. 이 호환 처리는 새 하이브리드 실행 기능이 아닙니다.

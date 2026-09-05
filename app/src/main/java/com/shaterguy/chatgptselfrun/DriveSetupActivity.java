@@ -26,6 +26,7 @@ public final class DriveSetupActivity extends Activity {
     private SelfRunStore store;
     private TextView statusHeadline;
     private TextView statusDetails;
+    private TextView bindingDetails;
     private View unbindButton;
 
     @Override
@@ -39,25 +40,17 @@ public final class DriveSetupActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout page = Ui.page(this);
         scroll.addView(page);
-        page.addView(Ui.topBar(this, "Drive 저장 위치", "SelfRun 실행문서 연결",
-                Ui.textButton(this, "뒤로", v -> finish())));
-
+        page.addView(Ui.toolbar(this, "Drive 저장 위치", null));
         statusHeadline = Ui.headline(this, "");
         statusDetails = Ui.body(this, "");
-        page.addView(Ui.heroSurface(this,
-                Ui.statusPill(this, store.driveRunsBaseFolderId().isEmpty() ? "NOT CONNECTED" : "CONNECTED"),
-                statusHeadline,
-                statusDetails));
-
-        page.addView(Ui.section(this, "CONNECTION"));
-        page.addView(Ui.body(this,
-                "Google Picker에서 /GPT/Self Run/Runs/ 폴더를 직접 선택합니다. 앱이 생성·수정하는 항목은 drive.file 범위에 한정하고, ChatGPT가 각 Run 폴더에 생성하는 신호 문서는 읽기 전용 메타데이터·Docs 권한으로만 확인합니다."));
-        View connect = Ui.button(this,
-                store.driveRunsBaseFolderId().isEmpty() ? "Drive 저장 위치 연결" : "다른 저장 위치 선택",
-                v -> startPicker());
-        page.addView(connect, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        bindingDetails = Ui.muted(this, "");
+        bindingDetails.setTextIsSelectable(true);
+        bindingDetails.setVisibility(View.GONE);
+        page.addView(Ui.card(this, statusHeadline, statusDetails));
+        page.addView(Ui.button(this, store.driveRunsBaseFolderId().isEmpty() ? "폴더 선택" : "폴더 변경", v -> startPicker()));
+        page.addView(Ui.textButton(this, "상세 정보", v -> bindingDetails.setVisibility(
+                bindingDetails.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE)));
+        page.addView(bindingDetails);
         unbindButton = Ui.textButton(this, "연결 해제", v -> unbind());
         LinearLayout.LayoutParams unbindParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -74,12 +67,13 @@ public final class DriveSetupActivity extends Activity {
             statusHeadline.setText(store.driveRunsBaseFolderName().isEmpty()
                     ? "Drive 실행문서 위치가 연결되어 있습니다"
                     : store.driveRunsBaseFolderName());
-            statusDetails.setText("폴더 ID  " + store.driveRunsBaseFolderId()
+            statusDetails.setText("연결됨");
+            bindingDetails.setText("폴더 ID  " + store.driveRunsBaseFolderId()
                     + "\nURL  " + store.driveRunsBaseFolderUrl()
                     + "\n바인딩 시각(ms)  " + store.driveRunsBaseFolderBoundAt());
         } else {
-            statusHeadline.setText("Drive 실행문서 위치가 연결되지 않았습니다");
-            statusDetails.setText("SelfRun Drive를 시작하기 전에 Runs 저장 위치를 한 번 선택하세요.");
+            statusHeadline.setText("저장 폴더를 선택하세요");
+            statusDetails.setText("/GPT/Self Run/Runs/");
         }
         if (unbindButton != null) unbindButton.setVisibility(bound ? View.VISIBLE : View.GONE);
     }

@@ -63,7 +63,7 @@ public final class ChatReasoningPolicyTest {
         assertFalse(dom.contains("ChatReasoningDom.inline(chatReasoning, runId)"));
         assertFalse(service.contains("ChatReasoningDom"));
         assertTrue(activity.contains("ProfileRegistry.listChat()"));
-        assertTrue(activity.contains("부트스트랩 전용 추론 정도"));
+        assertTrue(activity.contains("첫 턴 추론 정도"));
         assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)"));
         assertTrue(script.contains("setChatProfiles"));
         assertTrue(script.contains("latestMessageText"));

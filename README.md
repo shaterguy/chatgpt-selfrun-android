@@ -24,11 +24,13 @@ SELF_RUN_SKILL_DOCUMENT_ID=1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs
 
 Drive Runs의 canonical 안내 경로는 `/GPT/Self Run/Runs/`입니다. 이미 저장된 Runs folder ID가 접근 가능하면 경로 이동만으로 Picker 재연결을 요구하지 않습니다.
 
-## 새 작업 UI
+## 앱 화면과 실행 모드
 
-새 SelfRun Drive 작업의 실행 모드 기본값은 `일반 Chat · 모델 변경 없음`입니다. Work는 사용자가 명시적으로 선택할 때만 시작합니다.
+하단 메뉴는 **실행 · 기록 · 설정**이며 600dp 이상에서는 내비게이션 레일을 사용합니다. 실행 화면은 작업 제목, 현재 상태, 모델 조합, 실행 제어와 추가 지시로 구성합니다. 상세 ID·프로토콜 단계는 실행 정보에서 확인합니다.
 
-셀프런 명령 입력창은 다중 행 내부 스크롤을 유지하면서, IME가 열린 상태에서 포커스·클릭·텍스트 변경이 발생하면 현재 커서 줄의 화면 표시 영역을 다시 요청합니다. Activity는 `SOFT_INPUT_ADJUST_RESIZE`를 유지하고 공통 UI 레이어가 IME inset을 반영합니다.
+새 작업은 프로젝트, 요구사항, 첨부파일과 실행 설정 순서입니다. 일반 채팅이 기본이며 워크에서는 첫 턴 모델 조합을 선택합니다. 일반 채팅의 첫 턴 추론 설정은 필요할 때 펼칠 수 있습니다. 요구사항과 첨부·프로젝트·모드 선택은 화면 재생성 후에도 유지합니다. 고정된 상단 메뉴와 시작 버튼 사이의 폼은 IME·글꼴 크기에 맞춰 스크롤합니다.
+
+하이브리드 모드는 폐기했습니다. 새 실행은 CHAT/WORK만 허용합니다. 기존 실행은 저장된 현재 단계의 유효 프로필을 읽어 한 가지 일반 모드로 정규화하며 Run ID, 대화, 턴 토큰, Drive cursor와 보류 입력을 보존합니다. 확인할 수 없는 구 프로필은 추측해서 전송하지 않고 오류 상태를 표시합니다. 지난 작업 기록은 유지합니다.
 
 ## Drive 실행 흐름
 
@@ -43,15 +45,11 @@ Drive Runs의 canonical 안내 경로는 `/GPT/Self Run/Runs/`입니다. 이미 
 
 ## 빌드와 검증
 
-요구 환경은 JDK 17, Android SDK 36, Build Tools 36.0.0, Gradle 9.5.0입니다.
+원격 GitHub Actions에서 JDK 17, Android SDK 36, Gradle 9.5.0을 사용합니다. 개발 브랜치의 build-drive-test.yml은 정적 검사·Android 테스트 컴파일, JVM 테스트, canonical TEST APK 생성, 기존 TEST 업데이트 및 정식판 동시 설치 검증 순서로 진행합니다.
 
-```bash
-tools/verify_drive_variant.sh
-gradle --no-daemon :app:testDebugUnitTest
-gradle --no-daemon :app:assembleDebug :app:assembleRelease
-```
+같은 소스의 debug 계보에서 실제 Android 화면을 360/840dp, 밝은/어두운 테마, 글꼴 100/200%와 IME 조건으로 캡처합니다. 실행·일시정지·완료·오류·예약·잠금 상태 및 초안 보존을 검증합니다. 캡처는 ui-evidence에 source SHA·변형과 함께 기록하며, 사용자 배포본은 고정 TEST 인증서로 서명한 qaApp입니다.
 
-개발 CI는 `selfrun-drive/v*-dev*` 및 `selfrun-drive/v*-rc*` 브랜치를 대상으로 단위 테스트·Drive variant 정책·debug/release 빌드를 수행하고 aligned unsigned APK를 `chatgpt-selfrun-drive-unsigned` artifact로 보존합니다. 저장소에 `SELFRUN_SIGNING_PASSPHRASE` secret이 구성된 환경에서는 기존 SelfRun Drive 고정 인증서로 candidate APK까지 서명하고 packageName, versionName, versionCode, signing certificate와 SHA-256을 검증해 `chatgpt-selfrun-drive-build` artifact로 추가 제공합니다. secret이 없는 환경의 unsigned artifact는 최종 사용자 산출물이 아니며, 배포·사용자 전달 전에 `tools/sign_release.sh`와 기존 signing lineage를 사용해 별도 고정서명·검증해야 합니다.
+성공한 동일 canonical APK와 화면 증거를 immutable artifact ref에 게시합니다. deliverables/direct-apk.txt의 실제 APK URL을 내려받아 SHA-256과 크기를 다시 확인하며, 사용자 전달에는 해당 직접 APK 링크를 사용합니다. TEST application ID는 com.shaterguy.chatgptselfrun.drive.test로 정식판과 분리됩니다.
 
 ## 정식 릴리스
 

@@ -76,8 +76,8 @@ public final class SelfRunHealthPolicyTest {
     @Test public void historyAndDetailRenderWithoutNewRefreshTimer() throws Exception {
         String history = source("SelfRunHistoryActivity.java");
         String detail = source("SelfRunDetailActivity.java");
-        assertTrue(history.contains("RUN HEALTH"));
-        assertTrue(detail.contains("RUN HEALTH"));
+        assertTrue(history.contains("currentFor(item)"));
+        assertTrue(detail.contains("currentFor(item)"));
         assertFalse(history.contains("new Handler"));
         assertFalse(history.contains("postDelayed"));
         assertFalse(detail.contains("new Handler"));

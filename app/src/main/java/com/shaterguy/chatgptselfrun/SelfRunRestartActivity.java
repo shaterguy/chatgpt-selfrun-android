@@ -54,6 +54,8 @@ public final class SelfRunRestartActivity extends Activity {
         if (runId == null) runId = "";
         render();
         snapshot = history.get(runId);
+        try { snapshot = LegacyRunModeMigration.normalizedSnapshot(this, snapshot); }
+        catch (RuntimeException invalid) { failure("이전 실행 모드를 확인할 수 없습니다. 저장된 프로필을 확인하세요."); return; }
         updateTargetSummary();
         if (!SelfRunRestartPolicy.restartable(snapshot)) {
             failure("재시작할 수 있는 중지 작업이 아닙니다.");
@@ -73,28 +75,24 @@ public final class SelfRunRestartActivity extends Activity {
         LinearLayout page = Ui.page(this);
         scroll.addView(page);
 
-        page.addView(Ui.topBar(this, "작업 재시작", "Recovery Console", null));
+        page.addView(Ui.topBar(this, "작업 재시작", "", null));
 
-        stagePill = Ui.statusPill(this, "CHECK");
+        stagePill = Ui.muted(this, "");
+        stagePill.setVisibility(android.view.View.GONE);
         statusHeadline = Ui.headline(this, "중지 작업 확인 중");
         status = Ui.body(this, "작업 이력과 Drive 리소스를 확인하고 있습니다.");
         progress = Ui.body(this, progressText(0));
         progress.setTextIsSelectable(false);
-        page.addView(Ui.heroSurface(this,
+        page.addView(Ui.card(this,
                 stagePill,
                 statusHeadline,
                 status,
                 Ui.divider(this),
                 progress));
 
-        page.addView(Ui.section(this, "RECOVERY TARGET"));
+        page.addView(Ui.section(this, "작업"));
         targetSummary = Ui.muted(this, "Run ID  " + empty(runId));
         page.addView(targetSummary);
-
-        page.addView(Ui.section(this, "RECOVERY PATH"));
-        page.addView(Ui.body(this,
-                "기존 작업 이력과 Drive 문서를 검증한 뒤 같은 대화방에서 CONTINUE로 이어갑니다. "
-                        + "복구가 시작된 뒤에는 상태가 중간에 끊기지 않도록 화면 닫기와 뒤로가기를 잠급니다."));
 
         closeButton = Ui.outlinedButton(this, "재시작 취소", v -> cancelBeforeRecovery());
         LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
@@ -111,9 +109,8 @@ public final class SelfRunRestartActivity extends Activity {
             targetSummary.setText("Run ID  " + empty(runId) + "\n저장된 작업 정보를 찾지 못했습니다.");
             return;
         }
-        targetSummary.setText("Run ID  " + empty(runId)
-                + "\n" + snapshot.optString("mode", "-") + " · Turn " + snapshot.optInt("turn", 0)
-                + "\n" + missionPreview(snapshot.optString("requirement", "")));
+        targetSummary.setText(missionPreview(snapshot.optString("requirement", ""))
+                + "\n" + snapshot.optString("mode", "-") + " · " + snapshot.optInt("turn", 0) + "턴");
     }
 
     private void showRecoveryStage(String badge, String headline, String message, int step) {
@@ -127,14 +124,10 @@ public final class SelfRunRestartActivity extends Activity {
     }
 
     private static String progressText(int currentStep) {
-        String[] steps = {"작업 확인", "Drive 계정", "리소스 복구", "CONTINUE 준비"};
-        StringBuilder text = new StringBuilder();
-        for (int i = 0; i < steps.length; i++) {
-            if (i > 0) text.append('\n');
-            String mark = currentStep < 0 ? "○" : i < currentStep ? "✓" : i == currentStep ? "●" : "○";
-            text.append(mark).append(' ').append(steps[i]);
-        }
-        return text.toString();
+        String[] steps = {"작업 확인", "Drive 계정", "리소스 복구", "다음 턴 준비"};
+        if (currentStep < 0) return "복구를 완료하지 못했습니다.";
+        int index = Math.min(currentStep, steps.length - 1);
+        return (index + 1) + " / " + steps.length + " · " + steps[index];
     }
 
     private static String missionPreview(String value) {

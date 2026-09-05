@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="Theme.Material3Expressive.DayNight.NoActionBar">
+    <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/selfrun_primary</item>
         <item name="colorOnPrimary">@color/selfrun_on_primary</item>
         <item name="colorPrimaryContainer">@color/selfrun_primary_container</item>

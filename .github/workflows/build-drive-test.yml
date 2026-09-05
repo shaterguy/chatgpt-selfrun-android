@@ -409,7 +409,7 @@ jobs:
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
-          INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest,com.shaterguy.chatgptselfrun.HybridRequestProfileWebViewTest,com.shaterguy.chatgptselfrun.HybridContinuationUiModeWebViewTest'
+          INSTRUMENTATION_CLASS='com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest,com.shaterguy.chatgptselfrun.LegacyModeMigrationAndroidTest,com.shaterguy.chatgptselfrun.UiRedesignScreenshotTest'
           echo "TEST_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_INSTRUMENTATION_CLASS=$INSTRUMENTATION_CLASS" >> "$GITHUB_ENV"
       - name: Enable hardware acceleration
@@ -428,8 +428,7 @@ jobs:
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
-          script: >-
-            gradle --build-cache --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=$TEST_INSTRUMENTATION_CLASS && adb shell dumpsys webviewupdate > drive-test-webview-evidence.txt && cat drive-test-webview-evidence.txt && FORMAL_EXPECTED_VERSION="2.3.1" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v2.3.1.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1 && cat drive-test-coinstall-evidence.txt
+          script: bash tools/verify_drive_ui_runtime.sh
       - name: Upload TEST verification evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -442,6 +441,8 @@ jobs:
             coinstall-current-cert.txt
             coinstall-test-prev-cert.txt
             coinstall-formal-cert.txt
+            ui-evidence/
+            app/build/outputs/androidTest-results/connected/
           if-no-files-found: warn
           retention-days: 30
 
@@ -462,6 +463,11 @@ jobs:
         with:
           name: chatgpt-selfrun-drive-test-build
           path: current-candidate
+      - name: Download same-source Android visual evidence
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: chatgpt-selfrun-drive-test-coinstall-evidence
+          path: runtime-evidence
       - name: Prepare immutable direct TEST APK objects
         id: prepare_publish
         shell: bash
@@ -503,6 +509,13 @@ jobs:
           git read-tree --empty
           APK_BLOB="$(git hash-object -w "$APK")"
           git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
+          test -s runtime-evidence/ui-evidence/manifest.txt
+          grep -Fqx "SOURCE_SHA=$GITHUB_SHA" runtime-evidence/ui-evidence/manifest.txt
+          while IFS= read -r -d '' EVIDENCE_FILE; do
+            EVIDENCE_BLOB="$(git hash-object -w "$EVIDENCE_FILE")"
+            EVIDENCE_NAME="$(basename "$EVIDENCE_FILE")"
+            git update-index --add --cacheinfo 100644,"$EVIDENCE_BLOB","deliverables/ui-evidence/$EVIDENCE_NAME"
+          done < <(find runtime-evidence/ui-evidence -maxdepth 1 -type f -print0)
           APK_TREE="$(git write-tree)"
           APK_COMMIT="$(printf '%s\n' "publish: SelfRun Drive ${VERSION_NAME} TEST APK" | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
           RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/current-test.apk"
@@ -511,6 +524,7 @@ jobs:
             echo "ARTIFACT_COMMIT_SHA=$APK_COMMIT"
             echo "APK_SHA256=$APK_SHA256"
             echo "APK_URL=$RAW_URL"
+            echo "UI_EVIDENCE_URL=https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/ui-evidence/manifest.txt"
             echo "PREDECESSOR_SOURCE=$PREDECESSOR_SOURCE"
             echo "PREDECESSOR_LINEAGE_EVIDENCE=$PREDECESSOR_LINEAGE_EVIDENCE"
           } > direct-apk.txt
@@ -530,13 +544,6 @@ jobs:
             echo "- Predecessor source: `$PREDECESSOR_SOURCE`"
             echo "- Predecessor lineage evidence: `$PREDECESSOR_LINEAGE_EVIDENCE`"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload direct APK identity evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: chatgpt-selfrun-drive-direct-apk-evidence
-          path: direct-apk.txt
-          if-no-files-found: error
-          retention-days: 30
       - name: PUBLISH_DELIVER - publish immutable artifact ref
         shell: bash
         env:
@@ -553,3 +560,31 @@ jobs:
             exit 1
           fi
           git push origin "$META_COMMIT:refs/heads/$ARTIFACT_BRANCH"
+      - name: Verify direct APK accessibility and identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_URL="$(sed -n 's/^APK_URL=//p' direct-apk.txt)"
+          EXPECTED_SHA="$(sed -n 's/^APK_SHA256=//p' direct-apk.txt)"
+          test -n "$RAW_URL"
+          curl --fail --location --retry 4 --retry-delay 2 --output delivered-test.apk "$RAW_URL"
+          test -s delivered-test.apk
+          ACTUAL_SHA="$(sha256sum delivered-test.apk | awk '{print $1}')"
+          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          {
+            echo "SOURCE_SHA=$GITHUB_SHA"
+            echo "APK_URL=$RAW_URL"
+            echo "APK_SHA256=$ACTUAL_SHA"
+            echo "APK_SIZE_BYTES=$(stat -c%s delivered-test.apk)"
+            echo "HTTP_DOWNLOAD=PASS"
+          } > direct-apk-access.txt
+          cat direct-apk-access.txt
+      - name: Upload direct APK identity evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chatgpt-selfrun-drive-direct-apk-evidence
+          path: |
+            direct-apk.txt
+            direct-apk-access.txt
+          if-no-files-found: error
+          retention-days: 30

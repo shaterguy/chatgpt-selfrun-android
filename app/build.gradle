@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020047
-def selfRunDriveVersionName = '2.3.2-dev15'
+def selfRunDriveVersionCode = 2020048
+def selfRunDriveVersionName = '2.3.2-dev16'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.3.2-dev15') {
-            throw new GradleException('SelfRun Drive development version must be 2.3.2-dev15')
+        if (selfRunDriveVersionName != '2.3.2-dev16') {
+            throw new GradleException('SelfRun Drive development version must be 2.3.2-dev16')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -88,8 +88,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (!webConfig.contains('RequestProfileScript.installDocumentStart')) {
             throw new GradleException('SelfRun 2.0 request profile document-start interceptor is required')
         }
-        if (!webConfig.contains('HybridRequestProfileScript.installDocumentStart')) {
-            throw new GradleException('SelfRun HYBRID request profile bridge is required')
+        if (webConfig.contains('HybridRequestProfileScript')
+                || file('src/main/java/com/shaterguy/chatgptselfrun/HybridRequestProfileScript.java').exists()) {
+            throw new GradleException('Retired hybrid execution bridge must be absent')
         }
         if (webConfig.contains('TurnCompletionDomFallbackScript')
                 || file('src/main/java/com/shaterguy/chatgptselfrun/TurnCompletionDomFallbackScript.java').exists()) {

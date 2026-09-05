@@ -33,7 +33,7 @@ public final class WebUiCalibrationPolicyTest {
         assertTrue(manifest.contains("android:exported=\"false\""));
         assertFalse(tools.contains("WebUiCalibrationActivity.class"));
         assertTrue(tools.contains("ProfileRegistryActivity.class"));
-        assertTrue(tools.contains("모델 및 추론수준 관리"));
+        assertTrue(tools.contains("모델 조합"));
     }
 
     @Test public void activeCaptureAddsNoJavascriptBridgeOrPermissionSurface() throws Exception {
@@ -58,10 +58,10 @@ public final class WebUiCalibrationPolicyTest {
 
     @Test public void profileManagementDisplaysSignalAndActualCombinationWithoutEditAction() throws Exception {
         String activity = src("ProfileRegistryActivity.java");
-        assertTrue(activity.contains("신호 REASONING="));
+        assertTrue(activity.contains("REASONING="));
         assertTrue(activity.contains("MODEL="));
         assertTrue(activity.contains("실제 조합 "));
-        assertTrue(activity.contains("Ui.dangerButton(this, \"삭제\""));
+        assertTrue(activity.contains("confirmDelete(profile)"));
         assertFalse(activity.contains("이름 수정"));
         assertFalse(activity.contains("displayName"));
     }

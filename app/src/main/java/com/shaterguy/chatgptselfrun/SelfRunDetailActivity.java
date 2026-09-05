@@ -20,80 +20,52 @@ public final class SelfRunDetailActivity extends Activity {
         super.onCreate(savedInstanceState);
         String runId = getIntent().getStringExtra(EXTRA_RUN_ID);
         JSONObject item = new SelfRunHistoryStore(this).get(runId);
-
         ScrollView scroll = new ScrollView(this);
         LinearLayout page = Ui.page(this);
         scroll.addView(page);
-        page.addView(Ui.topBar(this, "Run Inspector", "실행 상태와 원본 요청",
-                Ui.textButton(this, "뒤로", v -> finish())));
-
+        page.addView(Ui.toolbar(this, "작업 상세", null));
         if (item == null) {
-            page.addView(Ui.heroSurface(this,
-                    Ui.statusPill(this, "NOT FOUND"),
-                    Ui.headline(this, "저장된 작업을 찾을 수 없습니다"),
-                    Ui.body(this, "작업 이력이 삭제되었거나 현재 Run ID와 일치하지 않습니다.")));
+            page.addView(Ui.headline(this, "저장된 작업을 찾을 수 없습니다"));
             Ui.setContent(this, scroll);
             return;
         }
-
         SelfRunHealthSnapshot runHealth = new SelfRunHealthObservationStore(this).currentFor(item);
-        String status = item.optString("status", "STATE");
-        page.addView(Ui.heroSurface(this,
-                Ui.statusPill(this, runHealth == null ? status : runHealth.rowLabel()),
-                Ui.headline(this, preview(item.optString("requirement"))),
-                Ui.muted(this, item.optString("runId"))));
-
-        if (runHealth != null) {
-            page.addView(Ui.section(this, "RUN HEALTH"));
-            LinearLayout health = new LinearLayout(this);
-            health.setOrientation(LinearLayout.VERTICAL);
-            health.addView(Ui.keyValue(this, "현재 상태", runHealth.title));
-            health.addView(Ui.keyValue(this, "설명", runHealth.description));
-            health.addView(Ui.keyValue(this, "마지막 상태 변경", time(runHealth.observedAt)));
-            health.addView(Ui.keyValue(this, "필요한 사용자 행동", runHealth.recommendedAction));
-            health.addView(Ui.keyValue(this, "진단 신뢰도", runHealth.confidence));
-            page.addView(health);
-        }
-
-        page.addView(Ui.section(this, "EXECUTION SNAPSHOT"));
-        LinearLayout snapshot = new LinearLayout(this);
-        snapshot.setOrientation(LinearLayout.VERTICAL);
-        snapshot.addView(Ui.keyValue(this, "Created", time(item.optLong("createdAt"))));
-        snapshot.addView(Ui.keyValue(this, "Updated", time(item.optLong("updatedAt"))));
-        snapshot.addView(Ui.keyValue(this, "Mode", item.optString("mode", "-")));
-        snapshot.addView(Ui.keyValue(this, "Phase", item.optString("phase", "-")));
-        snapshot.addView(Ui.keyValue(this, "Turn", String.valueOf(item.optInt("turn"))));
-        snapshot.addView(Ui.keyValue(this, "Profile", model(item)));
-        page.addView(snapshot);
-
-        page.addView(Ui.section(this, "SOURCE & DIAGNOSTIC"));
-        LinearLayout source = new LinearLayout(this);
-        source.setOrientation(LinearLayout.VERTICAL);
-        source.addView(Ui.keyValue(this, "Project", empty(item.optString("projectUrl"))));
-        source.addView(Ui.keyValue(this, "Conversation", empty(item.optString("conversationUrl"))));
-        source.addView(Ui.keyValue(this, "Error", error(item)));
-        if (runHealth != null) {
-            source.addView(Ui.keyValue(this, "Health category", runHealth.category));
-            source.addView(Ui.keyValue(this, "Health reason", empty(runHealth.internalReason)));
-            source.addView(Ui.keyValue(this, "Health phase", empty(runHealth.phase)));
-            source.addView(Ui.keyValue(this, "Health observed", time(runHealth.observedAt)));
-        }
-        page.addView(source);
-
-        page.addView(Ui.section(this, "ORIGINAL MISSION"));
-        page.addView(Ui.card(this, Ui.body(this, empty(item.optString("requirement")))));
-
+        page.addView(Ui.headline(this, preview(item.optString("requirement"))));
+        page.addView(Ui.body(this, runHealth == null ? item.optString("status") : runHealth.rowLabel()));
+        if (runHealth != null && !runHealth.recommendedAction.isEmpty())
+            page.addView(Ui.body(this, runHealth.recommendedAction));
+        page.addView(Ui.section(this, "원본 요청"));
+        android.widget.TextView requirement = Ui.body(this, empty(item.optString("requirement")));
+        requirement.setTextIsSelectable(true);
+        page.addView(requirement);
+        page.addView(Ui.section(this, "실행 정보"));
+        page.addView(Ui.keyValue(this, "시작", time(item.optLong("createdAt"))));
+        page.addView(Ui.keyValue(this, "마지막 실행", time(item.optLong("updatedAt"))));
+        page.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
+        page.addView(Ui.keyValue(this, "턴", String.valueOf(item.optInt("turn"))));
+        page.addView(Ui.keyValue(this, "모델 조합", model(item)));
         String resolvedRunId = item.optString("runId");
-        page.addView(Ui.section(this, "RELATED ACTIONS"));
-        page.addView(Ui.actionStrip(this,
-                Ui.outlinedButton(this, "실행 로그", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)),
-                Ui.outlinedButton(this, "디버그 로그", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG))));
-        if (SelfRunRestartPolicy.restartable(item)) {
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            params.topMargin = Ui.dp(this, 10);
-            page.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(resolvedRunId)), params);
+        page.addView(Ui.section(this, "로그"));
+        page.addView(Ui.setting(this, R.drawable.ic_history, "실행 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)));
+        page.addView(Ui.setting(this, R.drawable.ic_history, "디버그 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG)));
+        LinearLayout diagnostics = new LinearLayout(this);
+        diagnostics.setOrientation(LinearLayout.VERTICAL);
+        diagnostics.addView(Ui.keyValue(this, "Run ID", resolvedRunId));
+        diagnostics.addView(Ui.keyValue(this, "Phase", item.optString("phase")));
+        diagnostics.addView(Ui.keyValue(this, "프로젝트", item.optString("projectUrl")));
+        diagnostics.addView(Ui.keyValue(this, "대화", item.optString("conversationUrl")));
+        diagnostics.addView(Ui.keyValue(this, "오류", error(item)));
+        if (runHealth != null) {
+            diagnostics.addView(Ui.keyValue(this, "진단", runHealth.description));
+            diagnostics.addView(Ui.keyValue(this, "신뢰도", runHealth.confidence));
+            diagnostics.addView(Ui.keyValue(this, "진단 근거", runHealth.internalReason));
         }
+        diagnostics.setVisibility(android.view.View.GONE);
+        page.addView(Ui.textButton(this, "진단 정보", v -> diagnostics.setVisibility(
+                diagnostics.getVisibility() == android.view.View.VISIBLE ? android.view.View.GONE : android.view.View.VISIBLE)));
+        page.addView(diagnostics);
+        if (SelfRunRestartPolicy.restartable(item))
+            page.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(resolvedRunId)));
         Ui.setContent(this, scroll);
     }
 
