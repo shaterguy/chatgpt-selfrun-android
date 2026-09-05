@@ -10,14 +10,16 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Static guardrails for the Work-only decoder and privacy-safe diagnostic bridge. */
+/** Static guardrails for the shared response decoder and privacy-safe Work diagnostic bridge. */
 public final class WorkProtocolDiagnosticsContractTest {
-    @Test public void workDecoderKeepsChatStateMachineUntouchedAndUsesBoundedInspectorStructures()
+    @Test public void sharedDecoderKeepsCompletionAuthorityUntouchedAndUsesBoundedInspectorStructures()
             throws Exception {
         String work = source("WorkTurnProtocolIngressScript.java");
         String protocol = source("ChatGptTurnProtocolScript.java");
 
-        assertTrue(work.contains("work-turn-ingress-v3"));
+        assertTrue(work.contains("work-turn-ingress-v4"));
+        assertTrue(work.contains("handlesTransport"));
+        assertTrue(work.contains("snapshot.phase==='THINKING'||snapshot.phase==='ANSWERING'"));
         assertTrue(work.contains("MAX_ENCODED_ITEMS=6"));
         assertTrue(work.contains("MAX_ENCODED_ITEM_LENGTH=200000"));
         assertTrue(work.contains("MAX_DECODE_DEPTH=8"));

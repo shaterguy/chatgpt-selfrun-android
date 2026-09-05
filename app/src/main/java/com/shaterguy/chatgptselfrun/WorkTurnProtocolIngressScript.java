@@ -7,9 +7,9 @@ import androidx.webkit.WebViewFeature;
 
 import java.util.Set;
 
-/** Work-only transport adapter for the shared response protocol state machine. */
+/** Shared response transport adapter for the protocol state machine; request admission stays Work-only. */
 final class WorkTurnProtocolIngressScript {
-    static final String ENGINE_VERSION = "work-turn-ingress-v3";
+    static final String ENGINE_VERSION = "work-turn-ingress-v4";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -33,8 +33,18 @@ final class WorkTurnProtocolIngressScript {
                   const target=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const workMode=()=>safe(target()?.mode).toLowerCase()==='work';
                   const protocol=()=>{try{return window.__selfRunTurnProtocol||null;}catch(_){return null;}};
+                  const handlesTransport=()=>{
+                    const mode=safe(target()?.mode).toLowerCase();
+                    if(mode==='work')return true;
+                    if(mode!=='chat')return false;
+                    try{
+                      const p=protocol(),snapshot=p?.snapshot?.()||{},runId=safe(target()?.runId||'');
+                      return !!p&&!!runId&&safe(snapshot.runId||'')===runId
+                        &&(snapshot.phase==='THINKING'||snapshot.phase==='ANSWERING');
+                    }catch(_){return false;}
+                  };
                   const counters={fetchRequests:0,webSocketCreated:0,webSocketMessages:0,workerMessages:0,sharedWorkerMessages:0,
-                    framesSeen:0,binaryDecoded:0,forwardedFrames:0,encodedItemsFound:0,decodedItems:0,
+                    serviceWorkerMessages:0,serviceWorkerPortMessages:0,framesSeen:0,binaryDecoded:0,forwardedFrames:0,encodedItemsFound:0,decodedItems:0,
                     semanticSignals:0,staleFrames:0,ignoredTransport:0,decodeErrors:0};
                   const decoderKinds={};
                   const count=key=>{if(Object.prototype.hasOwnProperty.call(counters,key))counters[key]++;};
@@ -59,7 +69,7 @@ final class WorkTurnProtocolIngressScript {
                   let transportInstallLogged=false,generationEpoch=0;
                   const workTurnEpochs=new Map();
                   const trimEpochMap=()=>{while(workTurnEpochs.size>24)workTurnEpochs.delete(workTurnEpochs.keys().next().value);};
-                  const transportAvailability={fetch:false,websocket:false,worker:false,sharedworker:false};
+                  const transportAvailability={fetch:false,websocket:false,worker:false,sharedworker:false,serviceworker:false};
                   const ensureInstallDiagnostic=()=>{
                     if(transportInstallLogged||!workMode())return;
                     transportInstallLogged=true;
@@ -185,7 +195,8 @@ final class WorkTurnProtocolIngressScript {
                     const beforeSnapshot=(()=>{try{return p.snapshot?.()||{};}catch(_){return{};}})(),beforePhase=safe(beforeSnapshot.phase||'');
                     const beforeDiag=diagnosticsState(),turnId=safe(context?.workTurnId||'');
                     const knownEpoch=turnId?workTurnEpochs.get(turnId):null,staleExpected=!!(knownEpoch&&knownEpoch<generationEpoch);
-                    try{p.observeSseText('data: '+JSON.stringify(node)+'\\n\\n','work-decoder-'+decoder,context||{});count('semanticSignals');}
+                    const decoderSource=(workMode()?'work-decoder-':'chat-decoder-')+decoder;
+                    try{p.observeSseText('data: '+JSON.stringify(node)+'\\n\\n',decoderSource,context||{});count('semanticSignals');}
                     catch(_){count('decodeErrors');diagnostic('WORK_PROTOCOL_DECODE_ERROR',{source,decoder,reason:'semantic_forward_failed'});return false;}
                     const afterDiag=diagnosticsState(),afterSnapshot=(()=>{try{return p.snapshot?.()||{};}catch(_){return{};}})();
                     let binding='none',staleRejected=false;
@@ -262,7 +273,8 @@ final class WorkTurnProtocolIngressScript {
                     return true;
                   };
                   const observeTransportData=async(data,source)=>{
-                    if(!workMode())return false;ensureInstallDiagnostic();
+                    if(!handlesTransport())return false;
+                    if(workMode())ensureInstallDiagnostic();
                     const kind=dataType(data);count('framesSeen');
                     diagnostic('WORK_PROTOCOL_FRAME',{source,transport:source,dataType:kind,frameCount:counters.framesSeen,byteLength:dataLength(data)});
                     try{
@@ -300,8 +312,21 @@ final class WorkTurnProtocolIngressScript {
                     WrappedSharedWorker.prototype=NativeSharedWorker.prototype;try{Object.setPrototypeOf(WrappedSharedWorker,NativeSharedWorker);}catch(_){}
                     window.SharedWorker=WrappedSharedWorker;transportAvailability.sharedworker=true;
                   }
+                  if(navigator.serviceWorker?.addEventListener){
+                    navigator.serviceWorker.addEventListener('message',event=>{
+                      if(safe(target()?.mode).toLowerCase()!=='chat'||!handlesTransport())return;
+                      count('serviceWorkerMessages');void observeTransportData(event.data,'chat-service-worker');
+                      for(const port of Array.from(event.ports||[])){try{
+                        port.addEventListener('message',portEvent=>{
+                          if(safe(target()?.mode).toLowerCase()!=='chat'||!handlesTransport())return;
+                          count('serviceWorkerPortMessages');void observeTransportData(portEvent.data,'chat-service-worker-port');
+                        });port.start?.();
+                      }catch(_){}}
+                    });
+                    transportAvailability.serviceworker=true;
+                  }
                   window.__selfRunWorkTurnProtocolIngress={
-                    version:ENGINE_VERSION,observeRequest,
+                    version:ENGINE_VERSION,observeRequest,handlesTransport,
                     observeSocketFrame:frame=>observeTransportData(frame,'work-manual'),
                     observeTransportData,
                     diagnostics:()=>({mode:safe(target()?.mode),protocol:!!protocol(),generationEpoch,...counters,decoderKinds:{...decoderKinds}})
