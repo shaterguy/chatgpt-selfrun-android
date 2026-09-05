@@ -50,7 +50,7 @@ public final class HybridContinuationUiModeWebViewTest {
                     "window.__selfRunHybridProfileBridge.target().continuationReasoning"));
             assertEquals("0", read(scenario, web, "String(window.records.length)"));
 
-            String submitAction = "(()=>{window.submitCount+=1;window.emitXhr();return JSON.stringify({status:'CONTINUE_CLICKED'});})()";
+            String submitAction = "(()=>{window.submitCount+=1;window.sendXhr('continuation');return JSON.stringify({status:'CONTINUE_CLICKED'});})()";
             JSONObject submitted = evaluate(scenario, web,
                     HybridRequestProfileScript.selectContinuationAndThen(RUN, submitAction));
             assertEquals("CONTINUE_CLICKED", submitted.getString("status"));
@@ -96,7 +96,7 @@ public final class HybridContinuationUiModeWebViewTest {
                             + "window.__selfRunHybridProfileBridge.target=()=>({...target(),reasoning:'xhigh'});");
             JSONObject failed = evaluate(scenario, web,
                     HybridRequestProfileScript.selectContinuationAndThen(RUN,
-                            "(()=>{window.submitCount+=1;window.emitXhr();return JSON.stringify({status:'CONTINUE_CLICKED'});})()"));
+                            "(()=>{window.submitCount+=1;window.sendXhr('continuation');return JSON.stringify({status:'CONTINUE_CLICKED'});})()"));
             assertEquals("HYBRID_PROFILE_UNAVAILABLE", failed.getString("status"));
             assertEquals("profile_readback_failed", failed.getJSONObject("diagnostics")
                     .getString("hybridProfileReason"));
@@ -175,20 +175,28 @@ public final class HybridContinuationUiModeWebViewTest {
         return """
                 <!doctype html><html><body><script>
                 window.records=[];window.prepareCount=0;window.submitCount=0;
+                const base={action:'next',conversation_id:'conversation-fixed',
+                  parent_message_id:'parent-fixed',custom:{value:'preserve-me'},
+                  model:'source-model',thinking_effort:'source-effort',
+                  conversation_origin:'source-origin',service_tier:'source-tier'};
+                window.fetch=async function(input,init){
+                  const request=input instanceof Request?new Request(input,init):new Request(input,init);
+                  const body=await request.clone().text();
+                  window.records.push({url:request.url,body});
+                  return new Response('{}',{status:200,headers:{'Content-Type':'application/json'}});
+                };
                 class FixtureXHR {
                   open(method,url){this.method=method;this.url=new URL(url,location.href).href;}
                   setRequestHeader(){}
                   send(body){window.records.push({url:this.url,body});}
                 }
                 window.XMLHttpRequest=FixtureXHR;
-                window.emitXhr=()=>{const xhr=new XMLHttpRequest();
+                window.sendXhr=opaque=>{const xhr=new XMLHttpRequest();
                   xhr.open('POST','/backend-api/f/conversation');
-                  xhr.send(JSON.stringify({action:'next',opaque:'continuation',
-                    conversation_id:'conversation-fixed',parent_message_id:'parent-fixed',
-                    custom:{value:'preserve-me'},model:'source-model',
-                    thinking_effort:'source-effort',conversation_origin:'source-origin',
-                    service_tier:'source-tier'}));};
+                  xhr.setRequestHeader?.('Content-Type','application/json');
+                  xhr.send(JSON.stringify({...base,opaque}));};
                 </script></body></html>
                 """;
     }
+
 }
