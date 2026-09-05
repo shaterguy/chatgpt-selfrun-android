@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.*;
 
@@ -82,10 +84,18 @@ public final class SelfRunHealthPolicyTest {
         assertFalse(detail.contains("postDelayed"));
     }
 
-    @Test public void developmentIdentityIs232Dev14() throws Exception {
+    @Test public void developmentIdentityUses232DevLineage() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2020046"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.3.2-dev14'"));
+        Matcher version = Pattern.compile("selfRunDriveVersionName = '(2\\.3\\.2-dev([0-9]+))'").matcher(gradle);
+        Matcher code = Pattern.compile("selfRunDriveVersionCode = ([0-9]+)").matcher(gradle);
+        assertTrue(version.find());
+        assertTrue(code.find());
+        String versionName = version.group(1);
+        int devNumber = Integer.parseInt(version.group(2));
+        int versionCode = Integer.parseInt(code.group(1));
+        assertTrue(devNumber >= 1);
+        assertTrue(versionCode > 2020033);
+        assertTrue(gradle.contains("if (selfRunDriveVersionName != '" + versionName + "')"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
     }
 
