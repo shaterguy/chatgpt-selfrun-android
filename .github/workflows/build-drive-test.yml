@@ -343,7 +343,7 @@ jobs:
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$PREV_VERSION_NAME" == '2.3.2-dev8' ]] || fail 'actual predecessor is not the required dev8 TEST artifact'
+            [[ "$PREV_VERSION_NAME" == '2.3.2-dev9' ]] || fail 'actual predecessor is not the required dev9 TEST artifact'
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]] || fail 'actual previous TEST lineage evidence missing'
           else
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'not-verified-synthetic-fallback' ]] || fail 'synthetic predecessor mislabeled as lineage evidence'
