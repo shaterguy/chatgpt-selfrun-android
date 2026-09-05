@@ -53,11 +53,51 @@ public final class UserNextInputLateEditPolicyTest {
     @Test public void unmanagedDomAdapterAlsoUsesEvidenceGatedDispatchContract() throws Exception {
         String dom = src("SelfRunContinuationDom.java");
         String click = between(dom, "static String clickPreparedDriveTurn", "private static String probeLockedDriveTurn");
-        assertTrue(click.contains("UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)"));
-        assertTrue(click.contains("if (!plan.clickAllowed) {"));
-        assertTrue(click.contains("return preflightPreparedDriveTurn("));
-        assertTrue(click.contains("preferSendWhenStopCoexists);"));
-        assertTrue(click.contains("c.send.click()"));
+        int defaultAllowed = click.indexOf("boolean clickAllowed = true;");
+        int managedStart = click.indexOf("if (UserNextInputStore.initialized() && UserNextInputStore.managesContinuation(runId)) {");
+        assertTrue("unmanaged default must exist", defaultAllowed >= 0);
+        assertTrue("managed branch must exist", managedStart >= 0);
+        int managedEnd = click.indexOf("\n        }", managedStart);
+        int plan = click.indexOf("UserNextInputStore.nextClickPlan(");
+        int planPrompt = click.indexOf("effectivePrompt = plan.prompt;");
+        int planAllowed = click.indexOf("clickAllowed = plan.clickAllowed;");
+        assertTrue("managed branch end must exist", managedEnd >= 0);
+        assertTrue("managed click plan must exist", plan >= 0);
+        assertTrue("managed prompt assignment must exist", planPrompt >= 0);
+        assertTrue("managed permission assignment must exist", planAllowed >= 0);
+        assertTrue(defaultAllowed < managedStart);
+        assertTrue(managedStart < plan && plan < planPrompt);
+        assertTrue(planPrompt < planAllowed && planAllowed < managedEnd);
+
+        int finalPrompt = click.indexOf("effectivePrompt = LegacyRunModeMigration.appendNotice(runId, effectivePrompt);");
+        int deniedStart = click.indexOf("if (!clickAllowed) {");
+        assertTrue("final migration notice composition must exist", finalPrompt >= 0);
+        assertTrue("dispatch permission check must exist", deniedStart >= 0);
+        int deniedEnd = click.indexOf("\n        }", deniedStart);
+        int preflightReturn = click.indexOf("return preflightPreparedDriveTurn(");
+        int preflightArguments = click.indexOf("conversationUrl, effectivePrompt, markerId, preferSendWhenStopCoexists);");
+        int dispatchScript = click.indexOf("return \"(() =>{const result=");
+        assertTrue("denied branch end must exist", deniedEnd >= 0);
+        assertTrue("preflight return must exist", preflightReturn >= 0);
+        assertTrue("preflight must receive the final effective prompt", preflightArguments >= 0);
+        assertTrue("actual dispatch script must exist", dispatchScript >= 0);
+        assertTrue(managedEnd < finalPrompt && finalPrompt < deniedStart);
+        assertTrue(deniedStart < preflightReturn && preflightReturn < preflightArguments);
+        assertTrue(preflightArguments < deniedEnd && deniedEnd < dispatchScript);
+        String denied = click.substring(deniedStart, deniedEnd);
+        assertFalse(denied.contains("c.send.click()"));
+        assertFalse(denied.contains("requestComposerSubmit()"));
+
+        int preparedGuard = click.indexOf("if(m.state!=='prepared')");
+        int readbackGuard = click.indexOf("if(!same())");
+        int sendGuard = click.indexOf("SEND no longer enabled");
+        int dispatch = click.indexOf("c.send.click()");
+        assertTrue("prepared marker guard must exist", preparedGuard >= 0);
+        assertTrue("exact readback guard must exist", readbackGuard >= 0);
+        assertTrue("SEND guard must exist", sendGuard >= 0);
+        assertTrue("click dispatch must exist", dispatch >= 0);
+        assertTrue(dispatchScript < preparedGuard && preparedGuard < readbackGuard);
+        assertTrue(readbackGuard < sendGuard && sendGuard < dispatch);
         assertTrue(click.contains("return result('SUBMISSION_PENDING','dispatch=CONTINUE_CLICKED"));
     }
 
