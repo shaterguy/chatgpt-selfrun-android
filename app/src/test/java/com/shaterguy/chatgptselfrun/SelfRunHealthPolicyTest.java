@@ -82,10 +82,10 @@ public final class SelfRunHealthPolicyTest {
         assertFalse(detail.contains("postDelayed"));
     }
 
-    @Test public void developmentIdentityIs232Dev11() throws Exception {
+    @Test public void developmentIdentityIs232Dev12() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 2020043"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '2.3.2-dev11'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 2020044"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '2.3.2-dev12'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
     }
 
