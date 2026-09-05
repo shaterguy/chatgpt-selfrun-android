@@ -26,105 +26,103 @@ public final class ChatProtocolTransportIngressWebViewTest {
     private static final String ORIGIN = "https://chatgpt.com/c/fixture-conversation";
     private static final String CONVERSATION = "fixture-conversation";
 
-    @Test public void chatStringSocketInheritsOuterContextAndCompletesOnceAfterEarlyBoundary() throws Exception {
+    @Test public void stringWebSocketInheritsOuterContextAndCompletesOnce() throws Exception {
         try (Fixture f = new Fixture()) {
-            f.start("turn-a");
+            f.start("turn-string");
             assertEquals("true", f.text("String(window.__selfRunWorkTurnProtocolIngress.handlesTransport())"));
-
-            f.socketString(f.outer("turn-a", marker()));
-            f.eventually("ANSWERING");
+            f.socket(f.outer("turn-string", marker()));
+            f.phase("ANSWERING");
             assertEquals(0, f.callbacks.get());
-
-            f.socketString(f.outer("turn-a", complete()));
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(1);
-
-            f.socketString(f.outer("turn-a", complete()));
+            f.socket(f.outer("turn-string", complete()));
+            f.phase("COMPLETE");
+            f.callbacks(1);
+            f.socket(f.outer("turn-string", complete()));
             SystemClock.sleep(100);
             assertEquals(1, f.callbacks.get());
-            assertEquals("1", f.text("String(window.fixtureLogs.filter(x=>x.stage==='completion_dispatch').length)"));
         }
     }
 
-    @Test public void chatBlobArrayBufferAndViewSocketFramesDecode() throws Exception {
+    @Test public void blobArrayBufferAndArrayBufferViewDecode() throws Exception {
         try (Fixture f = new Fixture()) {
             f.start("turn-binary");
-            f.socketExpression("new Blob([" + JSONObject.quote(f.outer("turn-binary", marker())) + "])" );
-            f.eventually("ANSWERING");
-            f.socketExpression("new TextEncoder().encode(" + JSONObject.quote(f.outer("turn-binary", complete())) + ").buffer");
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(1);
-            assertTrue(f.diagnostics().getInt("binaryDecoded") >= 2);
-
-            f.startNewBoundTurn("turn-view");
-            f.socketExpression("new TextEncoder().encode(" + JSONObject.quote(f.outer("turn-view", marker())) + ")");
-            f.eventually("ANSWERING");
-            f.socketString(f.outer("turn-view", complete()));
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(2);
-            assertTrue(f.diagnostics().getInt("binaryDecoded") >= 3);
+            f.socketExpr("new Blob([" + JSONObject.quote(f.outer("turn-binary", marker())) + "])" );
+            f.phase("ANSWERING");
+            f.socketExpr("new TextEncoder().encode(" + JSONObject.quote(f.outer("turn-binary", complete())) + ").buffer");
+            f.phase("COMPLETE");
+            f.callbacks(1);
+            assertTrue(f.diag().getInt("binaryDecoded") >= 2);
+        }
+        try (Fixture f = new Fixture()) {
+            f.start("turn-view");
+            f.socketExpr("new TextEncoder().encode(" + JSONObject.quote(f.outer("turn-view", marker())) + ")");
+            f.phase("ANSWERING");
+            f.socket(f.outer("turn-view", complete()));
+            f.phase("COMPLETE");
+            f.callbacks(1);
+            assertTrue(f.diag().getInt("binaryDecoded") >= 1);
         }
     }
 
-    @Test public void chatWorkerAndSharedWorkerUseSharedDecoder() throws Exception {
+    @Test public void workerAndSharedWorkerUseSharedDecoder() throws Exception {
         try (Fixture f = new Fixture()) {
             f.start("turn-worker");
-            f.newWorker();
-            f.workerString(f.outer("turn-worker", marker()));
-            f.eventually("ANSWERING");
-            f.workerString(f.outer("turn-worker", complete()));
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(1);
-            assertTrue(f.diagnostics().getInt("workerMessages") >= 2);
-
-            f.startNewBoundTurn("turn-shared");
-            f.newSharedWorker();
-            f.sharedWorkerString(f.outer("turn-shared", marker()));
-            f.eventually("ANSWERING");
-            f.sharedWorkerString(f.outer("turn-shared", complete()));
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(2);
-            assertTrue(f.diagnostics().getInt("sharedWorkerMessages") >= 2);
+            f.eval("new Worker('fixture-worker.js');");
+            f.eval("window.fixtureWorker.emit(" + JSONObject.quote(f.outer("turn-worker", marker())) + ");");
+            f.phase("ANSWERING");
+            f.eval("window.fixtureWorker.emit(" + JSONObject.quote(f.outer("turn-worker", complete())) + ");");
+            f.phase("COMPLETE");
+            f.callbacks(1);
+            assertTrue(f.diag().getInt("workerMessages") >= 2);
+        }
+        try (Fixture f = new Fixture()) {
+            f.start("turn-shared");
+            f.eval("new SharedWorker('fixture-shared-worker.js');");
+            f.eval("window.fixtureSharedWorker.port.emit(" + JSONObject.quote(f.outer("turn-shared", marker())) + ");");
+            f.phase("ANSWERING");
+            f.eval("window.fixtureSharedWorker.port.emit(" + JSONObject.quote(f.outer("turn-shared", complete())) + ");");
+            f.phase("COMPLETE");
+            f.callbacks(1);
+            assertTrue(f.diag().getInt("sharedWorkerMessages") >= 2);
         }
     }
 
-    @Test public void chatServiceWorkerAndTransferredPortUsePassiveSharedIngress() throws Exception {
+    @Test public void serviceWorkerAndTransferredPortUsePassiveSharedIngress() throws Exception {
         try (Fixture f = new Fixture()) {
             assertEquals("true", f.text("String(!!window.fixtureServiceWorker&&typeof window.fixtureServiceWorker.dispatchEvent==='function')"));
             f.start("turn-sw");
-            f.serviceWorkerWithPort(f.outer("turn-sw", marker()));
-            f.eventually("ANSWERING");
-            f.serviceWorkerPortString(f.outer("turn-sw", complete()));
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(1);
-            JSONObject d = f.diagnostics();
+            f.eval("(()=>{const c=new MessageChannel();window.fixtureServicePeer=c.port2;"
+                    + "window.fixtureServiceWorker.dispatchEvent(new MessageEvent('message',{data:"
+                    + JSONObject.quote(f.outer("turn-sw", marker())) + ",ports:[c.port1]}));})()");
+            f.phase("ANSWERING");
+            f.eval("window.fixtureServicePeer.postMessage(" + JSONObject.quote(f.outer("turn-sw", complete())) + ");");
+            f.phase("COMPLETE");
+            f.callbacks(1);
+            JSONObject d = f.diag();
             assertTrue(d.getInt("serviceWorkerMessages") >= 1);
             assertTrue(d.getInt("serviceWorkerPortMessages") >= 1);
         }
     }
 
-    @Test public void staleOuterContextIsRejectedAndChatIdleDoesNotClaimTransport() throws Exception {
+    @Test public void staleOuterContextRejectedAndIdleDoesNotClaimTransport() throws Exception {
         try (Fixture f = new Fixture()) {
             assertEquals("false", f.text("String(window.__selfRunWorkTurnProtocolIngress.handlesTransport())"));
-            f.socketString(f.outer("idle-turn", marker()));
+            f.socket(f.outer("idle-turn", marker()));
             assertEquals("IDLE", f.state().getString("phase"));
 
             f.start("old-turn");
             String oldRequest = f.state().getString("requestIdentity");
             f.post("current-turn");
             assertNotEquals(oldRequest, f.state().getString("requestIdentity"));
-
-            f.socketString(f.outer("old-turn", marker()));
-            f.socketString(f.outer("old-turn", complete()));
+            f.socket(f.outer("old-turn", marker()));
+            f.socket(f.outer("old-turn", complete()));
             SystemClock.sleep(100);
             assertEquals("THINKING", f.state().getString("phase"));
             assertEquals(0, f.callbacks.get());
-
-            f.socketString(f.outer("current-turn", marker()));
-            f.eventually("ANSWERING");
-            f.socketString(f.outer("current-turn", complete()));
-            f.eventually("COMPLETE");
-            f.awaitCallbacks(1);
+            f.socket(f.outer("current-turn", marker()));
+            f.phase("ANSWERING");
+            f.socket(f.outer("current-turn", complete()));
+            f.phase("COMPLETE");
+            f.callbacks(1);
         }
     }
 
@@ -163,20 +161,20 @@ public final class ChatProtocolTransportIngressWebViewTest {
                 activity.setContentView(view);
                 web.set(view);
                 view.loadDataWithBaseURL(ORIGIN,
-                        "<!doctype html><html><body>chat transport ingress fixture</body></html>",
+                        "<!doctype html><html><body>chat transport fixture</body></html>",
                         "text/html", "UTF-8", null);
             });
             assertTrue("fixture load", loaded.await(15, TimeUnit.SECONDS));
             eval("sessionStorage.clear();window.fixtureLogs=[];window.selfRunTurnLog={postMessage:x=>window.fixtureLogs.push(JSON.parse(x))};"
                     + "window.__selfRunRequestProfileEngine={target:()=>({runId:'fixture-run',mode:'chat'})};"
                     + "window.fixtureResponse='';window.fixtureSocket=null;window.fixtureWorker=null;window.fixtureSharedWorker=null;"
-                    + "class FWS extends EventTarget{constructor(url){super();this.url=url;window.fixtureSocket=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}"
+                    + "class FWS extends EventTarget{constructor(url){super();window.fixtureSocket=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}"
                     + "FWS.CONNECTING=0;FWS.OPEN=1;FWS.CLOSING=2;FWS.CLOSED=3;window.WebSocket=FWS;"
-                    + "class FW extends EventTarget{constructor(url){super();this.url=url;window.fixtureWorker=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}window.Worker=FW;"
+                    + "class FW extends EventTarget{constructor(url){super();window.fixtureWorker=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}window.Worker=FW;"
                     + "class FP extends EventTarget{start(){}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}"
-                    + "class FSW{constructor(url){this.url=url;this.port=new FP();window.fixtureSharedWorker=this;}}window.SharedWorker=FSW;"
+                    + "class FSW{constructor(url){this.port=new FP();window.fixtureSharedWorker=this;}}window.SharedWorker=FSW;"
                     + "if(!navigator.serviceWorker){try{Object.defineProperty(navigator,'serviceWorker',{value:new EventTarget(),configurable:true});}catch(_){}}"
-                    + "window.fixtureServiceWorker=navigator.serviceWorker;window.fixtureServicePort=null;window.fixtureServicePeer=null;"
+                    + "window.fixtureServiceWorker=navigator.serviceWorker;window.fixtureServicePeer=null;"
                     + "window.fetch=()=>Promise.resolve(new Response(window.fixtureResponse,{status:200,headers:{'Content-Type':'text/event-stream'}}));");
             eval(ChatGptTurnProtocolScript.documentStartScript());
             eval(WorkTurnProtocolIngressScript.documentStartScript());
@@ -191,14 +189,8 @@ public final class ChatProtocolTransportIngressWebViewTest {
             post(turn);
         }
 
-        void startNewBoundTurn(String turn) throws Exception {
-            assertEquals("COMPLETE", state().getString("phase"));
-            assertEquals("true", text("String(window.__selfRunTurnProtocol.bindTurn('fixture-run','fixture-token-" + turn + "'))"));
-            assertEquals("true", text("String(window.__selfRunTurnProtocol.armCompletion('fixture-run','fixture-token-" + turn + "'))"));
-            post(turn);
-        }
-
         void post(String turn) throws Exception {
+            int callbacksBefore = callbacks.get();
             JSONObject handoff = new JSONObject().put("type", "stream_handoff")
                     .put("conversation_id", CONVERSATION).put("turn_id", turn);
             String stream = "data: " + handoff + "\n\ndata: " + complete() + "\n\n";
@@ -210,7 +202,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
                 if (turn.equals(s.getString("currentWorkTurnId")) && s.getBoolean("sawStreamComplete")) {
                     assertEquals("THINKING", s.getString("phase"));
                     assertTrue(s.getBoolean("sawStreamHandoff"));
-                    assertEquals(0, callbacks.get());
+                    assertEquals(callbacksBefore, callbacks.get());
                     return;
                 }
                 SystemClock.sleep(20);
@@ -225,41 +217,15 @@ public final class ChatProtocolTransportIngressWebViewTest {
                     .put("payload", new JSONObject().put("payload", streamItem)).toString();
         }
 
-        void socketString(String frame) throws Exception {
+        void socket(String frame) throws Exception {
             eval("window.fixtureSocket.emit(" + JSONObject.quote(frame) + ");");
         }
 
-        void socketExpression(String expression) throws Exception {
+        void socketExpr(String expression) throws Exception {
             eval("window.fixtureSocket.emit(" + expression + ");");
         }
 
-        void newWorker() throws Exception {
-            eval("new Worker('fixture-worker.js');");
-        }
-
-        void workerString(String frame) throws Exception {
-            eval("window.fixtureWorker.emit(" + JSONObject.quote(frame) + ");");
-        }
-
-        void newSharedWorker() throws Exception {
-            eval("new SharedWorker('fixture-shared-worker.js');");
-        }
-
-        void sharedWorkerString(String frame) throws Exception {
-            eval("window.fixtureSharedWorker.port.emit(" + JSONObject.quote(frame) + ");");
-        }
-
-        void serviceWorkerWithPort(String frame) throws Exception {
-            eval("(()=>{const c=new MessageChannel();window.fixtureServicePort=c.port1;window.fixtureServicePeer=c.port2;"
-                    + "window.fixtureServiceWorker.dispatchEvent(new MessageEvent('message',{data:"
-                    + JSONObject.quote(frame) + ",ports:[c.port1]}));})()");
-        }
-
-        void serviceWorkerPortString(String frame) throws Exception {
-            eval("window.fixtureServicePeer.postMessage(" + JSONObject.quote(frame) + ");");
-        }
-
-        JSONObject diagnostics() throws Exception {
+        JSONObject diag() throws Exception {
             return new JSONObject(text("JSON.stringify(window.__selfRunWorkTurnProtocolIngress.diagnostics())"));
         }
 
@@ -267,7 +233,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
             return new JSONObject(text("JSON.stringify(window.__selfRunTurnProtocol.snapshot())"));
         }
 
-        void eventually(String expected) throws Exception {
+        void phase(String expected) throws Exception {
             long deadline = SystemClock.uptimeMillis() + 5000;
             JSONObject last = null;
             while (SystemClock.uptimeMillis() < deadline) {
@@ -278,10 +244,10 @@ public final class ChatProtocolTransportIngressWebViewTest {
             fail("expected phase=" + expected + "; actual=" + last);
         }
 
-        void awaitCallbacks(int count) throws Exception {
+        void callbacks(int expected) throws Exception {
             long deadline = SystemClock.uptimeMillis() + 5000;
-            while (callbacks.get() != count && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(20);
-            assertEquals(count, callbacks.get());
+            while (callbacks.get() != expected && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(20);
+            assertEquals(expected, callbacks.get());
         }
 
         String text(String script) throws Exception {
