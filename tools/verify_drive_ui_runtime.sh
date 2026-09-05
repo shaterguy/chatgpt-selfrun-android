@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Same emulator, same source; collect real Android UI evidence before co-install verification.
 set -euo pipefail
+# Keep the new Pro regression on the real canonical instrumentation path, exactly once.
+PRO_COMPACT_CLASS='com.shaterguy.chatgptselfrun.ProCompactDeltaWebViewTest'
+case ",${TEST_INSTRUMENTATION_CLASS:?}," in
+  *",${PRO_COMPACT_CLASS},"*) ;;
+  *) TEST_INSTRUMENTATION_CLASS="${TEST_INSTRUMENTATION_CLASS},${PRO_COMPACT_CLASS}" ;;
+esac
+export TEST_INSTRUMENTATION_CLASS
+printf 'INSTRUMENTATION_CLASSES=%s\n' "$TEST_INSTRUMENTATION_CLASS"
 # Dedicated shell-owned directory is fresh before this one instrumentation invocation.
 adb shell 'rm -rf /data/local/tmp/selfrun-ui-evidence && mkdir -p /data/local/tmp/selfrun-ui-evidence'
 set +e

@@ -118,9 +118,6 @@ final class TurnProtocolUiState {
     }
 
     static String headlineFor(String stage, String phase) {
-        if ("completion_ignored".equals(stage) && "THINKING".equals(phase)) {
-            return "답변 시작 대기 중";
-        }
         return switch (safe(phase)) {
             case "THINKING" -> "추론 중";
             case "ANSWERING" -> "답변 생성 중";

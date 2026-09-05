@@ -15,7 +15,7 @@ import java.util.Set;
  * DOM state is never consulted for THINKING, ANSWERING, or COMPLETE.</p>
  */
 final class ChatGptTurnProtocolScript {
-    static final String ENGINE_VERSION = "turn-protocol-v10";
+    static final String ENGINE_VERSION = "turn-protocol-v11";
     static final String COMPLETION_SCHEME = "selfrun-drive";
     static final String COMPLETION_HOST = "turn-completed";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
@@ -59,13 +59,15 @@ final class ChatGptTurnProtocolScript {
                   if(window.__selfRunTurnProtocol?.version===ENGINE_VERSION)return;
                   const COMPLETION_SCHEME=__COMPLETION_SCHEME__;
                   const COMPLETION_HOST=__COMPLETION_HOST__;
-                  const STORE_KEY='selfrun-drive:response-protocol-state:v10';
+                  const STORE_KEY='selfrun-drive:response-protocol-state:v11';
                   const VALID_PHASES=new Set(['IDLE','THINKING','ANSWERING','COMPLETE','ERROR']);
                   const COMPLETE_SOURCES=new Set(['message_stream_complete']);
                   const blank=()=>({
                     runId:'',turnToken:'',phase:'IDLE',requestIdentity:'',
                     canonicalConversationId:'',currentWorkTurnId:'',
                     currentFinalMessageId:'',finalMessageActive:false,
+                    currentMessageRole:'',currentMessageChannel:'',lastDeltaPath:'',
+                    sawStreamHandoff:false,
                     sawFinalChannelToken:false,sawVisibleAnswer:false,
                     sawAssistantFinalText:false,sawStreamComplete:false,
                     completionArmed:false,completionDispatched:false,completionSource:'',
@@ -224,20 +226,48 @@ final class ChatGptTurnProtocolScript {
                     if(!message||typeof message!=='object')return false;
                     const role=safe(message.author?.role).toLowerCase(),channel=safe(message.channel).toLowerCase();
                     const visible=role==='assistant'&&(channel===''||channel==='final');
+                    state.currentMessageRole=role;state.currentMessageChannel=channel;state.lastDeltaPath='';
                     state.finalMessageActive=visible;
-                    state.currentFinalMessageId=visible&&message.id?safe(message.id):'';
+                    state.currentFinalMessageId=message.id?safe(message.id):'';
                     save();if(!visible)return false;
                     const parts=Array.isArray(message.content?.parts)?message.content.parts:[];
                     if(parts.some(nonEmptyText)){noteAssistantFinalText('visible_answer');return true;}
                     return false;
                   };
-                  const observeFinalTextDelta=value=>{
-                    if(!state.finalMessageActive||!value||typeof value!=='object')return;
-                    const path=safe(value.p||'');
-                    if(path.includes('/message/content/parts')&&nonEmptyText(value.v)){noteAssistantFinalText('assistant_final_text');return;}
-                    if(Array.isArray(value.v))for(const op of value.v){
-                      if(!op||typeof op!=='object')continue;const p=safe(op.p||'');
-                      if(p.includes('/message/content/parts')&&nonEmptyText(op.v)){noteAssistantFinalText('assistant_final_text');return;}
+                  // Compact deltas can omit p after an explicit path. Keep metadata only, never text.
+                  const observeFinalTextDelta=(value,prefix='',depth=0)=>{
+                    if(!value||typeof value!=='object'||depth>8)return;
+                    if(value.message_id&&state.currentFinalMessageId
+                            &&safe(value.message_id)!==state.currentFinalMessageId)return;
+                    const explicit=typeof value.p==='string';
+                    let path=explicit?safe(value.p):state.lastDeltaPath;
+                    if(explicit&&prefix&&path&&!path.startsWith('/message'))path=prefix+path;
+                    if(explicit&&!path&&prefix)path=prefix;
+                    if(!Object.prototype.hasOwnProperty.call(value,'v'))return;
+                    const operation=safe(value.o||'');
+                    if(operation==='patch'&&Array.isArray(value.v)){
+                      for(const op of value.v)observeFinalTextDelta(op,path,depth+1);return;
+                    }
+                    if(explicit){state.lastDeltaPath=path;save();}
+                    if(!['','append','add','replace'].includes(operation)){
+                      state.lastDeltaPath='';save();return;
+                    }
+                    if(path==='/message'&&value.v&&typeof value.v==='object'&&!Array.isArray(value.v)){
+                      markAssistantMessage(value.v);return;
+                    }
+                    if(path==='/message/channel'||path==='/message/author/role'){
+                      if(path==='/message/channel')state.currentMessageChannel=safe(value.v).toLowerCase();
+                      else state.currentMessageRole=safe(value.v).toLowerCase();
+                      state.finalMessageActive=state.currentMessageRole==='assistant'
+                        &&(state.currentMessageChannel===''||state.currentMessageChannel==='final');
+                      state.lastDeltaPath='';save();return;
+                    }
+                    if(!state.finalMessageActive)return;
+                    if(/^\\/message\\/content\\/parts(?:\\/(?:[0-9]+|-))?$/.test(path)){
+                      const parts=Array.isArray(value.v)?value.v:[value.v];
+                      if(parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');
+                    }else if(path==='/message/content'&&Array.isArray(value.v?.parts)){
+                      if(value.v.parts.some(nonEmptyText))noteAssistantFinalText('assistant_final_text');
                     }
                   };
                   const armCompletion=(run,token)=>{
@@ -258,12 +288,17 @@ final class ChatGptTurnProtocolScript {
                       requestIdentity:context?.requestIdentity,
                       conversationId:value.conversation_id||context?.conversationId,
                       workTurnId:value.turn_id||context?.workTurnId}))return;
-                    if(value.type==='stream_handoff')return;
+                    if(value.type==='stream_handoff'){
+                      state.sawStreamHandoff=true;state.lastDeltaPath='';save();
+                      emitLog('stream_handoff','stream_handoff');return;
+                    }
                     if(value.type==='message_marker'){
+                      state.lastDeltaPath='';
                       const marker=safe(value.marker),event=safe(value.event);
                       if(marker==='user_visible_token'||marker==='cot_token'||marker==='last_token')return;
                       if(marker==='final_channel_token'&&event==='first'){
                         state.sawFinalChannelToken=true;state.finalMessageActive=true;
+                        state.currentMessageRole='assistant';state.currentMessageChannel='final';
                         if(value.message_id)state.currentFinalMessageId=safe(value.message_id);
                         save();noteVisibleAnswer('final_channel');return;
                       }
@@ -276,10 +311,9 @@ final class ChatGptTurnProtocolScript {
                     if(assistantMessage)markAssistantMessage(assistantMessage);
                     observeFinalTextDelta(value);
                     if(value.type==='message_stream_complete'){
+                      state.lastDeltaPath='';
                       complete('message_stream_complete');return;
                     }
-                    if(directMessage&&directMessage!==value)inspectSemantic(directMessage,source,context);
-                    if(deltaMessage&&deltaMessage!==value)inspectSemantic(deltaMessage,source,context);
                   };
                   const parseSseBlock=(block,source,context)=>{
                     const data=[];for(const line of String(block??'').split('\\n')){
@@ -331,7 +365,10 @@ final class ChatGptTurnProtocolScript {
                   const NativeWebSocket=window.WebSocket;
                   if(typeof NativeWebSocket==='function'){
                     const WrappedWebSocket=function(...args){const socket=Reflect.construct(NativeWebSocket,args,NativeWebSocket);
-                      try{socket.addEventListener('message',event=>{if(typeof event.data==='string')observeSocketFrame(event.data);});}catch(_){}return socket;};
+                      try{socket.addEventListener('message',event=>{
+                        if(window.__selfRunWorkTurnProtocolIngress?.handlesTransport?.())return;
+                        if(typeof event.data==='string')observeSocketFrame(event.data);
+                      });}catch(_){}return socket;};
                     WrappedWebSocket.prototype=NativeWebSocket.prototype;try{Object.setPrototypeOf(WrappedWebSocket,NativeWebSocket);}catch(_){}
                     window.WebSocket=WrappedWebSocket;
                   }
@@ -346,6 +383,7 @@ final class ChatGptTurnProtocolScript {
                     diagnostics:()=>({runId:state.runId,turnToken:state.turnToken,phase:state.phase,
                       requestIdentity:state.requestIdentity,conversationId:state.canonicalConversationId,
                       workTurnId:state.currentWorkTurnId,sawFinalChannelToken:state.sawFinalChannelToken,
+                      sawStreamHandoff:state.sawStreamHandoff,
                       sawVisibleAnswer:state.sawVisibleAnswer,sawAssistantFinalText:state.sawAssistantFinalText,
                       sawStreamComplete:state.sawStreamComplete,completionArmed:state.completionArmed,
                       completionDispatched:state.completionDispatched,completionSource:state.completionSource,

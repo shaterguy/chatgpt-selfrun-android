@@ -68,8 +68,7 @@ final class TurnProtocolLogBridge {
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
                         TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase);
                         WorkProtocolCoverageTracker.observeProtocol(context, store, stage, source, phase);
-                        log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
-                                + ";phase=" + phase + ";token=current");
+                        log.record(store, "TURN_PROTOCOL", protocolDetails(stage, source, phase));
                     } catch (Throwable ignored) {
                     }
                 });
@@ -79,6 +78,13 @@ final class TurnProtocolLogBridge {
                     "path=PROTOCOL;bridge=web_message_listener;document_start=1");
         }
         return true;
+    }
+
+    /** Only validated enum values reach the log. The actual correlation identifier is never logged. */
+    static String protocolDetails(String stage, String source, String phase) {
+        String normalized = normalizedSource(stage, source);
+        if (normalized.isEmpty() || !validPhaseForStage(stage, phase)) return "";
+        return "stage=" + stage + ";source=" + normalized + ";phase=" + phase + ";binding=current";
     }
 
     private static String workDiagnosticDetails(JSONObject item) {
@@ -163,6 +169,7 @@ final class TurnProtocolLogBridge {
     private static boolean validPhaseForStage(String stage, String phase) {
         return switch (stage) {
             case "turn_request", "completion_ignored" -> "THINKING".equals(phase);
+            case "stream_handoff" -> "THINKING".equals(phase) || "ANSWERING".equals(phase);
             case "answering_started" -> "ANSWERING".equals(phase);
             case "complete", "completion_dispatch" -> "COMPLETE".equals(phase);
             case "error" -> "ERROR".equals(phase);
@@ -176,6 +183,7 @@ final class TurnProtocolLogBridge {
 
     private static String normalizedSource(String stage, String source) {
         if ("turn_request".equals(stage)) return "canonical_post";
+        if ("stream_handoff".equals(stage)) return "stream_handoff".equals(source) ? source : "";
         if ("answering_started".equals(stage)) {
             return switch (source) {
                 case "final_channel", "visible_answer", "assistant_final_text" -> source;

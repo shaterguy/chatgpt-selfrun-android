@@ -9,7 +9,7 @@ import static org.junit.Assert.*;
 
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalPostAndProtocolSemanticsOwnTurnState() {
-        assertEquals("turn-protocol-v10",ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v11",ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
         assertTrue(script.contains("state.phase='THINKING'"));
@@ -35,7 +35,7 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("const bindTurn=(run,token)=>"));
         assertTrue(script.contains("const armCompletion=(run,token)=>"));
         assertTrue(script.contains("completionArmed:false"));
-        assertTrue(script.contains("selfrun-drive:response-protocol-state:v10"));
+        assertTrue(script.contains("selfrun-drive:response-protocol-state:v11"));
         assertFalse(script.contains("__selfRunDriveTurnObserver"));
         assertFalse(script.contains("DomFallback"));
     }
@@ -62,6 +62,14 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("if(retiredWorkTurnIds.length>8)retiredWorkTurnIds.shift()"));
         assertTrue(script.contains("if(!identity&&(!safe(context?.conversationId||'')||!safe(context?.workTurnId||'')))return false"));
         assertTrue(script.contains("state.lastError='active_turn_overlap'"));
+    }
+
+    @Test public void compactDeltaMetadataDoesNotPersistAnswerText() {
+        String script=ChatGptTurnProtocolScript.documentStartScript();
+        assertTrue(script.contains("lastDeltaPath:''"));
+        assertTrue(script.contains("state.currentMessageRole==='assistant'"));
+        assertTrue(script.contains("state.sawStreamHandoff=true"));
+        assertFalse(script.contains("state.answerText="));
     }
 
     private static String source(String name) throws Exception {
