@@ -12,9 +12,9 @@ import static org.junit.Assert.*;
 /** Prevents producer/consumer registry engine drift. */
 public final class RequestProfileVersionContractTest {
     @Test public void producerOwnsOneCanonicalRegistryEngineVersion() throws Exception {
-        assertEquals("profile-registry-v3", RequestProfileScript.ENGINE_VERSION);
+        assertEquals("profile-registry-v4", RequestProfileScript.ENGINE_VERSION);
         String producer = source("RequestProfileScript.java");
-        assertEquals(1, occurrences(producer, "profile-registry-v3"));
+        assertEquals(1, occurrences(producer, "profile-registry-v4"));
         assertTrue(producer.contains("static final String ENGINE_VERSION"));
         assertTrue(producer.contains("__ENGINE_VERSION__"));
         assertTrue(producer.contains("ProfileRegistry.runtimeJson()"));
@@ -22,7 +22,7 @@ public final class RequestProfileVersionContractTest {
         String script = RequestProfileScript.documentStartScript();
         assertEquals(2, occurrences(script, RequestProfileScript.ENGINE_VERSION));
         assertTrue(script.contains("selfrun-drive:profile-registry-runtime:v1"));
-        assertTrue(script.contains("selfrun-drive:request-profile-target:v3"));
+        assertTrue(script.contains("selfrun-drive:request-profile-target:v4"));
         assertTrue(script.contains("p==='/backend-api/conversation'||p==='/backend-api/f/conversation'"));
         assertTrue(script.contains("if(!probe.eligible)return nativeFetch(input,init)"));
     }
@@ -67,6 +67,17 @@ public final class RequestProfileVersionContractTest {
         assertTrue(script.contains("patchObject(parsed,targetSnapshot())"));
         assertTrue(script.contains("latestMessageText"));
         assertTrue(script.contains("setChatProfiles"));
+    }
+
+    @Test public void hybridContinuationEnvelopeIsSnapshottedAndOverridesOnlyTransportFields() {
+        String script = RequestProfileScript.documentStartScript();
+        assertTrue(script.contains("setHybridContinuationEnvelope"));
+        assertTrue(script.contains("hybridContinuation:state.target.hybridContinuation===true"));
+        assertTrue(script.contains("if(t.hybridContinuation===true)"));
+        assertTrue(script.contains("delete out.conversation_origin;delete out.service_tier"));
+        assertTrue(script.contains("out.conversation_origin='tpp';out.service_tier='standard'"));
+        assertTrue(script.contains("const target=targetSnapshot();"));
+        assertTrue(script.contains("patchObject(body,target)"));
     }
 
     @Test public void consumersUseSharedEngineExpressionAndRegistryInjection() throws Exception {

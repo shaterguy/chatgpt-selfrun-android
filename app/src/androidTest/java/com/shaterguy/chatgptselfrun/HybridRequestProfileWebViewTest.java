@@ -28,6 +28,7 @@ public final class HybridRequestProfileWebViewTest {
     private static final String CHAT_URL = "https://chatgpt.com/";
     private static final String WORK_TO_CHAT_RUN = "SR-20260905-103318-W2CHAT";
     private static final String CHAT_TO_WORK_RUN = "SR-20260905-103318-C2WORK";
+    private static final String SAME_WORK_RUN = "SR-20260905-103318-W2WORK";
     private static final String RECOVERY_RUN = "SR-20260905-103318-RECOVR";
     private static final String MESSAGES = """
             [{"id":"message-bootstrap","author":{"role":"user"},"content":{"content_type":"text","parts":["[SELF_RUN_BOOTSTRAP 0.2.0 SR-20260905-103318-W2CHAT MODE=HYBRID]"]}},{"id":"message-continue","author":{"role":"user"},"content":{"content_type":"text","parts":["[SELF_RUN_CONTINUE SR-20260905-103318-W2CHAT]"]}}]
@@ -35,8 +36,10 @@ public final class HybridRequestProfileWebViewTest {
 
     @Test public void bothDirectionsBindEachFetchToNativeStageAndPreserveDataPlane() throws Exception {
         AtomicReference<ProfileRegistry.Profile> work = new AtomicReference<>();
+        AtomicReference<ProfileRegistry.Profile> removeTierWork = new AtomicReference<>();
         AtomicReference<ProfileRegistry.Profile> chat = new AtomicReference<>();
         AtomicBoolean removeCaptured = new AtomicBoolean(false);
+        AtomicBoolean removeTierCaptured = new AtomicBoolean(false);
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             scenario.onActivity(activity -> {
                 ProfileRegistry.initialize(activity);
@@ -52,8 +55,21 @@ public final class HybridRequestProfileWebViewTest {
                         ProfileRegistry.registerCaptured(captured, "luna", "standard");
                 removeCaptured.set(ProfileRegistry.RegisterResult.ADDED.equals(result.status));
                 work.set(result.profile);
+                ProfileRegistry.CapturedProfile capturedRemoveTier = ProfileRegistry.parseCaptured("""
+                        {"mode":"work","operations":[
+                          {"op":"SET","path":"model","value":"gpt-6-astra-wm"},
+                          {"op":"SET","path":"thinking_effort","value":"max"},
+                          {"op":"SET","path":"conversation_origin","value":"tpp"},
+                          {"op":"REMOVE","path":"service_tier"}
+                        ]}
+                        """);
+                ProfileRegistry.RegisterResult removeTierResult =
+                        ProfileRegistry.registerCaptured(capturedRemoveTier, "astra-fixture", "max");
+                removeTierCaptured.set(ProfileRegistry.RegisterResult.ADDED.equals(removeTierResult.status));
+                removeTierWork.set(removeTierResult.profile);
                 chat.set(ProfileRegistry.resolveChat("xhigh"));
                 assertTrue(work.get() != null);
+                assertTrue(removeTierWork.get() != null);
                 assertTrue(chat.get() != null);
             });
 
@@ -61,6 +77,8 @@ public final class HybridRequestProfileWebViewTest {
                     HybridRunProfileStore.Endpoint.fromProfile(work.get());
             HybridRunProfileStore.Endpoint chatEndpoint =
                     HybridRunProfileStore.Endpoint.fromProfile(chat.get());
+            HybridRunProfileStore.Endpoint removeTierWorkEndpoint =
+                    HybridRunProfileStore.Endpoint.fromProfile(removeTierWork.get());
 
             JSONArray workToChat = runDirection(scenario,
                     new HybridRunProfileStore.Selection(WORK_TO_CHAT_RUN,
@@ -75,9 +93,25 @@ public final class HybridRequestProfileWebViewTest {
             assertChat(body(chatToWork, "bootstrap"));
             assertWork(body(chatToWork, "continuation"));
             assertPreserved(chatToWork);
+
+            JSONArray sameWork = runDirection(scenario,
+                    new HybridRunProfileStore.Selection(SAME_WORK_RUN,
+                            HybridRunProfileStore.STAGE_BOOTSTRAP,
+                            removeTierWorkEndpoint, removeTierWorkEndpoint));
+            JSONObject sameWorkBootstrap = body(sameWork, "bootstrap");
+            assertEquals("gpt-6-astra-wm", sameWorkBootstrap.getString("model"));
+            assertEquals("max", sameWorkBootstrap.getString("thinking_effort"));
+            assertEquals("tpp", sameWorkBootstrap.getString("conversation_origin"));
+            assertFalse(sameWorkBootstrap.has("service_tier"));
+            assertWork(body(sameWork, "continuation"),
+                    "gpt-6-astra-wm", "max");
+            assertPreserved(sameWork);
         } finally {
             if (removeCaptured.get() && work.get() != null) {
                 assertTrue(ProfileRegistry.delete(work.get().fingerprint));
+            }
+            if (removeTierCaptured.get() && removeTierWork.get() != null) {
+                assertTrue(ProfileRegistry.delete(removeTierWork.get().fingerprint));
             }
         }
     }
@@ -155,8 +189,12 @@ public final class HybridRequestProfileWebViewTest {
     }
 
     private static void assertWork(JSONObject body) throws Exception {
-        assertEquals("gpt-5.6-luna-wm", body.getString("model"));
-        assertEquals("standard", body.getString("thinking_effort"));
+        assertWork(body, "gpt-5.6-luna-wm", "standard");
+    }
+
+    private static void assertWork(JSONObject body, String model, String effort) throws Exception {
+        assertEquals(model, body.getString("model"));
+        assertEquals(effort, body.getString("thinking_effort"));
         assertEquals("tpp", body.getString("conversation_origin"));
         assertEquals("standard", body.getString("service_tier"));
     }

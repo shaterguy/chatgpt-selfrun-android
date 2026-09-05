@@ -35,12 +35,15 @@ public final class WorkProtocolRunIdentityPolicyTest {
         String profile = source("RequestProfileScript.java");
         assertTrue(web.indexOf("RequestProfileScript.installDocumentStart(webView)")
                 < web.indexOf("HybridRequestProfileScript.installDocumentStart(webView)"));
-        assertTrue(hybrid.contains("configure(decision.endpoint)"));
-        int prepare = hybrid.indexOf("try{prepare(text);");
+        assertTrue(hybrid.contains("configure(stageEndpoint(),stage==='continuation')"));
+        int prepare = hybrid.indexOf("try{prepare();");
         assertTrue(prepare >= 0);
         assertTrue(hybrid.indexOf("return innerFetch(input,init);", prepare) > prepare);
-        assertTrue(profile.contains("planned=profileForBody(body)"));
-        assertTrue(profile.contains("const t=state.target"));
+        assertTrue(profile.contains("const targetSnapshot=()=>"));
+        int snapshot = profile.indexOf("const target=targetSnapshot();");
+        assertTrue(snapshot >= 0);
+        assertTrue(profile.indexOf("await request.clone().text()", snapshot) > snapshot);
+        assertTrue(profile.contains("patchObject(body,target)"));
     }
 
     private static String source(String name) throws Exception {

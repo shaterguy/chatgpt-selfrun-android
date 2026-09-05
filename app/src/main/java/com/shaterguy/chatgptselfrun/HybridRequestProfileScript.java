@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** HYBRID request profiles selected only by the durable native bootstrap/continuation stage. */
 final class HybridRequestProfileScript {
-    private static final String VERSION = "hybrid-request-profile-v3";
+    private static final String VERSION = "hybrid-request-profile-v4";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -62,31 +62,36 @@ final class HybridRequestProfileScript {
                   let stage=__INITIAL_STAGE__;
                   let lastDecision={stage,reason:'native-stage-initial'};
                   const endpointMatches=(t,e)=>!!t&&t.ready===true&&t.runId===RUN_ID&&t.mode===e.mode&&norm(t.reasoning)===e.reasoning&&(e.mode==='chat'||norm(t.model)===e.model);
-                  const configure=e=>{
+                  const configure=(e,envelope)=>{
+                    const expectedEnvelope=envelope===true;
                     const current=engine.target();
-                    if(endpointMatches(current,e))return false;
-                    engine.begin(e.mode,RUN_ID);
-                    if(e.mode==='chat')engine.setChatProfiles(e.reasoning,e.reasoning);
-                    else{engine.setWorkModel(e.model);engine.setWorkReasoning(e.reasoning);}
+                    let changed=!endpointMatches(current,e);
+                    if(changed){
+                      engine.begin(e.mode,RUN_ID);
+                      if(e.mode==='chat')engine.setChatProfiles(e.reasoning,e.reasoning);
+                      else{engine.setWorkModel(e.model);engine.setWorkReasoning(e.reasoning);}
+                    }
+                    if(current?.hybridContinuation!==expectedEnvelope)changed=true;
+                    engine.setHybridContinuationEnvelope(expectedEnvelope);
                     const next=engine.target();
-                    if(!endpointMatches(next,e))throw new Error('SELFRUN_HYBRID:target_readback_mismatch');
-                    return true;
+                    if(!endpointMatches(next,e)||next.hybridContinuation!==expectedEnvelope)throw new Error('SELFRUN_HYBRID:target_readback_mismatch');
+                    return changed;
                   };
                   const stageEndpoint=()=>stage==='continuation'?CONTINUATION:BOOTSTRAP;
                   const selectStage=value=>{
                     const next=norm(value);
                     if(next!=='bootstrap'&&next!=='continuation')throw new Error('SELFRUN_HYBRID:invalid_native_stage');
                     const endpoint=next==='continuation'?CONTINUATION:BOOTSTRAP;
-                    configure(endpoint);
+                    configure(endpoint,next==='continuation');
                     stage=next;
                     lastDecision={stage,reason:'native-stage-selected'};
                     return true;
                   };
                   const prepare=()=>{
-                    configure(stageEndpoint());
+                    configure(stageEndpoint(),stage==='continuation');
                     lastDecision={stage,reason:'native-stage-request'};
                   };
-                  configure(stageEndpoint());
+                  configure(stageEndpoint(),stage==='continuation');
                   const innerFetch=window.fetch.bind(window);
                   window.fetch=function(input,init){
                     let eligible=false;

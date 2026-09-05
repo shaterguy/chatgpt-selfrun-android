@@ -33,17 +33,19 @@ public final class HybridModePolicyTest {
         HybridRunProfileStore.Selection selection = new HybridRunProfileStore.Selection(
                 RUN_ID, HybridRunProfileStore.STAGE_BOOTSTRAP, work, chat);
         String script = HybridRequestProfileScript.documentStartScript(selection);
-        assertTrue(script.contains("let stage='bootstrap'"));
+        assertTrue(script.contains("let stage=" + SelfRunScript.quote("bootstrap")));
         assertTrue(script.contains("selectStage"));
         assertTrue(script.contains("native-stage-selected"));
         assertTrue(script.contains("native-stage-request"));
-        assertTrue(script.contains("configure(stageEndpoint())"));
+        assertTrue(script.contains("configure(stageEndpoint(),stage==='continuation')"));
         assertTrue(script.contains("t.runId===RUN_ID"));
         assertTrue(script.contains("lastDecision:()=>({...lastDecision})"));
         assertTrue(script.contains("const BOOTSTRAP="));
         assertTrue(script.contains("const CONTINUATION="));
         assertTrue(script.contains("engine.begin(e.mode,RUN_ID)"));
         assertTrue(script.contains("endpointMatches(current,e)"));
+        assertTrue(script.contains("engine.setHybridContinuationEnvelope(expectedEnvelope)"));
+        assertTrue(script.contains("next.hybridContinuation!==expectedEnvelope"));
         assertFalse(script.contains("SELF_RUN_BOOTSTRAP"));
         assertFalse(script.contains("SELF_RUN_CONTINUE"));
         assertFalse(script.contains("messageBatchText"));
@@ -61,8 +63,8 @@ public final class HybridModePolicyTest {
         HybridRunProfileStore.Selection selection = new HybridRunProfileStore.Selection(
                 RUN_ID, HybridRunProfileStore.STAGE_CONTINUATION, work, chat);
         String script = HybridRequestProfileScript.documentStartScript(selection);
-        assertTrue(script.contains("let stage='continuation'"));
-        assertTrue(script.contains("configure(stageEndpoint())"));
+        assertTrue(script.contains("let stage=" + SelfRunScript.quote("continuation")));
+        assertTrue(script.contains("configure(stageEndpoint(),stage==='continuation')"));
         assertTrue(script.contains("stage:()=>stage"));
     }
 
