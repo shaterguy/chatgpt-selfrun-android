@@ -323,8 +323,10 @@ final class Ui {
         content.setPadding(dp(context, horizontal), dp(context, vertical), dp(context, horizontal), dp(context, vertical));
         for (int i = 0; i < children.length; i++) {
             View child = children[i];
+            ViewGroup.LayoutParams existing = child.getLayoutParams();
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    existing == null ? LinearLayout.LayoutParams.WRAP_CONTENT : existing.height);
             if (i > 0) params.topMargin = dp(context, 6);
             content.addView(child, params);
         }
@@ -393,7 +395,6 @@ final class Ui {
         if (supporting != null && !supporting.isEmpty()) {
             TextView s = muted(context, supporting);
             s.setTextIsSelectable(false);
-            s.setMaxLines(3);
             item.addView(s);
         }
         return item;
