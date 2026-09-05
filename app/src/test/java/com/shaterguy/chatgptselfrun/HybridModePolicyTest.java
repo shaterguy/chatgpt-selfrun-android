@@ -71,7 +71,8 @@ public final class HybridModePolicyTest {
     @Test public void nativeContinuationSelectionWrapsTheActualSubmitAction() {
         String action = "window.__submitted=true";
         String script = HybridRequestProfileScript.selectContinuationAndThen(RUN_ID, action);
-        assertTrue(script.contains("bridge.runId!==" + SelfRunScript.quote(RUN_ID)));
+        assertTrue(script.contains("const RUN_ID=" + SelfRunScript.quote(RUN_ID)));
+        assertTrue(script.contains("bridge.runId!==RUN_ID"));
         assertTrue(script.contains("bridge.selectStage('continuation')"));
         assertTrue(script.indexOf("bridge.selectStage('continuation')")
                 < script.indexOf(action));

@@ -52,7 +52,7 @@ public final class WorkProtocolNativeObserverTest {
         assertTrue(source.contains("SOURCE_SERVICE_WORKER = \"native_service_worker\""));
         assertTrue(source.contains("ROUTE_CANONICAL_CONVERSATION = \"canonical_conversation\""));
         assertTrue(source.contains("\"HYBRID_REQUEST_TRANSPORT\""));
-        assertTrue(source.contains("\"body=unavailable\""));
+        assertTrue(source.contains(";outcome=canonical_request;body=unavailable"));
         assertFalse(source.contains("getRequestHeaders"));
         assertFalse(source.contains("WebResourceResponse("));
         assertFalse(source.contains("Cookie"));
