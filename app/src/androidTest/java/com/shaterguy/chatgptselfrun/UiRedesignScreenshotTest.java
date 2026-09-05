@@ -288,14 +288,20 @@ public final class UiRedesignScreenshotTest {
         exportEvidence(manifest);
     }
     private void exportEvidence(File file) throws Exception {
-        // Shell-owned storage survives AGP uninstall/cleanup, including after a later assertion fails.
-        String result = shell("mkdir -p " + RETAINED_EVIDENCE + " && cp -f "
-                + shellQuote(file.getAbsolutePath()) + " " + RETAINED_EVIDENCE + "/"
-                + shellQuote(file.getName()) + " && echo SELF_RUN_EVIDENCE_EXPORTED");
-        assertTrue("Evidence export failed: " + file.getName() + ": " + result,
-                result.contains("SELF_RUN_EVIDENCE_EXPORTED"));
-    }
-    private static String shellQuote(String value) {
-        return "'" + value.replace("'", "'\"'\"'") + "'";
+        // UiAutomation tokenizes one command; it does not interpret shell operators or quotes.
+        String source = file.getAbsolutePath();
+        String destination = new File(RETAINED_EVIDENCE, file.getName()).getAbsolutePath();
+        assertTrue("Unexpected evidence source path", source.matches("/[A-Za-z0-9_./-]+"));
+        assertTrue("Unexpected evidence destination path", destination.matches("/[A-Za-z0-9_./-]+"));
+        shell("mkdir -p " + RETAINED_EVIDENCE);
+        shell("cp -f " + source + " " + destination);
+        String sourceChecksum = shell("sha256sum " + source).trim();
+        String destinationChecksum = shell("sha256sum " + destination).trim();
+        assertTrue("Invalid source checksum: " + sourceChecksum,
+                sourceChecksum.matches("[0-9a-fA-F]{64}[ \\t]+" + java.util.regex.Pattern.quote(source)));
+        assertTrue("Invalid retained checksum: " + destinationChecksum,
+                destinationChecksum.matches("[0-9a-fA-F]{64}[ \\t]+" + java.util.regex.Pattern.quote(destination)));
+        assertEquals("Retained evidence differs: " + file.getName(),
+                sourceChecksum.substring(0, 64), destinationChecksum.substring(0, 64));
     }
 }
