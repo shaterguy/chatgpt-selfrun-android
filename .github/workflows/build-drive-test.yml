@@ -1,6 +1,6 @@
 name: Build SelfRun Drive TEST
 run-name: SelfRun Drive TEST (${{ github.ref_name }}) #${{ github.run_number }}
-# 2.3.2-dev13 HYBRID continuation UI-mode gate verification and TEST lineage verification
+# 2.3.2-dev14 HYBRID continuation API-profile verification and TEST lineage verification
 
 on:
   push:
@@ -358,7 +358,7 @@ jobs:
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$PREV_VERSION_NAME" == '2.3.2-dev13' ]] || fail 'actual predecessor is not the required dev11 TEST artifact'
+            [[ "$PREV_VERSION_NAME" == '2.3.2-dev13' ]] || fail 'actual predecessor is not the required dev13 TEST artifact'
             [[ "$PREV_VERSION_CODE" == '2020045' ]] || fail 'actual predecessor versionCode is not 2020045'
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]] || fail 'actual previous TEST lineage evidence missing'
           else
