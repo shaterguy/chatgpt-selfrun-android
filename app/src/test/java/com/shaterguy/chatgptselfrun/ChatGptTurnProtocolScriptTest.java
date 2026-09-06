@@ -9,23 +9,24 @@ import static org.junit.Assert.*;
 
 public final class ChatGptTurnProtocolScriptTest {
     @Test public void canonicalPostAndProtocolSemanticsOwnTurnState() {
-        assertEquals("turn-protocol-v11",ChatGptTurnProtocolScript.ENGINE_VERSION);
+        assertEquals("turn-protocol-v12",ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
         assertTrue(script.contains("state.phase='THINKING'"));
         assertTrue(script.contains("state.phase='ANSWERING'"));
         assertTrue(script.contains("value.type==='message_stream_complete'"));
-        assertTrue(script.contains("const COMPLETE_SOURCES=new Set(['message_stream_complete'])"));
-        assertFalse(script.contains("finished_successfully_end_turn"));
+        assertTrue(script.contains("const COMPLETE_SOURCES=new Set(['message_stream_complete','finished_successfully_end_turn'])"));
+        assertTrue(script.contains("complete('finished_successfully_end_turn')"));
+        assertTrue(script.contains("value.status==='finished_successfully'&&value.end_turn===true"));
         assertTrue(script.contains("role==='assistant'&&(channel===''||channel==='final')"));
         assertTrue(script.contains("if(parts.some(nonEmptyText))"));
         assertFalse(script.contains("turnSequence"));
         assertFalse(script.contains("turnKind"));
     }
 
-    @Test public void nativeBridgeAllowsOnlyAuthoritativeStreamCompletion() {
+    @Test public void nativeBridgeAllowsOnlyAuthoritativeCompletionSources() {
         assertTrue(TurnProtocolLogBridge.isAllowedCompletionSource("message_stream_complete"));
-        assertFalse(TurnProtocolLogBridge.isAllowedCompletionSource("finished_successfully_end_turn"));
+        assertTrue(TurnProtocolLogBridge.isAllowedCompletionSource("finished_successfully_end_turn"));
         assertFalse(TurnProtocolLogBridge.isAllowedCompletionSource("done"));
     }
 
@@ -40,7 +41,7 @@ public final class ChatGptTurnProtocolScriptTest {
         assertFalse(script.contains("DomFallback"));
     }
 
-    @Test public void streamCompletionRequiresFinalAnswerEvidence() {
+    @Test public void completionRequiresFinalAnswerEvidence() {
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("if(value.type==='message_stream_complete')"));
         assertTrue(script.contains("complete('message_stream_complete');return;"));
@@ -49,7 +50,9 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("state.lastError='completion_without_final_answer_evidence'"));
         assertTrue(script.contains("emitLog('completion_ignored',completionSource)"));
         assertTrue(script.contains("return finalizeComplete(completionSource);"));
-        assertFalse(script.contains("completeAfterLateEvidence"));
+        assertTrue(script.contains("if(completionSource==='message_stream_complete')state.sawStreamComplete=true"));
+        assertTrue(script.contains("currentMessageStatus:''"));
+        assertTrue(script.contains("currentMessageEndTurn:false"));
     }
 
     @Test public void lateAndStaleFramesRemainFencedByActiveTurnOwnership() {
@@ -68,6 +71,7 @@ public final class ChatGptTurnProtocolScriptTest {
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("lastDeltaPath:''"));
         assertTrue(script.contains("state.currentMessageRole==='assistant'"));
+        assertTrue(script.contains("path==='/message/status'||path==='/message/end_turn'"));
         assertTrue(script.contains("state.sawStreamHandoff=true"));
         assertFalse(script.contains("state.answerText="));
     }

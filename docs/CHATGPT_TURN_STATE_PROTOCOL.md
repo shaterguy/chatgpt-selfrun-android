@@ -11,15 +11,15 @@ SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive 
 | --- | --- |
 | 임의 상태 → THINKING | 가장 최근 `POST /backend-api/f/conversation` |
 | THINKING → ANSWERING | 일반 Chat·Work는 `message_marker(final_channel_token, first)`; Pro는 현재 assistant message의 실제 non-empty text snapshot 또는 해당 message의 text delta |
-| THINKING/ANSWERING → COMPLETE | 현재 요청과 상관된 `message_stream_complete` + `final_channel_token` 또는 실제 assistant final text 증거 |
+| THINKING/ANSWERING → COMPLETE | final-answer evidence가 확인된 현재 요청의 `message_stream_complete`, 또는 현재 final assistant message의 명시적 `finished_successfully + end_turn=true` |
 
 동일 run에서 THINKING/ANSWERING 중 새 turn token 바인딩은 거부한다. 앱은 현재 응답의 terminal COMPLETE 전에는 다음 canonical POST를 제출하지 않으며, 충돌이 감지되면 같은 conversation을 보존한 채 일시정지한다.
 
 이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. identity 없는 socket/subframe payload는 conversation ID와 work turn ID가 모두 현재 요청에 결합된 경우에만 허용한다. Work/Pro WebSocket은 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
 
-`user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`, `finished_successfully + end_turn=true`는 전체 응답 COMPLETE를 만들지 않는다. Pro의 ANSWERING 보조 신호는 assistant role이며 channel이 없거나 `final`인 message의 실제 non-empty string text로 제한한다. empty/whitespace text와 user/tool/analysis/commentary payload는 제외한다.
+`user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`는 전체 응답 COMPLETE를 만들지 않는다. Pro의 ANSWERING 보조 신호는 assistant role이며 channel이 없거나 `final`인 message의 실제 non-empty string text로 제한한다. empty/whitespace text와 user/tool/analysis/commentary payload는 제외한다. 최종 답변 text가 시작됐다는 사실만으로 COMPLETE하지 않는다.
 
-현재 request identity 또는 conversation ID·work turn ID fence를 통과한 `message_stream_complete`라도 `final_channel_token` 또는 실제 assistant final text 증거보다 먼저 도착하면 COMPLETE로 전이하지 않고 `completion_ignored`로 기록한다. 같은 활성 요청은 THINKING/ANSWERING 상태를 유지하며 후속 reasoning/final payload를 계속 수용하고, final-answer evidence가 확인된 뒤 도착한 `message_stream_complete`만 COMPLETE의 권위 terminal 신호로 인정한다. `message_stream_complete` 자체에 assistant final text가 포함되면 동일 semantic inspection 안에서 그 text를 evidence로 인정할 수 있다. 늦은 이전 요청과 폐기된 turn ID의 payload는 계속 무시하며 DOM 상태는 사용하지 않는다.
+현재 request identity 또는 conversation ID·work turn ID fence를 통과한 `message_stream_complete`라도 `final_channel_token` 또는 실제 assistant final text 증거보다 먼저 도착하면 COMPLETE로 전이하지 않고 `completion_ignored`로 기록한다. 같은 활성 요청은 THINKING/ANSWERING 상태를 유지하며 후속 reasoning/final payload를 계속 수용한다. 이후 final-answer evidence가 확인된 뒤 새 `message_stream_complete`가 도착하면 COMPLETE로 전이한다. 별도의 두 번째 `message_stream_complete`가 관찰되지 않더라도 현재 final assistant message 또는 그 current-message semantic status가 명시적으로 `finished_successfully`이고 `end_turn=true`가 되면 이를 `finished_successfully_end_turn` terminal source로 인정하여 COMPLETE로 전이한다. 이 terminal status가 final-answer evidence보다 먼저 도착하면 동일하게 `completion_ignored`로 남고, 이후 같은 현재 final message의 실제 final-answer evidence가 확인되면 terminal 조건을 다시 평가한다. 늦은 이전 요청과 폐기된 turn ID의 payload는 계속 무시하며 DOM 상태는 사용하지 않는다.
 
 ## Drive signal document 현재성
 
@@ -64,8 +64,8 @@ ChatGPT 응답 COMPLETE가 확인되면 앱은 Job 폴더를 조회한다.
 
 ## 회귀 검증
 
-- `TurnProtocolStateWebViewTest`: 활성 응답 중 새 canonical POST가 들어왔을 때 최신 요청으로 교체되고 이전 fetch/WebSocket 데이터가 폐기되는지 검증한다. Pro에서는 final-answer evidence보다 먼저 온 `message_stream_complete`가 무시되고 같은 활성 request/work turn의 최종 답변과 후속 terminal event에서만 COMPLETE 되는지도 검증한다.
-- `ProtocolDetachedSurfaceWebViewTest`: Surface detach 상태에서 token-correlated THINKING→ANSWERING→COMPLETE와 native callback을 검증합니다.
+- `TurnProtocolStateWebViewTest`: 활성 응답 중 새 canonical POST가 들어왔을 때 최신 요청으로 교체되고 이전 fetch/WebSocket 데이터가 폐기되는지 검증한다. Pro에서는 final-answer evidence보다 먼저 온 `message_stream_complete`가 무시되고, 같은 활성 request/work turn의 최종 답변 뒤 두 번째 `message_stream_complete` 없이 `finished_successfully + end_turn=true`만 도착해도 COMPLETE 되는지, compact status/end-turn delta와 non-final/stale payload가 잘 차단되는지도 검증한다.
+- `ProtocolDetachedSurfaceWebViewTest`: Surface detach 상태에서 조기 stream-complete를 무시한 뒤 current final assistant terminal status로 THINKING→ANSWERING→COMPLETE가 되고 native callback이 정확히 한 번만 발생하는지 검증한다.
 - `DriveSignalDocumentIdentityAndroidTest`: 비정상적으로 큰 과거 cursor, 파일 정렬 변화, 재개 시 신규 ID 부재에서도 Drive file ID 기준으로 unseen signal을 계산하는지 검증한다.
 - `SelfRunAndroidTestRunner`: 2.x TEST canonical instrumentation 경로에 위 회귀 테스트를 강제로 포함한다.
 

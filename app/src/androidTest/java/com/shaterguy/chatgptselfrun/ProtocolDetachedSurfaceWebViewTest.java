@@ -14,6 +14,7 @@ import org.junit.runner.RunWith;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
@@ -30,6 +31,7 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             AtomicReference<WebView> webRef=new AtomicReference<>();
             AtomicReference<SelfRunStore> storeRef=new AtomicReference<>();
             AtomicReference<String> callbackRef=new AtomicReference<>("");
+            AtomicInteger callbackCount=new AtomicInteger();
             CountDownLatch loaded=new CountDownLatch(1),completed=new CountDownLatch(1);
 
             scenario.onActivity(activity->{
@@ -53,7 +55,7 @@ public final class ProtocolDetachedSurfaceWebViewTest {
                         if(!ChatGptTurnProtocolScript.COMPLETION_SCHEME.equals(uri.getScheme()))return false;
                         String run=uri.getQueryParameter("run"),token=uri.getQueryParameter("token");
                         String source=uri.getQueryParameter("source");
-                        callbackRef.set(uri.toString());
+                        callbackRef.set(uri.toString());callbackCount.incrementAndGet();
                         if(RUN_ID.equals(run)&&TOKEN.equals(token)
                                 &&SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())
                                 &&TurnProtocolLogBridge.isAllowedCompletionSource(source)){
@@ -106,21 +108,21 @@ public final class ProtocolDetachedSurfaceWebViewTest {
 
             JSONObject answering=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_marker\\\",\\\"marker\\\":\\\"final_channel_token\\\",\\\"event\\\":\\\"first\\\"}\\n\\n',"
+                            +"'data: {\\\"type\\\":\\\"message_start\\\",\\\"message\\\":{\\\"id\\\":\\\"final-message\\\",\\\"author\\\":{\\\"role\\\":\\\"assistant\\\"},\\\"channel\\\":\\\"final\\\",\\\"content\\\":{\\\"parts\\\":[\\\"최종 답변\\\"]}}}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertEquals("ANSWERING",answering.getString("phase"));
-            assertTrue(answering.getBoolean("sawFinalChannelToken"));
+            assertTrue(answering.getBoolean("sawAssistantFinalText"));
             assertEquals("",answering.getString("lastError"));
             assertEquals("",callbackRef.get());
 
             JSONObject complete=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
-                            +"'data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',"
+                            +"'data: {\\\"status\\\":\\\"finished_successfully\\\",\\\"end_turn\\\":true}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertEquals("COMPLETE",complete.getString("phase"));
             assertTrue(complete.getBoolean("sawStreamComplete"));
             assertTrue(complete.getBoolean("sawVisibleAnswer"));
-            assertEquals("message_stream_complete",complete.getString("completionSource"));
+            assertEquals("finished_successfully_end_turn",complete.getString("completionSource"));
             assertTrue("protocol completion callback timed out",completed.await(15,TimeUnit.SECONDS));
             scenario.onActivity(activity->{
                 assertEquals(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,storeRef.get().phase());
@@ -129,7 +131,16 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             String callback=callbackRef.get();
             assertTrue(callback.contains("run="+RUN_ID));
             assertTrue(callback.contains("token="+TOKEN));
-            assertTrue(callback.contains("source=message_stream_complete"));
+            assertTrue(callback.contains("source=finished_successfully_end_turn"));
+            assertEquals(1,callbackCount.get());
+
+            state(scenario,webRef,
+                    "window.__selfRunTurnProtocol.observeSseText("
+                            +"'data: {\\\"status\\\":\\\"finished_successfully\\\",\\\"end_turn\\\":true}\\n\\n',"
+                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            Thread.sleep(100L);
+            assertEquals(1,callbackCount.get());
+            scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
 
             scenario.onActivity(activity->hostRef.get().destroy());
         }

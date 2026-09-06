@@ -52,6 +52,7 @@ public final class TurnProtocolStateWebViewTest {
                             .put("conversation_id", CONVERSATION_ID));
             assertPhase("COMPLETE", chatComplete);
             assertTrue(chatComplete.getBoolean("sawStreamComplete"));
+            assertEquals("message_stream_complete", chatComplete.getString("completionSource"));
 
             JSONObject workStart = request(scenario, web, "POST", "/backend-api/f/conversation");
             assertPhase("THINKING", workStart);
@@ -63,8 +64,10 @@ public final class TurnProtocolStateWebViewTest {
             JSONObject outerDone = socketOuterDone(scenario, web, "work-request");
             assertPhase("ANSWERING", outerDone);
             assertFalse(outerDone.getBoolean("sawStreamComplete"));
-            assertPhase("COMPLETE", socketEvent(scenario, web, "work-request",
-                    new JSONObject().put("type", "message_stream_complete")));
+            JSONObject workComplete = socketEvent(scenario, web, "work-request",
+                    new JSONObject().put("type", "message_stream_complete"));
+            assertPhase("COMPLETE", workComplete);
+            assertEquals("message_stream_complete", workComplete.getString("completionSource"));
         }
     }
 
@@ -89,10 +92,10 @@ public final class TurnProtocolStateWebViewTest {
             assertEquals("", answering.getString("lastError"));
             assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-early"));
 
-            JSONObject complete = socketEvent(scenario, web, "pro-early",
-                    new JSONObject().put("type", "message_stream_complete"));
+            JSONObject complete = socketEvent(scenario, web, "pro-early", terminalStatus());
             assertPhase("COMPLETE", complete);
             assertTrue(complete.getBoolean("sawStreamComplete"));
+            assertEquals("finished_successfully_end_turn", complete.getString("completionSource"));
         }
     }
 
@@ -112,37 +115,33 @@ public final class TurnProtocolStateWebViewTest {
             assertPhase("THINKING", blank);
             assertFalse(blank.getBoolean("sawVisibleAnswer"));
             assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
-                    messageStart(message("user", "user", null, "사용자"))));
+                    messageStart(terminalMessage("user", "user", "final", "사용자"))));
             assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
-                    messageStart(message("tool", "tool", null, "도구"))));
+                    messageStart(terminalMessage("tool", "tool", "final", "도구"))));
             assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
-                    messageStart(message("analysis", "assistant", "analysis", "분석"))));
+                    messageStart(terminalMessage("analysis", "assistant", "analysis", "분석"))));
             assertPhase("THINKING", socketEvent(scenario, web, "pro-request",
-                    messageStart(message("commentary", "assistant", "commentary", "중간"))));
+                    messageStart(terminalMessage("commentary", "assistant", "commentary", "중간"))));
 
-            JSONObject fallback = message("finished", "assistant", "final", null)
-                    .put("status", "finished_successfully").put("end_turn", true);
+            JSONObject fallback = terminalMessage("finished", "assistant", "final", null);
             JSONObject ignoredFallback = socketEvent(scenario, web, "pro-request", messageStart(fallback));
             assertPhase("THINKING", ignoredFallback);
             assertFalse(ignoredFallback.getBoolean("sawStreamComplete"));
+            assertEquals("completion_without_final_answer_evidence", ignoredFallback.getString("lastError"));
 
             JSONObject visible = socketEvent(scenario, web, "pro-request",
                     messageStart(message("pro-message", "assistant", null, "Pro 답변")));
             assertPhase("ANSWERING", visible);
             assertTrue(visible.getBoolean("sawVisibleAnswer"));
             assertTrue(visible.getBoolean("sawAssistantFinalText"));
+            assertEquals("", visible.getString("lastError"));
 
-            JSONObject finished = message("finished-visible", "assistant", "final", "완료 직전")
-                    .put("status", "finished_successfully").put("end_turn", true);
-            JSONObject stillAnswering = socketEvent(scenario, web, "pro-request", messageStart(finished));
-            assertPhase("ANSWERING", stillAnswering);
-            assertFalse(stillAnswering.getBoolean("sawStreamComplete"));
-            assertPhase("ANSWERING", socketOuterDone(scenario, web, "pro-request"));
-
-            JSONObject complete = socketEvent(scenario, web, "pro-request",
-                    new JSONObject().put("type", "message_stream_complete"));
+            JSONObject finished = terminalMessage("finished-visible", "assistant", "final", "완료 직전");
+            JSONObject complete = socketEvent(scenario, web, "pro-request", messageStart(finished));
             assertPhase("COMPLETE", complete);
-            assertTrue(complete.getBoolean("sawStreamComplete"));
+            assertFalse(complete.getBoolean("sawStreamComplete"));
+            assertEquals("finished_successfully_end_turn", complete.getString("completionSource"));
+            assertPhase("COMPLETE", socketOuterDone(scenario, web, "pro-request"));
         }
     }
 
@@ -161,8 +160,32 @@ public final class TurnProtocolStateWebViewTest {
             assertPhase("ANSWERING", answering);
             assertTrue(answering.getBoolean("sawVisibleAnswer"));
             assertTrue(answering.getBoolean("sawAssistantFinalText"));
-            assertPhase("COMPLETE", socketEvent(scenario, web, "pro-delta",
-                    new JSONObject().put("type", "message_stream_complete")));
+            JSONObject complete = socketEvent(scenario, web, "pro-delta",
+                    new JSONObject().put("type", "message_stream_complete"));
+            assertPhase("COMPLETE", complete);
+            assertEquals("message_stream_complete", complete.getString("completionSource"));
+        }
+    }
+
+    @Test public void compactTerminalStatusCompletesOnlyCurrentFinalMessage() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = new AtomicReference<>();
+            load(scenario, web); install(scenario, web);
+
+            assertPhase("THINKING", request(scenario, web, "POST", "/backend-api/f/conversation"));
+            assertPhase("THINKING", socketEvent(scenario, web, "compact-terminal",
+                    messageStart(message("compact-final", "assistant", "final", null))));
+            assertPhase("ANSWERING", socketEvent(scenario, web, "compact-terminal", new JSONObject()
+                    .put("type", "message_delta").put("p", "/message/content/parts/0")
+                    .put("message_id", "compact-final").put("v", "compact answer")));
+            assertPhase("ANSWERING", socketEvent(scenario, web, "compact-terminal", new JSONObject()
+                    .put("type", "message_update").put("p", "/message/status")
+                    .put("message_id", "compact-final").put("v", "finished_successfully")));
+            JSONObject complete = socketEvent(scenario, web, "compact-terminal", new JSONObject()
+                    .put("type", "message_update").put("p", "/message/end_turn")
+                    .put("message_id", "compact-final").put("v", true));
+            assertPhase("COMPLETE", complete);
+            assertEquals("finished_successfully_end_turn", complete.getString("completionSource"));
         }
     }
 
@@ -190,14 +213,17 @@ public final class TurnProtocolStateWebViewTest {
                     marker("final_channel_token", "first"));
             assertPhase("THINKING", staleSocket);
             assertFalse(staleSocket.getBoolean("sawVisibleAnswer"));
+            assertPhase("THINKING", socketEvent(scenario, web, "old-work-id", terminalStatus()));
 
             JSONObject replacementAnswer = semanticForIdentity(scenario, web, newIdentity,
                     marker("final_channel_token", "first"));
             assertPhase("ANSWERING", replacementAnswer);
             assertTrue(replacementAnswer.getBoolean("sawVisibleAnswer"));
-            assertPhase("COMPLETE", semanticForIdentity(scenario, web, newIdentity,
-                    terminalComplete("replacement-final")
-                            .put("conversation_id", CONVERSATION_ID)));
+            JSONObject replacementComplete = semanticForIdentity(scenario, web, newIdentity,
+                    new JSONObject().put("type", "message_stream_complete")
+                            .put("conversation_id", CONVERSATION_ID));
+            assertPhase("COMPLETE", replacementComplete);
+            assertEquals("message_stream_complete", replacementComplete.getString("completionSource"));
         }
     }
 
@@ -220,10 +246,13 @@ public final class TurnProtocolStateWebViewTest {
         return message;
     }
 
-    private static JSONObject terminalComplete(String id) throws Exception {
-        return new JSONObject().put("type", "message_stream_complete")
-                .put("status", "finished_successfully").put("end_turn", true)
-                .put("message", message(id, "assistant", "final", "terminal answer"));
+    private static JSONObject terminalMessage(String id, String role, String channel, String text) throws Exception {
+        return message(id, role, channel, text)
+                .put("status", "finished_successfully").put("end_turn", true);
+    }
+
+    private static JSONObject terminalStatus() throws Exception {
+        return new JSONObject().put("status", "finished_successfully").put("end_turn", true);
     }
 
     private static JSONObject request(ActivityScenario<SelfRunNewActivity> scenario,

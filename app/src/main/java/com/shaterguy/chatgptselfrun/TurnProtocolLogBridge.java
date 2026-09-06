@@ -168,7 +168,8 @@ final class TurnProtocolLogBridge {
 
     private static boolean validPhaseForStage(String stage, String phase) {
         return switch (stage) {
-            case "turn_request", "completion_ignored" -> "THINKING".equals(phase);
+            case "turn_request" -> "THINKING".equals(phase);
+            case "completion_ignored" -> "THINKING".equals(phase) || "ANSWERING".equals(phase);
             case "stream_handoff" -> "THINKING".equals(phase) || "ANSWERING".equals(phase);
             case "answering_started" -> "ANSWERING".equals(phase);
             case "complete", "completion_dispatch" -> "COMPLETE".equals(phase);
@@ -178,7 +179,8 @@ final class TurnProtocolLogBridge {
     }
 
     static boolean isAllowedCompletionSource(String source) {
-        return "message_stream_complete".equals(source);
+        return "message_stream_complete".equals(source)
+                || "finished_successfully_end_turn".equals(source);
     }
 
     private static String normalizedSource(String stage, String source) {
@@ -191,13 +193,19 @@ final class TurnProtocolLogBridge {
             };
         }
         if ("completion_ignored".equals(stage)) {
-            return "message_stream_complete".equals(source) ? source : "";
+            return switch (source) {
+                case "message_stream_complete", "finished_successfully_end_turn" -> source;
+                default -> "";
+            };
         }
         if ("error".equals(stage)) {
             if ("canonical_fetch_rejected".equals(source)) return source;
             return source != null && source.matches("canonical_http_[0-9]{1,3}") ? source : "protocol_unknown";
         }
         if (!("complete".equals(stage) || "completion_dispatch".equals(stage))) return "";
-        return "message_stream_complete".equals(source) ? source : "";
+        return switch (source) {
+            case "message_stream_complete", "finished_successfully_end_turn" -> source;
+            default -> "";
+        };
     }
 }
