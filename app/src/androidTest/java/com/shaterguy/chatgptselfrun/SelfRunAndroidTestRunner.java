@@ -7,6 +7,7 @@ import androidx.test.runner.AndroidJUnitRunner;
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
     private static final String[] REQUIRED = {
             "com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest",
+            "com.shaterguy.chatgptselfrun.ProRequestProfilePreclassificationWebViewTest",
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
             "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest",
             "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest",

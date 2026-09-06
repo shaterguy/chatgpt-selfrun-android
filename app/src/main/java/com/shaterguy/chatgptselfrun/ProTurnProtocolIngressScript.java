@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** Dedicated transport adapter for markerless/long-running Pro responses in Chat mode. */
 final class ProTurnProtocolIngressScript {
-    static final String ENGINE_VERSION = "pro-turn-ingress-v1";
+    static final String ENGINE_VERSION = "pro-turn-ingress-v2";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -40,10 +40,52 @@ final class ProTurnProtocolIngressScript {
                   };
                   const ownsCurrentTurn=()=>activeChat()&&safe(protocol()?.snapshot?.()?.detectorLane)==='PRO';
                   const handlesTransport=()=>activeChat();
-                  const counters={webSocketCreated:0,webSocketMessages:0,workerMessages:0,sharedWorkerMessages:0,
-                    serviceWorkerMessages:0,serviceWorkerPortMessages:0,framesSeen:0,binaryDecoded:0,forwardedFrames:0,
-                    encodedItemsFound:0,decodedItems:0,semanticSignals:0,ignoredTransport:0,decodeErrors:0};
+                  const counters={requestProfileHints:0,requestHintMisses:0,webSocketCreated:0,webSocketMessages:0,
+                    workerMessages:0,sharedWorkerMessages:0,serviceWorkerMessages:0,serviceWorkerPortMessages:0,
+                    framesSeen:0,binaryDecoded:0,forwardedFrames:0,encodedItemsFound:0,decodedItems:0,
+                    semanticSignals:0,ignoredTransport:0,decodeErrors:0};
                   const count=key=>{if(Object.prototype.hasOwnProperty.call(counters,key))counters[key]++;};
+                  const canonicalConversationPost=(input,init)=>{
+                    try{
+                      const isRequest=typeof Request!=='undefined'&&input instanceof Request;
+                      const url=isRequest?input.url:String(input??'');
+                      const method=String(init?.method??(isRequest?input.method:'GET')).toUpperCase();
+                      if(method!=='POST')return false;
+                      const parsed=new URL(url,location.href),path=parsed.pathname.replace(/\\/+$/,'').toLowerCase();
+                      return parsed.origin===location.origin
+                        &&(path==='/backend-api/conversation'||path==='/backend-api/f/conversation');
+                    }catch(_){return false;}
+                  };
+                  const requestBodyText=(input,init)=>{
+                    if(typeof init?.body==='string')return init.body;
+                    if(typeof input==='string'&&typeof init?.body==='string')return init.body;
+                    return'';
+                  };
+                  const proRequestSelected=(input,init)=>{
+                    try{
+                      if(!canonicalConversationPost(input,init))return false;
+                      const t=target();if(safe(t?.mode).toLowerCase()!=='chat'||!safe(t?.runId))return false;
+                      const raw=requestBodyText(input,init);if(!raw)return false;
+                      const body=JSON.parse(raw),messages=Array.isArray(body?.messages)?body.messages:[];
+                      const latest=messages.length?JSON.stringify(messages[messages.length-1]):'';
+                      const run=safe(t.runId);
+                      const bootstrap=latest.includes('SELF_RUN_BOOTSTRAP')&&(!run||latest.includes(run));
+                      const reasoning=safe(bootstrap?(t.bootstrapReasoning||t.reasoning):(t.continuationReasoning||t.reasoning)).toLowerCase();
+                      const model=safe(body?.model).toLowerCase();
+                      return reasoning==='pro'||/(?:^|[-_.])pro(?:[-_.]|$)/.test(model);
+                    }catch(_){return false;}
+                  };
+                  const promoteFromRequestProfile=()=>{
+                    try{
+                      const p=protocol(),before=p?.snapshot?.()||{};
+                      if(before.detectorLane==='PRO')return true;
+                      if(before.detectorLane!=='CHAT'||!before.requestIdentity
+                              ||(before.phase!=='THINKING'&&before.phase!=='ANSWERING'))return false;
+                      p.observeSseText('data: {"type":"stream_handoff","source":"request_profile_pro"}\\n\\n',
+                        'pro-request-profile',{requestIdentity:before.requestIdentity});
+                      return safe(p.snapshot?.()?.detectorLane)==='PRO';
+                    }catch(_){return false;}
+                  };
                   const blobText=blob=>{
                     if(blob&&typeof blob.text==='function')return blob.text();
                     return new Promise((resolve,reject)=>{try{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result??''));reader.onerror=()=>reject(reader.error);reader.readAsText(blob);}catch(error){reject(error);}});
@@ -155,6 +197,12 @@ final class ProTurnProtocolIngressScript {
                       if(data&&typeof data==='object')return decodeFrame(data);
                     }catch(_){count('decodeErrors');return false;}
                     count('ignoredTransport');return false;
+                  };
+                  const downstreamFetch=window.fetch.bind(window);
+                  window.fetch=function(input,init){
+                    const hint=proRequestSelected(input,init),result=downstreamFetch(input,init);
+                    if(hint){count('requestProfileHints');if(!promoteFromRequestProfile())count('requestHintMisses');}
+                    return result;
                   };
                   const NativeWebSocket=window.WebSocket;
                   if(typeof NativeWebSocket==='function'){
