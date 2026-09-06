@@ -1,0 +1,7 @@
+SOURCE_SHA=79824fe1e725f9fdc9d41cfa45d43ba7a2876fec
+ARTIFACT_COMMIT_SHA=f264f7ab871461095404357f6c24d83e2a1b36c3
+APK_SHA256=3ba2a60567d97dc7749623f880240bcf405d64bb8372e7f67853076d0aeae9b8
+APK_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/f264f7ab871461095404357f6c24d83e2a1b36c3/deliverables/current-test.apk
+UI_EVIDENCE_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/f264f7ab871461095404357f6c24d83e2a1b36c3/deliverables/ui-evidence/manifest.txt
+PREDECESSOR_SOURCE=synthetic-fallback
+PREDECESSOR_LINEAGE_EVIDENCE=not-verified-synthetic-fallback
