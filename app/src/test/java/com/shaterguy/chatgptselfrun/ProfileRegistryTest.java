@@ -135,6 +135,21 @@ public final class ProfileRegistryTest {
         assertTrue(found);
     }
 
+
+    @Test public void workLabelsIdentifyModelAndReasoningWhileChatLabelsStayStable() {
+        assertEquals("Sol / max", ProfileRegistry.resolveWork("sol", "max").displayLabel());
+        assertEquals("Terra / max", ProfileRegistry.resolveWork("terra", "max").displayLabel());
+        assertNotEquals(ProfileRegistry.resolveWork("sol", "max").displayLabel(),
+                ProfileRegistry.resolveWork("terra", "max").displayLabel());
+
+        ProfileRegistry.RegisterResult added = ProfileRegistry.registerCaptured(
+                capture("work", "gpt-5.7-nova-wm", "extreme", true), "nova-v2", "extreme");
+        assertEquals(ProfileRegistry.RegisterResult.ADDED, added.status);
+        assertEquals("Nova-v2 / extreme", added.profile.displayLabel());
+        assertEquals("Instant", ProfileRegistry.resolveChat("instant").displayLabel());
+        assertEquals("Extra High", ProfileRegistry.resolveChat("xhigh").displayLabel());
+    }
+
     private static ProfileRegistry.CapturedProfile capture(String mode, String model, String effort,
                                                             boolean work) {
         String origin = work ? "{\"op\":\"SET\",\"path\":\"conversation_origin\",\"value\":\"tpp\"}" : "{\"op\":\"REMOVE\",\"path\":\"conversation_origin\"}";

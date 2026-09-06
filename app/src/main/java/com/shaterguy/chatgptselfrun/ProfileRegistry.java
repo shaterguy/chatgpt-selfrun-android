@@ -107,7 +107,13 @@ final class ProfileRegistry {
 
         String requestValue(String path) { return ProfileRegistry.requestValue(operations, path); }
         boolean requestHas(String path) { return ProfileRegistry.requestHas(operations, path); }
-        String displayLabel() { return presentationLabel.isEmpty() ? signalReasoning : presentationLabel; }
+        String displayLabel() {
+            if (mode == Mode.WORK) {
+                return signalModel.substring(0, 1).toUpperCase(Locale.ROOT)
+                        + signalModel.substring(1) + " / " + signalReasoning;
+            }
+            return presentationLabel.isEmpty() ? signalReasoning : presentationLabel;
+        }
         String actualCombination() {
             return requestValue("model") + " / "
                     + (requestHas("thinking_effort") ? requestValue("thinking_effort") : "필드 없음");

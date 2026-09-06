@@ -171,11 +171,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p formal-baseline
-          gh release download drive-v2.3.1 \
+          gh release download drive-v2.3.2 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v2.3.1.apk' \
+            --pattern 'chatgpt-selfrun-drive-v2.3.2.apk' \
             --dir formal-baseline
-          test -s formal-baseline/chatgpt-selfrun-drive-v2.3.1.apk
+          test -s formal-baseline/chatgpt-selfrun-drive-v2.3.2.apk
       - name: Find actual previous TEST artifact
         id: previous_test_run
         shell: bash
@@ -184,6 +184,21 @@ jobs:
         run: |
           set -euo pipefail
           echo 'available=false' >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_NAME" == 'selfrun-drive/v2.3.3-dev1' ]]; then
+            PREV_BRANCH='selfrun-drive/v2.3.2-dev30'
+            PREV_RUN_ID='34018630527'
+            PREV_RUN_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}")"
+            [[ "$(jq -r '.head_branch' <<<"$PREV_RUN_JSON")" == "$PREV_BRANCH" ]] || { echo 'pinned dev30 TEST run branch mismatch' >&2; exit 1; }
+            [[ "$(jq -r '.head_sha' <<<"$PREV_RUN_JSON")" == '5cf5151b2860cae02cd0716c40109b51e2f41f83' ]] || { echo 'pinned dev30 TEST run source mismatch' >&2; exit 1; }
+            [[ "$(jq -r '.conclusion' <<<"$PREV_RUN_JSON")" == 'success' ]] || { echo 'pinned dev30 TEST run not successful' >&2; exit 1; }
+            [[ "$(jq -r '.run_attempt' <<<"$PREV_RUN_JSON")" == '1' ]] || { echo 'pinned dev30 TEST run attempt mismatch' >&2; exit 1; }
+            PREV_ARTIFACT_ID="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PREV_RUN_ID}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name == "chatgpt-selfrun-drive-test-build" and (.expired | not))][0].id // empty')"
+            [[ -n "$PREV_ARTIFACT_ID" ]] || { echo 'pinned dev30 TEST artifact unavailable' >&2; exit 1; }
+            echo "run_id=$PREV_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ "$GITHUB_REF_NAME" == 'selfrun-drive/v2.3.2-dev14' ]]; then
             PREV_BRANCH='selfrun-drive/v2.3.2-dev13'
             PREV_RUN_ID='33944765280'
@@ -354,7 +369,7 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           CURRENT_APK=current-candidate/current-test.apk
           PREV_APK=predecessor/previous-test.apk
-          FORMAL_APK=formal-baseline/chatgpt-selfrun-drive-v2.3.1.apk
+          FORMAL_APK=formal-baseline/chatgpt-selfrun-drive-v2.3.2.apk
           test -s "$CURRENT_APK" || fail 'canonical current TEST APK missing'
           test -s "$PREV_APK" || fail 'previous TEST APK missing'
           test -s "$FORMAL_APK" || fail 'formal baseline APK missing'
@@ -368,10 +383,15 @@ jobs:
           test -n "$PREV_VERSION_NAME" || fail 'previous TEST versionName unavailable'
           test -n "$PREV_VERSION_CODE" || fail 'previous TEST versionCode unavailable'
           if [[ "$PREDECESSOR_SOURCE" == 'artifact' ]]; then
-            [[ "$CURRENT_VERSION_NAME" =~ ^(.+)-dev([0-9]+)$ ]] || fail 'current TEST version is not a dev lineage candidate'
-            (( ${BASH_REMATCH[2]} > 1 )) || fail 'current TEST dev lineage has no predecessor'
-            EXPECTED_PREV_VERSION_NAME="${BASH_REMATCH[1]}-dev$((${BASH_REMATCH[2]} - 1))"
-            EXPECTED_PREV_VERSION_CODE="$((CURRENT_VERSION_CODE - 1))"
+            if [[ "$CURRENT_VERSION_NAME" == '2.3.3-dev1' ]]; then
+              EXPECTED_PREV_VERSION_NAME='2.3.2-dev30'
+              EXPECTED_PREV_VERSION_CODE='2020062'
+            else
+              [[ "$CURRENT_VERSION_NAME" =~ ^(.+)-dev([0-9]+)$ ]] || fail 'current TEST version is not a dev lineage candidate'
+              (( ${BASH_REMATCH[2]} > 1 )) || fail 'current TEST dev lineage has no predecessor'
+              EXPECTED_PREV_VERSION_NAME="${BASH_REMATCH[1]}-dev$((${BASH_REMATCH[2]} - 1))"
+              EXPECTED_PREV_VERSION_CODE="$((CURRENT_VERSION_CODE - 1))"
+            fi
             [[ "$PREV_VERSION_NAME" == "$EXPECTED_PREV_VERSION_NAME" ]] || fail "actual predecessor is not the required ${EXPECTED_PREV_VERSION_NAME} TEST artifact"
             [[ "$PREV_VERSION_CODE" == "$EXPECTED_PREV_VERSION_CODE" ]] || fail "actual predecessor versionCode is not ${EXPECTED_PREV_VERSION_CODE}"
             [[ "$PREDECESSOR_LINEAGE_EVIDENCE" == 'verified-previous-test-artifact' ]] || fail 'actual previous TEST lineage evidence missing'
@@ -384,8 +404,8 @@ jobs:
           grep -Fq "versionName='$CURRENT_VERSION_NAME'" <<<"$CURRENT_BADGING" || fail 'current TEST versionName mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$PREV_BADGING" || fail 'previous TEST package mismatch'
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING" || fail 'formal package mismatch'
-          grep -Fq "versionCode='2020033'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionCode mismatch'
-          grep -Fq "versionName='2.3.1'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionName mismatch'
+          grep -Fq "versionCode='2020048'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionCode mismatch'
+          grep -Fq "versionName='2.3.2'" <<<"$FORMAL_BADGING" || fail 'formal baseline versionName mismatch'
           "$BT/apksigner" verify --verbose --print-certs "$CURRENT_APK" > coinstall-current-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$PREV_APK" > coinstall-test-prev-cert.txt
           "$BT/apksigner" verify --verbose --print-certs "$FORMAL_APK" > coinstall-formal-cert.txt
@@ -397,7 +417,7 @@ jobs:
           [[ "$FORMAL_CERT" == 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' ]] || fail 'formal signer mismatch'
           echo "TEST_PREV_VERSION_NAME=$PREV_VERSION_NAME" >> "$GITHUB_ENV"
           echo "TEST_PREV_VERSION_CODE=$PREV_VERSION_CODE" >> "$GITHUB_ENV"
-          note "formal fixture: 2.3.1 / 2020033"
+          note "formal fixture: 2.3.2 / 2020048"
           note "TEST predecessor: $PREV_VERSION_NAME / $PREV_VERSION_CODE / source=$PREDECESSOR_SOURCE / lineage=$PREDECESSOR_LINEAGE_EVIDENCE"
           note "TEST current: $CURRENT_VERSION_NAME / $CURRENT_VERSION_CODE / source=$GITHUB_SHA"
           note 'preflight: PASS'

@@ -19,5 +19,5 @@ test "$PULL_RESULT" -eq 0
 test -s ui-evidence/manifest.txt
 adb shell dumpsys webviewupdate > drive-test-webview-evidence.txt
 cat drive-test-webview-evidence.txt
-FORMAL_EXPECTED_VERSION="2.3.1" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v2.3.1.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1
+FORMAL_EXPECTED_VERSION="2.3.2" TEST_PREV_EXPECTED_VERSION="$TEST_PREV_VERSION_NAME" TEST_EXPECTED_VERSION="$TEST_VERSION_NAME" timeout --foreground 6m bash tools/verify_drive_test_coinstall_emulator.sh formal-baseline/chatgpt-selfrun-drive-v2.3.2.apk predecessor/previous-test.apk current-candidate/current-test.apk > drive-test-coinstall-evidence.txt 2>&1
 cat drive-test-coinstall-evidence.txt
