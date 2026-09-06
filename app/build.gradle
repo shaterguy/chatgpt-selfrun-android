@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020057
-def selfRunDriveVersionName = '2.3.2-dev25'
+def selfRunDriveVersionCode = 2020058
+def selfRunDriveVersionName = '2.3.2-dev26'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.3.2-dev25') {
-            throw new GradleException('SelfRun Drive development version must be 2.3.2-dev25')
+        if (selfRunDriveVersionName != '2.3.2-dev26') {
+            throw new GradleException('SelfRun Drive development version must be 2.3.2-dev26')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -109,6 +109,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         }
         if (!webConfig.contains('WorkTurnProtocolIngressScript.installDocumentStart')) {
             throw new GradleException('Work transport protocol ingress document-start interceptor is required')
+        }
+        if (!webConfig.contains('ProTurnProtocolIngressScript.installDocumentStart')) {
+            throw new GradleException('Pro transport protocol ingress document-start interceptor is required')
         }
         if (!webConfig.contains('WorkProtocolTransportCaptureScript.installDocumentStart')) {
             throw new GradleException('Work transport capture and relay document-start interceptor is required')

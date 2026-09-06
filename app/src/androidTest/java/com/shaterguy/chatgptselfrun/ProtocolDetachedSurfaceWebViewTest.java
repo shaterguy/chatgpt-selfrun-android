@@ -25,7 +25,7 @@ public final class ProtocolDetachedSurfaceWebViewTest {
     private static final String TOKEN="protocol-token-current";
     private static final String ORIGIN="https://chatgpt.com/";
 
-    @Test public void detachedSurfaceWaitsForFinalEvidenceBeforeProtocolCompletion() throws Exception {
+    @Test public void detachedSurfaceSeparatesProBoundaryFromFinalCompletion() throws Exception {
         try(ActivityScenario<SelfRunNewActivity> scenario=ActivityScenario.launch(SelfRunNewActivity.class)){
             AtomicReference<HeadlessWebViewHost> hostRef=new AtomicReference<>();
             AtomicReference<WebView> webRef=new AtomicReference<>();
@@ -87,17 +87,28 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             JSONObject thinking=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeRequest('POST','/backend-api/f/conversation')");
             assertEquals("THINKING",thinking.getString("phase"));
+            assertEquals("CHAT",thinking.getString("detectorLane"));
             assertFalse(thinking.getBoolean("sawVisibleAnswer"));
             assertEquals("",thinking.getString("currentFinalMessageId"));
             assertEquals("",callbackRef.get());
             scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
+
+            JSONObject handoff=state(scenario,webRef,
+                    "window.__selfRunTurnProtocol.observeSseText("
+                            +"'data: {\\\"type\\\":\\\"stream_handoff\\\"}\\n\\n',"
+                            +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
+            assertEquals("THINKING",handoff.getString("phase"));
+            assertEquals("PRO",handoff.getString("detectorLane"));
+            assertTrue(handoff.getBoolean("sawStreamHandoff"));
 
             JSONObject premature=state(scenario,webRef,
                     "window.__selfRunTurnProtocol.observeSseText("
                             +"'data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',"
                             +"'fixture',{requestIdentity:window.__selfRunTurnProtocol.snapshot().requestIdentity})");
             assertEquals("THINKING",premature.getString("phase"));
+            assertEquals("PRO",premature.getString("detectorLane"));
             assertTrue(premature.getBoolean("sawStreamComplete"));
+            assertTrue(premature.getBoolean("proBoundarySeen"));
             assertFalse(premature.getBoolean("sawVisibleAnswer"));
             assertEquals("completion_without_final_answer_evidence",premature.getString("lastError"));
             assertEquals("",callbackRef.get());
@@ -143,6 +154,51 @@ public final class ProtocolDetachedSurfaceWebViewTest {
             scenario.onActivity(activity->assertFalse(hostRef.get().isOutputAttached()));
 
             scenario.onActivity(activity->hostRef.get().destroy());
+        }
+    }
+
+    @Test public void proIngressDecodesHandoffAndFinalSocketFramesWithoutDom() throws Exception {
+        final String run="SR-PRO-INGRESS",token="pro-ingress-token",conversation="pro-conversation",turn="pro-turn";
+        try(ActivityScenario<SelfRunNewActivity> scenario=ActivityScenario.launch(SelfRunNewActivity.class)){
+            AtomicReference<WebView> web=new AtomicReference<>();CountDownLatch loaded=new CountDownLatch(1);
+            scenario.onActivity(activity->{
+                WebView view=new WebView(activity);view.getSettings().setJavaScriptEnabled(true);view.getSettings().setDomStorageEnabled(true);
+                view.setWebViewClient(new WebViewClient(){@Override public void onPageFinished(WebView ignored,String url){if(url!=null&&url.startsWith(ORIGIN))loaded.countDown();}});
+                activity.setContentView(view);web.set(view);view.loadDataWithBaseURL(ORIGIN,"<!doctype html><html><body>pro ingress fixture</body></html>","text/html","UTF-8",null);
+            });
+            assertTrue("pro fixture load timed out",loaded.await(15,TimeUnit.SECONDS));
+            evaluate(scenario,web,
+                    "window.__selfRunRequestProfileEngine={target:()=>({runId:'"+run+"',mode:'chat'})};"
+                    +"window.__fixtureSocket=null;class FixtureWebSocket extends EventTarget{constructor(){super();window.__fixtureSocket=this;}emit(data){this.dispatchEvent(new MessageEvent('message',{data:data}));}}"
+                    +"FixtureWebSocket.CONNECTING=0;FixtureWebSocket.OPEN=1;FixtureWebSocket.CLOSING=2;FixtureWebSocket.CLOSED=3;window.WebSocket=FixtureWebSocket;"
+                    +"window.Worker=undefined;window.SharedWorker=undefined;'ready'");
+            evaluate(scenario,web,ChatGptTurnProtocolScript.documentStartScript());
+            assertEquals("true",evaluate(scenario,web,"String(window.__selfRunTurnProtocol.bindTurn('"+run+"','"+token+"'))"));
+            evaluate(scenario,web,ProTurnProtocolIngressScript.documentStartScript());
+            evaluate(scenario,web,"window.__fixtureClient=new WebSocket('wss://chatgpt.com/pro');'created'");
+            JSONObject started=state(scenario,web,"window.__selfRunTurnProtocol.observeRequest('POST','/backend-api/f/conversation')");
+            assertEquals("CHAT",started.getString("detectorLane"));assertEquals("THINKING",started.getString("phase"));
+
+            JSONObject handoff=new JSONObject().put("type","stream_handoff").put("conversation_id",conversation).put("turn_id",turn);
+            JSONObject early=new JSONObject().put("type","message_stream_complete");
+            String earlyEncoded="data: "+handoff+"\n\ndata: "+early+"\n\n";
+            JSONObject earlyPayload=new JSONObject().put("type","stream-item").put("conversation_id",conversation).put("turn_id",turn).put("encoded_item",earlyEncoded);
+            String earlyFrame=new JSONObject().put("payload",new JSONObject().put("payload",earlyPayload)).toString();
+            JSONObject afterEarly=state(scenario,web,"(()=>{window.__fixtureSocket.emit("+JSONObject.quote(earlyFrame)+");return window.__selfRunTurnProtocol.snapshot();})()");
+            assertEquals("PRO",afterEarly.getString("detectorLane"));assertEquals("THINKING",afterEarly.getString("phase"));
+            assertTrue(afterEarly.getBoolean("proBoundarySeen"));assertTrue(afterEarly.getBoolean("sawStreamComplete"));
+
+            JSONObject finalMessage=new JSONObject().put("type","message_start").put("message",new JSONObject().put("id","pro-final")
+                    .put("author",new JSONObject().put("role","assistant")).put("content",new JSONObject().put("parts",new org.json.JSONArray().put("Pro 최종 답변"))));
+            JSONObject terminal=new JSONObject().put("status","finished_successfully").put("end_turn",true);
+            String finalEncoded="data: "+finalMessage+"\n\ndata: "+terminal+"\n\n";
+            JSONObject finalPayload=new JSONObject().put("type","stream-item").put("conversation_id",conversation).put("turn_id",turn).put("encoded_item",finalEncoded);
+            String finalFrame=new JSONObject().put("payload",new JSONObject().put("payload",finalPayload)).toString();
+            JSONObject finished=state(scenario,web,"(()=>{window.__fixtureSocket.emit("+JSONObject.quote(finalFrame)+");return window.__selfRunTurnProtocol.snapshot();})()");
+            assertEquals("COMPLETE",finished.getString("phase"));assertTrue(finished.getBoolean("sawAssistantFinalText"));
+            assertEquals("finished_successfully_end_turn",finished.getString("completionSource"));
+            JSONObject diagnostics=state(scenario,web,"window.__selfRunProTurnProtocolIngress.diagnostics()");
+            assertTrue(diagnostics.getInt("forwardedFrames")>=2);assertTrue(diagnostics.getInt("semanticSignals")>=4);
         }
     }
 

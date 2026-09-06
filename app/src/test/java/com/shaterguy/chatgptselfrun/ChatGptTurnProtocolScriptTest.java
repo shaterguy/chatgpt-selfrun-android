@@ -8,20 +8,43 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class ChatGptTurnProtocolScriptTest {
-    @Test public void canonicalPostAndProtocolSemanticsOwnTurnState() {
-        assertEquals("turn-protocol-v12",ChatGptTurnProtocolScript.ENGINE_VERSION);
+    @Test public void canonicalPostAndSplitDetectorLanesOwnTurnState() {
+        assertEquals("turn-protocol-v13",ChatGptTurnProtocolScript.ENGINE_VERSION);
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("path==='/backend-api/f/conversation'"));
+        assertTrue(script.contains("detectorLane:'CHAT'"));
+        assertTrue(script.contains("const initialLane=()=>targetMode()==='work'?'WORK':'CHAT'"));
+        assertTrue(script.contains("const promoteProLane=()=>"));
+        assertTrue(script.contains("state.detectorLane='PRO'"));
         assertTrue(script.contains("state.phase='THINKING'"));
         assertTrue(script.contains("state.phase='ANSWERING'"));
         assertTrue(script.contains("value.type==='message_stream_complete'"));
         assertTrue(script.contains("const COMPLETE_SOURCES=new Set(['message_stream_complete','finished_successfully_end_turn'])"));
-        assertTrue(script.contains("complete('finished_successfully_end_turn')"));
-        assertTrue(script.contains("value.status==='finished_successfully'&&value.end_turn===true"));
-        assertTrue(script.contains("role==='assistant'&&(channel===''||channel==='final')"));
-        assertTrue(script.contains("if(parts.some(nonEmptyText))"));
         assertFalse(script.contains("turnSequence"));
         assertFalse(script.contains("turnKind"));
+    }
+
+    @Test public void normalChatRestoresDev16CompletionPolicy() {
+        String script=ChatGptTurnProtocolScript.documentStartScript();
+        assertTrue(script.contains("const requiresFinalEvidence=()=>state.detectorLane!=='CHAT'"));
+        assertTrue(script.contains("if(requiresFinalEvidence()&&!completionEvidence())"));
+        assertTrue(script.contains("return finalizeComplete(completionSource);"));
+        assertTrue(script.contains("const chatLane=state.detectorLane==='CHAT'"));
+        assertTrue(script.contains("chatLane?channel==='final'"));
+        assertTrue(script.contains("if(chatLane)noteVisibleAnswer('visible_answer')"));
+        assertTrue(script.contains("Compact deltas are used only by Work/Pro"));
+        assertTrue(script.contains("if(state.detectorLane==='CHAT'||!value"));
+    }
+
+    @Test public void proKeepsEarlyBoundarySeparateFromFinalCompletion() {
+        String script=ChatGptTurnProtocolScript.documentStartScript();
+        assertTrue(script.contains("proBoundarySeen:false"));
+        assertTrue(script.contains("state.detectorLane==='PRO'&&completionSource==='message_stream_complete'"));
+        assertTrue(script.contains("state.proBoundarySeen=true"));
+        assertTrue(script.contains("state.lastError='completion_without_final_answer_evidence'"));
+        assertTrue(script.contains("emitLog('completion_ignored',completionSource)"));
+        assertTrue(script.contains("if(!identity&&workTurnId)promoteProLane()"));
+        assertTrue(script.contains("if(state.detectorLane==='CHAT')promoteProLane()"));
     }
 
     @Test public void nativeBridgeAllowsOnlyAuthoritativeCompletionSources() {
@@ -36,34 +59,19 @@ public final class ChatGptTurnProtocolScriptTest {
         assertTrue(script.contains("const bindTurn=(run,token)=>"));
         assertTrue(script.contains("const armCompletion=(run,token)=>"));
         assertTrue(script.contains("completionArmed:false"));
-        assertTrue(script.contains("selfrun-drive:response-protocol-state:v11"));
+        assertTrue(script.contains("selfrun-drive:response-protocol-state:v12"));
         assertFalse(script.contains("__selfRunDriveTurnObserver"));
         assertFalse(script.contains("DomFallback"));
-    }
-
-    @Test public void completionRequiresFinalAnswerEvidence() {
-        String script=ChatGptTurnProtocolScript.documentStartScript();
-        assertTrue(script.contains("if(value.type==='message_stream_complete')"));
-        assertTrue(script.contains("complete('message_stream_complete');return;"));
-        assertTrue(script.contains("const completionEvidence=()=>state.sawFinalChannelToken||state.sawAssistantFinalText"));
-        assertTrue(script.contains("if(!completionEvidence())"));
-        assertTrue(script.contains("state.lastError='completion_without_final_answer_evidence'"));
-        assertTrue(script.contains("emitLog('completion_ignored',completionSource)"));
-        assertTrue(script.contains("return finalizeComplete(completionSource);"));
-        assertTrue(script.contains("if(completionSource==='message_stream_complete')state.sawStreamComplete=true"));
-        assertTrue(script.contains("currentMessageStatus:''"));
-        assertTrue(script.contains("currentMessageEndTurn:false"));
     }
 
     @Test public void lateAndStaleFramesRemainFencedByActiveTurnOwnership() {
         String script=ChatGptTurnProtocolScript.documentStartScript();
         assertTrue(script.contains("identity&&identity!==state.requestIdentity"));
-        assertTrue(script.contains("context.requestIdentity!==state.requestIdentity"));
         assertTrue(script.contains("retiredWorkTurnIds.includes(value)"));
         assertTrue(script.contains("if(sameRun)retireWorkTurn(state.currentWorkTurnId)"));
         assertTrue(script.contains("else retiredWorkTurnIds.length=0"));
         assertTrue(script.contains("if(retiredWorkTurnIds.length>8)retiredWorkTurnIds.shift()"));
-        assertTrue(script.contains("if(!identity&&(!safe(context?.conversationId||'')||!safe(context?.workTurnId||'')))return false"));
+        assertTrue(script.contains("if(!identity&&(!conversationId||!workTurnId))return false"));
         assertTrue(script.contains("state.lastError='active_turn_overlap'"));
     }
 

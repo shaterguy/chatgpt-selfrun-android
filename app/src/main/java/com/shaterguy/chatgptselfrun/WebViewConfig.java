@@ -35,6 +35,7 @@ final class WebViewConfig {
         RequestProfileScript.installDocumentStart(webView);
         ChatGptTurnProtocolScript.installDocumentStart(webView);
         WorkTurnProtocolIngressScript.installDocumentStart(webView);
+        ProTurnProtocolIngressScript.installDocumentStart(webView);
         WorkProtocolTransportCaptureScript.installDocumentStart(webView);
         WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
         return true;

@@ -10,16 +10,15 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Static guardrails for the shared response decoder and privacy-safe Work diagnostic bridge. */
+/** Static guardrails for separated Work and Pro transport adapters. */
 public final class WorkProtocolDiagnosticsContractTest {
-    @Test public void sharedDecoderKeepsCompletionAuthorityUntouchedAndUsesBoundedInspectorStructures()
-            throws Exception {
+    @Test public void workDecoderIsWorkOnlyAndKeepsBoundedInspectorStructures() throws Exception {
         String work = source("WorkTurnProtocolIngressScript.java");
         String protocol = source("ChatGptTurnProtocolScript.java");
 
-        assertTrue(work.contains("work-turn-ingress-v4"));
-        assertTrue(work.contains("handlesTransport"));
-        assertTrue(work.contains("snapshot.phase==='THINKING'||snapshot.phase==='ANSWERING'"));
+        assertTrue(work.contains("work-turn-ingress-v5"));
+        assertTrue(work.contains("const handlesTransport=()=>workMode()"));
+        assertFalse(work.contains("chat-decoder-"));
         assertTrue(work.contains("MAX_ENCODED_ITEMS=6"));
         assertTrue(work.contains("MAX_ENCODED_ITEM_LENGTH=200000"));
         assertTrue(work.contains("MAX_DECODE_DEPTH=8"));
@@ -36,6 +35,26 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertTrue(protocol.contains("if(!text||text==='[DONE]')return;"));
         assertTrue(protocol.contains("marker==='final_channel_token'&&event==='first'"));
         assertTrue(protocol.contains("value.type==='message_stream_complete'"));
+    }
+
+    @Test public void proDecoderIsDedicatedToActiveChatAndDoesNotOwnCanonicalPost() throws Exception {
+        String pro = source("ProTurnProtocolIngressScript.java");
+        String config = source("WebViewConfig.java");
+
+        assertTrue(pro.contains("pro-turn-ingress-v1"));
+        assertTrue(pro.contains("safe(t?.mode).toLowerCase()==='chat'"));
+        assertTrue(pro.contains("detectorLane)==='PRO'"));
+        assertTrue(pro.contains("MAX_ENCODED_ITEMS=6"));
+        assertTrue(pro.contains("MAX_ENCODED_ITEM_LENGTH=200000"));
+        assertTrue(pro.contains("MAX_DECODE_DEPTH=8"));
+        assertTrue(pro.contains("'pro-decoder-'+decoder"));
+        assertTrue(pro.contains("stream_handoff"));
+        assertTrue(pro.contains("workTurnId"));
+        assertTrue(pro.contains("navigator.serviceWorker.addEventListener('message'"));
+        assertTrue(pro.contains("new Uint8Array(data.buffer,data.byteOffset,data.byteLength)"));
+        assertFalse(pro.contains("/backend-api/f/conversation"));
+        assertFalse(pro.contains("window.fetch="));
+        assertTrue(config.contains("ProTurnProtocolIngressScript.installDocumentStart(webView)"));
     }
 
     @Test public void workDiagnosticsCanSeeSubframesWithoutPromotingThemToTurnState() throws Exception {
@@ -69,6 +88,7 @@ public final class WorkProtocolDiagnosticsContractTest {
 
     @Test public void diagnosticsAreSanitizedAndNativeObservationDoesNotPersistSensitiveTraffic() throws Exception {
         String work = source("WorkTurnProtocolIngressScript.java");
+        String pro = source("ProTurnProtocolIngressScript.java");
         String observer = source("WorkProtocolNativeObserver.java");
         String bridge = source("TurnProtocolLogBridge.java");
 
@@ -80,6 +100,9 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertFalse(work.contains("responseBody"));
         assertFalse(work.contains("cookie"));
         assertFalse(work.contains("authorization"));
+        assertFalse(pro.contains("requestBody"));
+        assertFalse(pro.contains("responseBody"));
+        assertFalse(pro.contains("answerText"));
         assertFalse(observer.contains("getRequestHeaders"));
         assertFalse(observer.contains("Cookie"));
         assertFalse(observer.contains("Authorization"));

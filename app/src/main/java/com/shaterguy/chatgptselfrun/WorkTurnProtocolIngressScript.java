@@ -7,9 +7,9 @@ import androidx.webkit.WebViewFeature;
 
 import java.util.Set;
 
-/** Shared response transport adapter for the protocol state machine; request admission stays Work-only. */
+/** Work-only transport adapter for the shared response protocol state machine. */
 final class WorkTurnProtocolIngressScript {
-    static final String ENGINE_VERSION = "work-turn-ingress-v4";
+    static final String ENGINE_VERSION = "work-turn-ingress-v5";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -33,16 +33,7 @@ final class WorkTurnProtocolIngressScript {
                   const target=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const workMode=()=>safe(target()?.mode).toLowerCase()==='work';
                   const protocol=()=>{try{return window.__selfRunTurnProtocol||null;}catch(_){return null;}};
-                  const handlesTransport=()=>{
-                    const mode=safe(target()?.mode).toLowerCase();
-                    if(mode==='work')return true;
-                    if(mode!=='chat')return false;
-                    try{
-                      const p=protocol(),snapshot=p?.snapshot?.()||{},runId=safe(target()?.runId||'');
-                      return !!p&&!!runId&&safe(snapshot.runId||'')===runId
-                        &&(snapshot.phase==='THINKING'||snapshot.phase==='ANSWERING');
-                    }catch(_){return false;}
-                  };
+                  const handlesTransport=()=>workMode();
                   const counters={fetchRequests:0,webSocketCreated:0,webSocketMessages:0,workerMessages:0,sharedWorkerMessages:0,
                     serviceWorkerMessages:0,serviceWorkerPortMessages:0,framesSeen:0,binaryDecoded:0,forwardedFrames:0,encodedItemsFound:0,decodedItems:0,
                     semanticSignals:0,staleFrames:0,ignoredTransport:0,decodeErrors:0};
@@ -195,7 +186,7 @@ final class WorkTurnProtocolIngressScript {
                     const beforeSnapshot=(()=>{try{return p.snapshot?.()||{};}catch(_){return{};}})(),beforePhase=safe(beforeSnapshot.phase||'');
                     const beforeDiag=diagnosticsState(),turnId=safe(context?.workTurnId||'');
                     const knownEpoch=turnId?workTurnEpochs.get(turnId):null,staleExpected=!!(knownEpoch&&knownEpoch<generationEpoch);
-                    const decoderSource=(workMode()?'work-decoder-':'chat-decoder-')+decoder;
+                    const decoderSource='work-decoder-'+decoder;
                     try{p.observeSseText('data: '+JSON.stringify(node)+'\\n\\n',decoderSource,context||{});count('semanticSignals');}
                     catch(_){count('decodeErrors');diagnostic('WORK_PROTOCOL_DECODE_ERROR',{source,decoder,reason:'semantic_forward_failed'});return false;}
                     const afterDiag=diagnosticsState(),afterSnapshot=(()=>{try{return p.snapshot?.()||{};}catch(_){return{};}})();
@@ -274,7 +265,7 @@ final class WorkTurnProtocolIngressScript {
                   };
                   const observeTransportData=async(data,source)=>{
                     if(!handlesTransport())return false;
-                    if(workMode())ensureInstallDiagnostic();
+                    ensureInstallDiagnostic();
                     const kind=dataType(data);count('framesSeen');
                     diagnostic('WORK_PROTOCOL_FRAME',{source,transport:source,dataType:kind,frameCount:counters.framesSeen,byteLength:dataLength(data)});
                     try{
@@ -290,8 +281,10 @@ final class WorkTurnProtocolIngressScript {
                   const NativeWebSocket=window.WebSocket;
                   if(typeof NativeWebSocket==='function'){
                     const WrappedWebSocket=function(...args){
-                      const socket=Reflect.construct(NativeWebSocket,args,NativeWebSocket);count('webSocketCreated');
-                      if(workMode()){ensureInstallDiagnostic();diagnostic('WORK_PROTOCOL_TRANSPORT',{source:'websocket',transport:'websocket',websocketCreated:true,outcome:'created'});}
+                      const socket=Reflect.construct(NativeWebSocket,args,NativeWebSocket);
+                      if(!workMode())return socket;
+                      count('webSocketCreated');ensureInstallDiagnostic();
+                      diagnostic('WORK_PROTOCOL_TRANSPORT',{source:'websocket',transport:'websocket',websocketCreated:true,outcome:'created'});
                       try{socket.addEventListener('message',event=>{count('webSocketMessages');void observeTransportData(event.data,'work-websocket');});}catch(_){}
                       return socket;
                     };
@@ -301,6 +294,7 @@ final class WorkTurnProtocolIngressScript {
                   const NativeWorker=window.Worker;
                   if(typeof NativeWorker==='function'){
                     const WrappedWorker=function(...args){const worker=Reflect.construct(NativeWorker,args,NativeWorker);
+                      if(!workMode())return worker;
                       try{worker.addEventListener('message',event=>{count('workerMessages');void observeTransportData(event.data,'work-worker');});}catch(_){}return worker;};
                     WrappedWorker.prototype=NativeWorker.prototype;try{Object.setPrototypeOf(WrappedWorker,NativeWorker);}catch(_){}
                     window.Worker=WrappedWorker;transportAvailability.worker=true;
@@ -308,22 +302,10 @@ final class WorkTurnProtocolIngressScript {
                   const NativeSharedWorker=window.SharedWorker;
                   if(typeof NativeSharedWorker==='function'){
                     const WrappedSharedWorker=function(...args){const shared=Reflect.construct(NativeSharedWorker,args,NativeSharedWorker);
+                      if(!workMode())return shared;
                       try{shared?.port?.addEventListener?.('message',event=>{count('sharedWorkerMessages');void observeTransportData(event.data,'work-shared-worker');});}catch(_){}return shared;};
                     WrappedSharedWorker.prototype=NativeSharedWorker.prototype;try{Object.setPrototypeOf(WrappedSharedWorker,NativeSharedWorker);}catch(_){}
                     window.SharedWorker=WrappedSharedWorker;transportAvailability.sharedworker=true;
-                  }
-                  if(navigator.serviceWorker?.addEventListener){
-                    navigator.serviceWorker.addEventListener('message',event=>{
-                      if(safe(target()?.mode).toLowerCase()!=='chat'||!handlesTransport())return;
-                      count('serviceWorkerMessages');void observeTransportData(event.data,'chat-service-worker');
-                      for(const port of Array.from(event.ports||[])){try{
-                        port.addEventListener('message',portEvent=>{
-                          if(safe(target()?.mode).toLowerCase()!=='chat'||!handlesTransport())return;
-                          count('serviceWorkerPortMessages');void observeTransportData(portEvent.data,'chat-service-worker-port');
-                        });port.start?.();
-                      }catch(_){}}
-                    });
-                    transportAvailability.serviceworker=true;
                   }
                   window.__selfRunWorkTurnProtocolIngress={
                     version:ENGINE_VERSION,observeRequest,handlesTransport,

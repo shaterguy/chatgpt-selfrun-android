@@ -7,19 +7,35 @@ SelfRun Drive 2.2.1-dev10부터 실행 제어에서 ChatGPT 턴 번호와 Drive 
 
 ## ChatGPT 응답 상태
 
-| 상태 전이 | 권위 신호 |
-| --- | --- |
-| 임의 상태 → THINKING | 가장 최근 `POST /backend-api/f/conversation` |
-| THINKING → ANSWERING | 일반 Chat·Work는 `message_marker(final_channel_token, first)`; Pro는 현재 assistant message의 실제 non-empty text snapshot 또는 해당 message의 text delta |
-| THINKING/ANSWERING → COMPLETE | final-answer evidence가 확인된 현재 요청의 `message_stream_complete`, 또는 현재 final assistant message의 명시적 `finished_successfully + end_turn=true` |
+응답 탐지는 일반 Chat, Work, Pro의 완료 정책을 분리한다. 공통으로 canonical POST와 run·turn token ownership만 공유하고, 일반 Chat에 Work/Pro의 추가 decoder·completion gate를 적용하지 않는다.
+
+| 경로 | THINKING | ANSWERING | COMPLETE |
+| --- | --- | --- | --- |
+| 일반 Chat | 가장 최근 `POST /backend-api/f/conversation` | dev16 기준 `message_marker(final_channel_token, first)` 또는 현재 assistant `channel=final` message | 현재 request identity에 상관된 `message_stream_complete`를 즉시 인정. final-answer evidence를 추가 요구하지 않음. 현재 final assistant message의 `finished_successfully + end_turn=true`도 인정 |
+| Work | 가장 최근 canonical POST | `message_marker(final_channel_token, first)` 또는 현재 final assistant evidence | final-answer evidence가 확인된 현재 Work turn의 `message_stream_complete` 또는 `finished_successfully + end_turn=true` |
+| Pro | 가장 최근 canonical POST 후 `stream_handoff`에서 Pro lane 확정 | 현재 assistant message의 실제 non-empty text snapshot 또는 해당 message의 text delta | 조기 transport boundary를 제외하고, final-answer evidence 이후 같은 Pro turn의 `message_stream_complete` 또는 `finished_successfully + end_turn=true` |
 
 동일 run에서 THINKING/ANSWERING 중 새 turn token 바인딩은 거부한다. 앱은 현재 응답의 terminal COMPLETE 전에는 다음 canonical POST를 제출하지 않으며, 충돌이 감지되면 같은 conversation을 보존한 채 일시정지한다.
 
-이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. identity 없는 socket/subframe payload는 conversation ID와 work turn ID가 모두 현재 요청에 결합된 경우에만 허용한다. Work/Pro WebSocket은 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
+이전 fetch 응답은 해당 요청에 부여된 일회성 request identity가 현재 identity와 다르면 폐기한다. identity 없는 Work/Pro transport payload는 conversation ID와 work turn ID가 현재 요청에 결합된 경우에만 허용한다. Work/Pro는 새 요청이 시작될 때 이전 `turn_id`를 폐기 목록에 넣어 늦게 도착한 stream을 현재 응답으로 오인하지 않는다. 이 identity들은 순번이 아니며 현재 요청과 폐기된 요청을 구분하는 용도로만 사용한다.
 
-`user_visible_token:first`, `cot_token:first`, `last_token:last`, `stream_handoff`, encoded-item 내부 `[DONE]`, outer WebSocket `done`는 전체 응답 COMPLETE를 만들지 않는다. Pro의 ANSWERING 보조 신호는 assistant role이며 channel이 없거나 `final`인 message의 실제 non-empty string text로 제한한다. empty/whitespace text와 user/tool/analysis/commentary payload는 제외한다. 최종 답변 text가 시작됐다는 사실만으로 COMPLETE하지 않는다.
+### 일반 Chat 경로
 
-현재 request identity 또는 conversation ID·work turn ID fence를 통과한 `message_stream_complete`라도 `final_channel_token` 또는 실제 assistant final text 증거보다 먼저 도착하면 COMPLETE로 전이하지 않고 `completion_ignored`로 기록한다. 같은 활성 요청은 THINKING/ANSWERING 상태를 유지하며 후속 reasoning/final payload를 계속 수용한다. 이후 final-answer evidence가 확인된 뒤 새 `message_stream_complete`가 도착하면 COMPLETE로 전이한다. 별도의 두 번째 `message_stream_complete`가 관찰되지 않더라도 현재 final assistant message 또는 그 current-message semantic status가 명시적으로 `finished_successfully`이고 `end_turn=true`가 되면 이를 `finished_successfully_end_turn` terminal source로 인정하여 COMPLETE로 전이한다. 이 terminal status가 final-answer evidence보다 먼저 도착하면 동일하게 `completion_ignored`로 남고, 이후 같은 현재 final message의 실제 final-answer evidence가 확인되면 terminal 조건을 다시 평가한다. 늦은 이전 요청과 폐기된 turn ID의 payload는 계속 무시하며 DOM 상태는 사용하지 않는다.
+일반 Chat의 응답 상태는 dev16의 빠른 protocol 경로를 비회귀 기준선으로 사용한다. canonical fetch-SSE를 직접 관찰하며 Work transport decoder나 Pro transport decoder가 일반 Chat의 정상 fetch 응답을 대신 해석하지 않는다.
+
+일반 Chat에서 현재 request identity와 상관된 `message_stream_complete`는 final marker나 assistant text가 먼저 관찰되지 않았더라도 현재 턴의 COMPLETE다. 따라서 Work/Pro용 `completion_without_final_answer_evidence` 조건으로 일반 Chat 완료를 지연시키지 않는다. late fetch identity와 폐기된 turn identity는 계속 거부한다.
+
+### Work 경로
+
+Work는 Work 전용 `WorkTurnProtocolIngressScript`가 WebSocket·Worker·SharedWorker 및 encoded-item을 해석한다. 이 ingress는 `mode=work`에서만 response transport를 소유하며 일반 Chat transport를 가로채지 않는다. `[DONE]`과 outer `done`은 transport boundary일 뿐 COMPLETE가 아니다.
+
+### Pro 경로
+
+Pro는 일반 Chat과 별도의 `ProTurnProtocolIngressScript`를 사용한다. Pro ingress는 canonical POST를 생성하거나 소유하지 않고, Chat의 현재 응답에서 `stream_handoff`가 관찰된 뒤에만 해당 턴의 장기 transport를 Pro lane으로 승격한다. 일반 Chat 상태에서는 매 WebSocket frame을 전체 decode하지 않고 handoff 후보만 최소 확인한다.
+
+`user_visible_token:first`, `cot_token:first`, `last_token:last`, encoded-item 내부 `[DONE]`, outer WebSocket `done`는 Pro 전체 응답 COMPLETE를 만들지 않는다. Pro의 ANSWERING 보조 신호는 assistant role이며 channel이 없거나 `final`인 message의 실제 non-empty string text로 제한한다. empty/whitespace text와 user/tool/analysis/commentary payload는 제외한다. 최종 답변 text가 시작됐다는 사실만으로 COMPLETE하지 않는다.
+
+Pro `stream_handoff` 뒤 final-answer evidence보다 먼저 도착한 `message_stream_complete`는 조기 transport boundary로 기록하고 `completion_ignored` 상태에서 현재 request/work turn을 유지한다. 이후 실제 assistant final text가 확인된 뒤 같은 현재 Pro turn의 새 `message_stream_complete`가 도착하면 COMPLETE로 전이한다. 별도의 두 번째 `message_stream_complete`가 없더라도 현재 final assistant message 또는 그 current-message semantic status가 명시적으로 `finished_successfully`이고 `end_turn=true`가 되면 `finished_successfully_end_turn` terminal source로 인정한다. 늦은 이전 요청과 폐기된 turn ID의 payload는 계속 무시하며 DOM 상태는 사용하지 않는다.
 
 ## Drive signal document 현재성
 
@@ -64,11 +80,12 @@ ChatGPT 응답 COMPLETE가 확인되면 앱은 Job 폴더를 조회한다.
 
 ## 회귀 검증
 
-- `TurnProtocolStateWebViewTest`: 활성 응답 중 새 canonical POST가 들어왔을 때 최신 요청으로 교체되고 이전 fetch/WebSocket 데이터가 폐기되는지 검증한다. Pro에서는 final-answer evidence보다 먼저 온 `message_stream_complete`가 무시되고, 같은 활성 request/work turn의 최종 답변 뒤 두 번째 `message_stream_complete` 없이 `finished_successfully + end_turn=true`만 도착해도 COMPLETE 되는지, compact status/end-turn delta와 non-final/stale payload가 잘 차단되는지도 검증한다.
-- `ProtocolDetachedSurfaceWebViewTest`: Surface detach 상태에서 조기 stream-complete를 무시한 뒤 current final assistant terminal status로 THINKING→ANSWERING→COMPLETE가 되고 native callback이 정확히 한 번만 발생하는지 검증한다.
+- `ChatGptTurnProtocolScriptTest`: CHAT/WORK/PRO lane 분리, 일반 Chat의 dev16 completion policy, Pro 조기 boundary gate와 stale identity fence를 정적으로 고정한다.
+- `TurnProtocolStateWebViewTest`: 일반 Chat의 canonical POST→ANSWERING→COMPLETE, Work/Pro의 final-evidence 경계, compact status/end-turn delta와 stale payload 차단을 WebView에서 검증한다.
+- `ProtocolDetachedSurfaceWebViewTest`: Surface detach 상태에서 Pro 조기 stream-complete를 boundary로 유지한 뒤 current final assistant terminal status로 THINKING→ANSWERING→COMPLETE가 되고 native callback이 정확히 한 번만 발생하는지 검증한다. Pro 전용 ingress가 handoff·encoded final socket frame을 protocol에 전달하는 경로도 검증한다.
+- `WorkTurnProtocolIngressWebViewTest`: Work ingress가 Work transport만 처리하고 Chat target에서는 inactive인지 검증한다.
 - `DriveSignalDocumentIdentityAndroidTest`: 비정상적으로 큰 과거 cursor, 파일 정렬 변화, 재개 시 신규 ID 부재에서도 Drive file ID 기준으로 unseen signal을 계산하는지 검증한다.
 - `SelfRunAndroidTestRunner`: 2.x TEST canonical instrumentation 경로에 위 회귀 테스트를 강제로 포함한다.
-
 
 ## 제출 확인과 대화 보존
 

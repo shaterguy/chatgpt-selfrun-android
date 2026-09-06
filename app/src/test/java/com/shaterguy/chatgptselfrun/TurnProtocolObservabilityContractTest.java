@@ -8,12 +8,13 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TurnProtocolObservabilityContractTest {
-    @Test public void onlyProtocolDetectorIsInstalledAndReported() throws Exception {
+    @Test public void onlyProtocolDetectorsAreInstalledAndReported() throws Exception {
         String config=source("WebViewConfig.java"),bridge=source("TurnProtocolLogBridge.java");
         String ui=source("TurnProtocolUiState.java");
         assertTrue(config.contains("TurnProtocolLogBridge.install(webView)"));
         assertTrue(config.contains("ChatGptTurnProtocolScript.installDocumentStart(webView)"));
         assertTrue(config.contains("WorkTurnProtocolIngressScript.installDocumentStart(webView)"));
+        assertTrue(config.contains("ProTurnProtocolIngressScript.installDocumentStart(webView)"));
         assertTrue(config.contains("WorkProtocolTransportCaptureScript.installDocumentStart(webView)"));
         assertFalse(config.contains("TurnCompletionDomFallbackScript"));
         assertTrue(bridge.contains("path=PROTOCOL"));
