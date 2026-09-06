@@ -56,16 +56,12 @@ final class ProTurnProtocolIngressScript {
                         &&(path==='/backend-api/conversation'||path==='/backend-api/f/conversation');
                     }catch(_){return false;}
                   };
-                  const requestBodyText=(input,init)=>{
-                    if(typeof init?.body==='string')return init.body;
-                    if(typeof input==='string'&&typeof init?.body==='string')return init.body;
-                    return'';
-                  };
+                  const submissionJson=(input,init)=>typeof init?.body==='string'?init.body:'';
                   const proRequestSelected=(input,init)=>{
                     try{
                       if(!canonicalConversationPost(input,init))return false;
                       const t=target();if(safe(t?.mode).toLowerCase()!=='chat'||!safe(t?.runId))return false;
-                      const raw=requestBodyText(input,init);if(!raw)return false;
+                      const raw=submissionJson(input,init);if(!raw)return false;
                       const body=JSON.parse(raw),messages=Array.isArray(body?.messages)?body.messages:[];
                       const latest=messages.length?JSON.stringify(messages[messages.length-1]):'';
                       const run=safe(t.runId);

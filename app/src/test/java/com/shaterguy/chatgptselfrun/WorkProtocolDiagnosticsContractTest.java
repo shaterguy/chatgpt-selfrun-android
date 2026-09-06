@@ -37,11 +37,11 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertTrue(protocol.contains("value.type==='message_stream_complete'"));
     }
 
-    @Test public void proDecoderIsDedicatedToActiveChatAndDoesNotOwnCanonicalPost() throws Exception {
+    @Test public void proDecoderIsDedicatedToActiveChatAndPreclassifiesCanonicalPost() throws Exception {
         String pro = source("ProTurnProtocolIngressScript.java");
         String config = source("WebViewConfig.java");
 
-        assertTrue(pro.contains("pro-turn-ingress-v1"));
+        assertTrue(pro.contains("pro-turn-ingress-v2"));
         assertTrue(pro.contains("safe(t?.mode).toLowerCase()==='chat'"));
         assertTrue(pro.contains("detectorLane)==='PRO'"));
         assertTrue(pro.contains("MAX_ENCODED_ITEMS=6"));
@@ -52,8 +52,11 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertTrue(pro.contains("workTurnId"));
         assertTrue(pro.contains("navigator.serviceWorker.addEventListener('message'"));
         assertTrue(pro.contains("new Uint8Array(data.buffer,data.byteOffset,data.byteLength)"));
-        assertFalse(pro.contains("/backend-api/f/conversation"));
-        assertFalse(pro.contains("window.fetch="));
+        assertTrue(pro.contains("path==='/backend-api/f/conversation'"));
+        assertTrue(pro.contains("const proRequestSelected=(input,init)=>"));
+        assertTrue(pro.contains("const promoteFromRequestProfile=()=>"));
+        assertTrue(pro.contains("window.fetch=function(input,init)"));
+        assertTrue(pro.contains("requestProfileHints"));
         assertTrue(config.contains("ProTurnProtocolIngressScript.installDocumentStart(webView)"));
     }
 
