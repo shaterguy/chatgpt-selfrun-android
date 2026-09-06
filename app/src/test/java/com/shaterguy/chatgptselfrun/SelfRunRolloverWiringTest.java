@@ -37,7 +37,8 @@ public final class SelfRunRolloverWiringTest {
     @Test public void continuationFailureEvidenceIsNotClearedBeforeClassification() throws Exception {
         String service=src("SelfRunService.java");
         assertFalse(service.contains("if(isContinuationDiagnosticPhase(phase))rollover.clearLocalFailures(runId)"));
-        assertTrue(service.contains("shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis())"));
+        assertTrue(service.contains("shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis(),"));
+        assertTrue(service.contains("continuationReconnectGraceStartedElapsed,SystemClock.elapsedRealtime())"));
         assertTrue(service.contains("rollover.recordLocalFailure(runId,status)"));
         assertTrue(service.contains("CONTINUATION_NO_PROGRESS"));
         String coordinator=src("SelfRunRolloverCoordinator.java");
