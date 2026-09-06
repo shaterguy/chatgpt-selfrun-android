@@ -62,6 +62,34 @@ public final class ProRequestProfilePreclassificationWebViewTest {
         }
     }
 
+    @Test public void proBootstrapThenNonProContinuationResetsLaneInSameProtocolInstance() throws Exception {
+        try(Fixture f=new Fixture()) {
+            f.fetch("[2026.09.06 | 14:46:25] [SELF_RUN_BOOTSTRAP 0.2.0 "+RUN+"]");
+            JSONObject early=f.awaitStreamComplete();
+            assertEquals("PRO",early.getString("detectorLane"));
+            assertEquals("THINKING",early.getString("phase"));
+            assertEquals(1,f.diag().getInt("requestProfileHints"));
+
+            f.sendFinal("pro-turn-sequential","최종 Pro 답변");
+            f.awaitPhase("COMPLETE");
+            f.awaitCallbacks(1);
+
+            f.bindTurn("fixture-token-2");
+            assertEquals("CHAT",f.state().getString("detectorLane"));
+            assertEquals("IDLE",f.state().getString("phase"));
+
+            f.fetch("[2026.09.06 | 14:47:25] [SELF_RUN_CONTINUE "+RUN+"]");
+            f.awaitPhase("COMPLETE");
+            JSONObject continuation=f.state();
+            assertEquals("CHAT",continuation.getString("detectorLane"));
+            assertTrue(continuation.getBoolean("sawStreamComplete"));
+            assertFalse(continuation.getBoolean("sawStreamHandoff"));
+            assertEquals(1,f.diag().getInt("requestProfileHints"));
+            assertEquals(0,f.diag().getInt("requestHintMisses"));
+            f.awaitCallbacks(2);
+        }
+    }
+
     private static final class Fixture implements AutoCloseable {
         final ActivityScenario<SelfRunNewActivity> scenario=ActivityScenario.launch(SelfRunNewActivity.class);
         final AtomicReference<WebView> web=new AtomicReference<>();
@@ -91,9 +119,14 @@ public final class ProRequestProfilePreclassificationWebViewTest {
                     +"window.fetch=()=>Promise.resolve(new Response('data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',{status:200,headers:{'Content-Type':'text/event-stream'}}));"
                     +"window.WebSocket=class extends EventTarget{constructor(){super();}};window.Worker=undefined;window.SharedWorker=undefined;");
             eval(ChatGptTurnProtocolScript.documentStartScript());
-            assertEquals("true",text("String(window.__selfRunTurnProtocol.bindTurn('"+RUN+"','fixture-token'))"));
-            assertEquals("true",text("String(window.__selfRunTurnProtocol.armCompletion('"+RUN+"','fixture-token'))"));
+            bindTurn("fixture-token");
             eval(ProTurnProtocolIngressScript.documentStartScript());
+        }
+
+        void bindTurn(String token) throws Exception {
+            String quoted=JSONObject.quote(token);
+            assertEquals("true",text("String(window.__selfRunTurnProtocol.bindTurn('"+RUN+"',"+quoted+"))"));
+            assertEquals("true",text("String(window.__selfRunTurnProtocol.armCompletion('"+RUN+"',"+quoted+"))"));
         }
 
         void fetch(String prompt) throws Exception {
