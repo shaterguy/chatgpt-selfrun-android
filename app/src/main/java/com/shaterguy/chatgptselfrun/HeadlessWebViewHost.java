@@ -192,6 +192,7 @@ final class HeadlessWebViewHost {
         private long lastCallbackElapsed;
         private int attachGeneration;
         private int visualCompletedGeneration;
+        private int composerRecoveryGeneration;
         private boolean destroyed;
 
         DisplayDiagnostics(Context context) {
@@ -255,9 +256,11 @@ final class HeadlessWebViewHost {
                 try {
                     webView.evaluateJavascript(SelfRunContinuationDiagnosticsDom.snapshot(), raw -> {
                         if (!active(generation)) return;
+                        long afterAttachMs = SystemClock.elapsedRealtime() - started;
                         String detail = decodeJsString(raw);
                         log("WEBVIEW_CONTINUATION_DIAG", "after_attach_ms="
-                                + (SystemClock.elapsedRealtime() - started) + ";" + detail + ";" + callbackState());
+                                + afterAttachMs + ";" + detail + ";" + callbackState());
+                        maybeRecoverMissingComposer(webView, generation, afterAttachMs, detail);
                     });
                 } catch (Throwable error) {
                     log("WEBVIEW_CONTINUATION_DIAG", "after_attach_ms="
@@ -265,6 +268,31 @@ final class HeadlessWebViewHost {
                             + error.getClass().getSimpleName() + ";" + callbackState());
                 }
             }, delay);
+        }
+
+        private void maybeRecoverMissingComposer(WebView webView, int generation,
+                                                 long afterAttachMs, String detail) {
+            boolean visualReady;
+            int recoveredGeneration;
+            synchronized (this) {
+                visualReady = visualCompletedGeneration >= generation;
+                recoveredGeneration = composerRecoveryGeneration;
+            }
+            if (!ContinuationComposerRecoveryPolicy.shouldReload(
+                    store.phase(), visualReady, afterAttachMs, generation, recoveredGeneration, detail)) return;
+            synchronized (this) {
+                if (composerRecoveryGeneration == generation || !active(generation)) return;
+                composerRecoveryGeneration = generation;
+            }
+            log("CONTINUATION_COMPOSER_RECOVERY",
+                    "reason=semantic_absent_after_reattach;action=reload_same_conversation;after_attach_ms="
+                            + afterAttachMs + ";visual_ready=1");
+            try {
+                webView.reload();
+            } catch (Throwable error) {
+                log("CONTINUATION_COMPOSER_RECOVERY",
+                        "result=reload_failed;error=" + error.getClass().getSimpleName());
+            }
         }
 
         private synchronized String callbackState() {
