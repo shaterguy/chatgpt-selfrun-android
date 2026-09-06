@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
 
-/** Actual-hook regression coverage for shared CHAT response transport ingress. */
+/** Actual-hook regression coverage for the dedicated Pro response transport ingress. */
 @RunWith(AndroidJUnit4.class)
 public final class ChatProtocolTransportIngressWebViewTest {
     private static final String ORIGIN = "https://chatgpt.com/c/fixture-conversation";
@@ -29,7 +29,8 @@ public final class ChatProtocolTransportIngressWebViewTest {
     @Test public void stringWebSocketInheritsOuterContextAndCompletesOnce() throws Exception {
         try (Fixture f = new Fixture()) {
             f.start("turn-string");
-            assertEquals("true", f.text("String(window.__selfRunWorkTurnProtocolIngress.handlesTransport())"));
+            assertEquals("false", f.text("String(window.__selfRunWorkTurnProtocolIngress.handlesTransport())"));
+            assertEquals("true", f.text("String(window.__selfRunProTurnProtocolIngress.handlesTransport())"));
             f.socket(f.outer("turn-string", marker()));
             f.phase("ANSWERING");
             assertEquals(0, f.callbacks.get());
@@ -63,7 +64,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
         }
     }
 
-    @Test public void workerAndSharedWorkerUseSharedDecoder() throws Exception {
+    @Test public void workerAndSharedWorkerUseDedicatedDecoder() throws Exception {
         try (Fixture f = new Fixture()) {
             f.start("turn-worker");
             f.eval("new Worker('fixture-worker.js');");
@@ -86,7 +87,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
         }
     }
 
-    @Test public void serviceWorkerAndTransferredPortUsePassiveSharedIngress() throws Exception {
+    @Test public void serviceWorkerAndTransferredPortUsePassiveProIngress() throws Exception {
         try (Fixture f = new Fixture()) {
             assertEquals("true", f.text("String(!!window.fixtureServiceWorker&&typeof window.fixtureServiceWorker.dispatchEvent==='function')"));
             f.start("turn-sw");
@@ -105,6 +106,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
 
     @Test public void staleOuterContextRejectedAndIdleDoesNotClaimTransport() throws Exception {
         try (Fixture f = new Fixture()) {
+            assertEquals("false", f.text("String(window.__selfRunProTurnProtocolIngress.handlesTransport())"));
             assertEquals("false", f.text("String(window.__selfRunWorkTurnProtocolIngress.handlesTransport())"));
             f.socket(f.outer("idle-turn", marker()));
             assertEquals("IDLE", f.state().getString("phase"));
@@ -161,7 +163,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
                 activity.setContentView(view);
                 web.set(view);
                 view.loadDataWithBaseURL(ORIGIN,
-                        "<!doctype html><html><body>chat transport fixture</body></html>",
+                        "<!doctype html><html><body>pro transport fixture</body></html>",
                         "text/html", "UTF-8", null);
             });
             assertTrue("fixture load", loaded.await(15, TimeUnit.SECONDS));
@@ -178,6 +180,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
                     + "window.fetch=()=>Promise.resolve(new Response(window.fixtureResponse,{status:200,headers:{'Content-Type':'text/event-stream'}}));");
             eval(ChatGptTurnProtocolScript.documentStartScript());
             eval(WorkTurnProtocolIngressScript.documentStartScript());
+            eval(ProTurnProtocolIngressScript.documentStartScript());
             eval(WorkProtocolTransportCaptureScript.documentStartScript());
             assertEquals("true", text("String(window.__selfRunTurnProtocol.bindTurn('fixture-run','fixture-token'))"));
             assertEquals("true", text("String(window.__selfRunTurnProtocol.armCompletion('fixture-run','fixture-token'))"));
@@ -201,7 +204,9 @@ public final class ChatProtocolTransportIngressWebViewTest {
                 JSONObject s = state();
                 if (turn.equals(s.getString("currentWorkTurnId")) && s.getBoolean("sawStreamComplete")) {
                     assertEquals("THINKING", s.getString("phase"));
+                    assertEquals("PRO", s.getString("detectorLane"));
                     assertTrue(s.getBoolean("sawStreamHandoff"));
+                    assertTrue(s.getBoolean("proBoundarySeen"));
                     assertEquals(callbacksBefore, callbacks.get());
                     return;
                 }
@@ -226,7 +231,7 @@ public final class ChatProtocolTransportIngressWebViewTest {
         }
 
         JSONObject diag() throws Exception {
-            return new JSONObject(text("JSON.stringify(window.__selfRunWorkTurnProtocolIngress.diagnostics())"));
+            return new JSONObject(text("JSON.stringify(window.__selfRunProTurnProtocolIngress.diagnostics())"));
         }
 
         JSONObject state() throws Exception {

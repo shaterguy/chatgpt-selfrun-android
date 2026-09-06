@@ -170,7 +170,7 @@ final class ChatGptTurnProtocolScript {
                     return state.currentWorkTurnId===value;
                   };
                   const promoteProLane=()=>{
-                    if(state.detectorLane!=='CHAT'||targetMode()!=='chat')return false;
+                    if(state.detectorLane!=='CHAT')return false;
                     state.detectorLane='PRO';state.lastDeltaPath='';save();return true;
                   };
                   const activeContext=context=>{
