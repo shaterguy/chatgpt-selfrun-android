@@ -8,11 +8,11 @@ public class ComposerSemanticFallbackTest {
     @Test public void runtimeMatcherSupportsPlaintextOnlyAndFutureContenteditableValues() {
         String script = WebUiCalibrationDom.runtimePrelude();
         assertTrue(script.contains("#prompt-textarea"));
-        assertTrue(script.contains("[data-testid=\\\"prompt-textarea\\\"]"));
+        assertTrue(script.contains("[data-testid=\"prompt-textarea\"]"));
         assertTrue(script.contains("[contenteditable]"));
-        assertTrue(script.contains("[role=\\\"textbox\\\"]"));
+        assertTrue(script.contains("[role=\"textbox\"]"));
         assertTrue(script.contains(".ProseMirror"));
-        assertTrue(script.contains("[data-lexical-editor=\\\"true\\\"]"));
+        assertTrue(script.contains("[data-lexical-editor=\"true\"]"));
         assertTrue(script.contains("v!=='false'"));
         assertTrue(script.contains("__srCurrentComposer"));
         assertTrue(script.contains("source=current;profile=0"));
@@ -22,7 +22,7 @@ public class ComposerSemanticFallbackTest {
     @Test public void calibrationCaptureUsesSemanticComposerPool() {
         String script = WebUiCalibrationDom.install(WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT);
         assertTrue(script.contains("[contenteditable]"));
-        assertTrue(script.contains("[role=\\\"textbox\\\"]"));
+        assertTrue(script.contains("[role=\"textbox\"]"));
         assertTrue(script.contains("prompt-textarea"));
         assertTrue(script.contains("v!=='false'"));
     }

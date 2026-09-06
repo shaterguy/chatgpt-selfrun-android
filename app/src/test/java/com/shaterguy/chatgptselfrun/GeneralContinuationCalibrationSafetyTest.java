@@ -11,7 +11,8 @@ public class GeneralContinuationCalibrationSafetyTest {
         assertTrue(runtime.contains("const __srComposerKey=k=>k==='GENERAL_COMPOSER'||k==='PROJECT_COMPOSER'"));
         assertTrue(runtime.contains("const __srSendKey=k=>k==='GENERAL_SEND'||k==='PROJECT_SEND'"));
         assertTrue(runtime.contains("const __srComposerCandidate=e=>"));
-        assertTrue(runtime.contains("textarea,[contenteditable="));
+        assertTrue(runtime.contains("#prompt-textarea,[data-testid=\"prompt-textarea\"],textarea,[contenteditable],[role=\"textbox\"]"));
+        assertTrue(runtime.contains("v!=='false'"));
         assertTrue(runtime.contains("const __srSendCandidate=e=>"));
         assertTrue(runtime.contains("form.contains(e)"));
         assertTrue(runtime.contains("__srCompatible(k,e)"));
@@ -22,6 +23,7 @@ public class GeneralContinuationCalibrationSafetyTest {
         assertTrue(runtime.contains("rawScore>=6?'REJECT':'MISS'"));
         assertTrue(runtime.contains("rawScore"));
         assertTrue(runtime.contains("kind=__srComposerKey(k)?'composer'"));
+        assertTrue(runtime.contains("if(semantic)"));
 
         String general = SelfRunDom.prepareDriveTurn(
                 "https://chatgpt.com/c/conversation123", "continue", "marker-general");
