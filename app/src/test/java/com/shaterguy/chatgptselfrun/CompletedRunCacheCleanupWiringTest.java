@@ -31,7 +31,7 @@ public final class CompletedRunCacheCleanupWiringTest {
         assertTrue(genericStart >= 0 && genericEnd > genericStart);
         assertFalse(service.substring(genericStart, genericEnd).contains("clearResourceCacheAfterCompletedRun"));
 
-        int destroyStart = host.indexOf("void destroy()");
+        int destroyStart = host.lastIndexOf("void destroy()");
         assertTrue(destroyStart >= 0);
         assertFalse(host.substring(destroyStart).contains("clearCache("));
         assertTrue(host.contains("boolean clearResourceCacheAfterCompletedRun()"));
