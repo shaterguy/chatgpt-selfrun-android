@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** Dedicated transport adapter for markerless/long-running Pro responses in Chat mode. */
 final class ProTurnProtocolIngressScript {
-    static final String ENGINE_VERSION = "pro-turn-ingress-v2";
+    static final String ENGINE_VERSION = "pro-turn-ingress-v3";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -28,6 +28,8 @@ final class ProTurnProtocolIngressScript {
                   const ENGINE_VERSION=__ENGINE_VERSION__;
                   if(window.__selfRunProTurnProtocolIngress?.version===ENGINE_VERSION)return;
                   const MAX_ENCODED_ITEMS=6,MAX_ENCODED_ITEM_LENGTH=200000,MAX_DECODE_DEPTH=8;
+                  const PROFILE_REGISTRY_STORE='selfrun-drive:profile-registry-runtime:v1';
+                  const PRO_MODEL_TOKEN=/(?:^|[-_.])pro(?:[-_.]|$)/;
                   const safe=value=>String(value??'').replace(/\\s+/g,' ').trim().slice(0,256);
                   const target=()=>{try{return window.__selfRunRequestProfileEngine?.target?.()||null;}catch(_){return null;}};
                   const protocol=()=>{try{return window.__selfRunTurnProtocol||null;}catch(_){return null;}};
@@ -57,6 +59,22 @@ final class ProTurnProtocolIngressScript {
                     }catch(_){return false;}
                   };
                   const submissionJson=(input,init)=>typeof init?.body==='string'?init.body:'';
+                  const selectedProfileModel=(body,t)=>{
+                    try{
+                      const messages=Array.isArray(body?.messages)?body.messages:[];
+                      const latest=messages.length?JSON.stringify(messages[messages.length-1]):'';
+                      const run=safe(t?.runId),bootstrap=latest.includes('SELF_RUN_BOOTSTRAP')&&(!run||latest.includes(run));
+                      const reasoning=safe(bootstrap?(t?.bootstrapReasoning||t?.reasoning):(t?.continuationReasoning||t?.reasoning)).toLowerCase();
+                      if(!reasoning)return'';
+                      const raw=localStorage.getItem(PROFILE_REGISTRY_STORE);if(!raw)return'';
+                      const registry=JSON.parse(raw);if(!Array.isArray(registry))return'';
+                      const profile=registry.find(item=>safe(item?.mode).toLowerCase()==='chat'
+                        &&safe(item?.signalReasoning).toLowerCase()===reasoning);
+                      const operations=Array.isArray(profile?.operations)?profile.operations:[];
+                      const model=operations.find(op=>safe(op?.path)==='model'&&safe(op?.op).toUpperCase()==='SET');
+                      return safe(model?.value).toLowerCase();
+                    }catch(_){return'';}
+                  };
                   const proRequestSelected=(input,init)=>{
                     try{
                       if(!canonicalConversationPost(input,init))return false;
@@ -68,7 +86,8 @@ final class ProTurnProtocolIngressScript {
                       const bootstrap=latest.includes('SELF_RUN_BOOTSTRAP')&&(!run||latest.includes(run));
                       const reasoning=safe(bootstrap?(t.bootstrapReasoning||t.reasoning):(t.continuationReasoning||t.reasoning)).toLowerCase();
                       const model=safe(body?.model).toLowerCase();
-                      return reasoning==='pro'||/(?:^|[-_.])pro(?:[-_.]|$)/.test(model);
+                      const profileModel=selectedProfileModel(body,t);
+                      return reasoning==='pro'||PRO_MODEL_TOKEN.test(profileModel)||PRO_MODEL_TOKEN.test(model);
                     }catch(_){return false;}
                   };
                   const promoteFromRequestProfile=()=>{

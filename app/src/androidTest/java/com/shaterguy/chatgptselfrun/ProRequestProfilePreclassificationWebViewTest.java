@@ -114,8 +114,11 @@ public final class ProRequestProfilePreclassificationWebViewTest {
                 view.loadDataWithBaseURL(ORIGIN,"<!doctype html><html><body>pro request profile fixture</body></html>","text/html","UTF-8",null);
             });
             assertTrue("fixture load",loaded.await(15,TimeUnit.SECONDS));
-            eval("sessionStorage.clear();window.fixtureLogs=[];window.selfRunTurnLog={postMessage:x=>window.fixtureLogs.push(JSON.parse(x))};"
-                    +"window.__selfRunRequestProfileEngine={target:()=>({runId:'"+RUN+"',mode:'chat',reasoning:'pro',bootstrapReasoning:'pro',continuationReasoning:'instant'})};"
+            eval("sessionStorage.clear();localStorage.clear();window.fixtureLogs=[];window.selfRunTurnLog={postMessage:x=>window.fixtureLogs.push(JSON.parse(x))};"
+                    +"window.__selfRunRequestProfileEngine={target:()=>({runId:'"+RUN+"',mode:'chat',reasoning:'6pro',bootstrapReasoning:'6pro',continuationReasoning:'instant'})};"
+                    +"localStorage.setItem('selfrun-drive:profile-registry-runtime:v1',JSON.stringify(["
+                    +"{mode:'chat',signalModel:'',signalReasoning:'6pro',operations:[{op:'SET',path:'model',value:'gpt-5-6-pro-fixture'},{op:'REMOVE',path:'thinking_effort'},{op:'REMOVE',path:'conversation_origin'},{op:'REMOVE',path:'service_tier'}]},"
+                    +"{mode:'chat',signalModel:'',signalReasoning:'instant',operations:[{op:'SET',path:'model',value:'gpt-5-6'},{op:'REMOVE',path:'thinking_effort'},{op:'REMOVE',path:'conversation_origin'},{op:'REMOVE',path:'service_tier'}]}]));"
                     +"window.fetch=()=>Promise.resolve(new Response('data: {\\\"type\\\":\\\"message_stream_complete\\\"}\\n\\n',{status:200,headers:{'Content-Type':'text/event-stream'}}));"
                     +"window.WebSocket=class extends EventTarget{constructor(){super();}};window.Worker=undefined;window.SharedWorker=undefined;");
             eval(ChatGptTurnProtocolScript.documentStartScript());

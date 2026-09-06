@@ -41,7 +41,7 @@ public final class WorkProtocolDiagnosticsContractTest {
         String pro = source("ProTurnProtocolIngressScript.java");
         String config = source("WebViewConfig.java");
 
-        assertTrue(pro.contains("pro-turn-ingress-v2"));
+        assertTrue(pro.contains("pro-turn-ingress-v3"));
         assertTrue(pro.contains("safe(t?.mode).toLowerCase()==='chat'"));
         assertTrue(pro.contains("detectorLane)==='PRO'"));
         assertTrue(pro.contains("MAX_ENCODED_ITEMS=6"));
@@ -53,10 +53,13 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertTrue(pro.contains("navigator.serviceWorker.addEventListener('message'"));
         assertTrue(pro.contains("new Uint8Array(data.buffer,data.byteOffset,data.byteLength)"));
         assertTrue(pro.contains("path==='/backend-api/f/conversation'"));
+        assertTrue(pro.contains("const selectedProfileModel=(body,t)=>"));
+        assertTrue(pro.contains("selfrun-drive:profile-registry-runtime:v1"));
         assertTrue(pro.contains("const proRequestSelected=(input,init)=>"));
         assertTrue(pro.contains("const promoteFromRequestProfile=()=>"));
         assertTrue(pro.contains("window.fetch=function(input,init)"));
         assertTrue(pro.contains("requestProfileHints"));
+        assertFalse(pro.contains("reasoning==='6pro'"));
         assertTrue(config.contains("ProTurnProtocolIngressScript.installDocumentStart(webView)"));
     }
 
