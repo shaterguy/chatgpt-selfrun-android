@@ -116,11 +116,9 @@ grep -Fq 'turnToken' "$TURN_PROTOCOL"
 grep -Fq 'bindTurn' "$TURN_PROTOCOL"
 grep -Fq 'armCompletion' "$TURN_PROTOCOL"
 grep -Fq 'message_stream_complete' "$TURN_PROTOCOL"
-grep -Fq "const COMPLETE_SOURCES=new Set(['message_stream_complete'])" "$TURN_PROTOCOL"
-if grep -Fq 'finished_successfully_end_turn' "$TURN_PROTOCOL" "$TURN_BRIDGE"; then
-  echo 'Only message_stream_complete may complete a response' >&2
-  exit 1
-fi
+grep -Fq "const COMPLETE_SOURCES=new Set(['message_stream_complete','finished_successfully_end_turn'])" "$TURN_PROTOCOL"
+grep -Fq "complete('finished_successfully_end_turn')" "$TURN_PROTOCOL"
+grep -Fq 'finished_successfully_end_turn' "$TURN_BRIDGE"
 grep -Fq 'turnToken.equals(store.turnProtocolToken())' "$TURN_BRIDGE"
 grep -Fq 'static boolean applyAutomation' "$WEB_CONFIG"
 grep -Fq 'if (!protocolAvailable)' "$WEB_CONFIG"
