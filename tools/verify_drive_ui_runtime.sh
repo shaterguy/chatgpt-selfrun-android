@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Same emulator, same source; collect real Android UI evidence before co-install verification.
 set -euo pipefail
-# Keep transport regressions on the real canonical instrumentation path, exactly once each.
+# Keep transport and Pro preclassification regressions on the real canonical instrumentation path, exactly once each.
 PRO_COMPACT_CLASS='com.shaterguy.chatgptselfrun.ProCompactDeltaWebViewTest'
+PRO_PRECLASSIFICATION_CLASS='com.shaterguy.chatgptselfrun.ProRequestProfilePreclassificationWebViewTest'
 CHAT_TRANSPORT_CLASS='com.shaterguy.chatgptselfrun.ChatProtocolTransportIngressWebViewTest'
-for REQUIRED_CLASS in "$PRO_COMPACT_CLASS" "$CHAT_TRANSPORT_CLASS"; do
+for REQUIRED_CLASS in "$PRO_COMPACT_CLASS" "$PRO_PRECLASSIFICATION_CLASS" "$CHAT_TRANSPORT_CLASS"; do
   case ",${TEST_INSTRUMENTATION_CLASS:?}," in
     *",${REQUIRED_CLASS},"*) ;;
     *) TEST_INSTRUMENTATION_CLASS="${TEST_INSTRUMENTATION_CLASS},${REQUIRED_CLASS}" ;;
