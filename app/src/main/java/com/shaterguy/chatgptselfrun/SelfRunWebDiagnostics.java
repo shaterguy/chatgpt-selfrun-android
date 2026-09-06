@@ -7,7 +7,8 @@ final class SelfRunWebDiagnostics {
     static String waitDetail(String phase, String status, String detail) {
         String safeStatus = switch (status == null ? "" : status) {
             case "WAIT", "UI_WAIT", "COMPOSER_CLEARING", "COMPOSER_INPUTTING", "SUBMISSION_PENDING",
-                    "SEND_DISABLED", "STOP", "UNKNOWN", "SCRIPT_ERROR", "SUBMISSION_FAILED" -> status;
+                    "SEND_DISABLED", "STOP", "UNKNOWN", "COMPOSER_UNAVAILABLE", "COMPOSER_NOT_EDITABLE",
+                    "SCRIPT_ERROR", "SUBMISSION_FAILED" -> status;
             default -> "OTHER";
         };
         String reason;
@@ -17,6 +18,8 @@ final class SelfRunWebDiagnostics {
         else if ("SEND_DISABLED".equals(safeStatus)) reason = "send_disabled";
         else if ("STOP".equals(safeStatus)) reason = "stop_visible";
         else if ("UNKNOWN".equals(safeStatus)) reason = "control_unknown";
+        else if ("COMPOSER_UNAVAILABLE".equals(safeStatus)) reason = "composer_unavailable";
+        else if ("COMPOSER_NOT_EDITABLE".equals(safeStatus)) reason = "composer_not_editable";
         else if ("SCRIPT_ERROR".equals(safeStatus)) reason = "script_error";
         else if ("SUBMISSION_FAILED".equals(safeStatus)) reason = "request_profile_rejected".equals(detail)
                 ? "request_profile_rejected" : "submission_failed";
@@ -40,6 +43,8 @@ final class SelfRunWebDiagnostics {
         else if (SelfRunContinuationDom.SEND_DISABLED.equals(status)) safeStatus = "SEND_DISABLED";
         else if (SelfRunContinuationDom.SEND_ENABLED.equals(status)) safeStatus = "SEND_ENABLED";
         else if (SelfRunContinuationDom.COMPOSER_IDLE.equals(status)) safeStatus = "COMPOSER_IDLE";
+        else if (SelfRunContinuationDom.COMPOSER_UNAVAILABLE.equals(status)) safeStatus = "COMPOSER_UNAVAILABLE";
+        else if (SelfRunContinuationDom.COMPOSER_NOT_EDITABLE.equals(status)) safeStatus = "COMPOSER_NOT_EDITABLE";
         else safeStatus = "OTHER";
         return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=state_wait";
     }

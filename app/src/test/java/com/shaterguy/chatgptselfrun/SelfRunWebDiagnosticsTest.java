@@ -13,6 +13,12 @@ public class SelfRunWebDiagnosticsTest {
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "입력 반영 확인 대기"));
         assertEquals("status=WAIT;phase=send_continue;reason=input_wait",
                 SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "WAIT", "continuation 입력 대기"));
+        assertEquals("status=COMPOSER_UNAVAILABLE;phase=send_continue;reason=composer_unavailable",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE,
+                        "COMPOSER_UNAVAILABLE", "private detail"));
+        assertEquals("status=COMPOSER_NOT_EDITABLE;phase=send_continue;reason=composer_not_editable",
+                SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE,
+                        "COMPOSER_NOT_EDITABLE", "private detail"));
         String future = SelfRunWebDiagnostics.waitDetail(SelfRunStore.PHASE_SEND_CONTINUE, "UI_WAIT", "future detail containing user text");
         assertEquals("status=UI_WAIT;phase=send_continue;reason=ui_wait", future);
         assertFalse(future.contains("future detail"));
