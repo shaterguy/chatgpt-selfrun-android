@@ -94,6 +94,8 @@ public final class SelfRunService extends Service {
     private String continuationAttemptPrompt = "";
     private String continuationAttemptMarkerId = "";
     private long continuationReconnectGraceStartedElapsed;
+    private long continuationReadinessStartedElapsed;
+    private int continuationReadinessProgress;
     private long postDispatchStartedElapsed;
     private String postDispatchRunId = "";
     private boolean postDispatchTransientSeen;
@@ -151,6 +153,7 @@ public final class SelfRunService extends Service {
             accessToken = "";
             bootstrapSendCallbackRecoveries = 0;
             continuationReconnectGraceStartedElapsed = 0L;
+            resetContinuationReadiness();
             
         }
         if (ACTION_RESUME.equals(action)) {
@@ -996,7 +999,17 @@ private void evaluate(String phase,String script){
             if(SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)){
                 if("CONTINUE_CLICKED".equals(status)||"SUBMISSION_CONFIRMED".equals(status)
                         ||"VERIFY_REQUIRED".equals(status)){
+                    resetContinuationReadiness();
                     rollover.clearLocalFailures(runId);continuationSubmitted(detail);return;
+                }
+                if(SelfRunRolloverPolicy.continuationReadinessStatus(status)){
+                    recordContinuationWait(phase,status,detail);
+                    if(!networkState.isValidated()){rollover.clearLocalFailures(runId);scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;}
+                    if(continuationReadinessDeadlineExpired(status)){
+                        rollover.clearLocalFailures(runId);
+                        rolloverConversation(SelfRunRolloverPolicy.CONTINUATION_NO_PROGRESS);return;
+                    }
+                    scheduleWeb(CONTINUATION_VERIFY_INTERVAL_MS);return;
                 }
                 if(SelfRunRolloverPolicy.shouldCountContinuationFailure(status,store.phaseStartedAt(),System.currentTimeMillis(),
                         continuationReconnectGraceStartedElapsed,SystemClock.elapsedRealtime())
@@ -1150,7 +1163,9 @@ private void handleWebResult(String phase,String status,JSONObject result){
 private String driveBootstrap(){return commandPrompt(SelfRunStore.RETRY_BOOTSTRAP);}
 private String continuationPrompt(){if(continuationAttemptPrompt.isEmpty())continuationAttemptPrompt=SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput());return continuationAttemptPrompt;}
 private String continuationMarkerId(){if(continuationAttemptMarkerId.isEmpty())continuationAttemptMarkerId=store.runId()+":continue:"+store.driveSignalCursor()+":"+store.phaseStartedAt();return continuationAttemptMarkerId;}
-private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";}
+private void clearContinuationAttempt(){continuationAttemptPrompt="";continuationAttemptMarkerId="";resetContinuationReadiness();}
+private void resetContinuationReadiness(){continuationReadinessStartedElapsed=0L;continuationReadinessProgress=0;}
+private boolean continuationReadinessDeadlineExpired(String status){long now=SystemClock.elapsedRealtime();int progress=SelfRunRolloverPolicy.continuationReadinessProgress(status);if(continuationReadinessStartedElapsed<=0L||progress>continuationReadinessProgress){continuationReadinessStartedElapsed=now;continuationReadinessProgress=progress;}return SelfRunRolloverPolicy.continuationReadinessDeadlineExpired(continuationReadinessStartedElapsed,now);}
 private void continuationSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();runLog.record(store,"CONTINUATION_SUBMISSION_DISPATCHED","detail="+detail);clearContinuationAttempt();store.beginTurnCompletionWait(token,"다음 턴 제출 확인 · 응답 프로토콜 대기 중",true);detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
 private void bootstrapSubmitted(String detail){if(!canRun())return;if(!postDispatchWindowActive())beginPostDispatchNoStartWindow();String token=ensureTurnProtocolToken();store.bootstrapSubmissionConfirmed(token);runLog.record(store,"BOOTSTRAP_SUBMISSION_DISPATCHED","detail="+detail);detachDisplayOutput("submission_confirmed");releaseWakeLock();armProtocolCompletion(token);scheduleTurnStartGuard();}
 
@@ -1291,7 +1306,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private void recordDisplayDrainFailure() {if(host==null)return;String failure=host.takeDisplayDrainFailure();if(!failure.isEmpty()&&runLog!=null)runLog.record(store,"DISPLAY_DRAIN_FAILURE","error="+BootstrapResultPolicy.safe(failure,80));}
     private boolean detachDisplayOutput(String reason) {if(host==null||!host.hasDetachableOutput())return false;try{boolean changed=host.detachOutput();recordDisplayDrainFailure();if(changed){continuationReconnectGraceStartedElapsed=0L;if(runLog!=null)runLog.record(store,"DISPLAY_OUTPUT_DETACHED","reason="+reason);}return changed;}catch(Throwable error){if(runLog!=null)runLog.record(store,"DISPLAY_DRAIN_FAILURE","action=detach;error="+error.getClass().getSimpleName());return false;}}
     private boolean attachDisplayOutput(String reason) {if(host==null||!host.hasDetachableOutput())return false;try{boolean changed=host.attachOutput();recordDisplayDrainFailure();if(changed){if(SelfRunStore.PHASE_SEND_CONTINUE.equals(store.phase()))continuationReconnectGraceStartedElapsed=SystemClock.elapsedRealtime();if(runLog!=null)runLog.record(store,"DISPLAY_OUTPUT_ATTACHED","reason="+reason);}return host.isOutputAttached();}catch(Throwable error){if(runLog!=null)runLog.record(store,"DISPLAY_DRAIN_FAILURE","action=attach;error="+error.getClass().getSimpleName());return false;}}
-    private void pauseWebView() { if(webView==null)return;detachDisplayOutput("webview_pause");if(webViewPaused)return;try{webView.onPause();webViewPaused=true;}catch(Throwable ignored){} }
+    private void pauseWebView() { if(webView==null)return;resetContinuationReadiness();detachDisplayOutput("webview_pause");if(webViewPaused)return;try{webView.onPause();webViewPaused=true;}catch(Throwable ignored){} }
     private void resumeWebView() { if(webView==null)return;attachDisplayOutput("active_automation");if(!webViewPaused)return;try{webView.onResume();}catch(Throwable ignored){}finally{webViewPaused=false;} }
     private void restoreCanonical() { String target=canonicalUrl(); if (canRun() && webView != null && validAutomationTarget(target)) { resumeWebView(); webView.loadUrl(target); } }
     private String canonicalUrl() { return store.conversationUrl().isEmpty() ? store.projectUrl() : store.conversationUrl(); }
@@ -1303,7 +1318,7 @@ private void resumeFromUi(){if(!store.paused()||store.userStopped()||store.runId
     private JSONObject parse(String raw) {try { Object outer = new JSONTokener(raw == null ? "" : raw).nextValue(); return new JSONObject(outer instanceof String ? (String) outer : String.valueOf(outer)); }catch (Throwable error) { return new JSONObject(); }}
     private void acquireWakeLock() { if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(2 * 60_000L); }
     private void releaseWakeLock() { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); }
-    private void cleanupWebView() {handler.removeCallbacks(webRunnable);generation++;webEvaluationId++;domInFlight=false;webViewPaused=false;continuationReconnectGraceStartedElapsed=0L;if(host!=null){host.destroy();host=null;}webView=null;}
+    private void cleanupWebView() {handler.removeCallbacks(webRunnable);generation++;webEvaluationId++;domInFlight=false;webViewPaused=false;continuationReconnectGraceStartedElapsed=0L;resetContinuationReadiness();if(host!=null){host.destroy();host=null;}webView=null;}
     private void stopRuntime() {stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock();stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();}
 
     @Override public void onDestroy() {destroyed = true;stopAutomationCallbacks(); cleanupWebView(); releaseWakeLock(); if(networkState!=null)networkState.stop(); io.shutdownNow();super.onDestroy();}

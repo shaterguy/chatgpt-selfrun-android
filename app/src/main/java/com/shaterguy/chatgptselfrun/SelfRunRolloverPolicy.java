@@ -20,6 +20,8 @@ final class SelfRunRolloverPolicy {
     static final int MAX_LOCAL_FAILURES = 3;
     static final long CONTINUATION_HARD_FAILURE_GRACE_MS = 5_000L;
     static final long CONTINUATION_SOFT_STALL_GRACE_MS = 15_000L;
+    /** Bounded same-conversation recheck budget after actual continuation preparation begins. */
+    static final long CONTINUATION_READINESS_MAX_WAIT_MS = 60_000L;
     static final long CONTINUATION_NO_START_MAX_WAIT_MS = 60_000L;
     static final int NO_START_WAIT = 0;
     static final int NO_START_ROLLOVER = 1;
@@ -64,13 +66,36 @@ final class SelfRunRolloverPolicy {
 
     static boolean hardContinuationFailureStatus(String status) {
         return "SUBMISSION_AMBIGUOUS".equals(status) || "MARKER_FAILED".equals(status)
-                || "SUBMISSION_FAILED".equals(status)
-                || SelfRunContinuationDom.UNKNOWN.equals(status) || "SCRIPT_ERROR".equals(status);
+                || "SUBMISSION_FAILED".equals(status) || "SCRIPT_ERROR".equals(status);
     }
 
     static boolean softContinuationStallStatus(String status) {
         return "COMPOSER_CLEARING".equals(status) || "COMPOSER_INPUTTING".equals(status)
                 || SelfRunContinuationDom.SEND_DISABLED.equals(status);
+    }
+
+    /**
+     * These states prove that a continuation has not been dispatched yet. They are retried in
+     * the same conversation under one monotonic, bounded readiness window rather than consuming
+     * the hard-failure rollover budget.
+     */
+    static boolean continuationReadinessStatus(String status) {
+        return SelfRunContinuationDom.COMPOSER_UNAVAILABLE.equals(status)
+                || SelfRunContinuationDom.COMPOSER_NOT_EDITABLE.equals(status)
+                || SelfRunContinuationDom.UNKNOWN.equals(status)
+                || softContinuationStallStatus(status);
+    }
+
+    /** Only real composer-stage advances may renew the readiness window. */
+    static int continuationReadinessProgress(String status) {
+        if ("COMPOSER_CLEARING".equals(status)) return 1;
+        if ("COMPOSER_INPUTTING".equals(status)) return 2;
+        return 0;
+    }
+
+    static boolean continuationReadinessDeadlineExpired(long startedElapsed, long nowElapsed) {
+        return startedElapsed > 0L && nowElapsed >= startedElapsed
+                && nowElapsed - startedElapsed >= CONTINUATION_READINESS_MAX_WAIT_MS;
     }
 
     static String continuationFailureBucket(String status) {

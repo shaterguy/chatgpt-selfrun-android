@@ -11,6 +11,10 @@ final class SelfRunContinuationDom {
     static final String STOP = "STOP";
     static final String SEND_DISABLED = "SEND_DISABLED";
     static final String COMPOSER_IDLE = "COMPOSER_IDLE";
+    /** Composer is absent during a temporary WebView/UI reattach. */
+    static final String COMPOSER_UNAVAILABLE = "COMPOSER_UNAVAILABLE";
+    /** Composer exists but has not become editable yet. */
+    static final String COMPOSER_NOT_EDITABLE = "COMPOSER_NOT_EDITABLE";
     static final String SUBMISSION_PENDING = "SUBMISSION_PENDING";
     static final String UNKNOWN = "UNKNOWN";
 
@@ -79,7 +83,7 @@ final class SelfRunContinuationDom {
                 + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected) + markerOps(marker)
                 + "let m=readMarker();" + continuationUserEvidenceVerification()
                 + "if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','submission was already confirmed');"
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','continuation composer unavailable');"
+                + composer(composerKey) + "if(!composer)return result('" + COMPOSER_UNAVAILABLE + "','continuation composer unavailable');"
                 + composerOps() + controls(sendKey) + submissionControl(preferSendWhenStopCoexists)
                 + continuationClickedVerification()
                 + "if(m.state==='failed'&&m.failure==='request_profile_rejected')return result('SUBMISSION_FAILED','request_profile_rejected');"
@@ -114,7 +118,7 @@ final class SelfRunContinuationDom {
         String sendKey = sendKey(conversationUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before click');"
+                + composer(composerKey) + "if(!composer)return result('" + COMPOSER_UNAVAILABLE + "','composer unavailable before click');"
                 + composerOps() + controls(sendKey) + markerOps(marker) + submissionControl(preferSendWhenStopCoexists)
                 + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('SUBMISSION_PENDING','continuation submission verification already pending');"
                 + "if(m.state!=='prepared'){if(!m.state)writeMarker({state:'clearing',at:Date.now()});return result('COMPOSER_INPUTTING','prepared marker unavailable before click');}"
@@ -130,7 +134,7 @@ final class SelfRunContinuationDom {
         String sendKey = sendKey(conversationUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(conversation) + authGuard() + calibration()
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','locked continuation composer unavailable');"
+                + composer(composerKey) + "if(!composer)return result('" + COMPOSER_UNAVAILABLE + "','locked continuation composer unavailable');"
                 + controls(sendKey) + markerOps(marker)
                 + "const m=readMarker();if(m.state==='confirmed')return result('SUBMISSION_CONFIRMED','locked continuation submission was already confirmed');"
                 + "if(m.state==='failed'&&m.failure==='request_profile_rejected')return result('SUBMISSION_FAILED','request_profile_rejected');"
@@ -148,7 +152,7 @@ final class SelfRunContinuationDom {
         String sendKey = sendKey(conversationUrl);
         return "(() =>{const result=(status,detail='')=>JSON.stringify({status,detail,url:location.href});"
                 + conversationGuard(conversation) + authGuard() + calibration() + textHelpers(expected)
-                + composer(composerKey) + "if(!composer)return result('" + UNKNOWN + "','composer unavailable before submission preflight');"
+                + composer(composerKey) + "if(!composer)return result('" + COMPOSER_UNAVAILABLE + "','composer unavailable before submission preflight');"
                 + composerOps() + controls(sendKey) + markerOps(marker) + submissionControl(preferSendWhenStopCoexists)
                 + "const m=readMarker();if(m.state==='clicked'||m.state==='confirmed')return result('SUBMISSION_PENDING','prior dispatch awaits submission evidence');"
                 + "if(m.state!=='prepared')return result('COMPOSER_INPUTTING','submission preflight waits for prepared continuation');"
@@ -200,7 +204,7 @@ final class SelfRunContinuationDom {
                 + "const isVoice=e=>!!e&&buttonLike(e)&&inComposer(e)&&voiceSemantic(e);"
                 + "const isSend=e=>!!e&&buttonLike(e)&&inComposer(e)&&!stopSemantic(e)&&!voiceSemantic(e)&&(sendSemantic(e)||e.matches?.('button[type=\"submit\"]'));"
                 + "const isAdjacentSend=e=>!!e&&buttonLike(e)&&!inComposer(e)&&inComposerScope(e)&&!voiceSemantic(e)&&sendSemantic(e);"
-                + "const controlState=(preferSendWhenStopCoexists=false)=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));const form=composer?.closest?.('form'),formSubmitReady=!!form&&typeof form.requestSubmit==='function';if(stop&&!preferSendWhenStopCoexists)return{state:'" + STOP + "',send:null};if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(stop&&!(composerEditable()&&formSubmitReady))return{state:'" + STOP + "',send:null};if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};if(stop)return{state:'" + STOP + "',send:null};return{state:'" + UNKNOWN + "',send:null};};";
+                + "const controlState=(preferSendWhenStopCoexists=false)=>{const calibrated=__srFind(" + q(sendKey) + ");const controls=composerRoot?[...composerRoot.querySelectorAll('button,[role=\"button\"]')].filter(visible):[];const adjacentControls=composerScope&&composerScope!==composerRoot?[...composerScope.querySelectorAll('button,[role=\"button\"]')].filter(visible).filter(e=>!inComposer(e)):[];if(calibrated&&visible(calibrated)&&!controls.includes(calibrated)&&!adjacentControls.includes(calibrated))adjacentControls.unshift(calibrated);const stop=controls.find(isStop);const send=calibrated&&visible(calibrated)&&(isSend(calibrated)||isAdjacentSend(calibrated))?calibrated:(controls.find(isSend)||adjacentControls.find(isAdjacentSend));const form=composer?.closest?.('form'),formSubmitReady=!!form&&typeof form.requestSubmit==='function';if(stop&&!preferSendWhenStopCoexists)return{state:'" + STOP + "',send:null};if(send){if(send.disabled||send.getAttribute('aria-disabled')==='true')return{state:'" + SEND_DISABLED + "',send};return{state:'" + SEND_ENABLED + "',send};}if(stop&&!(composerEditable()&&formSubmitReady))return{state:'" + STOP + "',send:null};if(composerEditable())return{state:'" + COMPOSER_IDLE + "',send:null};if(stop)return{state:'" + STOP + "',send:null};return{state:'" + COMPOSER_NOT_EDITABLE + "',send:null};};";
     }
 
     private static String composerOps() {

@@ -27,9 +27,21 @@ public final class SelfRunRolloverPolicyTest {
     }
     @Test public void continuationSubmissionFailuresRemainBounded() {
         long started=1_000L;
-        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure("UNKNOWN",started,7_000L));
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure("UNKNOWN",started,7_000L));
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,99_000L));
         assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("SUBMISSION_PENDING"));
+    }
+    @Test public void readinessStatesDoNotSpendHardFailureBudgetBeforeTheirBoundedDeadline() {
+        long start=500_000L;
+        assertFalse(SelfRunRolloverPolicy.hardContinuationFailureStatus(SelfRunContinuationDom.UNKNOWN));
+        assertTrue(SelfRunRolloverPolicy.continuationReadinessStatus(SelfRunContinuationDom.COMPOSER_UNAVAILABLE));
+        assertTrue(SelfRunRolloverPolicy.continuationReadinessStatus(SelfRunContinuationDom.COMPOSER_NOT_EDITABLE));
+        assertEquals(1,SelfRunRolloverPolicy.continuationReadinessProgress("COMPOSER_CLEARING"));
+        assertEquals(2,SelfRunRolloverPolicy.continuationReadinessProgress("COMPOSER_INPUTTING"));
+        assertFalse(SelfRunRolloverPolicy.continuationReadinessDeadlineExpired(start,
+                start+SelfRunRolloverPolicy.CONTINUATION_READINESS_MAX_WAIT_MS-1L));
+        assertTrue(SelfRunRolloverPolicy.continuationReadinessDeadlineExpired(start,
+                start+SelfRunRolloverPolicy.CONTINUATION_READINESS_MAX_WAIT_MS));
     }
     @Test public void reconnectGraceStartsFromActualOutputReattach() {
         long phaseStarted=1_000L,wallNow=99_000L,reconnectStarted=500_000L;
