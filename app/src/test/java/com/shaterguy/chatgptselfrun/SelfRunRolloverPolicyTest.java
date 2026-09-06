@@ -31,4 +31,15 @@ public final class SelfRunRolloverPolicyTest {
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.STOP,started,99_000L));
         assertTrue(SelfRunRolloverPolicy.continuationProgressStatus("SUBMISSION_PENDING"));
     }
+    @Test public void reconnectGraceStartsFromActualOutputReattach() {
+        long phaseStarted=1_000L,wallNow=99_000L,reconnectStarted=500_000L;
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.UNKNOWN,
+                phaseStarted,wallNow,reconnectStarted,reconnectStarted+4_999L));
+        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.UNKNOWN,
+                phaseStarted,wallNow,reconnectStarted,reconnectStarted+5_000L));
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.SEND_DISABLED,
+                phaseStarted,wallNow,reconnectStarted,reconnectStarted+4_999L));
+        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.SEND_DISABLED,
+                phaseStarted,wallNow,reconnectStarted,reconnectStarted+5_000L));
+    }
 }

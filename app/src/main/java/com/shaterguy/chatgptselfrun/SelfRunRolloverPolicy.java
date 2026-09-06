@@ -86,6 +86,17 @@ final class SelfRunRolloverPolicy {
         return softContinuationStallStatus(status) && elapsed >= CONTINUATION_SOFT_STALL_GRACE_MS;
     }
 
+    static boolean continuationReconnectGraceActive(long reconnectStartedElapsed, long nowElapsed) {
+        return reconnectStartedElapsed > 0L && nowElapsed >= reconnectStartedElapsed
+                && nowElapsed - reconnectStartedElapsed < CONTINUATION_HARD_FAILURE_GRACE_MS;
+    }
+
+    static boolean shouldCountContinuationFailure(String status, long phaseStartedAt, long now,
+                                                  long reconnectStartedElapsed, long nowElapsed) {
+        return !continuationReconnectGraceActive(reconnectStartedElapsed, nowElapsed)
+                && shouldCountContinuationFailure(status, phaseStartedAt, now);
+    }
+
     static int postDispatchNoStartAction(long dispatchStartedElapsed,
                                          long validatedSinceElapsed, long nowElapsed,
                                          boolean transientSeen, boolean protocolGenerationActive) {
