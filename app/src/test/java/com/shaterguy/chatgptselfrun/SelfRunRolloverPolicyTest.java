@@ -47,11 +47,11 @@ public final class SelfRunRolloverPolicyTest {
         long phaseStarted=1_000L,wallNow=99_000L,reconnectStarted=500_000L;
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.UNKNOWN,
                 phaseStarted,wallNow,reconnectStarted,reconnectStarted+4_999L));
-        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.UNKNOWN,
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.UNKNOWN,
                 phaseStarted,wallNow,reconnectStarted,reconnectStarted+5_000L));
         assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.SEND_DISABLED,
                 phaseStarted,wallNow,reconnectStarted,reconnectStarted+4_999L));
-        assertTrue(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.SEND_DISABLED,
+        assertFalse(SelfRunRolloverPolicy.shouldCountContinuationFailure(SelfRunContinuationDom.SEND_DISABLED,
                 phaseStarted,wallNow,reconnectStarted,reconnectStarted+5_000L));
     }
 }

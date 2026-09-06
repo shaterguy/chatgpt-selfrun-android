@@ -107,8 +107,8 @@ final class SelfRunRolloverPolicy {
     static boolean shouldCountContinuationFailure(String status, long phaseStartedAt, long now) {
         if (phaseStartedAt <= 0L || now < phaseStartedAt) return false;
         long elapsed = now - phaseStartedAt;
-        if (hardContinuationFailureStatus(status)) return elapsed >= CONTINUATION_HARD_FAILURE_GRACE_MS;
-        return softContinuationStallStatus(status) && elapsed >= CONTINUATION_SOFT_STALL_GRACE_MS;
+        if (continuationReadinessStatus(status)) return false;
+        return hardContinuationFailureStatus(status) && elapsed >= CONTINUATION_HARD_FAILURE_GRACE_MS;
     }
 
     static boolean continuationReconnectGraceActive(long reconnectStartedElapsed, long nowElapsed) {
