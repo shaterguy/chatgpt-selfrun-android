@@ -86,6 +86,33 @@ final class DriveApiClient {
         }
     }
 
+    /** One coherent native Google Docs read used by the V3 Drive adapter. */
+    static final class DocumentSnapshot {
+        final String text;
+        final String revisionId;
+        final String tabId;
+        final int claimStartIndex;
+        final int claimEndIndex;
+        private final JSONObject namedRanges;
+
+        DocumentSnapshot(String text, String revisionId, String tabId, int claimStartIndex,
+                         int claimEndIndex, JSONObject namedRanges) {
+            this.text = text == null ? "" : text;
+            this.revisionId = revisionId == null ? "" : revisionId;
+            this.tabId = tabId == null ? "" : tabId;
+            this.claimStartIndex = claimStartIndex;
+            this.claimEndIndex = claimEndIndex;
+            this.namedRanges = namedRanges == null ? new JSONObject() : namedRanges;
+        }
+
+        boolean hasNamedRange(String name) {
+            if (!validNamedRangeName(name)) return false;
+            JSONObject matches = namedRanges.optJSONObject(name);
+            JSONArray ranges = matches == null ? null : matches.optJSONArray("namedRanges");
+            return ranges != null && ranges.length() > 0;
+        }
+    }
+
     String getAccountPermissionId(String accessToken) throws Exception {
         JSONObject json = request("GET", "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)", accessToken, null);
         JSONObject user = json.optJSONObject("user");
@@ -336,10 +363,7 @@ final class DriveApiClient {
         return readNativeDocumentSnapshot(accessToken, documentId).text;
     }
 
-    /**
-     * Legacy-independent named-range primitive retained for generic Docs arbitration helpers.
-     * It never participates in V3 execution state or signal parsing.
-     */
+    /** Generic Docs arbitration primitive; it does not participate in V3 execution state. */
     boolean createNamedRangeClaim(String accessToken, String documentId, DocumentSnapshot snapshot,
                                   String claimName) throws Exception {
         requireFileId(documentId);
