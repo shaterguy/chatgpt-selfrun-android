@@ -3,11 +3,10 @@ package com.shaterguy.chatgptselfrun;
 /**
  * V3 first-turn transport restored from the last known-good V2 bootstrap semantics.
  *
- * <p>This class is intentionally separate from SelfRunContinuationDom. It owns only the first
- * request. Preparation verifies an exact composer readback and an enabled submit path without
- * binding the response protocol. The caller binds task/request identity only after
- * READY_TO_SUBMIT and immediately before submit(). Continuations remain owned by
- * SelfRun3ComposerTransport.</p>
+ * <p>This class owns only the first request. Preparation verifies an exact composer readback and
+ * an enabled submit path without binding the response protocol. The caller binds task/request
+ * identity only after READY_TO_SUBMIT and immediately before submit(). Continuations remain owned
+ * by SelfRun3ComposerTransport.</p>
  */
 final class SelfRun3BootstrapTransport {
     static final String SEND_ENABLED = "SEND_ENABLED";
