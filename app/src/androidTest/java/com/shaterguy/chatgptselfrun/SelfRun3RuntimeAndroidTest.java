@@ -127,17 +127,17 @@ public final class SelfRun3RuntimeAndroidTest {
                 assertTrue(host.isOutputAttached());
                 assertTrue(host.detachOutputWhenComposerReady());
             });
-            Thread.sleep(650L);
+            Thread.sleep(5_500L);
             InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                    () -> assertTrue("surface detached before composer returned", host.isOutputAttached()));
+                    () -> assertTrue("surface detached before delayed composer returned", host.isOutputAttached()));
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
                     host.webView().evaluateJavascript(
                             "(()=>{const e=document.createElement('textarea');e.id='prompt-textarea';"
                                     + "e.setAttribute('aria-label','Message');document.querySelector('main').appendChild(e);return true;})()",
                             null));
-            Thread.sleep(1_100L);
+            Thread.sleep(2_300L);
             InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                    () -> assertFalse("surface remained attached after composer returned", host.isOutputAttached()));
+                    () -> assertFalse("surface remained attached after delayed composer returned", host.isOutputAttached()));
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(host::destroy);
         }
