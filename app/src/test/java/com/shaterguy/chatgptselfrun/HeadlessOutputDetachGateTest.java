@@ -64,6 +64,33 @@ public final class HeadlessOutputDetachGateTest {
         assertTrue(web.contains("observedStart()"));
     }
 
+    @Test public void completionReattachesOutputBeforeNextTurnTransition() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        String end = web.substring(web.indexOf("private void observedEnd"),
+                web.indexOf("void prepare("));
+        String attach = web.substring(web.indexOf("void attachForCompletionTransition()"),
+                web.indexOf("private void detachImmediately()"));
+        String inspect = web.substring(web.indexOf("void inspect("),
+                web.indexOf("static String inspectionScript"));
+
+        assertTrue(end.contains("attachForCompletionTransition()"));
+        assertFalse(end.contains("detachAfterComposerReady()"));
+        assertTrue(attach.contains("host.attachOutput()"));
+        assertTrue(inspect.contains("result.optBoolean(\"complete\") || result.optBoolean(\"receipt\")"));
+        assertTrue(inspect.contains("attachForCompletionTransition()"));
+    }
+
+    @Test public void preparationRetryGetsFreshTimeoutBudgetWithoutResettingTurnIdentity() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        String prepare = web.substring(web.indexOf("void prepare("),
+                web.indexOf("private void ensureWeb"));
+
+        assertTrue(prepare.contains("boolean restartPreparation = newAttempt || !preparing"));
+        assertTrue(prepare.contains("else if (restartPreparation)"));
+        assertTrue(prepare.contains("prepareStarted = SystemClock.elapsedRealtime()"));
+        assertFalse(prepare.contains("state = null"));
+    }
+
     @Test public void gateUsesFastStartupThenSparseLongWaitProbe() throws Exception {
         String host = source("HeadlessWebViewHost.java");
         assertTrue(host.contains("OUTPUT_DETACH_SETTLE_MS = 1_000L"));

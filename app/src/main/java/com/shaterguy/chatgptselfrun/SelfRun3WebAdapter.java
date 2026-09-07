@@ -121,13 +121,14 @@ final class SelfRun3WebAdapter {
         if (state.requestId().equals(endedRequest)) return;
         endedRequest = state.requestId();
         trace("PROTOCOL_ACCEPT", "COMPLETE", step);
+        attachForCompletionTransition();
         listener.onEnded(state.taskId(), state.turnId(), state.requestId(), source);
-        detachAfterComposerReady();
     }
 
     void prepare(SelfRun3Engine.State s) {
         requireMain();
         boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
+        boolean restartPreparation = newAttempt || !preparing;
         state = s;
         closed = false;
         if (!newAttempt && s.requestId().equals(observedRequest)) {
@@ -141,6 +142,9 @@ final class SelfRun3WebAdapter {
             prepareStarted = SystemClock.elapsedRealtime();
             lastPrepareTrace = "";
             observedRequest = acceptedRequest = endedRequest = "";
+        } else if (restartPreparation) {
+            prepareStarted = SystemClock.elapsedRealtime();
+            lastPrepareTrace = "";
         }
         trace("PREPARE_START", s.resource("conversationUrl").isEmpty() ? "INITIAL" : "CONTINUATION", step);
         ensureWeb(false);
@@ -402,7 +406,12 @@ final class SelfRun3WebAdapter {
             return;
         }
         detachImmediately();
-        evaluate(inspectionScript(s), callback);
+        evaluate(inspectionScript(s), result -> {
+            if (result.optBoolean("complete") || result.optBoolean("receipt")) {
+                attachForCompletionTransition();
+            }
+            callback.accept(result);
+        });
     }
 
     static String inspectionScript(SelfRun3Engine.State s) {
@@ -582,6 +591,14 @@ final class SelfRun3WebAdapter {
     void detachAfterComposerReady() {
         requireMain();
         if (host != null) host.detachOutputWhenComposerReady();
+    }
+
+    void attachForCompletionTransition() {
+        requireMain();
+        if (host == null) return;
+        boolean changed = host.attachOutput();
+        trace("OUTPUT_COMPLETE", changed ? "ATTACHED"
+                : host.isOutputAttached() ? "ALREADY_ATTACHED" : "UNAVAILABLE", step);
     }
 
     private void detachImmediately() {
