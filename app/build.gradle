@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 2020048
-def selfRunDriveVersionName = '2.3.2'
+def selfRunDriveVersionCode = 3000001
+def selfRunDriveVersionName = '3.0.0-dev1'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -63,8 +63,11 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '2.3.2') {
-            throw new GradleException('SelfRun Drive stable version must be 2.3.2')
+        if (selfRunDriveVersionName != '3.0.0-dev1') {
+            throw new GradleException('SelfRun 3 development version must be 3.0.0-dev1')
+        }
+        if (selfRunDriveVersionCode <= 2020048) {
+            throw new GradleException('SelfRun 3 versionCode must advance the 2.3.2 stable lineage')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
@@ -78,54 +81,60 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (authorities.any { it != '${applicationId}.fileprovider' && !it.startsWith('${applicationId}.') }) {
             throw new GradleException('every provider authority must derive from applicationId')
         }
-        def service = file('src/main/java/com/shaterguy/chatgptselfrun/SelfRunService.java').getText('UTF-8')
-        ['RUN', 'PAUSE', 'RESUME'].each { action ->
+
+        def src = file('src/main/java/com/shaterguy/chatgptselfrun')
+        def service = new File(src, 'SelfRunService.java').getText('UTF-8')
+        ['RUN', 'PAUSE', 'RESUME', 'STOP'].each { action ->
             if (!service.contains('BuildConfig.APPLICATION_ID + ".' + action + '"')) {
                 throw new GradleException("${action} action must derive from applicationId")
             }
         }
-        def webConfig = file('src/main/java/com/shaterguy/chatgptselfrun/WebViewConfig.java').getText('UTF-8')
-        if (!webConfig.contains('RequestProfileScript.installDocumentStart')) {
-            throw new GradleException('SelfRun 2.0 request profile document-start interceptor is required')
+        if (!service.contains('SelfRun3Coordinator')
+                || service.contains('SelfRunRolloverCoordinator')
+                || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) {
+            throw new GradleException('SelfRunService must be the V3 foreground shell, not the V2 state machine')
         }
-        if (webConfig.contains('HybridRequestProfileScript')
-                || file('src/main/java/com/shaterguy/chatgptselfrun/HybridRequestProfileScript.java').exists()) {
-            throw new GradleException('Retired hybrid execution bridge must be absent')
+
+        ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
+         'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
+         'SelfRun3WebAdapter.java', 'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java',
+         'SelfRun3UserInput.java'].each { name ->
+            if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
-        if (webConfig.contains('TurnCompletionDomFallbackScript')
-                || file('src/main/java/com/shaterguy/chatgptselfrun/TurnCompletionDomFallbackScript.java').exists()) {
-            throw new GradleException('DOM completion fallback is forbidden')
+        def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
+        def coordinator = new File(src, 'SelfRun3Coordinator.java').getText('UTF-8')
+        def ledger = new File(src, 'SelfRun3Ledger.java').getText('UTF-8')
+        def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')
+        def power = new File(src, 'SelfRun3PowerPolicy.java').getText('UTF-8')
+        if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
+                || !engine.contains('lastConsumedInputRevision')) {
+            throw new GradleException('V3 task/turn/request and user-input ledger contract is required')
         }
-        if (!webConfig.contains('static boolean applyAutomation')
-                || !webConfig.contains('if (!protocolAvailable)')
-                || !service.contains('TURN_PROTOCOL_UNAVAILABLE')) {
-            throw new GradleException('protocol capability failure must fail closed')
+        if (!ledger.contains('beginTransaction') || !ledger.contains('PreserveCorruptionHandler')) {
+            throw new GradleException('V3 transactional ledger and non-destructive corruption handling are required')
         }
-        if (!webConfig.contains('TurnProtocolLogBridge.install')) {
-            throw new GradleException('response protocol observability bridge is required')
+        if (!coordinator.contains('MISSED_CALLBACK_PROBE_MS')
+                || !coordinator.contains('scheduleMissedProbe')
+                || !coordinator.contains('SelfRun3RunMarker')) {
+            throw new GradleException('V3 bounded reconciliation and explicit lineage are required')
         }
-        if (!webConfig.contains('ChatGptTurnProtocolScript.installDocumentStart')) {
-            throw new GradleException('protocol-first response state document-start interceptor is required')
+        if (!protocol.contains('contract-version: 3.0.0')
+                || !protocol.contains('RESULT_DOCUMENT_ID')
+                || !protocol.contains('AI 유지보수·자체 코드 수정·자동 패치 에이전트가 없다')) {
+            throw new GradleException('V3 result contract and AI-maintenance exclusion are required')
         }
-        if (!webConfig.contains('WorkTurnProtocolIngressScript.installDocumentStart')) {
-            throw new GradleException('Work transport protocol ingress document-start interceptor is required')
+        if (!power.contains('NORMAL_WAIT_POLL_MS = 0L')) {
+            throw new GradleException('normal V3 response waiting must not poll')
         }
-        if (!webConfig.contains('WorkProtocolTransportCaptureScript.installDocumentStart')) {
-            throw new GradleException('Work transport capture and relay document-start interceptor is required')
-        }
-        def protocol = file('src/main/java/com/shaterguy/chatgptselfrun/ChatGptTurnProtocolScript.java').getText('UTF-8')
-        if (!protocol.contains('bindTurn') || !protocol.contains('turnToken')
-                || protocol.contains('__selfRunDriveTurnObserver')) {
-            throw new GradleException('protocol-owned turn token contract is required')
-        }
-        def host = file('src/main/java/com/shaterguy/chatgptselfrun/HeadlessWebViewHost.java').getText('UTF-8')
+        def host = new File(src, 'HeadlessWebViewHost.java').getText('UTF-8')
         if (!host.contains('virtualDisplay.setSurface(null)')
                 || !host.contains('virtualDisplay.setSurface(surface)')) {
-            throw new GradleException('detachable VirtualDisplay Surface support is required')
+            throw new GradleException('detachable VirtualDisplay Surface support must be preserved')
         }
-        if (service.contains('observeTurnCompletion') || service.contains('TURN_OBSERVER_HEALTHCHECK_MS')
-                || service.contains('recoverDetachedObserverOutput')) {
-            throw new GradleException('WAIT_TURN_COMPLETION must not poll DOM completion state')
+        def webConfig = new File(src, 'WebViewConfig.java').getText('UTF-8')
+        if (!webConfig.contains('RequestProfileScript.installDocumentStart')
+                || !webConfig.contains('ChatGptTurnProtocolScript.installDocumentStart')) {
+            throw new GradleException('profile and protocol browser adapters are required')
         }
     }
 }
