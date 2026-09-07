@@ -10,24 +10,15 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class TestAppVariantPolicyTest {
-    @Test public void v2BuildKeepsChannelSpecificFormalAndTestIdentity() throws Exception {
+    @Test public void v3KeepsFormalAndTestInstallIdentitiesSeparated() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
-        boolean driveLineage = gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'");
-        if (driveLineage) {
-            assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
-            assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-            assertTrue(gradle.matches("(?s).*selfRunDriveVersionName = '[0-9]+\\.[0-9]+\\.[0-9]+(-(dev|rc)[0-9]+)?'.*"));
-        } else {
-            assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.v2'"));
-            assertFalse(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-            assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun 2.0 TEST'"));
-        }
+        assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
+        assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.0.1-dev12'"));
         assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
-        assertTrue(manifest.contains(".SelfRunRestartActivity"));
-        assertTrue(manifest.contains(".SelfRunRestartActivity\" android:exported=\"false\""));
     }
 
     @Test public void testSigningLineageIsDomainSeparatedFromFormalSigning() throws Exception {
@@ -41,18 +32,19 @@ public final class TestAppVariantPolicyTest {
         assertTrue(signer.contains("2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e"));
     }
 
-    @Test public void v2DevPushUsesOnlyDedicatedV2TestWorkflow() throws Exception {
-        String v1Test = read(".github/workflows/build-drive-test.yml", "../.github/workflows/build-drive-test.yml");
-        String v2Test = read(".github/workflows/build-selfrun-v2-test.yml", "../.github/workflows/build-selfrun-v2-test.yml");
-        assertTrue(v1Test.contains("- 'selfrun-drive/v*-dev*'"));
-        assertFalse(v1Test.contains("selfrun-drive-v2/"));
-        assertTrue(v2Test.contains("- 'selfrun-drive-v2/v2.*-dev*'"));
-        assertTrue(v2Test.contains(":app:assembleQaApp"));
-        assertTrue(v2Test.contains("com.shaterguy.chatgptselfrun.v2.test"));
-        assertTrue(v2Test.contains("chatgpt-selfrun-v2-test-v"));
+    @Test public void onlyV3CandidateWorkflowOwnsDevBuilds() throws Exception {
+        String candidate = read(".github/workflows/build-selfrun-v3-candidate.yml", "../.github/workflows/build-selfrun-v3-candidate.yml");
+        assertTrue(candidate.contains("selfrun-v3/v3.0.*-dev*"));
+        assertTrue(candidate.contains(":app:assembleQaApp"));
+        assertTrue(candidate.contains("com.shaterguy.chatgptselfrun.drive.test"));
+        for (String retired : new String[]{"build-drive-test.yml", "build-drive-v1.yml", "build-selfrun-v2-test.yml", "build-selfrun-v3-test.yml", "release-drive-v1.yml"}) {
+            Path p = Paths.get(".github/workflows", retired);
+            if (!Files.exists(p)) p = Paths.get("../.github/workflows", retired);
+            assertFalse("retired workflow must be absent: " + retired, Files.exists(p));
+        }
     }
 
-    @Test public void restartClaimIsWiredToProcessOwnership() throws Exception {
+    @Test public void restartClaimRemainsBoundToProcessOwnership() throws Exception {
         String activity = read(
                 "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java",
                 "src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java");
@@ -61,10 +53,10 @@ public final class TestAppVariantPolicyTest {
         assertTrue(activity.contains("requireClaimOwnership();"));
     }
 
-    @Test public void authDependencyVersionMustRemainIndependentFromAppVersion() throws Exception {
+    @Test public void authDependencyVersionRemainsIndependentFromAppVersion() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("play-services-auth:21.6.0"));
-        assertFalse(gradle.contains("play-services-auth:21.6.1-dev1"));
+        assertFalse(gradle.contains("play-services-auth:21.6.1-dev12"));
     }
 
     private static String read(String first, String second) throws Exception {

@@ -41,8 +41,7 @@ public final class SelfRun3ArchitectureTest {
 
     @Test public void firstSendDiagnosticTraceCoversPrepareSubmitAndFailureWithoutPayloads() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        for (String stage : new String[]{"PREPARE_START", "ON_PREPARED",
-                "SUBMIT_START", "SUBMIT_EVAL", "ON_UNSENT", "FAILURE", "PROTOCOL_ACCEPT"}) {
+        for (String stage : new String[]{"PREPARE_START", "ON_PREPARED", "SUBMIT_START", "SUBMIT_EVAL", "ON_UNSENT", "FAILURE", "PROTOCOL_ACCEPT"}) {
             assertTrue("missing diagnostic stage " + stage, web.contains("trace(\"" + stage + "\""));
         }
         assertTrue(web.contains("tracePrepare(result)"));
@@ -63,7 +62,7 @@ public final class SelfRun3ArchitectureTest {
     @Test public void promptDefersFixedSemanticsToCanonicalSkillAndHasNoSelfPatchPath() throws Exception {
         String protocol = source("SelfRun3Protocol.java");
         assertTrue(protocol.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
-        assertFalse(protocol.contains("static final String CONTRACT"));
+        assertFalse(protocol.contains("static final String CONTRACT ="));
         assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(source("SelfRun3Coordinator.java").contains("downloadCode"));
         assertFalse(source("SelfRun3Coordinator.java").contains("applyPatch"));

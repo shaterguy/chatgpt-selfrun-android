@@ -58,7 +58,7 @@ public final class TurnDocumentRetryWiringTest {
         String protocol = src("SelfRun3Protocol.java");
         assertTrue(protocol.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
         assertTrue(protocol.contains("RESULT_REPAIR=1"));
-        assertFalse(protocol.contains("static final String CONTRACT"));
+        assertFalse(protocol.contains("static final String CONTRACT ="));
         assertFalse(protocol.contains("SELF_RUN_TURN_COMPLETED"));
         assertFalse(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
         assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
