@@ -17,6 +17,7 @@ final class SelfRun3DriveAdapter {
     private final DriveApiClient api = new DriveApiClient();
     private final BooleanSupplier permitted;
     private final PowerManager.WakeLock resultReadWakeLock;
+    private final SelfRunRunLog diagnosticLog;
     private String verifiedToken = "";
     SelfRun3DriveAdapter(Context context, SelfRunStore projection, SelfRun3Ledger ledger, BooleanSupplier permitted) {
         this.context = context.getApplicationContext(); this.projection = projection; this.ledger = ledger; this.permitted = permitted;
@@ -24,6 +25,7 @@ final class SelfRun3DriveAdapter {
         resultReadWakeLock = power == null ? null : power.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, BuildConfig.APPLICATION_ID + ":selfrun3-result-read");
         if (resultReadWakeLock != null) resultReadWakeLock.setReferenceCounted(false);
+        diagnosticLog = new SelfRunRunLog(this.context);
     }
     SelfRun3Engine.State setup(String token, SelfRun3Engine.State original) throws Exception {
         verifyAccount(token, original);
@@ -68,19 +70,28 @@ final class SelfRun3DriveAdapter {
     }
     String readResult(String token, SelfRun3Engine.State s) throws Exception {
         acquireResultReadWakeLock();
+        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=START;turn=" + s.turn());
         try {
             verifyAccount(token, s); validateDocument(token, s, s.resource("resultDocumentId"));
             checkpoint();
             String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
-            if (raw == null || raw.trim().isEmpty()) return SelfRun3Engine.emptyResult(s).toString();
+            if (raw == null || raw.trim().isEmpty()) {
+                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_EMPTY;turn=" + s.turn());
+                return SelfRun3Engine.emptyResult(s).toString();
+            }
             try {
                 SelfRun3Engine.parseResult(raw, s);
+                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=COMMITTED;turn=" + s.turn());
                 return raw;
             } catch (RuntimeException incompleteOrMalformed) {
+                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
                 // A result body may be observed between delete/insert operations. Treat it as pending here;
                 // bounded retry and one RESULT_REPAIR request decide whether the condition persists.
                 return SelfRun3Engine.emptyResult(s).toString();
             }
+        } catch (Exception error) {
+            diagnosticLog.record(projection, "V3_RESULT_READ", "stage=ERROR;type=" + error.getClass().getSimpleName());
+            throw error;
         } finally {
             releaseResultReadWakeLock();
         }
