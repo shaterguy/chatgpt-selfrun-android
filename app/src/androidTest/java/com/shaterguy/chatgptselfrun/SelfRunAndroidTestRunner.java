@@ -5,7 +5,15 @@ import androidx.test.runner.AndroidJUnitRunner;
 
 /** Single owner of the branch-critical Android instrumentation profile. */
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
-    private static final String[] REQUIRED = {
+    private static final String[] V3_REQUIRED = {
+            "com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest",
+            "com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest",
+            "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
+            "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest",
+            "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest",
+            "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest"
+    };
+    private static final String[] V2_REQUIRED = {
             "com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest",
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
             "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest",
@@ -17,8 +25,10 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
     };
 
     @Override public void onCreate(Bundle arguments) {
-        Bundle effective=arguments==null?new Bundle():new Bundle(arguments);
-        for(String required:REQUIRED)appendRequiredClass(effective,required);
+        Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
+        String[] required = BuildConfig.VERSION_NAME != null && BuildConfig.VERSION_NAME.startsWith("3.")
+                ? V3_REQUIRED : V2_REQUIRED;
+        for (String item : required) appendRequiredClass(effective, item);
         super.onCreate(effective);
     }
 
