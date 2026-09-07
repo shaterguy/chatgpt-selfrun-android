@@ -28,6 +28,7 @@ final class HeadlessWebViewHost {
     private static final long OUTPUT_DETACH_PROBE_MS = 250L;
     private static final long OUTPUT_DETACH_MAX_WAIT_MS = 5_000L;
     private static volatile WebView activeWebView;
+    private static volatile HeadlessWebViewHost activeHost;
 
     private final WebView webView;
     private final Presentation presentation;
@@ -56,6 +57,7 @@ final class HeadlessWebViewHost {
         this.drainState = drainState;
         this.outputAttached = virtualDisplay != null && surface != null;
         activeWebView = webView;
+        activeHost = this;
     }
 
     static HeadlessWebViewHost create(Context context) {
@@ -178,6 +180,7 @@ final class HeadlessWebViewHost {
     }
 
     static WebView activeWebView() { return activeWebView; }
+    static HeadlessWebViewHost activeHost() { return activeHost; }
 
     WebView webView() { return webView; }
 
@@ -189,17 +192,26 @@ final class HeadlessWebViewHost {
         return outputAttached;
     }
 
-    /**
-     * Requests output detachment without pausing the virtual display before ChatGPT has finished
-     * its submit-to-thinking UI transition. On a live ChatGPT page the surface stays attached until
-     * the turn protocol is active and the actual message composer is present again. No navigation,
-     * reload or WebView recreation is used. If the composer does not become ready promptly, the
-     * safe fallback is to keep the existing surface attached for that turn.
-     */
+    /** Immediate detach for pause/stop/inspection paths that are not a fresh physical send. */
     boolean detachOutput() {
         requireMainThread();
+        cancelDetachProbe();
         if (!hasDetachableOutput() || !outputAttached) return false;
-        if (!isChatGptPage(webView.getUrl())) return detachOutputNow();
+        virtualDisplay.setSurface(null);
+        outputAttached = false;
+        return true;
+    }
+
+    /**
+     * Generation wait detach. Keep the surface attached through the submit-to-thinking UI transition,
+     * then detach only after the live message composer is available again. This never navigates,
+     * reloads or recreates the WebView. If the composer does not return promptly, the safe fallback
+     * is to leave the existing surface attached for that response.
+     */
+    boolean detachOutputWhenComposerReady() {
+        requireMainThread();
+        if (!hasDetachableOutput() || !outputAttached) return false;
+        if (!isChatGptPage(webView.getUrl())) return detachOutput();
         if (detachProbePending) return true;
         detachProbePending = true;
         detachProbeStartedAt = SystemClock.elapsedRealtime();
@@ -223,11 +235,11 @@ final class HeadlessWebViewHost {
                 boolean composerReady = divider >= 0 && value.substring(divider + 1).equals("1");
                 if (("THINKING".equals(phase) || "ANSWERING".equals(phase)
                         || "COMPLETE".equals(phase)) && composerReady) {
-                    detachOutputNow();
+                    detachOutput();
                     return;
                 }
                 if ("ERROR".equals(phase)) {
-                    detachOutputNow();
+                    detachOutput();
                     return;
                 }
                 if (SystemClock.elapsedRealtime() - detachProbeStartedAt >= OUTPUT_DETACH_MAX_WAIT_MS) {
@@ -263,14 +275,6 @@ final class HeadlessWebViewHost {
         detachProbePending = false;
         detachProbeGeneration++;
         mainHandler.removeCallbacksAndMessages(null);
-    }
-
-    private boolean detachOutputNow() {
-        cancelDetachProbe();
-        if (!hasDetachableOutput() || !outputAttached) return false;
-        virtualDisplay.setSurface(null);
-        outputAttached = false;
-        return true;
     }
 
     private static boolean isChatGptPage(String raw) {
@@ -327,6 +331,7 @@ final class HeadlessWebViewHost {
     void destroy() {
         cancelDetachProbe();
         if (activeWebView == webView) activeWebView = null;
+        if (activeHost == this) activeHost = null;
         try {
             webView.setWebViewClient(null);
             webView.setWebChromeClient(null);
