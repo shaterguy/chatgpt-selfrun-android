@@ -30,7 +30,7 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(engine.contains("!before.requestId().equals(nextRequest)"));
         assertTrue(engine.contains("put(v, \"requestId\", nextRequest)"));
         assertFalse(between(engine, "case REPAIR", "case PAUSE").contains("put(v, \"turnId\""));
-        assertTrue(protocol.contains("repair(SelfRun3Engine.State state, String repairRequestId)"));
+        assertTrue(protocol.contains("static String repair(SelfRun3Engine.State s, String nextRequestId)"));
         assertTrue(coordinator.contains("SelfRun3Protocol.repair(current, repairRequest)"));
     }
 
@@ -55,7 +55,7 @@ public final class TurnDocumentRetryWiringTest {
 
     @Test public void v3ContractNeverAsksForLegacyTurnCompletedSignalDocument() throws Exception {
         String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("이 턴의 완료/다음 행동을 위 RESULT_DOCUMENT_ID 본문 하나에만 확정한다"));
+        assertTrue(protocol.contains("RESULT_DOCUMENT_ID가 가리키는 정확한 기존 Google Doc 본문을 읽는다"));
         assertTrue(protocol.contains("구형 SELF_RUN_TURN_COMPLETED/DONE 제목 문서를 새로 만들거나"));
         assertFalse(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
     }
