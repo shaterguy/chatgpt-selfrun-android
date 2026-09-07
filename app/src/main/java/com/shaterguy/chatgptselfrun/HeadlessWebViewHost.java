@@ -7,9 +7,11 @@ import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.ViewGroup;
@@ -18,8 +20,13 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import org.json.JSONTokener;
+
 /** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
 final class HeadlessWebViewHost {
+    private static final long OUTPUT_DETACH_SETTLE_MS = 1_000L;
+    private static final long OUTPUT_DETACH_PROBE_MS = 250L;
+    private static final long OUTPUT_DETACH_MAX_WAIT_MS = 5_000L;
     private static volatile WebView activeWebView;
 
     private final WebView webView;
@@ -29,8 +36,12 @@ final class HeadlessWebViewHost {
     private final ImageReader imageReader;
     private final HandlerThread drainThread;
     private final DisplayDrainState drainState;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean outputAttached;
     private boolean completedRunResourceCacheCleared;
+    private boolean detachProbePending;
+    private long detachProbeStartedAt;
+    private int detachProbeGeneration;
 
     private HeadlessWebViewHost(WebView webView, Presentation presentation,
                                 VirtualDisplay virtualDisplay, Surface surface,
@@ -178,16 +189,112 @@ final class HeadlessWebViewHost {
         return outputAttached;
     }
 
+    /**
+     * Requests output detachment without pausing the virtual display before ChatGPT has finished
+     * its submit-to-thinking UI transition. On a live ChatGPT page the surface stays attached until
+     * the turn protocol is active and the actual message composer is present again. No navigation,
+     * reload or WebView recreation is used. If the composer does not become ready promptly, the
+     * safe fallback is to keep the existing surface attached for that turn.
+     */
     boolean detachOutput() {
         requireMainThread();
+        if (!hasDetachableOutput() || !outputAttached) return false;
+        if (!isChatGptPage(webView.getUrl())) return detachOutputNow();
+        if (detachProbePending) return true;
+        detachProbePending = true;
+        detachProbeStartedAt = SystemClock.elapsedRealtime();
+        int generation = ++detachProbeGeneration;
+        mainHandler.postDelayed(() -> probeDetachReadiness(generation), OUTPUT_DETACH_SETTLE_MS);
+        return true;
+    }
+
+    private void probeDetachReadiness(int generation) {
+        if (!detachProbeCurrent(generation)) return;
+        String script = "(()=>{const p=window.__selfRunTurnProtocol?.snapshot?.();"
+                + "const phase=String(p?.phase||'');"
+                + "const composer=Boolean(" + SelfRun3ComposerTransport.composerReadyExpression() + ");"
+                + "return phase+'|'+(composer?'1':'0');})()";
+        try {
+            webView.evaluateJavascript(script, raw -> {
+                if (!detachProbeCurrent(generation)) return;
+                String value = decodeJavascriptString(raw);
+                int divider = value.indexOf('|');
+                String phase = divider < 0 ? "" : value.substring(0, divider);
+                boolean composerReady = divider >= 0 && value.substring(divider + 1).equals("1");
+                if (("THINKING".equals(phase) || "ANSWERING".equals(phase)
+                        || "COMPLETE".equals(phase)) && composerReady) {
+                    detachOutputNow();
+                    return;
+                }
+                if ("ERROR".equals(phase)) {
+                    detachOutputNow();
+                    return;
+                }
+                if (SystemClock.elapsedRealtime() - detachProbeStartedAt >= OUTPUT_DETACH_MAX_WAIT_MS) {
+                    finishDetachProbeKeepingOutput();
+                    return;
+                }
+                mainHandler.postDelayed(
+                        () -> probeDetachReadiness(generation), OUTPUT_DETACH_PROBE_MS);
+            });
+        } catch (Throwable ignored) {
+            if (!detachProbeCurrent(generation)) return;
+            if (SystemClock.elapsedRealtime() - detachProbeStartedAt >= OUTPUT_DETACH_MAX_WAIT_MS) {
+                finishDetachProbeKeepingOutput();
+            } else {
+                mainHandler.postDelayed(
+                        () -> probeDetachReadiness(generation), OUTPUT_DETACH_PROBE_MS);
+            }
+        }
+    }
+
+    private boolean detachProbeCurrent(int generation) {
+        return detachProbePending && generation == detachProbeGeneration
+                && hasDetachableOutput() && outputAttached;
+    }
+
+    private void finishDetachProbeKeepingOutput() {
+        detachProbePending = false;
+        detachProbeGeneration++;
+        mainHandler.removeCallbacksAndMessages(null);
+    }
+
+    private void cancelDetachProbe() {
+        detachProbePending = false;
+        detachProbeGeneration++;
+        mainHandler.removeCallbacksAndMessages(null);
+    }
+
+    private boolean detachOutputNow() {
+        cancelDetachProbe();
         if (!hasDetachableOutput() || !outputAttached) return false;
         virtualDisplay.setSurface(null);
         outputAttached = false;
         return true;
     }
 
+    private static boolean isChatGptPage(String raw) {
+        try {
+            Uri uri = Uri.parse(raw == null ? "" : raw);
+            return "https".equals(uri.getScheme())
+                    && ("chatgpt.com".equals(uri.getHost()) || "www.chatgpt.com".equals(uri.getHost()));
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String decodeJavascriptString(String raw) {
+        try {
+            Object value = new JSONTokener(raw == null ? "null" : raw).nextValue();
+            return value instanceof String ? (String) value : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
     boolean attachOutput() {
         requireMainThread();
+        cancelDetachProbe();
         if (!hasDetachableOutput() || outputAttached) return false;
         virtualDisplay.setSurface(surface);
         outputAttached = true;
@@ -218,6 +325,7 @@ final class HeadlessWebViewHost {
     }
 
     void destroy() {
+        cancelDetachProbe();
         if (activeWebView == webView) activeWebView = null;
         try {
             webView.setWebViewClient(null);
