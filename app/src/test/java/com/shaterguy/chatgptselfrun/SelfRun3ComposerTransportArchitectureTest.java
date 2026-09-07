@@ -24,7 +24,7 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertFalse(transport.contains("projectGuard"));
     }
 
-    @Test public void bootstrapRestoresKnownGoodPreparedThenBindThenSubmitBoundary() throws Exception {
+    @Test public void bootstrapKeepsKnownGoodPreparedThenBindThenSubmitBoundary() throws Exception {
         String bootstrap = source("SelfRun3BootstrapTransport.java");
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(bootstrap.contains("state:'prepared'"));
@@ -41,9 +41,10 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(submit >= 0 && bind > submit);
     }
 
-    @Test public void continuationUsesPersistentPreparePhasesAndDetachedNodeFence() throws Exception {
+    @Test public void continuationGloballyRanksEditorsAndCanonicalizesBlockReadback() throws Exception {
         String transport = source("SelfRun3ComposerTransport.java");
-        for (String retired : new String[]{"SelfRunContinuationDom", "UserNextInputStore", "LegacyRunModeMigration"}) {
+        for (String retired : new String[]{"SelfRunContinuationDom", "UserNextInputStore", "LegacyRunModeMigration",
+                "WebUiCalibrationStore", "offsetParent"}) {
             assertFalse("retired continuation dependency remains: " + retired, transport.contains(retired));
         }
         assertTrue(transport.contains("selfrun-drive:v3-cont:"));
@@ -51,24 +52,31 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(transport.contains("state:'inputting'"));
         assertTrue(transport.contains("state:'prepared'"));
         assertTrue(transport.contains("state:'clicked'"));
+        assertTrue(transport.contains("allCandidates"));
+        assertTrue(transport.contains("ranked(allCandidates())"));
+        assertTrue(transport.contains("prompt-textarea"));
+        assertTrue(transport.contains("data-lexical-editor"));
+        assertTrue(transport.contains("rawVariants"));
+        assertTrue(transport.contains("querySelectorAll?.('p,div,li')"));
+        assertTrue(transport.contains("String.fromCharCode(10)"));
+        assertTrue(transport.contains("split(' ').filter(Boolean).join(' ')"));
+        assertTrue(transport.contains("COMPOSER_DIVERGED_A"));
+        assertTrue(transport.contains("hashText"));
+        assertTrue(transport.contains("composerSignature"));
         assertTrue(transport.contains("if(!e.isConnected)return"));
-        assertTrue(transport.contains("String.fromCharCode(13)"));
-        assertTrue(transport.contains("inputComposer(composer,expected)"));
-        assertTrue(transport.contains("clearComposer(composer)"));
-        assertTrue(transport.contains("exact continuation prepared"));
-        assertTrue(transport.contains("shadowRoot"));
         assertTrue(transport.contains("form.requestSubmit()"));
-        assertTrue(transport.contains("KeyboardEvent"));
     }
 
-    @Test public void continuationRegressionOnlyExercisesReachableTwoTurnPath() throws Exception {
+    @Test public void continuationRegressionMatchesLiveFailureShape() throws Exception {
         String test = androidTestSource("SelfRun3ComposerTransportWebViewTest.java");
-        assertTrue(test.contains("twoContinuationsSurviveSynchronousShadowEditorReplacementAndCanonicalProtocol"));
-        assertTrue(test.contains("attachShadow({mode:'open'})"));
-        assertTrue(test.contains("syncContinuationRebuild=()=>true"));
+        assertTrue(test.contains("twoMultilineContinuationsPreferMessageComposerAndSurviveBlockReadbackRebuild"));
+        assertTrue(test.contains("Search messages"));
+        assertTrue(test.contains("data-lexical-editor"));
+        assertTrue(test.contains("window.currentEditor.innerText===window.editorModel"));
+        assertTrue(test.contains("line one  with spaces"));
+        assertTrue(test.contains("window.decoySubmitCount"));
         assertTrue(test.contains("window.rebuildComposer()"));
         assertTrue(test.contains("message_stream_complete"));
-        assertTrue(test.contains("turn-two|turn-three"));
         assertTrue(test.contains("String(window.canonicalPosts.length)"));
         assertFalse(test.contains("prepareInitial"));
         assertFalse(test.contains("submitInitial"));
