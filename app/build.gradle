@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3001001
-def selfRunDriveVersionName = '3.0.1-dev1'
+def selfRunDriveVersionCode = 3001002
+def selfRunDriveVersionName = '3.0.1-dev2'
 def selfRun3VersionPattern = ~/^3\.0\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -155,8 +155,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
 
         ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
-         'SelfRun3WebAdapter.java', 'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java',
-         'SelfRun3UserInput.java', 'SelfRun3StrictJson.java'].each { name ->
+         'SelfRun3WebAdapter.java', 'SelfRun3ComposerTransport.java', 'SelfRun3PowerPolicy.java',
+         'SelfRun3RunMarker.java', 'SelfRun3UserInput.java', 'SelfRun3StrictJson.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
@@ -164,6 +164,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def ledger = new File(src, 'SelfRun3Ledger.java').getText('UTF-8')
         def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')
         def drive = new File(src, 'SelfRun3DriveAdapter.java').getText('UTF-8')
+        def web = new File(src, 'SelfRun3WebAdapter.java').getText('UTF-8')
+        def composer = new File(src, 'SelfRun3ComposerTransport.java').getText('UTF-8')
         def power = new File(src, 'SelfRun3PowerPolicy.java').getText('UTF-8')
         if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
                 || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) {
@@ -194,6 +196,15 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !drive.contains('REQUIREMENT_READBACK_MISMATCH')
                 || drive.contains('DriveSignalParser')) {
             throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
+        }
+        if (web.contains('SelfRunContinuationDom')
+                || !web.contains('SelfRun3ComposerTransport.prepareContinuation')
+                || !web.contains('SelfRun3ComposerTransport.submitContinuation')) {
+            throw new GradleException('V3 continuation must be owned by the V3 composer transport')
+        }
+        if (composer.contains('__srFind') || composer.contains('WebUiCalibrationStore')
+                || composer.contains('offsetParent') || composer.contains('UserNextInputStore')) {
+            throw new GradleException('V3 composer transport must not depend on legacy calibration/visibility authority')
         }
         if (!power.contains('NORMAL_WAIT_POLL_MS = 0L')) {
             throw new GradleException('normal V3 response waiting must not poll')

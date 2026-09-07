@@ -15,9 +15,10 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import org.json.JSONObject;
 import org.json.JSONTokener;
+import java.util.Set;
 import java.util.function.Consumer;
 
-/** Replaceable browser port. Uses verified input/profile transports, never the V2 execution machine. */
+/** Replaceable V3 browser port with a V3-owned composer transport and protocol-owned response state. */
 final class SelfRun3WebAdapter {
     interface Listener {
         void onPrepared(String task, String turn, String request);
@@ -29,6 +30,18 @@ final class SelfRun3WebAdapter {
         void onFailure(String task, String turn, String request, String code);
         void onDispatched(String task, String turn, String request);
     }
+
+    private static final Set<String> DEFINITE_UNSENT = Set.of(
+            SelfRun3ComposerTransport.SEND_DISABLED,
+            SelfRun3ComposerTransport.SEND_UNAVAILABLE,
+            SelfRun3ComposerTransport.STOP,
+            SelfRun3ComposerTransport.COMPOSER_WAITING,
+            SelfRun3ComposerTransport.COMPOSER_INPUTTING,
+            SelfRun3ComposerTransport.TARGET_ERROR,
+            SelfRun3ComposerTransport.AUTH_REQUIRED,
+            "TURN_PROTOCOL_BUSY",
+            "TURN_PROTOCOL_UNAVAILABLE");
+
     private static SelfRun3WebAdapter active;
     private final Context context;
     private final Listener listener;
@@ -50,151 +63,269 @@ final class SelfRun3WebAdapter {
         diagnosticStore = new SelfRunStore(context);
         diagnosticLog = new SelfRunRunLog(context);
     }
+
     static void protocolEvent(WebView view, JSONObject event) {
         SelfRun3WebAdapter a = active;
         if (a == null || a.closed || a.web != view || a.state == null) return;
         SelfRun3Engine.State s = a.state;
-        if (!s.taskId().equals(event.optString("runId")) || !s.requestId().equals(event.optString("turnToken"))) return;
+        if (!s.taskId().equals(event.optString("runId"))
+                || !s.requestId().equals(event.optString("turnToken"))) return;
         String stage = event.optString("stage"), source = event.optString("source");
-        if ("turn_request".equals(stage)) a.listener.onStarted(s.taskId(), s.turnId(), s.requestId());
-        else if ("answering_started".equals(stage)) a.listener.onAccepted(s.taskId(), s.turnId(), s.requestId());
-        else if (("complete".equals(stage) || "completion_dispatch".equals(stage)) && TurnProtocolLogBridge.isAllowedCompletionSource(source))
+        if ("turn_request".equals(stage)) {
+            a.listener.onStarted(s.taskId(), s.turnId(), s.requestId());
+        } else if ("answering_started".equals(stage)) {
+            a.listener.onAccepted(s.taskId(), s.turnId(), s.requestId());
+        } else if (("complete".equals(stage) || "completion_dispatch".equals(stage))
+                && TurnProtocolLogBridge.isAllowedCompletionSource(source)) {
             a.listener.onEnded(s.taskId(), s.turnId(), s.requestId(), source);
-        else if ("error".equals(stage)) a.listener.onFailure(s.taskId(), s.turnId(), s.requestId(), "TRANSPORT_INTERRUPTED");
+        } else if ("error".equals(stage)) {
+            a.listener.onFailure(s.taskId(), s.turnId(), s.requestId(), "TRANSPORT_INTERRUPTED");
+        }
         a.captureConversation();
     }
+
     void prepare(SelfRun3Engine.State s) {
         requireMain();
         boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
-        state = s; closed = false; preparing = true;
-        if (newAttempt) { step = 0; prepareStarted = SystemClock.elapsedRealtime(); lastPrepareTrace = ""; }
+        state = s;
+        closed = false;
+        preparing = true;
+        if (newAttempt) {
+            step = 0;
+            prepareStarted = SystemClock.elapsedRealtime();
+            lastPrepareTrace = "";
+        }
         trace("PREPARE_START", s.resource("conversationUrl").isEmpty() ? "INITIAL" : "CONTINUATION", step);
         ensureWeb(false);
         if (host != null) host.attachOutput();
         if (!loading) advance();
     }
+
     private void ensureWeb(boolean detached) {
         if (web != null) return;
         String target = state.resource("conversationUrl");
         if (target.isEmpty()) target = state.config().optString("projectUrl");
-        if (!trusted(target)) { fail("TARGET_INVALID"); return; }
-        host = HeadlessWebViewHost.create(context); web = host.webView(); active = this;
+        if (!trusted(target)) {
+            fail("TARGET_INVALID");
+            return;
+        }
+        host = HeadlessWebViewHost.create(context);
+        web = host.webView();
+        active = this;
         if (detached) host.detachOutput();
-        if (!WebViewConfig.applyAutomation(web)) { fail("TURN_PROTOCOL_UNAVAILABLE"); return; }
+        if (!WebViewConfig.applyAutomation(web)) {
+            fail("TURN_PROTOCOL_UNAVAILABLE");
+            return;
+        }
         loading = true;
         web.setWebViewClient(new WebViewClient() {
-            @Override public void onPageStarted(WebView view, String url, Bitmap icon) { generation++; evaluation++; loading = true; }
+            @Override public void onPageStarted(WebView view, String url, Bitmap icon) {
+                generation++;
+                evaluation++;
+                loading = true;
+            }
+
             @Override public void onPageFinished(WebView view, String url) {
                 if (view != web || closed) return;
-                loading = false; captureConversation();
-                if (pendingInspection != null) { Consumer<JSONObject> cb = pendingInspection; pendingInspection = null; inspect(state, cb); }
-                else if (preparing) later(SelfRun3WebAdapter.this::advance, 500L);
+                loading = false;
+                captureConversation();
+                if (pendingInspection != null) {
+                    Consumer<JSONObject> cb = pendingInspection;
+                    pendingInspection = null;
+                    inspect(state, cb);
+                } else if (preparing) {
+                    later(SelfRun3WebAdapter.this::advance, 500L);
+                }
             }
-            @Override public void doUpdateVisitedHistory(WebView view, String url, boolean reload) { if (view == web && !closed) captureConversation(); }
+
+            @Override public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
+                if (view == web && !closed) captureConversation();
+            }
+
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (view != web || closed) return true;
                 if (!request.isForMainFrame()) return false;
                 Uri u = request.getUrl();
                 if ("selfrun-drive".equals(u.getScheme()) && "turn-completed".equals(u.getHost())) {
-                    if (state.taskId().equals(u.getQueryParameter("run")) && state.requestId().equals(u.getQueryParameter("token"))
-                            && TurnProtocolLogBridge.isAllowedCompletionSource(u.getQueryParameter("source")))
-                        listener.onEnded(state.taskId(), state.turnId(), state.requestId(), u.getQueryParameter("source"));
+                    if (state.taskId().equals(u.getQueryParameter("run"))
+                            && state.requestId().equals(u.getQueryParameter("token"))
+                            && TurnProtocolLogBridge.isAllowedCompletionSource(u.getQueryParameter("source"))) {
+                        listener.onEnded(state.taskId(), state.turnId(), state.requestId(),
+                                u.getQueryParameter("source"));
+                    }
                     return true;
                 }
-                if (!allowedRoute(String.valueOf(u))) { fail("ROUTE_MISMATCH"); return true; }
+                if (!allowedRoute(String.valueOf(u))) {
+                    fail("ROUTE_MISMATCH");
+                    return true;
+                }
                 return false;
             }
-            @Override public void onReceivedSslError(WebView view, SslErrorHandler response, SslError error) { response.cancel(); fail("TLS_REJECTED"); }
+
+            @Override public void onReceivedSslError(WebView view, SslErrorHandler response, SslError error) {
+                response.cancel();
+                fail("TLS_REJECTED");
+            }
+
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (view == web && request.isForMainFrame()) fail("WEB_CONNECTION_FAILED");
             }
+
             @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-                if (view == web) { disposeHost(); fail("RENDERER_GONE"); } return true;
+                if (view == web) {
+                    disposeHost();
+                    fail("RENDERER_GONE");
+                }
+                return true;
             }
         });
         web.loadUrl(target);
     }
+
     private void advance() {
         if (!preparing || closed || loading || web == null || state == null) return;
-        if (SystemClock.elapsedRealtime() - prepareStarted >= SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS) { fail("WEB_PREPARATION_TIMEOUT"); return; }
+        if (SystemClock.elapsedRealtime() - prepareStarted >= SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS) {
+            fail("WEB_PREPARATION_TIMEOUT");
+            return;
+        }
         boolean initial = state.resource("conversationUrl").isEmpty();
         String script;
         if (step == 0 && initial) {
-            BootstrapRunStateStore.touchBootstrap(context, state.taskId(), ChatReasoningPreferenceStore.selectionForRun(context, state.taskId()), System.currentTimeMillis());
-            script = SelfRunDom.prepareInitialContext(state.config().optString("projectUrl"), state.config().optString("mode"), state.taskId());
+            BootstrapRunStateStore.touchBootstrap(
+                    context,
+                    state.taskId(),
+                    ChatReasoningPreferenceStore.selectionForRun(context, state.taskId()),
+                    System.currentTimeMillis());
+            script = SelfRunDom.prepareInitialContext(
+                    state.config().optString("projectUrl"),
+                    state.config().optString("mode"),
+                    state.taskId());
         } else if (step <= 1) {
-            step = 1; script = profileScript(state);
+            step = 1;
+            script = profileScript(state);
         } else {
-            script = initial ? SelfRunContinuationDom.prepareBootstrap(state.config().optString("projectUrl"), state.text("prompt"), marker(state))
-                    : SelfRunContinuationDom.prepareDriveTurn(state.resource("conversationUrl"), state.text("prompt"), marker(state));
+            script = initial
+                    ? SelfRun3ComposerTransport.prepareInitial(
+                            state.config().optString("projectUrl"), state.text("prompt"))
+                    : SelfRun3ComposerTransport.prepareContinuation(
+                            state.resource("conversationUrl"), state.text("prompt"));
         }
         evaluate(script, result -> {
             String status = result.optString("status");
             tracePrepare(status);
-            if ("READY".equals(status) && step < 2) { step++; later(this::advance, 0L); return; }
-            if ("READY_TO_SUBMIT".equals(status)) {
+            if ("READY".equals(status) && step < 2) {
+                step++;
+                later(this::advance, 0L);
+                return;
+            }
+            if (SelfRun3ComposerTransport.READY_TO_SUBMIT.equals(status)) {
                 preparing = false;
                 trace("ON_PREPARED", status, step);
-                listener.onPrepared(state.taskId(), state.turnId(), state.requestId()); return;
+                listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
+                return;
             }
-            if ("SUBMISSION_CONFIRMED".equals(status)) { preparing = false; listener.onAccepted(state.taskId(), state.turnId(), state.requestId()); detach(); return; }
-            if ("AUTH_REQUIRED".equals(status) || status.endsWith("_FAILED") || status.endsWith("_UNAVAILABLE")
-                    || "PROFILE_ERROR".equals(status) || "TARGET_ERROR".equals(status)) { fail(status); return; }
+            if ("AUTH_REQUIRED".equals(status)
+                    || status.endsWith("_FAILED")
+                    || status.endsWith("_UNAVAILABLE")
+                    || "PROFILE_ERROR".equals(status)
+                    || "TARGET_ERROR".equals(status)) {
+                fail(status);
+                return;
+            }
             later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
         });
     }
+
     void submit(SelfRun3Engine.State claimed) {
         requireMain();
-        if (web == null || closed || !SelfRun3PowerPolicy.maySend(claimed)) { fail("SUBMISSION_STATE_INVALID"); return; }
-        state = claimed; preparing = false;
+        if (web == null || closed || !SelfRun3PowerPolicy.maySend(claimed)) {
+            fail("SUBMISSION_STATE_INVALID");
+            return;
+        }
+        state = claimed;
+        preparing = false;
         boolean initial = claimed.resource("conversationUrl").isEmpty();
         trace("SUBMIT_START", initial ? "INITIAL" : "CONTINUATION", step);
-        String action = initial ? SelfRunContinuationDom.clickPreparedBootstrap(claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed))
-                : SelfRunContinuationDom.clickPreparedDriveTurn(claimed.resource("conversationUrl"), claimed.text("prompt"), marker(claimed), "");
-        String wrapped = "(()=>{const p=window.__selfRunTurnProtocol; if(!p.armCompletion(" + q(claimed.taskId()) + "," + q(claimed.requestId())
-                + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});return (" + action + ");})()";
-        evaluate(ChatGptTurnProtocolScript.bindTurnAndThen(claimed.taskId(), claimed.requestId(), wrapped), result -> {
+
+        String action = initial
+                ? SelfRun3ComposerTransport.submitInitial(
+                        claimed.config().optString("projectUrl"), claimed.text("prompt"))
+                : SelfRun3ComposerTransport.submitContinuation(
+                        claimed.resource("conversationUrl"), claimed.text("prompt"));
+        String wrapped = "(()=>{const p=window.__selfRunTurnProtocol;"
+                + "if(!p.armCompletion(" + q(claimed.taskId()) + "," + q(claimed.requestId())
+                + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});"
+                + "return (" + action + ");})()";
+
+        evaluate(ChatGptTurnProtocolScript.bindTurnAndThen(
+                claimed.taskId(), claimed.requestId(), wrapped), result -> {
             String status = result.optString("status");
             trace("SUBMIT_EVAL", status, step);
             detach();
-            if (java.util.Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING", "COMPOSER_INPUTTING", "TARGET_ERROR", "AUTH_REQUIRED", "TURN_PROTOCOL_BUSY", "TURN_PROTOCOL_UNAVAILABLE").contains(status)) {
+
+            if (DEFINITE_UNSENT.contains(status)) {
                 trace("ON_UNSENT", status, step);
                 listener.onUnsent(claimed.taskId(), claimed.turnId(), claimed.requestId(), status);
-            } else if ("CALLBACK_AMBIGUOUS".equals(status) || "SCRIPT_ERROR".equals(status)) fail("SUBMISSION_OUTCOME_UNKNOWN");
-            else listener.onDispatched(claimed.taskId(), claimed.turnId(), claimed.requestId());
+            } else if (SelfRun3ComposerTransport.SUBMISSION_PENDING.equals(status)) {
+                listener.onDispatched(claimed.taskId(), claimed.turnId(), claimed.requestId());
+            } else {
+                fail("SUBMISSION_OUTCOME_UNKNOWN");
+            }
             captureConversation();
         });
     }
+
     void inspect(SelfRun3Engine.State s, Consumer<JSONObject> callback) {
-        requireMain(); state = s;
+        requireMain();
+        state = s;
         if (web == null) {
-            if (s.resource("conversationUrl").isEmpty()) { callback.accept(object("{\"ready\":false,\"reason\":\"conversation_unknown\"}")); return; }
-            preparing = false; pendingInspection = callback; ensureWeb(true);
-            if (web == null) { pendingInspection = null; callback.accept(object("{\"ready\":false}")); }
+            if (s.resource("conversationUrl").isEmpty()) {
+                callback.accept(object("{\"ready\":false,\"reason\":\"conversation_unknown\"}"));
+                return;
+            }
+            preparing = false;
+            pendingInspection = callback;
+            ensureWeb(true);
+            if (web == null) {
+                pendingInspection = null;
+                callback.accept(object("{\"ready\":false}"));
+            }
             return;
         }
-        if (loading) { pendingInspection = callback; return; }
-        detach(); evaluate(inspectionScript(s), callback);
+        if (loading) {
+            pendingInspection = callback;
+            return;
+        }
+        detach();
+        evaluate(inspectionScript(s), callback);
     }
+
     static String inspectionScript(SelfRun3Engine.State s) {
         return "(()=>{const out={ready:false,complete:false,accepted:false,receipt:false,signature:'',source:''};"
                 + "if(location.protocol!=='https:'||!['chatgpt.com','www.chatgpt.com'].includes(location.hostname))return JSON.stringify(out);"
-                + "const p=window.__selfRunTurnProtocol?.snapshot?.();if(p&&p.runId===" + q(s.taskId()) + "&&p.turnToken===" + q(s.requestId()) + "){"
+                + "const p=window.__selfRunTurnProtocol?.snapshot?.();"
+                + "if(p&&p.runId===" + q(s.taskId()) + "&&p.turnToken===" + q(s.requestId()) + "){"
                 + "out.accepted=p.sawVisibleAnswer===true||p.sawStreamComplete===true;"
-                + "if(p.phase==='COMPLETE'&&['message_stream_complete','finished_successfully_end_turn'].includes(p.completionSource)){out.complete=true;out.source=p.completionSource;return JSON.stringify(out);}}"
-                + "const expected=" + q(SelfRunScript.conversationId(s.resource("conversationUrl"))) + ";const parts=location.pathname.split('/').filter(Boolean),ci=parts.indexOf('c');"
+                + "if(p.phase==='COMPLETE'&&['message_stream_complete','finished_successfully_end_turn'].includes(p.completionSource)){"
+                + "out.complete=true;out.source=p.completionSource;return JSON.stringify(out);}}"
+                + "const expected=" + q(SelfRunScript.conversationId(s.resource("conversationUrl"))) + ";"
+                + "const parts=location.pathname.split('/').filter(Boolean),ci=parts.indexOf('c');"
                 + "if(!expected||ci<0||parts[ci+1]!==expected)return JSON.stringify(out);"
-                + "const messages=[...document.querySelectorAll('[data-message-author-role]')];const users=messages.filter(e=>e.getAttribute('data-message-author-role')==='user');"
-                + "const assistants=messages.filter(e=>e.getAttribute('data-message-author-role')==='assistant');const u=users.at(-1),a=assistants.at(-1);"
+                + "const messages=[...document.querySelectorAll('[data-message-author-role]')];"
+                + "const users=messages.filter(e=>e.getAttribute('data-message-author-role')==='user');"
+                + "const assistants=messages.filter(e=>e.getAttribute('data-message-author-role')==='assistant');"
+                + "const u=users.at(-1),a=assistants.at(-1);"
                 + "if(!u||!a||!String(u.textContent||'').includes(" + q(s.turnId()) + "))return JSON.stringify(out);"
                 + "if(!(u.compareDocumentPosition(a)&Node.DOCUMENT_POSITION_FOLLOWING))return JSON.stringify(out);"
-                + "const text=String(a.innerText||a.textContent||'').trim();out.receipt=text.endsWith(" + q(SelfRun3Protocol.receipt(s)) + ");"
-                + "const c=document.querySelector('textarea#prompt-textarea,div#prompt-textarea[contenteditable=true],main form [contenteditable=true]');"
-                + "const stop=[...document.querySelectorAll('[data-testid=stop-button],[data-testid=stop-generating-button],[data-testid=composer-stop-button]')].some(e=>e.isConnected&&e.offsetParent!==null);"
-                + "out.ready=out.receipt&&!!c&&c.isConnected&&!c.disabled&&!c.readOnly&&!stop;"
-                + "out.signature=out.ready?" + q(s.turnId() + ":") + "+String(a.getAttribute('data-message-id')||'')+':'+text.length:'';"
+                + "const text=String(a.innerText||a.textContent||'').trim();"
+                + "out.receipt=text.endsWith(" + q(SelfRun3Protocol.receipt(s)) + ");"
+                + "const composerReady=Boolean(" + SelfRun3ComposerTransport.composerReadyExpression() + ");"
+                + "out.ready=out.receipt&&composerReady;"
+                + "out.signature=out.ready?" + q(s.turnId() + ":")
+                + "+String(a.getAttribute('data-message-id')||'')+':'+text.length:'';"
                 + "return JSON.stringify(out);})()";
     }
+
     private static String profileScript(SelfRun3Engine.State s) {
         JSONObject c = s.config();
         String calls = RequestProfileScript.beginTarget(c.optString("mode"), s.taskId());
@@ -207,63 +338,158 @@ final class SelfRun3WebAdapter {
         } else {
             calls += RequestProfileScript.setChatReasoning(c.optString("chatContinuation"));
         }
-        return "(()=>{try{" + calls + "return JSON.stringify({status:'READY'});}catch(_){return JSON.stringify({status:'PROFILE_ERROR'});}})()";
+        return "(()=>{try{" + calls
+                + "return JSON.stringify({status:'READY'});"
+                + "}catch(_){return JSON.stringify({status:'PROFILE_ERROR'});}})()";
     }
+
     private void evaluate(String script, Consumer<JSONObject> callback) {
-        WebView current = web; int id = ++evaluation, page = generation; String request = state.requestId();
+        WebView current = web;
+        int id = ++evaluation, page = generation;
+        String request = state.requestId();
         handler.postDelayed(() -> {
-            if (current != web || id != evaluation || page != generation || closed || !request.equals(state.requestId())) return;
-            evaluation++; callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}"));
+            if (current != web || id != evaluation || page != generation || closed
+                    || !request.equals(state.requestId())) return;
+            evaluation++;
+            callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}"));
         }, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
         try {
             current.evaluateJavascript(script, raw -> {
-                if (current != web || id != evaluation || page != generation || closed || !request.equals(state.requestId())) return;
+                if (current != web || id != evaluation || page != generation || closed
+                        || !request.equals(state.requestId())) return;
                 evaluation++;
-                try { Object v = new JSONTokener(raw == null ? "null" : raw).nextValue(); callback.accept(v instanceof String ? object((String)v) : v instanceof JSONObject ? (JSONObject)v : object("{\"status\":\"CALLBACK_AMBIGUOUS\"}")); }
-                catch (Exception e) { callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}")); }
+                try {
+                    Object v = new JSONTokener(raw == null ? "null" : raw).nextValue();
+                    callback.accept(v instanceof String
+                            ? object((String) v)
+                            : v instanceof JSONObject
+                                    ? (JSONObject) v
+                                    : object("{\"status\":\"CALLBACK_AMBIGUOUS\"}"));
+                } catch (Exception e) {
+                    callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}"));
+                }
             });
-        } catch (Throwable e) { evaluation++; callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}")); }
+        } catch (Throwable e) {
+            evaluation++;
+            callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}"));
+        }
     }
+
     private void tracePrepare(String status) {
         String key = step + ":" + status;
         if (key.equals(lastPrepareTrace)) return;
         lastPrepareTrace = key;
         trace("PREPARE_EVAL", status, step);
     }
+
     private void trace(String stage, String status, int traceStep) {
         if (state == null || !state.taskId().equals(diagnosticStore.runId())) return;
         String safeStage = safeTrace(stage);
         String safeStatus = safeTrace(status);
-        diagnosticLog.record(diagnosticStore, "V3_WEB_TRACE",
+        diagnosticLog.record(
+                diagnosticStore,
+                "V3_WEB_TRACE",
                 "stage=" + safeStage + ";status=" + safeStatus + ";step=" + traceStep);
     }
+
     private static String safeTrace(String value) {
-        String safe = value == null ? "" : value.toUpperCase().replaceAll("[^A-Z0-9_:-]", "_");
+        String safe = value == null
+                ? ""
+                : value.toUpperCase().replaceAll("[^A-Z0-9_:-]", "_");
         return safe.isEmpty() ? "UNKNOWN" : safe.substring(0, Math.min(100, safe.length()));
     }
+
     private void captureConversation() {
         if (web == null || state == null || !state.flag("sendClaimed")) return;
         String url = web.getUrl();
-        if (allowedRoute(url) && !SelfRunScript.conversationId(url).isEmpty()) listener.onConversation(state.taskId(), state.turnId(), url);
+        if (allowedRoute(url) && !SelfRunScript.conversationId(url).isEmpty()) {
+            listener.onConversation(state.taskId(), state.turnId(), url);
+        }
     }
+
     private boolean allowedRoute(String url) {
         if (!trusted(url) || state == null) return false;
         String known = state.resource("conversationUrl");
-        if (!known.isEmpty()) return SelfRunScript.conversationId(known).equals(SelfRunScript.conversationId(url));
-        return SelfRunScript.projectId(state.config().optString("projectUrl")).equals(SelfRunScript.projectId(url));
+        if (!known.isEmpty()) {
+            return SelfRunScript.conversationId(known).equals(SelfRunScript.conversationId(url));
+        }
+        return SelfRunScript.projectId(state.config().optString("projectUrl"))
+                .equals(SelfRunScript.projectId(url));
     }
+
     static boolean trusted(String raw) {
-        try { Uri u = Uri.parse(raw); return "https".equals(u.getScheme()) && ("chatgpt.com".equals(u.getHost()) || "www.chatgpt.com".equals(u.getHost())) && (u.getPort() == -1 || u.getPort() == 443) && u.getUserInfo() == null; }
-        catch (Exception e) { return false; }
+        try {
+            Uri u = Uri.parse(raw);
+            return "https".equals(u.getScheme())
+                    && ("chatgpt.com".equals(u.getHost()) || "www.chatgpt.com".equals(u.getHost()))
+                    && (u.getPort() == -1 || u.getPort() == 443)
+                    && u.getUserInfo() == null;
+        } catch (Exception e) {
+            return false;
+        }
     }
-    void detach() { requireMain(); if (host != null) host.detachOutput(); }
-    void quiesce() { preparing = false; evaluation++; handler.removeCallbacksAndMessages(null); detach(); }
-    void close() { requireMain(); closed = true; preparing = false; evaluation++; handler.removeCallbacksAndMessages(null); pendingInspection = null; disposeHost(); }
-    private void disposeHost() { if (active == this) active = null; if (host != null) host.destroy(); host = null; web = null; loading = false; }
-    private void fail(String code) { preparing = false; trace("FAILURE", code, step); detach(); if (state != null) listener.onFailure(state.taskId(),state.turnId(),state.requestId(),code); }
-    private void later(Runnable action, long delay) { String request = state.requestId(); handler.postDelayed(() -> { if (!closed && state != null && request.equals(state.requestId())) action.run(); }, delay); }
-    private static String marker(SelfRun3Engine.State s) { return "v3-" + s.requestId(); }
-    private static String q(String value) { return SelfRunScript.quote(value); }
-    private static JSONObject object(String raw) { try { return new JSONObject(raw); } catch (Exception e) { return new JSONObject(); } }
-    private static void requireMain() { if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("browser port requires main thread"); }
+
+    void detach() {
+        requireMain();
+        if (host != null) host.detachOutput();
+    }
+
+    void quiesce() {
+        preparing = false;
+        evaluation++;
+        handler.removeCallbacksAndMessages(null);
+        detach();
+    }
+
+    void close() {
+        requireMain();
+        closed = true;
+        preparing = false;
+        evaluation++;
+        handler.removeCallbacksAndMessages(null);
+        pendingInspection = null;
+        disposeHost();
+    }
+
+    private void disposeHost() {
+        if (active == this) active = null;
+        if (host != null) host.destroy();
+        host = null;
+        web = null;
+        loading = false;
+    }
+
+    private void fail(String code) {
+        preparing = false;
+        trace("FAILURE", code, step);
+        detach();
+        if (state != null) {
+            listener.onFailure(state.taskId(), state.turnId(), state.requestId(), code);
+        }
+    }
+
+    private void later(Runnable action, long delay) {
+        String request = state.requestId();
+        handler.postDelayed(() -> {
+            if (!closed && state != null && request.equals(state.requestId())) action.run();
+        }, delay);
+    }
+
+    private static String q(String value) {
+        return SelfRunScript.quote(value);
+    }
+
+    private static JSONObject object(String raw) {
+        try {
+            return new JSONObject(raw);
+        } catch (Exception e) {
+            return new JSONObject();
+        }
+    }
+
+    private static void requireMain() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            throw new IllegalStateException("browser port requires main thread");
+        }
+    }
 }
