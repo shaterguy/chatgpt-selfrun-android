@@ -182,9 +182,17 @@ final class SelfRun3WebAdapter {
                 + "return JSON.stringify(out);})()";
     }
     private static String profileScript(SelfRun3Engine.State s) {
-        JSONObject c = s.config(); String calls = RequestProfileScript.beginTarget(c.optString("mode"), s.taskId());
-        if ("WORK".equals(c.optString("mode"))) calls += RequestProfileScript.setWorkModel(c.optString("model")) + RequestProfileScript.setWorkReasoning(c.optString("reasoning"));
-        else calls += RequestProfileScript.setChatReasoning(c.optString(s.turn() == 1 ? "chatBootstrap" : "chatContinuation"));
+        JSONObject c = s.config();
+        String calls = RequestProfileScript.beginTarget(c.optString("mode"), s.taskId());
+        if ("WORK".equals(c.optString("mode"))) {
+            calls += RequestProfileScript.setWorkModel(c.optString("model"))
+                    + RequestProfileScript.setWorkReasoning(c.optString("reasoning"));
+        } else if (s.turn() == 1) {
+            calls += RequestProfileScript.setChatProfiles(
+                    c.optString("chatBootstrap"), c.optString("chatContinuation"));
+        } else {
+            calls += RequestProfileScript.setChatReasoning(c.optString("chatContinuation"));
+        }
         return "(()=>{try{" + calls + "return JSON.stringify({status:'READY'});}catch(_){return JSON.stringify({status:'PROFILE_ERROR'});}})()";
     }
     private void evaluate(String script, Consumer<JSONObject> callback) {
