@@ -54,7 +54,7 @@ final class SelfRun3ComposerTransport {
                 + "if(sameText(composer,expected))return result('" + READY_TO_SUBMIT + "','exact prompt already prepared');"
                 + "writeExact(composer,expected);"
                 + "return result('" + COMPOSER_INPUTTING + "',sameText(composer,expected)"
-                + "?'editor mutation completed; exact readback will be rechecked':'editor mutation issued; exact readback is pending');"
+                + "?'native editor mutation visible; model readback will be rechecked':'native editor mutation issued; model readback is pending');"
                 + "})()";
     }
 
@@ -67,7 +67,7 @@ final class SelfRun3ComposerTransport {
                 + protocolIdleGuard()
                 + "const composer=findComposer();"
                 + "if(!composer)return result('" + COMPOSER_WAITING + "','editable composer disappeared before submit');"
-                + "if(!sameText(composer,expected))return result('" + COMPOSER_INPUTTING + "','exact prompt readback changed before submit');"
+                + "if(!sameText(composer,expected))return result('" + COMPOSER_INPUTTING + "','exact prompt model readback changed before submit');"
                 + "const form=findOwningForm(composer);"
                 + "if(form&&typeof form.requestSubmit==='function'){"
                 + "try{form.requestSubmit();return result('" + SUBMISSION_PENDING + "','dispatch=form_request_submit');}"
@@ -175,6 +175,16 @@ final class SelfRun3ComposerTransport {
                   .trim();
                 const raw=e=>('value'in e?e.value:(e.innerText||e.textContent||''));
                 const sameText=(e,value)=>canonical(raw(e))===canonical(value);
+                const emitInput=(e,inputType,data)=>{
+                  try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType,data}));}
+                  catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}
+                  try{e.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}
+                };
+                const emitBeforeInput=(e,inputType,data)=>{
+                  try{return e.dispatchEvent(new InputEvent('beforeinput',{
+                    bubbles:true,cancelable:true,inputType,data
+                  }));}catch(_){return true;}
+                };
                 const setField=(e,value)=>{
                   const proto=Object.getPrototypeOf(e);
                   const own=proto?Object.getOwnPropertyDescriptor(proto,'value'):null;
@@ -183,10 +193,12 @@ final class SelfRun3ComposerTransport {
                   const input=typeof HTMLInputElement!=='undefined'
                     ?Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value'):null;
                   const setter=own?.set||textarea?.set||input?.set;
-                  if(setter)setter.call(e,value);else e.value=value;
-                  try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));}
-                  catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}
-                  e.dispatchEvent(new Event('change',{bubbles:true}));
+                  e.focus?.();
+                  emitBeforeInput(e,'insertText',value);
+                  if(!sameText(e,value)){
+                    if(setter)setter.call(e,value);else e.value=value;
+                  }
+                  emitInput(e,'insertText',value);
                 };
                 const selectContents=e=>{
                   try{
@@ -197,13 +209,15 @@ final class SelfRun3ComposerTransport {
                   }catch(_){return false;}
                 };
                 const setRich=(e,value)=>{
-                  const doc=e.ownerDocument||document;e.focus?.();selectContents(e);
-                  try{doc.execCommand?.('insertText',false,value);}catch(_){}
-                  if(!sameText(e,value)){
-                    e.textContent=value;
-                    try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));}
-                    catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}
+                  const doc=e.ownerDocument||document;
+                  try{e.focus?.();}catch(_){}
+                  selectContents(e);
+                  emitBeforeInput(e,'insertText',value);
+                  if(!sameText(e,value)&&e.isConnected){
+                    selectContents(e);
+                    try{doc.execCommand?.('insertText',false,value);}catch(_){}
                   }
+                  if(e.isConnected)emitInput(e,'insertText',value);
                 };
                 const writeExact=(e,value)=>{
                   try{e.focus?.();}catch(_){}
