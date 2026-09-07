@@ -8,6 +8,7 @@ def selfRunDriveVersionName = '3.0.0-dev3'
 android {
     namespace 'com.shaterguy.chatgptselfrun'
     compileSdk 36
+    testBuildType 'qaApp'
 
     defaultConfig {
         applicationId 'com.shaterguy.chatgptselfrun.drive'
@@ -68,6 +69,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         }
         if (selfRunDriveVersionCode <= 2020048) {
             throw new GradleException('SelfRun 3 versionCode must advance the 2.3.2 stable lineage')
+        }
+        if (android.testBuildType != 'qaApp') {
+            throw new GradleException('SelfRun 3 instrumentation must target the qaApp TEST lineage')
         }
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') {
