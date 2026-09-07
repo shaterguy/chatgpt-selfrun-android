@@ -57,6 +57,22 @@ public final class UserImmediateInputPolicyTest {
         assertTrue(activity.contains("UserImmediateInputCoordinator.submit"));
     }
 
+    @Test public void forceInputReattachesBeforeSendAndUsesComposerGateAfterConfirmedSend() throws Exception {
+        String coordinator = src("UserImmediateInputCoordinator.java");
+        String host = src("HeadlessWebViewHost.java");
+
+        assertTrue(host.contains("static HeadlessWebViewHost activeHost()"));
+        assertTrue(coordinator.contains("HeadlessWebViewHost.activeHost()"));
+        assertTrue(coordinator.contains("host.attachOutput()"));
+        assertTrue(coordinator.contains("restoreOutputAfterAttempt(true)"));
+        assertTrue(coordinator.contains("host.detachOutputWhenComposerReady()"));
+        assertTrue(coordinator.contains("restoreOutputAfterAttempt(false)"));
+        assertTrue(coordinator.contains("else if (restoreDetached)"));
+        assertTrue(coordinator.contains("host.detachOutput()"));
+        assertFalse(coordinator.contains("view.reload()"));
+        assertFalse(coordinator.contains("view.loadUrl("));
+    }
+
     private static String src(String file) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
