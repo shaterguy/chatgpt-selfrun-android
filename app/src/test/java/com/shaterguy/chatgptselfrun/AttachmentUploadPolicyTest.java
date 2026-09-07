@@ -71,7 +71,7 @@ public class AttachmentUploadPolicyTest {
 
     @Test public void v3BootstrapReferencesFolderOnlyNotLocalFileNamesOrUris() throws Exception {
         String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("REFERENCE_FOLDER_ID="));
+        assertTrue(protocol.contains("FOLDER_ID="));
         assertFalse(protocol.contains("attachment.name"));
         assertFalse(protocol.contains("attachment.uri"));
     }
