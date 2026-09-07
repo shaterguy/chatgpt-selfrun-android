@@ -86,33 +86,6 @@ final class DriveApiClient {
         }
     }
 
-    /** One coherent native Docs read. */
-    static final class DocumentSnapshot {
-        final String text;
-        final String revisionId;
-        final String tabId;
-        final int claimStartIndex;
-        final int claimEndIndex;
-        private final JSONObject namedRanges;
-
-        DocumentSnapshot(String text, String revisionId, String tabId, int claimStartIndex,
-                         int claimEndIndex, JSONObject namedRanges) {
-            this.text = text == null ? "" : text;
-            this.revisionId = revisionId == null ? "" : revisionId;
-            this.tabId = tabId == null ? "" : tabId;
-            this.claimStartIndex = claimStartIndex;
-            this.claimEndIndex = claimEndIndex;
-            this.namedRanges = namedRanges == null ? new JSONObject() : namedRanges;
-        }
-
-        boolean hasNamedRange(String name) {
-            if (!validNamedRangeName(name)) return false;
-            JSONObject matches = namedRanges.optJSONObject(name);
-            JSONArray ranges = matches == null ? null : matches.optJSONArray("namedRanges");
-            return ranges != null && ranges.length() > 0;
-        }
-    }
-
     String getAccountPermissionId(String accessToken) throws Exception {
         JSONObject json = request("GET", "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)", accessToken, null);
         JSONObject user = json.optJSONObject("user");
@@ -402,7 +375,7 @@ final class DriveApiClient {
         return new Metadata(json);
     }
 
-    private static JSONObject baseMetadata(String name, String mimeType, String parentId, String kind) {
+    private static JSONObject baseMetadata(String name, String mimeType, String parentId, String kind) throws Exception {
         return new JSONObject().put("name", name).put("mimeType", mimeType)
                 .put("parents", new JSONArray().put(parentId))
                 .put("appProperties", new JSONObject().put("job_id", name).put("selfrun_kind", kind));
