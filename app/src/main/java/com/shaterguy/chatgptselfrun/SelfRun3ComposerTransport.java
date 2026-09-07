@@ -103,7 +103,7 @@ final class SelfRun3ComposerTransport {
 
     private static String locatorPrelude() {
         return """
-                const safeText=v=>String(v??'').replace(/\s+/g,' ').trim().toLowerCase();
+                const safeText=v=>String(v??'').trim().toLowerCase();
                 const hiddenByContract=e=>!!e?.closest?.('[hidden],[aria-hidden="true"]');
                 const inputKind=e=>String(e?.getAttribute?.('type')||'text').toLowerCase();
                 const editable=e=>{
@@ -118,7 +118,7 @@ final class SelfRun3ComposerTransport {
                 const semantic=e=>safeText([e?.getAttribute?.('aria-label'),e?.getAttribute?.('placeholder'),e?.getAttribute?.('role'),e?.getAttribute?.('aria-multiline'),e?.getAttribute?.('contenteditable')].join(' '));
                 const nearestForm=e=>{let node=e,depth=0;while(node&&depth++<16){if(String(node.tagName||'').toLowerCase()==='form')return node;if(node.parentElement){node=node.parentElement;continue;}const root=node.getRootNode?.();node=root&&root.host?root.host:null;}return null;};
                 const inMain=e=>{let node=e,depth=0;while(node&&depth++<16){if(String(node.tagName||'').toLowerCase()==='main')return true;if(node.parentElement){node=node.parentElement;continue;}const root=node.getRootNode?.();node=root&&root.host?root.host:null;}return false;};
-                const score=(e,index)=>{let s=index/10000;const text=semantic(e),tag=String(e.tagName||'').toLowerCase();if(nearestForm(e))s+=70;if(inMain(e))s+=30;if(tag==='textarea')s+=35;if(e.isContentEditable||e.getAttribute?.('contenteditable')==='true')s+=35;if(String(e.getAttribute?.('role')||'').toLowerCase()==='textbox')s+=30;if(String(e.getAttribute?.('aria-multiline')||'').toLowerCase()==='true')s+=20;if(/message|chat|ask|question|prompt|메시지|질문|입력/.test(text))s+=30;if(/search|검색/.test(text))s-=80;return s;};
+                const score=(e,index)=>{let s=index/10000;const text=semantic(e),tag=String(e.tagName||'').toLowerCase();if(nearestForm(e))s+=70;if(inMain(e))s+=30;if(tag==='textarea')s+=35;if(e.isContentEditable||e.getAttribute?.('contenteditable')==='true')s+=35;if(String(e.getAttribute?.('role')||'').toLowerCase()==='textbox')s+=30;if(String(e.getAttribute?.('aria-multiline')||'').toLowerCase()==='true')s+=20;if(text.includes('message')||text.includes('chat')||text.includes('ask')||text.includes('question')||text.includes('prompt')||text.includes('메시지')||text.includes('질문')||text.includes('입력'))s+=30;if(text.includes('search')||text.includes('검색'))s-=80;return s;};
                 const collect=root=>[...root.querySelectorAll?.('textarea,input,[contenteditable],[role="textbox"]')||[]].filter(editable);
                 const ranked=nodes=>nodes.map((e,i)=>({e,s:score(e,i)})).sort((a,b)=>b.s-a.s);
                 const shadowCandidates=()=>{const found=[],queue=[document],seen=new Set([document]);for(let qi=0;qi<queue.length&&qi<32;qi++){const root=queue[qi];for(const element of root.querySelectorAll?.('*')||[]){const shadow=element.shadowRoot;if(shadow&&!seen.has(shadow)){seen.add(shadow);queue.push(shadow);for(const e of collect(shadow))found.push(e);}}}return found;};
@@ -128,9 +128,14 @@ final class SelfRun3ComposerTransport {
                 """;
     }
 
-    private static String genericEditorPrelude() {
+    private static String normalizationPrelude() {
         return """
-                const canonical=v=>String(v??'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\u00a0/g,' ').replace(/\r\n?/g,'\n').trim();
+                const canonical=v=>{let s=String(v??'');for(const code of [8203,8204,8205,65279])s=s.split(String.fromCharCode(code)).join('');s=s.split(String.fromCharCode(160)).join(' ');s=s.split(String.fromCharCode(13)).join('');return s.trim();};
+                """;
+    }
+
+    private static String genericEditorPrelude() {
+        return normalizationPrelude() + """
                 const raw=e=>('value'in e?e.value:(e.innerText||e.textContent||''));
                 const sameText=(e,value)=>canonical(raw(e))===canonical(value);
                 const emitInput=(e,inputType,data)=>{try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType,data}));}catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}try{e.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}};
@@ -139,8 +144,7 @@ final class SelfRun3ComposerTransport {
     }
 
     private static String continuationEditorPrelude() {
-        return """
-                const canonical=v=>String(v??'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\u00a0/g,' ').replace(/\r\n?/g,'\n').trim();
+        return normalizationPrelude() + """
                 const raw=e=>('value'in e?e.value:(e.innerText||e.textContent||''));
                 const sameText=(e,value)=>!!e&&e.isConnected&&canonical(raw(e))===canonical(value);
                 const emptyText=e=>!!e&&e.isConnected&&canonical(raw(e))==='';
