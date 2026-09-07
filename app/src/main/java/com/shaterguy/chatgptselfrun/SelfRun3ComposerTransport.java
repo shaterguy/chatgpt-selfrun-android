@@ -1,6 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
-/** V3-only composer transport. Continuation preparation is marker-driven and restart-safe. */
+/** V3 continuation-only composer transport. Preparation is marker-driven and restart-safe. */
 final class SelfRun3ComposerTransport {
     static final String READY_TO_SUBMIT = "READY_TO_SUBMIT";
     static final String COMPOSER_WAITING = "COMPOSER_WAITING";
@@ -14,14 +14,6 @@ final class SelfRun3ComposerTransport {
     static final String TARGET_ERROR = "TARGET_ERROR";
 
     private SelfRun3ComposerTransport() {}
-
-    static String prepareInitial(String projectUrl, String prompt) {
-        return genericPrepare(projectGuard(projectUrl), prompt);
-    }
-
-    static String submitInitial(String projectUrl, String prompt) {
-        return genericSubmit(projectGuard(projectUrl), prompt);
-    }
 
     static String prepareContinuation(String conversationUrl, String prompt) {
         return "(()=>{const result=(status,detail='')=>JSON.stringify({status,detail});"
@@ -64,29 +56,9 @@ final class SelfRun3ComposerTransport {
                 + "})()";
     }
 
-    /** Used only by bounded reconciliation and shares the live transport's capability probe. */
+    /** Used only by bounded reconciliation and shares the live continuation capability probe. */
     static String composerReadyExpression() {
         return "(()=>{" + locatorPrelude() + "return !!findComposer();})()";
-    }
-
-    private static String genericPrepare(String guard, String prompt) {
-        return "(()=>{const result=(status,detail='')=>JSON.stringify({status,detail});"
-                + guard + "const expected=" + q(prompt) + ";" + locatorPrelude() + genericEditorPrelude()
-                + protocolIdleGuard() + "const composer=findComposer();"
-                + "if(!composer)return result('" + COMPOSER_WAITING + "','editable composer not present yet');"
-                + "if(sameText(composer,expected))return result('" + READY_TO_SUBMIT + "','exact prompt already prepared');"
-                + "writeExact(composer,expected);return result('" + COMPOSER_INPUTTING + "','prompt mutation issued');})()";
-    }
-
-    private static String genericSubmit(String guard, String prompt) {
-        return "(()=>{const result=(status,detail='')=>JSON.stringify({status,detail});"
-                + guard + "const expected=" + q(prompt) + ";" + locatorPrelude() + genericEditorPrelude()
-                + protocolIdleGuard() + "const composer=findComposer();"
-                + "if(!composer)return result('" + COMPOSER_WAITING + "','editable composer disappeared before submit');"
-                + "if(!sameText(composer,expected))return result('" + COMPOSER_INPUTTING + "','exact prompt model readback changed before submit');"
-                + "const form=findOwningForm(composer);if(form&&typeof form.requestSubmit==='function'){try{form.requestSubmit();return result('" + SUBMISSION_PENDING + "','dispatch=form_request_submit');}catch(_){}}"
-                + "if(dispatchEnter(composer))return result('" + SUBMISSION_PENDING + "','dispatch=editor_enter');"
-                + "return result('" + SEND_UNAVAILABLE + "','no functional submit path');})()";
     }
 
     private static String protocolIdleGuard() {
@@ -134,15 +106,6 @@ final class SelfRun3ComposerTransport {
                 """;
     }
 
-    private static String genericEditorPrelude() {
-        return normalizationPrelude() + """
-                const raw=e=>('value'in e?e.value:(e.innerText||e.textContent||''));
-                const sameText=(e,value)=>canonical(raw(e))===canonical(value);
-                const emitInput=(e,inputType,data)=>{try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType,data}));}catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}try{e.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}};
-                const writeExact=(e,value)=>{try{e.focus?.();}catch(_){}if('value'in e){const p=Object.getPrototypeOf(e),own=p?Object.getOwnPropertyDescriptor(p,'value'):null,base=typeof HTMLTextAreaElement!=='undefined'?Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value'):null,setter=own?.set||base?.set;if(setter)setter.call(e,value);else e.value=value;emitInput(e,'insertText',value);}else{try{e.textContent=value;}catch(_){}emitInput(e,'insertText',value);}};
-                """;
-    }
-
     private static String continuationEditorPrelude() {
         return normalizationPrelude() + """
                 const raw=e=>('value'in e?e.value:(e.innerText||e.textContent||''));
@@ -164,17 +127,6 @@ final class SelfRun3ComposerTransport {
                 + "if(/\\/(?:auth|login)(?:\\/|$)/.test(location.pathname))return result('" + AUTH_REQUIRED + "','authentication route active');"
                 + "const __srParts=location.pathname.split('/').filter(Boolean);const __srAfter=k=>{const i=__srParts.indexOf(k);return i>=0&&i+1<__srParts.length?__srParts[i+1]:''};"
                 + "if(__srAfter('c')!==" + conversation + ")return result('" + TARGET_ERROR + "','conversation route mismatch');";
-    }
-
-    private static String projectGuard(String projectUrl) {
-        String project = q(SelfRunScript.projectId(projectUrl));
-        String general = q(SelfRunScript.GENERAL_CHAT_SCOPE);
-        return "if(location.protocol!=='https:'||!['chatgpt.com','www.chatgpt.com'].includes(location.hostname))return result('" + TARGET_ERROR + "','host mismatch');"
-                + "if(/\\/(?:auth|login)(?:\\/|$)/.test(location.pathname))return result('" + AUTH_REQUIRED + "','authentication route active');"
-                + ProjectUrlPolicy.webProjectIdentityPrelude()
-                + "const __srParts=location.pathname.split('/').filter(Boolean);const __srAfter=k=>{const i=__srParts.indexOf(k);return i>=0&&i+1<__srParts.length?__srParts[i+1]:''};"
-                + "const __srExpectedProject=" + project + ";const __srActualProject=__srCanonicalProjectId(__srAfter('g'));"
-                + "if(__srExpectedProject===" + general + "){if(__srAfter('g'))return result('" + TARGET_ERROR + "','project route active for general chat');}else if(__srActualProject!==__srExpectedProject)return result('" + TARGET_ERROR + "','project route mismatch');";
     }
 
     private static String q(String value) {
