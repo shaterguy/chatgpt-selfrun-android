@@ -32,7 +32,7 @@ VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$
 VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUILD" | head -1)"
 [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
 [[ "$VERSION_CODE" -gt 2020048 ]]
-[[ "$VERSION_NAME" =~ ^3\.0\.0-(dev|rc)[0-9]+$|^3\.0\.0$ ]]
+[[ "$VERSION_NAME" =~ ^3\.0\.[0-9]+-(dev|rc)[0-9]+$|^3\.0\.[0-9]+$ ]]
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
 grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
