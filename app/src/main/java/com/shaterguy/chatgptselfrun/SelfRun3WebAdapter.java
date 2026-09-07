@@ -33,15 +33,23 @@ final class SelfRun3WebAdapter {
     private final Context context;
     private final Listener listener;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final SelfRunStore diagnosticStore;
+    private final SelfRunRunLog diagnosticLog;
     private HeadlessWebViewHost host;
     private WebView web;
     private SelfRun3Engine.State state;
     private boolean preparing, loading, closed;
     private int step, evaluation, generation;
     private long prepareStarted;
+    private String lastPrepareTrace = "";
     private Consumer<JSONObject> pendingInspection;
 
-    SelfRun3WebAdapter(Context context, Listener listener) { this.context = context; this.listener = listener; }
+    SelfRun3WebAdapter(Context context, Listener listener) {
+        this.context = context;
+        this.listener = listener;
+        diagnosticStore = new SelfRunStore(context);
+        diagnosticLog = new SelfRunRunLog(context);
+    }
     static void protocolEvent(WebView view, JSONObject event) {
         SelfRun3WebAdapter a = active;
         if (a == null || a.closed || a.web != view || a.state == null) return;
@@ -59,7 +67,8 @@ final class SelfRun3WebAdapter {
         requireMain();
         boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
         state = s; closed = false; preparing = true;
-        if (newAttempt) { step = 0; prepareStarted = SystemClock.elapsedRealtime(); }
+        if (newAttempt) { step = 0; prepareStarted = SystemClock.elapsedRealtime(); lastPrepareTrace = ""; }
+        trace("PREPARE_START", s.resource("conversationUrl").isEmpty() ? "INITIAL" : "CONTINUATION", step);
         ensureWeb(false);
         if (host != null) host.attachOutput();
         if (!loading) advance();
@@ -121,9 +130,11 @@ final class SelfRun3WebAdapter {
         }
         evaluate(script, result -> {
             String status = result.optString("status");
+            tracePrepare(status);
             if ("READY".equals(status) && step < 2) { step++; later(this::advance, 0L); return; }
             if ("READY_TO_SUBMIT".equals(status)) {
                 preparing = false;
+                trace("ON_PREPARED", status, step);
                 listener.onPrepared(state.taskId(), state.turnId(), state.requestId()); return;
             }
             if ("SUBMISSION_CONFIRMED".equals(status)) { preparing = false; listener.onAccepted(state.taskId(), state.turnId(), state.requestId()); detach(); return; }
@@ -137,16 +148,19 @@ final class SelfRun3WebAdapter {
         if (web == null || closed || !SelfRun3PowerPolicy.maySend(claimed)) { fail("SUBMISSION_STATE_INVALID"); return; }
         state = claimed; preparing = false;
         boolean initial = claimed.resource("conversationUrl").isEmpty();
+        trace("SUBMIT_START", initial ? "INITIAL" : "CONTINUATION", step);
         String action = initial ? SelfRunContinuationDom.clickPreparedBootstrap(claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed))
                 : SelfRunContinuationDom.clickPreparedDriveTurn(claimed.resource("conversationUrl"), claimed.text("prompt"), marker(claimed), "");
         String wrapped = "(()=>{const p=window.__selfRunTurnProtocol; if(!p.armCompletion(" + q(claimed.taskId()) + "," + q(claimed.requestId())
                 + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});return (" + action + ");})()";
         evaluate(ChatGptTurnProtocolScript.bindTurnAndThen(claimed.taskId(), claimed.requestId(), wrapped), result -> {
             String status = result.optString("status");
+            trace("SUBMIT_EVAL", status, step);
             detach();
-            if (java.util.Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING", "COMPOSER_INPUTTING", "TARGET_ERROR", "AUTH_REQUIRED", "TURN_PROTOCOL_BUSY", "TURN_PROTOCOL_UNAVAILABLE").contains(status))
+            if (java.util.Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING", "COMPOSER_INPUTTING", "TARGET_ERROR", "AUTH_REQUIRED", "TURN_PROTOCOL_BUSY", "TURN_PROTOCOL_UNAVAILABLE").contains(status)) {
+                trace("ON_UNSENT", status, step);
                 listener.onUnsent(claimed.taskId(), claimed.turnId(), claimed.requestId(), status);
-            else if ("CALLBACK_AMBIGUOUS".equals(status) || "SCRIPT_ERROR".equals(status)) fail("SUBMISSION_OUTCOME_UNKNOWN");
+            } else if ("CALLBACK_AMBIGUOUS".equals(status) || "SCRIPT_ERROR".equals(status)) fail("SUBMISSION_OUTCOME_UNKNOWN");
             else listener.onDispatched(claimed.taskId(), claimed.turnId(), claimed.requestId());
             captureConversation();
         });
@@ -210,6 +224,23 @@ final class SelfRun3WebAdapter {
             });
         } catch (Throwable e) { evaluation++; callback.accept(object("{\"status\":\"CALLBACK_AMBIGUOUS\"}")); }
     }
+    private void tracePrepare(String status) {
+        String key = step + ":" + status;
+        if (key.equals(lastPrepareTrace)) return;
+        lastPrepareTrace = key;
+        trace("PREPARE_EVAL", status, step);
+    }
+    private void trace(String stage, String status, int traceStep) {
+        if (state == null || !state.taskId().equals(diagnosticStore.runId())) return;
+        String safeStage = safeTrace(stage);
+        String safeStatus = safeTrace(status);
+        diagnosticLog.record(diagnosticStore, "V3_WEB_TRACE",
+                "stage=" + safeStage + ";status=" + safeStatus + ";step=" + traceStep);
+    }
+    private static String safeTrace(String value) {
+        String safe = value == null ? "" : value.toUpperCase().replaceAll("[^A-Z0-9_:-]", "_");
+        return safe.isEmpty() ? "UNKNOWN" : safe.substring(0, Math.min(100, safe.length()));
+    }
     private void captureConversation() {
         if (web == null || state == null || !state.flag("sendClaimed")) return;
         String url = web.getUrl();
@@ -229,7 +260,7 @@ final class SelfRun3WebAdapter {
     void quiesce() { preparing = false; evaluation++; handler.removeCallbacksAndMessages(null); detach(); }
     void close() { requireMain(); closed = true; preparing = false; evaluation++; handler.removeCallbacksAndMessages(null); pendingInspection = null; disposeHost(); }
     private void disposeHost() { if (active == this) active = null; if (host != null) host.destroy(); host = null; web = null; loading = false; }
-    private void fail(String code) { preparing = false; detach(); if (state != null) listener.onFailure(state.taskId(),state.turnId(),state.requestId(),code); }
+    private void fail(String code) { preparing = false; trace("FAILURE", code, step); detach(); if (state != null) listener.onFailure(state.taskId(),state.turnId(),state.requestId(),code); }
     private void later(Runnable action, long delay) { String request = state.requestId(); handler.postDelayed(() -> { if (!closed && state != null && request.equals(state.requestId())) action.run(); }, delay); }
     private static String marker(SelfRun3Engine.State s) { return "v3-" + s.requestId(); }
     private static String q(String value) { return SelfRunScript.quote(value); }
