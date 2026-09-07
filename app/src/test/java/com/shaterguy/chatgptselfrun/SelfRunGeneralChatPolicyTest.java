@@ -79,10 +79,12 @@ public class SelfRunGeneralChatPolicyTest {
     }
 
     @Test public void captureLogRequiresPersistedConversationRoute() throws Exception {
-        String service = src("SelfRunService.java");
-        assertTrue(service.contains("store.captureConversationUrl(url);if(sameConversation(store.conversationUrl(),url))"));
-        assertTrue(service.contains("trusted_general_route"));
-        assertTrue(service.contains("trusted_project_route"));
+        String coordinator = src("SelfRun3Coordinator.java");
+        String web = src("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("listener.onConversation(state.taskId(), state.turnId(), url)"));
+        assertTrue(coordinator.contains("if (store.conversationUrl().isEmpty()) store.captureConversationUrl(url)"));
+        assertTrue(coordinator.contains("SelfRun3Engine.Kind.RESOURCE"));
+        assertTrue(coordinator.contains("\"conversationUrl\""));
     }
 
     @Test public void generalChatIsSelectedFromTheFixedSafeOption() throws Exception {
