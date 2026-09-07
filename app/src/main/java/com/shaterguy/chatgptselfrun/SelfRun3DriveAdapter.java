@@ -69,7 +69,8 @@ final class SelfRun3DriveAdapter {
         require(s.turnId().equals(original.turnId()), "STALE_TURN");
         if (!s.resource(key).isEmpty()) { validateDocument(token, s, s.resource(key)); return s; }
         checkpoint();
-        DriveApiClient.Metadata found = api.findV3Document(token, name, s.resource("folderId"));
+        String foundId = SelfRun3DriveLookup.findSingleDocumentId(token, name, s.resource("folderId"));
+        DriveApiClient.Metadata found = foundId.isEmpty() ? null : api.getMetadata(token, foundId);
         if (found != null) return pin(s, key, found.id);
         // An earlier ambiguous native-Doc create can become visible later; never blindly repeat it.
         require(s.resource(intentKey).isEmpty(), "DOCUMENT_CREATE_UNCONFIRMED");
