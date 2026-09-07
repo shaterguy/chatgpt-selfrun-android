@@ -56,9 +56,9 @@ public final class SelfRun3EarlyObservationTest {
     @Test public void earlyObservationWiringIsPresentInActualRuntime() throws Exception {
         java.nio.file.Path source = java.nio.file.Path.of("src/main/java/com/shaterguy/chatgptselfrun");
         if (!java.nio.file.Files.isDirectory(source)) source = java.nio.file.Path.of("app").resolve(source);
-        String web = java.nio.file.Files.readString(source.resolve("SelfRun3WebAdapter.java"));
-        String bridge = java.nio.file.Files.readString(source.resolve("TurnProtocolLogBridge.java"));
-        String coordinator = java.nio.file.Files.readString(source.resolve("SelfRun3Coordinator.java"));
+        String web = read(source.resolve("SelfRun3WebAdapter.java"));
+        String bridge = read(source.resolve("TurnProtocolLogBridge.java"));
+        String coordinator = read(source.resolve("SelfRun3Coordinator.java"));
         assertTrue(web.contains("evaluate(observeBeforeAndAfter(state, script)"));
         assertTrue(web.contains("if (consumeObservation(result) || !preparing) return"));
         assertTrue(bridge.contains("SelfRun3WebAdapter.protocolEvent(view, item)"));
@@ -68,6 +68,9 @@ public final class SelfRun3EarlyObservationTest {
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.ENDED"));
     }
 
+    private static String read(java.nio.file.Path file) throws java.io.IOException {
+        return new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
+    }
     private static SelfRun3Engine.State initial() {
         JSONObject c = new JSONObject(); SelfRun3Engine.put(c, "mode", "CHAT");
         return SelfRun3Engine.create("task", "task:turn:1", c);
