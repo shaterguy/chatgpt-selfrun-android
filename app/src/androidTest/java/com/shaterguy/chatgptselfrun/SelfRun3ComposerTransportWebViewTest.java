@@ -14,30 +14,32 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-/** Continuation-only regression for synchronous replacement of a Shadow DOM rich editor. */
+/** Live-failure regression: multiline block readback, two editors and synchronous rich-editor rebuild. */
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3ComposerTransportWebViewTest {
-    private static final String RUN_ID = "SR-V3-CONTINUATION-2TURN";
+    private static final String RUN_ID = "SR-V3-CONTINUATION-LIVE-SHAPE";
     private static final String PROJECT_ID = "g-p-6a582c824ba08191ac7e74e9bad721fc";
     private static final String SLUGGED_PROJECT_ID = PROJECT_ID + "-vibe-coding";
     private static final String CONVERSATION_PATH = "/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
     private static final String CONVERSATION_URL = "https://chatgpt.com" + CONVERSATION_PATH;
 
-    @Test public void twoContinuationsSurviveSynchronousShadowEditorReplacementAndCanonicalProtocol()
+    @Test public void twoMultilineContinuationsPreferMessageComposerAndSurviveBlockReadbackRebuild()
             throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
             read(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
             assertEquals(CONVERSATION_PATH, read(scenario, web, "location.pathname"));
-            assertShadowComposer(scenario, web);
+            assertEquals("2", read(scenario, web,
+                    "String(document.querySelectorAll('textarea,[contenteditable],[role=\"textbox\"]').length)"));
 
-            runContinuation(scenario, web, "turn-2", "turn-two", 1);
-            assertShadowComposer(scenario, web);
-            runContinuation(scenario, web, "turn-3", "turn-three", 2);
-            assertShadowComposer(scenario, web);
+            String second = "[SELF_RUN_V3 3.0.0]\nTURN=2\nPHASE=WORK\n\nSelfRun 3 실행 계약\nline one  with spaces\nline two";
+            String third = "[SELF_RUN_V3 3.0.0]\nTURN=3\nPHASE=VERIFY\n\n[RESULT_IDENTITY_TEMPLATE]\nalpha beta\ngamma";
+            runContinuation(scenario, web, "turn-2", second, 1);
+            runContinuation(scenario, web, "turn-3", third, 2);
 
-            assertEquals("turn-two|turn-three", read(scenario, web, "window.sent.join('|')"));
+            assertEquals(second + "|" + third, read(scenario, web, "window.sent.join('|')"));
             assertEquals("2", read(scenario, web, "String(window.nativeModelCommits)"));
+            assertEquals("0", read(scenario, web, "String(window.decoySubmitCount)"));
             assertEquals("2", read(scenario, web, "String(window.canonicalPosts.length)"));
             assertEquals("POST|POST", read(scenario, web,
                     "window.canonicalPosts.map(x=>x.method).join('|')"));
@@ -56,6 +58,9 @@ public final class SelfRun3ComposerTransportWebViewTest {
         JSONObject prepared = prepare(scenario, web, prepareScript);
         assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT, prepared.optString("status"));
         assertEquals(prompt, read(scenario, web, "window.editorModel"));
+        assertEquals("", read(scenario, web, "window.decoy.value"));
+        assertEquals("false", read(scenario, web,
+                "String(window.currentEditor.innerText===window.editorModel)"));
         assertEquals(token, read(scenario, web,
                 "window.__selfRunTurnProtocol.snapshot().turnToken"));
         assertEquals("IDLE", read(scenario, web,
@@ -84,17 +89,6 @@ public final class SelfRun3ComposerTransportWebViewTest {
         assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT,
                 last == null ? "" : last.optString("status"));
         return last;
-    }
-
-    private static void assertShadowComposer(ActivityScenario<SelfRunNewActivity> scenario,
-                                             AtomicReference<WebView> web) throws Exception {
-        assertEquals("true", read(scenario, web,
-                "String(window.currentEditor.getRootNode() instanceof ShadowRoot)"));
-        assertEquals("", read(scenario, web, "String(window.currentEditor.id||'')"));
-        assertEquals("", read(scenario, web,
-                "String(window.currentEditor.getAttribute('data-testid')||'')"));
-        assertEquals("0", read(scenario, web,
-                "String(window.currentForm.querySelectorAll('button,[role=button]').length)"));
     }
 
     private static void await(ActivityScenario<SelfRunNewActivity> scenario,
@@ -147,12 +141,16 @@ public final class SelfRun3ComposerTransportWebViewTest {
 
     private static String fixture() {
         return """
-                <!doctype html><html><body><main><div id="composer-host"></div></main><script>
+                <!doctype html><html><body><main>
+                <form id="search-form"><textarea role="textbox" aria-label="Search messages"></textarea></form>
+                <div id="composer-host"></div>
+                </main><script>
                 history.replaceState({},'','__CONVERSATION_PATH__');
                 window.submitCount=0;window.sent=[];window.canonicalPosts=[];
-                window.editorModel='';window.nativeModelCommits=0;window.execCommandCalls=0;
-                window.syncContinuationRebuild=()=>true;
-                document.execCommand=()=>{window.execCommandCalls++;return false;};
+                window.editorModel='';window.nativeModelCommits=0;window.decoySubmitCount=0;
+                window.decoy=document.querySelector('#search-form textarea');
+                document.querySelector('#search-form').addEventListener('submit',event=>{event.preventDefault();window.decoySubmitCount++;});
+                document.execCommand=()=>false;
                 window.fetch=async(input,init={})=>{
                   const url=typeof input==='string'?input:String(input?.url||'');
                   const method=String(init.method||(input&&input.method)||'GET').toUpperCase();
@@ -162,7 +160,6 @@ public final class SelfRun3ComposerTransportWebViewTest {
                 };
                 const host=document.getElementById('composer-host');
                 const shadow=host.attachShadow({mode:'open'});
-                const modelText=editor=>String(editor.innerText||editor.textContent||'').trim();
                 window.rebuildComposer=()=>{
                   shadow.replaceChildren();
                   const form=document.createElement('form');
@@ -171,22 +168,21 @@ public final class SelfRun3ComposerTransportWebViewTest {
                   editor.setAttribute('role','textbox');
                   editor.setAttribute('aria-multiline','true');
                   editor.setAttribute('aria-label','Message');
-                  const p=document.createElement('p');
-                  if(window.editorModel)p.textContent=window.editorModel;
-                  else p.appendChild(document.createElement('br'));
-                  editor.appendChild(p);form.appendChild(editor);shadow.appendChild(form);
+                  editor.setAttribute('data-lexical-editor','true');
+                  for(const line of String(window.editorModel).split('\\n')){
+                    const p=document.createElement('p');
+                    if(line){p.textContent='  '+line.split(' ').join('   ')+'  ';}
+                    else p.appendChild(document.createElement('br'));
+                    editor.appendChild(p);
+                  }
+                  form.appendChild(editor);shadow.appendChild(form);
                   window.currentForm=form;window.currentEditor=editor;
                   editor.addEventListener('beforeinput',event=>{
                     if(event.inputType!=='insertText')return;
                     event.preventDefault();
                     window.editorModel=String(event.data||'');
                     window.nativeModelCommits++;
-                    if(window.syncContinuationRebuild())window.rebuildComposer();
-                  });
-                  editor.addEventListener('input',()=>{
-                    if(modelText(editor)!==window.editorModel&&window.syncContinuationRebuild()){
-                      window.rebuildComposer();
-                    }
+                    window.rebuildComposer();
                   });
                   form.addEventListener('submit',event=>{
                     event.preventDefault();
