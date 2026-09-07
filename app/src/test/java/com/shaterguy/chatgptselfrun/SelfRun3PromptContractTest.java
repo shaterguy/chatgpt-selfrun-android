@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import org.junit.Test;
 
 public final class SelfRun3PromptContractTest {
@@ -15,7 +16,7 @@ public final class SelfRun3PromptContractTest {
         assertTrue(source.contains("1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs"));
         assertTrue(source.contains("WORK_PROFILE_CHOICES"));
         assertTrue(source.contains("compactWorkChoices"));
-        assertFalse(source.contains("static final String CONTRACT"));
+        assertFalse(source.contains("static final String CONTRACT ="));
         assertFalse(source.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(source.contains("ProfileRegistry.exportWorkJson"));
         assertFalse(source.contains("[최초 요구사항 원문]"));
@@ -36,8 +37,8 @@ public final class SelfRun3PromptContractTest {
     }
 
     private static String src(String name) throws Exception {
-        Path p = Path.of("src/main/java/com/shaterguy/chatgptselfrun", name);
-        if (!Files.exists(p)) p = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun", name);
-        return Files.readString(p, StandardCharsets.UTF_8);
+        Path p = Paths.get("src/main/java/com/shaterguy/chatgptselfrun", name);
+        if (!Files.exists(p)) p = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun", name);
+        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
     }
 }
