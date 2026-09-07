@@ -18,7 +18,7 @@ import org.json.JSONTokener;
 import java.util.Set;
 import java.util.function.Consumer;
 
-/** Replaceable V3 browser port with a V3-owned composer transport and protocol-owned response state. */
+/** Replaceable V3 browser port with separate verified bootstrap and continuation transports. */
 final class SelfRun3WebAdapter {
     interface Listener {
         void onPrepared(String task, String turn, String request);
@@ -37,6 +37,7 @@ final class SelfRun3WebAdapter {
             SelfRun3ComposerTransport.STOP,
             SelfRun3ComposerTransport.COMPOSER_WAITING,
             SelfRun3ComposerTransport.COMPOSER_INPUTTING,
+            "COMPOSER_CLEARING",
             SelfRun3ComposerTransport.TARGET_ERROR,
             SelfRun3ComposerTransport.AUTH_REQUIRED,
             "TURN_PROTOCOL_BUSY",
@@ -100,7 +101,6 @@ final class SelfRun3WebAdapter {
     private void observedStart() {
         if (state.requestId().equals(observedRequest)) return;
         observedRequest = state.requestId();
-        // Fence pending preparation callbacks, but do not cancel an independent receipt inspection.
         if (preparing) evaluation++;
         preparing = false;
         trace("PROTOCOL_ACCEPT", "CANONICAL_POST", step);
@@ -250,21 +250,26 @@ final class SelfRun3WebAdapter {
             script = profileScript(state);
         } else {
             script = initial
-                    ? SelfRun3ComposerTransport.prepareInitial(
-                            state.config().optString("projectUrl"), state.text("prompt"))
+                    ? SelfRun3BootstrapTransport.prepare(
+                            state.config().optString("projectUrl"), state.text("prompt"), state.requestId())
                     : SelfRun3ComposerTransport.prepareContinuation(
                             state.resource("conversationUrl"), state.text("prompt"));
         }
-        evaluate(observeBeforeAndAfter(state, script), result -> {
+        boolean continuationComposerStage = !initial && step >= 2;
+        String evaluationScript = continuationComposerStage
+                ? observeBeforeAndAfter(state, script)
+                : observeWithoutBinding(script);
+        evaluate(evaluationScript, result -> {
             tracePrepare(result);
-            if (consumeObservation(result) || !preparing) return;
+            if (continuationComposerStage && consumeObservation(result)) return;
+            if (!preparing) return;
             String status = result.optString("status");
             if ("READY".equals(status) && step < 2) {
                 step++;
                 later(this::advance, 0L);
                 return;
             }
-            if (SelfRun3ComposerTransport.READY_TO_SUBMIT.equals(status)) {
+            if ("READY_TO_SUBMIT".equals(status)) {
                 preparing = false;
                 trace("ON_PREPARED", status, step);
                 listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
@@ -299,8 +304,8 @@ final class SelfRun3WebAdapter {
         trace("SUBMIT_START", initial ? "INITIAL" : "CONTINUATION", step);
 
         String action = initial
-                ? SelfRun3ComposerTransport.submitInitial(
-                        claimed.config().optString("projectUrl"), claimed.text("prompt"))
+                ? SelfRun3BootstrapTransport.submit(
+                        claimed.config().optString("projectUrl"), claimed.text("prompt"), claimed.requestId())
                 : SelfRun3ComposerTransport.submitContinuation(
                         claimed.resource("conversationUrl"), claimed.text("prompt"));
         evaluate(observeBeforeAndAfter(claimed, action), result -> {
@@ -312,7 +317,7 @@ final class SelfRun3WebAdapter {
             if (DEFINITE_UNSENT.contains(status)) {
                 trace("ON_UNSENT", status, step);
                 listener.onUnsent(claimed.taskId(), claimed.turnId(), claimed.requestId(), status);
-            } else if (SelfRun3ComposerTransport.SUBMISSION_PENDING.equals(status)) {
+            } else if ("SUBMISSION_PENDING".equals(status)) {
                 listener.onDispatched(claimed.taskId(), claimed.turnId(), claimed.requestId());
             } else {
                 fail("SUBMISSION_OUTCOME_UNKNOWN");
@@ -321,7 +326,7 @@ final class SelfRun3WebAdapter {
         });
     }
 
-    /** Bind before any UI mutation; a current observed POST always wins over a DOM return status. */
+    /** Binds one exact request around a physical submission or continuation mutation that may submit. */
     static String observeBeforeAndAfter(SelfRun3Engine.State s, String action) {
         String run = q(s.taskId()), request = q(s.requestId());
         String body = "(()=>{const p=window.__selfRunTurnProtocol;"
@@ -340,6 +345,17 @@ final class SelfRun3WebAdapter {
                 + "ready:document.readyState,focused:document.hasFocus(),hidden:document.hidden};"
                 + "return JSON.stringify(out);})()";
         return ChatGptTurnProtocolScript.bindTurnAndThen(s.taskId(), s.requestId(), body);
+    }
+
+    /** First-turn context/profile/composer preparation never owns a canonical request. */
+    static String observeWithoutBinding(String action) {
+        return "(()=>{let out;try{const value=(" + action + ");out=typeof value==='string'?JSON.parse(value):value;"
+                + "out=out||{status:'CALLBACK_AMBIGUOUS'};}catch(_){out={status:'JS_EVALUATION_FAILED'};}"
+                + "const p=window.__selfRunTurnProtocol?.snapshot?.();"
+                + "out.v3diag={bound:false,phase:p?.phase||'UNAVAILABLE',postSeen:false,"
+                + "editors:document.querySelectorAll('textarea,[contenteditable],[role=\"textbox\"]').length,"
+                + "ready:document.readyState,focused:document.hasFocus(),hidden:document.hidden};"
+                + "return JSON.stringify(out);})()";
     }
 
     private boolean consumeObservation(JSONObject result) {
@@ -503,8 +519,6 @@ final class SelfRun3WebAdapter {
             listener.onConversation(state.taskId(), state.turnId(), url);
             return;
         }
-        // Native URL publication can lag same-document history changes. Read the current route
-        // once per request/page/start-or-end boundary, without a polling clock or UI mutation.
         WebView current = web;
         int page = generation;
         String task = state.taskId(), turn = state.turnId(), request = state.requestId();
