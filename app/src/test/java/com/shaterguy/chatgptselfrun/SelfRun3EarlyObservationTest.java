@@ -64,9 +64,11 @@ public final class SelfRun3EarlyObservationTest {
         assertTrue(web.contains("SelfRun3BootstrapTransport.submit"));
         assertTrue(web.contains("evaluate(observeBeforeAndAfter(claimed, action)"));
         assertTrue(web.contains("continuationComposerStage"));
+        assertTrue(bridge.contains("if (!SelfRun3WebAdapter.ownsProtocolView(view)) return;"));
         assertTrue(bridge.contains("SelfRun3WebAdapter.protocolEvent(view, item)"));
+        assertFalse(bridge.contains("store.turnProtocolToken()"));
         assertTrue(bridge.indexOf("SelfRun3WebAdapter.protocolEvent(view, item)")
-                < bridge.indexOf("else if (!turnToken.equals(store.turnProtocolToken()))"));
+                < bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase)"));
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.STARTED"));
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.ENDED"));
     }

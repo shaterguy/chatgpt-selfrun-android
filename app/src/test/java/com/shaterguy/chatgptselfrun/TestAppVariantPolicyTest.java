@@ -44,15 +44,6 @@ public final class TestAppVariantPolicyTest {
         }
     }
 
-    @Test public void restartClaimRemainsBoundToProcessOwnership() throws Exception {
-        String activity = read(
-                "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java",
-                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunRestartActivity.java");
-        assertTrue(activity.contains("claimProcessId"));
-        assertTrue(activity.contains("SelfRunRestartPolicy.processClaimConflicts"));
-        assertTrue(activity.contains("requireClaimOwnership();"));
-    }
-
     @Test public void authDependencyVersionRemainsIndependentFromAppVersion() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("play-services-auth:21.6.0"));

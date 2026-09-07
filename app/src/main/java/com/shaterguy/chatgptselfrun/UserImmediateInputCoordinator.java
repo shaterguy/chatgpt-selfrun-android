@@ -57,7 +57,7 @@ final class UserImmediateInputCoordinator {
     static boolean immediateEligible(boolean active, boolean paused, boolean stopped, String phase,
                                      String conversationUrl, boolean webViewAvailable) {
         return active && !paused && !stopped && webViewAvailable
-                && SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(safe(phase))
+                && SelfRun3Coordinator.PHASE_WAITING.equals(safe(phase))
                 && !SelfRunScript.conversationId(safe(conversationUrl)).isEmpty();
     }
 
@@ -172,7 +172,7 @@ final class UserImmediateInputCoordinator {
         void click() {
             if (finished) return;
             if (!sameRun() || HeadlessWebViewHost.activeWebView() != view
-                    || !SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(store.phase())) {
+                    || !SelfRun3Coordinator.PHASE_WAITING.equals(store.phase())) {
                 cleanupAndDefer(0, "response phase moved before immediate click");
                 return;
             }

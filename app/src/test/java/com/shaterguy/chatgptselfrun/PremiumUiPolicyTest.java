@@ -60,7 +60,7 @@ public final class PremiumUiPolicyTest {
         assertTrue(ui.contains("applyAdaptiveContentWidth"));
     }
 
-    @Test public void mainConsoleShowsSemanticStateWithoutTurnOrCursorCounters() throws Exception {
+    @Test public void mainConsoleShowsSemanticV3StateWithoutLegacySignalCounters() throws Exception {
         String main = src("MainActivity.java"), runtime = src("TurnProtocolUiState.java");
         String tools = src("SelfRunLogMenuActivity.java");
         assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
@@ -72,8 +72,10 @@ public final class PremiumUiPolicyTest {
         assertTrue(runtime.contains("추론 중"));
         assertTrue(runtime.contains("답변 생성 중"));
         assertTrue(runtime.contains("답변 완료 · 차기 턴 대기"));
-        assertTrue(main.contains("다음 턴 전송 중"));
-        assertTrue(main.contains("마지막 인식 signal document ID"));
+        assertTrue(main.contains("실행 엔진  SelfRun 3 ledger"));
+        assertTrue(main.contains("응답 프로토콜 phase"));
+        assertTrue(main.contains("Run 폴더"));
+        assertFalse(main.contains("signal document"));
         assertFalse(main.contains("SelfRun Turn"));
         assertFalse(main.contains("ChatGPT Turn"));
         assertFalse(main.contains("Drive signal cursor"));

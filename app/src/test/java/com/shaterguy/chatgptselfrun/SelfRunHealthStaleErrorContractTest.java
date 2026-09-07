@@ -11,12 +11,12 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class SelfRunHealthStaleErrorContractTest {
-    @Test public void staleRetryCodeCannotOverrideNewPhase() throws Exception {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_WAIT_TURN_COMPLETION);
-        in.lastErrorCode = "DRIVE_OPERATION_RETRY";
+    @Test public void staleRetryCodeCannotOverrideNewV3Phase() throws Exception {
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_WAITING);
+        in.lastErrorCode = "WEB_STATE_RETRY";
         JSONObject record = new JSONObject()
-                .put("lastErrorCodeSeen", "DRIVE_OPERATION_RETRY")
-                .put("lastErrorPhase", SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
+                .put("lastErrorCodeSeen", "WEB_STATE_RETRY")
+                .put("lastErrorPhase", SelfRun3Coordinator.PHASE_RECONCILING);
         SelfRunHealthObservationStore.suppressStaleError(in, record);
         SelfRunHealthSnapshot h = SelfRunHealthEvaluator.evaluate(in, 10_000L);
         assertEquals(SelfRunHealthSnapshot.WAITING, h.level);
@@ -24,21 +24,21 @@ public final class SelfRunHealthStaleErrorContractTest {
     }
 
     @Test public void freshRetryCodeStillShowsRecovery() throws Exception {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
-        in.lastErrorCode = "DRIVE_OPERATION_RETRY";
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_RECONCILING);
+        in.lastErrorCode = "WEB_STATE_RETRY";
         JSONObject record = new JSONObject()
-                .put("lastErrorCodeSeen", "DRIVE_OPERATION_RETRY")
-                .put("lastErrorPhase", SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC);
+                .put("lastErrorCodeSeen", "WEB_STATE_RETRY")
+                .put("lastErrorPhase", SelfRun3Coordinator.PHASE_RECONCILING);
         SelfRunHealthObservationStore.suppressStaleError(in, record);
         SelfRunHealthSnapshot h = SelfRunHealthEvaluator.evaluate(in, 10_000L);
         assertEquals(SelfRunHealthSnapshot.RECOVERING, h.level);
     }
 
     @Test public void unknownPreUpgradeErrorIsNotReinterpretedAsCurrent() throws Exception {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_WAIT_TURN_COMPLETION);
-        in.lastErrorCode = "DRIVE_OPERATION_RETRY";
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_WAITING);
+        in.lastErrorCode = "WEB_STATE_RETRY";
         JSONObject record = new JSONObject()
-                .put("lastErrorCodeSeen", "DRIVE_OPERATION_RETRY")
+                .put("lastErrorCodeSeen", "WEB_STATE_RETRY")
                 .put("lastErrorPhase", "");
         SelfRunHealthObservationStore.suppressStaleError(in, record);
         assertEquals("", in.lastErrorCode);
@@ -51,6 +51,7 @@ public final class SelfRunHealthStaleErrorContractTest {
         assertTrue(store.contains("lastErrorPhase"));
         assertTrue(store.contains("observeErrorState"));
         assertTrue(store.contains("suppressStaleError"));
+        assertTrue(store.contains("v3_reconciling"));
         assertFalse(store.contains("store.clearLastError"));
         assertFalse(store.contains("store.setLastError"));
     }

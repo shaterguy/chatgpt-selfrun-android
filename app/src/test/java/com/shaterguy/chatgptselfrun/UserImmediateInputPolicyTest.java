@@ -11,21 +11,18 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class UserImmediateInputPolicyTest {
-    @Test public void immediateAttemptIsLimitedToTheCurrentAssistantResponse() {
+    @Test public void immediateAttemptIsLimitedToTheCurrentV3AssistantResponse() {
+        String conversation = "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc";
         assertTrue(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
-                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
+                true, false, false, SelfRun3Coordinator.PHASE_WAITING, conversation, true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,
-                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
+                true, false, false, SelfRun3Coordinator.PHASE_RECONCILING, conversation, true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, true, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
-                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
+                true, true, false, SelfRun3Coordinator.PHASE_WAITING, conversation, true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION, "", true));
+                true, false, false, SelfRun3Coordinator.PHASE_WAITING, "", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
-                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", false));
+                true, false, false, SelfRun3Coordinator.PHASE_WAITING, conversation, false));
     }
 
     @Test public void onlyAnIdenticalReservationIsReleasedBeforeImmediateClick() {
@@ -34,24 +31,12 @@ public final class UserImmediateInputPolicyTest {
         assertFalse(UserImmediateInputCoordinator.matchingReservation("", "send now"));
     }
 
-    @Test public void wiringKeepsCompletionObserverSemanticsSeparateFromImmediateSendDetection() throws Exception {
-        String existingDom = src("SelfRunContinuationDom.java");
+    @Test public void wiringKeepsV3CompletionOwnershipSeparateFromImmediateSendDetection() throws Exception {
         String immediateDom = src("UserImmediateInputDom.java");
         String coordinator = src("UserImmediateInputCoordinator.java");
         String host = src("HeadlessWebViewHost.java");
         String activity = src("MainActivity.java");
 
-        int existingStop = existingDom.indexOf("const stop=controls.find(isStop);");
-        int existingSend = existingDom.indexOf("const send=calibrated", existingStop);
-        int strictStopGate = existingDom.indexOf(
-                "if(stop&&!preferSendWhenStopCoexists)", existingSend);
-        int verifiedFormFallbackGate = existingDom.indexOf(
-                "if(stop&&!(composerEditable()&&formSubmitReady))", strictStopGate);
-        assertTrue(existingStop >= 0 && existingSend > existingStop
-                && strictStopGate > existingSend
-                && verifiedFormFallbackGate > strictStopGate);
-        assertTrue(existingDom.contains(
-                "const controlState=(preferSendWhenStopCoexists=false)=>"));
         assertTrue(immediateDom.contains("const runningStop=()=>"));
         assertTrue(immediateDom.contains("if(!runningStop())"));
         assertTrue(immediateDom.contains("const forceSend=()=>"));
@@ -59,7 +44,8 @@ public final class UserImmediateInputPolicyTest {
         assertTrue(immediateDom.contains("IMMEDIATE_INPUT_CLICK_UNCERTAIN"));
         assertTrue(immediateDom.contains("send.click()"));
         assertFalse(immediateDom.contains("requestComposerSubmit"));
-        assertTrue(coordinator.contains("SelfRunStore.PHASE_WAIT_TURN_COMPLETION"));
+        assertTrue(coordinator.contains("SelfRun3Coordinator.PHASE_WAITING"));
+        assertFalse(coordinator.contains("PHASE_WAIT_TURN_COMPLETION"));
         assertTrue(coordinator.contains("UserNextInputStore.save(runId, text)"));
         assertTrue(coordinator.contains("UserNextInputStore.delete(runId)"));
         assertTrue(coordinator.contains("cleanupAfterAmbiguousClick"));

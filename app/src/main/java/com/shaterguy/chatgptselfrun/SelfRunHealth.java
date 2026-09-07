@@ -117,6 +117,7 @@ final class SelfRunHealthInput {
     String status = "";
     String mode = "";
     String lastErrorCode = "";
+    // Retained only for bounded history compatibility. V3 does not use Drive title signals as authority.
     String driveSignalType = "";
     long createdAt;
     long phaseStartedAt;
@@ -126,6 +127,7 @@ final class SelfRunHealthInput {
     boolean paused;
     boolean userStopped;
     boolean terminal;
+    // Retained only for bounded history compatibility. V3 reconciliation is ledger-driven.
     boolean retryPending;
     String webReason = "";
     String webPhase = "";
@@ -144,7 +146,6 @@ final class SelfRunHealthInput {
         in.status = safe(store.status());
         in.mode = safe(store.mode());
         in.lastErrorCode = safe(store.lastErrorCode());
-        in.driveSignalType = latestSignal(store.pendingDriveSignalType(), store.lastDriveSignalType());
         in.createdAt = store.createdAt();
         in.phaseStartedAt = store.phaseStartedAt();
         in.turn = store.turn();
@@ -152,7 +153,6 @@ final class SelfRunHealthInput {
         in.paused = store.paused();
         in.userStopped = store.userStopped();
         in.terminal = SelfRunStore.PHASE_DONE.equals(in.phase) || in.userStopped;
-        in.retryPending = !safe(store.submissionRetryKind()).isEmpty();
         applyObservation(in, observation);
         return in;
     }
@@ -165,7 +165,6 @@ final class SelfRunHealthInput {
         in.status = item.optString("status");
         in.mode = item.optString("mode");
         in.lastErrorCode = item.optString("lastErrorCode");
-        in.driveSignalType = latestSignal(item.optString("pendingDriveSignalType"), item.optString("lastDriveSignalType"));
         in.createdAt = item.optLong("createdAt");
         in.phaseStartedAt = item.optLong("phaseStartedAt", in.createdAt);
         in.updatedAt = item.optLong("updatedAt");
@@ -174,7 +173,6 @@ final class SelfRunHealthInput {
         in.paused = item.optBoolean("paused");
         in.userStopped = item.optBoolean("userStopped");
         in.terminal = item.optBoolean("terminal") || SelfRunStore.PHASE_DONE.equals(in.phase) || in.userStopped;
-        in.retryPending = !item.optString("submissionRetryKind").isEmpty();
         applyObservation(in, observation);
         return in;
     }
@@ -192,11 +190,6 @@ final class SelfRunHealthInput {
         in.processObservedAt = observation.optLong("processObservedAt");
     }
 
-    private static String latestSignal(String pending, String last) {
-        String p = safe(pending);
-        return p.isEmpty() ? safe(last) : p;
-    }
-
     private static String safe(String value) { return value == null ? "" : value; }
 }
 
@@ -210,15 +203,10 @@ final class SelfRunHealthEvaluator {
 
     private static SelfRunHealthSnapshot evaluateUnsafe(SelfRunHealthInput in, long now) {
         long phaseAt = in.phaseStartedAt > 0L ? in.phaseStartedAt : (in.createdAt > 0L ? in.createdAt : now);
-        if (SelfRunStore.PHASE_DONE.equals(in.phase) || "DONE".equals(in.driveSignalType)) {
+        if (SelfRunStore.PHASE_DONE.equals(in.phase)) {
             return snap(SelfRunHealthSnapshot.TERMINAL, "DONE", "SelfRun 완료",
                     "SelfRun 작업이 완료되었습니다.", "SELFRUN_STORE", SelfRunHealthSnapshot.CONFIRMED,
                     "아무 작업 필요 없음", phaseAt, "", in.phase);
-        }
-        if (in.paused && "USER_ACTION_REQUIRED".equals(in.driveSignalType)) {
-            return snap(SelfRunHealthSnapshot.ATTENTION, "USER_ACTION_REQUIRED", "사용자 조치가 필요합니다.",
-                    "현재 Run이 사용자 조치를 기다리고 있습니다.", "DRIVE", SelfRunHealthSnapshot.CONFIRMED,
-                    "Run 상세 확인", phaseAt, "user_action_required", in.phase);
         }
         if (in.paused) {
             return snap(SelfRunHealthSnapshot.TERMINAL, "PAUSED", "SelfRun이 일시정지되었습니다.",
@@ -228,7 +216,7 @@ final class SelfRunHealthEvaluator {
         if (in.userStopped) {
             return snap(SelfRunHealthSnapshot.TERMINAL, "STOPPED", "SelfRun이 중지되었습니다.",
                     "사용자 중지로 실행이 종료되었습니다.", "SELFRUN_STORE", SelfRunHealthSnapshot.CONFIRMED,
-                    "중지 작업 재시작", phaseAt, "user_stopped", in.phase);
+                    "새 작업 시작", phaseAt, "user_stopped", in.phase);
         }
 
         if (explicitFatal(in)) {
@@ -315,7 +303,7 @@ final class SelfRunHealthEvaluator {
         if ("send_wait".equals(r) || "send_disabled".equals(r) || "submission_pending".equals(r)) {
             return waiting("WAITING_SEND", "전송 준비 대기", "ChatGPT 요청을 안전하게 전송할 수 있는 상태를 기다리고 있습니다.", at, r, in.phase);
         }
-        if ("stop_visible".equals(r) || ("state_wait".equals(r) && SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(in.phase))) {
+        if ("stop_visible".equals(r) || ("state_wait".equals(r) && SelfRun3Coordinator.PHASE_WAITING.equals(in.phase))) {
             return waiting("WAITING_CHATGPT", "ChatGPT 응답 대기", "요청 전송은 완료되었으며 현재 ChatGPT 응답을 기다리고 있습니다.", at, r, in.phase);
         }
         if ("evaluate_javascript".equals(r)) {
@@ -331,42 +319,27 @@ final class SelfRunHealthEvaluator {
 
     private static SelfRunHealthSnapshot waitFromPhase(SelfRunHealthInput in, long at) {
         String p = in.phase;
-        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(p)) return waiting("WAITING_CHATGPT", "ChatGPT 응답 대기", "요청 전송은 완료되었으며 현재 ChatGPT 응답을 기다리고 있습니다.", at, "", p);
-        if (SelfRunStore.PHASE_APPLY_PREFS.equals(p) || SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(p)) return waiting("WAITING_MODEL", "모델 설정 적용 중", "선택한 모델 설정이 적용되기를 기다리고 있습니다.", at, "", p);
-        if (SelfRunStore.PHASE_APPLY_REASONING.equals(p) || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(p)) return waiting("WAITING_REASONING", "추론 설정 적용 중", "선택한 추론 설정이 적용되기를 기다리고 있습니다.", at, "", p);
-        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(p) || SelfRunStore.PHASE_RESUME_BASELINE.equals(p)) {
-            return snap(SelfRunHealthSnapshot.WAITING, "WAITING_DRIVE", "Drive 응답 대기",
-                    "SelfRun 실행 신호가 Google Drive에 반영되기를 기다리고 있습니다.", "DRIVE", SelfRunHealthSnapshot.CONFIRMED,
-                    "아무 작업 필요 없음", at, "", p);
+        if (SelfRun3Coordinator.PHASE_SETUP.equals(p)) {
+            return normal("SelfRun 3 준비 중", "SelfRun 3 원장과 Drive 바인딩을 준비하고 있습니다.", at, p);
         }
-        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(p)) {
-            return snap(SelfRunHealthSnapshot.NORMAL, "NORMAL", "ChatGPT에 작업 전송 중",
-                    "SelfRun이 첫 작업을 ChatGPT에 전송하고 있습니다.", "SELFRUN_STORE", SelfRunHealthSnapshot.CONFIRMED,
-                    "아무 작업 필요 없음", at, "", p);
+        if (SelfRun3Coordinator.PHASE_PREPARING.equals(p)) {
+            return normal("다음 논리 턴 준비 중", "SelfRun 3가 다음 요청에 필요한 상태를 준비하고 있습니다.", at, p);
         }
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(p)) {
-            return snap(SelfRunHealthSnapshot.NORMAL, "NORMAL", "다음 턴 전송 준비 중",
-                    "SelfRun이 다음 요청 전송을 준비하고 있습니다.", "SELFRUN_STORE", SelfRunHealthSnapshot.CONFIRMED,
-                    "아무 작업 필요 없음", at, "", p);
+        if (SelfRun3Coordinator.PHASE_READY.equals(p)) {
+            return phaseWaiting("WAITING_SEND", "ChatGPT 요청 준비", "검증된 요청을 전송할 준비가 완료되었습니다.", at, p);
         }
-        if (drivePreparationPhase(p)) {
-            return snap(SelfRunHealthSnapshot.NORMAL, "NORMAL", "SelfRun 준비 중",
-                    "SelfRun 실행에 필요한 Drive 상태를 준비하고 있습니다.", "DRIVE", SelfRunHealthSnapshot.CONFIRMED,
-                    "아무 작업 필요 없음", at, "", p);
+        if (SelfRun3Coordinator.PHASE_DISPATCHING.equals(p)) {
+            return phaseWaiting("WAITING_SEND", "전송 결과 확인", "요청의 물리적 전송 결과를 확인하고 있습니다.", at, p);
+        }
+        if (SelfRun3Coordinator.PHASE_WAITING.equals(p)) {
+            return phaseWaiting("WAITING_CHATGPT", "ChatGPT 응답 대기", "요청 전송은 완료되었으며 현재 ChatGPT 응답을 기다리고 있습니다.", at, p);
+        }
+        if (SelfRun3Coordinator.PHASE_RECONCILING.equals(p)) {
+            return snap(SelfRunHealthSnapshot.RECOVERING, "RECONCILING", "결과 상태 대조 중",
+                    "고정된 결과 문서와 대화 상태를 대조하고 있습니다.", "SELFRUN_STORE", SelfRunHealthSnapshot.CONFIRMED,
+                    "자동 복구 중", at, "result_reconciliation", p);
         }
         return null;
-    }
-
-    private static boolean drivePreparationPhase(String phase) {
-        return SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)
-                || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)
-                || SelfRunStore.PHASE_BOOTSTRAP.equals(phase);
     }
 
     private static boolean freshWeb(SelfRunHealthInput in) {
@@ -431,30 +404,41 @@ final class SelfRunHealthEvaluator {
     }
 
     private static boolean recovering(SelfRunHealthInput in) {
-        return in.retryPending || recoveryCode(upper(in.lastErrorCode))
+        return recoveryCode(upper(in.lastErrorCode))
                 || in.status.contains("복구") || in.status.contains("재시도") || in.status.contains("다시 확인");
     }
 
     private static boolean recoveryCode(String code) {
-        return code.contains("RETRY") || code.contains("TRANSIENT") || code.contains("RECOVER") || code.contains("ROLLOVER");
+        return code.contains("RETRY") || code.contains("TRANSIENT") || code.contains("RECOVER");
     }
 
     private static String recoveryReason(SelfRunHealthInput in) {
         if (upper(in.lastErrorCode).contains("NETWORK")) return "network_recovery";
-        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(in.phase) || SelfRunStore.PHASE_RESUME_BASELINE.equals(in.phase)) return "drive_recovery";
+        if (SelfRun3Coordinator.PHASE_RECONCILING.equals(in.phase)) return "result_reconciliation";
         return "automatic_recovery";
     }
 
     private static String recoveryDescription(SelfRunHealthInput in) {
         if (upper(in.lastErrorCode).contains("NETWORK")) return "네트워크 연결을 기다리고 있습니다.";
-        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(in.phase) || SelfRunStore.PHASE_RESUME_BASELINE.equals(in.phase)) return "Drive signal을 다시 확인하고 있습니다.";
-        return "ChatGPT 화면과 실행 상태를 다시 확인하고 있습니다.";
+        if (SelfRun3Coordinator.PHASE_RECONCILING.equals(in.phase)) return "고정된 결과 문서와 대화 상태를 다시 대조하고 있습니다.";
+        return "SelfRun 3 실행 상태를 다시 확인하고 있습니다.";
     }
 
     private static boolean isRouteMismatch(String reason) {
         return "host_mismatch".equals(reason) || "project_mismatch".equals(reason)
                 || "conversation_mismatch".equals(reason) || "general_target_mismatch".equals(reason)
                 || "route_mismatch".equals(reason);
+    }
+
+    private static SelfRunHealthSnapshot normal(String title, String description, long at, String phase) {
+        return snap(SelfRunHealthSnapshot.NORMAL, "NORMAL", title, description, "SELFRUN_STORE",
+                SelfRunHealthSnapshot.CONFIRMED, "아무 작업 필요 없음", at, "", phase);
+    }
+
+    private static SelfRunHealthSnapshot phaseWaiting(String category, String title, String description,
+                                                      long at, String phase) {
+        return snap(SelfRunHealthSnapshot.WAITING, category, title, description, "SELFRUN_STORE",
+                SelfRunHealthSnapshot.CONFIRMED, "아무 작업 필요 없음", at, "", phase);
     }
 
     private static SelfRunHealthSnapshot waiting(String category, String title, String description,

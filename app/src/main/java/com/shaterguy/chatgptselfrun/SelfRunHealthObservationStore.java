@@ -249,7 +249,8 @@ final class SelfRunHealthObservationStore {
 
     private static String safePhase(String value) {
         return switch (value == null ? "" : value) {
-            case "bootstrap_send", "wait_turn_completion", "apply_model", "apply_reasoning", "send_continue", "other" -> value;
+            case "v3_setup", "v3_preparing", "v3_ready", "v3_dispatching", "v3_waiting",
+                    "v3_reconciling", "paused", "done", "other" -> value;
             default -> "";
         };
     }

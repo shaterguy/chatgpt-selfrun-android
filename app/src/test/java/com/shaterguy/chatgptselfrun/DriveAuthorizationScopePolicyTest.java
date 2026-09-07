@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class DriveAuthorizationScopePolicyTest {
-    @Test public void signalTransportAddsReadOnlyCrossAppScopesWithoutFullDriveWriteScope() throws Exception {
+    @Test public void runtimeAddsReadOnlyMetadataAndDocsScopesWithoutFullDriveWriteScope() throws Exception {
         String authorization = src("DriveAuthorization.java");
         assertTrue(authorization.contains("https://www.googleapis.com/auth/drive.file"));
         assertTrue(authorization.contains("https://www.googleapis.com/auth/drive.metadata.readonly"));
@@ -32,24 +32,6 @@ public final class DriveAuthorizationScopePolicyTest {
         assertTrue(pickerRequest.contains("setRequestedScopes(pickerScopes())"));
         assertTrue(pickerRequest.contains("PICKER_OAUTH_TRIGGER"));
         assertFalse(pickerRequest.contains("runtimeScopes()"));
-    }
-
-    @Test public void signalDiscoveryIsRestrictedAgainByExactRunFolderAndRunId() throws Exception {
-        String api = src("DriveApiClient.java");
-        String transport = src("DriveSignalDocumentTransport.java");
-        assertTrue(api.contains("turnDocument.parentId"));
-        assertTrue(api.contains("listSignalDocuments(accessToken, turnDocument.name, turnDocument.parentId)"));
-        assertTrue(api.contains("' in parents and trashed = false"));
-        assertTrue(transport.contains("expectedParentId.equals(parentId)"));
-        assertTrue(transport.contains("isCanonicalTitle(name, runId)"));
-        assertTrue(transport.contains("metadata.shared"));
-    }
-
-    @Test public void nextInputBodyIsReadOnlyWhenTitleExplicitlyMarksPresence() throws Exception {
-        String api = src("DriveApiClient.java");
-        assertTrue(api.contains("DriveSignalDocumentTransport.needsBodyRead(metadata.name)"));
-        assertTrue(api.contains("readNativeDocumentSnapshot(accessToken, metadata.id).text"));
-        assertTrue(api.contains("DriveSignalDocumentTransport.materialize(metadata.name, body, batch.runId)"));
     }
 
     private static String between(String source, String start, String end) {

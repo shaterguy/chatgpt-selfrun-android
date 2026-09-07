@@ -29,13 +29,14 @@ public final class WorkProtocolNativeObserverTest {
                 "POST", "https://chatgpt.com/backend-api/accounts/check"));
     }
 
-    @Test public void onlySubmissionAndTurnWaitPhasesAreObservable() {
-        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_BOOTSTRAP_SEND));
-        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_SEND_CONTINUE));
-        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
-        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_BOOTSTRAP));
-        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_APPLY_PREFS));
-        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC));
+    @Test public void onlyV3PreparationSubmissionAndTurnWaitPhasesAreObservable() {
+        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRun3Coordinator.PHASE_PREPARING));
+        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRun3Coordinator.PHASE_READY));
+        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRun3Coordinator.PHASE_DISPATCHING));
+        assertTrue(WorkProtocolNativeObserver.observablePhase(SelfRun3Coordinator.PHASE_WAITING));
+        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRun3Coordinator.PHASE_SETUP));
+        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRun3Coordinator.PHASE_RECONCILING));
+        assertFalse(WorkProtocolNativeObserver.observablePhase(SelfRunStore.PHASE_DONE));
     }
 
     @Test public void onlyWorkRunsAreObservable() {
@@ -53,6 +54,9 @@ public final class WorkProtocolNativeObserverTest {
         assertTrue(source.contains("ROUTE_CANONICAL_CONVERSATION = \"canonical_conversation\""));
         assertTrue(source.contains("\"WORK_PROTOCOL_TRANSPORT\""));
         assertTrue(source.contains(";outcome=canonical_request"));
+        assertTrue(source.contains("SelfRun3Coordinator.PHASE_PREPARING"));
+        assertTrue(source.contains("SelfRun3Coordinator.PHASE_WAITING"));
+        assertFalse(source.contains("PHASE_WAIT_TURN_COMPLETION"));
         assertFalse(source.contains("getRequestHeaders"));
         assertFalse(source.contains("WebResourceResponse("));
         assertFalse(source.contains("Cookie"));
