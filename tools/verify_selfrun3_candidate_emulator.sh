@@ -6,11 +6,11 @@ set -euo pipefail
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
 
-adb install -r stable/chatgpt-selfrun-drive-v2.3.2.apk >/dev/null
+adb install -r stable/chatgpt-selfrun-drive-v3.0.0.apk >/dev/null
 adb install -r current/candidate.apk >/dev/null
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$FORMAL"
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$TEST"
-[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '2.3.2' ]]
+[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.0.0' ]]
 [[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == "$VERSION_NAME" ]]
 
 FORMAL_UID="$(adb shell pm list packages -U "$FORMAL" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"
