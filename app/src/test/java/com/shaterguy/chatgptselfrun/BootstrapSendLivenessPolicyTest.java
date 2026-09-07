@@ -7,33 +7,46 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
+/** V3 submission liveness: bounded active preparation, passive normal wait, bounded reconciliation. */
 public final class BootstrapSendLivenessPolicyTest {
-    @Test public void submissionCallbacksRemainGuardedButProtocolWaitIsPassive() {
-        assertTrue(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_BOOTSTRAP_SEND));
-        assertFalse(SelfRunService.shouldGuardContinuationCallback(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
-        assertEquals(5_000L,SelfRunService.CONTINUATION_CALLBACK_TIMEOUT_MS);
+    @Test public void browserCallbacksAreBoundedButNormalResponseWaitDoesNotPoll() {
+        assertEquals(5_000L, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
+        assertEquals(90_000L, SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS);
+        assertEquals(0L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+        assertEquals(10 * 60_000L, SelfRun3PowerPolicy.MISSED_CALLBACK_PROBE_MS);
+        assertEquals(3, SelfRun3PowerPolicy.MAX_MISSED_CALLBACK_PROBES);
     }
-    @Test public void bootstrapDeadlineStillFailsClosed() {
-        assertFalse(SelfRunService.bootstrapSendTimedOut(1_000L,60_999L));
-        assertTrue(SelfRunService.bootstrapSendTimedOut(1_000L,61_000L));
-        assertEquals(60_000L,SelfRunService.BOOTSTRAP_SEND_MAX_WAIT_MS);
+
+    @Test public void preparedSendIsClaimedDurablyBeforeTheBrowserClick() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        String prepared = between(coordinator, "onPrepared(String task", "onDispatched(String task");
+        assertTrue(prepared.contains("SelfRun3Engine.Kind.CLAIM_SEND"));
+        assertTrue(prepared.indexOf("ledger.apply") < prepared.indexOf("web.submit(claimed)"));
+        assertTrue(prepared.contains("SelfRun3PowerPolicy.maySend(claimed)"));
     }
-    @Test public void capturedRouteIsCheckedBeforeComposerAndTimeoutNeverRollsOver() throws Exception {
-        String dom=source("SelfRunContinuationDom.java");
-        String prepare=dom.substring(dom.indexOf("static String prepareBootstrap"),dom.indexOf("static String clickPreparedBootstrap"));
-        assertTrue(prepare.indexOf("bootstrapRouteVerification")<prepare.indexOf("bootstrap composer unavailable"));
-        String service=source("SelfRunService.java");
-        String timeout=service.substring(service.indexOf("private void failBootstrapSubmissionTimeout"),service.indexOf("private void failBootstrap("));
-        assertTrue(timeout.contains("BOOTSTRAP_SUBMISSION_RECOVERED"));
-        assertTrue(timeout.contains("action=pause_same_conversation"));
-        assertFalse(timeout.contains("rolloverConversation"));
+
+    @Test public void generationWaitDetachesRasterAndReleasesWakeLock() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        String wait = between(coordinator, "case WAIT ->", "case READ_RESULT ->");
+        assertTrue(wait.contains("web.detach()"));
+        assertTrue(wait.contains("releaseWakeLock()"));
+        assertTrue(wait.contains("scheduleMissedProbe"));
+        assertFalse(wait.contains("scheduleNext("));
     }
-    @Test public void confirmedSubmissionPersistsWaitThenDetachesThenArms() throws Exception {
-        String service=source("SelfRunService.java");
-        String method=service.substring(service.indexOf("private void continuationSubmitted"),service.indexOf("private void armProtocolCompletion"));
-        assertTrue(method.indexOf("store.beginTurnCompletionWait")<method.indexOf("detachDisplayOutput"));
-        assertTrue(method.indexOf("detachDisplayOutput")<method.indexOf("armProtocolCompletion"));
+
+    @Test public void unknownSubmissionOutcomeNeverReopensSend() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(web.contains("SUBMISSION_OUTCOME_UNKNOWN"));
+        assertTrue(coordinator.contains("if (after.flag(\"sendClaimed\")) scheduleMissedProbe"));
+        assertFalse(coordinator.contains("SUBMISSION_OUTCOME_UNKNOWN\")" + ", web.submit"));
     }
+
+    private static String between(String source, String start, String end) {
+        int a = source.indexOf(start), b = source.indexOf(end, Math.max(0, a));
+        return a >= 0 && b > a ? source.substring(a, b) : "";
+    }
+
     private static String source(String name) throws Exception {
         Path path=Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/"+name);
         if(!Files.exists(path))path=Paths.get("src/main/java/com/shaterguy/chatgptselfrun/"+name);
