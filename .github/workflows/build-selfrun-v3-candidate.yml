@@ -174,14 +174,14 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.0.0.apk > stable-cert.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
-          gh run download 34110590666 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
-          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == '804a34959d3b019354e09a0a73546006f3296913' ]]
-          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev11.apk
+          gh run download 34124946731 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
+          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == 'aa5af83726dd12f22599f412911736e1c8ffba5b' ]]
+          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev12.apk
           test -s "$PREVIOUS"
           grep -F "$(sha256sum "$PREVIOUS" | awk '{print $1}')" previous/SHA256SUMS.txt >/dev/null
           "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS" > previous-cert.txt
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' previous-cert.txt
-          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev11'"
+          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev12'"
       - name: Enable hardware acceleration
         shell: bash
         run: |
