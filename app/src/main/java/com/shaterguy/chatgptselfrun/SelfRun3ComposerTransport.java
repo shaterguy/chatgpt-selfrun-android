@@ -22,7 +22,7 @@ final class SelfRun3ComposerTransport {
     private SelfRun3ComposerTransport() {}
 
     static String prepareInitial(String projectUrl, String prompt) {
-        return prepare(projectGuard(projectUrl, true), prompt);
+        return prepare(projectGuard(projectUrl), prompt);
     }
 
     static String prepareContinuation(String conversationUrl, String prompt) {
@@ -30,7 +30,7 @@ final class SelfRun3ComposerTransport {
     }
 
     static String submitInitial(String projectUrl, String prompt) {
-        return submit(projectGuard(projectUrl, true), prompt);
+        return submit(projectGuard(projectUrl), prompt);
     }
 
     static String submitContinuation(String conversationUrl, String prompt) {
@@ -223,12 +223,9 @@ final class SelfRun3ComposerTransport {
                 + "if(__srAfter('c')!==" + conversation + ")return result('" + TARGET_ERROR + "','conversation route mismatch');";
     }
 
-    private static String projectGuard(String projectUrl, boolean requireNewConversation) {
+    private static String projectGuard(String projectUrl) {
         String project = q(SelfRunScript.projectId(projectUrl));
         String general = q(SelfRunScript.GENERAL_CHAT_SCOPE);
-        String noConversation = requireNewConversation
-                ? "if(__srAfter('c'))return result('" + TARGET_ERROR + "','unexpected existing conversation');"
-                : "";
         return "if(location.protocol!=='https:'||!['chatgpt.com','www.chatgpt.com'].includes(location.hostname))"
                 + "return result('" + TARGET_ERROR + "','host mismatch');"
                 + "if(/\\/(?:auth|login)(?:\\/|$)/.test(location.pathname))"
@@ -241,8 +238,7 @@ final class SelfRun3ComposerTransport {
                 + "if(__srExpectedProject===" + general + "){"
                 + "if(__srAfter('g'))return result('" + TARGET_ERROR + "','project route active for general chat');"
                 + "}else if(__srActualProject!==__srExpectedProject)"
-                + "return result('" + TARGET_ERROR + "','project route mismatch');"
-                + noConversation;
+                + "return result('" + TARGET_ERROR + "','project route mismatch');";
     }
 
     private static String q(String value) {

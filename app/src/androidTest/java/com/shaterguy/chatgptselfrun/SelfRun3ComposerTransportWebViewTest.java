@@ -21,7 +21,8 @@ import static org.junit.Assert.assertTrue;
 /**
  * V3 transport regression: bootstrap plus two continuations must use a freshly rebuilt composer
  * inside an open shadow root, without calibrated IDs, test IDs, send buttons, or layout visibility.
- * Each physical submit is observed by the V3 canonical POST/response protocol before the next turn.
+ * The bootstrap also reproduces live ChatGPT changing to a conversation route after editor input but
+ * before the physical submit; that route transition must not invalidate the initial V3 transport.
  */
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3ComposerTransportWebViewTest {
@@ -29,8 +30,9 @@ public final class SelfRun3ComposerTransportWebViewTest {
     private static final String PROJECT_ID = "g-p-6a582c824ba08191ac7e74e9bad721fc";
     private static final String SLUGGED_PROJECT_ID = PROJECT_ID + "-vibe-coding";
     private static final String PROJECT_URL = "https://chatgpt.com/g/" + SLUGGED_PROJECT_ID + "/project";
-    private static final String CONVERSATION_URL =
-            "https://chatgpt.com/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
+    private static final String CONVERSATION_PATH =
+            "/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
+    private static final String CONVERSATION_URL = "https://chatgpt.com" + CONVERSATION_PATH;
 
     @Test public void bootstrapThenTwoContinuationsUseFreshShadowComposerAndCanonicalProtocol()
             throws Exception {
@@ -41,8 +43,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
 
             assertShadowComposer(scenario, web);
             runTurn(scenario, web, "turn-1", "turn-one", true, 1);
-            assertEquals("/g/" + SLUGGED_PROJECT_ID + "/c/conversation123",
-                    read(scenario, web, "location.pathname"));
+            assertEquals(CONVERSATION_PATH, read(scenario, web, "location.pathname"));
             assertShadowComposer(scenario, web);
 
             runTurn(scenario, web, "turn-2", "turn-two", false, 2);
@@ -72,6 +73,12 @@ public final class SelfRun3ComposerTransportWebViewTest {
                 : SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, prompt);
         JSONObject prepared = prepare(scenario, web, prepare);
         assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT, prepared.optString("status"));
+        if (initial) {
+            assertEquals("bootstrap route must be allowed to become canonical before submit",
+                    CONVERSATION_PATH, read(scenario, web, "location.pathname"));
+            assertEquals("0", read(scenario, web, "String(window.submitCount)"));
+            assertEquals("0", read(scenario, web, "String(window.canonicalPosts.length)"));
+        }
 
         String action = initial
                 ? SelfRun3ComposerTransport.submitInitial(PROJECT_URL, prompt)
@@ -191,12 +198,15 @@ public final class SelfRun3ComposerTransportWebViewTest {
                   editor.appendChild(document.createElement('p')).appendChild(document.createElement('br'));
                   form.appendChild(editor);shadow.appendChild(form);
                   window.currentForm=form;window.currentEditor=editor;
+                  editor.addEventListener('input',()=>{
+                    if(window.submitCount===0&&!location.pathname.includes('/c/')){
+                      history.replaceState({},'','__CONVERSATION_PATH__');
+                    }
+                  });
                   form.addEventListener('submit',event=>{
                     event.preventDefault();
                     const text=String(editor.innerText||editor.textContent||'').trim();
                     window.sent.push(text);window.submitCount++;
-                    if(window.submitCount===1)history.replaceState({},'',
-                      '/g/__SLUGGED_PROJECT_ID__/c/conversation123');
                     fetch('/backend-api/f/conversation',{
                       method:'POST',headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({action:'next',messages:[{content:{parts:[text]}}]})
@@ -206,6 +216,6 @@ public final class SelfRun3ComposerTransportWebViewTest {
                 };
                 window.rebuildComposer();
                 </script></body></html>
-                """.replace("__SLUGGED_PROJECT_ID__", SLUGGED_PROJECT_ID);
+                """.replace("__CONVERSATION_PATH__", CONVERSATION_PATH);
     }
 }
