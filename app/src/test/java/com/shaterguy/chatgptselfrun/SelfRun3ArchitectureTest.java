@@ -13,8 +13,10 @@ public final class SelfRun3ArchitectureTest {
     @Test public void foregroundServiceIsOnlyV3Shell() throws Exception {
         String service = source("SelfRunService.java");
         assertTrue(service.contains("SelfRun3Coordinator"));
-        assertTrue(service.contains("V3_LEGACY_RUN_PRESERVED"));
+        assertTrue(service.contains("V3_STALE_RUN_RETIRED"));
+        assertFalse(service.contains("V3_LEGACY_RUN_PRESERVED"));
         assertFalse(service.contains("DriveSignalParser.scan"));
+        assertFalse(service.contains("SelfRunRolloverCoordinator"));
         assertFalse(service.contains("rolloverConversation"));
         assertFalse(service.contains("PHASE_POST_PROTOCOL_DRIVE_SYNC"));
         assertTrue(service.length() < 12_000);
@@ -43,7 +45,6 @@ public final class SelfRun3ArchitectureTest {
                 "SUBMIT_START", "SUBMIT_EVAL", "ON_UNSENT", "FAILURE", "PROTOCOL_ACCEPT"}) {
             assertTrue("missing diagnostic stage " + stage, web.contains("trace(\"" + stage + "\""));
         }
-        // PREPARE_EVAL now carries a bounded structural snapshot through a dedicated writer.
         assertTrue(web.contains("tracePrepare(result)"));
         String prepareTrace = web.substring(web.indexOf("private void tracePrepare("), web.indexOf("private void trace(String stage"));
         assertTrue(prepareTrace.contains("stage=PREPARE_EVAL;status="));
@@ -59,9 +60,11 @@ public final class SelfRun3ArchitectureTest {
         }
     }
 
-    @Test public void v3HasNoAiMaintenanceOrSelfPatchPath() throws Exception {
+    @Test public void promptDefersFixedSemanticsToCanonicalSkillAndHasNoSelfPatchPath() throws Exception {
         String protocol = source("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("AI 유지보수·자체 코드 수정·자동 패치 에이전트가 없다"));
+        assertTrue(protocol.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
+        assertFalse(protocol.contains("static final String CONTRACT"));
+        assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(source("SelfRun3Coordinator.java").contains("downloadCode"));
         assertFalse(source("SelfRun3Coordinator.java").contains("applyPatch"));
     }

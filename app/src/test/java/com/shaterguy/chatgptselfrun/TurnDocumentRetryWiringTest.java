@@ -9,7 +9,7 @@ import java.nio.file.Paths;
 
 import static org.junit.Assert.*;
 
-/** V3 result recovery is pinned-document reconciliation, not a V2 title-signal retry cycle. */
+/** V3 result recovery is pinned-document reconciliation, never a title-signal retry cycle. */
 public final class TurnDocumentRetryWiringTest {
     @Test public void resultReadRetriesAreFiniteAndThenOneRepairRequestIsAllowed() throws Exception {
         assertEquals(5_000L, SelfRun3PowerPolicy.resultRetryDelay(0));
@@ -30,7 +30,8 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(engine.contains("!before.requestId().equals(nextRequest)"));
         assertTrue(engine.contains("put(v, \"requestId\", nextRequest)"));
         assertFalse(between(engine, "case REPAIR", "case PAUSE").contains("put(v, \"turnId\""));
-        assertTrue(protocol.contains("repair(SelfRun3Engine.State state, String repairRequestId)"));
+        assertTrue(protocol.contains("static String repair(SelfRun3Engine.State s, String nextRequestId)"));
+        assertTrue(protocol.contains("RESULT_REPAIR=1"));
         assertTrue(coordinator.contains("SelfRun3Protocol.repair(current, repairRequest)"));
     }
 
@@ -53,11 +54,14 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(commit.contains("lateInput"));
     }
 
-    @Test public void v3ContractNeverAsksForLegacyTurnCompletedSignalDocument() throws Exception {
+    @Test public void repairPromptIsCompactAndContainsNoRetiredSignalContract() throws Exception {
         String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("이 턴의 완료/다음 행동을 위 RESULT_DOCUMENT_ID 본문 하나에만 확정한다"));
-        assertTrue(protocol.contains("구형 SELF_RUN_TURN_COMPLETED/DONE 제목 문서를 새로 만들거나"));
+        assertTrue(protocol.contains("SELF_RUN_SKILL_DOCUMENT_ID"));
+        assertTrue(protocol.contains("RESULT_REPAIR=1"));
+        assertFalse(protocol.contains("static final String CONTRACT"));
+        assertFalse(protocol.contains("SELF_RUN_TURN_COMPLETED"));
         assertFalse(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
+        assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
     }
 
     private static String between(String source, String start, String end) {
