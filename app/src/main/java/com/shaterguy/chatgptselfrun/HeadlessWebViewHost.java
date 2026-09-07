@@ -24,8 +24,9 @@ import org.json.JSONTokener;
 /** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
 final class HeadlessWebViewHost {
     private static final long OUTPUT_DETACH_SETTLE_MS = 1_000L;
-    private static final long OUTPUT_DETACH_PROBE_MS = 250L;
-    private static final long OUTPUT_DETACH_MAX_WAIT_MS = 5_000L;
+    private static final long OUTPUT_DETACH_FAST_PROBE_MS = 250L;
+    private static final long OUTPUT_DETACH_FAST_WINDOW_MS = 5_000L;
+    private static final long OUTPUT_DETACH_SLOW_PROBE_MS = 2_000L;
     private static volatile WebView activeWebView;
     private static volatile HeadlessWebViewHost activeHost;
 
@@ -204,8 +205,9 @@ final class HeadlessWebViewHost {
     /**
      * Generation wait detach. Keep the surface attached through the submit-to-thinking UI transition,
      * then detach only after the live message composer is available again. This never navigates,
-     * reloads or recreates the WebView. If the composer does not return promptly, the safe fallback
-     * is to leave the existing surface attached for that response.
+     * reloads or recreates the WebView. If the transition is unusually slow, probing becomes sparse
+     * after the initial fast window but continues until the composer actually returns or another
+     * lifecycle action explicitly cancels the pending detach.
      */
     boolean detachOutputWhenComposerReady() {
         requireMainThread();
@@ -240,33 +242,25 @@ final class HeadlessWebViewHost {
                     detachOutput();
                     return;
                 }
-                if (SystemClock.elapsedRealtime() - detachProbeStartedAt >= OUTPUT_DETACH_MAX_WAIT_MS) {
-                    finishDetachProbeKeepingOutput();
-                    return;
-                }
-                mainHandler.postDelayed(
-                        () -> probeDetachReadiness(generation), OUTPUT_DETACH_PROBE_MS);
+                scheduleNextDetachProbe(generation);
             });
         } catch (Throwable ignored) {
-            if (!detachProbeCurrent(generation)) return;
-            if (SystemClock.elapsedRealtime() - detachProbeStartedAt >= OUTPUT_DETACH_MAX_WAIT_MS) {
-                finishDetachProbeKeepingOutput();
-            } else {
-                mainHandler.postDelayed(
-                        () -> probeDetachReadiness(generation), OUTPUT_DETACH_PROBE_MS);
-            }
+            if (detachProbeCurrent(generation)) scheduleNextDetachProbe(generation);
         }
+    }
+
+    private void scheduleNextDetachProbe(int generation) {
+        if (!detachProbeCurrent(generation)) return;
+        long elapsed = SystemClock.elapsedRealtime() - detachProbeStartedAt;
+        long delay = elapsed < OUTPUT_DETACH_FAST_WINDOW_MS
+                ? OUTPUT_DETACH_FAST_PROBE_MS
+                : OUTPUT_DETACH_SLOW_PROBE_MS;
+        mainHandler.postDelayed(() -> probeDetachReadiness(generation), delay);
     }
 
     private boolean detachProbeCurrent(int generation) {
         return detachProbePending && generation == detachProbeGeneration
                 && hasDetachableOutput() && outputAttached;
-    }
-
-    private void finishDetachProbeKeepingOutput() {
-        detachProbePending = false;
-        detachProbeGeneration++;
-        mainHandler.removeCallbacksAndMessages(null);
     }
 
     private void cancelDetachProbe() {
