@@ -36,7 +36,8 @@ public final class HeadlessOutputDetachGateTest {
 
         assertTrue(immediate.contains("virtualDisplay.setSurface(null)"));
         assertFalse(gatedEntry.contains("virtualDisplay.setSurface(null)"));
-        assertTrue(gatedEntry.contains("isChatGptPage(webView.getUrl())"));
+        assertFalse(gatedEntry.contains("getUrl()"));
+        assertFalse(gatedEntry.contains("isChatGptPage"));
     }
 
     @Test public void failedComposerGateKeepsSamePageAttachedWithoutReconnect() throws Exception {
