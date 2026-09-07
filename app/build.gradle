@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3001007
-def selfRunDriveVersionName = '3.0.1-dev7'
+def selfRunDriveVersionCode = 3001008
+def selfRunDriveVersionName = '3.0.1-dev8'
 def selfRun3VersionPattern = ~/^3\.0\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -169,8 +169,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         }
         if (!composer.contains("selfrun-drive:v3-cont:") || !composer.contains("state:'clearing'")
                 || !composer.contains("state:'inputting'") || !composer.contains("state:'prepared'")
-                || !composer.contains("if(!e.isConnected)return")) {
-            throw new GradleException('V3 continuation must be restart-safe across rich-editor replacement')
+                || !composer.contains("if(!e.isConnected)return") || !composer.contains('String.fromCharCode(13)')) {
+            throw new GradleException('V3 continuation must be restart-safe and escape-safe across rich-editor replacement')
         }
         if (!power.contains('NORMAL_WAIT_POLL_MS = 0L')) throw new GradleException('normal V3 response waiting must not poll')
         def host = new File(src, 'HeadlessWebViewHost.java').getText('UTF-8')
