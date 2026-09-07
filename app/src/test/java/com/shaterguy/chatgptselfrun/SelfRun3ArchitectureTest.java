@@ -39,15 +39,24 @@ public final class SelfRun3ArchitectureTest {
 
     @Test public void firstSendDiagnosticTraceCoversPrepareSubmitAndFailureWithoutPayloads() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        for (String stage : new String[]{"PREPARE_START", "PREPARE_EVAL", "ON_PREPARED",
-                "SUBMIT_START", "SUBMIT_EVAL", "ON_UNSENT", "FAILURE"}) {
-            assertTrue("missing diagnostic stage " + stage, web.contains("\"" + stage + "\""));
+        for (String stage : new String[]{"PREPARE_START", "ON_PREPARED",
+                "SUBMIT_START", "SUBMIT_EVAL", "ON_UNSENT", "FAILURE", "PROTOCOL_ACCEPT"}) {
+            assertTrue("missing diagnostic stage " + stage, web.contains("trace(\"" + stage + "\""));
         }
+        // PREPARE_EVAL now carries a bounded structural snapshot through a dedicated writer.
+        assertTrue(web.contains("tracePrepare(result)"));
+        String prepareTrace = web.substring(web.indexOf("private void tracePrepare("), web.indexOf("private void trace(String stage"));
+        assertTrue(prepareTrace.contains("stage=PREPARE_EVAL;status="));
+        assertTrue(prepareTrace.contains("V3_WEB_TRACE"));
+        assertTrue(prepareTrace.contains("key.equals(lastPrepareTrace)"));
         String trace = web.substring(web.indexOf("private void trace(String stage"), web.indexOf("private void captureConversation()"));
         assertTrue(trace.contains("V3_WEB_TRACE"));
-        assertFalse(trace.contains("text(\"prompt\")"));
-        assertFalse(trace.contains("conversationUrl"));
-        assertFalse(trace.contains("web.getUrl"));
+        for (String logged : new String[]{prepareTrace, trace}) {
+            assertFalse(logged.contains("text(\"prompt\")"));
+            assertFalse(logged.contains("conversationUrl"));
+            assertFalse(logged.contains("web.getUrl"));
+            assertFalse(logged.contains("result.toString()"));
+        }
     }
 
     @Test public void v3HasNoAiMaintenanceOrSelfPatchPath() throws Exception {
