@@ -7,14 +7,14 @@ FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
 
 adb install -r stable/chatgpt-selfrun-drive-v3.0.0.apk >/dev/null
-adb install -r previous/chatgpt-selfrun-drive-test-v3.0.1-dev5.apk >/dev/null
-[[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.0.1-dev5' ]]
+adb install -r previous/chatgpt-selfrun-drive-test-v3.0.1-dev6.apk >/dev/null
+[[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.0.1-dev6' ]]
 OLD_UID="$(adb shell pm list packages -U "$TEST" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"
 test -n "$OLD_UID"
 adb install -r current/candidate.apk >/dev/null
 NEW_UID="$(adb shell pm list packages -U "$TEST" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"
 [[ "$OLD_UID" == "$NEW_UID" ]]
-printf 'TEST_UPGRADE=PASS;from=3.0.1-dev5;to=%s;uid_preserved=true\n' "$VERSION_NAME" | tee selfrun-v3-runtime-evidence.txt
+printf 'TEST_UPGRADE=PASS;from=3.0.1-dev6;to=%s;uid_preserved=true\n' "$VERSION_NAME" | tee selfrun-v3-runtime-evidence.txt
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$FORMAL"
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$TEST"
 [[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.0.0' ]]
