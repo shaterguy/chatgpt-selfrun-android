@@ -19,10 +19,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * V3 transport regression: bootstrap plus two continuations must use a freshly rebuilt composer
- * inside an open shadow root, without calibrated IDs, test IDs, send buttons, or layout visibility.
- * The bootstrap also reproduces live ChatGPT changing to a conversation route after editor input but
- * before the physical submit; that route transition must not invalidate the initial V3 transport.
+ * V3 transport regression: bootstrap plus two continuations must survive a controlled rich editor
+ * that rebuilds from its model after DOM-only mutation. The transport must update that model through
+ * native editing events, tolerate the bootstrap conversation route appearing before submit, and then
+ * dispatch three canonical requests through freshly rebuilt shadow-root composers.
  */
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3ComposerTransportWebViewTest {
@@ -34,7 +34,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
             "/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
     private static final String CONVERSATION_URL = "https://chatgpt.com" + CONVERSATION_PATH;
 
-    @Test public void bootstrapThenTwoContinuationsUseFreshShadowComposerAndCanonicalProtocol()
+    @Test public void bootstrapThenTwoContinuationsUseControlledEditorModelAndCanonicalProtocol()
             throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario =
                      ActivityScenario.launch(SelfRunNewActivity.class)) {
@@ -54,6 +54,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
 
             assertEquals("turn-one|turn-two|turn-three",
                     read(scenario, web, "window.sent.join('|')"));
+            assertEquals("3", read(scenario, web, "String(window.nativeModelCommits)"));
             assertEquals("3", read(scenario, web, "String(window.canonicalPosts.length)"));
             assertEquals("POST|POST|POST", read(scenario, web,
                     "window.canonicalPosts.map(x=>x.method).join('|')"));
@@ -73,6 +74,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
                 : SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, prompt);
         JSONObject prepared = prepare(scenario, web, prepare);
         assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT, prepared.optString("status"));
+        assertEquals(prompt, read(scenario, web, "window.editorModel"));
         if (initial) {
             assertEquals("bootstrap route must be allowed to become canonical before submit",
                     CONVERSATION_PATH, read(scenario, web, "location.pathname"));
@@ -98,7 +100,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
                                       AtomicReference<WebView> web,
                                       String script) throws Exception {
         JSONObject last = null;
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 12; i++) {
             last = evaluate(scenario, web, script);
             if (SelfRun3ComposerTransport.READY_TO_SUBMIT.equals(last.optString("status"))) {
                 return last;
@@ -149,7 +151,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
             web.set(view);
             view.loadDataWithBaseURL(PROJECT_URL, fixture(), "text/html", "UTF-8", null);
         });
-        assertTrue("V3 shadow composer fixture did not load",
+        assertTrue("V3 controlled composer fixture did not load",
                 loaded.await(15, TimeUnit.SECONDS));
         return web;
     }
@@ -178,6 +180,8 @@ public final class SelfRun3ComposerTransportWebViewTest {
         return """
                 <!doctype html><html><body><main><div id="composer-host"></div></main><script>
                 window.submitCount=0;window.sent=[];window.canonicalPosts=[];
+                window.editorModel='';window.nativeModelCommits=0;window.execCommandCalls=0;
+                document.execCommand=()=>{window.execCommandCalls++;return false;};
                 window.fetch=async(input,init={})=>{
                   const url=typeof input==='string'?input:String(input?.url||'');
                   const method=String(init.method||(input&&input.method)||'GET').toUpperCase();
@@ -187,6 +191,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
                 };
                 const host=document.getElementById('composer-host');
                 const shadow=host.attachShadow({mode:'open'});
+                const modelText=editor=>String(editor.innerText||editor.textContent||'').trim();
                 window.rebuildComposer=()=>{
                   shadow.replaceChildren();
                   const form=document.createElement('form');
@@ -195,22 +200,35 @@ public final class SelfRun3ComposerTransportWebViewTest {
                   editor.setAttribute('role','textbox');
                   editor.setAttribute('aria-multiline','true');
                   editor.setAttribute('aria-label','Message');
-                  editor.appendChild(document.createElement('p')).appendChild(document.createElement('br'));
-                  form.appendChild(editor);shadow.appendChild(form);
+                  const p=document.createElement('p');
+                  if(window.editorModel)p.textContent=window.editorModel;
+                  else p.appendChild(document.createElement('br'));
+                  editor.appendChild(p);form.appendChild(editor);shadow.appendChild(form);
                   window.currentForm=form;window.currentEditor=editor;
-                  editor.addEventListener('input',()=>{
+                  editor.addEventListener('beforeinput',event=>{
+                    if(event.inputType!=='insertText')return;
+                    event.preventDefault();
+                    window.editorModel=String(event.data||'');
+                    window.nativeModelCommits++;
                     if(window.submitCount===0&&!location.pathname.includes('/c/')){
                       history.replaceState({},'','__CONVERSATION_PATH__');
+                    }
+                    queueMicrotask(()=>window.rebuildComposer());
+                  });
+                  editor.addEventListener('input',()=>{
+                    if(modelText(editor)!==window.editorModel){
+                      queueMicrotask(()=>window.rebuildComposer());
                     }
                   });
                   form.addEventListener('submit',event=>{
                     event.preventDefault();
-                    const text=String(editor.innerText||editor.textContent||'').trim();
+                    const text=window.editorModel;
                     window.sent.push(text);window.submitCount++;
                     fetch('/backend-api/f/conversation',{
                       method:'POST',headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({action:'next',messages:[{content:{parts:[text]}}]})
                     });
+                    window.editorModel='';
                     window.rebuildComposer();
                   });
                 };
