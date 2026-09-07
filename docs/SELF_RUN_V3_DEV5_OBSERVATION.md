@@ -38,3 +38,11 @@ Security delta LIMITED: existing trusted-origin main-frame bridge still bounds s
 ## Verification recording
 
 Only the matching final Actions run, canonical artifact SHA256SUMS/SOURCE_COMMIT, signing evidence and native runtime evidence can establish validation. This document records requirements, not a pre-declared PASS. Live device behavior remains a post-delivery check. Existing development principles cover the diagnostic lesson; no additional global policy or retry redesign is introduced.
+
+## Integration finding and bounded route recovery
+
+Actions 34095869281 at source 7a627302220dd3efb052b5cb5ccf563f0b6b4f22 passed static/JVM/build/signing and dev4-to-dev5 installation. Its native suite ran 22 tests with one failure: the new observation test received STARTED and COMPLETE through the native bridge, but the ledger conversationUrl was empty. The three-turn test stopped at that assertion; it was not a three-turn PASS.
+
+The browser adapter now reads location.href when WebView.getUrl() does not contain a valid current conversation. This is a bounded read at a request/page/start-or-end boundary, not a timer or response DOM polling loop. The callback is fenced by active WebView, page generation, task, logical turn and request, then checked by the existing HTTPS/route policy before persistence. No URL is added to diagnostic logs. This closes a source-observed native-route publication gap; it does not prove the same publication timing caused the user's live failure.
+
+The test retains the exact URL equality and persistence assertions and now waits a bounded interval for the asynchronous route callback. Database reopen and logical-turn commit are serialized with native callbacks. Earlier failed candidate binaries are superseded and cannot be reported as fully verified.

@@ -56,6 +56,7 @@ final class SelfRun3WebAdapter {
     private long prepareStarted;
     private String lastPrepareTrace = "";
     private String observedRequest = "", acceptedRequest = "", endedRequest = "";
+    private String conversationProbeKey = "";
     private Consumer<JSONObject> pendingInspection;
 
     SelfRun3WebAdapter(Context context, Listener listener) {
@@ -500,6 +501,33 @@ final class SelfRun3WebAdapter {
         String url = web.getUrl();
         if (allowedRoute(url) && !SelfRunScript.conversationId(url).isEmpty()) {
             listener.onConversation(state.taskId(), state.turnId(), url);
+            return;
+        }
+        // Native URL publication can lag same-document history changes. Read the current route
+        // once per request/page/start-or-end boundary, without a polling clock or UI mutation.
+        WebView current = web;
+        int page = generation;
+        String task = state.taskId(), turn = state.turnId(), request = state.requestId();
+        String probe = request + ":" + page + ":" + (request.equals(endedRequest) ? "ended" : "started");
+        if (probe.equals(conversationProbeKey)) return;
+        conversationProbeKey = probe;
+        try {
+            current.evaluateJavascript("location.href", raw -> {
+                if (current != web || page != generation || closed || state == null
+                        || !task.equals(state.taskId()) || !turn.equals(state.turnId())
+                        || !request.equals(state.requestId())) return;
+                try {
+                    if (raw == null || raw.length() > 4096) return;
+                    Object value = new JSONTokener(raw).nextValue();
+                    if (!(value instanceof String)) return;
+                    String observedUrl = (String) value;
+                    if (allowedRoute(observedUrl) && !SelfRunScript.conversationId(observedUrl).isEmpty()) {
+                        listener.onConversation(task, turn, observedUrl);
+                    }
+                } catch (Exception ignored) {
+                }
+            });
+        } catch (Throwable ignored) {
         }
     }
 

@@ -44,18 +44,21 @@ public final class SelfRun3ObservationWebViewTest {
             assertEquals("1", h.read("String(window.posts.length)"));
             h.read("window.finishResponse();'released'");
             h.awaitFlag("ended");
+            h.awaitResource("conversationUrl", URL);
             assertEquals(1, h.ended.get());
             assertEquals("message_stream_complete", h.current.get().text("endSource"));
             assertEquals(URL, h.current.get().resource("conversationUrl"));
-            assertEquals("V3", h.read("window.nativeBridgeLabel"));
 
-            // Reopen the real database: observed effect and completion must survive object recreation.
-            h.ledger.close();
-            h.ledger = new SelfRun3Ledger(h.context);
-            h.current.set(h.ledger.load(RUN));
+            // Reopen the real database on the callback thread; observation and route must persist.
+            h.ui(() -> {
+                h.ledger.close();
+                h.ledger = new SelfRun3Ledger(h.context);
+                h.current.set(h.ledger.load(RUN));
+            });
             assertTrue(h.current.get().flag("sendClaimed"));
             assertTrue(h.current.get().flag("ended"));
-            h.commitAndPrepareNext();
+            assertEquals(URL, h.current.get().resource("conversationUrl"));
+            h.ui(h::commitAndPrepareNext);
 
             for (int turn = 2; turn <= 3; turn++) {
                 SelfRun3Engine.State next = h.current.get();
@@ -64,8 +67,9 @@ public final class SelfRun3ObservationWebViewTest {
                 assertEquals(String.valueOf(turn), h.read("String(window.posts.length)"));
                 h.read("window.finishResponse();'released'");
                 h.awaitFlag("ended");
+                h.ui(() -> {});
                 assertEquals(turn, h.ended.get());
-                if (turn == 2) h.commitAndPrepareNext();
+                if (turn == 2) h.ui(h::commitAndPrepareNext);
             }
             assertEquals("first-prompt|second-prompt|third-prompt", h.read("window.posts.join('|')"));
             assertEquals(2, h.prepared.get()); // Only normal explicit submissions for turn 2 and 3.
@@ -220,6 +224,13 @@ public final class SelfRun3ObservationWebViewTest {
             }
             fail("missing " + name + "; state=" + current.get().stage() + "; failure=" + failure.get());
         }
+        void awaitResource(String name, String expected) throws Exception {
+            for (int i = 0; i < 120; i++) {
+                if (expected.equals(current.get().resource(name))) return;
+                assertEquals("", failure.get()); Thread.sleep(50L);
+            }
+            assertEquals("resource was not recorded: " + name, expected, current.get().resource(name));
+        }
         void ui(Runnable action) throws Exception {
             AtomicReference<Throwable> error = new AtomicReference<>();
             scenario.onActivity(a -> { try { action.run(); } catch (Throwable e) { error.set(e); } });
@@ -252,7 +263,7 @@ public final class SelfRun3ObservationWebViewTest {
     private static String fixture() {
         return """
                 <!doctype html><html><body><main></main><script>
-                window.posts=[];window.editCalls=0;window.nativeBridgeLabel='V3';
+                window.posts=[];window.editCalls=0;
                 window.fetch=(url,init)=>{
                   window.posts.push(JSON.parse(init.body).messages[0].content.parts[0]);
                   return new Promise(resolve=>{
