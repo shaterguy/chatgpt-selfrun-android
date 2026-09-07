@@ -6,7 +6,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Durable per-run marker that selects one-signal-per-Google-Doc transport. */
+/** Durable per-run transport marker. SelfRun 3 also pins its independent run lineage here. */
 final class SelfRunSignalTransport {
     private static final String PREFS = "selfrun_drive_signal_transport";
     private static final String KEY_RUNS = "runs";
@@ -16,14 +16,21 @@ final class SelfRunSignalTransport {
     static boolean mark(Context context, String runId) {
         String value = runId == null ? "" : runId.trim();
         if (context == null || !SelfRunProtocolRules.validRunId(value)) return false;
+        Context app = context.getApplicationContext();
         synchronized (SelfRunSignalTransport.class) {
-            Set<String> current = new HashSet<>(context.getApplicationContext()
-                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            Set<String> current = new HashSet<>(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .getStringSet(KEY_RUNS, Collections.emptySet()));
-            if (!current.add(value)) return true;
-            return context.getApplicationContext()
-                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                    .putStringSet(KEY_RUNS, current).commit();
+            boolean transportPersisted = current.contains(value);
+            if (!transportPersisted) {
+                current.add(value);
+                transportPersisted = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                        .putStringSet(KEY_RUNS, current).commit();
+            }
+            if (!transportPersisted) return false;
+            if (BuildConfig.VERSION_NAME != null && BuildConfig.VERSION_NAME.startsWith("3.")) {
+                return SelfRun3RunMarker.mark(app, value);
+            }
+            return true;
         }
     }
 
