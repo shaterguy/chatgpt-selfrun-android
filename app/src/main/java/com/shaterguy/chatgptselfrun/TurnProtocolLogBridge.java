@@ -11,7 +11,7 @@ import org.json.JSONObject;
 
 import java.util.Set;
 
-/** Receives trusted protocol-state events for run logging and the user-facing runtime status. */
+/** Receives trusted SelfRun 3 protocol-state events for run logging and user-facing runtime status. */
 final class TurnProtocolLogBridge {
     static final String JS_OBJECT = "selfRunTurnLog";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
@@ -66,25 +66,20 @@ final class TurnProtocolLogBridge {
                         if (turnToken.isEmpty()) return;
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
-                        boolean v3 = SelfRun3WebAdapter.ownsProtocolView(view);
-                        if (v3) {
-                            // V3 request identity belongs to its ledger/adapter, not the V2 projection.
-                            item.put("source", source);
-                            if (!SelfRun3WebAdapter.protocolEvent(view, item)) return;
-                        } else if (!turnToken.equals(store.turnProtocolToken())) {
-                            return;
-                        }
+                        if (!SelfRun3WebAdapter.ownsProtocolView(view)) return;
+                        item.put("source", source);
+                        if (!SelfRun3WebAdapter.protocolEvent(view, item)) return;
                         TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase);
                         WorkProtocolCoverageTracker.observeProtocol(context, store, stage, source, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
-                                + ";phase=" + phase + ";token=current;owner=" + (v3 ? "V3" : "legacy"));
+                                + ";phase=" + phase + ";token=current;owner=V3");
                     } catch (Throwable ignored) {
                     }
                 });
         if (!runId.isEmpty()) {
             TurnProtocolUiState.recordDetector(context, runId);
             log.record(store, "TURN_DETECTOR",
-                    "path=PROTOCOL;bridge=web_message_listener;document_start=1");
+                    "path=PROTOCOL;bridge=web_message_listener;document_start=1;owner=V3");
         }
         return true;
     }
