@@ -1,16 +1,26 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
+import android.database.DatabaseErrorHandler;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteOpenHelper;
 import org.json.JSONObject;
 import java.io.File;
 
 /** App-private transactional journal. The task snapshot, event receipt and turn record commit together. */
 final class SelfRun3Ledger extends SQLiteOpenHelper {
+    private static final class PreserveCorruptionHandler implements DatabaseErrorHandler {
+        @Override public void onCorruption(SQLiteDatabase dbObj) {
+            throw new SQLiteException("SelfRun 3 ledger corruption detected; database preserved for recovery");
+        }
+    }
+
     SelfRun3Ledger(Context context) {
-        super(context.getApplicationContext(), new File(context.getNoBackupFilesDir(), "selfrun3-ledger.db").getAbsolutePath(), null, 1);
+        super(context.getApplicationContext(),
+                new File(context.getNoBackupFilesDir(), "selfrun3-ledger.db").getAbsolutePath(),
+                null, 1, new PreserveCorruptionHandler());
         setWriteAheadLoggingEnabled(true);
     }
     @Override public void onConfigure(SQLiteDatabase db) { db.setForeignKeyConstraintsEnabled(true); }
