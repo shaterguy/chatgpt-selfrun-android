@@ -10,17 +10,13 @@ import static org.junit.Assert.assertTrue;
 
 /** Source contract for separate V3 bootstrap and continuation transports. */
 public final class SelfRun3ComposerTransportArchitectureTest {
-    @Test public void v3UsesVerifiedBootstrapModuleAndKeepsContinuationOnNewTransport() throws Exception {
+    @Test public void v3UsesVerifiedBootstrapModuleAndKeepsContinuationOnV3Transport() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(web.contains("SelfRun3BootstrapTransport.prepare"));
         assertTrue(web.contains("SelfRun3BootstrapTransport.submit"));
         assertTrue(web.contains("SelfRun3ComposerTransport.prepareContinuation"));
         assertTrue(web.contains("SelfRun3ComposerTransport.submitContinuation"));
         assertTrue(web.contains("SelfRun3ComposerTransport.composerReadyExpression()"));
-        assertTrue(web.contains("observeWithoutBinding(script)"));
-        assertTrue(web.contains("continuationComposerStage"));
-        assertFalse(web.contains("SelfRun3ComposerTransport.prepareInitial("));
-        assertFalse(web.contains("SelfRun3ComposerTransport.submitInitial("));
         assertFalse(web.contains("SelfRunContinuationDom"));
     }
 
@@ -32,8 +28,6 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(bootstrap.contains("baselineUserCount"));
         assertTrue(bootstrap.contains("c.send.click()"));
         assertTrue(bootstrap.contains("requestComposerSubmit()"));
-        assertTrue(bootstrap.contains("WebUiCalibrationDom.runtimePrelude()"));
-        assertTrue(bootstrap.contains("WebUiCalibrationStore.TARGET_PROJECT_COMPOSER"));
         assertFalse(bootstrap.contains("SelfRunContinuationDom"));
         int prepare = web.indexOf("SelfRun3BootstrapTransport.prepare");
         int noBind = web.indexOf("observeWithoutBinding(script)");
@@ -43,34 +37,33 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(submit >= 0 && bind > submit);
     }
 
-    @Test public void continuationTransportUsesCapabilitiesInsteadOfLegacyUiIdentity() throws Exception {
+    @Test public void continuationUsesPersistentPreparePhasesAndDetachedNodeFence() throws Exception {
         String transport = source("SelfRun3ComposerTransport.java");
-        for (String legacy : new String[]{
-                "SelfRunContinuationDom", "__srFind", "WebUiCalibrationStore", "offsetParent",
-                "UserNextInputStore", "LegacyRunModeMigration",
-                "selfrun-drive:verified-continuation", "selfrun-drive:verified-bootstrap",
-                "prompt-textarea", "data-testid", "findSendControl", "send.click()",
-                "composer-stop-button"}) {
-            assertFalse("legacy dependency remains in V3 continuation transport: " + legacy,
-                    transport.contains(legacy));
+        for (String retired : new String[]{"SelfRunContinuationDom", "UserNextInputStore", "LegacyRunModeMigration"}) {
+            assertFalse("retired continuation dependency remains: " + retired, transport.contains(retired));
         }
-        assertTrue(transport.contains("textarea,input,[contenteditable],[role=\"textbox\"]"));
+        assertTrue(transport.contains("selfrun-drive:v3-cont:"));
+        assertTrue(transport.contains("state:'clearing'"));
+        assertTrue(transport.contains("state:'inputting'"));
+        assertTrue(transport.contains("state:'prepared'"));
+        assertTrue(transport.contains("state:'clicked'"));
+        assertTrue(transport.contains("if(!e.isConnected)return"));
+        assertTrue(transport.contains("inputComposer(composer,expected)"));
+        assertTrue(transport.contains("clearComposer(composer)"));
+        assertTrue(transport.contains("exact continuation prepared"));
         assertTrue(transport.contains("shadowRoot"));
         assertTrue(transport.contains("form.requestSubmit()"));
         assertTrue(transport.contains("KeyboardEvent"));
-        assertTrue(transport.contains("protocol.phase==='THINKING'||protocol.phase==='ANSWERING'"));
-        assertTrue(transport.contains("e.isConnected"));
-        assertTrue(transport.contains("nearestForm"));
-        assertTrue(transport.contains("TURN_PROTOCOL_BUSY"));
     }
 
-    @Test public void nativeRegressionRejectsUnboundNoiseAndThenRunsThreeOwnedTurns() throws Exception {
-        String test = androidTestSource("SelfRun3ObservationWebViewTest.java");
-        assertTrue(test.contains("window.unrelatedPost()"));
-        assertTrue(test.contains("assertFalse(h.current.get().flag(\"dispatchObserved\"))"));
-        assertTrue(test.contains("first-prompt|second-prompt|third-prompt"));
-        assertTrue(test.contains("awaitFlag(\"dispatchObserved\")"));
+    @Test public void controlledEditorRegressionIncludesSynchronousContinuationRebuild() throws Exception {
+        String test = androidTestSource("SelfRun3ComposerTransportWebViewTest.java");
+        assertTrue(test.contains("attachShadow({mode:'open'})"));
+        assertTrue(test.contains("syncContinuationRebuild"));
+        assertTrue(test.contains("window.rebuildComposer()"));
         assertTrue(test.contains("message_stream_complete"));
+        assertTrue(test.contains("turn-one|turn-two|turn-three"));
+        assertTrue(test.contains("String(window.canonicalPosts.length)"));
     }
 
     private static String source(String name) throws Exception {
