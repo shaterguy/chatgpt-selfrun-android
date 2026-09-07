@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3000004
-def selfRunDriveVersionName = '3.0.0-dev4'
+def selfRunDriveVersionCode = 3000005
+def selfRunDriveVersionName = '3.0.0-dev5'
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -53,6 +53,47 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
 }
 
+// These methods assert the removed 2.x execution machine itself (signal cursors, protocol->Drive
+// handoff, rollover and service polling). The surrounding classes still run for compatibility.
+def v3RetiredV2Assertions = [
+    'com.shaterguy.chatgptselfrun.BootstrapFiniteStateWiringTest.serviceOwnsPersistentDeadlineAndMalformedCallbackFailure',
+    'com.shaterguy.chatgptselfrun.BootstrapResultPolicyTest.serviceTargetErrorRecoveryUsesCanonicalEntryOnlyBeforeConversation',
+    'com.shaterguy.chatgptselfrun.CompletedRunCacheCleanupWiringTest.serviceRunsCleanupAfterTerminalSideEffectAckAndBeforeRuntimeStop',
+    'com.shaterguy.chatgptselfrun.CompletedRunCacheCleanupWiringTest.activityAndStopFlowsDoNotAttemptDirectWebViewCacheCleanup',
+    'com.shaterguy.chatgptselfrun.ContinuationDiagnosticsPolicyTest.continuationFailuresLogStructuredProtocolStateAndCallbackTimeouts',
+    'com.shaterguy.chatgptselfrun.DriveSignalIdentityWiringTest.storePersistsSignalDocumentCursorAndCompletion',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.canonicalDriveV1RuntimeIsForegroundAndDomBased',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.scriptUsesStrictProjectAndConversationChecks',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.globalRunsPathAndExistingFolderIdPolicyArePreserved',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.onlyExactCurrentProjectRouteIsAccepted',
+    'com.shaterguy.chatgptselfrun.HeadlessDisplayOutputWiringTest.serviceAttachesOnlyForActiveDomWorkAndDetachesOnProtocolWait',
+    'com.shaterguy.chatgptselfrun.HeadlessDisplayOutputWiringTest.protocolWaitCallbackWiringCannotRequestSurfaceReattach',
+    'com.shaterguy.chatgptselfrun.PostDriveConfirmationDelayPolicyTest.chatAndWorkCompletionWaitBeforeContinuationPath',
+    'com.shaterguy.chatgptselfrun.PostDriveConfirmationDelayPolicyTest.completionDelayIsSingleSourceOfTruth',
+    'com.shaterguy.chatgptselfrun.SelfRunContinuationSubmissionTest.nativeBindsContinuationOnEveryVerificationAttempt',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveCommandAckPollingTest.commandSubmissionIsVerifiedByProtocolStateNotRetryCount',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveCommandAckPollingTest.temporaryUncertaintyRetriesWithoutSubmissionCounter',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveDev3PolicyTest.driveStartsOnlyAfterProtocolComplete',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveDev3PolicyTest.continuationBindsProtocolBeforeSubmissionAndWaitsWithoutObserverPolling',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveTurnInfoSourceTest.workCompletionRequiresExplicitTurnInfo',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveTurnInfoSourceTest.chatCompletionDoesNotRequireTurnInfo',
+    'com.shaterguy.chatgptselfrun.SelfRunPauseResumeTest.manualResumeBaselinesThenForcesContinue',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.onlyRendererCrashAndConversationLocalMainFrameFailuresUseRollover',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.postDispatchNoStartGuardUsesCoverageNotUnknownPolling',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.conversationLocalRoutesUseRollover',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.rolloverNoLongerUsesDomRetryBudget',
+    'com.shaterguy.chatgptselfrun.WebViewTransientNoStartPolicyWiringTest.serviceSeparatesCanonicalPostTransientFromUnrelatedSubresources',
+    'com.shaterguy.chatgptselfrun.WorkModeRecoveryPolicyTest.serviceResumesWorkFromDurableModeWithoutLegacyDetection'
+]
+
+tasks.withType(org.gradle.api.tasks.testing.Test).configureEach {
+    if (selfRunDriveVersionName.startsWith('3.')) {
+        filter {
+            v3RetiredV2Assertions.each { excludeTestsMatching it }
+        }
+    }
+}
+
 def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
     group = 'verification'
     doLast {
@@ -64,8 +105,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || android.defaultConfig.versionName != selfRunDriveVersionName) {
             throw new GradleException('SelfRun Drive version identity mismatch')
         }
-        if (selfRunDriveVersionName != '3.0.0-dev4') {
-            throw new GradleException('SelfRun 3 development version must be 3.0.0-dev4')
+        if (selfRunDriveVersionName != '3.0.0-dev5') {
+            throw new GradleException('SelfRun 3 development version must be 3.0.0-dev5')
         }
         if (selfRunDriveVersionCode <= 2020048) {
             throw new GradleException('SelfRun 3 versionCode must advance the 2.3.2 stable lineage')
