@@ -62,7 +62,17 @@ final class SelfRun3DriveAdapter {
     }
     String readResult(String token, SelfRun3Engine.State s) throws Exception {
         verifyAccount(token, s); validateDocument(token, s, s.resource("resultDocumentId"));
-        checkpoint(); return api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
+        checkpoint();
+        String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
+        if (raw == null || raw.trim().isEmpty()) return SelfRun3Engine.emptyResult(s).toString();
+        try {
+            SelfRun3Engine.parseResult(raw, s);
+            return raw;
+        } catch (RuntimeException incompleteOrMalformed) {
+            // A result body may be observed between delete/insert operations. Treat it as pending here;
+            // bounded retry and one RESULT_REPAIR request decide whether the condition persists.
+            return SelfRun3Engine.emptyResult(s).toString();
+        }
     }
     private SelfRun3Engine.State ensureDocument(String token, SelfRun3Engine.State original, String key, String intentKey, String name) throws Exception {
         SelfRun3Engine.State s = ledger.load(original.taskId());
