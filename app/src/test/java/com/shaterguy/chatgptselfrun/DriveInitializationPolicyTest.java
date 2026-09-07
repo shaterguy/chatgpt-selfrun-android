@@ -9,22 +9,25 @@ import static org.junit.Assert.*;
 
 public class DriveInitializationPolicyTest {
     @Test public void newExecutionDocStoresExactOriginalRequirement() throws Exception {
-        String service = src("SelfRunService.java");
-        String init = between(service, "private void initializeDocument", "private void verifyInitialDocument");
-        assertTrue(init.contains("SelfRunOriginalRequirement.validationError"));
-        assertTrue(init.contains("readTurnDocumentSnapshot"));
-        assertTrue(init.contains("current.revisionId"));
-        assertTrue(init.contains("exactDocumentMatch"));
-        assertTrue(init.contains("ORIGINAL_REQUIREMENT_READBACK_MISMATCH"));
+        String drive = src("SelfRun3DriveAdapter.java");
+        String setup = between(drive, "SelfRun3Engine.State setup", "SelfRun3Engine.State prepareTurn");
+        assertTrue(setup.contains("String requirement = s.config().optString(\"requirement\")"));
+        assertTrue(setup.contains("api.readTurnDocumentSnapshot"));
+        assertTrue(setup.contains("api.initializeDocument"));
+        assertTrue(setup.contains("initial.revisionId"));
+        assertTrue(setup.contains("stripTerminalNewline(initial.text).equals(stripTerminalNewline(requirement))"));
+        assertTrue(setup.contains("REQUIREMENT_READBACK_MISMATCH"));
     }
 
-    @Test public void signalDocumentTransportNeverFallsBackToRequirementBody() throws Exception {
-        String drive = src("DriveApiClient.java");
-        assertTrue(drive.contains("final boolean staged"));
-        assertTrue(drive.contains("if (batch.staged) return readSignalDocumentSnapshot"));
-        assertTrue(drive.contains("getPollMetadata(String accessToken, String fileId, boolean signalDocumentTransport)"));
+    @Test public void v3CompletionNeverUsesLegacySignalDocumentTransport() throws Exception {
         String service = src("SelfRunService.java");
-        assertTrue(service.contains("SelfRunSignalTransport.isSignalDocumentRun"));
+        String coordinator = src("SelfRun3Coordinator.java");
+        String drive = src("SelfRun3DriveAdapter.java");
+        assertFalse(service.contains("SelfRunSignalTransport.isSignalDocumentRun"));
+        assertFalse(coordinator.contains("DriveSignalParser"));
+        assertFalse(drive.contains("readSignalDocumentSnapshot"));
+        assertTrue(drive.contains("SelfRun3DriveLookup.findSingleDocumentId"));
+        assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
     }
 
     @Test public void newRunUiPreservesRawRequirementAndMarksTransport() throws Exception {
