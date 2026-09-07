@@ -25,7 +25,6 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertFalse(activity.contains("store.setPendingReasoning(workProfile.signalReasoning)"));
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_REASONING"));
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_MODEL"));
-        assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_REASONING"));
         assertFalse(activity.contains("Work 모드는 새 작업에서 수동 선택하지 않고"));
 
         assertTrue(preferences.contains("LEGACY_DEFAULT_MODEL = \"sol\""));
@@ -40,13 +39,17 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertTrue(store.contains("putString(\"pendingModel\",safe(initialModel)).putString(\"pendingReasoning\",safe(initialReasoning))"));
     }
 
-    @Test public void workSelectionDoesNotReplaceTurnCompletedDynamicProfileFlow() throws Exception {
-        String store = src("SelfRunStore.java");
-        String service = src("SelfRunService.java");
-        assertTrue(store.contains("hasPendingDriveCompletion()"));
-        assertTrue(store.contains("pendingDriveWorkProfile()"));
-        assertTrue(service.contains("WorkPreferenceDom.modelForConversation(store.conversationUrl(),store.pendingModel())"));
-        assertTrue(service.contains("WorkPreferenceDom.reasoningForConversation(store.conversationUrl(),store.pendingReasoning())"));
+    @Test public void workSelectionFeedsV3ResultDrivenDynamicProfileFlow() throws Exception {
+        String engine = src("SelfRun3Engine.java");
+        String web = src("SelfRun3WebAdapter.java");
+        String coordinator = src("SelfRun3Coordinator.java");
+        assertTrue(engine.contains("JSONObject config = before.config(), profile = result.optJSONObject(\"profile\")"));
+        assertTrue(engine.contains("put(config, \"model\", profile.optString(\"model\"))"));
+        assertTrue(engine.contains("put(config, \"reasoning\", profile.optString(\"reasoning\"))"));
+        assertTrue(web.contains("RequestProfileScript.setWorkModel(c.optString(\"model\"))"));
+        assertTrue(web.contains("RequestProfileScript.setWorkReasoning(c.optString(\"reasoning\"))"));
+        assertTrue(coordinator.contains("store.setPendingModel(config.optString(\"model\"))"));
+        assertTrue(coordinator.contains("store.setPendingReasoning(config.optString(\"reasoning\"))"));
     }
 
     private static String src(String file) throws Exception {
