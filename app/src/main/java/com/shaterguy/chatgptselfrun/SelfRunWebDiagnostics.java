@@ -1,6 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
-/** Privacy-safe categories for continuation diagnostics written to the local run log. */
+/** Privacy-safe categories for diagnostics written to the local run log. */
 final class SelfRunWebDiagnostics {
     private SelfRunWebDiagnostics() {}
 
@@ -34,13 +34,10 @@ final class SelfRunWebDiagnostics {
     }
 
     static String stateDetail(String phase, String status) {
-        String safeStatus;
-        if (SelfRunContinuationDom.UNKNOWN.equals(status)) safeStatus = "UNKNOWN";
-        else if (SelfRunContinuationDom.STOP.equals(status)) safeStatus = "STOP";
-        else if (SelfRunContinuationDom.SEND_DISABLED.equals(status)) safeStatus = "SEND_DISABLED";
-        else if (SelfRunContinuationDom.SEND_ENABLED.equals(status)) safeStatus = "SEND_ENABLED";
-        else if (SelfRunContinuationDom.COMPOSER_IDLE.equals(status)) safeStatus = "COMPOSER_IDLE";
-        else safeStatus = "OTHER";
+        String safeStatus = switch (status == null ? "" : status) {
+            case "UNKNOWN", "STOP", "SEND_DISABLED", "SEND_ENABLED", "COMPOSER_IDLE" -> status;
+            default -> "OTHER";
+        };
         return "status=" + safeStatus + ";phase=" + phaseKind(phase) + ";reason=state_wait";
     }
 
@@ -62,11 +59,14 @@ final class SelfRunWebDiagnostics {
     static String phaseKindForHealth(String phase) { return phaseKind(phase); }
 
     private static String phaseKind(String phase) {
-        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) return "bootstrap_send";
-        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) return "wait_turn_completion";
-        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)) return "apply_model";
-        if (SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "apply_reasoning";
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "send_continue";
+        if (SelfRun3Coordinator.PHASE_SETUP.equals(phase)) return "v3_setup";
+        if (SelfRun3Coordinator.PHASE_PREPARING.equals(phase)) return "v3_preparing";
+        if (SelfRun3Coordinator.PHASE_READY.equals(phase)) return "v3_ready";
+        if (SelfRun3Coordinator.PHASE_DISPATCHING.equals(phase)) return "v3_dispatching";
+        if (SelfRun3Coordinator.PHASE_WAITING.equals(phase)) return "v3_waiting";
+        if (SelfRun3Coordinator.PHASE_RECONCILING.equals(phase)) return "v3_reconciling";
+        if (SelfRunStore.PHASE_PAUSED.equals(phase)) return "paused";
+        if (SelfRunStore.PHASE_DONE.equals(phase)) return "done";
         return "other";
     }
 

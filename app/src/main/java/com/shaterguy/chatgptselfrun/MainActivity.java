@@ -181,14 +181,13 @@ public final class MainActivity extends Activity {
         if (!store.lastErrorCode().isEmpty()) meta += "\n오류  " + errorSummary();
         runMeta.setText(meta);
         technicalDetails.setText("Run ID  " + runId
+                + "\n실행 엔진  SelfRun 3 ledger"
                 + "\nconversation  " + dash(store.conversationUrl())
                 + "\n모델 / 추론  " + dash(store.pendingModel()) + " / " + dash(store.pendingReasoning())
                 + "\n내부 phase  " + dash(store.phase())
                 + "\n응답 프로토콜 phase  " + (protocol.present ? protocol.phase : "-")
                 + "\n응답 프로토콜 event  " + (protocol.present ? protocol.stage : "-")
-                + "\nDrive 문서  " + dash(store.turnDocumentUrl())
-                + "\n마지막 인식 signal document ID  " + dash(DriveSignalDocumentIdentity.latestRecognizedSignalId(this))
-                + "\n마지막 Drive signal  " + dash(store.lastDriveSignalType())
+                + "\nRun 폴더  " + dash(store.runBaseFolderId())
                 + "\n마지막 오류  " + errorSummary());
 
         pauseButton.setVisibility(running ? View.VISIBLE : View.GONE);
@@ -210,31 +209,15 @@ public final class MainActivity extends Activity {
         if (SelfRunStore.PHASE_DONE.equals(phase)) return "작업 완료";
         if (SelfRunStore.PHASE_IDLE.equals(phase)) return "실행 종료";
         if (!store.lastErrorCode().isEmpty()) return "오류 확인 필요";
-        if (SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC.equals(phase)) return "답변 완료 · 새 Drive 신호 확인 중";
-        if (SelfRunStore.PHASE_APPLY_PREFS.equals(phase)
-                || SelfRunStore.PHASE_APPLY_REASONING.equals(phase)) return "다음 요청 설정 중";
-        if (SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)) return "다음 턴 전송 중";
-        if (SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase)) {
+        if (SelfRun3Coordinator.PHASE_SETUP.equals(phase)) return "SelfRun 3 준비 중";
+        if (SelfRun3Coordinator.PHASE_PREPARING.equals(phase)) return "다음 논리 턴 준비 중";
+        if (SelfRun3Coordinator.PHASE_READY.equals(phase)) return "ChatGPT 요청 준비 중";
+        if (SelfRun3Coordinator.PHASE_DISPATCHING.equals(phase)) return "전송 결과 확인 중";
+        if (SelfRun3Coordinator.PHASE_WAITING.equals(phase)) {
             String live = protocol.headline();
-            return live.isEmpty() ? "응답 상태 확인 중" : live;
+            return live.isEmpty() ? "응답 진행 중" : live;
         }
-        if (SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)) {
-            String live = protocol.headline();
-            if (!live.isEmpty()) return live;
-            return "첫 요청 전송 중";
-        }
-        if (SelfRunStore.PHASE_BOOTSTRAP_MODEL.equals(phase)
-                || SelfRunStore.PHASE_BOOTSTRAP_REASONING.equals(phase)) return "첫 요청 설정 중";
-        if (SelfRunStore.PHASE_BOOTSTRAP.equals(phase)) return "ChatGPT 연결 준비 중";
-        if (SelfRunStore.PHASE_RESUME_BASELINE.equals(phase)) return "재개 · 새 Drive 신호 확인 중";
-        if (SelfRunStore.PHASE_DRIVE_ACCOUNT_CHECK.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_BASE_FOLDER_CHECK.equals(phase)
-                || SelfRunStore.PHASE_JOB_ID_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_JOB_FOLDER_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_DOCUMENT_INIT.equals(phase)
-                || SelfRunStore.PHASE_DRIVE_DOCUMENT_READBACK.equals(phase)) return "실행 준비 중";
+        if (SelfRun3Coordinator.PHASE_RECONCILING.equals(phase)) return "결과·대화 상태 확인 중";
         return terminal ? "실행 종료" : "실행 중";
     }
 
@@ -307,7 +290,7 @@ public final class MainActivity extends Activity {
     private void saveNextInput() {
         String runId = store.runId();
         if (!UserNextInputStore.save(runId, nextInputEditor.getText().toString())) {
-            Toast.makeText(this, "다음 요청 제출이 이미 시작되었거나 현재 입력할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "현재 다음 요청을 저장할 수 없습니다.", Toast.LENGTH_SHORT).show();
             refreshCurrent();
             return;
         }
@@ -319,7 +302,7 @@ public final class MainActivity extends Activity {
     private void deleteNextInput() {
         String runId = store.runId();
         if (!UserNextInputStore.delete(runId)) {
-            Toast.makeText(this, "다음 요청 제출이 이미 시작되었거나 현재 삭제할 수 없는 단계입니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "현재 다음 요청을 삭제할 수 없습니다.", Toast.LENGTH_SHORT).show();
             refreshCurrent();
             return;
         }

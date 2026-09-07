@@ -3,7 +3,6 @@ package com.shaterguy.chatgptselfrun;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 
@@ -32,13 +31,15 @@ public final class SelfRunDetailActivity extends Activity {
         SelfRunHealthSnapshot runHealth = new SelfRunHealthObservationStore(this).currentFor(item);
         page.addView(Ui.headline(this, preview(item.optString("requirement"))));
         page.addView(Ui.body(this, runHealth == null ? item.optString("status") : runHealth.rowLabel()));
-        if (runHealth != null && !runHealth.recommendedAction.isEmpty())
+        if (runHealth != null && !runHealth.recommendedAction.isEmpty()) {
             page.addView(Ui.body(this, runHealth.recommendedAction));
+        }
         page.addView(Ui.section(this, "원본 요청"));
         android.widget.TextView requirement = Ui.body(this, empty(item.optString("requirement")));
         requirement.setTextIsSelectable(true);
         page.addView(requirement);
         page.addView(Ui.section(this, "실행 정보"));
+        page.addView(Ui.keyValue(this, "엔진", "SelfRun 3 ledger"));
         page.addView(Ui.keyValue(this, "시작", time(item.optLong("createdAt"))));
         page.addView(Ui.keyValue(this, "마지막 실행", time(item.optLong("updatedAt"))));
         page.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
@@ -46,8 +47,10 @@ public final class SelfRunDetailActivity extends Activity {
         page.addView(Ui.keyValue(this, "모델 조합", model(item)));
         String resolvedRunId = item.optString("runId");
         page.addView(Ui.section(this, "로그"));
-        page.addView(Ui.setting(this, R.drawable.ic_history, "실행 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)));
-        page.addView(Ui.setting(this, R.drawable.ic_history, "디버그 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG)));
+        page.addView(Ui.setting(this, R.drawable.ic_history, "실행 로그", "",
+                v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)));
+        page.addView(Ui.setting(this, R.drawable.ic_history, "디버그 로그", "",
+                v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG)));
         LinearLayout diagnostics = new LinearLayout(this);
         diagnostics.setOrientation(LinearLayout.VERTICAL);
         diagnostics.addView(Ui.keyValue(this, "Run ID", resolvedRunId));
@@ -62,10 +65,9 @@ public final class SelfRunDetailActivity extends Activity {
         }
         diagnostics.setVisibility(android.view.View.GONE);
         page.addView(Ui.textButton(this, "진단 정보", v -> diagnostics.setVisibility(
-                diagnostics.getVisibility() == android.view.View.VISIBLE ? android.view.View.GONE : android.view.View.VISIBLE)));
+                diagnostics.getVisibility() == android.view.View.VISIBLE
+                        ? android.view.View.GONE : android.view.View.VISIBLE)));
         page.addView(diagnostics);
-        if (SelfRunRestartPolicy.restartable(item))
-            page.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(resolvedRunId)));
         Ui.setContent(this, scroll);
     }
 
@@ -73,11 +75,6 @@ public final class SelfRunDetailActivity extends Activity {
         startActivity(new Intent(this, SelfRunLogsActivity.class)
                 .putExtra(SelfRunLogsActivity.EXTRA_RUN_ID, runId)
                 .putExtra(SelfRunLogsActivity.EXTRA_KIND, kind));
-    }
-
-    private void openRestart(String runId) {
-        startActivity(new Intent(this, SelfRunRestartActivity.class)
-                .putExtra(SelfRunRestartActivity.EXTRA_RUN_ID, runId));
     }
 
     private String model(JSONObject item) {
