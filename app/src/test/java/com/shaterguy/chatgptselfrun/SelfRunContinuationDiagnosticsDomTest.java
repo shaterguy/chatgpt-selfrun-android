@@ -8,6 +8,9 @@ public class SelfRunContinuationDiagnosticsDomTest {
     @Test public void snapshotIsPassivePrivacySafeAndDeep() {
         String script = SelfRunContinuationDiagnosticsDom.snapshot();
         assertTrue(script.contains("document.visibilityState"));
+        assertTrue(script.contains("document.documentURI"));
+        assertTrue(script.contains("performance.timeOrigin"));
+        assertTrue(script.contains("history.state"));
         assertTrue(script.contains("document.elementsFromPoint"));
         assertTrue(script.contains("contentDocument"));
         assertTrue(script.contains("shadowRoot"));
@@ -20,6 +23,7 @@ public class SelfRunContinuationDiagnosticsDomTest {
         assertTrue(script.contains("stage===0"));
         assertTrue(script.contains("stage===1"));
         assertTrue(script.contains("s=2"));
+        assertTrue(script.contains("v=5"));
         assertTrue(script.contains("replace(/prompt/gi,'p~')"));
         assertFalse(script.contains("innerText"));
         assertFalse(script.contains("textContent"));

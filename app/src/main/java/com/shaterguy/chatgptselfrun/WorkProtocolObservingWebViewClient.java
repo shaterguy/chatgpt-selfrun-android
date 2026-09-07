@@ -34,14 +34,17 @@ final class WorkProtocolObservingWebViewClient extends WebViewClient {
 
     @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {
         delegate.onPageStarted(view, url, favicon);
+        WebViewDocumentContextProbe.record(context, view, "ps", url);
     }
 
     @Override public void onPageFinished(WebView view, String url) {
         delegate.onPageFinished(view, url);
+        WebViewDocumentContextProbe.record(context, view, "pf", url);
     }
 
     @Override public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
         delegate.doUpdateVisitedHistory(view, url, isReload);
+        WebViewDocumentContextProbe.record(context, view, "hist", url);
     }
 
     @Override public void onReceivedHttpError(
