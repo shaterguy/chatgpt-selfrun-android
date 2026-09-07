@@ -63,13 +63,21 @@ final class TurnProtocolLogBridge {
                         }
                         if (!isMainFrame) return;
                         String turnToken = item.optString("turnToken", "");
-                        if (turnToken.isEmpty() || !turnToken.equals(store.turnProtocolToken())) return;
+                        if (turnToken.isEmpty()) return;
                         String source = normalizedSource(stage, item.optString("source", ""));
                         if (source.isEmpty() || !validPhaseForStage(stage, phase)) return;
+                        boolean v3 = SelfRun3WebAdapter.ownsProtocolView(view);
+                        if (v3) {
+                            // V3 request identity belongs to its ledger/adapter, not the V2 projection.
+                            item.put("source", source);
+                            if (!SelfRun3WebAdapter.protocolEvent(view, item)) return;
+                        } else if (!turnToken.equals(store.turnProtocolToken())) {
+                            return;
+                        }
                         TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase);
                         WorkProtocolCoverageTracker.observeProtocol(context, store, stage, source, phase);
                         log.record(store, "TURN_PROTOCOL", "stage=" + stage + ";source=" + source
-                                + ";phase=" + phase + ";token=current");
+                                + ";phase=" + phase + ";token=current;owner=" + (v3 ? "V3" : "legacy"));
                     } catch (Throwable ignored) {
                     }
                 });

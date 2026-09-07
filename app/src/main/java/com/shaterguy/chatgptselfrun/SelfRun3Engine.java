@@ -96,7 +96,18 @@ final class SelfRun3Engine {
                 put(v, "sendClaimed", true); put(v, "stage", Stage.DISPATCHING.name()); put(v, "submittedAt", p.optLong("at"));
             }
             case STARTED -> {
-                if (!before.flag("sendClaimed") || before.flag("dispatchObserved")) return before;
+                if (before.flag("dispatchObserved")) return before;
+                if (!before.flag("sendClaimed")) {
+                    // STARTED is current-request canonical POST evidence, not permission to submit.
+                    // UI input may cause a POST before ON_PREPARED. Record that existing effect
+                    // atomically so a delayed CLAIM_SEND cannot send the same request again.
+                    boolean ready = stage == Stage.READY || (stage == Stage.PAUSED
+                            && Stage.READY.name().equals(before.text("resumeStage")));
+                    if (!ready) return before;
+                    put(v, "sendClaimed", true);
+                    if (p.optLong("at") > 0L) put(v, "submittedAt", p.optLong("at"));
+                    v.remove("error");
+                }
                 put(v, "dispatchObserved", true);
                 if (!before.flag("ended")) setActiveStage(v, stage, Stage.WAITING);
             }

@@ -55,6 +55,7 @@ final class SelfRun3WebAdapter {
     private int step, evaluation, generation;
     private long prepareStarted;
     private String lastPrepareTrace = "";
+    private String observedRequest = "", acceptedRequest = "", endedRequest = "";
     private Consumer<JSONObject> pendingInspection;
 
     SelfRun3WebAdapter(Context context, Listener listener) {
@@ -64,24 +65,62 @@ final class SelfRun3WebAdapter {
         diagnosticLog = new SelfRunRunLog(context);
     }
 
-    static void protocolEvent(WebView view, JSONObject event) {
+    static boolean ownsProtocolView(WebView view) {
+        return active != null && !active.closed && active.web == view && active.state != null;
+    }
+
+    /** Called only after the native bridge has checked origin, main frame and event schema. */
+    static boolean protocolEvent(WebView view, JSONObject event) {
+        if (!ownsProtocolView(view)) return false;
         SelfRun3WebAdapter a = active;
-        if (a == null || a.closed || a.web != view || a.state == null) return;
         SelfRun3Engine.State s = a.state;
         if (!s.taskId().equals(event.optString("runId"))
-                || !s.requestId().equals(event.optString("turnToken"))) return;
+                || !s.requestId().equals(event.optString("turnToken"))) return false;
         String stage = event.optString("stage"), source = event.optString("source");
-        if ("turn_request".equals(stage)) {
-            a.listener.onStarted(s.taskId(), s.turnId(), s.requestId());
-        } else if ("answering_started".equals(stage)) {
-            a.listener.onAccepted(s.taskId(), s.turnId(), s.requestId());
+        String phase = event.optString("phase");
+        if ("turn_request".equals(stage) && "THINKING".equals(phase)
+                && "canonical_post".equals(source)) {
+            a.observedStart();
+        } else if ("answering_started".equals(stage) && "ANSWERING".equals(phase)) {
+            a.observedAnswer();
         } else if (("complete".equals(stage) || "completion_dispatch".equals(stage))
-                && TurnProtocolLogBridge.isAllowedCompletionSource(source)) {
-            a.listener.onEnded(s.taskId(), s.turnId(), s.requestId(), source);
-        } else if ("error".equals(stage)) {
-            a.listener.onFailure(s.taskId(), s.turnId(), s.requestId(), "TRANSPORT_INTERRUPTED");
+                && "COMPLETE".equals(phase) && TurnProtocolLogBridge.isAllowedCompletionSource(source)) {
+            a.observedEnd(source);
+        } else if ("error".equals(stage) && "ERROR".equals(phase)) {
+            a.observedStart();
+            a.fail("TRANSPORT_INTERRUPTED");
+        } else if (!("completion_ignored".equals(stage) && "THINKING".equals(phase))) {
+            return false;
         }
         a.captureConversation();
+        return true;
+    }
+
+    private void observedStart() {
+        if (state.requestId().equals(observedRequest)) return;
+        observedRequest = state.requestId();
+        // Fence pending preparation callbacks, but do not cancel an independent receipt inspection.
+        if (preparing) evaluation++;
+        preparing = false;
+        trace("PROTOCOL_ACCEPT", "CANONICAL_POST", step);
+        listener.onStarted(state.taskId(), state.turnId(), state.requestId());
+        captureConversation();
+        detach();
+    }
+
+    private void observedAnswer() {
+        observedStart();
+        if (state.requestId().equals(acceptedRequest)) return;
+        acceptedRequest = state.requestId();
+        listener.onAccepted(state.taskId(), state.turnId(), state.requestId());
+    }
+
+    private void observedEnd(String source) {
+        observedStart();
+        if (state.requestId().equals(endedRequest)) return;
+        endedRequest = state.requestId();
+        trace("PROTOCOL_ACCEPT", "COMPLETE", step);
+        listener.onEnded(state.taskId(), state.turnId(), state.requestId(), source);
     }
 
     void prepare(SelfRun3Engine.State s) {
@@ -89,11 +128,17 @@ final class SelfRun3WebAdapter {
         boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
         state = s;
         closed = false;
+        if (!newAttempt && s.requestId().equals(observedRequest)) {
+            trace("PREPARE_SKIPPED", "REQUEST_ALREADY_OBSERVED", step);
+            detach();
+            return;
+        }
         preparing = true;
         if (newAttempt) {
             step = 0;
             prepareStarted = SystemClock.elapsedRealtime();
             lastPrepareTrace = "";
+            observedRequest = acceptedRequest = endedRequest = "";
         }
         trace("PREPARE_START", s.resource("conversationUrl").isEmpty() ? "INITIAL" : "CONTINUATION", step);
         ensureWeb(false);
@@ -150,8 +195,7 @@ final class SelfRun3WebAdapter {
                     if (state.taskId().equals(u.getQueryParameter("run"))
                             && state.requestId().equals(u.getQueryParameter("token"))
                             && TurnProtocolLogBridge.isAllowedCompletionSource(u.getQueryParameter("source"))) {
-                        listener.onEnded(state.taskId(), state.turnId(), state.requestId(),
-                                u.getQueryParameter("source"));
+                        observedEnd(u.getQueryParameter("source"));
                     }
                     return true;
                 }
@@ -210,9 +254,10 @@ final class SelfRun3WebAdapter {
                     : SelfRun3ComposerTransport.prepareContinuation(
                             state.resource("conversationUrl"), state.text("prompt"));
         }
-        evaluate(script, result -> {
+        evaluate(observeBeforeAndAfter(state, script), result -> {
+            tracePrepare(result);
+            if (consumeObservation(result) || !preparing) return;
             String status = result.optString("status");
-            tracePrepare(status);
             if ("READY".equals(status) && step < 2) {
                 step++;
                 later(this::advance, 0L);
@@ -238,6 +283,11 @@ final class SelfRun3WebAdapter {
 
     void submit(SelfRun3Engine.State claimed) {
         requireMain();
+        if (claimed.requestId().equals(observedRequest)) {
+            trace("SUBMIT_SKIPPED", "REQUEST_ALREADY_OBSERVED", step);
+            detach();
+            return;
+        }
         if (web == null || closed || !SelfRun3PowerPolicy.maySend(claimed)) {
             fail("SUBMISSION_STATE_INVALID");
             return;
@@ -252,16 +302,11 @@ final class SelfRun3WebAdapter {
                         claimed.config().optString("projectUrl"), claimed.text("prompt"))
                 : SelfRun3ComposerTransport.submitContinuation(
                         claimed.resource("conversationUrl"), claimed.text("prompt"));
-        String wrapped = "(()=>{const p=window.__selfRunTurnProtocol;"
-                + "if(!p.armCompletion(" + q(claimed.taskId()) + "," + q(claimed.requestId())
-                + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});"
-                + "return (" + action + ");})()";
-
-        evaluate(ChatGptTurnProtocolScript.bindTurnAndThen(
-                claimed.taskId(), claimed.requestId(), wrapped), result -> {
+        evaluate(observeBeforeAndAfter(claimed, action), result -> {
             String status = result.optString("status");
             trace("SUBMIT_EVAL", status, step);
             detach();
+            if (consumeObservation(result)) return;
 
             if (DEFINITE_UNSENT.contains(status)) {
                 trace("ON_UNSENT", status, step);
@@ -273,6 +318,47 @@ final class SelfRun3WebAdapter {
             }
             captureConversation();
         });
+    }
+
+    /** Bind before any UI mutation; a current observed POST always wins over a DOM return status. */
+    static String observeBeforeAndAfter(SelfRun3Engine.State s, String action) {
+        String run = q(s.taskId()), request = q(s.requestId());
+        String body = "(()=>{const p=window.__selfRunTurnProtocol;"
+                + "if(!p.armCompletion(" + run + "," + request + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});"
+                + "const current=x=>!!x&&x.runId===" + run + "&&x.turnToken===" + request + ";"
+                + "const seen=x=>current(x)&&!!x.requestIdentity&&['THINKING','ANSWERING','COMPLETE','ERROR'].includes(x.phase);"
+                + "let before=p.snapshot(),out;"
+                + "if(seen(before))out={status:'REQUEST_OBSERVED'};else{try{const value=(" + action + ");"
+                + "out=typeof value==='string'?JSON.parse(value):value;out=out||{status:'CALLBACK_AMBIGUOUS'};"
+                + "}catch(_){out={status:'JS_EVALUATION_FAILED'};}}"
+                + "const after=p.snapshot();"
+                + "if(seen(after)){out.status='REQUEST_OBSERVED';out.protocol={runId:after.runId,turnToken:after.turnToken,"
+                + "requestIdentity:after.requestIdentity,phase:after.phase,completionSource:after.completionSource||''};}"
+                + "out.v3diag={bound:current(after),phase:after?.phase||'UNAVAILABLE',postSeen:seen(after),"
+                + "editors:document.querySelectorAll('textarea,[contenteditable],[role=\"textbox\"]').length,"
+                + "ready:document.readyState,focused:document.hasFocus(),hidden:document.hidden};"
+                + "return JSON.stringify(out);})()";
+        return ChatGptTurnProtocolScript.bindTurnAndThen(s.taskId(), s.requestId(), body);
+    }
+
+    private boolean consumeObservation(JSONObject result) {
+        JSONObject p = result.optJSONObject("protocol");
+        if (p != null && state.taskId().equals(p.optString("runId"))
+                && state.requestId().equals(p.optString("turnToken"))
+                && !p.optString("requestIdentity").isEmpty()) {
+            String phase = p.optString("phase");
+            if (Set.of("THINKING", "ANSWERING", "COMPLETE", "ERROR").contains(phase)) {
+                observedStart();
+                if ("ANSWERING".equals(phase)) observedAnswer();
+                if ("COMPLETE".equals(phase)
+                        && TurnProtocolLogBridge.isAllowedCompletionSource(p.optString("completionSource"))) {
+                    observedEnd(p.optString("completionSource"));
+                }
+                if ("ERROR".equals(phase)) fail("TRANSPORT_INTERRUPTED");
+                return true;
+            }
+        }
+        return state.requestId().equals(observedRequest);
     }
 
     void inspect(SelfRun3Engine.State s, Consumer<JSONObject> callback) {
@@ -375,11 +461,20 @@ final class SelfRun3WebAdapter {
         }
     }
 
-    private void tracePrepare(String status) {
-        String key = step + ":" + status;
+    private void tracePrepare(JSONObject result) {
+        String status = result.optString("status");
+        JSONObject d = result.optJSONObject("v3diag");
+        String detail = d == null ? ";snapshot=missing" : ";bound=" + d.optBoolean("bound")
+                + ";protocol=" + safeTrace(d.optString("phase")) + ";postSeen=" + d.optBoolean("postSeen")
+                + ";editors=" + Math.max(0, Math.min(10000, d.optInt("editors")))
+                + ";document=" + safeTrace(d.optString("ready"))
+                + ";focused=" + d.optBoolean("focused") + ";hidden=" + d.optBoolean("hidden");
+        String key = step + ":" + status + detail;
         if (key.equals(lastPrepareTrace)) return;
         lastPrepareTrace = key;
-        trace("PREPARE_EVAL", status, step);
+        if (state == null || !state.taskId().equals(diagnosticStore.runId())) return;
+        diagnosticLog.record(diagnosticStore, "V3_WEB_TRACE", "stage=PREPARE_EVAL;status="
+                + safeTrace(status) + ";step=" + step + detail);
     }
 
     private void trace(String stage, String status, int traceStep) {
@@ -400,7 +495,8 @@ final class SelfRun3WebAdapter {
     }
 
     private void captureConversation() {
-        if (web == null || state == null || !state.flag("sendClaimed")) return;
+        if (web == null || state == null
+                || (!state.flag("sendClaimed") && !state.requestId().equals(observedRequest))) return;
         String url = web.getUrl();
         if (allowedRoute(url) && !SelfRunScript.conversationId(url).isEmpty()) {
             listener.onConversation(state.taskId(), state.turnId(), url);
