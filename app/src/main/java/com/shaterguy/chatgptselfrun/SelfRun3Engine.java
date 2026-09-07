@@ -2,7 +2,6 @@ package com.shaterguy.chatgptselfrun;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.Objects;
@@ -188,15 +187,9 @@ final class SelfRun3Engine {
         };
     }
     static JSONObject parseResult(String raw, State s) {
-        try { return parseResultChecked(raw, s); }
-        catch (org.json.JSONException e) { throw new IllegalArgumentException("result JSON invalid", e); }
-    }
-    private static JSONObject parseResultChecked(String raw, State s) throws org.json.JSONException {
         if (raw == null || raw.trim().isEmpty()) return null;
         require(utf8(raw) <= MAX_RESULT_BYTES && raw.indexOf('\0') < 0, "result too large or contains NUL");
-        JSONTokener tokenizer = new JSONTokener(raw.trim()); Object parsed = tokenizer.nextValue();
-        require(parsed instanceof JSONObject && tokenizer.nextClean() == 0, "single JSON object required");
-        JSONObject r = (JSONObject) parsed;
+        JSONObject r = SelfRun3StrictJson.parseObject(raw.trim());
         require(RESULT_SCHEMA.equals(r.optString("schema")), "result schema mismatch");
         Object ordinal = r.opt("turn");
         require((ordinal instanceof Integer || ordinal instanceof Long) && ((Number)ordinal).longValue() == s.turn(), "turn ordinal mismatch");
