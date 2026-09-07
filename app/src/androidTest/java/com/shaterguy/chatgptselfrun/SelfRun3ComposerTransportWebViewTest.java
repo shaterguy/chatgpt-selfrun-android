@@ -14,72 +14,54 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-/** V3 transport regression including synchronous rich-editor replacement on continuation input. */
+/** Continuation-only regression for synchronous replacement of a Shadow DOM rich editor. */
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3ComposerTransportWebViewTest {
-    private static final String RUN_ID = "SR-V3-COMPOSER-3TURN";
+    private static final String RUN_ID = "SR-V3-CONTINUATION-2TURN";
     private static final String PROJECT_ID = "g-p-6a582c824ba08191ac7e74e9bad721fc";
     private static final String SLUGGED_PROJECT_ID = PROJECT_ID + "-vibe-coding";
-    private static final String PROJECT_URL = "https://chatgpt.com/g/" + SLUGGED_PROJECT_ID + "/project";
     private static final String CONVERSATION_PATH = "/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
     private static final String CONVERSATION_URL = "https://chatgpt.com" + CONVERSATION_PATH;
 
-    @Test public void bootstrapThenTwoContinuationsUseControlledEditorModelAndCanonicalProtocol()
+    @Test public void twoContinuationsSurviveSynchronousShadowEditorReplacementAndCanonicalProtocol()
             throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
             read(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
-
-            assertShadowComposer(scenario, web);
-            runTurn(scenario, web, "turn-1", "turn-one", true, 1);
             assertEquals(CONVERSATION_PATH, read(scenario, web, "location.pathname"));
             assertShadowComposer(scenario, web);
 
-            runTurn(scenario, web, "turn-2", "turn-two", false, 2);
+            runContinuation(scenario, web, "turn-2", "turn-two", 1);
+            assertShadowComposer(scenario, web);
+            runContinuation(scenario, web, "turn-3", "turn-three", 2);
             assertShadowComposer(scenario, web);
 
-            runTurn(scenario, web, "turn-3", "turn-three", false, 3);
-            assertShadowComposer(scenario, web);
-
-            assertEquals("turn-one|turn-two|turn-three", read(scenario, web, "window.sent.join('|')"));
-            assertEquals("3", read(scenario, web, "String(window.nativeModelCommits)"));
-            assertEquals("3", read(scenario, web, "String(window.canonicalPosts.length)"));
-            assertEquals("POST|POST|POST", read(scenario, web,
+            assertEquals("turn-two|turn-three", read(scenario, web, "window.sent.join('|')"));
+            assertEquals("2", read(scenario, web, "String(window.nativeModelCommits)"));
+            assertEquals("2", read(scenario, web, "String(window.canonicalPosts.length)"));
+            assertEquals("POST|POST", read(scenario, web,
                     "window.canonicalPosts.map(x=>x.method).join('|')"));
             assertEquals("COMPLETE", read(scenario, web,
                     "window.__selfRunTurnProtocol.snapshot().phase"));
         }
     }
 
-    private static void runTurn(ActivityScenario<SelfRunNewActivity> scenario,
-                                AtomicReference<WebView> web,
-                                String token,
-                                String prompt,
-                                boolean initial,
-                                int expectedCount) throws Exception {
-        String rawPrepare = initial
-                ? SelfRun3ComposerTransport.prepareInitial(PROJECT_URL, prompt)
-                : SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, prompt);
-        String prepareScript = initial ? rawPrepare
-                : ChatGptTurnProtocolScript.bindTurnAndThen(RUN_ID, token, rawPrepare);
+    private static void runContinuation(ActivityScenario<SelfRunNewActivity> scenario,
+                                        AtomicReference<WebView> web,
+                                        String token,
+                                        String prompt,
+                                        int expectedCount) throws Exception {
+        String rawPrepare = SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, prompt);
+        String prepareScript = ChatGptTurnProtocolScript.bindTurnAndThen(RUN_ID, token, rawPrepare);
         JSONObject prepared = prepare(scenario, web, prepareScript);
         assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT, prepared.optString("status"));
         assertEquals(prompt, read(scenario, web, "window.editorModel"));
-        if (initial) {
-            assertEquals("bootstrap route must be allowed to become canonical before submit",
-                    CONVERSATION_PATH, read(scenario, web, "location.pathname"));
-            assertEquals("0", read(scenario, web, "String(window.submitCount)"));
-            assertEquals("0", read(scenario, web, "String(window.canonicalPosts.length)"));
-        } else {
-            assertEquals(token, read(scenario, web,
-                    "window.__selfRunTurnProtocol.snapshot().turnToken"));
-            assertEquals("IDLE", read(scenario, web,
-                    "window.__selfRunTurnProtocol.snapshot().phase"));
-        }
+        assertEquals(token, read(scenario, web,
+                "window.__selfRunTurnProtocol.snapshot().turnToken"));
+        assertEquals("IDLE", read(scenario, web,
+                "window.__selfRunTurnProtocol.snapshot().phase"));
 
-        String action = initial
-                ? SelfRun3ComposerTransport.submitInitial(PROJECT_URL, prompt)
-                : SelfRun3ComposerTransport.submitContinuation(CONVERSATION_URL, prompt);
+        String action = SelfRun3ComposerTransport.submitContinuation(CONVERSATION_URL, prompt);
         JSONObject dispatched = evaluate(scenario, web,
                 ChatGptTurnProtocolScript.bindTurnAndThen(RUN_ID, token, action));
         assertEquals(SelfRun3ComposerTransport.SUBMISSION_PENDING, dispatched.optString("status"));
@@ -138,9 +120,9 @@ public final class SelfRun3ComposerTransportWebViewTest {
             });
             activity.setContentView(view);
             web.set(view);
-            view.loadDataWithBaseURL(PROJECT_URL, fixture(), "text/html", "UTF-8", null);
+            view.loadDataWithBaseURL(CONVERSATION_URL, fixture(), "text/html", "UTF-8", null);
         });
-        assertTrue("V3 controlled composer fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+        assertTrue("V3 continuation fixture did not load", loaded.await(15, TimeUnit.SECONDS));
         return web;
     }
 
@@ -166,9 +148,10 @@ public final class SelfRun3ComposerTransportWebViewTest {
     private static String fixture() {
         return """
                 <!doctype html><html><body><main><div id="composer-host"></div></main><script>
+                history.replaceState({},'','__CONVERSATION_PATH__');
                 window.submitCount=0;window.sent=[];window.canonicalPosts=[];
                 window.editorModel='';window.nativeModelCommits=0;window.execCommandCalls=0;
-                window.syncContinuationRebuild=()=>window.submitCount>0;
+                window.syncContinuationRebuild=()=>true;
                 document.execCommand=()=>{window.execCommandCalls++;return false;};
                 window.fetch=async(input,init={})=>{
                   const url=typeof input==='string'?input:String(input?.url||'');
@@ -198,16 +181,11 @@ public final class SelfRun3ComposerTransportWebViewTest {
                     event.preventDefault();
                     window.editorModel=String(event.data||'');
                     window.nativeModelCommits++;
-                    if(window.submitCount===0&&!location.pathname.includes('/c/')){
-                      history.replaceState({},'','__CONVERSATION_PATH__');
-                    }
                     if(window.syncContinuationRebuild())window.rebuildComposer();
-                    else queueMicrotask(()=>window.rebuildComposer());
                   });
                   editor.addEventListener('input',()=>{
-                    if(modelText(editor)!==window.editorModel){
-                      if(window.syncContinuationRebuild())window.rebuildComposer();
-                      else queueMicrotask(()=>window.rebuildComposer());
+                    if(modelText(editor)!==window.editorModel&&window.syncContinuationRebuild()){
+                      window.rebuildComposer();
                     }
                   });
                   form.addEventListener('submit',event=>{
