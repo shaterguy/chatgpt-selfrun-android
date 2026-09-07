@@ -60,6 +60,7 @@ final class SelfRun3Engine {
         put(v, "schema", STATE_SCHEMA); put(v, "taskId", taskId); put(v, "turnId", turnId);
         put(v, "requestId", turnId + "-request"); put(v, "turn", 1); put(v, "stage", Stage.SETUP.name());
         put(v, "phase", "PLAN"); put(v, "config", copy(config)); put(v, "resources", new JSONObject());
+        put(v, "lastConsumedInputRevision", 0L);
         return new State(v);
     }
     static State reduce(State before, Event event) {
@@ -125,22 +126,25 @@ final class SelfRun3Engine {
                 require(stage != Stage.PAUSED && before.hasResult() && before.flag("ended"), "result and transport evidence required");
                 JSONObject result = parseResult(before.text("result"), before); require(result != null, "committed result required");
                 String status = result.optString("status");
+                boolean lateInput = p.optBoolean("lateInput", false);
                 put(v, "previousResultDocumentId", before.resource("resultDocumentId")); put(v, "checkpoint", result.toString());
                 put(v, "lastCommittedTurn", before.turn());
-                if ("DONE".equals(status)) { put(v, "stage", Stage.DONE.name()); put(v, "phase", "DONE"); return new State(v); }
+                if (before.time("inputRevision") >= 0L) put(v, "lastConsumedInputRevision", before.time("inputRevision"));
+                if ("DONE".equals(status) && !lateInput) { put(v, "stage", Stage.DONE.name()); put(v, "phase", "DONE"); return new State(v); }
                 String nextId = p.optString("nextTurnId"); require(validId(nextId) && !nextId.equals(before.turnId()), "fresh turn identity required");
                 require(before.turn() < Integer.MAX_VALUE, "turn ordinal overflow");
                 put(v, "turn", before.turn() + 1); put(v, "turnId", nextId); put(v, "requestId", nextId + "-request");
-                put(v, "phase", result.optString("next_phase")); put(v, "nextInput", result.optString("next_input"));
+                put(v, "phase", lateInput ? "PLAN" : result.optString("next_phase"));
+                put(v, "nextInput", lateInput ? "" : result.optString("next_input"));
                 JSONObject config = before.config(), profile = result.optJSONObject("profile");
-                if (profile != null && "WORK".equals(config.optString("mode"))) {
+                if (!lateInput && profile != null && "WORK".equals(config.optString("mode"))) {
                     put(config, "model", profile.optString("model")); put(config, "reasoning", profile.optString("reasoning"));
                 }
                 put(v, "config", config); JSONObject resources = copy(v.optJSONObject("resources"));
                 resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); put(v, "resources", resources);
                 for (String key : new String[]{"prompt", "result", "inputText", "inputRevision", "submittedAt", "endSource", "error", "repairAttempt"}) v.remove(key);
                 put(v, "sendClaimed", false); put(v, "dispatchObserved", false); put(v, "accepted", false); put(v, "ended", false); put(v, "reconcileCount", 0);
-                boolean pause = "PAUSED".equals(status) || "USER_ACTION_REQUIRED".equals(status);
+                boolean pause = !lateInput && ("PAUSED".equals(status) || "USER_ACTION_REQUIRED".equals(status));
                 put(v, "stage", pause ? Stage.PAUSED.name() : Stage.PREPARING.name());
                 if (pause) { put(v, "resumeStage", Stage.PREPARING.name()); put(v, "pauseReason", result.optString("reason")); }
             }
@@ -162,7 +166,10 @@ final class SelfRun3Engine {
             }
             case RESUME -> {
                 if (stage != Stage.PAUSED) return before;
-                Stage resume = before.flag("sendClaimed") ? Stage.RECONCILING : Stage.valueOf(before.text("resumeStage"));
+                Stage resume;
+                if (before.flag("ended") || before.hasResult()) resume = Stage.RECONCILING;
+                else if (before.flag("sendClaimed")) resume = Stage.WAITING;
+                else resume = Stage.valueOf(before.text("resumeStage"));
                 put(v, "stage", resume.name()); v.remove("pauseReason"); v.remove("error"); put(v, "reconcileCount", 0);
             }
             case STOP -> { put(v, "stage", Stage.STOPPED.name()); put(v, "pauseReason", "USER_STOP"); }
