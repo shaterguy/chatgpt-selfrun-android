@@ -10,14 +10,18 @@ import static org.junit.Assert.assertTrue;
 
 /** Source contract for separate V3 bootstrap and continuation transports. */
 public final class SelfRun3ComposerTransportArchitectureTest {
-    @Test public void v3UsesVerifiedBootstrapModuleAndKeepsContinuationOnV3Transport() throws Exception {
+    @Test public void v3UsesVerifiedBootstrapModuleAndContinuationOnlyComposerTransport() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
+        String transport = source("SelfRun3ComposerTransport.java");
         assertTrue(web.contains("SelfRun3BootstrapTransport.prepare"));
         assertTrue(web.contains("SelfRun3BootstrapTransport.submit"));
         assertTrue(web.contains("SelfRun3ComposerTransport.prepareContinuation"));
         assertTrue(web.contains("SelfRun3ComposerTransport.submitContinuation"));
         assertTrue(web.contains("SelfRun3ComposerTransport.composerReadyExpression()"));
         assertFalse(web.contains("SelfRunContinuationDom"));
+        assertFalse(transport.contains("prepareInitial"));
+        assertFalse(transport.contains("submitInitial"));
+        assertFalse(transport.contains("projectGuard"));
     }
 
     @Test public void bootstrapRestoresKnownGoodPreparedThenBindThenSubmitBoundary() throws Exception {
@@ -48,6 +52,7 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(transport.contains("state:'prepared'"));
         assertTrue(transport.contains("state:'clicked'"));
         assertTrue(transport.contains("if(!e.isConnected)return"));
+        assertTrue(transport.contains("String.fromCharCode(13)"));
         assertTrue(transport.contains("inputComposer(composer,expected)"));
         assertTrue(transport.contains("clearComposer(composer)"));
         assertTrue(transport.contains("exact continuation prepared"));
@@ -56,14 +61,17 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(transport.contains("KeyboardEvent"));
     }
 
-    @Test public void controlledEditorRegressionIncludesSynchronousContinuationRebuild() throws Exception {
+    @Test public void continuationRegressionOnlyExercisesReachableTwoTurnPath() throws Exception {
         String test = androidTestSource("SelfRun3ComposerTransportWebViewTest.java");
+        assertTrue(test.contains("twoContinuationsSurviveSynchronousShadowEditorReplacementAndCanonicalProtocol"));
         assertTrue(test.contains("attachShadow({mode:'open'})"));
-        assertTrue(test.contains("syncContinuationRebuild"));
+        assertTrue(test.contains("syncContinuationRebuild=()=>true"));
         assertTrue(test.contains("window.rebuildComposer()"));
         assertTrue(test.contains("message_stream_complete"));
-        assertTrue(test.contains("turn-one|turn-two|turn-three"));
+        assertTrue(test.contains("turn-two|turn-three"));
         assertTrue(test.contains("String(window.canonicalPosts.length)"));
+        assertFalse(test.contains("prepareInitial"));
+        assertFalse(test.contains("submitInitial"));
     }
 
     private static String source(String name) throws Exception {
