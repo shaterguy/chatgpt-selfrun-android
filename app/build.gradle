@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3001008
-def selfRunDriveVersionName = '3.0.1-dev8'
+def selfRunDriveVersionCode = 3001009
+def selfRunDriveVersionName = '3.0.1-dev9'
 def selfRun3VersionPattern = ~/^3\.0\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -164,8 +164,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
             throw new GradleException('V3 bootstrap must be independent and retain prepared-submit verification')
         }
         if (composer.contains('__srFind') || composer.contains('WebUiCalibrationStore') || composer.contains('offsetParent')
-                || composer.contains('UserNextInputStore') || composer.contains('SelfRunContinuationDom')) {
-            throw new GradleException('V3 continuation transport must not depend on retired continuation identity/calibration')
+                || composer.contains('UserNextInputStore') || composer.contains('SelfRunContinuationDom')
+                || composer.contains('prepareInitial') || composer.contains('submitInitial')) {
+            throw new GradleException('V3 composer transport must be continuation-only and independent of retired identity/calibration')
         }
         if (!composer.contains("selfrun-drive:v3-cont:") || !composer.contains("state:'clearing'")
                 || !composer.contains("state:'inputting'") || !composer.contains("state:'prepared'")
