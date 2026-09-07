@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - 'selfrun-v3/v3.0.*-dev*'
-      - '!selfrun-v3/v3.0.0-dev1'
       - 'selfrun-v3/v3.0.*-rc*'
   workflow_dispatch:
 
@@ -152,7 +151,7 @@ jobs:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - name: Resolve and verify candidate plus stable baseline
+      - name: Resolve and verify candidate plus baselines
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -175,14 +174,14 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.0.0.apk > stable-cert.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
-          gh run download 34107584514 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
-          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == 'c83876185abc1e51831b345cbc9c83da61cefcc3' ]]
-          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev9.apk
+          gh run download 34110590666 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
+          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == '804a34959d3b019354e09a0a73546006f3296913' ]]
+          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev11.apk
           test -s "$PREVIOUS"
           grep -F "$(sha256sum "$PREVIOUS" | awk '{print $1}')" previous/SHA256SUMS.txt >/dev/null
           "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS" > previous-cert.txt
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' previous-cert.txt
-          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev9'"
+          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev11'"
       - name: Enable hardware acceleration
         shell: bash
         run: |

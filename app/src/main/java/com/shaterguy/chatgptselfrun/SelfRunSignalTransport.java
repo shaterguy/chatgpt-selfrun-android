@@ -2,45 +2,15 @@ package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
-
-/** Durable per-run transport marker. SelfRun 3 also pins its independent run lineage here. */
+/** V3 launch-marker facade retained for existing UI call sites. */
 final class SelfRunSignalTransport {
-    private static final String PREFS = "selfrun_drive_signal_transport";
-    private static final String KEY_RUNS = "runs";
-
     private SelfRunSignalTransport() {}
 
     static boolean mark(Context context, String runId) {
-        String value = runId == null ? "" : runId.trim();
-        if (context == null || !SelfRunProtocolRules.validRunId(value)) return false;
-        Context app = context.getApplicationContext();
-        synchronized (SelfRunSignalTransport.class) {
-            Set<String> current = new HashSet<>(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .getStringSet(KEY_RUNS, Collections.emptySet()));
-            boolean transportPersisted = current.contains(value);
-            if (!transportPersisted) {
-                current.add(value);
-                transportPersisted = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                        .putStringSet(KEY_RUNS, current).commit();
-            }
-            if (!transportPersisted) return false;
-            if (BuildConfig.VERSION_NAME != null && BuildConfig.VERSION_NAME.startsWith("3.")) {
-                return SelfRun3RunMarker.mark(app, value);
-            }
-            return true;
-        }
+        return SelfRun3RunMarker.mark(context, runId);
     }
 
     static boolean isSignalDocumentRun(Context context, String runId) {
-        String value = runId == null ? "" : runId.trim();
-        if (context == null || value.isEmpty()) return false;
-        boolean enabled = context.getApplicationContext()
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getStringSet(KEY_RUNS, Collections.emptySet()).contains(value);
-        if (enabled) DriveSignalDocumentIdentity.activate(context, value);
-        return enabled;
+        return SelfRun3RunMarker.current(context, runId);
     }
 }
