@@ -193,31 +193,7 @@ jobs:
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
-          script: |
-            bash -o pipefail -c '
-              set -eu
-              FORMAL=com.shaterguy.chatgptselfrun.drive
-              TEST=com.shaterguy.chatgptselfrun.drive.test
-              adb install -r stable/chatgpt-selfrun-drive-v2.3.2.apk >/dev/null
-              adb install -r current/candidate.apk >/dev/null
-              adb shell pm list packages | tr -d "\r" | grep -Fx "package:$FORMAL"
-              adb shell pm list packages | tr -d "\r" | grep -Fx "package:$TEST"
-              [[ "$(adb shell dumpsys package "$FORMAL" | tr -d "\r" | sed -n "s/^[[:space:]]*versionName=//p" | head -1)" == "2.3.2" ]]
-              [[ "$(adb shell dumpsys package "$TEST" | tr -d "\r" | sed -n "s/^[[:space:]]*versionName=//p" | head -1)" == "$VERSION_NAME" ]]
-              FORMAL_UID="$(adb shell pm list packages -U "$FORMAL" | tr -d "\r" | sed -n "s/.*uid://p" | head -1)"
-              TEST_UID="$(adb shell pm list packages -U "$TEST" | tr -d "\r" | sed -n "s/.*uid://p" | head -1)"
-              test -n "$FORMAL_UID"; test -n "$TEST_UID"; [[ "$FORMAL_UID" != "$TEST_UID" ]]
-              adb shell am start -W -n "$FORMAL/com.shaterguy.chatgptselfrun.MainActivity" >/dev/null
-              adb shell am start -W -n "$TEST/com.shaterguy.chatgptselfrun.MainActivity" >/dev/null
-              adb shell pidof "$TEST" >/dev/null
-              adb install -r current/androidTest.apk >/dev/null
-              INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d "\r" | sed -n "s#^instrumentation:\([^ ]*\) (target=$TEST)#\1#p" | head -1)"
-              test -n "$INSTRUMENTATION"
-              adb shell am instrument -w -r \
-                -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
-                "$INSTRUMENTATION" | tee selfrun-v3-runtime-evidence.txt
-              grep -Fq "OK (" selfrun-v3-runtime-evidence.txt
-            '
+          script: bash tools/verify_selfrun3_candidate_emulator.sh
       - name: Upload runtime evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
