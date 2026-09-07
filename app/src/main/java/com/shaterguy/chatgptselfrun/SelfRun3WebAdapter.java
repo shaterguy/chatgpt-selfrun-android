@@ -106,7 +106,7 @@ final class SelfRun3WebAdapter {
         trace("PROTOCOL_ACCEPT", "CANONICAL_POST", step);
         listener.onStarted(state.taskId(), state.turnId(), state.requestId());
         captureConversation();
-        detach();
+        detachAfterComposerReady();
     }
 
     private void observedAnswer() {
@@ -122,6 +122,7 @@ final class SelfRun3WebAdapter {
         endedRequest = state.requestId();
         trace("PROTOCOL_ACCEPT", "COMPLETE", step);
         listener.onEnded(state.taskId(), state.turnId(), state.requestId(), source);
+        detachAfterComposerReady();
     }
 
     void prepare(SelfRun3Engine.State s) {
@@ -131,7 +132,7 @@ final class SelfRun3WebAdapter {
         closed = false;
         if (!newAttempt && s.requestId().equals(observedRequest)) {
             trace("PREPARE_SKIPPED", "REQUEST_ALREADY_OBSERVED", step);
-            detach();
+            detachAfterComposerReady();
             return;
         }
         preparing = true;
@@ -291,7 +292,7 @@ final class SelfRun3WebAdapter {
         requireMain();
         if (claimed.requestId().equals(observedRequest)) {
             trace("SUBMIT_SKIPPED", "REQUEST_ALREADY_OBSERVED", step);
-            detach();
+            detachAfterComposerReady();
             return;
         }
         if (web == null || closed || !SelfRun3PowerPolicy.maySend(claimed)) {
@@ -311,13 +312,14 @@ final class SelfRun3WebAdapter {
         evaluate(observeBeforeAndAfter(claimed, action), result -> {
             String status = result.optString("status");
             trace("SUBMIT_EVAL", status, step);
-            detach();
             if (consumeObservation(result)) return;
 
             if (DEFINITE_UNSENT.contains(status)) {
+                detach();
                 trace("ON_UNSENT", status, step);
                 listener.onUnsent(claimed.taskId(), claimed.turnId(), claimed.requestId(), status);
             } else if ("SUBMISSION_PENDING".equals(status)) {
+                detachAfterComposerReady();
                 listener.onDispatched(claimed.taskId(), claimed.turnId(), claimed.requestId());
             } else {
                 fail("SUBMISSION_OUTCOME_UNKNOWN");
@@ -570,6 +572,11 @@ final class SelfRun3WebAdapter {
     void detach() {
         requireMain();
         if (host != null) host.detachOutput();
+    }
+
+    void detachAfterComposerReady() {
+        requireMain();
+        if (host != null) host.detachOutputWhenComposerReady();
     }
 
     void quiesce() {
