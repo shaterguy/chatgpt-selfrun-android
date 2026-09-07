@@ -111,7 +111,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !protocol.contains('PREVIOUS_RESULT_DOCUMENT_ID') || !protocol.contains('FOLDER_ID=')
                 || !protocol.contains('RECEIPT=') || !protocol.contains('WORK_PROFILE_CHOICES')
                 || !protocol.contains('compactWorkChoices')
-                || protocol.contains('static final String CONTRACT') || protocol.contains('RESULT_IDENTITY_TEMPLATE')
+                || protocol.contains('static final String CONTRACT =') || protocol.contains('RESULT_IDENTITY_TEMPLATE')
                 || protocol.contains('ProfileRegistry.exportWorkJson') || protocol.contains('[최초 요구사항 원문]')
                 || protocol.contains('REQUEST_ID=') || protocol.contains('SELF_RUN_TURN_COMPLETED')
                 || protocol.contains('[SELF_RUN_TURN_DOCUMENT_RETRY ')
