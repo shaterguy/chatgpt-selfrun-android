@@ -27,29 +27,41 @@ public final class SelfRun3ObservationWebViewTest {
     private static final String RUN = "SR-V3-NATIVE-OBSERVATION";
     private static final String URL = "https://chatgpt.com/c/v3-native-observation";
 
-    @Test public void preparationPostAndDelayedNativeCompletionAdvanceThreeTurnsWithoutDuplicate()
+    @Test public void unboundNoiseIsIgnoredThenVerifiedBootstrapAndTwoContinuationsAdvanceExactlyOnce()
             throws Exception {
         try (Harness h = new Harness()) {
             h.open();
             SelfRun3Engine.State first = h.current.get();
+
+            // Reproduce the dev5 failure class: canonical traffic exists while first-turn preparation
+            // is not yet at READY_TO_SUBMIT. It must not acquire this SelfRun request identity.
+            h.read("window.unrelatedPost();'noise-started'");
+            h.awaitPosts(1);
+            Thread.sleep(150L);
+            assertFalse(h.current.get().flag("sendClaimed"));
+            assertFalse(h.current.get().flag("dispatchObserved"));
+            assertEquals(SelfRun3Engine.Stage.READY, h.current.get().stage());
+
+            // The first request is owned only after exact preparation -> native claim -> verified submit.
             h.beginPreparation(first);
             h.awaitFlag("dispatchObserved");
-            assertEquals(0, h.prepared.get());
+            assertEquals(1, h.prepared.get());
             assertEquals(SelfRun3Engine.Stage.WAITING, h.current.get().stage());
-            assertFalse(h.current.get().flag("ended"));
-            assertEquals("1", h.read("String(window.posts.length)"));
-            assertEquals("1", h.read("String(window.editCalls)"));
-            // A delayed ON_PREPARED/submit must not repeat an already observed physical request.
-            h.ui(() -> { h.adapter.prepare(first); h.adapter.submit(h.claimSnapshot(first)); });
-            assertEquals("1", h.read("String(window.posts.length)"));
+            assertEquals("2", h.read("String(window.posts.length)"));
+            assertEquals("noise", h.read("window.posts[0]"));
+            assertEquals("first-prompt", h.read("window.posts[1]"));
+
+            // A late duplicate submit call cannot create a second physical bootstrap request.
+            h.ui(() -> h.adapter.submit(h.claimSnapshot(first)));
+            assertEquals("2", h.read("String(window.posts.length)"));
+
             h.read("window.finishResponse();'released'");
             h.awaitFlag("ended");
             h.awaitResource("conversationUrl", URL);
             assertEquals(1, h.ended.get());
             assertEquals("message_stream_complete", h.current.get().text("endSource"));
-            assertEquals(URL, h.current.get().resource("conversationUrl"));
 
-            // Reopen the real database on the callback thread; observation and route must persist.
+            // Observation and the conversation route survive a real SQLite reopen.
             h.ui(() -> {
                 h.ledger.close();
                 h.ledger = new SelfRun3Ledger(h.context);
@@ -64,15 +76,15 @@ public final class SelfRun3ObservationWebViewTest {
                 SelfRun3Engine.State next = h.current.get();
                 h.beginPreparation(next);
                 h.awaitFlag("dispatchObserved");
-                assertEquals(String.valueOf(turn), h.read("String(window.posts.length)"));
+                assertEquals(String.valueOf(turn + 1), h.read("String(window.posts.length)"));
                 h.read("window.finishResponse();'released'");
                 h.awaitFlag("ended");
-                h.ui(() -> {});
                 assertEquals(turn, h.ended.get());
                 if (turn == 2) h.ui(h::commitAndPrepareNext);
             }
-            assertEquals("first-prompt|second-prompt|third-prompt", h.read("window.posts.join('|')"));
-            assertEquals(2, h.prepared.get()); // Only normal explicit submissions for turn 2 and 3.
+            assertEquals("first-prompt|second-prompt|third-prompt",
+                    h.read("window.posts.slice(1).join('|')"));
+            assertEquals(3, h.prepared.get());
             assertEquals("", h.failure.get());
             assertEquals(SelfRun3Engine.Stage.RECONCILING, h.current.get().stage());
         }
@@ -111,7 +123,6 @@ public final class SelfRun3ObservationWebViewTest {
 
         void open() throws Exception {
             clearDatabase();
-            // Deliberately stale legacy token proves the V3 bridge uses the adapter's request identity.
             assertTrue(context.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE).edit()
                     .putString("runId", RUN).putString("mode", "CHAT")
                     .putString("turnProtocolToken", "legacy-stale-token").commit());
@@ -130,7 +141,6 @@ public final class SelfRun3ObservationWebViewTest {
                 view.setWebViewClient(new WebViewClient() {
                     @Override public void onPageFinished(WebView v, String url) { loaded.countDown(); }
                     @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
-                        // Completion must reach the real WebMessage bridge, not this URL fallback.
                         return "selfrun-drive".equals(request.getUrl().getScheme());
                     }
                 });
@@ -156,7 +166,6 @@ public final class SelfRun3ObservationWebViewTest {
 
         void bindAdapter(SelfRun3Engine.State s, boolean preparing) throws Exception {
             ui(() -> {
-                // Enter the production composer stage after separate existing profile tests.
                 set(adapter, "state", s); set(adapter, "step", 2);
                 set(adapter, "prepareStarted", SystemClock.elapsedRealtime());
                 set(adapter, "preparing", preparing); set(adapter, "loading", false);
@@ -172,7 +181,9 @@ public final class SelfRun3ObservationWebViewTest {
         void ready() {
             resource("resultDocumentId", "fixture-result-" + current.get().turn());
             JSONObject p = new JSONObject();
-            String prompt = switch (current.get().turn()) { case 1 -> "first-prompt"; case 2 -> "second-prompt"; default -> "third-prompt"; };
+            String prompt = switch (current.get().turn()) {
+                case 1 -> "first-prompt"; case 2 -> "second-prompt"; default -> "third-prompt";
+            };
             SelfRun3Engine.put(p, "prompt", prompt); SelfRun3Engine.put(p, "inputRevision", 0);
             apply(SelfRun3Engine.Kind.TURN_READY, p);
         }
@@ -201,7 +212,9 @@ public final class SelfRun3ObservationWebViewTest {
             current.set(ledger.apply(new SelfRun3Engine.Event("fixture-" + events.incrementAndGet(), kind,
                     s.taskId(), s.turnId(), payload)));
         }
-        JSONObject request(String request) { JSONObject p = new JSONObject(); SelfRun3Engine.put(p, "requestId", request); return p; }
+        JSONObject request(String request) {
+            JSONObject p = new JSONObject(); SelfRun3Engine.put(p, "requestId", request); return p;
+        }
         @Override public void onStarted(String t, String turn, String request) { apply(SelfRun3Engine.Kind.STARTED, request(request)); }
         @Override public void onAccepted(String t, String turn, String request) { apply(SelfRun3Engine.Kind.ACCEPTED, request(request)); }
         @Override public void onEnded(String t, String turn, String request, String source) {
@@ -231,6 +244,13 @@ public final class SelfRun3ObservationWebViewTest {
             }
             assertEquals("resource was not recorded: " + name, expected, current.get().resource(name));
         }
+        void awaitPosts(int expected) throws Exception {
+            for (int i = 0; i < 120; i++) {
+                if (String.valueOf(expected).equals(read("String(window.posts.length)"))) return;
+                Thread.sleep(25L);
+            }
+            assertEquals(String.valueOf(expected), read("String(window.posts.length)"));
+        }
         void ui(Runnable action) throws Exception {
             AtomicReference<Throwable> error = new AtomicReference<>();
             scenario.onActivity(a -> { try { action.run(); } catch (Throwable e) { error.set(e); } });
@@ -257,23 +277,29 @@ public final class SelfRun3ObservationWebViewTest {
 
     private static void set(Object target, String name, Object value) {
         try {
-            Field field = SelfRun3WebAdapter.class.getDeclaredField(name); field.setAccessible(true); field.set(target, value);
+            Field field = SelfRun3WebAdapter.class.getDeclaredField(name);
+            field.setAccessible(true); field.set(target, value);
         } catch (ReflectiveOperationException e) { throw new AssertionError(e); }
     }
+
     private static String fixture() {
         return """
                 <!doctype html><html><body><main></main><script>
-                window.posts=[];window.editCalls=0;
-                window.fetch=(url,init)=>{
-                  window.posts.push(JSON.parse(init.body).messages[0].content.parts[0]);
-                  return new Promise(resolve=>{
-                    window.finishResponse=()=>{
-                      resolve(new Response('data: '+JSON.stringify({type:'message_stream_complete'})+'\\n\\n',
-                        {status:200,headers:{'Content-Type':'text/event-stream'}}));
-                      rebuild();
-                    };
-                  });
+                window.posts=[];window.editCalls=0;window.pendingResolve=null;
+                const sse=()=>new Response('data: '+JSON.stringify({type:'message_stream_complete'})+'\\n\\n',
+                  {status:200,headers:{'Content-Type':'text/event-stream'}});
+                window.fetch=(url,init={})=>{
+                  const body=JSON.parse(String(init.body||'{}'));
+                  const text=String(body.messages?.[0]?.content?.parts?.[0]||'');
+                  window.posts.push(text);
+                  if(text==='noise')return Promise.resolve(sse());
+                  return new Promise(resolve=>{window.pendingResolve=resolve;});
                 };
+                window.finishResponse=()=>{
+                  if(window.pendingResolve){const resolve=window.pendingResolve;window.pendingResolve=null;resolve(sse());rebuild();}
+                };
+                window.unrelatedPost=()=>fetch('/backend-api/f/conversation',{method:'POST',
+                  body:JSON.stringify({action:'next',messages:[{content:{parts:['noise']}}]})});
                 function rebuild(){
                   const main=document.querySelector('main');main.replaceChildren();
                   const form=document.createElement('form'),editor=document.createElement('div');
@@ -290,8 +316,6 @@ public final class SelfRun3ObservationWebViewTest {
                   editor.addEventListener('beforeinput',event=>{
                     if(event.inputType!=='insertText')return;
                     event.preventDefault();window.editCalls++;editor.textContent=event.data;
-                    // Reproduce a physical POST before native ON_PREPARED; subsequent turns submit normally.
-                    if(window.posts.length===0)send();
                   });
                   form.addEventListener('submit',event=>{event.preventDefault();send();});
                 }
