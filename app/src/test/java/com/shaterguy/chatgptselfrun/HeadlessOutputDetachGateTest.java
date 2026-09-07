@@ -40,13 +40,16 @@ public final class HeadlessOutputDetachGateTest {
         assertFalse(gatedEntry.contains("isChatGptPage"));
     }
 
-    @Test public void failedComposerGateKeepsSamePageAttachedWithoutReconnect() throws Exception {
+    @Test public void slowComposerStillDetachesEventuallyWithoutReconnect() throws Exception {
         String host = source("HeadlessWebViewHost.java");
         String gate = host.substring(host.indexOf("private void probeDetachReadiness"),
                 host.indexOf("boolean attachOutput()"));
 
-        assertTrue(gate.contains("OUTPUT_DETACH_MAX_WAIT_MS"));
-        assertTrue(gate.contains("finishDetachProbeKeepingOutput()"));
+        assertTrue(gate.contains("scheduleNextDetachProbe"));
+        assertTrue(gate.contains("OUTPUT_DETACH_FAST_WINDOW_MS"));
+        assertTrue(gate.contains("OUTPUT_DETACH_SLOW_PROBE_MS"));
+        assertFalse(gate.contains("OUTPUT_DETACH_MAX_WAIT_MS"));
+        assertFalse(gate.contains("finishDetachProbeKeepingOutput"));
         assertFalse(gate.contains("loadUrl("));
         assertFalse(gate.contains("reload("));
         assertFalse(gate.contains("destroy("));
@@ -61,11 +64,12 @@ public final class HeadlessOutputDetachGateTest {
         assertTrue(web.contains("observedStart()"));
     }
 
-    @Test public void gateUsesShortSettlingWindowThenLowCostBoundedProbe() throws Exception {
+    @Test public void gateUsesFastStartupThenSparseLongWaitProbe() throws Exception {
         String host = source("HeadlessWebViewHost.java");
         assertTrue(host.contains("OUTPUT_DETACH_SETTLE_MS = 1_000L"));
-        assertTrue(host.contains("OUTPUT_DETACH_PROBE_MS = 250L"));
-        assertTrue(host.contains("OUTPUT_DETACH_MAX_WAIT_MS = 5_000L"));
+        assertTrue(host.contains("OUTPUT_DETACH_FAST_PROBE_MS = 250L"));
+        assertTrue(host.contains("OUTPUT_DETACH_FAST_WINDOW_MS = 5_000L"));
+        assertTrue(host.contains("OUTPUT_DETACH_SLOW_PROBE_MS = 2_000L"));
     }
 
     private static String source(String name) throws Exception {
