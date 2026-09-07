@@ -90,15 +90,15 @@ public class SelfRunNextInputDev6Test {
         assertTrue(DriveSignalParser.historySafeRaw(raw).contains("NEXT_INPUT_B64URL=<redacted>"));
     }
 
-    @Test public void sourceKeepsStableResumeBaselineAndUsesExistingDurableCompletion() throws Exception {
-        String service = source("SelfRunService.java");
-        String store = source("SelfRunStore.java");
-        assertTrue(service.contains("store.baselineManualResume(scan.totalCount,scan.latest,latestCompletion)"));
-        assertTrue(service.contains("SelfRunProtocol.driveContinuation(store.runId(),store.pendingNextInput())"));
-        assertTrue(store.contains("String pendingNextInput()"));
-        assertTrue(store.contains("pendingDriveSignalRaw"));
-        assertFalse(service.contains("DriveResumePolicy"));
-        assertFalse(store.contains("pauseAnchor"));
+    @Test public void v3UsesRevisionBoundUserInputInsteadOfDriveSignalCompletionPayload() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        String input = source("SelfRun3UserInput.java");
+        assertTrue(coordinator.contains("SelfRun3UserInput.Snapshot input"));
+        assertTrue(coordinator.contains("input.revision > consumed ? input.text : \"\""));
+        assertTrue(coordinator.contains("SelfRun3UserInput.consumeIfRevision"));
+        assertTrue(coordinator.contains("lateInput"));
+        assertTrue(input.contains("if (p.getLong(REVISION, 0L) != revision) return false"));
+        assertFalse(coordinator.contains("DriveSignalParser"));
     }
 
     private static String line(String tail) {
