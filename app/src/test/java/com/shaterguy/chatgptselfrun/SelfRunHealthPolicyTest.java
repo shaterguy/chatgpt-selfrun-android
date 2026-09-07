@@ -84,19 +84,18 @@ public final class SelfRunHealthPolicyTest {
         assertFalse(detail.contains("postDelayed"));
     }
 
-    @Test public void versionIdentityUses232Lineage() throws Exception {
+    @Test public void versionIdentityUses300Lineage() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        Matcher version = Pattern.compile("selfRunDriveVersionName = '(2\\.3\\.2(?:-dev([0-9]+))?)'").matcher(gradle);
+        Matcher version = Pattern.compile("selfRunDriveVersionName = '(3\\.0\\.0(?:-(?:dev|rc)([0-9]+))?)'").matcher(gradle);
         Matcher code = Pattern.compile("selfRunDriveVersionCode = ([0-9]+)").matcher(gradle);
         assertTrue(version.find());
         assertTrue(code.find());
         String versionName = version.group(1);
-        String devGroup = version.group(2);
         int versionCode = Integer.parseInt(code.group(1));
-        if (devGroup != null) assertTrue(Integer.parseInt(devGroup) >= 1);
-        assertTrue(versionCode > 2020033);
+        assertTrue(versionCode > 2020048);
         assertTrue(gradle.contains("if (selfRunDriveVersionName != '" + versionName + "')"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
+        assertTrue(gradle.contains("testBuildType 'qaApp'"));
     }
 
     private static String source(String name) throws Exception {
