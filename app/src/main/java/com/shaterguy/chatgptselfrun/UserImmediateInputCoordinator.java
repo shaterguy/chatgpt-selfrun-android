@@ -50,8 +50,12 @@ final class UserImmediateInputCoordinator {
             defer(store, runLog, runId, value, callback, "current response unavailable");
             return;
         }
+        HeadlessWebViewHost host = HeadlessWebViewHost.activeHost();
+        boolean restoreDetached = host != null && host.hasDetachableOutput() && !host.isOutputAttached();
+        if (host != null) host.attachOutput();
         String requestId = runId + ":" + UUID.randomUUID().toString().replace("-", "");
-        new Attempt(store, runLog, runId, conversationUrl, value, requestId, view, callback).prepare(0);
+        new Attempt(store, runLog, runId, conversationUrl, value, requestId,
+                view, host, restoreDetached, callback).prepare(0);
     }
 
     static boolean immediateEligible(boolean active, boolean paused, boolean stopped, String phase,
@@ -73,12 +77,15 @@ final class UserImmediateInputCoordinator {
         final String text;
         final String requestId;
         final WebView view;
+        final HeadlessWebViewHost host;
+        final boolean restoreDetached;
         final Callback callback;
         final Handler handler = new Handler(Looper.getMainLooper());
         boolean finished;
 
         Attempt(SelfRunStore store, SelfRunRunLog runLog, String runId, String conversationUrl,
-                String text, String requestId, WebView view, Callback callback) {
+                String text, String requestId, WebView view, HeadlessWebViewHost host,
+                boolean restoreDetached, Callback callback) {
             this.store = store;
             this.runLog = runLog;
             this.runId = runId;
@@ -86,6 +93,8 @@ final class UserImmediateInputCoordinator {
             this.text = text;
             this.requestId = requestId;
             this.view = view;
+            this.host = host;
+            this.restoreDetached = restoreDetached;
             this.callback = callback;
         }
 
@@ -264,6 +273,7 @@ final class UserImmediateInputCoordinator {
         void deferNow(String reason) {
             if (finished) return;
             if (UserNextInputStore.save(runId, text)) {
+                restoreOutputAfterAttempt(false);
                 runLog.record(store, "IMMEDIATE_INPUT", "result=deferred;reason=" + logSafe(reason));
                 finish(new Result(OUTCOME_DEFERRED, reason));
             } else {
@@ -273,14 +283,27 @@ final class UserImmediateInputCoordinator {
 
         void finishSent(String detail) {
             if (finished) return;
+            restoreOutputAfterAttempt(true);
             runLog.record(store, "IMMEDIATE_INPUT", "result=sent;detail=" + logSafe(detail));
             finish(new Result(OUTCOME_SENT, detail));
         }
 
         void finishFailed(String detail) {
             if (finished) return;
+            restoreOutputAfterAttempt(false);
             runLog.record(store, "IMMEDIATE_INPUT", "result=failed;detail=" + logSafe(detail));
             finish(new Result(OUTCOME_FAILED, detail));
+        }
+
+        void restoreOutputAfterAttempt(boolean sent) {
+            if (host == null || HeadlessWebViewHost.activeHost() != host
+                    || HeadlessWebViewHost.activeWebView() != view) return;
+            if (sent) {
+                host.attachOutput();
+                host.detachOutputWhenComposerReady();
+            } else if (restoreDetached) {
+                host.detachOutput();
+            }
         }
 
         void finish(Result result) {
