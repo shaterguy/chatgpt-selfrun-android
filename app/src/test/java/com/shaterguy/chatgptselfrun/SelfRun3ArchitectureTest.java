@@ -37,6 +37,19 @@ public final class SelfRun3ArchitectureTest {
         assertTrue(web.contains("RequestProfileScript.setChatReasoning(c.optString(\"chatContinuation\"))"));
     }
 
+    @Test public void firstSendDiagnosticTraceCoversPrepareSubmitAndFailureWithoutPayloads() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        for (String stage : new String[]{"PREPARE_START", "PREPARE_EVAL", "ON_PREPARED",
+                "SUBMIT_START", "SUBMIT_EVAL", "ON_UNSENT", "FAILURE"}) {
+            assertTrue("missing diagnostic stage " + stage, web.contains("\"" + stage + "\""));
+        }
+        String trace = web.substring(web.indexOf("private void trace(String stage"), web.indexOf("private void captureConversation()"));
+        assertTrue(trace.contains("V3_WEB_TRACE"));
+        assertFalse(trace.contains("text(\"prompt\")"));
+        assertFalse(trace.contains("conversationUrl"));
+        assertFalse(trace.contains("web.getUrl"));
+    }
+
     @Test public void v3HasNoAiMaintenanceOrSelfPatchPath() throws Exception {
         String protocol = source("SelfRun3Protocol.java");
         assertTrue(protocol.contains("AI 유지보수·자체 코드 수정·자동 패치 에이전트가 없다"));
