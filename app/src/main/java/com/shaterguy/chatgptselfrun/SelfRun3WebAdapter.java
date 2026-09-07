@@ -315,7 +315,7 @@ final class SelfRun3WebAdapter {
             if (consumeObservation(result)) return;
 
             if (DEFINITE_UNSENT.contains(status)) {
-                detach();
+                detachImmediately();
                 trace("ON_UNSENT", status, step);
                 listener.onUnsent(claimed.taskId(), claimed.turnId(), claimed.requestId(), status);
             } else if ("SUBMISSION_PENDING".equals(status)) {
@@ -401,7 +401,7 @@ final class SelfRun3WebAdapter {
             pendingInspection = callback;
             return;
         }
-        detach();
+        detachImmediately();
         evaluate(inspectionScript(s), callback);
     }
 
@@ -569,9 +569,14 @@ final class SelfRun3WebAdapter {
         }
     }
 
+    /** Coordinator WAIT detach is generation-aware; explicit pause/failure paths use detachImmediately(). */
     void detach() {
         requireMain();
-        if (host != null) host.detachOutput();
+        if (state != null && state.flag("sendClaimed") && !state.flag("ended")) {
+            detachAfterComposerReady();
+        } else {
+            detachImmediately();
+        }
     }
 
     void detachAfterComposerReady() {
@@ -579,11 +584,16 @@ final class SelfRun3WebAdapter {
         if (host != null) host.detachOutputWhenComposerReady();
     }
 
+    private void detachImmediately() {
+        requireMain();
+        if (host != null) host.detachOutput();
+    }
+
     void quiesce() {
         preparing = false;
         evaluation++;
         handler.removeCallbacksAndMessages(null);
-        detach();
+        detachImmediately();
     }
 
     void close() {
@@ -607,7 +617,7 @@ final class SelfRun3WebAdapter {
     private void fail(String code) {
         preparing = false;
         trace("FAILURE", code, step);
-        detach();
+        detachImmediately();
         if (state != null) {
             listener.onFailure(state.taskId(), state.turnId(), state.requestId(), code);
         }
