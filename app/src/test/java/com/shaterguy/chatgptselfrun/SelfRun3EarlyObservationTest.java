@@ -4,7 +4,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
-/** An observed effect must not be confused with permission to repeat that effect. */
+/** Actual effects can be adopted only after the transport has intentionally bound a request. */
 public final class SelfRun3EarlyObservationTest {
     @Test public void observedPostBeforeClaimWaitsAndLateClaimCannotResubmit() {
         SelfRun3Engine.State ready = ready();
@@ -53,14 +53,17 @@ public final class SelfRun3EarlyObservationTest {
         assertFalse(ready.flag("sendClaimed"));
     }
 
-    @Test public void earlyObservationWiringIsPresentInActualRuntime() throws Exception {
+    @Test public void bootstrapPreparationIsUnboundButPhysicalSubmitIsBound() throws Exception {
         java.nio.file.Path source = java.nio.file.Path.of("src/main/java/com/shaterguy/chatgptselfrun");
         if (!java.nio.file.Files.isDirectory(source)) source = java.nio.file.Path.of("app").resolve(source);
         String web = read(source.resolve("SelfRun3WebAdapter.java"));
         String bridge = read(source.resolve("TurnProtocolLogBridge.java"));
         String coordinator = read(source.resolve("SelfRun3Coordinator.java"));
-        assertTrue(web.contains("evaluate(observeBeforeAndAfter(state, script)"));
-        assertTrue(web.contains("if (consumeObservation(result) || !preparing) return"));
+        assertTrue(web.contains("SelfRun3BootstrapTransport.prepare"));
+        assertTrue(web.contains("observeWithoutBinding(script)"));
+        assertTrue(web.contains("SelfRun3BootstrapTransport.submit"));
+        assertTrue(web.contains("evaluate(observeBeforeAndAfter(claimed, action)"));
+        assertTrue(web.contains("continuationComposerStage"));
         assertTrue(bridge.contains("SelfRun3WebAdapter.protocolEvent(view, item)"));
         assertTrue(bridge.indexOf("SelfRun3WebAdapter.protocolEvent(view, item)")
                 < bridge.indexOf("else if (!turnToken.equals(store.turnProtocolToken()))"));
