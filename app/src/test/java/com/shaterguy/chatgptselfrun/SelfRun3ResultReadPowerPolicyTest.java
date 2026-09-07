@@ -13,29 +13,34 @@ import static org.junit.Assert.*;
 public final class SelfRun3ResultReadPowerPolicyTest {
     @Test public void resultReadOwnsBoundedWakeLockForEntireDriveRead() throws Exception {
         String source = source("SelfRun3DriveAdapter.java");
+        String constructor = source.substring(source.indexOf("SelfRun3DriveAdapter(Context"),
+                source.indexOf("SelfRun3Engine.State setup("));
         String read = source.substring(source.indexOf("String readResult("),
-                source.indexOf("private SelfRun3Engine.State ensureDocument"));
+                source.indexOf("private void acquireResultReadWakeLock()"));
         String acquire = source.substring(source.indexOf("private void acquireResultReadWakeLock()"),
                 source.indexOf("private void releaseResultReadWakeLock()"));
         String release = source.substring(source.indexOf("private void releaseResultReadWakeLock()"),
                 source.indexOf("private SelfRun3Engine.State ensureDocument"));
 
+        assertTrue(constructor.contains("PowerManager.PARTIAL_WAKE_LOCK"));
+        assertTrue(constructor.contains(":selfrun3-result-read"));
         assertTrue(read.contains("acquireResultReadWakeLock();"));
         assertTrue(read.indexOf("acquireResultReadWakeLock();") < read.indexOf("verifyAccount(token, s)"));
         assertTrue(read.contains("finally"));
         assertTrue(read.contains("releaseResultReadWakeLock();"));
-        assertTrue(acquire.contains("PowerManager.PARTIAL_WAKE_LOCK"));
-        assertTrue(acquire.contains("SelfRun3PowerPolicy.WAKE_LOCK_MAX_MS"));
+        assertTrue(acquire.contains("resultReadWakeLock.acquire(SelfRun3PowerPolicy.WAKE_LOCK_MAX_MS)"));
         assertTrue(release.contains("resultReadWakeLock.release()"));
     }
 
-    @Test public void resultReadPowerDoesNotChangeGenerationWaitPolicy() throws Exception {
+    @Test public void resultReadIsObservableWithoutChangingGenerationWaitPolicy() throws Exception {
         String drive = source("SelfRun3DriveAdapter.java");
         String coordinator = source("SelfRun3Coordinator.java");
         String wait = coordinator.substring(coordinator.indexOf("case WAIT ->"),
                 coordinator.indexOf("case READ_RESULT ->"));
 
-        assertTrue(drive.contains(":selfrun3-result-read"));
+        assertTrue(drive.contains("\"V3_RESULT_READ\", \"stage=START;turn=\""));
+        assertTrue(drive.contains("\"V3_RESULT_READ\", \"stage=COMMITTED;turn=\""));
+        assertTrue(drive.contains("\"V3_RESULT_READ\", \"stage=ERROR;type=\""));
         assertTrue(wait.contains("releaseWakeLock();"));
         assertFalse(wait.contains("acquireWakeLock();"));
     }
