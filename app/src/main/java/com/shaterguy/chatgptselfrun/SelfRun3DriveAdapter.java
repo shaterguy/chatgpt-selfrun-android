@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.PowerManager;
 import org.json.JSONObject;
 import java.io.InputStream;
 import java.io.IOException;
@@ -15,9 +16,14 @@ final class SelfRun3DriveAdapter {
     private final SelfRun3Ledger ledger;
     private final DriveApiClient api = new DriveApiClient();
     private final BooleanSupplier permitted;
+    private final PowerManager.WakeLock resultReadWakeLock;
     private String verifiedToken = "";
     SelfRun3DriveAdapter(Context context, SelfRunStore projection, SelfRun3Ledger ledger, BooleanSupplier permitted) {
         this.context = context.getApplicationContext(); this.projection = projection; this.ledger = ledger; this.permitted = permitted;
+        PowerManager power = this.context.getSystemService(PowerManager.class);
+        resultReadWakeLock = power == null ? null : power.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK, BuildConfig.APPLICATION_ID + ":selfrun3-result-read");
+        if (resultReadWakeLock != null) resultReadWakeLock.setReferenceCounted(false);
     }
     SelfRun3Engine.State setup(String token, SelfRun3Engine.State original) throws Exception {
         verifyAccount(token, original);
@@ -61,17 +67,32 @@ final class SelfRun3DriveAdapter {
         return s;
     }
     String readResult(String token, SelfRun3Engine.State s) throws Exception {
-        verifyAccount(token, s); validateDocument(token, s, s.resource("resultDocumentId"));
-        checkpoint();
-        String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
-        if (raw == null || raw.trim().isEmpty()) return SelfRun3Engine.emptyResult(s).toString();
+        acquireResultReadWakeLock();
         try {
-            SelfRun3Engine.parseResult(raw, s);
-            return raw;
-        } catch (RuntimeException incompleteOrMalformed) {
-            // A result body may be observed between delete/insert operations. Treat it as pending here;
-            // bounded retry and one RESULT_REPAIR request decide whether the condition persists.
-            return SelfRun3Engine.emptyResult(s).toString();
+            verifyAccount(token, s); validateDocument(token, s, s.resource("resultDocumentId"));
+            checkpoint();
+            String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
+            if (raw == null || raw.trim().isEmpty()) return SelfRun3Engine.emptyResult(s).toString();
+            try {
+                SelfRun3Engine.parseResult(raw, s);
+                return raw;
+            } catch (RuntimeException incompleteOrMalformed) {
+                // A result body may be observed between delete/insert operations. Treat it as pending here;
+                // bounded retry and one RESULT_REPAIR request decide whether the condition persists.
+                return SelfRun3Engine.emptyResult(s).toString();
+            }
+        } finally {
+            releaseResultReadWakeLock();
+        }
+    }
+    private void acquireResultReadWakeLock() {
+        if (resultReadWakeLock != null && !resultReadWakeLock.isHeld()) {
+            resultReadWakeLock.acquire(SelfRun3PowerPolicy.WAKE_LOCK_MAX_MS);
+        }
+    }
+    private void releaseResultReadWakeLock() {
+        if (resultReadWakeLock != null && resultReadWakeLock.isHeld()) {
+            try { resultReadWakeLock.release(); } catch (Throwable ignored) { }
         }
     }
     private SelfRun3Engine.State ensureDocument(String token, SelfRun3Engine.State original, String key, String intentKey, String name) throws Exception {
