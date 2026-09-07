@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3000101
-def selfRunDriveVersionName = '3.0.0-rc1'
+def selfRunDriveVersionCode = 3001000
+def selfRunDriveVersionName = '3.0.0'
 def selfRun3VersionPattern = ~/^3\.0\.0(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
