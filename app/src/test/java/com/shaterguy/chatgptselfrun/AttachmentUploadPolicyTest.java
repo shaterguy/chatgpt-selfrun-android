@@ -23,30 +23,30 @@ public class AttachmentUploadPolicyTest {
         assertTrue(activity.contains("\"content\".equals(uri.getScheme())"));
     }
 
-    @Test public void stateMachineUploadsAttachmentsBeforeTurnDocumentAndBootstrap() throws Exception {
+    @Test public void v3UploadsAttachmentsInsideSetupBeforeSetupDoneAndBrowserPreparation() throws Exception {
         String store = src("SelfRunStore.java");
-        String service = src("SelfRunService.java");
-        assertTrue(store.contains("PHASE_DRIVE_ATTACHMENT_UPLOAD"));
+        String drive = src("SelfRun3DriveAdapter.java");
+        String coordinator = src("SelfRun3Coordinator.java");
         assertTrue(store.contains("ATTACHMENT_ID_RESERVED"));
         assertTrue(store.contains("ATTACHMENT_UPLOADING"));
         assertTrue(store.contains("ATTACHMENT_COMMITTED"));
-        assertTrue(service.contains("drive.generateFileId(accessToken)"));
-        assertTrue(service.contains("store.reserveAttachmentFileId"));
-        assertTrue(service.contains("drive.getMetadata(accessToken, fileId)"));
-        assertTrue(service.contains("drive.uploadAttachmentResumable"));
-        assertTrue(service.contains("store.allAttachmentsCommitted()"));
-        int attachmentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD->uploadNextAttachment(epoch)");
-        int documentPhase = service.indexOf("case SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE->createOrRecoverDocument(epoch)");
-        assertTrue(attachmentPhase >= 0 && documentPhase > attachmentPhase);
+        String setup = between(drive, "SelfRun3Engine.State setup", "SelfRun3Engine.State prepareTurn");
+        assertTrue(setup.contains("uploadAttachments(token, s)"));
+        assertTrue(coordinator.contains("after = drive.setup(token, state)"));
+        assertTrue(coordinator.contains("SelfRun3Engine.Kind.SETUP_DONE"));
+        String driveStep = between(coordinator, "if (step == DriveStep.SETUP)", "} else if (step == DriveStep.PREPARE_TURN)");
+        assertTrue(driveStep.indexOf("drive.setup") < driveStep.indexOf("SETUP_DONE"));
     }
 
-    @Test public void multiAttachmentBatchContinuesUntilTheLastAttachmentCommits() {
-        assertTrue(SelfRunService.shouldContinueSamePhaseDriveStep(
-                SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD, true));
-        assertFalse(SelfRunService.shouldContinueSamePhaseDriveStep(
-                SelfRunStore.PHASE_DRIVE_ATTACHMENT_UPLOAD, false));
-        assertFalse(SelfRunService.shouldContinueSamePhaseDriveStep(
-                SelfRunStore.PHASE_DRIVE_TURN_DOCUMENT_CREATE, true));
+    @Test public void multiAttachmentBatchLoopsUntilEveryAttachmentHasExactReadback() throws Exception {
+        String drive = src("SelfRun3DriveAdapter.java");
+        String upload = between(drive, "private void uploadAttachments", "private SelfRun3Engine.State pin");
+        assertTrue(upload.contains("while (true)"));
+        assertTrue(upload.contains("projection.nextUncommittedAttachment()"));
+        assertTrue(upload.contains("if (a == null) return"));
+        assertTrue(upload.contains("api.getMetadata(token, a.driveFileId)"));
+        assertTrue(upload.contains("projection.markAttachmentCommitted(a.index)"));
+        assertTrue(upload.contains("api.uploadAttachmentResumable"));
     }
 
     @Test public void attachmentPickerResumePreservesCurrentProjectDraft() throws Exception {
@@ -69,9 +69,9 @@ public class AttachmentUploadPolicyTest {
         assertFalse(store.contains("resumableSession"));
     }
 
-    @Test public void attachmentBootstrapUsesFolderOnlyNotFileNamesOrUris() throws Exception {
-        String protocol = src("SelfRunProtocol.java");
-        assertTrue(protocol.contains("SELF_RUN_REFERENCE_FOLDER_ID="));
+    @Test public void v3BootstrapReferencesFolderOnlyNotLocalFileNamesOrUris() throws Exception {
+        String protocol = src("SelfRun3Protocol.java");
+        assertTrue(protocol.contains("REFERENCE_FOLDER_ID="));
         assertFalse(protocol.contains("attachment.name"));
         assertFalse(protocol.contains("attachment.uri"));
     }
@@ -86,14 +86,14 @@ public class AttachmentUploadPolicyTest {
 
     @Test public void committedUploadPersistsBeforeRecoverableGrantCleanup() throws Exception {
         String store = src("SelfRunStore.java");
-        String service = src("SelfRunService.java");
+        String drive = src("SelfRun3DriveAdapter.java");
         String commitMethod = between(store, "void markAttachmentCommitted",
                 "void releaseCommittedAttachmentPermissions");
         int committedWrite = commitMethod.indexOf("ATTACHMENT_COMMITTED");
         int cleanupCall = commitMethod.indexOf("releaseCommittedAttachmentPermissions();");
         assertTrue(committedWrite >= 0 && cleanupCall > committedWrite);
-        assertTrue(service.contains("store.releaseCommittedAttachmentPermissions();"));
-        assertFalse(service.contains("if (reportedSize >= 0) return reportedSize"));
+        assertTrue(drive.contains("projection.markAttachmentCommitted(a.index)"));
+        assertTrue(drive.contains("if (existing != null)"));
     }
 
     @Test public void nativeGoogleMimeIsNormalizedAndLimitsAreFinite() throws Exception {
@@ -105,10 +105,9 @@ public class AttachmentUploadPolicyTest {
         assertEquals(100L * 1024L * 1024L, SelfRunStore.MAX_ATTACHMENT_BYTES);
         assertEquals(3, SelfRunStore.MAX_ATTACHMENT_UPLOAD_ATTEMPTS);
 
-        String service = src("SelfRunService.java");
-        assertTrue(service.contains("total > SelfRunStore.MAX_ATTACHMENT_BYTES"));
-        assertTrue(service.contains("DRIVE_ATTACHMENT_RETRY_LIMIT"));
-        assertTrue(service.contains("DRIVE_ATTACHMENT_LIMIT_EXCEEDED"));
+        String drive = src("SelfRun3DriveAdapter.java");
+        assertTrue(drive.contains("size <= SelfRunStore.MAX_ATTACHMENT_BYTES"));
+        assertTrue(drive.contains("projection.markAttachmentUploading(a.index)"));
     }
 
     @Test public void draftLifecycleNeverReleasesPersistedGrantOwnedByAnotherRun() throws Exception {
