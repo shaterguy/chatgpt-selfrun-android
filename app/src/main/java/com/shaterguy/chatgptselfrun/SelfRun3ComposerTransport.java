@@ -3,17 +3,18 @@ package com.shaterguy.chatgptselfrun;
 /**
  * V3-only ChatGPT composer transport.
  *
- * <p>This transport discovers the current composer by editable capabilities and submits
- * through the owning form when available. It is independent from the retired continuation
- * execution authority.</p>
+ * <p>The transport owns V3 prompt preparation/submission. It does not depend on the retired
+ * continuation DOM adapter, calibrated element identities, layout visibility, or SEND/STOP button
+ * state. A composer is discovered from editable capabilities, including open shadow roots, and the
+ * owning form is the primary submission primitive.</p>
  */
 final class SelfRun3ComposerTransport {
     static final String READY_TO_SUBMIT = "READY_TO_SUBMIT";
     static final String COMPOSER_WAITING = "COMPOSER_WAITING";
     static final String COMPOSER_INPUTTING = "COMPOSER_INPUTTING";
     static final String SUBMISSION_PENDING = "SUBMISSION_PENDING";
-    static final String STOP = "STOP";
-    static final String SEND_DISABLED = "SEND_DISABLED";
+    static final String STOP = "STOP"; // retained only for status compatibility; never emitted here.
+    static final String SEND_DISABLED = "SEND_DISABLED"; // retained only for status compatibility.
     static final String SEND_UNAVAILABLE = "SEND_UNAVAILABLE";
     static final String AUTH_REQUIRED = "AUTH_REQUIRED";
     static final String TARGET_ERROR = "TARGET_ERROR";
@@ -52,9 +53,8 @@ final class SelfRun3ComposerTransport {
                 + "if(!composer)return result('" + COMPOSER_WAITING + "','editable composer not present yet');"
                 + "if(sameText(composer,expected))return result('" + READY_TO_SUBMIT + "','exact prompt already prepared');"
                 + "writeExact(composer,expected);"
-                + "return sameText(composer,expected)"
-                + "?result('" + READY_TO_SUBMIT + "','exact prompt prepared')"
-                + ":result('" + COMPOSER_INPUTTING + "','editor accepted mutation but exact readback is pending');"
+                + "return result('" + COMPOSER_INPUTTING + "',sameText(composer,expected)"
+                + "?'editor mutation completed; exact readback will be rechecked':'editor mutation issued; exact readback is pending');"
                 + "})()";
     }
 
@@ -72,20 +72,15 @@ final class SelfRun3ComposerTransport {
                 + "if(form&&typeof form.requestSubmit==='function'){"
                 + "try{form.requestSubmit();return result('" + SUBMISSION_PENDING + "','dispatch=form_request_submit');}"
                 + "catch(_){}}"
-                + "const send=findSendControl(composer,form);"
-                + "if(send){"
-                + "if(send.disabled||send.getAttribute?.('aria-disabled')==='true')"
-                + "return result('" + SEND_DISABLED + "','send control is disabled');"
-                + "try{send.focus?.();send.click();return result('" + SUBMISSION_PENDING + "','dispatch=semantic_send_control');}"
-                + "catch(_){return result('" + SEND_UNAVAILABLE + "','send control click failed');}}"
-                + "return result('" + SEND_UNAVAILABLE + "','no submit form or semantic send control');"
+                + "if(dispatchEnter(composer))return result('" + SUBMISSION_PENDING + "','dispatch=editor_enter');"
+                + "return result('" + SEND_UNAVAILABLE + "','no functional submit path');"
                 + "})()";
     }
 
     private static String protocolIdleGuard() {
         return "const protocol=window.__selfRunTurnProtocol?.snapshot?.();"
                 + "if(protocol&&(protocol.phase==='THINKING'||protocol.phase==='ANSWERING'))"
-                + "return result('" + STOP + "','previous response protocol is still active');";
+                + "return result('TURN_PROTOCOL_BUSY','previous response protocol is still active');";
     }
 
     private static String locatorPrelude() {
@@ -98,58 +93,75 @@ final class SelfRun3ComposerTransport {
                   if(e.disabled||e.readOnly||e.getAttribute?.('aria-disabled')==='true')return false;
                   const tag=String(e.tagName||'').toLowerCase();
                   if(tag==='textarea')return true;
-                  if(tag==='input')return ['text','search'].includes(inputKind(e));
-                  return e.isContentEditable||e.getAttribute?.('contenteditable')==='true';
+                  if(tag==='input')return inputKind(e)==='text';
+                  return e.isContentEditable||e.getAttribute?.('contenteditable')==='true'
+                    ||String(e.getAttribute?.('role')||'').toLowerCase()==='textbox';
                 };
                 const semantic=e=>safeText([
-                  e?.id,e?.getAttribute?.('data-testid'),e?.getAttribute?.('aria-label'),
-                  e?.getAttribute?.('placeholder'),e?.getAttribute?.('role'),
-                  e?.getAttribute?.('data-lexical-editor')
+                  e?.getAttribute?.('aria-label'),e?.getAttribute?.('placeholder'),
+                  e?.getAttribute?.('role'),e?.getAttribute?.('aria-multiline'),
+                  e?.getAttribute?.('contenteditable')
                 ].join(' '));
-                const score=(e,index)=>{
-                  let s=index/10000;const text=semantic(e),tag=String(e.tagName||'').toLowerCase();
-                  if(e===document.activeElement)s+=80;
-                  if(e.id==='prompt-textarea')s+=70;
-                  if(String(e.getAttribute?.('data-testid')||'').toLowerCase()==='prompt-textarea')s+=65;
-                  if(tag==='textarea')s+=35;
-                  if(e.isContentEditable||e.getAttribute?.('contenteditable')==='true')s+=35;
-                  if(String(e.getAttribute?.('role')||'').toLowerCase()==='textbox')s+=25;
-                  if(e.closest?.('form'))s+=25;
-                  if(e.closest?.('main'))s+=15;
-                  if(/prompt|message|chat|ask|question|메시지|질문|입력/.test(text))s+=35;
-                  return s;
-                };
-                const findComposer=()=>{
-                  const nodes=[...document.querySelectorAll('textarea,input,[contenteditable],[role="textbox"]')]
-                    .filter(editable);
-                  if(!nodes.length)return null;
-                  return nodes.map((e,i)=>({e,s:score(e,i)})).sort((a,b)=>b.s-a.s)[0].e;
-                };
-                const findOwningForm=composer=>{
-                  const direct=composer?.closest?.('form');if(direct)return direct;
-                  let p=composer?.parentElement,depth=0;
-                  while(p&&depth++<4){const f=p.querySelector?.(':scope > form,form');if(f&&f.contains(composer))return f;p=p.parentElement;}
+                const nearestForm=e=>{
+                  let node=e,depth=0;
+                  while(node&&depth++<16){
+                    if(String(node.tagName||'').toLowerCase()==='form')return node;
+                    if(node.parentElement){node=node.parentElement;continue;}
+                    const root=node.getRootNode?.();node=root&&root.host?root.host:null;
+                  }
                   return null;
                 };
-                const controlText=e=>safeText([
-                  e?.getAttribute?.('data-testid'),e?.getAttribute?.('aria-label'),
-                  e?.getAttribute?.('title'),e?.innerText,e?.textContent
-                ].join(' '));
-                const sendScore=e=>{
-                  if(!e||!e.isConnected||hiddenByContract(e))return -1;
-                  const t=controlText(e);let s=0;
-                  if(String(e.getAttribute?.('type')||'').toLowerCase()==='submit')s+=40;
-                  if(/send-button|composer-submit-button/.test(String(e.getAttribute?.('data-testid')||'').toLowerCase()))s+=70;
-                  if(/\\b(send|submit)\\b|보내기/.test(t))s+=60;
-                  if(/\\bstop\\b|중지|정지|voice|microphone|mic|음성|마이크/.test(t))s-=100;
+                const inMain=e=>{
+                  let node=e,depth=0;
+                  while(node&&depth++<16){
+                    if(String(node.tagName||'').toLowerCase()==='main')return true;
+                    if(node.parentElement){node=node.parentElement;continue;}
+                    const root=node.getRootNode?.();node=root&&root.host?root.host:null;
+                  }
+                  return false;
+                };
+                const score=(e,index)=>{
+                  let s=index/10000;const text=semantic(e),tag=String(e.tagName||'').toLowerCase();
+                  if(nearestForm(e))s+=70;
+                  if(inMain(e))s+=30;
+                  if(tag==='textarea')s+=35;
+                  if(e.isContentEditable||e.getAttribute?.('contenteditable')==='true')s+=35;
+                  if(String(e.getAttribute?.('role')||'').toLowerCase()==='textbox')s+=30;
+                  if(String(e.getAttribute?.('aria-multiline')||'').toLowerCase()==='true')s+=20;
+                  if(/message|chat|ask|question|prompt|메시지|질문|입력/.test(text))s+=30;
+                  if(/search|검색/.test(text))s-=80;
                   return s;
                 };
-                const findSendControl=(composer,form)=>{
-                  const roots=[];if(form)roots.push(form);
-                  let p=composer?.parentElement,depth=0;while(p&&depth++<3){roots.push(p);p=p.parentElement;}
-                  const all=[];for(const root of roots)for(const e of root.querySelectorAll?.('button,[role="button"]')||[])if(!all.includes(e))all.push(e);
-                  const ranked=all.map(e=>({e,s:sendScore(e)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s);
-                  return ranked.length?ranked[0].e:null;
+                const collect=root=>[...root.querySelectorAll?.('textarea,input,[contenteditable],[role="textbox"]')||[]].filter(editable);
+                const ranked=nodes=>nodes.map((e,i)=>({e,s:score(e,i)})).sort((a,b)=>b.s-a.s);
+                const shadowCandidates=()=>{
+                  const found=[],queue=[document],seen=new Set([document]);
+                  for(let qi=0;qi<queue.length&&qi<32;qi++){
+                    const root=queue[qi];
+                    for(const element of root.querySelectorAll?.('*')||[]){
+                      const shadow=element.shadowRoot;
+                      if(shadow&&!seen.has(shadow)){seen.add(shadow);queue.push(shadow);for(const e of collect(shadow))found.push(e);}
+                    }
+                  }
+                  return found;
+                };
+                const findComposer=()=>{
+                  const direct=ranked(collect(document));
+                  if(direct.length&&direct[0].s>=80)return direct[0].e;
+                  const shadow=ranked(shadowCandidates());
+                  if(shadow.length&&(!direct.length||shadow[0].s>direct[0].s))return shadow[0].e;
+                  return direct.length&&direct[0].s>0?direct[0].e:null;
+                };
+                const findOwningForm=composer=>nearestForm(composer);
+                const dispatchEnter=composer=>{
+                  try{
+                    composer.focus?.();
+                    const options={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true,shiftKey:false};
+                    composer.dispatchEvent(new KeyboardEvent('keydown',options));
+                    composer.dispatchEvent(new KeyboardEvent('keypress',options));
+                    composer.dispatchEvent(new KeyboardEvent('keyup',options));
+                    return true;
+                  }catch(_){return false;}
                 };
                 """;
     }
@@ -186,16 +198,9 @@ final class SelfRun3ComposerTransport {
                 };
                 const setRich=(e,value)=>{
                   const doc=e.ownerDocument||document;e.focus?.();selectContents(e);
-                  let nativeChanged=false;
-                  try{nativeChanged=!!doc.execCommand?.('insertText',false,value);}catch(_){}
+                  try{doc.execCommand?.('insertText',false,value);}catch(_){}
                   if(!sameText(e,value)){
-                    while(e.firstChild)e.removeChild(e.firstChild);
-                    const p=doc.createElement('p');
-                    if(value)p.textContent=value;else p.appendChild(doc.createElement('br'));
-                    e.appendChild(p);
-                    try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));}
-                    catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}
-                  }else if(!nativeChanged){
+                    e.textContent=value;
                     try{e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));}
                     catch(_){e.dispatchEvent(new Event('input',{bubbles:true}));}
                   }

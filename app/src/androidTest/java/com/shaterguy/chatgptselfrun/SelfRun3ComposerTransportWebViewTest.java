@@ -19,84 +19,111 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * V3 transport regression: one bootstrap plus two continuations must survive a brand-new
- * composer node after every turn, including a fixed-position editor whose offsetParent is null.
+ * V3 transport regression: bootstrap plus two continuations must use a freshly rebuilt composer
+ * inside an open shadow root, without calibrated IDs, test IDs, send buttons, or layout visibility.
+ * Each physical submit is observed by the V3 canonical POST/response protocol before the next turn.
  */
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3ComposerTransportWebViewTest {
+    private static final String RUN_ID = "SR-V3-COMPOSER-3TURN";
     private static final String PROJECT_ID = "g-p-6a582c824ba08191ac7e74e9bad721fc";
     private static final String SLUGGED_PROJECT_ID = PROJECT_ID + "-vibe-coding";
     private static final String PROJECT_URL = "https://chatgpt.com/g/" + SLUGGED_PROJECT_ID + "/project";
     private static final String CONVERSATION_URL =
             "https://chatgpt.com/g/" + SLUGGED_PROJECT_ID + "/c/conversation123";
 
-    @Test public void bootstrapThenTwoContinuationsUseFreshCapabilityDiscoveredComposer() throws Exception {
+    @Test public void bootstrapThenTwoContinuationsUseFreshShadowComposerAndCanonicalProtocol()
+            throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario =
                      ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
+            read(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
 
-            assertEquals("true", read(scenario, web,
-                    "String(window.currentEditor.offsetParent===null)"));
-
-            prepare(scenario, web,
-                    SelfRun3ComposerTransport.prepareInitial(PROJECT_URL, "turn-one"));
-            assertPending(evaluate(scenario, web,
-                    SelfRun3ComposerTransport.submitInitial(PROJECT_URL, "turn-one")));
-            awaitCount(scenario, web, 1);
+            assertShadowComposer(scenario, web);
+            runTurn(scenario, web, "turn-1", "turn-one", true, 1);
             assertEquals("/g/" + SLUGGED_PROJECT_ID + "/c/conversation123",
                     read(scenario, web, "location.pathname"));
-            assertEquals("true", read(scenario, web,
-                    "String(window.currentEditor.offsetParent===null)"));
+            assertShadowComposer(scenario, web);
 
-            prepare(scenario, web,
-                    SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, "turn-two"));
-            assertPending(evaluate(scenario, web,
-                    SelfRun3ComposerTransport.submitContinuation(CONVERSATION_URL, "turn-two")));
-            awaitCount(scenario, web, 2);
-            assertEquals("true", read(scenario, web,
-                    "String(window.currentEditor.offsetParent===null)"));
+            runTurn(scenario, web, "turn-2", "turn-two", false, 2);
+            assertShadowComposer(scenario, web);
 
-            prepare(scenario, web,
-                    SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, "turn-three"));
-            assertPending(evaluate(scenario, web,
-                    SelfRun3ComposerTransport.submitContinuation(CONVERSATION_URL, "turn-three")));
-            awaitCount(scenario, web, 3);
+            runTurn(scenario, web, "turn-3", "turn-three", false, 3);
+            assertShadowComposer(scenario, web);
 
             assertEquals("turn-one|turn-two|turn-three",
                     read(scenario, web, "window.sent.join('|')"));
             assertEquals("3", read(scenario, web, "String(window.canonicalPosts.length)"));
             assertEquals("POST|POST|POST", read(scenario, web,
                     "window.canonicalPosts.map(x=>x.method).join('|')"));
+            assertEquals("COMPLETE", read(scenario, web,
+                    "window.__selfRunTurnProtocol.snapshot().phase"));
         }
     }
 
-    private static void prepare(ActivityScenario<SelfRunNewActivity> scenario,
+    private static void runTurn(ActivityScenario<SelfRunNewActivity> scenario,
                                 AtomicReference<WebView> web,
-                                String script) throws Exception {
+                                String token,
+                                String prompt,
+                                boolean initial,
+                                int expectedCount) throws Exception {
+        String prepare = initial
+                ? SelfRun3ComposerTransport.prepareInitial(PROJECT_URL, prompt)
+                : SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, prompt);
+        JSONObject prepared = prepare(scenario, web, prepare);
+        assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT, prepared.optString("status"));
+
+        String action = initial
+                ? SelfRun3ComposerTransport.submitInitial(PROJECT_URL, prompt)
+                : SelfRun3ComposerTransport.submitContinuation(CONVERSATION_URL, prompt);
+        JSONObject dispatched = evaluate(scenario, web,
+                ChatGptTurnProtocolScript.bindTurnAndThen(RUN_ID, token, action));
+        assertEquals(SelfRun3ComposerTransport.SUBMISSION_PENDING,
+                dispatched.optString("status"));
+
+        await(scenario, web, "String(window.submitCount)", String.valueOf(expectedCount));
+        await(scenario, web, "window.__selfRunTurnProtocol.snapshot().phase", "COMPLETE");
+        assertEquals(token, read(scenario, web,
+                "window.__selfRunTurnProtocol.snapshot().turnToken"));
+    }
+
+    private static JSONObject prepare(ActivityScenario<SelfRunNewActivity> scenario,
+                                      AtomicReference<WebView> web,
+                                      String script) throws Exception {
         JSONObject last = null;
         for (int i = 0; i < 8; i++) {
             last = evaluate(scenario, web, script);
-            if (SelfRun3ComposerTransport.READY_TO_SUBMIT.equals(last.optString("status"))) return;
+            if (SelfRun3ComposerTransport.READY_TO_SUBMIT.equals(last.optString("status"))) {
+                return last;
+            }
             Thread.sleep(50L);
         }
         assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT,
                 last == null ? "" : last.optString("status"));
+        return last;
     }
 
-    private static void assertPending(JSONObject result) {
-        assertEquals(SelfRun3ComposerTransport.SUBMISSION_PENDING, result.optString("status"));
+    private static void assertShadowComposer(ActivityScenario<SelfRunNewActivity> scenario,
+                                             AtomicReference<WebView> web) throws Exception {
+        assertEquals("true", read(scenario, web,
+                "String(window.currentEditor.getRootNode() instanceof ShadowRoot)"));
+        assertEquals("", read(scenario, web,
+                "String(window.currentEditor.id||'')"));
+        assertEquals("", read(scenario, web,
+                "String(window.currentEditor.getAttribute('data-testid')||'')"));
+        assertEquals("0", read(scenario, web,
+                "String(window.currentForm.querySelectorAll('button,[role=button]').length)"));
     }
 
-    private static void awaitCount(ActivityScenario<SelfRunNewActivity> scenario,
-                                   AtomicReference<WebView> web,
-                                   int count) throws Exception {
-        for (int i = 0; i < 40; i++) {
-            if (String.valueOf(count).equals(
-                    read(scenario, web, "String(window.submitCount)"))) return;
+    private static void await(ActivityScenario<SelfRunNewActivity> scenario,
+                              AtomicReference<WebView> web,
+                              String expression,
+                              String expected) throws Exception {
+        for (int i = 0; i < 60; i++) {
+            if (expected.equals(read(scenario, web, expression))) return;
             Thread.sleep(50L);
         }
-        assertEquals(String.valueOf(count),
-                read(scenario, web, "String(window.submitCount)"));
+        assertEquals(expected, read(scenario, web, expression));
     }
 
     private static AtomicReference<WebView> loadFixture(
@@ -115,7 +142,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
             web.set(view);
             view.loadDataWithBaseURL(PROJECT_URL, fixture(), "text/html", "UTF-8", null);
         });
-        assertTrue("V3 composer transport fixture did not load",
+        assertTrue("V3 shadow composer fixture did not load",
                 loaded.await(15, TimeUnit.SECONDS));
         return web;
     }
@@ -142,45 +169,41 @@ public final class SelfRun3ComposerTransportWebViewTest {
 
     private static String fixture() {
         return """
-                <!doctype html><html><body><main>
-                <form id="composer-form"></form>
-                </main><script>
+                <!doctype html><html><body><main><div id="composer-host"></div></main><script>
                 window.submitCount=0;window.sent=[];window.canonicalPosts=[];
-                const form=document.getElementById('composer-form');
                 window.fetch=async(input,init={})=>{
                   const url=typeof input==='string'?input:String(input?.url||'');
                   const method=String(init.method||(input&&input.method)||'GET').toUpperCase();
                   window.canonicalPosts.push({url,method,body:String(init.body||'')});
-                  return new Response('{}',{status:200,headers:{'Content-Type':'application/json'}});
+                  const sse='data: '+JSON.stringify({type:'message_stream_complete'})+'\\n\\n';
+                  return new Response(sse,{status:200,headers:{'Content-Type':'text/event-stream'}});
                 };
+                const host=document.getElementById('composer-host');
+                const shadow=host.attachShadow({mode:'open'});
                 window.rebuildComposer=()=>{
-                  form.replaceChildren();
+                  shadow.replaceChildren();
+                  const form=document.createElement('form');
                   const editor=document.createElement('div');
                   editor.setAttribute('contenteditable','true');
                   editor.setAttribute('role','textbox');
-                  editor.setAttribute('aria-label','Message ChatGPT');
-                  editor.style.position='fixed';
-                  editor.style.left='12px';
-                  editor.style.bottom='12px';
-                  editor.style.minWidth='200px';
+                  editor.setAttribute('aria-multiline','true');
+                  editor.setAttribute('aria-label','Message');
                   editor.appendChild(document.createElement('p')).appendChild(document.createElement('br'));
-                  const send=document.createElement('button');
-                  send.type='submit';send.setAttribute('aria-label','Send message');
-                  send.textContent='Send';
-                  form.append(editor,send);window.currentEditor=editor;
-                };
-                form.addEventListener('submit',event=>{
-                  event.preventDefault();
-                  const text=String(window.currentEditor.innerText||window.currentEditor.textContent||'').trim();
-                  window.sent.push(text);window.submitCount++;
-                  fetch('/backend-api/f/conversation',{
-                    method:'POST',headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({action:'next',messages:[{content:{parts:[text]}}]})
+                  form.appendChild(editor);shadow.appendChild(form);
+                  window.currentForm=form;window.currentEditor=editor;
+                  form.addEventListener('submit',event=>{
+                    event.preventDefault();
+                    const text=String(editor.innerText||editor.textContent||'').trim();
+                    window.sent.push(text);window.submitCount++;
+                    if(window.submitCount===1)history.replaceState({},'',
+                      '/g/__SLUGGED_PROJECT_ID__/c/conversation123');
+                    fetch('/backend-api/f/conversation',{
+                      method:'POST',headers:{'Content-Type':'application/json'},
+                      body:JSON.stringify({action:'next',messages:[{content:{parts:[text]}}]})
+                    });
+                    window.rebuildComposer();
                   });
-                  if(window.submitCount===1)history.replaceState({},'',
-                    '/g/__SLUGGED_PROJECT_ID__/c/conversation123');
-                  window.rebuildComposer();
-                });
+                };
                 window.rebuildComposer();
                 </script></body></html>
                 """.replace("__SLUGGED_PROJECT_ID__", SLUGGED_PROJECT_ID);

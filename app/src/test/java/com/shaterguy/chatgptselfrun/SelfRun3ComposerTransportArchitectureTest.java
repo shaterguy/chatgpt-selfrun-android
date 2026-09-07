@@ -24,24 +24,46 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertFalse(web.contains("composer-stop-button"));
     }
 
-    @Test public void transportIsCapabilityDrivenAndIndependentOfLegacyCalibration() throws Exception {
+    @Test public void transportUsesCapabilitiesFormAndProtocolInsteadOfLegacyUiIdentity() throws Exception {
         String transport = source("SelfRun3ComposerTransport.java");
         for (String legacy : new String[]{
-                "__srFind", "WebUiCalibrationStore", "offsetParent",
+                "SelfRunContinuationDom", "__srFind", "WebUiCalibrationStore", "offsetParent",
                 "UserNextInputStore", "LegacyRunModeMigration",
-                "selfrun-drive:verified-continuation", "selfrun-drive:verified-bootstrap"}) {
+                "selfrun-drive:verified-continuation", "selfrun-drive:verified-bootstrap",
+                "prompt-textarea", "data-testid", "findSendControl", "send.click()",
+                "composer-stop-button"}) {
             assertFalse("legacy dependency remains in V3 transport: " + legacy,
                     transport.contains(legacy));
         }
-        assertTrue(transport.contains("querySelectorAll('textarea,input,[contenteditable],[role=\"textbox\"]')"));
+        assertTrue(transport.contains("textarea,input,[contenteditable],[role=\"textbox\"]"));
+        assertTrue(transport.contains("shadowRoot"));
         assertTrue(transport.contains("form.requestSubmit()"));
+        assertTrue(transport.contains("KeyboardEvent"));
         assertTrue(transport.contains("protocol.phase==='THINKING'||protocol.phase==='ANSWERING'"));
         assertTrue(transport.contains("e.isConnected"));
+        assertTrue(transport.contains("nearestForm"));
+        assertTrue(transport.contains("TURN_PROTOCOL_BUSY"));
+    }
+
+    @Test public void threeTurnInstrumentationExercisesShadowComposerAndCanonicalProtocol() throws Exception {
+        String test = androidTestSource("SelfRun3ComposerTransportWebViewTest.java");
+        assertTrue(test.contains("attachShadow({mode:'open'})"));
+        assertTrue(test.contains("ChatGptTurnProtocolScript.bindTurnAndThen"));
+        assertTrue(test.contains("message_stream_complete"));
+        assertTrue(test.contains("turn-one|turn-two|turn-three"));
+        assertTrue(test.contains("String(window.canonicalPosts.length)"));
+        assertFalse(test.contains("data-testid=\"send-button\""));
     }
 
     private static String source(String name) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static String androidTestSource(String name) throws Exception {
+        Path path = Paths.get("app/src/androidTest/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Paths.get("src/androidTest/java/com/shaterguy/chatgptselfrun/" + name);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
