@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 'selfrun-v3/v3.0.0-dev*'
+      - '!selfrun-v3/v3.0.0-dev1'
       - 'selfrun-v3/v3.0.0-rc*'
   workflow_dispatch:
 
@@ -54,14 +55,14 @@ jobs:
           tools/verify_drive_variant.sh
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:verifyDriveVariantIdentity \
-            :app:compileDebugJavaWithJavac \
-            :app:compileDebugUnitTestJavaWithJavac \
+            :app:compileQaAppJavaWithJavac \
+            :app:compileQaAppUnitTestJavaWithJavac \
             :app:compileQaAppAndroidTestJavaWithJavac
       - name: FAST_TEST - complete JVM regression suite
         shell: bash
         run: |
           set -euo pipefail
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testDebugUnitTest
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
       - name: ARTIFACT_BUILD - TEST target and TEST instrumentation APKs
         shell: bash
         run: |
@@ -142,6 +143,10 @@ jobs:
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: current
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '11076708'
