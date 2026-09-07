@@ -30,7 +30,11 @@ public final class SelfRun3ComposerTransportWebViewTest {
             read(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
             assertEquals(CONVERSATION_PATH, read(scenario, web, "location.pathname"));
             assertEquals("2", read(scenario, web,
+                    "String((window.decoy?.isConnected?1:0)+(window.currentEditor?.isConnected?1:0))"));
+            assertEquals("1", read(scenario, web,
                     "String(document.querySelectorAll('textarea,[contenteditable],[role=\"textbox\"]').length)"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.currentEditor.getRootNode() instanceof ShadowRoot)"));
 
             String second = "[SELF_RUN_V3 3.0.0]\nTURN=2\nPHASE=WORK\n\nSelfRun 3 실행 계약\nline one  with spaces\nline two";
             String third = "[SELF_RUN_V3 3.0.0]\nTURN=3\nPHASE=VERIFY\n\n[RESULT_IDENTITY_TEMPLATE]\nalpha beta\ngamma";
