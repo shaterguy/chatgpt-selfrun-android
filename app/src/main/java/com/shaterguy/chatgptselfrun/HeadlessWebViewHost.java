@@ -7,7 +7,6 @@ import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
-import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -211,7 +210,6 @@ final class HeadlessWebViewHost {
     boolean detachOutputWhenComposerReady() {
         requireMainThread();
         if (!hasDetachableOutput() || !outputAttached) return false;
-        if (!isChatGptPage(webView.getUrl())) return detachOutput();
         if (detachProbePending) return true;
         detachProbePending = true;
         detachProbeStartedAt = SystemClock.elapsedRealtime();
@@ -275,16 +273,6 @@ final class HeadlessWebViewHost {
         detachProbePending = false;
         detachProbeGeneration++;
         mainHandler.removeCallbacksAndMessages(null);
-    }
-
-    private static boolean isChatGptPage(String raw) {
-        try {
-            Uri uri = Uri.parse(raw == null ? "" : raw);
-            return "https".equals(uri.getScheme())
-                    && ("chatgpt.com".equals(uri.getHost()) || "www.chatgpt.com".equals(uri.getHost()));
-        } catch (Throwable ignored) {
-            return false;
-        }
     }
 
     private static String decodeJavascriptString(String raw) {
