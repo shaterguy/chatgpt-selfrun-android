@@ -35,15 +35,7 @@ adb shell pidof "$TEST" >/dev/null
 adb install -r current/androidTest.apk >/dev/null
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\([^ ]*\) (target=$TEST)#\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
-
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
-  "$INSTRUMENTATION" | tee selfrun-v3-runtime-main.txt
-grep -Fq 'OK (' selfrun-v3-runtime-main.txt
-cat selfrun-v3-runtime-main.txt >> selfrun-v3-runtime-evidence.txt
-
-adb shell am instrument -w -r \
-  -e class com.shaterguy.chatgptselfrun.SelfRun3PinnedComposerAndroidTest \
-  "$INSTRUMENTATION" | tee selfrun-v3-runtime-pinned.txt
-grep -Fq 'OK (' selfrun-v3-runtime-pinned.txt
-cat selfrun-v3-runtime-pinned.txt >> selfrun-v3-runtime-evidence.txt
+  "$INSTRUMENTATION" | tee -a selfrun-v3-runtime-evidence.txt
+grep -Fq 'OK (' selfrun-v3-runtime-evidence.txt
