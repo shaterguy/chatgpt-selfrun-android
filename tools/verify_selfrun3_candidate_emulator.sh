@@ -5,7 +5,7 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_VERSION=3.0.1-dev16
+PREVIOUS_VERSION=3.0.1-dev18
 PREVIOUS_APK="previous/chatgpt-selfrun-drive-test-v${PREVIOUS_VERSION}.apk"
 
 adb install -r stable/chatgpt-selfrun-drive-v3.0.0.apk >/dev/null
