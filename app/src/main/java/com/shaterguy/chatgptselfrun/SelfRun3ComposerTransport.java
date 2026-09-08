@@ -20,11 +20,12 @@ final class SelfRun3ComposerTransport {
                 + conversationGuard(conversationUrl)
                 + "const expected=" + q(prompt) + ";"
                 + locatorPrelude()
+                + pinnedComposerPrelude()
                 + continuationEditorPrelude()
                 + protocolIdleGuard()
                 + continuationMarkerPrelude()
-                + "const composer=findComposer();"
-                + "if(!composer)return result('" + COMPOSER_WAITING + "','editable composer not present yet');"
+                + "const composer=resolveComposer();"
+                + "if(!composer)return result('" + COMPOSER_WAITING + "','pinned or live composer not present yet');"
                 + "const m=readMarker();"
                 + "if(m.state==='clicked')return result('" + SUBMISSION_PENDING + "','continuation submission already pending');"
                 + "if(!m.state||m.state==='failed'){writeMarker({state:'clearing',at:Date.now()});clearComposer(composer);return result('" + COMPOSER_CLEARING + "','continuation composer clearing started');}"
@@ -40,11 +41,12 @@ final class SelfRun3ComposerTransport {
                 + conversationGuard(conversationUrl)
                 + "const expected=" + q(prompt) + ";"
                 + locatorPrelude()
+                + pinnedComposerPrelude()
                 + continuationEditorPrelude()
                 + protocolIdleGuard()
                 + continuationMarkerPrelude()
-                + "const composer=findComposer();"
-                + "if(!composer)return result('" + COMPOSER_WAITING + "','editable composer disappeared before submit');"
+                + "const composer=resolveComposer();"
+                + "if(!composer)return result('" + COMPOSER_WAITING + "','pinned or live composer disappeared before submit');"
                 + "const m=readMarker();if(m.state==='clicked')return result('" + SUBMISSION_PENDING + "','continuation submission already pending');"
                 + "if(m.state!=='prepared')return result('" + COMPOSER_INPUTTING + "','continuation prepared marker missing before submit');"
                 + "if(!sameText(composer,expected))return result(divergedStatus(composer,expected),'exact continuation readback changed before submit');"
@@ -56,9 +58,17 @@ final class SelfRun3ComposerTransport {
                 + "})()";
     }
 
-    /** Used only by bounded reconciliation and shares the live continuation capability probe. */
+    /** Pins the exact ranked live composer immediately before generation-time Surface detach. */
+    static String pinComposerExpression() {
+        return "(()=>{" + locatorPrelude()
+                + "const composer=findComposer();if(!composer)return false;"
+                + "window.__selfRunV3PinnedComposer=composer;"
+                + "window.__selfRunV3PinnedComposerPath=location.pathname;return true;})()";
+    }
+
+    /** Used only by bounded reconciliation and accepts a connected pinned composer before rediscovery. */
     static String composerReadyExpression() {
-        return "(()=>{" + locatorPrelude() + "return !!findComposer();})()";
+        return "(()=>{" + locatorPrelude() + pinnedComposerPrelude() + "return !!resolveComposer();})()";
     }
 
     private static String protocolIdleGuard() {
@@ -98,6 +108,13 @@ final class SelfRun3ComposerTransport {
                 const findOwningForm=composer=>nearestForm(composer);
                 const composerSignature=e=>{const tag=String(e?.tagName||'X').toUpperCase();const id=safeText(e?.id)==='prompt-textarea'?'P':'N';const lex=e?.getAttribute?.('data-lexical-editor')==='true'?'L':'N';return tag+'_'+(nearestForm(e)?'F':'N')+'_'+(inMain(e)?'M':'N')+'_'+id+'_'+lex;};
                 const dispatchEnter=composer=>{try{composer.focus?.();const options={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true,shiftKey:false};composer.dispatchEvent(new KeyboardEvent('keydown',options));composer.dispatchEvent(new KeyboardEvent('keypress',options));composer.dispatchEvent(new KeyboardEvent('keyup',options));return true;}catch(_){return false;}};
+                """;
+    }
+
+    private static String pinnedComposerPrelude() {
+        return """
+                const pinnedComposer=()=>{const e=window.__selfRunV3PinnedComposer;return e&&e.isConnected&&window.__selfRunV3PinnedComposerPath===location.pathname?e:null;};
+                const resolveComposer=()=>{const pinned=pinnedComposer();if(pinned)return pinned;const live=findComposer();if(live){window.__selfRunV3PinnedComposer=live;window.__selfRunV3PinnedComposerPath=location.pathname;}return live;};
                 """;
     }
 
