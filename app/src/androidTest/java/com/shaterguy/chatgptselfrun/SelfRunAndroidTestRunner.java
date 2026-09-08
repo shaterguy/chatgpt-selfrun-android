@@ -7,6 +7,7 @@ import androidx.test.runner.AndroidJUnitRunner;
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
     private static final String[] V3_REQUIRED = {
             "com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3PinnedComposerAndroidTest",
             "com.shaterguy.chatgptselfrun.SelfRun3ObservationWebViewTest",
             "com.shaterguy.chatgptselfrun.SelfRun3ComposerTransportWebViewTest",
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
