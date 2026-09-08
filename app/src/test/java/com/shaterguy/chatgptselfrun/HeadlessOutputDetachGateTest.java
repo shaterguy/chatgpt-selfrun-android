@@ -10,21 +10,27 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Source contract for deferring generation-time VirtualDisplay pause until the next composer is ready. */
+/** Source contract for low-power generation detach with a pinned continuation composer. */
 public final class HeadlessOutputDetachGateTest {
-    @Test public void generationDetachWaitsForActiveProtocolAndRealComposer() throws Exception {
+    @Test public void generationDetachPinsActiveComposerBeforeSurfaceRemoval() throws Exception {
         String host = source("HeadlessWebViewHost.java");
+        String transport = source("SelfRun3ComposerTransport.java");
         String gated = host.substring(host.indexOf("boolean detachOutputWhenComposerReady()"),
                 host.indexOf("boolean attachOutput()"));
 
         assertTrue(gated.contains("OUTPUT_DETACH_SETTLE_MS"));
         assertTrue(gated.contains("probeDetachReadiness"));
         assertTrue(gated.contains("window.__selfRunTurnProtocol?.snapshot?.()"));
-        assertTrue(gated.contains("SelfRun3ComposerTransport.composerReadyExpression()"));
+        assertTrue(gated.contains("SelfRun3ComposerTransport.pinComposerReadyExpression()"));
+        assertTrue(gated.contains("virtualDisplay.setSurface(null)") || host.contains("virtualDisplay.setSurface(null)"));
         assertTrue(gated.contains("\"THINKING\".equals(phase)"));
         assertTrue(gated.contains("\"ANSWERING\".equals(phase)"));
         assertTrue(gated.contains("\"COMPLETE\".equals(phase)"));
-        assertTrue(gated.contains("composerReady"));
+        assertTrue(transport.contains("window.__selfRunV3PinnedComposer"));
+        assertTrue(transport.contains("const composer=resolveComposer();"));
+        assertTrue(transport.contains("state.path!==location.pathname"));
+        assertTrue(transport.contains("e.ownerDocument===document"));
+        assertTrue(transport.contains("e.isConnected"));
     }
 
     @Test public void immediateDetachRemainsAvailableForPauseAndFailurePaths() throws Exception {
@@ -54,6 +60,16 @@ public final class HeadlessOutputDetachGateTest {
         assertFalse(gate.contains("reload("));
         assertFalse(gate.contains("destroy("));
         assertFalse(gate.contains("new WebView"));
+    }
+
+    @Test public void pinnedComposerFallsBackToFreshDiscoveryWhenStale() throws Exception {
+        String transport = source("SelfRun3ComposerTransport.java");
+        assertTrue(transport.contains("const pinned=pinnedComposer();if(pinned)return pinned;"));
+        assertTrue(transport.contains("const discovered=findComposer();"));
+        assertTrue(transport.contains("if(discovered)pinComposer(discovered);"));
+        assertTrue(transport.contains("clearPinnedComposer()"));
+        assertFalse(transport.contains("setInterval("));
+        assertFalse(transport.contains("setTimeout("));
     }
 
     @Test public void webAdapterRoutesActiveWaitsThroughComposerGate() throws Exception {
