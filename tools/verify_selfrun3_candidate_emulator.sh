@@ -6,7 +6,7 @@ set -euo pipefail
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
 DEV6=previous/chatgpt-selfrun-drive-test-v3.1.0-dev6.apk
-DEV6_SHA256=15ffe38c0a9c6732254013b4f22c66f81592d98016815a77b7724e76c1e3546a
+DEV6_SHA256=15ffe38c1fe2bee8b3cfe86b6ab33729d89e62828b04249eaeafb94b043ee813
 DEV6_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/99d6d4cf3cb36bf1f604788f288c6a5bf85ee20d/deliverables/current-test.apk
 
 mkdir -p previous
