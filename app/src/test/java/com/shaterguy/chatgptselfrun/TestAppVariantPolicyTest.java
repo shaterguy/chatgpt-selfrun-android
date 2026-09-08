@@ -15,7 +15,7 @@ public final class TestAppVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.0.1-dev16'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.0.1-dev17'"));
         assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
@@ -47,7 +47,7 @@ public final class TestAppVariantPolicyTest {
     @Test public void authDependencyVersionRemainsIndependentFromAppVersion() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("play-services-auth:21.6.0"));
-        assertFalse(gradle.contains("play-services-auth:21.6.1-dev16"));
+        assertFalse(gradle.contains("play-services-auth:21.6.1-dev17"));
     }
 
     private static String read(String first, String second) throws Exception {
