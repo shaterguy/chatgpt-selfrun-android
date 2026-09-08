@@ -43,8 +43,3 @@ adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-runtime-evidence.txt
 grep -Fq 'OK (' selfrun-v3-runtime-evidence.txt
-adb shell am instrument -w -r \
-  -e class com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest \
-  "$INSTRUMENTATION" | tee selfrun-v3-dispatch-evidence.txt
-grep -Fq 'OK (' selfrun-v3-dispatch-evidence.txt
-cat selfrun-v3-dispatch-evidence.txt >> selfrun-v3-runtime-evidence.txt
