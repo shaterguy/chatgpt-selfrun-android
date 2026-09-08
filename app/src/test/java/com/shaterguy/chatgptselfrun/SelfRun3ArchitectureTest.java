@@ -22,11 +22,19 @@ public final class SelfRun3ArchitectureTest {
         assertTrue(c.contains("releaseWakeLock()"));
         assertTrue(source("HeadlessWebViewHost.java").contains("virtualDisplay.setSurface(null)"));
     }
-    @Test public void contractCarriesCheckpointProfilesAndMergeInputs() {
-        assertTrue(SelfRun3Protocol.CONTRACT.contains("full checkpoint"));
-        assertTrue(SelfRun3Protocol.CONTRACT.contains("USER_ACTION_RESOLVED"));
-        assertTrue(SelfRun3Protocol.CONTRACT.contains("PARALLEL_MERGE"));
-        assertTrue(SelfRun3Protocol.CONTRACT.contains("mutation_boundary"));
+    @Test public void promptIsEnvelopeWhileEngineRetainsExecutionContract() throws Exception {
+        String protocol=source("SelfRun3Protocol.java");
+        String engine=source("SelfRun3Engine.java");
+        assertTrue(protocol.contains("Dynamic SelfRun 3 envelope"));
+        assertTrue(protocol.contains("compactProfileChoices"));
+        assertFalse(protocol.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));
+        assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
+        assertFalse(protocol.contains("ProfileRegistry.export"));
+        assertFalse(protocol.contains("full checkpoint"));
+        assertTrue(engine.contains("full handoff missing"));
+        assertTrue(engine.contains("case REPAIR"));
+        assertTrue(engine.contains("maybeMerge"));
+        assertTrue(engine.contains("RESULT_SCHEMA"));
     }
     @Test public void coordinatorDoesNotDownloadExecutablePatches() throws Exception {
         String c=source("SelfRun3Coordinator.java");
@@ -35,6 +43,6 @@ public final class SelfRun3ArchitectureTest {
     private static String source(String name) throws Exception {
         Path p=Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/"+name);
         if(!Files.exists(p)) p=Path.of("src/main/java/com/shaterguy/chatgptselfrun/"+name);
-        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(p),StandardCharsets.UTF_8);
     }
 }

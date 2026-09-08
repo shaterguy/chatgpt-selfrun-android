@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3010007
-def selfRunDriveVersionName = '3.1.0-dev7'
+def selfRunDriveVersionCode = 3010008
+def selfRunDriveVersionName = '3.1.0-dev8'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -167,10 +167,19 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (!protocol.contains('CONTRACT_VERSION="3.1.0"')
                 || !protocol.contains('SELF_RUN_SKILL_DOCUMENT_ID=SKILL_DOCUMENT_ID')
                 || !protocol.contains('SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo"')
-                || !protocol.contains('contract-version: 3.1.0')
+                || !protocol.contains('REQUEST_ID') || !protocol.contains('TASK_MODE')
+                || !protocol.contains('EXECUTION_KIND') || !protocol.contains('SIGNAL_TYPE')
                 || !protocol.contains('RESULT_DOCUMENT_ID') || !protocol.contains('PREVIOUS_RESULT_DOCUMENT_ID')
-                || !protocol.contains('REQUIREMENT_DOCUMENT_ID') || !protocol.contains('full checkpoint')
-                || !protocol.contains('USER_ACTION_RESOLVED') || !protocol.contains('PARALLEL_MERGE')) throw new GradleException('V3.1 protocol/skill identity and disposable execution contract are required')
+                || !protocol.contains('REQUIREMENT_DOCUMENT_ID') || !protocol.contains('EXECUTION_PROFILE')
+                || !protocol.contains('compactProfileChoices') || !protocol.contains('PROFILE_REGISTRY_CHAT')
+                || !protocol.contains('PROFILE_REGISTRY_WORK') || !protocol.contains('PARALLEL_MERGE')
+                || !protocol.contains('REPAIR_TARGET_DOCUMENT_ID') || !protocol.contains('사용자 추가 지시 원문')
+                || (protocol =~ /static\s+final\s+String\s+CONTRACT\s*=/).find() || protocol.contains('contract-version: 3.1.0')
+                || protocol.contains('RESULT_IDENTITY_TEMPLATE') || protocol.contains('SelfRun3Engine.emptyResult')
+                || protocol.contains('ProfileRegistry.exportChatJson') || protocol.contains('ProfileRegistry.exportWorkJson')
+                || protocol.contains('[최초 요구사항 원문]') || protocol.contains('optString("requirement")')
+                || protocol.contains('phase_completed') || protocol.contains('full checkpoint')
+                || protocol.contains('USER_ACTION_RESOLVED')) throw new GradleException('V3.1 prompt must remain a dynamic compact envelope')
         if (!drive.contains('SelfRun3DriveLookup.findSingleDocumentId') || !drive.contains('REQUIREMENT_READBACK_MISMATCH')
                 || drive.contains('DriveSignalParser')) throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
         if (!power.contains('NORMAL_WAIT_POLL_MS = 30_000L')) throw new GradleException('V3 Drive metadata observation must use bounded 30-second low-frequency polling')
