@@ -19,6 +19,7 @@ final class SelfRunStore {
     static final Object RUN_STATE_LOCK = new Object();
     static final String MODE_CHAT = "CHAT";
     static final String MODE_WORK = "WORK";
+    static final String MODE_HYBRID = "HYBRID";
     static final int DRIVE_SIGNAL_CURSOR_SCHEMA_LEGACY = 1;
     static final int DRIVE_SIGNAL_CURSOR_SCHEMA_PHYSICAL = 2;
 
@@ -129,9 +130,14 @@ final class SelfRunStore {
     }
 
     void start(String runId, String mode, String projectUrl, String requirement, List<Attachment> attachments) {
+        start(runId, mode, projectUrl, requirement, attachments, mode);
+    }
+
+    void start(String runId, String mode, String projectUrl, String requirement,
+               List<Attachment> attachments, String taskMode) {
         String model = MODE_WORK.equals(mode) ? "sol" : "";
         String reasoning = MODE_WORK.equals(mode) ? "xhigh" : "";
-        startInternal(runId, mode, projectUrl, requirement, attachments, model, reasoning);
+        startInternal(runId, mode, projectUrl, requirement, attachments, model, reasoning, taskMode);
     }
 
     void startWork(String runId, String projectUrl, String requirement, String model, String reasoning) {
@@ -140,15 +146,22 @@ final class SelfRunStore {
 
     void startWork(String runId, String projectUrl, String requirement, List<Attachment> attachments,
                    String model, String reasoning) {
+        startWork(runId, projectUrl, requirement, attachments, model, reasoning, MODE_WORK);
+    }
+
+    void startWork(String runId, String projectUrl, String requirement, List<Attachment> attachments,
+                   String model, String reasoning, String taskMode) {
         if (!SelfRunProtocol.validWorkProfile(model, reasoning)) {
             throw new IllegalArgumentException("registered Work profile required");
         }
-        startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning);
+        startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning, taskMode);
     }
 
     private void startInternal(String runId, String mode, String projectUrl, String requirement,
-                               List<Attachment> attachments, String initialModel, String initialReasoning) {
+                               List<Attachment> attachments, String initialModel, String initialReasoning, String taskMode) {
         if (!MODE_CHAT.equals(mode) && !MODE_WORK.equals(mode)) throw new IllegalArgumentException("CHAT or WORK mode required");
+        if (!MODE_HYBRID.equals(taskMode) && !mode.equals(taskMode))
+            throw new IllegalArgumentException("task mode must match actual mode or be HYBRID");
         synchronized (RUN_STATE_LOCK) {
             if (!DriveApiClient.validOpaqueAccountId(driveAccountId())
                     || !DriveApiClient.validFileId(driveRunsBaseFolderId())) {
@@ -160,14 +173,14 @@ final class SelfRunStore {
                 if (ref == null) throw new IllegalArgumentException("trusted ChatGPT project URL required");
                 target = ref.canonicalUrl;
             }
-            startLocked(runId, mode, target, requirement, normalizeDrafts(attachments), initialModel, initialReasoning);
+            startLocked(runId, mode, target, requirement, normalizeDrafts(attachments), initialModel, initialReasoning, taskMode);
         }
     }
 
-private void startLocked(String runId,String mode,String projectUrl,String requirement,List<Attachment> attachments,String initialModel,String initialReasoning){
+private void startLocked(String runId,String mode,String projectUrl,String requirement,List<Attachment> attachments,String initialModel,String initialReasoning,String taskMode){
  long now=System.currentTimeMillis();
  commitOrThrow(prefs.edit().putString("runId",safe(runId)).putLong("createdAt",now).putLong("phaseStartedAt",now)
-  .putString("mode",safe(mode)).putString("projectUrl",safe(projectUrl)).putString("requirement",safe(requirement)).putString("conversationUrl","")
+  .putString("taskMode",safe(taskMode)).putString("mode",safe(mode)).putString("projectUrl",safe(projectUrl)).putString("requirement",safe(requirement)).putString("conversationUrl","")
   .putString("phase",PHASE_DRIVE_ACCOUNT_CHECK).putString("status","Drive 계정 확인 준비")
   .putString("pendingModel",safe(initialModel)).putString("pendingReasoning",safe(initialReasoning))
   .putString("lastErrorCode","").putString("lastErrorMessage","").putString("runDriveAccountId",driveAccountId()).putString("runBaseFolderId",driveRunsBaseFolderId())
@@ -232,6 +245,39 @@ private void startLocked(String runId,String mode,String projectUrl,String requi
     long createdAt() { return prefs.getLong("createdAt", 0L); }
     long phaseStartedAt() { return prefs.getLong("phaseStartedAt", createdAt()); }
     String mode() { return getOr("mode", MODE_WORK); }
+    String taskMode() { return getOr("taskMode", mode()); }
+    void setTaskMode(String value) {
+        if (!MODE_CHAT.equals(value) && !MODE_WORK.equals(value) && !MODE_HYBRID.equals(value))
+            throw new IllegalArgumentException("unsupported task mode");
+        commitOrThrow(prefs.edit().putString("taskMode", value));
+    }
+    /** Current execution projection; immutable task policy remains in taskMode. */
+    void setExecutionProjection(String mode, String model, String reasoning, String conversationUrl) {
+        if (!MODE_CHAT.equals(mode) && !MODE_WORK.equals(mode))
+            throw new IllegalArgumentException("CHAT or WORK execution mode required");
+        String url = safe(conversationUrl);
+        if (!url.isEmpty()) {
+            Uri uri = Uri.parse(url);
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || !"chatgpt.com".equalsIgnoreCase(uri.getHost())
+                    || uri.getUserInfo() != null || (uri.getPort() != -1 && uri.getPort() != 443))
+                throw new IllegalArgumentException("trusted HTTPS conversation URL required");
+            List<String> path = uri.getPathSegments();
+            boolean canonical = path.size() == 2 && "c".equals(path.get(0));
+            boolean project = path.size() == 4 && "g".equals(path.get(0)) && "c".equals(path.get(2));
+            if ((!canonical && !project) || !path.get(path.size() - 1).matches("[A-Za-z0-9_-]{1,200}"))
+                throw new IllegalArgumentException("conversation identity required");
+            url = "https://chatgpt.com/c/" + path.get(path.size() - 1);
+        }
+        synchronized (RUN_STATE_LOCK) {
+            if (mode.equals(mode()) && safe(model).equals(get("pendingModel"))
+                    && safe(reasoning).equals(get("pendingReasoning")) && url.equals(conversationUrl())) return;
+            commitOrThrow(prefs.edit().putString("mode", mode).putString("pendingModel", safe(model))
+                    .putString("pendingReasoning", safe(reasoning)).putString("conversationUrl", url));
+            syncHistory();
+        }
+    }
+
     String projectUrl() { return get("projectUrl"); }
     String defaultProjectUrl() { return canonicalStoredProjectUrl(get("defaultProjectUrl")); }
     static String canonicalStoredProjectUrl(String value) {

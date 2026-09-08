@@ -12,33 +12,31 @@ public final class BootstrapSendLivenessPolicyTest {
     @Test public void browserCallbacksAreBoundedButNormalResponseWaitDoesNotPoll() {
         assertEquals(5_000L, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
         assertEquals(90_000L, SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS);
-        assertEquals(0L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
-        assertEquals(10 * 60_000L, SelfRun3PowerPolicy.MISSED_CALLBACK_PROBE_MS);
-        assertEquals(3, SelfRun3PowerPolicy.MAX_MISSED_CALLBACK_PROBES);
+        assertEquals(60_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
     }
 
     @Test public void preparedSendIsClaimedDurablyBeforeTheBrowserClick() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         String prepared = between(coordinator, "onPrepared(String task", "onDispatched(String task");
         assertTrue(prepared.contains("SelfRun3Engine.Kind.CLAIM_SEND"));
-        assertTrue(prepared.indexOf("ledger.apply") < prepared.indexOf("web.submit(claimed)"));
-        assertTrue(prepared.contains("SelfRun3PowerPolicy.maySend(claimed)"));
+        assertTrue(prepared.indexOf("ledger.apply") < prepared.indexOf("web.submit(claimed.execution(turn))"));
+        assertTrue(prepared.contains("SelfRun3PowerPolicy.maySend(claimed.execution(turn))"));
     }
 
     @Test public void generationWaitDetachesRasterAndReleasesWakeLock() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        String wait = between(coordinator, "case WAIT ->", "case READ_RESULT ->");
+        String wait = between(coordinator, "case WAIT, READ_RESULT, CHECK_RECEIPT ->", "case COMMIT ->");
         assertTrue(wait.contains("web.detach()"));
         assertTrue(wait.contains("releaseWakeLock()"));
-        assertTrue(wait.contains("scheduleMissedProbe"));
-        assertFalse(wait.contains("scheduleNext("));
+        assertFalse(wait.contains("scheduleMissedProbe"));
+        assertTrue(wait.contains("scheduleNext("));
     }
 
     @Test public void unknownSubmissionOutcomeNeverReopensSend() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(web.contains("SUBMISSION_OUTCOME_UNKNOWN"));
-        assertTrue(coordinator.contains("if (after.flag(\"sendClaimed\")) scheduleMissedProbe"));
+        assertTrue(coordinator.contains("SelfRun3Engine.waitingExecutions(state)"));
         assertFalse(coordinator.contains("SUBMISSION_OUTCOME_UNKNOWN\")" + ", web.submit"));
     }
 

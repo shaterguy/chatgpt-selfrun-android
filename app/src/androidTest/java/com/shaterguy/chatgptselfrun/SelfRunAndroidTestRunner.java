@@ -7,6 +7,9 @@ import androidx.test.runner.AndroidJUnitRunner;
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
     private static final String[] V3_REQUIRED = {
             "com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3ParallelLedgerAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3InputCommitAndroidTest",
             "com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest",
             "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
             "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest",
@@ -26,6 +29,13 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
 
     @Override public void onCreate(Bundle arguments) {
         Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
+        String selected = effective.getString("class", "").trim();
+        String upgrade = "com.shaterguy.chatgptselfrun.SelfRun3UpgradePersistenceAndroidTest#";
+        if (selected.equals(upgrade + "seedUpgradeState")
+                || selected.equals(upgrade + "verifyUpgradeState")) {
+            super.onCreate(effective);
+            return;
+        }
         String[] required = BuildConfig.VERSION_NAME != null && BuildConfig.VERSION_NAME.startsWith("3.")
                 ? V3_REQUIRED : V2_REQUIRED;
         for (String item : required) appendRequiredClass(effective, item);

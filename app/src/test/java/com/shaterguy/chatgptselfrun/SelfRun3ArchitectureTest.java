@@ -1,52 +1,39 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
-
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-
 import static org.junit.Assert.*;
 
 public final class SelfRun3ArchitectureTest {
-    @Test public void foregroundServiceIsOnlyV3Shell() throws Exception {
-        String service = source("SelfRunService.java");
+    @Test public void foregroundServiceRemainsLedgerCoordinatorShell() throws Exception {
+        String service=source("SelfRunService.java");
         assertTrue(service.contains("SelfRun3Coordinator"));
-        assertTrue(service.contains("V3_LEGACY_RUN_PRESERVED"));
         assertFalse(service.contains("DriveSignalParser.scan"));
         assertFalse(service.contains("rolloverConversation"));
-        assertFalse(service.contains("PHASE_POST_PROTOCOL_DRIVE_SYNC"));
-        assertTrue(service.length() < 12_000);
     }
-
-    @Test public void normalGenerationHasNoPollingAndDetachesRasterOutput() throws Exception {
-        assertEquals(0L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
-        String coordinator = source("SelfRun3Coordinator.java");
-        String host = source("HeadlessWebViewHost.java");
-        assertTrue(coordinator.contains("SelfRun3PowerPolicy.MISSED_CALLBACK_PROBE_MS"));
-        assertTrue(coordinator.contains("web.detach()"));
-        assertTrue(coordinator.contains("releaseWakeLock()"));
-        assertTrue(host.contains("virtualDisplay.setSurface(null)"));
+    @Test public void resultWaitHasNoAssistantOrComposerObservation() throws Exception {
+        String c=source("SelfRun3Coordinator.java");
+        assertFalse(c.contains("probeReceipt("));
+        assertFalse(c.contains("runMissedProbe("));
+        assertFalse(c.contains("web.inspect("));
+        assertTrue(c.contains("web.detach()"));
+        assertTrue(c.contains("releaseWakeLock()"));
+        assertTrue(source("HeadlessWebViewHost.java").contains("virtualDisplay.setSurface(null)"));
     }
-
-    @Test public void chatBootstrapAndContinuationProfilesRemainDistinct() throws Exception {
-        String web = source("SelfRun3WebAdapter.java");
-        assertTrue(web.contains("RequestProfileScript.setChatProfiles"));
-        assertTrue(web.contains("c.optString(\"chatBootstrap\"), c.optString(\"chatContinuation\")"));
-        assertTrue(web.contains("RequestProfileScript.setChatReasoning(c.optString(\"chatContinuation\"))"));
+    @Test public void contractCarriesCheckpointProfilesAndMergeInputs() {
+        assertTrue(SelfRun3Protocol.CONTRACT.contains("full checkpoint"));
+        assertTrue(SelfRun3Protocol.CONTRACT.contains("USER_ACTION_RESOLVED"));
+        assertTrue(SelfRun3Protocol.CONTRACT.contains("PARALLEL_MERGE"));
+        assertTrue(SelfRun3Protocol.CONTRACT.contains("mutation_boundary"));
     }
-
-    @Test public void v3HasNoAiMaintenanceOrSelfPatchPath() throws Exception {
-        String protocol = source("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("AI 유지보수·자체 코드 수정·자동 패치 에이전트가 없다"));
-        assertFalse(source("SelfRun3Coordinator.java").contains("downloadCode"));
-        assertFalse(source("SelfRun3Coordinator.java").contains("applyPatch"));
+    @Test public void coordinatorDoesNotDownloadExecutablePatches() throws Exception {
+        String c=source("SelfRun3Coordinator.java");
+        assertFalse(c.contains("downloadCode")); assertFalse(c.contains("applyPatch"));
     }
-
     private static String source(String name) throws Exception {
-        Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        Path p=Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/"+name);
+        if(!Files.exists(p)) p=Path.of("src/main/java/com/shaterguy/chatgptselfrun/"+name);
+        return Files.readString(p);
     }
 }

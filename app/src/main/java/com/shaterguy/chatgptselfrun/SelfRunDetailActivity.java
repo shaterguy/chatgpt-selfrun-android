@@ -2,6 +2,9 @@ package com.shaterguy.chatgptselfrun;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
+import android.widget.Toast;
+import org.json.JSONArray;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -14,6 +17,9 @@ import java.util.Date;
 
 public final class SelfRunDetailActivity extends Activity {
     public static final String EXTRA_RUN_ID = "selfrun.runId";
+    private LinearLayout conversations;
+    private String detailRunId = "";
+    private int historyGeneration;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,6 +51,11 @@ public final class SelfRunDetailActivity extends Activity {
         page.addView(Ui.keyValue(this, "턴", String.valueOf(item.optInt("turn"))));
         page.addView(Ui.keyValue(this, "모델 조합", model(item)));
         String resolvedRunId = item.optString("runId");
+        detailRunId = resolvedRunId;
+        page.addView(Ui.section(this, "대화 이력"));
+        conversations = new LinearLayout(this);
+        conversations.setOrientation(LinearLayout.VERTICAL);
+        page.addView(conversations);
         page.addView(Ui.section(this, "로그"));
         page.addView(Ui.setting(this, R.drawable.ic_history, "실행 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)));
         page.addView(Ui.setting(this, R.drawable.ic_history, "디버그 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG)));
@@ -67,6 +78,94 @@ public final class SelfRunDetailActivity extends Activity {
         if (SelfRunRestartPolicy.restartable(item))
             page.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(resolvedRunId)));
         Ui.setContent(this, scroll);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (conversations == null) return;
+        final int generation = ++historyGeneration;
+        conversations.removeAllViews();
+        conversations.addView(Ui.muted(this, "대화 이력을 불러오는 중입니다."));
+        new Thread(() -> {
+            JSONArray entries = new JSONArray();
+            String taskMode = "";
+            String failure = "";
+            try (SelfRun3Ledger ledger = new SelfRun3Ledger(getApplicationContext())) {
+                SelfRun3Engine.State state = ledger.load(detailRunId);
+                if (state != null) { entries = state.history(); taskMode = state.taskMode(); }
+            } catch (RuntimeException error) {
+                failure = "대화 이력을 읽지 못했습니다. 다시 열어 확인하세요.";
+            }
+            final JSONArray result = entries;
+            final String selectedMode = taskMode;
+            final String message = failure;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || generation != historyGeneration) return;
+                conversations.removeAllViews();
+                if (!selectedMode.isEmpty()) conversations.addView(Ui.keyValue(this, "작업 모드", selectedMode));
+                if (!message.isEmpty()) { conversations.addView(Ui.body(this, message)); return; }
+                if (result.length() == 0) {
+                    JSONObject old = new SelfRunHistoryStore(this).get(detailRunId);
+                    String url = old == null ? "" : canonicalConversationUrl(old.optString("conversationUrl"));
+                    if (!url.isEmpty()) conversations.addView(Ui.button(this, "ChatGPT 대화 열기", v -> openConversation(url)));
+                    else conversations.addView(Ui.muted(this, "아직 저장된 대화가 없습니다."));
+                    return;
+                }
+                for (int i = 0; i < result.length(); i++) {
+                    JSONObject entry = result.optJSONObject(i);
+                    if (entry != null) renderConversation(entry);
+                }
+            });
+        }, "selfrun-history").start();
+    }
+
+    private void renderConversation(JSONObject entry) {
+        String kind = entry.optString("executionKind", "NORMAL");
+        String label = switch (kind) {
+            case "PARALLEL_BRANCH" -> "병렬작업 " + entry.optString("branchId");
+            case "PARALLEL_MERGE" -> "병렬 결과 통합";
+            case "USER_INTERVENTION" -> "사용자 개입";
+            case "REPAIR" -> "결과 복구";
+            default -> entry.optString("phase");
+        };
+        conversations.addView(Ui.body(this, "TURN " + entry.optInt("turn") + " · " + label));
+        conversations.addView(Ui.muted(this, entry.optString("mode") + " · "
+                + empty(entry.optString("model")) + " · " + empty(entry.optString("reasoning"))));
+        conversations.addView(Ui.muted(this, time(entry.optLong("submittedAt",
+                entry.optLong("createdAt")))));
+        conversations.addView(Ui.muted(this, entry.optString("dispatchStatus") + " · "
+                + entry.optString("resultStatus")));
+        if ("USER_ACTION_RESOLVED".equals(entry.optString("resultStatus")))
+            conversations.addView(Ui.body(this, "사용자 개입 완료"));
+        else if (entry.optBoolean("userIntervention") || "USER_ACTION_REQUIRED".equals(entry.optString("resultStatus")))
+            conversations.addView(Ui.body(this, "사용자 조치가 필요한 대화입니다."));
+        String url = canonicalConversationUrl(entry.optString("conversationUrl"));
+        if (!url.isEmpty()) conversations.addView(Ui.button(this, "ChatGPT 대화 열기", v -> openConversation(url)));
+        else conversations.addView(Ui.muted(this, "대화 주소 확인 중"));
+        conversations.addView(Ui.divider(this));
+    }
+
+    static String canonicalConversationUrl(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        try {
+            Uri uri = Uri.parse(raw);
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || !"chatgpt.com".equalsIgnoreCase(uri.getHost())
+                    || uri.getUserInfo() != null || (uri.getPort() != -1 && uri.getPort() != 443)) return "";
+            java.util.List<String> segments = uri.getPathSegments();
+            int index = segments.indexOf("c");
+            if (index < 0 || index + 2 != segments.size()) return "";
+            String id = segments.get(index + 1);
+            if (!id.matches("[A-Za-z0-9_-]{1,200}")) return "";
+            return "https://chatgpt.com/c/" + id;
+        } catch (RuntimeException invalid) { return ""; }
+    }
+
+    private void openConversation(String url) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+        catch (android.content.ActivityNotFoundException error) {
+            Toast.makeText(this, "대화를 열 수 있는 앱이나 브라우저가 없습니다.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void openLogs(String runId, String kind) {

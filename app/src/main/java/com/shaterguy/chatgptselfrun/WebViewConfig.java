@@ -10,7 +10,11 @@ final class WebViewConfig {
 
     /** Shared by the visible calibration WebView and the background automation WebView. */
     @SuppressWarnings("SetJavaScriptEnabled")
-    static boolean applyAutomation(WebView webView) {
+    static boolean applyAutomation(WebView webView) { return applyAutomation(webView, false); }
+
+    static boolean applySelfRun3Automation(WebView webView) { return applyAutomation(webView, true); }
+
+    private static boolean applyAutomation(WebView webView, boolean dispatchOnly) {
         ChatReasoningPreferenceStore.initialize(webView.getContext());
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(false);
@@ -27,6 +31,11 @@ final class WebViewConfig {
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        if (dispatchOnly) {
+            if (!SelfRun3DispatchScript.install(webView)) return false;
+            RequestProfileScript.installDocumentStart(webView);
+            return true;
+        }
         boolean protocolAvailable = TurnProtocolLogBridge.install(webView);
         if (!protocolAvailable) {
             WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());

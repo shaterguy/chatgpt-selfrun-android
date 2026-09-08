@@ -60,6 +60,11 @@ final class SelfRun3DriveAdapter {
         require(parsed == null, "RESULT_EXISTS_BEFORE_DISPATCH");
         return s;
     }
+    String resultVersion(String token, SelfRun3Engine.State s) throws Exception {
+        verifyAccount(token, s);
+        DriveApiClient.Metadata metadata = validateDocument(token, s, s.resource("resultDocumentId"));
+        return metadata.modifiedTime + ":" + metadata.version;
+    }
     String readResult(String token, SelfRun3Engine.State s) throws Exception {
         verifyAccount(token, s); validateDocument(token, s, s.resource("resultDocumentId"));
         checkpoint();
@@ -69,14 +74,29 @@ final class SelfRun3DriveAdapter {
             SelfRun3Engine.parseResult(raw, s);
             return raw;
         } catch (RuntimeException incompleteOrMalformed) {
-            // A result body may be observed between delete/insert operations. Treat it as pending here;
-            // bounded retry and one RESULT_REPAIR request decide whether the condition persists.
+            if (isInvalidCommittedResult(raw, s)) throw new InvalidCommittedResultException();
+            // Partial writes and foreign identities cannot establish that automatic work ended.
             return SelfRun3Engine.emptyResult(s).toString();
         }
     }
+    static boolean isInvalidCommittedResult(String raw, SelfRun3Engine.State s) {
+        if (raw == null || SelfRun3Engine.utf8(raw) > SelfRun3Engine.MAX_RESULT_BYTES) return false;
+        try {
+            JSONObject body = SelfRun3StrictJson.parseObject(raw);
+            if (!SelfRun3Engine.RESULT_SCHEMA.equals(body.opt("schema"))
+                    || !s.taskId().equals(body.opt("task_id"))
+                    || !s.turnId().equals(body.opt("turn_id"))
+                    || !s.resource("resultDocumentId").equals(body.opt("document_id"))
+                    || !Boolean.TRUE.equals(body.opt("committed"))) return false;
+            try { SelfRun3Engine.parseResult(raw, s); return false; }
+            catch (RuntimeException invalidPayload) { return true; }
+        } catch (RuntimeException ambiguousIdentity) { return false; }
+    }
+    static final class InvalidCommittedResultException extends Exception { }
+
     private SelfRun3Engine.State ensureDocument(String token, SelfRun3Engine.State original, String key, String intentKey, String name) throws Exception {
-        SelfRun3Engine.State s = ledger.load(original.taskId());
-        require(s.turnId().equals(original.turnId()), "STALE_TURN");
+        SelfRun3Engine.State s = ledger.loadExecution(original.taskId(), original.turnId());
+        require(s != null, "STALE_TURN");
         if (!s.resource(key).isEmpty()) { validateDocument(token, s, s.resource(key)); return s; }
         checkpoint();
         String foundId = SelfRun3DriveLookup.findSingleDocumentId(token, name, s.resource("folderId"));
@@ -90,10 +110,11 @@ final class SelfRun3DriveAdapter {
         s = pin(s, key, created.id);
         validateDocument(token, s, created.id); return s;
     }
-    private void validateDocument(String token, SelfRun3Engine.State s, String id) throws Exception {
+    private DriveApiClient.Metadata validateDocument(String token, SelfRun3Engine.State s, String id) throws Exception {
         checkpoint(); DriveApiClient.Metadata m = api.getMetadata(token, id);
         require(id.equals(m.id) && s.resource("folderId").equals(m.parentId) && DriveApiClient.MIME_DOCUMENT.equals(m.mimeType)
                 && !m.trashed && !m.shared && m.isAppAuthorized, "DOCUMENT_BOUNDARY_MISMATCH");
+        return m;
     }
     private void verifyAccount(String token, SelfRun3Engine.State s) throws Exception {
         checkpoint();
@@ -136,7 +157,7 @@ final class SelfRun3DriveAdapter {
     }
     private SelfRun3Engine.State pin(SelfRun3Engine.State s, String key, String value) {
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "key", key); SelfRun3Engine.put(payload, "value", value);
-        return ledger.apply(new SelfRun3Engine.Event("resource-" + UUID.randomUUID(), SelfRun3Engine.Kind.RESOURCE, s.taskId(), s.turnId(), payload));
+        return ledger.apply(new SelfRun3Engine.Event("resource-" + UUID.randomUUID(), SelfRun3Engine.Kind.RESOURCE, s.taskId(), s.turnId(), payload)).execution(s.turnId());
     }
     private void checkpoint() throws IOException { if (!permitted.getAsBoolean()) throw new IOException("OPERATION_CANCELLED"); }
     private static void require(boolean value, String code) { if (!value) throw new IllegalStateException(code); }

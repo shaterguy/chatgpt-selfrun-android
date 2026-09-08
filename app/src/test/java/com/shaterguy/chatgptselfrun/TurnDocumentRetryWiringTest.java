@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
+import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -11,27 +12,32 @@ import static org.junit.Assert.*;
 
 /** V3 result recovery is pinned-document reconciliation, not a V2 title-signal retry cycle. */
 public final class TurnDocumentRetryWiringTest {
-    @Test public void resultReadRetriesAreFiniteAndThenOneRepairRequestIsAllowed() throws Exception {
-        assertEquals(5_000L, SelfRun3PowerPolicy.resultRetryDelay(0));
-        assertEquals(90_000L, SelfRun3PowerPolicy.resultRetryDelay(4));
-        assertEquals(-1L, SelfRun3PowerPolicy.resultRetryDelay(5));
-        String coordinator = src("SelfRun3Coordinator.java");
-        assertTrue(coordinator.contains("scheduleResultRetry"));
-        assertTrue(coordinator.contains("repairResult(state)"));
-        assertTrue(coordinator.contains("current.number(\"repairAttempt\") != 0"));
-        assertTrue(coordinator.contains("V3_RESULT_REPAIR_EXHAUSTED"));
+    @Test public void onlyAnExactCommittedInvalidPayloadAllowsRepair() {
+        JSONObject config = new JSONObject(); SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.put(config, "reasoning", "medium");
+        SelfRun3Engine.State state = SelfRun3Engine.create("task", "task:turn:1", config);
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "key", "resultDocumentId"); SelfRun3Engine.put(payload, "value", "result");
+        state = SelfRun3Engine.reduce(state, new SelfRun3Engine.Event("pin", SelfRun3Engine.Kind.RESOURCE,
+                state.taskId(), state.turnId(), payload));
+        JSONObject body = SelfRun3Engine.emptyResult(state);
+        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "committed", "true");
+        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "committed", true);
+        assertTrue(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "turn_id", "other");
+        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult("{\"committed\":true", state));
     }
 
-    @Test public void repairCreatesFreshRequestWithoutChangingLogicalTurnOrResultDocument() throws Exception {
-        String engine = src("SelfRun3Engine.java");
-        String protocol = src("SelfRun3Protocol.java");
+    @Test public void pendingReadsNeverLaunchRepairByElapsedTime() throws Exception {
         String coordinator = src("SelfRun3Coordinator.java");
-        assertTrue(engine.contains("case REPAIR"));
-        assertTrue(engine.contains("!before.requestId().equals(nextRequest)"));
-        assertTrue(engine.contains("put(v, \"requestId\", nextRequest)"));
-        assertFalse(between(engine, "case REPAIR", "case PAUSE").contains("put(v, \"turnId\""));
-        assertTrue(protocol.contains("repair(SelfRun3Engine.State state, String repairRequestId)"));
-        assertTrue(coordinator.contains("SelfRun3Protocol.repair(current, repairRequest)"));
+        String pending = between(coordinator, "private void scheduleResultRetry", "private void repairResult");
+        assertTrue(pending.contains("NORMAL_WAIT_POLL_MS"));
+        assertFalse(pending.contains("repairResult("));
+        assertTrue(coordinator.contains("InvalidCommittedResultException"));
+        assertTrue(coordinator.contains("SelfRun3Engine.Kind.REPAIR"));
     }
 
     @Test public void malformedOrPartiallyWrittenResultIsPendingInsteadOfBlindlyCreatingAnotherDocument() throws Exception {
@@ -48,15 +54,15 @@ public final class TurnDocumentRetryWiringTest {
         String repair = between(coordinator, "private void repairResult", "private void commitTurn");
         assertFalse(repair.contains("SelfRun3UserInput.consumeIfRevision"));
         assertFalse(repair.contains("SelfRun3UserInput.snapshot"));
-        String commit = between(coordinator, "private void commitTurn", "private void scheduleNetworkRetry");
-        assertTrue(commit.contains("SelfRun3UserInput.Snapshot latest"));
+        String commit = src("SelfRun3UserInput.java");
+        assertTrue(commit.contains("Snapshot latest"));
         assertTrue(commit.contains("lateInput"));
     }
 
-    @Test public void v3ContractNeverAsksForLegacyTurnCompletedSignalDocument() throws Exception {
+    @Test public void v3ContractUsesFreshExecutionIdentity() throws Exception {
         String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("이 턴의 완료/다음 행동을 위 RESULT_DOCUMENT_ID 본문 하나에만 확정한다"));
-        assertTrue(protocol.contains("구형 SELF_RUN_TURN_COMPLETED/DONE 제목 문서를 새로 만들거나"));
+        assertTrue(protocol.contains("RESULT_DOCUMENT_ID="));
+        assertTrue(protocol.contains("REQUEST_ID="));
         assertFalse(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
     }
 

@@ -31,7 +31,7 @@ public final class SelfRunRendererCallbackFenceTest {
 
     @Test public void rendererDeathDisposesOnlyCurrentAdapterHostThenReportsFailure() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        String callback = between(web, "onRenderProcessGone", "});\n        web.loadUrl");
+        String callback = between(web, "onRenderProcessGone", "private void advance");
         assertTrue(callback.contains("if (view == web)"));
         assertTrue(callback.contains("disposeHost()"));
         assertTrue(callback.contains("fail(\"RENDERER_GONE\")"));

@@ -47,7 +47,9 @@ final class HeadlessWebViewHost {
         activeWebView = webView;
     }
 
-    static HeadlessWebViewHost create(Context context) {
+    static HeadlessWebViewHost create(Context context) { return create(context, true); }
+
+    static HeadlessWebViewHost create(Context context, boolean observeLegacyProtocol) {
         HandlerThread drainThread = null;
         ImageReader imageReader = null;
         Surface surface = null;
@@ -73,7 +75,7 @@ final class HeadlessWebViewHost {
             }
             presentation = new Presentation(context, display.getDisplay(), android.R.style.Theme_DeviceDefault_NoActionBar);
             FrameLayout root = new FrameLayout(presentation.getContext());
-            WebView webView = new FocusPreservingWebView(presentation.getContext());
+            WebView webView = new FocusPreservingWebView(presentation.getContext(), observeLegacyProtocol);
             webView.setFocusable(true);
             webView.setFocusableInTouchMode(true);
             root.addView(webView, new FrameLayout.LayoutParams(
@@ -91,7 +93,7 @@ final class HeadlessWebViewHost {
             if (surface != null) try { surface.release(); } catch (Throwable ignored) {}
             if (imageReader != null) try { imageReader.close(); } catch (Throwable ignored) {}
             if (drainThread != null) try { drainThread.quitSafely(); } catch (Throwable ignored) {}
-            WebView fallback = new FocusPreservingWebView(context);
+            WebView fallback = new FocusPreservingWebView(context, observeLegacyProtocol);
             fallback.setFocusable(true);
             fallback.setFocusableInTouchMode(true);
             fallback.requestFocus();
@@ -144,10 +146,13 @@ final class HeadlessWebViewHost {
     }
 
     private static final class FocusPreservingWebView extends WebView {
-        FocusPreservingWebView(Context context) { super(context); }
+        private final boolean observeLegacyProtocol;
+        FocusPreservingWebView(Context context, boolean observeLegacyProtocol) {
+            super(context); this.observeLegacyProtocol = observeLegacyProtocol;
+        }
 
         @Override public void setWebViewClient(WebViewClient client) {
-            super.setWebViewClient(client == null ? null
+            super.setWebViewClient(client == null || !observeLegacyProtocol ? client
                     : new WorkProtocolObservingWebViewClient(getContext(), client));
         }
 

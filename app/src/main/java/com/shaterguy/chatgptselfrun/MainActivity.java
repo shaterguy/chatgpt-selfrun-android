@@ -41,7 +41,6 @@ public final class MainActivity extends Activity {
     private TextView technicalDetails;
     private TextView nextInputStatus;
     private EditText nextInputEditor;
-    private Button immediateInputButton;
     private Button nextInputSaveButton;
     private Button nextInputDeleteButton;
     private Button pauseButton;
@@ -50,7 +49,6 @@ public final class MainActivity extends Activity {
     private Button currentLogsButton;
     private String lastNextInputRunId = "";
     private String lastNextInputStored = "";
-    private boolean immediateInputInFlight;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,7 +102,9 @@ public final class MainActivity extends Activity {
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
         stopButton = Ui.dangerButton(this, "중지", v -> stopSelfRun());
-        currentLogsButton = Ui.textButton(this, "로그", v -> openCurrentLogs());
+        currentLogsButton = Ui.textButton(this, "대화 이력·로그", v -> startActivity(
+                new Intent(this, SelfRunDetailActivity.class)
+                        .putExtra(SelfRunDetailActivity.EXTRA_RUN_ID, store.runId())));
         Button detailsButton = Ui.textButton(this, "실행 정보", v -> {
             technicalDetails.setVisibility(technicalDetails.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
         });
@@ -118,11 +118,10 @@ public final class MainActivity extends Activity {
         nextInputEditor.setMinLines(Ui.isExpanded(this) ? 6 : 2);
         nextInputEditor.setMaxLines(Ui.isExpanded(this) ? 14 : 7);
         nextInputEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        immediateInputButton = Ui.outlinedButton(this, "즉시 보내기", v -> forceImmediateInput());
-        nextInputSaveButton = Ui.tonalButton(this, "다음 턴 예약", v -> saveNextInput());
+        nextInputSaveButton = Ui.tonalButton(this, "다음 실행 예약", v -> saveNextInput());
         nextInputDeleteButton = Ui.textButton(this, "예약 삭제", v -> deleteNextInput());
         composerPanel = Ui.card(this, Ui.section(this, "추가 지시"), nextInputStatus, nextInputEditor,
-                Ui.actionStrip(this, immediateInputButton, nextInputSaveButton), nextInputDeleteButton);
+                Ui.actionStrip(this, nextInputSaveButton), nextInputDeleteButton);
         if (Ui.isExpanded(this)) {
             ScrollView paneScroll = new ScrollView(this);
             LinearLayout pane = Ui.page(this);
@@ -205,8 +204,10 @@ public final class MainActivity extends Activity {
     private String displayRuntimeStatus(TurnProtocolUiState.Snapshot protocol,
                                         boolean paused, boolean terminal) {
         if (store.userStopped()) return "사용자 중지";
-        if (paused) return store.lastErrorCode().isEmpty() ? "일시정지" : "일시정지 · 오류 확인 필요";
+        if (paused) return store.phase().startsWith("V3_") ? store.status()
+                : store.lastErrorCode().isEmpty() ? "일시정지" : "일시정지 · 오류 확인 필요";
         String phase = store.phase();
+        if (phase.startsWith("V3_")) return store.status();
         if (SelfRunStore.PHASE_DONE.equals(phase)) return "작업 완료";
         if (SelfRunStore.PHASE_IDLE.equals(phase)) return "실행 종료";
         if (!store.lastErrorCode().isEmpty()) return "오류 확인 필요";
@@ -251,57 +252,23 @@ public final class MainActivity extends Activity {
         lastNextInputStored = stored;
         nextInputEditor.setEnabled(editable);
         nextInputEditor.setVisibility(unavailable ? View.GONE : View.VISIBLE);
-        immediateInputButton.setEnabled(editable && !immediateInputInFlight);
-        immediateInputButton.setVisibility(unavailable ? View.GONE : View.VISIBLE);
-        nextInputSaveButton.setEnabled(editable && !immediateInputInFlight);
+        nextInputSaveButton.setEnabled(editable);
         nextInputSaveButton.setVisibility(unavailable ? View.GONE : View.VISIBLE);
-        nextInputDeleteButton.setEnabled(editable && !stored.isEmpty() && !immediateInputInFlight);
+        nextInputDeleteButton.setEnabled(editable && !stored.isEmpty());
         nextInputDeleteButton.setVisibility(!unavailable && !stored.isEmpty() ? View.VISIBLE : View.GONE);
 
         if (runId.isEmpty()) {
             nextInputStatus.setText("");
-        } else if (immediateInputInFlight) {
-            nextInputStatus.setText("전송 중");
+
         } else if (editable && stored.isEmpty()) {
             nextInputStatus.setText("");
         } else if (editable) {
-            nextInputStatus.setText("예약됨");
+            nextInputStatus.setText("다음 새 대화에 반영됩니다.");
         } else if (locked) {
             nextInputStatus.setText("전송 준비 중 · 수정할 수 없음");
         } else {
             nextInputStatus.setText("");
         }
-    }
-
-    private void forceImmediateInput() {
-        String runId = store.runId();
-        String value = nextInputEditor.getText().toString();
-        if (value.trim().isEmpty()) {
-            Toast.makeText(this, "지시를 입력하세요.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!UserNextInputStore.withinUtf8Limit(value, UserNextInputStore.MAX_USER_UTF8_BYTES)) {
-            Toast.makeText(this, "입력 내용이 허용 길이를 초과했습니다.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (immediateInputInFlight || runId.isEmpty()) return;
-        immediateInputInFlight = true;
-        nextInputEditor.clearFocus();
-        refreshNextInput(runId);
-        UserImmediateInputCoordinator.submit(store, runLog, value, result -> {
-            if (isFinishing() || isDestroyed()) return;
-            immediateInputInFlight = false;
-            String message;
-            if (UserImmediateInputCoordinator.OUTCOME_SENT.equals(result.outcome)) {
-                message = "전송했습니다.";
-            } else if (UserImmediateInputCoordinator.OUTCOME_DEFERRED.equals(result.outcome)) {
-                message = "지금 전송할 수 없어 다음 턴에 예약했습니다.";
-            } else {
-                message = "강제입력을 안전하게 확정하지 못했습니다. 로그를 확인하세요.";
-            }
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-            refreshCurrent();
-        });
     }
 
     private void saveNextInput() {
