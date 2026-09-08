@@ -15,7 +15,7 @@ public final class TestAppVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.0.1-dev18'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.0.1-dev19'"));
         assertTrue(gradle.contains("qaApp {"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
