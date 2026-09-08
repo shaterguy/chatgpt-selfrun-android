@@ -38,6 +38,6 @@ public final class SelfRun3DispatchScriptTest {
     private static String source(String name) throws Exception {
         Path p = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(p)) p = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        return Files.readString(p, StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
     }
 }
