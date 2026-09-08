@@ -35,8 +35,10 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertTrue(preferences.contains("putString(KEY_REASONING, selection.reasoning)"));
 
         assertTrue(store.contains("void startWork(String runId, String projectUrl, String requirement"));
+        assertTrue(activity.contains("workProfile.signalModel, workProfile.signalReasoning, selectedTaskMode)"));
+        assertFalse(activity.contains("store.setTaskMode(selectedTaskMode)"));
         assertTrue(store.contains("SelfRunProtocol.validWorkProfile(model, reasoning)"));
-        assertTrue(store.contains("startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning)"));
+        assertTrue(store.contains("startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning, taskMode)"));
         assertTrue(store.contains("putString(\"pendingModel\",safe(initialModel)).putString(\"pendingReasoning\",safe(initialReasoning))"));
     }
 

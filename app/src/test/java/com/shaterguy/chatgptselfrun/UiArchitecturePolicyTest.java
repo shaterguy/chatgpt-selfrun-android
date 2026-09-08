@@ -14,8 +14,9 @@ public final class UiArchitecturePolicyTest {
         String main = src("MainActivity.java");
         assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
         assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
-        assertTrue(main.contains("다음 턴 예약"));
-        assertTrue(main.contains("즉시 보내기"));
+        assertTrue(main.contains("다음 실행 예약"));
+        assertFalse(main.contains("즉시 보내기"));
+        assertTrue(main.contains("UserNextInputStore.save(runId, nextInputEditor.getText().toString())"));
         assertTrue(main.contains("pauseButton.setVisibility(running ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("resumeButton.setVisibility(paused ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("if (Ui.isExpanded(this))"));

@@ -10,7 +10,7 @@ public class DriveVariantPolicyTest {
         assertTrue(g.matches("(?s).*selfRunDriveVersionCode = [0-9]+.*"));
         assertTrue(g.matches("(?s).*selfRunDriveVersionName = '[0-9]+\\.[0-9]+\\.[0-9]+(-(dev|rc)[0-9]+)?'.*"));
         assertTrue(g.contains("com.shaterguy.chatgptselfrun.drive"));
-        assertTrue(a.contains("MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK}"));
+        assertTrue(a.contains("MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK, SelfRunStore.MODE_HYBRID}"));
         assertFalse(a.contains("HybridRunProfileStore"));
         assertTrue(a.contains("requirement.setMinLines(Ui.isExpanded(this) ? 12 : 6)"));
         assertTrue(a.contains("setVerticalScrollBarEnabled(false)"));

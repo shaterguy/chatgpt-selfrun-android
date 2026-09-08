@@ -59,11 +59,27 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(commit.contains("lateInput"));
     }
 
-    @Test public void v3ContractUsesFreshExecutionIdentity() throws Exception {
-        String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("RESULT_DOCUMENT_ID="));
-        assertTrue(protocol.contains("REQUEST_ID="));
-        assertFalse(protocol.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
+    @Test public void v3ContractUsesFreshExecutionIdentity() {
+        JSONObject config = new JSONObject();
+        SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.put(config, "reasoning", "medium");
+        SelfRun3Engine.State state = SelfRun3Engine.create("task", "task:turn:1", config);
+        for (String[] entry : new String[][]{
+                {"folderId", "folder"}, {"requirementDocumentId", "requirement"},
+                {"resultDocumentId", "resultdoc"}}) {
+            JSONObject resource = new JSONObject();
+            SelfRun3Engine.put(resource, "key", entry[0]);
+            SelfRun3Engine.put(resource, "value", entry[1]);
+            state = SelfRun3Engine.reduce(state, new SelfRun3Engine.Event("pin:" + entry[0],
+                    SelfRun3Engine.Kind.RESOURCE, state.taskId(), state.turnId(), resource));
+        }
+        String prompt = SelfRun3Protocol.prompt(state, "new user input");
+        assertTrue(prompt.contains("\nRESULT_DOCUMENT_ID=resultdoc\n"));
+        assertTrue(prompt.contains("\nREQUEST_ID=" + state.requestId() + "\n"));
+        assertTrue(prompt.contains("\nTURN_ID=" + state.turnId() + "\n"));
+        assertTrue(prompt.contains("\nREQUIREMENT_DOCUMENT_ID=requirement\n"));
+        assertTrue(prompt.contains("\nnew user input\n"));
+        assertFalse(prompt.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));
     }
 
     private static String between(String source, String start, String end) {
