@@ -58,6 +58,7 @@ final class SelfRun3WebAdapter {
     private String lastPrepareTrace = "";
     private String observedRequest = "", acceptedRequest = "", endedRequest = "";
     private String conversationProbeKey = "";
+    private String pageSnapshotRequest = "", pageSnapshotTimeoutRequest = "";
     private Consumer<JSONObject> pendingInspection;
 
     SelfRun3WebAdapter(Context context, Listener listener) {
@@ -163,6 +164,7 @@ final class SelfRun3WebAdapter {
         host = HeadlessWebViewHost.create(context);
         web = host.webView();
         active = this;
+        installPageDiagnostics();
         if (detached) host.detachOutput();
         if (!WebViewConfig.applyAutomation(web)) {
             fail("TURN_PROTOCOL_UNAVAILABLE");
@@ -235,6 +237,10 @@ final class SelfRun3WebAdapter {
     private void advance() {
         if (!preparing || closed || loading || web == null || state == null) return;
         if (SystemClock.elapsedRealtime() - prepareStarted >= SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS) {
+            if (state.turn() > 1 && !state.requestId().equals(pageSnapshotTimeoutRequest)) {
+                pageSnapshotTimeoutRequest = state.requestId();
+                capturePageDiagnostics("PREPARE_TIMEOUT");
+            }
             fail("WEB_PREPARATION_TIMEOUT");
             return;
         }
@@ -503,6 +509,65 @@ final class SelfRun3WebAdapter {
         if (state == null || !state.taskId().equals(diagnosticStore.runId())) return;
         diagnosticLog.record(diagnosticStore, "V3_WEB_TRACE", "stage=PREPARE_EVAL;status="
                 + safeTrace(status) + ";step=" + step + detail);
+        if (state.turn() > 1 && SelfRun3ComposerTransport.COMPOSER_WAITING.equals(status)
+                && !state.requestId().equals(pageSnapshotRequest)) {
+            pageSnapshotRequest = state.requestId();
+            capturePageDiagnostics("COMPOSER_MISSING");
+        }
+    }
+
+    private void installPageDiagnostics() {
+        WebView current = web;
+        try {
+            current.setWebChromeClient(new SelfRun3PageDiagnostics(detail -> {
+                if (current == web && !closed && state != null
+                        && state.taskId().equals(diagnosticStore.runId())) {
+                    diagnosticLog.record(diagnosticStore, "V3_JS_ERROR", detail);
+                }
+            }));
+            android.content.pm.PackageInfo pkg = WebView.getCurrentWebViewPackage();
+            diagnosticLog.record(diagnosticStore, "V3_ENV", "app=" + BuildConfig.VERSION_NAME
+                    + ";android=" + android.os.Build.VERSION.SDK_INT
+                    + ";webview=" + safeTrace(pkg == null ? "UNKNOWN" : pkg.versionName));
+        } catch (RuntimeException ignored) {
+            diagnosticLog.record(diagnosticStore, "V3_ENV", "diagnostics=UNAVAILABLE");
+        }
+    }
+
+    private void capturePageDiagnostics(String stage) {
+        if (web == null || closed || state == null) return;
+        WebView current = web;
+        int page = generation;
+        String task = state.taskId(), request = state.requestId();
+        String prefix = "stage=" + safeTrace(stage) + ";";
+        try {
+            android.view.Display display = current.getDisplay();
+            diagnosticLog.record(diagnosticStore, "V3_PAGE_VIEW", prefix
+                    + "surface=" + (host != null && host.isOutputAttached())
+                    + ";detachable=" + (host != null && host.hasDetachableOutput())
+                    + ";display=" + (display == null ? -1 : display.getState())
+                    + ";nativeW=" + current.getWidth() + ";nativeH=" + current.getHeight()
+                    + ";visible=" + current.getVisibility() + ";window=" + current.getWindowVisibility()
+                    + ";focus=" + current.hasWindowFocus() + ";attached=" + current.isAttachedToWindow());
+            // Use an independent read-only evaluation, not the submission evaluation sequence.
+            current.evaluateJavascript(SelfRun3PageDiagnostics.pageSnapshotScript(), raw -> {
+                if (current != web || page != generation || closed || state == null
+                        || !task.equals(state.taskId()) || !request.equals(state.requestId())
+                        || !task.equals(diagnosticStore.runId())) return;
+                JSONObject data = null;
+                try {
+                    if (raw != null && raw.length() <= 4096) {
+                        Object value = new JSONTokener(raw).nextValue();
+                        if (value instanceof String) data = new JSONObject((String) value);
+                        else if (value instanceof JSONObject) data = (JSONObject) value;
+                    }
+                } catch (Exception ignored) { }
+                diagnosticLog.record(diagnosticStore, "V3_PAGE_DOM", prefix
+                        + SelfRun3PageDiagnostics.compactSnapshot(data));
+            });
+        } catch (RuntimeException ignored) {
+            diagnosticLog.record(diagnosticStore, "V3_PAGE_DOM", prefix + "snapshot=UNAVAILABLE");
+        }
     }
 
     private void trace(String stage, String status, int traceStep) {

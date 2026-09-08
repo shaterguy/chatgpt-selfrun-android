@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.json.JSONObject;
+import org.json.JSONTokener;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -141,6 +142,85 @@ public final class SelfRun3RuntimeAndroidTest {
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(host::destroy);
         }
+    }
+
+    @Test public void pageDiagnosticsDistinguishMissingMainComposerFromShadowAndFrameWithoutMutation() throws Exception {
+        AtomicReference<HeadlessWebViewHost> hostRef = new AtomicReference<>();
+        CountDownLatch loaded = new CountDownLatch(1);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            HeadlessWebViewHost host = HeadlessWebViewHost.create(context);
+            hostRef.set(host);
+            WebView view = host.webView();
+            view.getSettings().setJavaScriptEnabled(true);
+            view.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView web, String url) { loaded.countDown(); }
+            });
+            view.loadDataWithBaseURL("https://chatgpt.com/c/diagnostic-fixture", """
+                    <!doctype html><html><head><title>PRIVATE_FIXTURE_TITLE</title></head><body>
+                    <main><form><textarea id="prompt-textarea">PRIVATE_FIXTURE_TEXT</textarea></form></main>
+                    <div id="shadow-host"></div><iframe srcdoc="<textarea>PRIVATE_FRAME_TEXT</textarea>"></iframe>
+                    <script>
+                    document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML=
+                      '<div contenteditable="true">PRIVATE_SHADOW_TEXT</div>';
+                    window.__selfRunTurnProtocol={snapshot:()=>({phase:'COMPLETE'})};
+                    </script></body></html>
+                    """, "text/html", "UTF-8", null);
+        });
+        HeadlessWebViewHost host = hostRef.get();
+        assertNotNull(host);
+        try {
+            assertTrue("diagnostic fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+            String before = readPage(host.webView(), "document.documentElement.outerHTML");
+            String raw = readPage(host.webView(), SelfRun3PageDiagnostics.pageSnapshotScript());
+            JSONObject snapshot = new JSONObject(raw);
+            assertEquals(1, snapshot.getInt("rawEditors"));
+            assertEquals(1, snapshot.getInt("shadowEditors"));
+            assertEquals(1, snapshot.getInt("frameEditors"));
+            assertEquals("OTHER", snapshot.getString("titleClass"));
+            assertFalse(raw.contains("PRIVATE_"));
+            assertEquals(before, readPage(host.webView(), "document.documentElement.outerHTML"));
+            assertEquals("COMPLETE", readPage(host.webView(), "window.__selfRunTurnProtocol.snapshot().phase"));
+            readPage(host.webView(), "document.querySelector('main').replaceChildren();'removed'");
+            snapshot = new JSONObject(readPage(host.webView(), SelfRun3PageDiagnostics.pageSnapshotScript()));
+            assertEquals(0, snapshot.getInt("rawEditors"));
+            assertEquals(1, snapshot.getInt("shadowEditors"));
+            assertEquals(1, snapshot.getInt("frameEditors"));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(host::detachOutput);
+            readPage(host.webView(), SelfRun3PageDiagnostics.pageSnapshotScript());
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                    () -> assertFalse("diagnostics must not reattach the surface", host.isOutputAttached()));
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(host::destroy);
+        }
+    }
+
+    @Test public void consoleDiagnosticsDeduplicateCapAndDoNotLeakErrorBodies() {
+        java.util.List<String> records = new java.util.ArrayList<>();
+        SelfRun3PageDiagnostics client = new SelfRun3PageDiagnostics(records::add);
+        android.webkit.ConsoleMessage first = new android.webkit.ConsoleMessage(
+                "TypeError PRIVATE_ERROR_BODY", "https://example.com/private.js", 5,
+                android.webkit.ConsoleMessage.MessageLevel.ERROR);
+        assertFalse(client.onConsoleMessage(first));
+        assertFalse(client.onConsoleMessage(first));
+        assertEquals(1, records.size());
+        for (int i = 0; i < 20; i++) {
+            client.onConsoleMessage(new android.webkit.ConsoleMessage(
+                    "Minified React error #" + i + "; PRIVATE_ERROR_BODY", "private.js", 1,
+                    android.webkit.ConsoleMessage.MessageLevel.ERROR));
+        }
+        assertEquals(12, records.size());
+        assertFalse(records.toString().contains("PRIVATE_"));
+        assertFalse(records.toString().contains("http"));
+    }
+
+    private static String readPage(WebView view, String script) throws Exception {
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<String> raw = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                view.evaluateJavascript(script, value -> { raw.set(value); done.countDown(); }));
+        assertTrue("diagnostic evaluation did not return", done.await(15, TimeUnit.SECONDS));
+        assertNotNull(raw.get());
+        return String.valueOf(new JSONTokener(raw.get()).nextValue());
     }
 
     private SelfRun3Engine.State initial() {
