@@ -41,7 +41,7 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(submit >= 0 && bind > submit);
     }
 
-    @Test public void continuationGloballyRanksEditorsAndCanonicalizesBlockReadback() throws Exception {
+    @Test public void continuationPinsBeforeDetachAndPrefersConnectedPinnedComposer() throws Exception {
         String transport = source("SelfRun3ComposerTransport.java");
         for (String retired : new String[]{"SelfRunContinuationDom", "UserNextInputStore", "LegacyRunModeMigration",
                 "WebUiCalibrationStore", "offsetParent"}) {
@@ -56,6 +56,12 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(transport.contains("ranked(allCandidates())"));
         assertTrue(transport.contains("prompt-textarea"));
         assertTrue(transport.contains("data-lexical-editor"));
+        assertTrue(transport.contains("pinComposerExpression()"));
+        assertTrue(transport.contains("window.__selfRunV3PinnedComposer=composer"));
+        assertTrue(transport.contains("const pinnedComposer=()=>"));
+        assertTrue(transport.contains("const resolveComposer=()=>"));
+        assertTrue(transport.contains("const composer=resolveComposer();"));
+        assertTrue(transport.contains("window.__selfRunV3PinnedComposerPath===location.pathname"));
         assertTrue(transport.contains("rawVariants"));
         assertTrue(transport.contains("querySelectorAll?.('p,div,li')"));
         assertTrue(transport.contains("String.fromCharCode(10)"));
@@ -67,17 +73,17 @@ public final class SelfRun3ComposerTransportArchitectureTest {
         assertTrue(transport.contains("form.requestSubmit()"));
     }
 
-    @Test public void continuationRegressionMatchesLiveFailureShape() throws Exception {
+    @Test public void continuationRegressionIncludesSelectorLossWithPinnedNode() throws Exception {
         String test = androidTestSource("SelfRun3ComposerTransportWebViewTest.java");
         assertTrue(test.contains("twoMultilineContinuationsPreferMessageComposerAndSurviveBlockReadbackRebuild"));
+        assertTrue(test.contains("pinnedComposerSurvivesDetachedSelectorLoss"));
+        assertTrue(test.contains("SelfRun3ComposerTransport.pinComposerExpression()"));
+        assertTrue(test.contains("window.preservePinnedEditor=true"));
+        assertTrue(test.contains("removeAttribute('contenteditable')"));
+        assertTrue(test.contains("window.__selfRunV3PinnedComposer===window.currentEditor"));
         assertTrue(test.contains("Search messages"));
         assertTrue(test.contains("data-lexical-editor"));
-        assertTrue(test.contains("window.currentEditor.innerText===window.editorModel"));
-        assertTrue(test.contains("line one  with spaces"));
-        assertTrue(test.contains("window.decoySubmitCount"));
-        assertTrue(test.contains("window.rebuildComposer()"));
         assertTrue(test.contains("message_stream_complete"));
-        assertTrue(test.contains("String(window.canonicalPosts.length)"));
         assertFalse(test.contains("prepareInitial"));
         assertFalse(test.contains("submitInitial"));
     }
