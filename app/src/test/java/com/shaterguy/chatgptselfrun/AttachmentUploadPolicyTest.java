@@ -71,7 +71,7 @@ public class AttachmentUploadPolicyTest {
 
     @Test public void v3PromptReferencesDriveFolderOnlyNotLocalFileNamesOrUris() throws Exception {
         String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("FOLDER_ID="));
+        assertTrue(protocol.contains("field(out,\"FOLDER_ID\",s.resource(\"folderId\"))"));
         assertFalse(protocol.contains("attachment.name"));
         assertFalse(protocol.contains("attachment.uri"));
     }

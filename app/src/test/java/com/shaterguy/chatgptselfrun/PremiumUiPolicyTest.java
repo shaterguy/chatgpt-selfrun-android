@@ -60,26 +60,24 @@ public final class PremiumUiPolicyTest {
         assertTrue(ui.contains("applyAdaptiveContentWidth"));
     }
 
-    @Test public void mainConsoleShowsSemanticV3StateWithoutLegacySignalCounters() throws Exception {
-        String main = src("MainActivity.java"), runtime = src("TurnProtocolUiState.java");
+    @Test public void mainConsoleShowsSemantic31StateWithoutRetiredBrowserCompletion() throws Exception {
+        String main = src("MainActivity.java");
         String tools = src("SelfRunLogMenuActivity.java");
         assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
         assertTrue(main.contains("pauseSelfRun()"));
         assertTrue(main.contains("resumeSelfRun()"));
         assertTrue(main.contains("stopSelfRun()"));
-        assertTrue(main.contains("TurnProtocolUiState.read(this, runId)"));
-        assertTrue(main.contains("displayRuntimeStatus(protocol, paused, terminal)"));
-        assertTrue(runtime.contains("추론 중"));
-        assertTrue(runtime.contains("답변 생성 중"));
-        assertTrue(runtime.contains("답변 완료 · 차기 턴 대기"));
-        assertTrue(main.contains("실행 엔진  SelfRun 3 ledger"));
-        assertTrue(main.contains("응답 프로토콜 phase"));
+        assertTrue(main.contains("currentStatus.setText(displayStatus(paused, terminal))"));
+        assertTrue(main.contains("Task mode"));
+        assertTrue(main.contains("현재 실행 모드"));
         assertTrue(main.contains("Run 폴더"));
+        assertTrue(main.contains("store.status()"));
+        assertFalse(main.contains("TurnProtocolUiState.read(this, runId)"));
+        assertFalse(main.contains("응답 프로토콜 phase"));
         assertFalse(main.contains("signal document"));
         assertFalse(main.contains("SelfRun Turn"));
         assertFalse(main.contains("ChatGPT Turn"));
         assertFalse(main.contains("Drive signal cursor"));
-        assertFalse(main.contains("currentStatus.setText(store.status())"));
         assertFalse(main.contains("requestNotificationPermission()"));
         assertTrue(tools.contains("requestNotificationPermission()"));
         assertTrue(tools.contains("requestBatteryExemption()"));

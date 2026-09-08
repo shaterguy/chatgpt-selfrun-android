@@ -15,11 +15,8 @@ public final class SelfRunFocusRetentionTest {
         String focusWebView = between(host,
                 "private static final class FocusPreservingWebView",
                 "WebView webView()");
-        assertTrue(host.contains("new FocusPreservingWebView(presentation.getContext(), observeLegacyProtocol)"));
-        assertTrue(host.contains("new FocusPreservingWebView(context, observeLegacyProtocol)"));
-        assertTrue(host.contains("static HeadlessWebViewHost create(Context context) { return create(context, true); }"));
-        assertTrue(host.contains("static HeadlessWebViewHost create(Context context, boolean observeLegacyProtocol)"));
-        assertTrue(focusWebView.contains("super(context); this.observeLegacyProtocol = observeLegacyProtocol;"));
+        assertTrue(host.contains("new FocusPreservingWebView(presentation.getContext())"));
+        assertTrue(host.contains("new FocusPreservingWebView(context)"));
         assertTrue(focusWebView.contains("@Override public void onResume()"));
         assertTrue(focusWebView.contains("super.onResume();"));
         assertTrue(focusWebView.contains("requestFocus();"));

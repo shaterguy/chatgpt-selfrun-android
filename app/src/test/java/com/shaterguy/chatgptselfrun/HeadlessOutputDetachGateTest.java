@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Source contract for low-power generation detach with a pinned continuation composer. */
+/** Source contract for low-power VirtualDisplay detach across legacy and active 3.1 paths. */
 public final class HeadlessOutputDetachGateTest {
     @Test public void generationDetachPinsActiveComposerBeforeSurfaceRemoval() throws Exception {
         String host = source("HeadlessWebViewHost.java");
@@ -72,28 +72,25 @@ public final class HeadlessOutputDetachGateTest {
         assertFalse(transport.contains("setTimeout("));
     }
 
-    @Test public void webAdapterRoutesActiveWaitsThroughComposerGate() throws Exception {
+    @Test public void active31WaitDetachesWithoutBrowserCompletionInspection() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        assertTrue(web.contains("state.flag(\"sendClaimed\") && !state.flag(\"ended\")"));
-        assertTrue(web.contains("host.detachOutputWhenComposerReady()"));
-        assertTrue(web.contains("detachImmediately()"));
-        assertTrue(web.contains("observedStart()"));
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(web.contains("a.quiesce();"));
+        assertTrue(web.contains("void detach() { requireMain(); if (host != null) host.detachOutput(); }"));
+        assertTrue(coordinator.contains("case WAIT, READ_RESULT, CHECK_RECEIPT"));
+        assertTrue(coordinator.contains("web.detach();"));
+        assertTrue(coordinator.contains("releaseWakeLock();"));
+        assertFalse(web.contains("host.detachOutputWhenComposerReady()"));
     }
 
-    @Test public void completionReattachesOutputBeforeNextTurnTransition() throws Exception {
+    @Test public void browserCompletionNeverReattachesOrAdvances31() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        String end = web.substring(web.indexOf("private void observedEnd"),
-                web.indexOf("void prepare("));
-        String attach = web.substring(web.indexOf("void attachForCompletionTransition()"),
-                web.indexOf("private void detachImmediately()"));
-        String inspect = web.substring(web.indexOf("void inspect("),
-                web.indexOf("static String inspectionScript"));
-
-        assertTrue(end.contains("attachForCompletionTransition()"));
-        assertFalse(end.contains("detachAfterComposerReady()"));
-        assertTrue(attach.contains("host.attachOutput()"));
-        assertTrue(inspect.contains("result.optBoolean(\"complete\") || result.optBoolean(\"receipt\")"));
-        assertTrue(inspect.contains("attachForCompletionTransition()"));
+        assertFalse(web.contains("observedEnd"));
+        assertFalse(web.contains("attachForCompletionTransition"));
+        assertFalse(web.contains("message_stream_complete"));
+        assertFalse(web.contains("receipt"));
+        assertTrue(web.contains("\"turn_request\".equals(event.optString(\"stage\"))"));
+        assertTrue(web.contains("\"canonical_post\".equals(event.optString(\"source\"))"));
     }
 
     @Test public void preparationRetryGetsFreshTimeoutBudgetWithoutResettingTurnIdentity() throws Exception {

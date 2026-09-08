@@ -40,9 +40,10 @@ public final class SelfRunRendererCallbackFenceTest {
 
     @Test public void protocolBridgeRejectsEventsFromDifferentViewOrRequestIdentity() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        String protocol = between(web, "static void protocolEvent", "void prepare(");
+        String protocol = between(web, "static boolean protocolEvent", "void prepare(");
         assertTrue(protocol.contains("a.web != view"));
         assertTrue(protocol.contains("!s.taskId().equals(event.optString(\"runId\"))"));
+        assertTrue(protocol.contains("!s.turnId().equals(event.optString(\"turnId\"))"));
         assertTrue(protocol.contains("!s.requestId().equals(event.optString(\"turnToken\"))"));
     }
 

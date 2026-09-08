@@ -33,8 +33,10 @@ public final class SelfRun3ComposerTransportArchitectureTest {
 
     @Test public void dispatchObserverCannotBlockOrReadAssistantResponse() throws Exception {
         String dispatch = source("SelfRun3DispatchScript.java");
-        assertTrue(dispatch.contains("return nativeFetch(input,init)"));
-        assertTrue(dispatch.contains("return send.call(this,body)"));
+        assertTrue(dispatch.contains("const result=nativeFetch(input,init)"));
+        assertTrue(dispatch.contains("const result=send.call(this,body)"));
+        assertTrue(dispatch.contains("if(matched)emit();"));
+        assertTrue(dispatch.contains("return result;"));
         assertFalse(dispatch.contains("throw new Error"));
         assertFalse(dispatch.contains("reject()"));
         assertFalse(dispatch.contains("response.clone"));

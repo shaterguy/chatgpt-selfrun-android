@@ -81,12 +81,15 @@ final class SelfRun3WebAdapter {
     void prepare(SelfRun3Engine.State s) {
         requireMain();
         boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
+        boolean restartPreparation = newAttempt || !preparing;
         state = s;
         closed = false;
         if (newAttempt) {
             quiesce();
             dispatchConfirmed = false;
             step = 0;
+            prepareStarted = SystemClock.elapsedRealtime();
+        } else if (restartPreparation) {
             prepareStarted = SystemClock.elapsedRealtime();
         }
         preparing = true;
