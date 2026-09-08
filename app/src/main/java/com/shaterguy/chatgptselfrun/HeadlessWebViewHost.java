@@ -204,10 +204,8 @@ final class HeadlessWebViewHost {
 
     /**
      * Generation wait detach. Keep the surface attached through the submit-to-thinking UI transition,
-     * then detach only after the live message composer is available again. This never navigates,
-     * reloads or recreates the WebView. If the transition is unusually slow, probing becomes sparse
-     * after the initial fast window but continues until the composer actually returns or another
-     * lifecycle action explicitly cancels the pending detach.
+     * pin the exact ranked composer node, then detach. The pinned node remains available to later
+     * evaluateJavascript calls even when detached rendering no longer exposes a rediscoverable editor.
      */
     boolean detachOutputWhenComposerReady() {
         requireMainThread();
@@ -224,17 +222,17 @@ final class HeadlessWebViewHost {
         if (!detachProbeCurrent(generation)) return;
         String script = "(()=>{const p=window.__selfRunTurnProtocol?.snapshot?.();"
                 + "const phase=String(p?.phase||'');"
-                + "const composer=Boolean(" + SelfRun3ComposerTransport.composerReadyExpression() + ");"
-                + "return phase+'|'+(composer?'1':'0');})()";
+                + "const pinned=Boolean(" + SelfRun3ComposerTransport.pinComposerExpression() + ");"
+                + "return phase+'|'+(pinned?'1':'0');})()";
         try {
             webView.evaluateJavascript(script, raw -> {
                 if (!detachProbeCurrent(generation)) return;
                 String value = decodeJavascriptString(raw);
                 int divider = value.indexOf('|');
                 String phase = divider < 0 ? "" : value.substring(0, divider);
-                boolean composerReady = divider >= 0 && value.substring(divider + 1).equals("1");
+                boolean composerPinned = divider >= 0 && value.substring(divider + 1).equals("1");
                 if (("THINKING".equals(phase) || "ANSWERING".equals(phase)
-                        || "COMPLETE".equals(phase)) && composerReady) {
+                        || "COMPLETE".equals(phase)) && composerPinned) {
                     detachOutput();
                     return;
                 }
