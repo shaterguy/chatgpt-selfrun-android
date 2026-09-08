@@ -10,9 +10,9 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Source contract for deferring generation-time VirtualDisplay pause until the next composer is ready. */
+/** Source contract for pinning the continuation composer before generation-time output detach. */
 public final class HeadlessOutputDetachGateTest {
-    @Test public void generationDetachWaitsForActiveProtocolAndRealComposer() throws Exception {
+    @Test public void generationDetachPinsActiveProtocolComposerBeforeSurfaceRemoval() throws Exception {
         String host = source("HeadlessWebViewHost.java");
         String gated = host.substring(host.indexOf("boolean detachOutputWhenComposerReady()"),
                 host.indexOf("boolean attachOutput()"));
@@ -20,11 +20,11 @@ public final class HeadlessOutputDetachGateTest {
         assertTrue(gated.contains("OUTPUT_DETACH_SETTLE_MS"));
         assertTrue(gated.contains("probeDetachReadiness"));
         assertTrue(gated.contains("window.__selfRunTurnProtocol?.snapshot?.()"));
-        assertTrue(gated.contains("SelfRun3ComposerTransport.composerReadyExpression()"));
+        assertTrue(gated.contains("SelfRun3ComposerTransport.pinComposerExpression()"));
         assertTrue(gated.contains("\"THINKING\".equals(phase)"));
         assertTrue(gated.contains("\"ANSWERING\".equals(phase)"));
         assertTrue(gated.contains("\"COMPLETE\".equals(phase)"));
-        assertTrue(gated.contains("composerReady"));
+        assertTrue(gated.contains("composerPinned"));
     }
 
     @Test public void immediateDetachRemainsAvailableForPauseAndFailurePaths() throws Exception {
@@ -64,20 +64,32 @@ public final class HeadlessOutputDetachGateTest {
         assertTrue(web.contains("observedStart()"));
     }
 
-    @Test public void completionReattachesOutputBeforeNextTurnTransition() throws Exception {
+    @Test public void completionKeepsDetachedPinnedOutputAndContinuationUsesOneShotRecoveryOnly() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         String end = web.substring(web.indexOf("private void observedEnd"),
                 web.indexOf("void prepare("));
-        String attach = web.substring(web.indexOf("void attachForCompletionTransition()"),
-                web.indexOf("private void detachImmediately()"));
+        String prepare = web.substring(web.indexOf("void prepare("),
+                web.indexOf("private void ensureWeb"));
+        String advance = web.substring(web.indexOf("private void advance()"),
+                web.indexOf("void submit("));
         String inspect = web.substring(web.indexOf("void inspect("),
                 web.indexOf("static String inspectionScript"));
 
-        assertTrue(end.contains("attachForCompletionTransition()"));
-        assertFalse(end.contains("detachAfterComposerReady()"));
-        assertTrue(attach.contains("host.attachOutput()"));
-        assertTrue(inspect.contains("result.optBoolean(\"complete\") || result.optBoolean(\"receipt\")"));
+        assertTrue(end.contains("traceCompletionOutputState()"));
+        assertFalse(end.contains("attachForCompletionTransition()"));
+        assertTrue(prepare.contains("if (host != null && initial) host.attachOutput()"));
+        assertFalse(prepare.contains("if (host != null) host.attachOutput()"));
+        assertTrue(advance.contains("continuationRecoveryAttached"));
+        assertTrue(advance.contains("COMPOSER_RECOVERY_OUTPUT"));
+        assertTrue(advance.contains("!host.isOutputAttached()"));
         assertTrue(inspect.contains("attachForCompletionTransition()"));
+    }
+
+    @Test public void diagnosticsExposePinnedComposerWhenSelectorsDisappear() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("window.__selfRunV3PinnedComposer&&window.__selfRunV3PinnedComposer.isConnected"));
+        assertTrue(web.contains(";pinned="));
+        assertTrue(web.contains("KEPT_DETACHED"));
     }
 
     @Test public void preparationRetryGetsFreshTimeoutBudgetWithoutResettingTurnIdentity() throws Exception {
