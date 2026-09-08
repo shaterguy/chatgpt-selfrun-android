@@ -224,7 +224,7 @@ final class HeadlessWebViewHost {
         if (!detachProbeCurrent(generation)) return;
         String script = "(()=>{const p=window.__selfRunTurnProtocol?.snapshot?.();"
                 + "const phase=String(p?.phase||'');"
-                + "const composer=Boolean(" + SelfRun3ComposerTransport.composerReadyExpression() + ");"
+                + "const composer=Boolean(" + SelfRun3ComposerTransport.pinComposerReadyExpression() + ");"
                 + "return phase+'|'+(composer?'1':'0');})()";
         try {
             webView.evaluateJavascript(script, raw -> {
