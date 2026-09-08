@@ -101,7 +101,7 @@ public final class SelfRun3RuntimeAndroidTest {
         assertTrue(databasePath.startsWith(context.getNoBackupFilesDir().getAbsolutePath()));
     }
 
-    @Test public void generationDetachWaitsUntilThinkingComposerReappears() throws Exception {
+    @Test public void activeGenerationKeepsHeadlessSurfaceAttached() throws Exception {
         AtomicReference<HeadlessWebViewHost> hostRef = new AtomicReference<>();
         CountDownLatch loaded = new CountDownLatch(1);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
@@ -113,32 +113,35 @@ public final class SelfRun3RuntimeAndroidTest {
                 @Override public void onPageFinished(WebView view, String url) { loaded.countDown(); }
             });
             web.loadDataWithBaseURL(
-                    "https://chatgpt.com/c/selfrun-v3-detach-gate",
+                    "https://chatgpt.com/c/selfrun-v3-active-output",
                     "<!doctype html><html><body><main></main><script>"
                             + "window.__selfRunTurnProtocol={snapshot:()=>({phase:'THINKING'})};"
                             + "</script></body></html>",
                     "text/html", "UTF-8", null);
         });
-        assertTrue("detach gate fixture did not load", loaded.await(15, TimeUnit.SECONDS));
+        assertTrue("active-output fixture did not load", loaded.await(15, TimeUnit.SECONDS));
         HeadlessWebViewHost host = hostRef.get();
         assertNotNull(host);
         try {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 assertTrue(host.hasDetachableOutput());
                 assertTrue(host.isOutputAttached());
-                assertTrue(host.detachOutputWhenComposerReady());
+                assertFalse("generation wait must not suspend the surface", host.detachOutputWhenComposerReady());
+                assertTrue(host.isOutputAttached());
+                assertFalse("runtime detach must be disabled", host.detachOutput());
+                assertTrue(host.isOutputAttached());
             });
-            Thread.sleep(5_500L);
+            Thread.sleep(1_500L);
             InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                    () -> assertTrue("surface detached before delayed composer returned", host.isOutputAttached()));
+                    () -> assertTrue("surface changed while the response was active", host.isOutputAttached()));
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
                     host.webView().evaluateJavascript(
                             "(()=>{const e=document.createElement('textarea');e.id='prompt-textarea';"
                                     + "e.setAttribute('aria-label','Message');document.querySelector('main').appendChild(e);return true;})()",
                             null));
-            Thread.sleep(2_300L);
+            Thread.sleep(500L);
             InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                    () -> assertFalse("surface remained attached after delayed composer returned", host.isOutputAttached()));
+                    () -> assertTrue("surface changed when the continuation composer appeared", host.isOutputAttached()));
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(host::destroy);
         }
@@ -185,10 +188,13 @@ public final class SelfRun3RuntimeAndroidTest {
             assertEquals(0, snapshot.getInt("rawEditors"));
             assertEquals(1, snapshot.getInt("shadowEditors"));
             assertEquals(1, snapshot.getInt("frameEditors"));
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(host::detachOutput);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                assertFalse(host.detachOutput());
+                assertTrue("diagnostic runtime must keep the surface attached", host.isOutputAttached());
+            });
             readPage(host.webView(), SelfRun3PageDiagnostics.pageSnapshotScript());
             InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                    () -> assertFalse("diagnostics must not reattach the surface", host.isOutputAttached()));
+                    () -> assertTrue("diagnostics changed the active surface", host.isOutputAttached()));
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(host::destroy);
         }
@@ -218,9 +224,9 @@ public final class SelfRun3RuntimeAndroidTest {
         AtomicReference<String> raw = new AtomicReference<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
                 view.evaluateJavascript(script, value -> { raw.set(value); done.countDown(); }));
-        assertTrue("diagnostic evaluation did not return", done.await(15, TimeUnit.SECONDS));
-        assertNotNull(raw.get());
-        return String.valueOf(new JSONTokener(raw.get()).nextValue());
+        assertTrue("WebView read timed out", done.await(15, TimeUnit.SECONDS));
+        Object decoded = new JSONTokener(raw.get()).nextValue();
+        return String.valueOf(decoded);
     }
 
     private SelfRun3Engine.State initial() {
@@ -233,8 +239,7 @@ public final class SelfRun3RuntimeAndroidTest {
     private static SelfRun3Engine.State resource(SelfRun3Ledger ledger, SelfRun3Engine.State state,
                                                   String key, String value) {
         JSONObject payload = new JSONObject();
-        SelfRun3Engine.put(payload, "key", key);
-        SelfRun3Engine.put(payload, "value", value);
+        SelfRun3Engine.put(payload, "key", key); SelfRun3Engine.put(payload, "value", value);
         return ledger.apply(event(state, "resource:" + key, SelfRun3Engine.Kind.RESOURCE, payload));
     }
 
