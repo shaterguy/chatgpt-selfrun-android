@@ -23,7 +23,7 @@ final class SelfRun3WebAdapter {
     interface Listener {
         void onPrepared(String task, String turn, String request);
         void onStarted(String task, String turn, String request);
-        void onAccepted(String task, String turn, String request);
+        void onAccepted(String task, String turn, String url);
         void onConversation(String task, String turn, String url);
         void onUnsent(String task, String turn, String request, String status);
         void onFailure(String task, String turn, String request, String code);
@@ -287,8 +287,11 @@ final class SelfRun3WebAdapter {
     private void captureConversation() {
         if (web == null || state == null || !dispatchConfirmed) return;
         String url = web.getUrl();
-        if (allowedRoute(url) && !SelfRunScript.conversationId(url).isEmpty())
-            listener.onConversation(state.taskId(), state.turnId(), url);
+        String conversationId = SelfRunScript.conversationId(url);
+        if (allowedRoute(url) && !conversationId.isEmpty()) {
+            listener.onConversation(state.taskId(), state.turnId(),
+                    "https://chatgpt.com/c/" + conversationId);
+        }
     }
 
     private boolean allowedRoute(String url) {
