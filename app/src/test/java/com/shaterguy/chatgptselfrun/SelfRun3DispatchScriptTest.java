@@ -12,8 +12,10 @@ public final class SelfRun3DispatchScriptTest {
         assertTrue(js.contains("stage:'turn_request'"));
         assertTrue(js.contains("source:'canonical_post'"));
         assertTrue(js.contains("b?.conversation_id"));
-        assertTrue(js.contains("return nativeFetch(input,init)"));
-        assertTrue(js.contains("return send.call(this,body)"));
+        assertTrue(js.contains("const result=nativeFetch(input,init)"));
+        assertTrue(js.contains("const result=send.call(this,body)"));
+        assertTrue(js.contains("if(matched)emit();"));
+        assertTrue(js.contains("return result;"));
         assertFalse(js.contains("throw new Error"));
         assertFalse(js.contains("reject()"));
         assertFalse(js.contains("response.clone"));

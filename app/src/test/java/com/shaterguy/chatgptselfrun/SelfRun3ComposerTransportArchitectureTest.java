@@ -5,81 +5,51 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
-/** Source contract for separate V3 bootstrap and continuation transports. */
+/** Active 3.1 transport contract: every automatic execution uses the proven first-message bootstrap. */
 public final class SelfRun3ComposerTransportArchitectureTest {
-    @Test public void v3UsesVerifiedBootstrapModuleAndContinuationOnlyComposerTransport() throws Exception {
+    @Test public void adapterAlwaysUsesFirstMessageBootstrapAndNeverContinuation() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        String transport = source("SelfRun3ComposerTransport.java");
         assertTrue(web.contains("SelfRun3BootstrapTransport.prepare"));
         assertTrue(web.contains("SelfRun3BootstrapTransport.submit"));
-        assertTrue(web.contains("SelfRun3ComposerTransport.prepareContinuation"));
-        assertTrue(web.contains("SelfRun3ComposerTransport.submitContinuation"));
-        assertTrue(web.contains("SelfRun3ComposerTransport.composerReadyExpression()"));
-        assertFalse(web.contains("SelfRunContinuationDom"));
-        assertFalse(transport.contains("prepareInitial"));
-        assertFalse(transport.contains("submitInitial"));
-        assertFalse(transport.contains("projectGuard"));
+        assertTrue(web.contains("SelfRun3DispatchScript.arm"));
+        assertFalse(web.contains("SelfRun3ComposerTransport.prepareContinuation"));
+        assertFalse(web.contains("SelfRun3ComposerTransport.submitContinuation"));
+        assertFalse(web.contains("SelfRunContinuationDom.prepareBootstrap"));
+        assertFalse(web.contains("message_stream_complete"));
+        assertFalse(web.contains("completion_dispatch"));
     }
 
-    @Test public void bootstrapKeepsKnownGoodPreparedThenBindThenSubmitBoundary() throws Exception {
+    @Test public void dev21BootstrapPreparedSubmitBoundaryIsPreserved() throws Exception {
         String bootstrap = source("SelfRun3BootstrapTransport.java");
-        String web = source("SelfRun3WebAdapter.java");
         assertTrue(bootstrap.contains("state:'prepared'"));
         assertTrue(bootstrap.contains("READY_TO_SUBMIT"));
         assertTrue(bootstrap.contains("baselineUserCount"));
         assertTrue(bootstrap.contains("c.send.click()"));
         assertTrue(bootstrap.contains("requestComposerSubmit()"));
-        assertFalse(bootstrap.contains("SelfRunContinuationDom"));
-        int prepare = web.indexOf("SelfRun3BootstrapTransport.prepare");
-        int noBind = web.indexOf("observeWithoutBinding(script)");
-        int submit = web.indexOf("SelfRun3BootstrapTransport.submit");
-        int bind = web.indexOf("evaluate(observeBeforeAndAfter(claimed, action)");
-        assertTrue(prepare >= 0 && noBind > prepare);
-        assertTrue(submit >= 0 && bind > submit);
+        assertTrue(bootstrap.contains("exact bootstrap readback"));
     }
 
-    @Test public void continuationGloballyRanksEditorsAndCanonicalizesBlockReadback() throws Exception {
-        String transport = source("SelfRun3ComposerTransport.java");
-        for (String retired : new String[]{"SelfRunContinuationDom", "UserNextInputStore", "LegacyRunModeMigration",
-                "WebUiCalibrationStore", "offsetParent"}) {
-            assertFalse("retired continuation dependency remains: " + retired, transport.contains(retired));
-        }
-        assertTrue(transport.contains("selfrun-drive:v3-cont:"));
-        assertTrue(transport.contains("state:'clearing'"));
-        assertTrue(transport.contains("state:'inputting'"));
-        assertTrue(transport.contains("state:'prepared'"));
-        assertTrue(transport.contains("state:'clicked'"));
-        assertTrue(transport.contains("allCandidates"));
-        assertTrue(transport.contains("ranked(allCandidates())"));
-        assertTrue(transport.contains("prompt-textarea"));
-        assertTrue(transport.contains("data-lexical-editor"));
-        assertTrue(transport.contains("rawVariants"));
-        assertTrue(transport.contains("querySelectorAll?.('p,div,li')"));
-        assertTrue(transport.contains("String.fromCharCode(10)"));
-        assertTrue(transport.contains("split(' ').filter(Boolean).join(' ')"));
-        assertTrue(transport.contains("COMPOSER_DIVERGED_A"));
-        assertTrue(transport.contains("hashText"));
-        assertTrue(transport.contains("composerSignature"));
-        assertTrue(transport.contains("if(!e.isConnected)return"));
-        assertTrue(transport.contains("form.requestSubmit()"));
+    @Test public void dispatchObserverCannotBlockOrReadAssistantResponse() throws Exception {
+        String dispatch = source("SelfRun3DispatchScript.java");
+        assertTrue(dispatch.contains("return nativeFetch(input,init)"));
+        assertTrue(dispatch.contains("return send.call(this,body)"));
+        assertFalse(dispatch.contains("throw new Error"));
+        assertFalse(dispatch.contains("reject()"));
+        assertFalse(dispatch.contains("response.clone"));
+        assertFalse(dispatch.contains("captureIdentity"));
+        assertFalse(dispatch.contains("message_stream_complete"));
     }
 
-    @Test public void continuationRegressionMatchesLiveFailureShape() throws Exception {
-        String test = androidTestSource("SelfRun3ComposerTransportWebViewTest.java");
-        assertTrue(test.contains("twoMultilineContinuationsPreferMessageComposerAndSurviveBlockReadbackRebuild"));
-        assertTrue(test.contains("Search messages"));
-        assertTrue(test.contains("data-lexical-editor"));
-        assertTrue(test.contains("window.currentEditor.innerText===window.editorModel"));
-        assertTrue(test.contains("line one  with spaces"));
-        assertTrue(test.contains("window.decoySubmitCount"));
-        assertTrue(test.contains("window.rebuildComposer()"));
-        assertTrue(test.contains("message_stream_complete"));
-        assertTrue(test.contains("String(window.canonicalPosts.length)"));
-        assertFalse(test.contains("prepareInitial"));
-        assertFalse(test.contains("submitInitial"));
+    @Test public void firstConversationRegressionUsesActualBootstrapPrepareAndSubmit() throws Exception {
+        String test = androidTestSource("SelfRun31FirstConversationAndroidTest.java");
+        assertTrue(test.contains("SelfRun3BootstrapTransport.prepare"));
+        assertTrue(test.contains("SelfRun3BootstrapTransport.submit"));
+        assertTrue(test.contains("/backend-api/f/conversation"));
+        assertTrue(test.contains("fixturePosts.length"));
+        assertTrue(test.contains("host.get().detachOutput()"));
+        assertTrue(test.contains("assertSame(original, host.get().webView())"));
     }
 
     private static String source(String name) throws Exception {
