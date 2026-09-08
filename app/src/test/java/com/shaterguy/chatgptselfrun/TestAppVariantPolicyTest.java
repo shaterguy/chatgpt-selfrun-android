@@ -37,7 +37,7 @@ public final class TestAppVariantPolicyTest {
         assertTrue(candidate.contains("selfrun-v3/v3.0.*-dev*"));
         assertTrue(candidate.contains(":app:assembleQaApp"));
         assertTrue(candidate.contains("com.shaterguy.chatgptselfrun.drive.test"));
-        for (String retired : new String[]{"build-drive-test.yml", "build-drive-v1.yml", "build-selfrun-v2-test.yml", "release-drive-v1.yml"}) {
+        for (String retired : new String[]{"build-drive-test.yml", "build-drive-v1.yml", "build-selfrun-v2-test.yml", "build-selfrun-v3-test.yml", "release-drive-v1.yml"}) {
             Path p = Paths.get(".github/workflows", retired);
             if (!Files.exists(p)) p = Paths.get("../.github/workflows", retired);
             assertFalse("retired workflow must be absent: " + retired, Files.exists(p));
