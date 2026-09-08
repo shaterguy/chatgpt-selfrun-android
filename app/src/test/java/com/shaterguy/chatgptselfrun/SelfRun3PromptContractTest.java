@@ -33,7 +33,7 @@ public final class SelfRun3PromptContractTest {
         assertFalse(prompt.contains("full checkpoint"));
     }
 
-    @Test public void hybridChoicesExposeOnlySignalKeysAndChatXhigh() {
+    @Test public void hybridChoicesExposeOnlySignalKeysAndChatXhigh() throws Exception {
         String prompt=SelfRun3Protocol.prompt(state("HYBRID","CHAT","NORMAL"),"");
         String chat=between(prompt,"[PROFILE_REGISTRY_CHAT]\n","\n[PROFILE_REGISTRY_WORK]");
         JSONArray chatChoices=new JSONArray(chat);
@@ -54,7 +54,7 @@ public final class SelfRun3PromptContractTest {
         }
     }
 
-    @Test public void branchMergeRepairAndInterventionContextStayConditional() {
+    @Test public void branchMergeRepairAndInterventionContextStayConditional() throws Exception {
         JSONObject branchRaw=state("HYBRID","WORK","PARALLEL_BRANCH").json();
         SelfRun3Engine.put(branchRaw,"parallelGroupId","group-1");
         SelfRun3Engine.put(branchRaw,"branchId","A");
