@@ -1,0 +1,4 @@
+SOURCE_SHA=65687ddf2abc974003f470854745ba63796e7343
+ARTIFACT_COMMIT_SHA=0891fa9b4c75b2534abaef6c421b48f040bbe1eb
+APK_SHA256=2de5d3fa9e59f24879cb89675262781c7fe2fdf07db647cf9db8587e2f871777
+APK_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/0891fa9b4c75b2534abaef6c421b48f040bbe1eb/deliverables/current-test.apk
