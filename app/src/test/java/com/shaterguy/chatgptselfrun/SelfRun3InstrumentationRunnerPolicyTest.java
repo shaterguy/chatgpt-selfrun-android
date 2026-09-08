@@ -22,6 +22,7 @@ public final class SelfRun3InstrumentationRunnerPolicyTest {
         assertFalse(runner.contains("DriveSignalDocumentIdentityAndroidTest"));
         for (String required : new String[]{
                 "SelfRun3RuntimeAndroidTest",
+                "SelfRun3PinnedComposerAndroidTest",
                 "SelfRun3ObservationWebViewTest",
                 "SelfRun3ComposerTransportWebViewTest",
                 "TurnProtocolStateWebViewTest",
