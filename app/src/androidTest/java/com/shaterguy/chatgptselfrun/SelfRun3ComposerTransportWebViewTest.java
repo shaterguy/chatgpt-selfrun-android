@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-/** Live-failure regression: multiline block readback, two editors and synchronous rich-editor rebuild. */
+/** Live-failure regression: multiline block readback, two editors and detached pinned-editor continuity. */
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3ComposerTransportWebViewTest {
     private static final String RUN_ID = "SR-V3-CONTINUATION-LIVE-SHAPE";
@@ -49,6 +49,41 @@ public final class SelfRun3ComposerTransportWebViewTest {
                     "window.canonicalPosts.map(x=>x.method).join('|')"));
             assertEquals("COMPLETE", read(scenario, web,
                     "window.__selfRunTurnProtocol.snapshot().phase"));
+        }
+    }
+
+    @Test public void pinnedComposerSurvivesDetachedSelectorLoss() throws Exception {
+        try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
+            AtomicReference<WebView> web = loadFixture(scenario);
+            read(scenario, web, ChatGptTurnProtocolScript.documentStartScript());
+            assertEquals("true", read(scenario, web, SelfRun3ComposerTransport.pinComposerExpression()));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunV3PinnedComposer===window.currentEditor)"));
+            assertEquals("armed", read(scenario, web,
+                    "(()=>{window.preservePinnedEditor=true;const e=window.currentEditor;"
+                            + "e.removeAttribute('contenteditable');e.removeAttribute('role');"
+                            + "e.removeAttribute('aria-multiline');e.removeAttribute('aria-label');"
+                            + "e.removeAttribute('data-lexical-editor');return 'armed';})()"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunV3PinnedComposer.isConnected)"));
+
+            String prompt = "[SELF_RUN_V3 3.0.0]\nTURN=2\nPHASE=WORK\n\npinned detached composer";
+            String rawPrepare = SelfRun3ComposerTransport.prepareContinuation(CONVERSATION_URL, prompt);
+            String prepareScript = ChatGptTurnProtocolScript.bindTurnAndThen(RUN_ID, "turn-pinned", rawPrepare);
+            JSONObject prepared = prepare(scenario, web, prepareScript);
+            assertEquals(SelfRun3ComposerTransport.READY_TO_SUBMIT, prepared.optString("status"));
+            assertEquals(prompt, read(scenario, web, "window.editorModel"));
+            assertEquals("true", read(scenario, web,
+                    "String(window.__selfRunV3PinnedComposer===window.currentEditor)"));
+
+            String action = SelfRun3ComposerTransport.submitContinuation(CONVERSATION_URL, prompt);
+            JSONObject dispatched = evaluate(scenario, web,
+                    ChatGptTurnProtocolScript.bindTurnAndThen(RUN_ID, "turn-pinned", action));
+            assertEquals(SelfRun3ComposerTransport.SUBMISSION_PENDING, dispatched.optString("status"));
+            await(scenario, web, "String(window.submitCount)", "1");
+            await(scenario, web, "window.__selfRunTurnProtocol.snapshot().phase", "COMPLETE");
+            assertEquals(prompt, read(scenario, web, "window.sent[0]"));
+            assertEquals("0", read(scenario, web, "String(window.decoySubmitCount)"));
         }
     }
 
@@ -152,6 +187,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
                 history.replaceState({},'','__CONVERSATION_PATH__');
                 window.submitCount=0;window.sent=[];window.canonicalPosts=[];
                 window.editorModel='';window.nativeModelCommits=0;window.decoySubmitCount=0;
+                window.preservePinnedEditor=false;
                 window.decoy=document.querySelector('#search-form textarea');
                 document.querySelector('#search-form').addEventListener('submit',event=>{event.preventDefault();window.decoySubmitCount++;});
                 document.execCommand=()=>false;
@@ -186,6 +222,7 @@ public final class SelfRun3ComposerTransportWebViewTest {
                     event.preventDefault();
                     window.editorModel=String(event.data||'');
                     window.nativeModelCommits++;
+                    if(window.preservePinnedEditor){editor.textContent=window.editorModel;return;}
                     window.rebuildComposer();
                   });
                   form.addEventListener('submit',event=>{
