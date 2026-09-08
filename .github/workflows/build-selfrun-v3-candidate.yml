@@ -29,7 +29,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - uses: android-actions/setup-android@9fc6c4e9069bf581ec31e66cbd7dcb644d
         with:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
@@ -146,7 +146,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - uses: android-actions/setup-android@9fc6c4e9069bf581ec31e66cbd7dcb644d
         with:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
@@ -174,14 +174,14 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.0.0.apk > stable-cert.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
-          gh run download 34170345349 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
-          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == '9c4bbeb6336e017dcda324c8e85df18bdff508a5' ]]
-          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev16.apk
+          gh run download 34172891088 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
+          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == '3ee8daba6422b9875c6810b4a319879e77f003dd' ]]
+          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev18.apk
           test -s "$PREVIOUS"
           grep -F "$(sha256sum "$PREVIOUS" | awk '{print $1}')" previous/SHA256SUMS.txt >/dev/null
           "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS" > previous-cert.txt
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' previous-cert.txt
-          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev16'"
+          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev18'"
       - name: Enable hardware acceleration
         shell: bash
         run: |
