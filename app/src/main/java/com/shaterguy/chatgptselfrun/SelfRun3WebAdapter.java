@@ -125,7 +125,7 @@ final class SelfRun3WebAdapter {
         } else if (step <= 1) {
             step = 1; script = profileScript(state);
         } else {
-            script = SelfRun3ComposerTransport.prepareBootstrap(state.config().optString("projectUrl"), state.text("prompt"), marker(state));
+            script = SelfRunContinuationDom.prepareBootstrap(state.config().optString("projectUrl"), state.text("prompt"), marker(state));
         }
         evaluate(script, result -> {
             String status = result.optString("status");
@@ -143,7 +143,7 @@ final class SelfRun3WebAdapter {
         requireMain();
         if (web == null || closed || dispatchConfirmed || !SelfRun3PowerPolicy.maySend(claimed)) { fail("SUBMISSION_STATE_INVALID"); return; }
         state = claimed; preparing = false;
-        String action = SelfRun3ComposerTransport.clickPreparedBootstrap(claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed));
+        String action = SelfRunContinuationDom.clickPreparedBootstrap(claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed));
         String wrapped = "(()=>{if(!" + SelfRun3DispatchScript.arm(claimed.taskId(), claimed.turnId(), claimed.requestId())
                 + ")return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});return (" + action + ");})()";
         evaluate(wrapped, result -> {

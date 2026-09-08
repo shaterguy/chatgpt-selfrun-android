@@ -22,11 +22,15 @@ public final class SelfRun3DispatchScriptTest {
         assertTrue(js.contains("includes(owner.turn)"));
         assertTrue(js.contains("includes(owner.request)"));
     }
-    @Test public void activeAdapterOnlyUsesFreshComposerAndStopsAtCanonicalDispatch() throws Exception {
+    @Test public void activeAdapterReusesProvenBootstrapAndStopsAtCanonicalDispatch() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        assertFalse(web.contains("SelfRunContinuationDom"));
+        assertTrue(web.contains("SelfRunContinuationDom.prepareBootstrap"));
+        assertTrue(web.contains("SelfRunContinuationDom.clickPreparedBootstrap"));
+        assertFalse(web.contains("SelfRun3ComposerTransport.prepareBootstrap"));
+        assertFalse(web.contains("SelfRun3ComposerTransport.clickPreparedBootstrap"));
         assertFalse(web.contains("inspectionScript"));
         assertFalse(web.contains("armCompletion"));
+        assertTrue(web.contains("SelfRun3DispatchScript.arm"));
         assertTrue(web.contains("a.quiesce();"));
         assertTrue(web.indexOf("a.quiesce();") < web.indexOf("a.listener.onStarted("));
         assertTrue(web.contains("WebViewConfig.applySelfRun3Automation"));
