@@ -39,12 +39,13 @@ final class SelfRun3DispatchScript {
                     return String(method).toUpperCase()==='POST'&&u.origin===location.origin
                       &&u.pathname.replace(/\\/+$/,'')==='/backend-api/f/conversation';
                   }catch(_){return false;}};
+                  const hasConversationRoute=()=>{const p=location.pathname.split('/').filter(Boolean),i=p.indexOf('c');return i>=0&&!!p[i+1];};
                   const reject=()=>{throw new Error('SELFRUN_DISPATCH_IDENTITY_REJECTED');};
                   const claim=text=>{
                     if(!owner||claimed)reject();
                     let b;try{b=JSON.parse(text);}catch(_){reject();}
                     const messages=b?.messages,last=Array.isArray(messages)?messages.at(-1):null;
-                    if(b?.conversation_id||location.pathname.split('/').includes('c')
+                    if(b?.conversation_id
                       ||last?.author?.role!=='user'||!JSON.stringify(last).includes(owner.turn)||!JSON.stringify(last).includes(owner.request))reject();
                     claimed=true;return {...owner};
                   };
@@ -97,7 +98,7 @@ final class SelfRun3DispatchScript {
                   };
                   window.__selfRun3Dispatch={arm:(task,turn,request)=>{
                     if(owner)return owner.task===task&&owner.turn===turn&&owner.request===request&&!claimed;
-                    if(!task||!turn||!request)return false;
+                    if(!task||!turn||!request||hasConversationRoute())return false;
                     owner={task,turn,request};return true;
                   }};
                 })();

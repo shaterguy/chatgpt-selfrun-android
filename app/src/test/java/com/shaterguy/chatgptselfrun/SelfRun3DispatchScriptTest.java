@@ -19,6 +19,9 @@ public final class SelfRun3DispatchScriptTest {
         assertTrue(js.contains("reader?.cancel?.()"));
         assertFalse(js.contains("while("));
         assertTrue(js.contains("b?.conversation_id"));
+        assertTrue(js.contains("hasConversationRoute"));
+        assertTrue(js.contains("if(!task||!turn||!request||hasConversationRoute())return false"));
+        assertFalse(js.contains("b?.conversation_id||location.pathname"));
         assertTrue(js.contains("includes(owner.turn)"));
         assertTrue(js.contains("includes(owner.request)"));
     }

@@ -20,7 +20,7 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun3DispatchAndroidTest {
     private static final String ORIGIN = "https://chatgpt.com/";
-    @Test public void oneShotCanonicalDispatchReadsOnlyIdentityAndHostIsReusable() throws Exception {
+    @Test public void oneShotCanonicalDispatchAllowsOptimisticConversationRouteAndHostIsReusable() throws Exception {
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<HeadlessWebViewHost> host = new AtomicReference<>();
             AtomicReference<WebView> web = new AtomicReference<>();
@@ -52,9 +52,14 @@ public final class SelfRun3DispatchAndroidTest {
                           });
                           const post=(path,text)=>fetch('https://chatgpt.com'+path,{method:'POST',body:text});
                           try{
-                            window.__selfRun3Dispatch.arm('task','turn-1','request-1');
+                            history.replaceState({},'', '/c/already-existing');
+                            out.existingArm=window.__selfRun3Dispatch.arm('task','turn-1','request-1');
+                            history.replaceState({},'', '/');
+                            out.freshArm=window.__selfRun3Dispatch.arm('task','turn-1','request-1');
                             await post('/backend-api/f/conversation/prepare',body('turn-1','request-1'));
                             out.noncanonicalSignals=signals();
+                            history.replaceState({},'', '/c/fresh-client-route');
+                            out.routeAtCanonical=location.pathname;
                             try{await post('/backend-api/f/conversation',body('turn-1','wrong'));}catch(_){}
                             out.wrongSignals=signals();
                             try{await post('/backend-api/f/conversation',body('turn-1','request-1','existing'));}catch(_){}
@@ -79,6 +84,9 @@ public final class SelfRun3DispatchAndroidTest {
                 JSONObject result = report.get();
                 assertNotNull(result);
                 assertFalse(result.toString(), result.has("error"));
+                assertFalse(result.getBoolean("existingArm"));
+                assertTrue(result.getBoolean("freshArm"));
+                assertEquals("/c/fresh-client-route", result.getString("routeAtCanonical"));
                 assertEquals(0, result.getInt("noncanonicalSignals"));
                 assertEquals(0, result.getInt("wrongSignals"));
                 assertEquals(0, result.getInt("existingSignals"));
