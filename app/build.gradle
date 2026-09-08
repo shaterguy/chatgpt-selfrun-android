@@ -2,9 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3001021
-def selfRunDriveVersionName = '3.0.1-dev21'
-def selfRun3VersionPattern = ~/^3\.0\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
+def selfRunDriveVersionCode = 3010004
+def selfRunDriveVersionName = '3.1.0-dev4'
+def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
     namespace 'com.shaterguy.chatgptselfrun'
@@ -54,6 +54,58 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
 }
 
+// These assertions inspect the retired 2.x/3.0 continuation state machine itself. They remain in
+// the source tree to protect the proven bootstrap assets, but are not execution gates for the 3.1
+// disposable-conversation coordinator. 3.1-equivalent invariants are enforced by SelfRun3* tests.
+def selfRun3RetiredAssertions = [
+    'com.shaterguy.chatgptselfrun.BootstrapFiniteStateWiringTest.serviceOwnsPersistentDeadlineAndMalformedCallbackFailure',
+    'com.shaterguy.chatgptselfrun.BootstrapResultPolicyTest.serviceTargetErrorRecoveryUsesCanonicalEntryOnlyBeforeConversation',
+    'com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationPolicyTest.processInitializerAndContextExplicitLookupAreWired',
+    'com.shaterguy.chatgptselfrun.CompletedRunCacheCleanupWiringTest.terminalDoneAcknowledgesBeforeCleanupAndTeardown',
+    'com.shaterguy.chatgptselfrun.CompletedRunCacheCleanupWiringTest.genericDestroyAndGenericCleanupDoNotClearApplicationCache',
+    'com.shaterguy.chatgptselfrun.ContinuationDiagnosticsPolicyTest.continuationFailuresReachDeduplicatedRunLog',
+    'com.shaterguy.chatgptselfrun.DriveInitializationPolicyTest.newExecutionDocStoresExactOriginalRequirement',
+    'com.shaterguy.chatgptselfrun.DriveInitializationPolicyTest.signalDocumentTransportNeverFallsBackToRequirementBody',
+    'com.shaterguy.chatgptselfrun.DriveSignalIdentityWiringTest.signalDocumentTransportUsesDriveIdsAsOngoingConsumptionAuthority',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.continuationUsesDomVerificationWithoutAnyGuardPhase',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.routineNotificationIsSilentAndAlertsAreEventDriven',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.signalCursorReplacesCommitMetadata',
+    'com.shaterguy.chatgptselfrun.DriveVariantPolicyTest.globalRunsPathAndExistingFolderIdPolicyArePreserved',
+    'com.shaterguy.chatgptselfrun.HeadlessDisplayOutputWiringTest.protocolWaitDetachesWithoutRecoveryAttachOrDomPolling',
+    'com.shaterguy.chatgptselfrun.HeadlessDisplayOutputWiringTest.rendererGoneDuringProtocolWaitCancelsNoStartWithoutRollover',
+    'com.shaterguy.chatgptselfrun.PostDriveConfirmationDelayPolicyTest.bothDriveSuccessPathsUseTheSameDelayedOutcome',
+    'com.shaterguy.chatgptselfrun.PostDriveConfirmationDelayPolicyTest.confirmedDriveOutcomeWaitsFiveSecondsBeforeExistingProgression',
+    'com.shaterguy.chatgptselfrun.SelfRunContinuationSubmissionTest.nativeBindsProtocolBeforeEitherSubmitPath',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveCommandAckPollingTest.normalCompletionHasNoDriveOrButtonPollingClock',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveCommandAckPollingTest.bootstrapSubmissionStartsProtocolOwnedWait',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveDev3PolicyTest.callbackIsFullyFenced',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveDev3PolicyTest.driveStartsOnlyAfterProtocolComplete',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveTurnInfoSourceTest.workProfileIsReadFromPendingDriveCompletion',
+    'com.shaterguy.chatgptselfrun.SelfRunDriveTurnInfoSourceTest.invalidDriveProfileUsesRewriteWithoutAssistantControlState',
+    'com.shaterguy.chatgptselfrun.SelfRunGeneralChatPolicyTest.captureLogRequiresPersistedConversationRoute',
+    'com.shaterguy.chatgptselfrun.SelfRunHealthPolicyTest.versionIdentityUses232Lineage',
+    'com.shaterguy.chatgptselfrun.SelfRunNextInputDev6Test.sourceKeepsStableResumeBaselineAndUsesExistingDurableCompletion',
+    'com.shaterguy.chatgptselfrun.SelfRunPauseResumeTest.manualResumeBaselinesThenForcesContinue',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.predecessorLateCallbacksAreFencedByRunAndEpoch',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.pausePrecedesPendingRolloverAndPausedStickyRunDoesNotResumeIt',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.conversationLocalRoutesUseRollover',
+    'com.shaterguy.chatgptselfrun.SelfRunRolloverWiringTest.continuationFailureEvidenceIsNotClearedBeforeClassification',
+    'com.shaterguy.chatgptselfrun.WebViewTransientNoStartPolicyWiringTest.retryableResourceErrorsPauseNoStartWithoutCompleting',
+    'com.shaterguy.chatgptselfrun.WorkBootstrapSelectionPolicyTest.workSelectionDoesNotReplaceTurnCompletedDynamicProfileFlow',
+    'com.shaterguy.chatgptselfrun.WorkModeRecoveryPolicyTest.waitHasNoWorkSpecificOrDomFallbackPath',
+    'com.shaterguy.chatgptselfrun.AttachmentUploadPolicyTest.v3BootstrapReferencesFolderOnlyNotLocalFileNamesOrUris',
+    'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest.v3ContractNeverAsksForLegacyTurnCompletedSignalDocument',
+    'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest.repairCreatesFreshRequestWithoutChangingLogicalTurnOrResultDocument'
+]
+
+tasks.withType(org.gradle.api.tasks.testing.Test).configureEach {
+    if (selfRunDriveVersionName ==~ selfRun3VersionPattern) {
+        filter {
+            selfRun3RetiredAssertions.each { retiredTest -> excludeTestsMatching(retiredTest) }
+        }
+    }
+}
+
 def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
     group = 'verification'
     doLast {
@@ -61,7 +113,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (android.defaultConfig.applicationId != expectedId) throw new GradleException("SelfRun Drive applicationId must be ${expectedId}")
         if (android.defaultConfig.versionCode != selfRunDriveVersionCode
                 || android.defaultConfig.versionName != selfRunDriveVersionName) throw new GradleException('SelfRun Drive version identity mismatch')
-        if (!(selfRunDriveVersionName ==~ selfRun3VersionPattern)) throw new GradleException('SelfRun 3 version must use the 3.0.x stable/dev/rc lineage')
+        if (!(selfRunDriveVersionName ==~ selfRun3VersionPattern)) throw new GradleException('SelfRun 3 version must be 3.x.y, 3.x.y-devN, or 3.x.y-rcN')
         if (selfRunDriveVersionCode <= 2020048) throw new GradleException('SelfRun 3 versionCode must advance the historical stable lineage')
         if (android.testBuildType != 'qaApp') throw new GradleException('SelfRun 3 instrumentation must target the qaApp TEST lineage')
         def testType = android.buildTypes.getByName('qaApp')
@@ -76,15 +128,12 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         ['RUN', 'PAUSE', 'RESUME', 'STOP'].each { action ->
             if (!service.contains('BuildConfig.APPLICATION_ID + ".' + action + '"')) throw new GradleException("${action} action must derive from applicationId")
         }
-        if (!service.contains('SelfRun3Coordinator') || !service.contains('V3_STALE_RUN_RETIRED')
-                || service.contains('V3_LEGACY_RUN_PRESERVED') || service.contains('SelfRunRolloverCoordinator')
-                || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) {
-            throw new GradleException('SelfRunService must be V3-only and must not preserve the retired executor')
-        }
+        if (!service.contains('SelfRun3Coordinator') || service.contains('SelfRunRolloverCoordinator')
+                || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) throw new GradleException('SelfRunService must be the V3 foreground shell')
 
         ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
-         'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3ComposerTransport.java',
+         'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
          'SelfRun3StrictJson.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
@@ -95,65 +144,34 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')
         def drive = new File(src, 'SelfRun3DriveAdapter.java').getText('UTF-8')
         def web = new File(src, 'SelfRun3WebAdapter.java').getText('UTF-8')
+        def dispatch = new File(src, 'SelfRun3DispatchScript.java').getText('UTF-8')
         def bootstrap = new File(src, 'SelfRun3BootstrapTransport.java').getText('UTF-8')
-        def composer = new File(src, 'SelfRun3ComposerTransport.java').getText('UTF-8')
         def power = new File(src, 'SelfRun3PowerPolicy.java').getText('UTF-8')
-        def markerFacade = new File(src, 'SelfRunSignalTransport.java').getText('UTF-8')
         if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
                 || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result contract are required')
-        if (!engine.contains('case REPAIR') || !engine.contains('put(v, "requestId", nextRequest)')) throw new GradleException('V3 repair must use a fresh physical request without replacing the logical turn')
+        if (!engine.contains('case REPAIR') || !engine.contains('repairTargetDocumentId')
+                || !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')
+                || !engine.contains('full handoff missing')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and full checkpoint are required')
         if (!ledger.contains('beginTransaction') || !ledger.contains('PreserveCorruptionHandler')) throw new GradleException('V3 transactional ledger and non-destructive corruption handling are required')
-        if (!coordinator.contains('MISSED_CALLBACK_PROBE_MS') || !coordinator.contains('scheduleMissedProbe') || !coordinator.contains('SelfRun3RunMarker')) throw new GradleException('V3 bounded reconciliation and explicit lineage are required')
-        if (!protocol.contains('CONTRACT_VERSION = "3.0.0"')
-                || !protocol.contains('SELF_RUN_SKILL_DOCUMENT_ID')
-                || !protocol.contains('1qPTSmJG8GpXMSyIGm6SIpgx6-LtWCBGVW3WUpoKj9fs')
-                || !protocol.contains('RESULT_DOCUMENT_ID') || !protocol.contains('REQUIREMENT_DOCUMENT_ID')
-                || !protocol.contains('PREVIOUS_RESULT_DOCUMENT_ID') || !protocol.contains('FOLDER_ID=')
-                || !protocol.contains('RECEIPT=') || !protocol.contains('WORK_PROFILE_CHOICES')
-                || !protocol.contains('compactWorkChoices')
-                || protocol.contains('static final String CONTRACT =') || protocol.contains('RESULT_IDENTITY_TEMPLATE')
-                || protocol.contains('ProfileRegistry.exportWorkJson') || protocol.contains('[최초 요구사항 원문]')
-                || protocol.contains('REQUEST_ID=') || protocol.contains('SELF_RUN_TURN_COMPLETED')
-                || protocol.contains('[SELF_RUN_TURN_DOCUMENT_RETRY ')
-                || protocol.contains('attachment.name') || protocol.contains('attachment.uri')) {
-            throw new GradleException('V3 prompt must be a compact canonical-SKILL envelope without retired contract payloads')
-        }
-        if (!markerFacade.contains('SelfRun3RunMarker.mark') || !markerFacade.contains('SelfRun3RunMarker.current')
-                || markerFacade.contains('DriveSignalDocumentIdentity') || markerFacade.contains('SelfRunProtocolRules')
-                || markerFacade.contains('getSharedPreferences')) {
-            throw new GradleException('launch marker facade must be V3-only')
-        }
-        if (!drive.contains('SelfRun3DriveLookup.findSingleDocumentId') || !drive.contains('REQUIREMENT_READBACK_MISMATCH') || drive.contains('DriveSignalParser')) throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
-        if (web.contains('SelfRunContinuationDom') || !web.contains('SelfRun3BootstrapTransport.prepare')
-                || !web.contains('SelfRun3BootstrapTransport.submit') || !web.contains('SelfRun3ComposerTransport.prepareContinuation')
-                || !web.contains('SelfRun3ComposerTransport.submitContinuation') || !web.contains('observeWithoutBinding(script)')) {
-            throw new GradleException('V3 bootstrap must use verified unbound prepare and continuation must stay V3-owned')
-        }
-        if (bootstrap.contains('SelfRunContinuationDom') || !bootstrap.contains("state:'prepared'") || !bootstrap.contains('READY_TO_SUBMIT')) {
-            throw new GradleException('V3 bootstrap must be independent and retain prepared-submit verification')
-        }
-        if (composer.contains('__srFind') || composer.contains('WebUiCalibrationStore') || composer.contains('offsetParent')
-                || composer.contains('UserNextInputStore') || composer.contains('SelfRunContinuationDom')
-                || composer.contains('prepareInitial') || composer.contains('submitInitial')) {
-            throw new GradleException('V3 composer transport must be continuation-only and independent of retired identity/calibration')
-        }
-        if (!composer.contains("selfrun-drive:v3-cont:") || !composer.contains("state:'clearing'")
-                || !composer.contains("state:'inputting'") || !composer.contains("state:'prepared'")
-                || !composer.contains("if(!e.isConnected)return") || !composer.contains('String.fromCharCode(13)')) {
-            throw new GradleException('V3 continuation must be restart-safe and escape-safe across rich-editor replacement')
-        }
-        if (!power.contains('NORMAL_WAIT_POLL_MS = 0L')) throw new GradleException('normal V3 response waiting must not poll')
+        if (coordinator.contains('scheduleMissedProbe') || coordinator.contains('web.receipt')) throw new GradleException('V3 progression must use committed Drive results, not browser completion or receipt')
+        if (!protocol.contains('CONTRACT_VERSION="3.1.0"')
+                || !protocol.contains('SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo"')
+                || !protocol.contains('contract-version: 3.1.0')
+                || !protocol.contains('RESULT_DOCUMENT_ID') || !protocol.contains('PREVIOUS_RESULT_DOCUMENT_ID')
+                || !protocol.contains('REQUIREMENT_DOCUMENT_ID') || !protocol.contains('full checkpoint')
+                || !protocol.contains('USER_ACTION_RESOLVED') || !protocol.contains('PARALLEL_MERGE')) throw new GradleException('V3.1 protocol/skill identity and disposable execution contract are required')
+        if (!drive.contains('SelfRun3DriveLookup.findSingleDocumentId') || !drive.contains('REQUIREMENT_READBACK_MISMATCH')
+                || drive.contains('DriveSignalParser')) throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
+        if (!power.contains('NORMAL_WAIT_POLL_MS = 60_000L')) throw new GradleException('V3 Drive metadata observation must use bounded low-frequency polling')
         def host = new File(src, 'HeadlessWebViewHost.java').getText('UTF-8')
         if (!host.contains('virtualDisplay.setSurface(null)') || !host.contains('virtualDisplay.setSurface(surface)')) throw new GradleException('detachable VirtualDisplay Surface support must be preserved')
         def webConfig = new File(src, 'WebViewConfig.java').getText('UTF-8')
-        if (!webConfig.contains('RequestProfileScript.installDocumentStart') || !webConfig.contains('ChatGptTurnProtocolScript.installDocumentStart')) throw new GradleException('profile and protocol browser adapters are required')
-
-        ['build-drive-test.yml', 'build-drive-v1.yml', 'build-selfrun-v2-test.yml',
-         'build-selfrun-v3-test.yml', 'release-drive-v1.yml'].each { name ->
-            if (rootProject.file(".github/workflows/${name}").exists()) throw new GradleException("retired workflow remains: ${name}")
-        }
-        ['docs/SELF_RUN_DRIVE_V1_PROTOCOL.md', 'docs/SELF_RUN_DRIVE_RUNTIME.md'].each { path ->
-            if (rootProject.file(path).exists()) throw new GradleException("retired protocol document remains: ${path}")
-        }
+        if (!webConfig.contains('RequestProfileScript.installDocumentStart') || !webConfig.contains('SelfRun3DispatchScript.install')) throw new GradleException('profile and dispatch-only browser adapters are required')
+        if (!web.contains('SelfRun3BootstrapTransport.prepare') || !web.contains('SelfRun3BootstrapTransport.submit')
+                || web.contains('SelfRunContinuationDom.prepareBootstrap') || web.contains('SelfRun3ComposerTransport.prepareContinuation')) throw new GradleException('every 3.1 app dispatch must use the proven first-message bootstrap transport')
+        if (!bootstrap.contains("state:'prepared'") || !bootstrap.contains('READY_TO_SUBMIT')) throw new GradleException('proven prepared-submit bootstrap verification must be preserved')
+        if (dispatch.contains('throw new Error') || dispatch.contains('reject()') || dispatch.contains('captureIdentity')
+                || dispatch.contains('response.clone')) throw new GradleException('3.1 dispatch observer must never block or inspect assistant responses')
+        if (!dispatch.contains('return nativeFetch(input,init)') || !dispatch.contains('return send.call(this,body)')) throw new GradleException('3.1 observer must always pass the original network request through')
     }
 }

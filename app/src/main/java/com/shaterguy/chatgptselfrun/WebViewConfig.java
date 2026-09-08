@@ -8,10 +8,34 @@ import android.webkit.WebView;
 final class WebViewConfig {
     private WebViewConfig() {}
 
-    /** Shared by the visible calibration WebView and the background automation WebView. */
+    /** Shared by visible calibration and legacy verified protocol paths. */
     @SuppressWarnings("SetJavaScriptEnabled")
     static boolean applyAutomation(WebView webView) {
         ChatReasoningPreferenceStore.initialize(webView.getContext());
+        configureAutomationViewport(webView);
+        boolean protocolAvailable = TurnProtocolLogBridge.install(webView);
+        if (!protocolAvailable) {
+            WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
+            return false;
+        }
+        RequestProfileScript.installDocumentStart(webView);
+        ChatGptTurnProtocolScript.installDocumentStart(webView);
+        WorkTurnProtocolIngressScript.installDocumentStart(webView);
+        WorkProtocolTransportCaptureScript.installDocumentStart(webView);
+        WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
+        return true;
+    }
+
+    /** SelfRun 3.1 keeps the proven WebView/bootstrap stack but observes only its outgoing POST. */
+    static boolean applySelfRun3Automation(WebView webView) {
+        ChatReasoningPreferenceStore.initialize(webView.getContext());
+        configureAutomationViewport(webView);
+        if (!SelfRun3DispatchScript.install(webView)) return false;
+        RequestProfileScript.installDocumentStart(webView);
+        return true;
+    }
+
+    private static void configureAutomationViewport(WebView webView) {
         WebSettings settings = common(webView);
         settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);
@@ -27,17 +51,6 @@ final class WebViewConfig {
         if (current != null && !current.contains(marker)) settings.setUserAgentString(current + " " + marker);
         webView.setInitialScale(100);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
-        boolean protocolAvailable = TurnProtocolLogBridge.install(webView);
-        if (!protocolAvailable) {
-            WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
-            return false;
-        }
-        RequestProfileScript.installDocumentStart(webView);
-        ChatGptTurnProtocolScript.installDocumentStart(webView);
-        WorkTurnProtocolIngressScript.installDocumentStart(webView);
-        WorkProtocolTransportCaptureScript.installDocumentStart(webView);
-        WorkProtocolNativeObserver.recordEnvironmentIfWork(webView.getContext());
-        return true;
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")

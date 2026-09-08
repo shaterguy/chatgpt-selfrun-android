@@ -11,18 +11,21 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class UserImmediateInputPolicyTest {
-    @Test public void immediateAttemptIsLimitedToTheCurrentV3AssistantResponse() {
-        String conversation = "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc";
+    @Test public void immediateAttemptIsLimitedToTheCurrentAssistantResponse() {
         assertTrue(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRun3Coordinator.PHASE_WAITING, conversation, true));
+                true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
+                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRun3Coordinator.PHASE_RECONCILING, conversation, true));
+                true, false, false, SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC,
+                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, true, false, SelfRun3Coordinator.PHASE_WAITING, conversation, true));
+                true, true, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
+                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRun3Coordinator.PHASE_WAITING, "", true));
+                true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION, "", true));
         assertFalse(UserImmediateInputCoordinator.immediateEligible(
-                true, false, false, SelfRun3Coordinator.PHASE_WAITING, conversation, false));
+                true, false, false, SelfRunStore.PHASE_WAIT_TURN_COMPLETION,
+                "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc", false));
     }
 
     @Test public void onlyAnIdenticalReservationIsReleasedBeforeImmediateClick() {
@@ -31,12 +34,23 @@ public final class UserImmediateInputPolicyTest {
         assertFalse(UserImmediateInputCoordinator.matchingReservation("", "send now"));
     }
 
-    @Test public void wiringKeepsV3CompletionOwnershipSeparateFromImmediateSendDetection() throws Exception {
+    @Test public void wiringKeepsCompletionObserverSemanticsSeparateFromImmediateSendDetection() throws Exception {
+        String existingDom = src("SelfRunContinuationDom.java");
         String immediateDom = src("UserImmediateInputDom.java");
         String coordinator = src("UserImmediateInputCoordinator.java");
         String host = src("HeadlessWebViewHost.java");
-        String activity = src("MainActivity.java");
 
+        int existingStop = existingDom.indexOf("const stop=controls.find(isStop);");
+        int existingSend = existingDom.indexOf("const send=calibrated", existingStop);
+        int strictStopGate = existingDom.indexOf(
+                "if(stop&&!preferSendWhenStopCoexists)", existingSend);
+        int verifiedFormFallbackGate = existingDom.indexOf(
+                "if(stop&&!(composerEditable()&&formSubmitReady))", strictStopGate);
+        assertTrue(existingStop >= 0 && existingSend > existingStop
+                && strictStopGate > existingSend
+                && verifiedFormFallbackGate > strictStopGate);
+        assertTrue(existingDom.contains(
+                "const controlState=(preferSendWhenStopCoexists=false)=>"));
         assertTrue(immediateDom.contains("const runningStop=()=>"));
         assertTrue(immediateDom.contains("if(!runningStop())"));
         assertTrue(immediateDom.contains("const forceSend=()=>"));
@@ -44,8 +58,7 @@ public final class UserImmediateInputPolicyTest {
         assertTrue(immediateDom.contains("IMMEDIATE_INPUT_CLICK_UNCERTAIN"));
         assertTrue(immediateDom.contains("send.click()"));
         assertFalse(immediateDom.contains("requestComposerSubmit"));
-        assertTrue(coordinator.contains("SelfRun3Coordinator.PHASE_WAITING"));
-        assertFalse(coordinator.contains("PHASE_WAIT_TURN_COMPLETION"));
+        assertTrue(coordinator.contains("SelfRunStore.PHASE_WAIT_TURN_COMPLETION"));
         assertTrue(coordinator.contains("UserNextInputStore.save(runId, text)"));
         assertTrue(coordinator.contains("UserNextInputStore.delete(runId)"));
         assertTrue(coordinator.contains("cleanupAfterAmbiguousClick"));
@@ -53,24 +66,16 @@ public final class UserImmediateInputPolicyTest {
         assertFalse(coordinator.contains("void click(int retry)"));
         assertTrue(host.contains("static WebView activeWebView()"));
         assertTrue(host.contains("if (activeWebView == webView) activeWebView = null"));
-        assertTrue(activity.contains("\"즉시 보내기\""));
-        assertTrue(activity.contains("UserImmediateInputCoordinator.submit"));
     }
 
-    @Test public void forceInputReattachesBeforeSendAndUsesComposerGateAfterConfirmedSend() throws Exception {
-        String coordinator = src("UserImmediateInputCoordinator.java");
-        String host = src("HeadlessWebViewHost.java");
-
-        assertTrue(host.contains("static HeadlessWebViewHost activeHost()"));
-        assertTrue(coordinator.contains("HeadlessWebViewHost.activeHost()"));
-        assertTrue(coordinator.contains("host.attachOutput()"));
-        assertTrue(coordinator.contains("restoreOutputAfterAttempt(true)"));
-        assertTrue(coordinator.contains("host.detachOutputWhenComposerReady()"));
-        assertTrue(coordinator.contains("restoreOutputAfterAttempt(false)"));
-        assertTrue(coordinator.contains("else if (restoreDetached)"));
-        assertTrue(coordinator.contains("host.detachOutput()"));
-        assertFalse(coordinator.contains("view.reload()"));
-        assertFalse(coordinator.contains("view.loadUrl("));
+    @Test public void activeUiOnlySavesDurableNextExecutionInput() throws Exception {
+        String activity = src("MainActivity.java");
+        assertFalse(activity.contains("\"즉시 보내기\""));
+        assertFalse(activity.contains("UserImmediateInputCoordinator.submit"));
+        assertFalse(activity.contains("forceImmediateInput"));
+        assertTrue(activity.contains("v -> saveNextInput()"));
+        assertTrue(activity.contains("UserNextInputStore.save(runId, nextInputEditor.getText().toString())"));
+        assertTrue(activity.contains("다음 새 대화에 반영됩니다."));
     }
 
     private static String src(String file) throws Exception {

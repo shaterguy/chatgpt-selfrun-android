@@ -4,8 +4,8 @@ run-name: SelfRun 3 Candidate (${{ github.ref_name }}) #${{ github.run_number }}
 on:
   push:
     branches:
-      - 'selfrun-v3/v3.0.*-dev*'
-      - 'selfrun-v3/v3.0.*-rc*'
+      - 'selfrun-v3/v3.1.0-dev*'
+      - 'selfrun-v3/v3.1.0-rc*'
   workflow_dispatch:
 
 permissions:
@@ -45,7 +45,7 @@ jobs:
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           test -n "$VERSION_NAME"; test -n "$VERSION_CODE"
-          [[ "$VERSION_NAME" =~ ^3\.0\.[0-9]+-(dev|rc)[0-9]+$ ]]
+          [[ "$VERSION_NAME" =~ ^3\.1\.0-(dev|rc)[0-9]+$ ]]
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
       - name: STATIC_PREFLIGHT - V3 policy and all test-source compile
         shell: bash
@@ -174,14 +174,14 @@ jobs:
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.0.0.apk > stable-cert.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
-          gh run download 34175062587 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
-          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == 'f1b50ad741252cebfed102dbfdb878e123291bba' ]]
-          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev19.apk
+          gh run download 34176676515 --repo "$GITHUB_REPOSITORY" --name selfrun-v3-candidate-1 --dir previous
+          [[ "$(tr -d '[:space:]' < previous/SOURCE_COMMIT.txt)" == '30f166a9b8b3ccc6d3fd093116929438058924a0' ]]
+          PREVIOUS=previous/chatgpt-selfrun-drive-test-v3.0.1-dev21.apk
           test -s "$PREVIOUS"
           grep -F "$(sha256sum "$PREVIOUS" | awk '{print $1}')" previous/SHA256SUMS.txt >/dev/null
           "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS" > previous-cert.txt
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' previous-cert.txt
-          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev19'"
+          "$BT/aapt" dump badging "$PREVIOUS" | grep -F "versionName='3.0.1-dev21'"
       - name: Enable hardware acceleration
         shell: bash
         run: |
@@ -210,6 +210,8 @@ jobs:
             selfrun-v3-runtime-evidence.txt
             stable-cert.txt
             previous-cert.txt
+            selfrun-v3-upgrade-seed.txt
+            selfrun-v3-upgrade-verify.txt
           if-no-files-found: warn
           retention-days: 30
 

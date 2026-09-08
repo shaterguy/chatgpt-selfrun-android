@@ -30,17 +30,14 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class SelfRunNewActivity extends Activity {
-    private static final String[] MODE_LABELS = {"일반 채팅", "워크"};
-    private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK};
-    private static final String BOOTSTRAP_SAME_AS_TASK = "same";
+    private static final String[] MODE_LABELS = {"일반 채팅", "워크", "하이브리드"};
+    private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK, SelfRunStore.MODE_HYBRID};
     private static final int REQUEST_ATTACHMENTS = 3017;
     private static final String STATE_REQUIREMENT = "requirement";
     private static final String STATE_MODE = "mode";
     private static final String STATE_PROJECT = "project";
     private static final String STATE_ATTACHMENTS = "attachments";
     private static final String STATE_CHAT_REASONING = "chatReasoningToken";
-    private static final String STATE_CHAT_BOOTSTRAP_REASONING = "chatBootstrapReasoningToken";
-    private static final String STATE_CHAT_ADVANCED_EXPANDED = "chatAdvancedExpanded";
     private static final String STATE_WORK_BOOTSTRAP_MODEL = "workBootstrapModel";
     private static final String STATE_WORK_BOOTSTRAP_REASONING = "workBootstrapReasoning";
 
@@ -52,18 +49,14 @@ public final class SelfRunNewActivity extends Activity {
     private List<ProjectUrlPolicy.ProjectRef> projectEntries;
     private EditText requirement;
     private Ui.SelectionField mode;
+    private Ui.SelectionField firstMode;
     private Ui.SelectionField chatReasoning;
-    private Button chatAdvancedToggle;
-    private LinearLayout chatAdvancedContainer;
-    private Ui.SelectionField chatBootstrapReasoning;
     private Ui.SelectionField workBootstrapProfile;
     private LinearLayout attachmentListView;
     private TextView attachmentSummary;
     private final ArrayList<SelfRunStore.Attachment> selectedAttachments = new ArrayList<>();
     private final ArrayList<String> chatReasoningValues = new ArrayList<>();
-    private final ArrayList<String> chatBootstrapReasoningValues = new ArrayList<>();
     private final ArrayList<ProfileRegistry.Profile> workBootstrapProfiles = new ArrayList<>();
-    private boolean chatAdvancedExpanded;
     private boolean attachmentsHandedOff;
     private boolean firstResume = true;
 
@@ -103,22 +96,15 @@ public final class SelfRunNewActivity extends Activity {
         mode = Ui.selection(this, "실행 모드");
         mode.setItems(MODE_LABELS);
         runtime.addView(mode);
-        chatReasoning = Ui.selection(this, "추론 정도");
-        refreshChatReasoningOptions(ChatReasoningPreferenceStore.EXTRA_HIGH);
+        firstMode = Ui.selection(this, "첫 턴 실행 모드");
+        firstMode.setItems(new String[]{"일반 채팅", "워크"});
+        firstMode.setOnSelectionChangedListener(position -> updateChatReasoningAvailability());
+        runtime.addView(firstMode);
+        chatReasoning = Ui.selection(this, "첫 턴 모델 조합");
+        refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);
         LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         gap.topMargin = Ui.dp(this, 12);
         runtime.addView(chatReasoning, gap);
-        chatAdvancedToggle = Ui.textButton(this, "첫 턴 설정", v -> {
-            chatAdvancedExpanded = !chatAdvancedExpanded;
-            updateChatReasoningAvailability();
-        });
-        runtime.addView(chatAdvancedToggle);
-        chatAdvancedContainer = new LinearLayout(this);
-        chatAdvancedContainer.setOrientation(LinearLayout.VERTICAL);
-        chatBootstrapReasoning = Ui.selection(this, "첫 턴 추론 정도");
-        refreshChatBootstrapReasoningOptions(BOOTSTRAP_SAME_AS_TASK);
-        chatAdvancedContainer.addView(chatBootstrapReasoning);
-        runtime.addView(chatAdvancedContainer);
         workBootstrapProfile = Ui.selection(this, "첫 턴 모델 조합");
         WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
         refreshWorkBootstrapOptions(workDefault.model, workDefault.reasoning);
@@ -187,7 +173,7 @@ public final class SelfRunNewActivity extends Activity {
         String wanted = preferred == null || preferred.isEmpty() ? ChatReasoningPreferenceStore.KEEP : preferred;
         ArrayList<String> labels = new ArrayList<>();
         chatReasoningValues.clear();
-        labels.add("현재 설정 유지");
+        labels.add("초기 프로필 선택 필요");
         chatReasoningValues.add(ChatReasoningPreferenceStore.KEEP);
         int selected = 0;
         for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) {
@@ -203,28 +189,6 @@ public final class SelfRunNewActivity extends Activity {
         }
         chatReasoning.setItems(labels.toArray(new String[0]));
         chatReasoning.setSelection(selected);
-    }
-
-    private void refreshChatBootstrapReasoningOptions(String preferred) {
-        if (chatBootstrapReasoning == null) return;
-        String wanted = preferred == null || preferred.isEmpty() ? BOOTSTRAP_SAME_AS_TASK : preferred;
-        ArrayList<String> labels = new ArrayList<>();
-        chatBootstrapReasoningValues.clear();
-        labels.add("작업 추론 정도와 동일");
-        chatBootstrapReasoningValues.add(BOOTSTRAP_SAME_AS_TASK);
-        int selected = 0;
-        for (ProfileRegistry.Profile profile : ProfileRegistry.listChat()) {
-            labels.add(profile.displayLabel());
-            chatBootstrapReasoningValues.add(profile.signalReasoning);
-            if (profile.signalReasoning.equals(wanted)) selected = chatBootstrapReasoningValues.size() - 1;
-        }
-        if (!BOOTSTRAP_SAME_AS_TASK.equals(wanted) && ProfileRegistry.resolveChat(wanted) == null) {
-            labels.add("지원하지 않는 이전 선택 · " + wanted);
-            chatBootstrapReasoningValues.add(wanted);
-            selected = chatBootstrapReasoningValues.size() - 1;
-        }
-        chatBootstrapReasoning.setItems(labels.toArray(new String[0]));
-        chatBootstrapReasoning.setSelection(selected);
     }
 
     private void refreshWorkBootstrapOptions(String preferredModel, String preferredReasoning) {
@@ -254,15 +218,19 @@ public final class SelfRunNewActivity extends Activity {
 
     private void updateChatReasoningAvailability() {
         if (mode == null || chatReasoning == null || workBootstrapProfile == null) return;
-        boolean chat = mode.getSelectedItemPosition() == 0;
+        boolean hybrid = mode.getSelectedItemPosition() == 2;
+        firstMode.setVisibility(hybrid ? View.VISIBLE : View.GONE);
+        boolean chat = SelfRunStore.MODE_CHAT.equals(selectedActualMode());
         chatReasoning.setEnabled(chat);
         chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE);
-        chatAdvancedToggle.setVisibility(chat ? View.VISIBLE : View.GONE);
-        chatAdvancedToggle.setText(chatAdvancedExpanded ? "첫 턴 설정 닫기" : "첫 턴 설정");
-        chatAdvancedContainer.setVisibility(chat && chatAdvancedExpanded ? View.VISIBLE : View.GONE);
-        chatBootstrapReasoning.setEnabled(chat && chatAdvancedExpanded);
         workBootstrapProfile.setEnabled(!chat && !workBootstrapProfiles.isEmpty());
         workBootstrapProfile.setVisibility(chat ? View.GONE : View.VISIBLE);
+    }
+
+    private String selectedActualMode() {
+        return mode.getSelectedItemPosition() == 2
+                ? (firstMode.getSelectedItemPosition() == 1 ? SelfRunStore.MODE_WORK : SelfRunStore.MODE_CHAT)
+                : MODE_VALUES[mode.getSelectedItemPosition()];
     }
 
     private String selectedChatReasoning() {
@@ -270,15 +238,6 @@ public final class SelfRunNewActivity extends Activity {
         int position = Math.max(0, Math.min(chatReasoningValues.size() - 1,
                 chatReasoning.getSelectedItemPosition()));
         return chatReasoningValues.get(position);
-    }
-
-    private String selectedChatBootstrapReasoning() {
-        if (chatBootstrapReasoning == null || chatBootstrapReasoningValues.isEmpty()) {
-            return BOOTSTRAP_SAME_AS_TASK;
-        }
-        int position = Math.max(0, Math.min(chatBootstrapReasoningValues.size() - 1,
-                chatBootstrapReasoning.getSelectedItemPosition()));
-        return chatBootstrapReasoningValues.get(position);
     }
 
     private ProfileRegistry.Profile selectedWorkBootstrapProfile() {
@@ -508,7 +467,8 @@ public final class SelfRunNewActivity extends Activity {
                 || !DriveApiClient.validOpaqueAccountId(store.driveAccountId())) {
             Toast.makeText(this, "먼저 ‘Drive 실행문서 저장 위치’에서 Runs 폴더를 연결하세요.", Toast.LENGTH_LONG).show(); return;
         }
-        String selectedMode = MODE_VALUES[mode.getSelectedItemPosition()];
+        String selectedTaskMode = MODE_VALUES[mode.getSelectedItemPosition()];
+        String selectedMode = selectedActualMode();
         ProfileRegistry.Profile workProfile = SelfRunStore.MODE_WORK.equals(selectedMode)
                 ? selectedWorkBootstrapProfile() : null;
         if (SelfRunStore.MODE_WORK.equals(selectedMode)
@@ -517,28 +477,11 @@ public final class SelfRunNewActivity extends Activity {
             Toast.makeText(this, "선택할 수 있는 Work bootstrap profile이 없거나 삭제되었습니다. Profile Registry를 확인하세요.", Toast.LENGTH_LONG).show();
             return;
         }
-        String continuationReasoning = SelfRunStore.MODE_CHAT.equals(selectedMode)
+        String bootstrapReasoning = SelfRunStore.MODE_CHAT.equals(selectedMode)
                 ? selectedChatReasoning() : ChatReasoningPreferenceStore.KEEP;
-        String bootstrapChoice = SelfRunStore.MODE_CHAT.equals(selectedMode)
-                ? selectedChatBootstrapReasoning() : BOOTSTRAP_SAME_AS_TASK;
-        String bootstrapReasoning = BOOTSTRAP_SAME_AS_TASK.equals(bootstrapChoice)
-                ? continuationReasoning : bootstrapChoice;
         if (SelfRunStore.MODE_CHAT.equals(selectedMode)
-                && !ChatReasoningPreferenceStore.KEEP.equals(continuationReasoning)
-                && ProfileRegistry.resolveChat(continuationReasoning) == null) {
-            Toast.makeText(this, "선택한 작업 Chat profile이 삭제되었거나 지원되지 않습니다. Profile Registry에서 다시 선택하세요.", Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (SelfRunStore.MODE_CHAT.equals(selectedMode)
-                && !ChatReasoningPreferenceStore.KEEP.equals(bootstrapReasoning)
                 && ProfileRegistry.resolveChat(bootstrapReasoning) == null) {
-            Toast.makeText(this, "선택한 부트스트랩 Chat profile이 삭제되었거나 지원되지 않습니다. Profile Registry에서 다시 선택하세요.", Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (SelfRunStore.MODE_CHAT.equals(selectedMode)
-                && ChatReasoningPreferenceStore.KEEP.equals(continuationReasoning)
-                && !ChatReasoningPreferenceStore.KEEP.equals(bootstrapReasoning)) {
-            Toast.makeText(this, "부트스트랩 후 복원할 작업 profile을 알 수 없습니다. 작업 추론 정도를 등록된 조합으로 선택하세요.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "초기 프로필 선택 필요: 등록된 Chat 모델 조합을 선택하세요.", Toast.LENGTH_LONG).show();
             return;
         }
         if (workProfile != null && !WorkBootstrapPreferenceStore.save(
@@ -547,7 +490,7 @@ public final class SelfRunNewActivity extends Activity {
             return;
         }
         String runId = SelfRunRunId.create();
-        if (!ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)) {
+        if (!ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, bootstrapReasoning)) {
             Toast.makeText(this, "Chat 추론 profile 설정을 저장하지 못했습니다.", Toast.LENGTH_LONG).show(); return;
         }
         Set<String> persistedBefore;
@@ -571,18 +514,17 @@ public final class SelfRunNewActivity extends Activity {
         try {
             if (workProfile != null) {
                 store.startWork(runId, project, request, new ArrayList<>(selectedAttachments),
-                        workProfile.signalModel, workProfile.signalReasoning);
+                        workProfile.signalModel, workProfile.signalReasoning, selectedTaskMode);
             } else {
-                store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments));
+                store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments), selectedTaskMode);
             }
             attachmentsHandedOff = true;
         } catch (RuntimeException error) {
             store.cancelAttachmentGrantHandoff();
             throw error;
         }
-        runLog.record(store, "UI_START", "mode=" + selectedMode
+        runLog.record(store, "UI_START", "taskMode=" + selectedTaskMode + ";mode=" + selectedMode
                 + ";chatBootstrapReasoning=" + bootstrapReasoning
-                + ";chatContinuationReasoning=" + continuationReasoning
                 + ";workBootstrapModel=" + (workProfile == null ? "" : workProfile.signalModel)
                 + ";workBootstrapReasoning=" + (workProfile == null ? "" : workProfile.signalReasoning)
                 + ";attachments=" + selectedAttachments.size());
@@ -600,9 +542,7 @@ public final class SelfRunNewActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         if (chatReasoning != null) refreshChatReasoningOptions(selectedChatReasoning());
-        if (chatBootstrapReasoning != null) {
-            refreshChatBootstrapReasoningOptions(selectedChatBootstrapReasoning());
-        }
+
         if (workBootstrapProfile != null) {
             ProfileRegistry.Profile selected = selectedWorkBootstrapProfile();
             WorkBootstrapPreferenceStore.Selection fallback = WorkBootstrapPreferenceStore.load(this);
@@ -618,9 +558,8 @@ public final class SelfRunNewActivity extends Activity {
         super.onSaveInstanceState(outState);
         outState.putString(STATE_REQUIREMENT, requirement == null ? "" : requirement.getText().toString());
         outState.putInt(STATE_MODE, mode == null ? 0 : mode.getSelectedItemPosition());
+        outState.putInt("firstMode", firstMode == null ? 0 : firstMode.getSelectedItemPosition());
         outState.putString(STATE_CHAT_REASONING, selectedChatReasoning());
-        outState.putString(STATE_CHAT_BOOTSTRAP_REASONING, selectedChatBootstrapReasoning());
-        outState.putBoolean(STATE_CHAT_ADVANCED_EXPANDED, chatAdvancedExpanded);
         ProfileRegistry.Profile workProfile = selectedWorkBootstrapProfile();
         outState.putString(STATE_WORK_BOOTSTRAP_MODEL, workProfile == null ? "" : workProfile.signalModel);
         outState.putString(STATE_WORK_BOOTSTRAP_REASONING, workProfile == null ? "" : workProfile.signalReasoning);
@@ -630,15 +569,9 @@ public final class SelfRunNewActivity extends Activity {
 
     private void restoreDraftState(Bundle state) {
         if (state == null) {
-            String preferred = ProfileRegistry.resolveChat(ChatReasoningPreferenceStore.EXTRA_HIGH) != null
-                    ? ChatReasoningPreferenceStore.EXTRA_HIGH
-                    : (ProfileRegistry.listChat().isEmpty() ? ChatReasoningPreferenceStore.KEEP
-                    : ProfileRegistry.listChat().get(0).signalReasoning);
-            refreshChatReasoningOptions(preferred);
-            refreshChatBootstrapReasoningOptions(BOOTSTRAP_SAME_AS_TASK);
+            refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);
             WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
             refreshWorkBootstrapOptions(workDefault.model, workDefault.reasoning);
-            chatAdvancedExpanded = false;
             renderAttachments();
             updateChatReasoningAvailability();
             return;
@@ -647,15 +580,13 @@ public final class SelfRunNewActivity extends Activity {
         int savedMode = state.getInt(STATE_MODE, 0);
         int modePosition = savedMode >= 0 && savedMode < MODE_VALUES.length ? savedMode : 0;
         mode.setSelection(modePosition);
+        firstMode.setSelection(state.getInt("firstMode", 0) == 1 ? 1 : 0);
         String reasoning = state.getString(STATE_CHAT_REASONING, ChatReasoningPreferenceStore.KEEP);
         refreshChatReasoningOptions(reasoning);
-        String bootstrap = state.getString(STATE_CHAT_BOOTSTRAP_REASONING, BOOTSTRAP_SAME_AS_TASK);
-        refreshChatBootstrapReasoningOptions(bootstrap);
         WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
         String workModel = state.getString(STATE_WORK_BOOTSTRAP_MODEL, workDefault.model);
         String workReasoning = state.getString(STATE_WORK_BOOTSTRAP_REASONING, workDefault.reasoning);
         refreshWorkBootstrapOptions(workModel, workReasoning);
-        chatAdvancedExpanded = state.getBoolean(STATE_CHAT_ADVANCED_EXPANDED, false);
         selectedAttachments.clear();
         selectedAttachments.addAll(SelfRunStore.decodeAttachmentDrafts(state.getString(STATE_ATTACHMENTS, "")));
         selectProjectUrl(state.getString(STATE_PROJECT, SelfRunScript.GENERAL_CHAT_URL));

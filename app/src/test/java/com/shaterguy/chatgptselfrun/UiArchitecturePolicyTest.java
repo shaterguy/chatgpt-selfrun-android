@@ -13,8 +13,10 @@ public final class UiArchitecturePolicyTest {
     @Test public void mainIsRunConsoleNotLegacyQuickActionCardStack() throws Exception {
         String main = src("MainActivity.java");
         assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
-        assertTrue(main.contains("다음 턴 예약"));
-        assertTrue(main.contains("즉시 보내기"));
+        assertTrue(main.contains("Ui.setPrimaryContent(this, console, Ui.DEST_RUN)"));
+        assertTrue(main.contains("다음 실행 예약"));
+        assertFalse(main.contains("즉시 보내기"));
+        assertTrue(main.contains("UserNextInputStore.save(runId, nextInputEditor.getText().toString())"));
         assertTrue(main.contains("pauseButton.setVisibility(running ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("resumeButton.setVisibility(paused ? View.VISIBLE : View.GONE)"));
         assertTrue(main.contains("if (Ui.isExpanded(this))"));
@@ -36,10 +38,10 @@ public final class UiArchitecturePolicyTest {
         String history = src("SelfRunHistoryActivity.java"), detail = src("SelfRunDetailActivity.java");
         assertTrue(history.contains("renderDetailPane"));
         assertTrue(history.contains("Ui.isExpanded(this)"));
+        assertTrue(history.contains("renderDetailPane"));
         assertTrue(detail.contains("작업 상세"));
         assertTrue(detail.contains("실행 정보"));
         assertTrue(detail.contains("원본 요청"));
-        assertTrue(detail.contains("SelfRun 3 ledger"));
     }
 
     @Test public void launchWorkspaceUsesDynamicRegistriesAndAllowsWorkBootstrapSelection() throws Exception {
@@ -82,6 +84,15 @@ public final class UiArchitecturePolicyTest {
         assertTrue(profiles.contains("registryScroll.setVisibility(View.GONE)"));
         assertTrue(profiles.contains("메뉴 클릭만으로는 캡처되지 않습니다"));
         assertTrue(drive.contains("연결됨"));
+    }
+
+    @Test public void restartUsesRecoveryConsoleAndKeepsRecoverySemantics() throws Exception {
+        String restart = src("SelfRunRestartActivity.java");
+        assertTrue(restart.contains("작업 재시작"));
+        assertTrue(restart.contains("작업"));
+        assertTrue(restart.contains("progressText"));
+        assertTrue(restart.contains("DriveAuthorization.requestSilently"));
+        assertTrue(restart.contains("requireClaimOwnership();"));
     }
 
     private static String src(String file) throws Exception {

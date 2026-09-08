@@ -51,14 +51,14 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
-    @Test public void commitRequiresBothTransportEndAndCommittedResult() {
+    @Test public void committedResultAdvancesWithoutTransportEnd() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject resultPayload = new JSONObject();
         SelfRun3Engine.put(resultPayload, "text", continueResult(claimed).toString());
         SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, resultPayload);
         assertTrue(withResult.hasResult());
         assertFalse(withResult.flag("ended"));
-        assertEquals(SelfRun3Engine.Action.CHECK_RECEIPT, SelfRun3Engine.nextAction(withResult));
+        assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(withResult));
         JSONObject end = request(withResult); SelfRun3Engine.put(end, "source", "message_stream_complete");
         SelfRun3Engine.State ended = reduce(withResult, "ended", SelfRun3Engine.Kind.ENDED, end);
         assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(ended));
@@ -88,6 +88,7 @@ public final class SelfRun3EngineTest {
     private static SelfRun3Engine.State readyState() {
         JSONObject config = new JSONObject();
         SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.put(config, "reasoning", "medium");
         SelfRun3Engine.put(config, "projectUrl", "https://chatgpt.com/");
         SelfRun3Engine.State s = SelfRun3Engine.create("task", "task:turn:1", config);
         s = resource(s, "folderId", "folder");
@@ -110,6 +111,7 @@ public final class SelfRun3EngineTest {
     private static SelfRun3Engine.State verifyCompletedState() {
         JSONObject config = new JSONObject();
         SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.put(config, "reasoning", "medium");
         JSONObject raw = new JSONObject();
         SelfRun3Engine.put(raw, "schema", SelfRun3Engine.STATE_SCHEMA);
         SelfRun3Engine.put(raw, "taskId", "task");
@@ -172,6 +174,7 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.put(h, "evidence", "test");
         SelfRun3Engine.put(h, "constraints", "none");
         SelfRun3Engine.put(h, "next_action", "continue");
+        for (String key : new String[]{"requirements","decisions","assumptions","materials","external_state","verification_state","do_not_repeat"}) SelfRun3Engine.put(h,key,new org.json.JSONArray());
         return h;
     }
 
