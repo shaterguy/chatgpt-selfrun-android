@@ -10,74 +10,63 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Source contract for deferring generation-time VirtualDisplay pause until the next composer is ready. */
+/** Regression contract: an active SelfRun page stays attached to its VirtualDisplay for the whole turn. */
 public final class HeadlessOutputDetachGateTest {
-    @Test public void generationDetachWaitsForActiveProtocolAndRealComposer() throws Exception {
+    @Test public void runtimeSurfaceDetachIsDisabled() throws Exception {
         String host = source("HeadlessWebViewHost.java");
-        String gated = host.substring(host.indexOf("boolean detachOutputWhenComposerReady()"),
+        String runtime = host.substring(host.indexOf("boolean detachOutput()"),
                 host.indexOf("boolean attachOutput()"));
 
-        assertTrue(gated.contains("OUTPUT_DETACH_SETTLE_MS"));
-        assertTrue(gated.contains("probeDetachReadiness"));
-        assertTrue(gated.contains("window.__selfRunTurnProtocol?.snapshot?.()"));
-        assertTrue(gated.contains("SelfRun3ComposerTransport.composerReadyExpression()"));
-        assertTrue(gated.contains("\"THINKING\".equals(phase)"));
-        assertTrue(gated.contains("\"ANSWERING\".equals(phase)"));
-        assertTrue(gated.contains("\"COMPLETE\".equals(phase)"));
-        assertTrue(gated.contains("composerReady"));
+        assertTrue(runtime.contains("boolean detachOutput()"));
+        assertTrue(runtime.contains("boolean detachOutputWhenComposerReady()"));
+        assertFalse(runtime.contains("virtualDisplay.setSurface(null)"));
+        assertFalse(runtime.contains("probeDetachReadiness"));
+        assertFalse(runtime.contains("scheduleNextDetachProbe"));
+        assertFalse(runtime.contains("OUTPUT_DETACH_"));
     }
 
-    @Test public void immediateDetachRemainsAvailableForPauseAndFailurePaths() throws Exception {
-        String host = source("HeadlessWebViewHost.java");
-        String immediate = host.substring(host.indexOf("boolean detachOutput()"),
-                host.indexOf("boolean detachOutputWhenComposerReady()"));
-        String gatedEntry = host.substring(host.indexOf("boolean detachOutputWhenComposerReady()"),
-                host.indexOf("private void probeDetachReadiness"));
-
-        assertTrue(immediate.contains("virtualDisplay.setSurface(null)"));
-        assertFalse(gatedEntry.contains("virtualDisplay.setSurface(null)"));
-        assertFalse(gatedEntry.contains("getUrl()"));
-        assertFalse(gatedEntry.contains("isChatGptPage"));
-    }
-
-    @Test public void slowComposerStillDetachesEventuallyWithoutReconnect() throws Exception {
-        String host = source("HeadlessWebViewHost.java");
-        String gate = host.substring(host.indexOf("private void probeDetachReadiness"),
-                host.indexOf("boolean attachOutput()"));
-
-        assertTrue(gate.contains("scheduleNextDetachProbe"));
-        assertTrue(gate.contains("OUTPUT_DETACH_FAST_WINDOW_MS"));
-        assertTrue(gate.contains("OUTPUT_DETACH_SLOW_PROBE_MS"));
-        assertFalse(gate.contains("OUTPUT_DETACH_MAX_WAIT_MS"));
-        assertFalse(gate.contains("finishDetachProbeKeepingOutput"));
-        assertFalse(gate.contains("loadUrl("));
-        assertFalse(gate.contains("reload("));
-        assertFalse(gate.contains("destroy("));
-        assertFalse(gate.contains("new WebView"));
-    }
-
-    @Test public void webAdapterRoutesActiveWaitsThroughComposerGate() throws Exception {
+    @Test public void waitAndInspectionCannotSuspendTheHeadlessPage() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        assertTrue(web.contains("state.flag(\"sendClaimed\") && !state.flag(\"ended\")"));
-        assertTrue(web.contains("host.detachOutputWhenComposerReady()"));
-        assertTrue(web.contains("detachImmediately()"));
-        assertTrue(web.contains("observedStart()"));
+        String host = source("HeadlessWebViewHost.java");
+        String runtime = host.substring(host.indexOf("boolean detachOutput()"),
+                host.indexOf("boolean attachOutput()"));
+
+        // Existing callers may still request a detach, but the host contract makes every runtime request a no-op.
+        assertTrue(web.contains("host.detachOutput()") || web.contains("host.detachOutputWhenComposerReady()"));
+        assertTrue(runtime.contains("return false"));
+        assertFalse(runtime.contains("setSurface(null)"));
     }
 
-    @Test public void completionReattachesOutputBeforeNextTurnTransition() throws Exception {
+    @Test public void destroyStillReleasesVirtualDisplayResources() throws Exception {
+        String host = source("HeadlessWebViewHost.java");
+        String destroy = host.substring(host.indexOf("void destroy()"));
+
+        assertTrue(destroy.contains("virtualDisplay.setSurface(null)"));
+        assertTrue(destroy.contains("virtualDisplay.release()"));
+        assertTrue(destroy.contains("surface.release()"));
+        assertTrue(destroy.contains("imageReader.close()"));
+        assertTrue(destroy.contains("drainThread.quitSafely()"));
+    }
+
+    @Test public void rasterAndDrainPowerOptimizationsRemainWithoutLifecycleSuspension() throws Exception {
+        String host = source("HeadlessWebViewHost.java");
+
+        assertTrue(host.contains("HeadlessWebViewPowerPolicy.capRasterDensity"));
+        assertTrue(host.contains("ImageReader.newInstance"));
+        assertTrue(host.contains("setOnImageAvailableListener"));
+        assertTrue(host.contains("drainLatestImage"));
+    }
+
+    @Test public void completionCanKeepUsingTheAlreadyAttachedOutput() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         String end = web.substring(web.indexOf("private void observedEnd"),
                 web.indexOf("void prepare("));
         String attach = web.substring(web.indexOf("void attachForCompletionTransition()"),
                 web.indexOf("private void detachImmediately()"));
-        String inspect = web.substring(web.indexOf("void inspect("),
-                web.indexOf("static String inspectionScript"));
 
         assertTrue(end.contains("attachForCompletionTransition()"));
-        assertFalse(end.contains("detachAfterComposerReady()"));
         assertTrue(attach.contains("host.attachOutput()"));
-        assertTrue(inspect.contains("result.optBoolean(\"complete\") || result.optBoolean(\"receipt\")"));
-        assertTrue(inspect.contains("attachForCompletionTransition()"));
+        assertFalse(attach.contains("host.detachOutput"));
     }
 
     @Test public void preparationRetryGetsFreshTimeoutBudgetWithoutResettingTurnIdentity() throws Exception {
@@ -89,14 +78,6 @@ public final class HeadlessOutputDetachGateTest {
         assertTrue(prepare.contains("else if (restartPreparation)"));
         assertTrue(prepare.contains("prepareStarted = SystemClock.elapsedRealtime()"));
         assertFalse(prepare.contains("state = null"));
-    }
-
-    @Test public void gateUsesFastStartupThenSparseLongWaitProbe() throws Exception {
-        String host = source("HeadlessWebViewHost.java");
-        assertTrue(host.contains("OUTPUT_DETACH_SETTLE_MS = 1_000L"));
-        assertTrue(host.contains("OUTPUT_DETACH_FAST_PROBE_MS = 250L"));
-        assertTrue(host.contains("OUTPUT_DETACH_FAST_WINDOW_MS = 5_000L"));
-        assertTrue(host.contains("OUTPUT_DETACH_SLOW_PROBE_MS = 2_000L"));
     }
 
     private static String source(String name) throws Exception {
