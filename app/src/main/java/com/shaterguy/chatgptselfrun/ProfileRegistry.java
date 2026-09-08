@@ -107,7 +107,12 @@ final class ProfileRegistry {
 
         String requestValue(String path) { return ProfileRegistry.requestValue(operations, path); }
         boolean requestHas(String path) { return ProfileRegistry.requestHas(operations, path); }
-        String displayLabel() { return presentationLabel.isEmpty() ? signalReasoning : presentationLabel; }
+        String displayLabel() {
+            String reasoningLabel = presentationLabel.isEmpty() ? signalReasoning : presentationLabel;
+            if (mode == Mode.CHAT) return reasoningLabel;
+            String modelLabel = titleSignalToken(signalModel);
+            return modelLabel.isEmpty() ? reasoningLabel : modelLabel + " · " + reasoningLabel;
+        }
         String actualCombination() {
             return requestValue("model") + " / "
                     + (requestHas("thinking_effort") ? requestValue("thinking_effort") : "필드 없음");
@@ -402,6 +407,11 @@ final class ProfileRegistry {
         if (value == null) return "";
         String token = value.trim().toLowerCase(Locale.ROOT);
         return SIGNAL_TOKEN.matcher(token).matches() ? token : "";
+    }
+
+    private static String titleSignalToken(String value) {
+        if (value == null || value.isEmpty()) return "";
+        return value.substring(0, 1).toUpperCase(Locale.ROOT) + value.substring(1);
     }
 
     private static Profile parseImportedProfile(JSONObject item, Mode mode) throws Exception {

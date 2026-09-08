@@ -2,7 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 /** Metadata-only waiting. No response UI inspection, rendering, or held wake lock. */
 final class SelfRun3PowerPolicy {
-    static final long NORMAL_WAIT_POLL_MS = 60_000L;
+    static final long NORMAL_WAIT_POLL_MS = 30_000L;
     static final long WEB_PREPARATION_MAX_MS = 90_000L;
     static final long WEB_STEP_RETRY_MS = 500L;
     static final long CALLBACK_TIMEOUT_MS = 5_000L;

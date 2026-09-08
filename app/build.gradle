@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3010006
-def selfRunDriveVersionName = '3.1.0-dev6'
+def selfRunDriveVersionCode = 3010007
+def selfRunDriveVersionName = '3.1.0-dev7'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -161,6 +161,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !engine.contains('full handoff missing')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and full checkpoint are required')
         if (!ledger.contains('beginTransaction') || !ledger.contains('PreserveCorruptionHandler')) throw new GradleException('V3 transactional ledger and non-destructive corruption handling are required')
         if (coordinator.contains('scheduleMissedProbe') || coordinator.contains('web.receipt')) throw new GradleException('V3 progression must use committed Drive results, not browser completion or receipt')
+        if (!coordinator.contains('clearRecoveredDriveWarning(store)')
+                || !coordinator.contains('service.stopForeground(Service.STOP_FOREGROUND_REMOVE)')
+                || !coordinator.contains('NotificationHelper.notifyUser(service, "작업 완료"')) throw new GradleException('V3 recovered Drive warning cleanup and terminal foreground teardown are required')
         if (!protocol.contains('CONTRACT_VERSION="3.1.0"')
                 || !protocol.contains('SELF_RUN_SKILL_DOCUMENT_ID=SKILL_DOCUMENT_ID')
                 || !protocol.contains('SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo"')
@@ -170,7 +173,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !protocol.contains('USER_ACTION_RESOLVED') || !protocol.contains('PARALLEL_MERGE')) throw new GradleException('V3.1 protocol/skill identity and disposable execution contract are required')
         if (!drive.contains('SelfRun3DriveLookup.findSingleDocumentId') || !drive.contains('REQUIREMENT_READBACK_MISMATCH')
                 || drive.contains('DriveSignalParser')) throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
-        if (!power.contains('NORMAL_WAIT_POLL_MS = 60_000L')) throw new GradleException('V3 Drive metadata observation must use bounded low-frequency polling')
+        if (!power.contains('NORMAL_WAIT_POLL_MS = 30_000L')) throw new GradleException('V3 Drive metadata observation must use bounded 30-second low-frequency polling')
         def host = new File(src, 'HeadlessWebViewHost.java').getText('UTF-8')
         if (!host.contains('virtualDisplay.setSurface(null)') || !host.contains('virtualDisplay.setSurface(surface)')) throw new GradleException('detachable VirtualDisplay Surface support must be preserved')
         def webConfig = new File(src, 'WebViewConfig.java').getText('UTF-8')

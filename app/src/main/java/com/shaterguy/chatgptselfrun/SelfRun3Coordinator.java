@@ -40,6 +40,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final Map<String, String> resultVersions = new HashMap<>();
     private Runnable scheduledNext;
     private String preparingRequest = "";
+    private String completedTaskNotification = "";
 
     private volatile boolean destroyed;
     private volatile int epoch;
@@ -283,7 +284,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (!validEpoch(expectedEpoch) || !completed.taskId().equals(expectedTask)) return;
+                    if (!validEpoch(expectedEpoch) || !completed.taskId().equals(expectedTask)
+                            || !expectedTask.equals(store.runId())) return;
+                    clearRecoveredDriveWarning(store);
                     networkAttempt = 0;
                     if (step == DriveStep.READ_RESULT) nextResultPoll.put(expectedTurn,
                             SystemClock.elapsedRealtime() + SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
@@ -294,13 +297,21 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (validEpoch(expectedEpoch)) repairResult(state);
+                    if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
+                        clearRecoveredDriveWarning(store);
+                        networkAttempt = 0;
+                        repairResult(state);
+                    }
                 });
             } catch (ResultPendingException pending) {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (validEpoch(expectedEpoch)) scheduleResultRetry(state);
+                    if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
+                        clearRecoveredDriveWarning(store);
+                        networkAttempt = 0;
+                        scheduleResultRetry(state);
+                    }
                 });
             } catch (Throwable error) {
                 main.post(() -> {
@@ -357,9 +368,20 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     nextResultPoll.remove(current.turnId());
                     syncProjection(after);
                     if (after.stage() == SelfRun3Engine.Stage.DONE) {
+                        epoch++;
+                        main.removeCallbacksAndMessages(null);
+                        preparingRequest = "";
+                        nextResultPoll.clear();
+                        resultVersions.clear();
                         web.close();
                         releaseWakeLock();
                         log.record(store, "V3_DONE", "turn=" + after.turn() + ";task=" + after.taskId());
+                        service.stopForeground(Service.STOP_FOREGROUND_REMOVE);
+                        if (!after.taskId().equals(completedTaskNotification)) {
+                            completedTaskNotification = after.taskId();
+                            NotificationHelper.notifyUser(service, "작업 완료", "SelfRun 작업이 완료되었습니다.");
+                        }
+                        service.stopSelf();
                     } else scheduleNext(0L);
                 });
             } catch (Throwable error) {
@@ -371,6 +393,19 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void scheduleNetworkRetry(String code) {
         store.setLastError(code, "SelfRun 3 네트워크 작업을 재확인합니다.");
         scheduleNext(SelfRun3PowerPolicy.networkRetryDelay(networkAttempt++));
+    }
+
+    static boolean transientDriveWarning(String code) {
+        if (code == null || code.isEmpty()) return false;
+        return "V3_DRIVE_TOKEN_EMPTY".equals(code)
+                || "V3_DRIVE_AUTH_FAILED".equals(code)
+                || "V3_DRIVE_TOKEN_EXPIRED".equals(code)
+                || "V3_DRIVE_NETWORK_RETRY".equals(code)
+                || code.startsWith("V3_DRIVE_HTTP_RETRY_");
+    }
+
+    static void clearRecoveredDriveWarning(SelfRunStore store) {
+        if (store != null && transientDriveWarning(store.lastErrorCode())) store.clearLastError();
     }
 
     private void handleDriveFailure(SelfRun3Engine.State state, DriveStep step, Throwable error) {

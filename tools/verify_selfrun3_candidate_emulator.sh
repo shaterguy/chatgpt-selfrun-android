@@ -5,9 +5,20 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
+DEV6=previous/chatgpt-selfrun-drive-test-v3.1.0-dev6.apk
+DEV6_SHA256=15ffe38c0a9c6732254013b4f22c66f81592d98016815a77b7724e76c1e3546a
+DEV6_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/99d6d4cf3cb36bf1f604788f288c6a5bf85ee20d/deliverables/current-test.apk
+
+mkdir -p previous
+curl --fail --location --retry 3 --retry-all-errors --output "$DEV6" "$DEV6_URL"
+echo "$DEV6_SHA256  $DEV6" | sha256sum -c -
+BT="$ANDROID_HOME/build-tools/36.0.0"
+"$BT/apksigner" verify --verbose --print-certs "$DEV6" > selfrun-v3-dev6-cert.txt
+grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-dev6-cert.txt
+"$BT/aapt" dump badging "$DEV6" | grep -F "versionName='3.1.0-dev6'"
 
 adb install -r stable/chatgpt-selfrun-drive-v3.0.0.apk >/dev/null
-adb install -r previous/chatgpt-selfrun-drive-test-v3.0.1-dev21.apk >/dev/null
+adb install -r "$DEV6" >/dev/null
 adb install -r current/androidTest.apk >/dev/null
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\\([^ ]*\\) (target=$TEST)#\\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
@@ -43,3 +54,7 @@ adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-runtime-evidence.txt
 grep -Fq 'OK (' selfrun-v3-runtime-evidence.txt
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun31WorkFixAndroidTest \
+  "$INSTRUMENTATION" | tee selfrun-v3-work-fix-evidence.txt
+grep -Fq 'OK (' selfrun-v3-work-fix-evidence.txt

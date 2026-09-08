@@ -27,6 +27,7 @@ AUTH=$SRC/DriveAuthorization.java
 WEB_CONFIG=$SRC/WebViewConfig.java
 HEADLESS=$SRC/HeadlessWebViewHost.java
 PROFILE=$SRC/RequestProfileScript.java
+PROFILE_REGISTRY=$SRC/ProfileRegistry.java
 RUNNER=$ANDROID_TEST/SelfRunAndroidTestRunner.java
 FIRST_TEST=$ANDROID_TEST/SelfRun31FirstConversationAndroidTest.java
 TEST_SIGN=tools/sign_test.sh
@@ -125,8 +126,12 @@ grep -Fq 'drive.resultVersion' "$COORD"
 grep -Fq 'web.detach();' "$COORD"
 grep -Fq 'SelfRun3RunMarker' "$COORD"
 grep -Fq 'SelfRun3UserInput' "$COORD"
-grep -Fq 'NORMAL_WAIT_POLL_MS = 60_000L' "$POWER"
+grep -Fq 'clearRecoveredDriveWarning(store);' "$COORD"
+grep -Fq 'service.stopForeground(Service.STOP_FOREGROUND_REMOVE);' "$COORD"
+grep -Fq 'NotificationHelper.notifyUser(service, "작업 완료"' "$COORD"
+grep -Fq 'NORMAL_WAIT_POLL_MS = 30_000L' "$POWER"
 grep -Fq 'WAKE_LOCK_MAX_MS = 90_000L' "$POWER"
+grep -Fq 'modelLabel + " · " + reasoningLabel' "$PROFILE_REGISTRY"
 ! grep -Fq 'while (true)' "$COORD"
 
 grep -Fq 'duplicate object key' "$STRICT"
