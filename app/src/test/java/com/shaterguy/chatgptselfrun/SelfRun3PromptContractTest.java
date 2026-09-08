@@ -124,6 +124,8 @@ public final class SelfRun3PromptContractTest {
         SelfRun3Engine.put(resources,"requirementDocumentId","requirement");
         SelfRun3Engine.put(resources,"folderId","folder");
         JSONObject raw=new JSONObject();
+        SelfRun3Engine.put(raw,"schema",SelfRun3Engine.STATE_SCHEMA);
+        SelfRun3Engine.put(raw,"stage",SelfRun3Engine.Stage.SETUP.name());
         SelfRun3Engine.put(raw,"taskId","task");
         SelfRun3Engine.put(raw,"turnId","task:turn:2");
         SelfRun3Engine.put(raw,"requestId","task:turn:2-request");
