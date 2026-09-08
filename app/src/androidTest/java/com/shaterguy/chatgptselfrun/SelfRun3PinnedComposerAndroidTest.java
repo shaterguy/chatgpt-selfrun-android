@@ -84,6 +84,12 @@ public final class SelfRun3PinnedComposerAndroidTest {
                       return String(document.querySelectorAll('textarea,[contenteditable],[role="textbox"]').length);
                     })()
                     """));
+
+            String freshOnlyProbe = "(()=>{const saved=window.__selfRunV3PinnedComposer;"
+                    + "delete window.__selfRunV3PinnedComposer;const fresh=Boolean("
+                    + SelfRun3ComposerTransport.composerReadyExpression()
+                    + ");window.__selfRunV3PinnedComposer=saved;return String(fresh);})()";
+            assertEquals("false", readPage(host.webView(), freshOnlyProbe));
             assertEquals("true", readPage(host.webView(), SelfRun3ComposerTransport.composerReadyExpression()));
 
             JSONObject clearing = new JSONObject(readPage(host.webView(),
