@@ -53,6 +53,7 @@ final class SelfRun3WebAdapter {
     private WebView web;
     private SelfRun3Engine.State state;
     private boolean preparing, loading, closed;
+    private boolean continuationRecoveryAttached;
     private int step, evaluation, generation;
     private long prepareStarted;
     private String lastPrepareTrace = "";
@@ -121,7 +122,7 @@ final class SelfRun3WebAdapter {
         if (state.requestId().equals(endedRequest)) return;
         endedRequest = state.requestId();
         trace("PROTOCOL_ACCEPT", "COMPLETE", step);
-        attachForCompletionTransition();
+        traceCompletionOutputState();
         listener.onEnded(state.taskId(), state.turnId(), state.requestId(), source);
     }
 
@@ -129,6 +130,7 @@ final class SelfRun3WebAdapter {
         requireMain();
         boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
         boolean restartPreparation = newAttempt || !preparing;
+        boolean initial = s.resource("conversationUrl").isEmpty();
         state = s;
         closed = false;
         if (!newAttempt && s.requestId().equals(observedRequest)) {
@@ -141,14 +143,15 @@ final class SelfRun3WebAdapter {
             step = 0;
             prepareStarted = SystemClock.elapsedRealtime();
             lastPrepareTrace = "";
+            continuationRecoveryAttached = false;
             observedRequest = acceptedRequest = endedRequest = "";
         } else if (restartPreparation) {
             prepareStarted = SystemClock.elapsedRealtime();
             lastPrepareTrace = "";
         }
-        trace("PREPARE_START", s.resource("conversationUrl").isEmpty() ? "INITIAL" : "CONTINUATION", step);
+        trace("PREPARE_START", initial ? "INITIAL" : "CONTINUATION", step);
         ensureWeb(false);
-        if (host != null) host.attachOutput();
+        if (host != null && initial) host.attachOutput();
         if (!loading) advance();
     }
 
@@ -280,6 +283,16 @@ final class SelfRun3WebAdapter {
                 listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
                 return;
             }
+            if (continuationComposerStage
+                    && SelfRun3ComposerTransport.COMPOSER_WAITING.equals(status)
+                    && host != null && !host.isOutputAttached() && !continuationRecoveryAttached) {
+                continuationRecoveryAttached = true;
+                boolean changed = host.attachOutput();
+                trace("COMPOSER_RECOVERY_OUTPUT", changed ? "ATTACHED"
+                        : host.isOutputAttached() ? "ALREADY_ATTACHED" : "UNAVAILABLE", step);
+                later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
+                return;
+            }
             if ("AUTH_REQUIRED".equals(status)
                     || status.endsWith("_FAILED")
                     || status.endsWith("_UNAVAILABLE")
@@ -348,6 +361,7 @@ final class SelfRun3WebAdapter {
                 + "requestIdentity:after.requestIdentity,phase:after.phase,completionSource:after.completionSource||''};}"
                 + "out.v3diag={bound:current(after),phase:after?.phase||'UNAVAILABLE',postSeen:seen(after),"
                 + "editors:document.querySelectorAll('textarea,[contenteditable],[role=\"textbox\"]').length,"
+                + "pinned:!!(window.__selfRunV3PinnedComposer&&window.__selfRunV3PinnedComposer.isConnected),"
                 + "ready:document.readyState,focused:document.hasFocus(),hidden:document.hidden};"
                 + "return JSON.stringify(out);})()";
         return ChatGptTurnProtocolScript.bindTurnAndThen(s.taskId(), s.requestId(), body);
@@ -360,6 +374,7 @@ final class SelfRun3WebAdapter {
                 + "const p=window.__selfRunTurnProtocol?.snapshot?.();"
                 + "out.v3diag={bound:false,phase:p?.phase||'UNAVAILABLE',postSeen:false,"
                 + "editors:document.querySelectorAll('textarea,[contenteditable],[role=\"textbox\"]').length,"
+                + "pinned:!!(window.__selfRunV3PinnedComposer&&window.__selfRunV3PinnedComposer.isConnected),"
                 + "ready:document.readyState,focused:document.hasFocus(),hidden:document.hidden};"
                 + "return JSON.stringify(out);})()";
     }
@@ -495,6 +510,7 @@ final class SelfRun3WebAdapter {
         String detail = d == null ? ";snapshot=missing" : ";bound=" + d.optBoolean("bound")
                 + ";protocol=" + safeTrace(d.optString("phase")) + ";postSeen=" + d.optBoolean("postSeen")
                 + ";editors=" + Math.max(0, Math.min(10000, d.optInt("editors")))
+                + ";pinned=" + d.optBoolean("pinned")
                 + ";document=" + safeTrace(d.optString("ready"))
                 + ";focused=" + d.optBoolean("focused") + ";hidden=" + d.optBoolean("hidden");
         String key = step + ":" + status + detail;
@@ -593,11 +609,21 @@ final class SelfRun3WebAdapter {
         if (host != null) host.detachOutputWhenComposerReady();
     }
 
+    /** Normal protocol completion deliberately preserves the current Surface state and pinned DOM. */
+    private void traceCompletionOutputState() {
+        if (host == null) {
+            trace("OUTPUT_COMPLETE", "UNAVAILABLE", step);
+            return;
+        }
+        trace("OUTPUT_COMPLETE", host.isOutputAttached() ? "KEPT_ATTACHED" : "KEPT_DETACHED", step);
+    }
+
+    /** Recovery-only attach used by bounded inspection when no live callback path is available. */
     void attachForCompletionTransition() {
         requireMain();
         if (host == null) return;
         boolean changed = host.attachOutput();
-        trace("OUTPUT_COMPLETE", changed ? "ATTACHED"
+        trace("OUTPUT_RECOVERY", changed ? "ATTACHED"
                 : host.isOutputAttached() ? "ALREADY_ATTACHED" : "UNAVAILABLE", step);
     }
 
