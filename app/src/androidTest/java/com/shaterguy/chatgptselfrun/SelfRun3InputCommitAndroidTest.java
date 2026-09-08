@@ -26,6 +26,7 @@ public final class SelfRun3InputCommitAndroidTest {
         context.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences("selfrun_drive_user_next_input", Context.MODE_PRIVATE).edit().clear().commit();
         store = new SelfRunStore(context);
+        store.bindBaseFolder("acct_123", "abcdefgh", "Runs", "", 1L);
         store.start("task", "CHAT", "https://chatgpt.com/", "test");
         store.setPhase("V3_WAITING");
         UserNextInputStore.initialize(context);
