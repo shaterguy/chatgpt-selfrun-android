@@ -6,6 +6,7 @@ import org.json.JSONObject;
 final class SelfRun3Protocol {
     static final String CONTRACT_VERSION="3.1.0";
     static final String SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo";
+    static final String SELF_RUN_SKILL_DOCUMENT_ID=SKILL_DOCUMENT_ID;
     static final String CONTRACT="""
             SelfRun 3 실행 계약 (contract-version: 3.1.0)
             실행 전에 SELF_RUN_SKILL_DOCUMENT_ID의 최신 메타데이터와 전체 내용을 읽고 적용한다.

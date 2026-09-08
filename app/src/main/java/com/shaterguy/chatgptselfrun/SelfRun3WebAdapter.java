@@ -57,6 +57,10 @@ final class SelfRun3WebAdapter {
         this.listener = listener;
     }
 
+    static boolean ownsProtocolView(WebView view) {
+        return active != null && !active.closed && active.web == view && active.state != null;
+    }
+
     static boolean protocolEvent(WebView view, JSONObject event) {
         SelfRun3WebAdapter a = active;
         if (a == null || a.closed || a.web != view || a.state == null) return false;

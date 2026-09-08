@@ -3,26 +3,23 @@ package com.shaterguy.chatgptselfrun;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
-import android.widget.Toast;
-import org.json.JSONArray;
 import android.os.Bundle;
-import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-
+import android.widget.Toast;
+import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.text.DateFormat;
 import java.util.Date;
 
+/** SelfRun 3.1 detail view with addressable per-execution conversation history. */
 public final class SelfRunDetailActivity extends Activity {
     public static final String EXTRA_RUN_ID = "selfrun.runId";
     private LinearLayout conversations;
     private String detailRunId = "";
     private int historyGeneration;
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         String runId = getIntent().getStringExtra(EXTRA_RUN_ID);
         JSONObject item = new SelfRunHistoryStore(this).get(runId);
@@ -38,33 +35,37 @@ public final class SelfRunDetailActivity extends Activity {
         SelfRunHealthSnapshot runHealth = new SelfRunHealthObservationStore(this).currentFor(item);
         page.addView(Ui.headline(this, preview(item.optString("requirement"))));
         page.addView(Ui.body(this, runHealth == null ? item.optString("status") : runHealth.rowLabel()));
-        if (runHealth != null && !runHealth.recommendedAction.isEmpty())
-            page.addView(Ui.body(this, runHealth.recommendedAction));
+        if (runHealth != null && !runHealth.recommendedAction.isEmpty()) page.addView(Ui.body(this, runHealth.recommendedAction));
         page.addView(Ui.section(this, "원본 요청"));
         android.widget.TextView requirement = Ui.body(this, empty(item.optString("requirement")));
         requirement.setTextIsSelectable(true);
         page.addView(requirement);
         page.addView(Ui.section(this, "실행 정보"));
+        page.addView(Ui.keyValue(this, "엔진", "SelfRun 3 ledger"));
         page.addView(Ui.keyValue(this, "시작", time(item.optLong("createdAt"))));
         page.addView(Ui.keyValue(this, "마지막 실행", time(item.optLong("updatedAt"))));
         page.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
         page.addView(Ui.keyValue(this, "턴", String.valueOf(item.optInt("turn"))));
         page.addView(Ui.keyValue(this, "모델 조합", model(item)));
-        String resolvedRunId = item.optString("runId");
-        detailRunId = resolvedRunId;
+
+        detailRunId = item.optString("runId");
         page.addView(Ui.section(this, "대화 이력"));
         conversations = new LinearLayout(this);
         conversations.setOrientation(LinearLayout.VERTICAL);
         page.addView(conversations);
+
         page.addView(Ui.section(this, "로그"));
-        page.addView(Ui.setting(this, R.drawable.ic_history, "실행 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_EXECUTION)));
-        page.addView(Ui.setting(this, R.drawable.ic_history, "디버그 로그", "", v -> openLogs(resolvedRunId, SelfRunLogsActivity.KIND_DEBUG)));
+        page.addView(Ui.setting(this, R.drawable.ic_history, "실행 로그", "",
+                v -> openLogs(detailRunId, SelfRunLogsActivity.KIND_EXECUTION)));
+        page.addView(Ui.setting(this, R.drawable.ic_history, "디버그 로그", "",
+                v -> openLogs(detailRunId, SelfRunLogsActivity.KIND_DEBUG)));
+
         LinearLayout diagnostics = new LinearLayout(this);
         diagnostics.setOrientation(LinearLayout.VERTICAL);
-        diagnostics.addView(Ui.keyValue(this, "Run ID", resolvedRunId));
+        diagnostics.addView(Ui.keyValue(this, "Run ID", detailRunId));
         diagnostics.addView(Ui.keyValue(this, "Phase", item.optString("phase")));
         diagnostics.addView(Ui.keyValue(this, "프로젝트", item.optString("projectUrl")));
-        diagnostics.addView(Ui.keyValue(this, "대화", item.optString("conversationUrl")));
+        diagnostics.addView(Ui.keyValue(this, "현재 대화", item.optString("conversationUrl")));
         diagnostics.addView(Ui.keyValue(this, "오류", error(item)));
         if (runHealth != null) {
             diagnostics.addView(Ui.keyValue(this, "진단", runHealth.description));
@@ -75,8 +76,6 @@ public final class SelfRunDetailActivity extends Activity {
         page.addView(Ui.textButton(this, "진단 정보", v -> diagnostics.setVisibility(
                 diagnostics.getVisibility() == android.view.View.VISIBLE ? android.view.View.GONE : android.view.View.VISIBLE)));
         page.addView(diagnostics);
-        if (SelfRunRestartPolicy.restartable(item))
-            page.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(resolvedRunId)));
         Ui.setContent(this, scroll);
     }
 
@@ -92,7 +91,10 @@ public final class SelfRunDetailActivity extends Activity {
             String failure = "";
             try (SelfRun3Ledger ledger = new SelfRun3Ledger(getApplicationContext())) {
                 SelfRun3Engine.State state = ledger.load(detailRunId);
-                if (state != null) { entries = state.history(); taskMode = state.taskMode(); }
+                if (state != null) {
+                    entries = state.history();
+                    taskMode = state.taskMode();
+                }
             } catch (RuntimeException error) {
                 failure = "대화 이력을 읽지 못했습니다. 다시 열어 확인하세요.";
             }
@@ -103,7 +105,10 @@ public final class SelfRunDetailActivity extends Activity {
                 if (isFinishing() || isDestroyed() || generation != historyGeneration) return;
                 conversations.removeAllViews();
                 if (!selectedMode.isEmpty()) conversations.addView(Ui.keyValue(this, "작업 모드", selectedMode));
-                if (!message.isEmpty()) { conversations.addView(Ui.body(this, message)); return; }
+                if (!message.isEmpty()) {
+                    conversations.addView(Ui.body(this, message));
+                    return;
+                }
                 if (result.length() == 0) {
                     JSONObject old = new SelfRunHistoryStore(this).get(detailRunId);
                     String url = old == null ? "" : canonicalConversationUrl(old.optString("conversationUrl"));
@@ -131,10 +136,8 @@ public final class SelfRunDetailActivity extends Activity {
         conversations.addView(Ui.body(this, "TURN " + entry.optInt("turn") + " · " + label));
         conversations.addView(Ui.muted(this, entry.optString("mode") + " · "
                 + empty(entry.optString("model")) + " · " + empty(entry.optString("reasoning"))));
-        conversations.addView(Ui.muted(this, time(entry.optLong("submittedAt",
-                entry.optLong("createdAt")))));
-        conversations.addView(Ui.muted(this, entry.optString("dispatchStatus") + " · "
-                + entry.optString("resultStatus")));
+        conversations.addView(Ui.muted(this, time(entry.optLong("submittedAt", entry.optLong("createdAt")))));
+        conversations.addView(Ui.muted(this, entry.optString("dispatchStatus") + " · " + entry.optString("resultStatus")));
         if ("USER_ACTION_RESOLVED".equals(entry.optString("resultStatus")))
             conversations.addView(Ui.body(this, "사용자 개입 완료"));
         else if (entry.optBoolean("userIntervention") || "USER_ACTION_REQUIRED".equals(entry.optString("resultStatus")))
@@ -150,20 +153,20 @@ public final class SelfRunDetailActivity extends Activity {
         try {
             Uri uri = Uri.parse(raw);
             if (!"https".equalsIgnoreCase(uri.getScheme())
-                    || !"chatgpt.com".equalsIgnoreCase(uri.getHost())
+                    || !("chatgpt.com".equalsIgnoreCase(uri.getHost()) || "www.chatgpt.com".equalsIgnoreCase(uri.getHost()))
                     || uri.getUserInfo() != null || (uri.getPort() != -1 && uri.getPort() != 443)) return "";
-            java.util.List<String> segments = uri.getPathSegments();
-            int index = segments.indexOf("c");
-            if (index < 0 || index + 2 != segments.size()) return "";
-            String id = segments.get(index + 1);
-            if (!id.matches("[A-Za-z0-9_-]{1,200}")) return "";
+            String id = SelfRunScript.conversationId(raw);
+            if (id.isEmpty() || !id.matches("[A-Za-z0-9_-]{1,200}")) return "";
             return "https://chatgpt.com/c/" + id;
-        } catch (RuntimeException invalid) { return ""; }
+        } catch (RuntimeException invalid) {
+            return "";
+        }
     }
 
     private void openConversation(String url) {
-        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
-        catch (android.content.ActivityNotFoundException error) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (android.content.ActivityNotFoundException error) {
             Toast.makeText(this, "대화를 열 수 있는 앱이나 브라우저가 없습니다.", Toast.LENGTH_LONG).show();
         }
     }
@@ -174,11 +177,6 @@ public final class SelfRunDetailActivity extends Activity {
                 .putExtra(SelfRunLogsActivity.EXTRA_KIND, kind));
     }
 
-    private void openRestart(String runId) {
-        startActivity(new Intent(this, SelfRunRestartActivity.class)
-                .putExtra(SelfRunRestartActivity.EXTRA_RUN_ID, runId));
-    }
-
     private String model(JSONObject item) {
         return SelfRunStore.MODE_WORK.equals(item.optString("mode"))
                 ? empty(item.optString("pendingModel")) + " / " + empty(item.optString("pendingReasoning"))
@@ -187,8 +185,7 @@ public final class SelfRunDetailActivity extends Activity {
 
     private static String error(JSONObject item) {
         String code = item.optString("lastErrorCode");
-        if (code.isEmpty()) return "없음";
-        return code + " · " + empty(item.optString("lastErrorMessage"));
+        return code.isEmpty() ? "없음" : code + " · " + empty(item.optString("lastErrorMessage"));
     }
 
     private static String preview(String text) {
@@ -197,10 +194,7 @@ public final class SelfRunDetailActivity extends Activity {
         return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 120) + "…";
     }
 
-    private static String empty(String value) {
-        return value == null || value.isEmpty() ? "-" : value;
-    }
-
+    private static String empty(String value) { return value == null || value.isEmpty() ? "-" : value; }
     private static String time(long value) {
         return value <= 0L ? "-" : DateFormat.getDateTimeInstance().format(new Date(value));
     }

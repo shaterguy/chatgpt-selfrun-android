@@ -57,18 +57,21 @@ final class SelfRun3DispatchScript {
                   }catch(_){}};
                   const nativeFetch=window.fetch.bind(window);
                   window.fetch=function(input,init){
+                    let matched=false;
                     try{
                       const isRequest=typeof Request!=='undefined'&&input instanceof Request;
                       const method=init?.method??(isRequest?input.method:'GET');
                       const url=isRequest?input.url:String(input??'');
                       if(canonical(method,url)){
-                        if(matches(init?.body))emit();
-                        else if(isRequest){
+                        matched=matches(init?.body);
+                        if(!matched&&isRequest){
                           try{input.clone().text().then(text=>{if(matches(text))emit();},()=>{});}catch(_){}
                         }
                       }
                     }catch(_){}
-                    return nativeFetch(input,init);
+                    const result=nativeFetch(input,init);
+                    if(matched)emit();
+                    return result;
                   };
                   const open=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send,meta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){
@@ -76,8 +79,11 @@ final class SelfRun3DispatchScript {
                     return open.call(this,method,url,...rest);
                   };
                   XMLHttpRequest.prototype.send=function(body){
-                    try{const m=meta.get(this);if(m&&canonical(m.method,m.url)&&matches(body))emit();}catch(_){}
-                    return send.call(this,body);
+                    let matched=false;
+                    try{const m=meta.get(this);matched=!!m&&canonical(m.method,m.url)&&matches(body);}catch(_){}
+                    const result=send.call(this,body);
+                    if(matched)emit();
+                    return result;
                   };
                   window.__selfRun3Dispatch={arm:(task,turn,request)=>{
                     if(!task||!turn||!request)return false;
