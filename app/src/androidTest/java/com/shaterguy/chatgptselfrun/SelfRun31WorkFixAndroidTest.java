@@ -106,16 +106,19 @@ public final class SelfRun31WorkFixAndroidTest {
         assertEquals("Orion · balanced", ProfileRegistry.resolveWork("orion", "balanced").displayLabel());
     }
 
-    @Test public void completionAlertUsesExistingImportantChannel() {
+    @Test public void completionAlertUsesExistingImportantChannel() throws Exception {
         NotificationHelper.notifyUser(context, "작업 완료", "SelfRun 작업이 완료되었습니다.");
 
         StatusBarNotification completion = null;
-        for (StatusBarNotification active : notifications.getActiveNotifications()) {
-            CharSequence title = active.getNotification().extras.getCharSequence(Notification.EXTRA_TITLE);
-            if (title != null && title.toString().contains("작업 완료")) {
-                completion = active;
-                break;
+        for (int attempt = 0; attempt < 20 && completion == null; attempt++) {
+            for (StatusBarNotification active : notifications.getActiveNotifications()) {
+                CharSequence title = active.getNotification().extras.getCharSequence(Notification.EXTRA_TITLE);
+                if (title != null && title.toString().contains("작업 완료")) {
+                    completion = active;
+                    break;
+                }
             }
+            if (completion == null) Thread.sleep(50L);
         }
         assertNotNull(completion);
         assertEquals("selfrun-drive-alerts-v2", completion.getNotification().getChannelId());

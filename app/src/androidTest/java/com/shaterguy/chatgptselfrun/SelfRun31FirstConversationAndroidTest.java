@@ -30,6 +30,7 @@ public final class SelfRun31FirstConversationAndroidTest {
             AtomicReference<WebView> web = new AtomicReference<>();
             AtomicReference<JSONObject> event = new AtomicReference<>();
             CountDownLatch observed = new CountDownLatch(1);
+            String marker = "fixture-first-" + System.nanoTime();
             try {
                 scenario.onActivity(activity -> {
                     HeadlessWebViewHost h = HeadlessWebViewHost.create(activity);
@@ -50,7 +51,7 @@ public final class SelfRun31FirstConversationAndroidTest {
                 String status = "";
                 for (int i = 0; i < 12; i++) {
                     status = status(evaluate(scenario, web,
-                            SelfRun3BootstrapTransport.prepare(ORIGIN, PROMPT, "fixture-first")));
+                            SelfRun3BootstrapTransport.prepare(ORIGIN, PROMPT, marker)));
                     if (SelfRun3BootstrapTransport.READY_TO_SUBMIT.equals(status)) break;
                     Thread.sleep(30L);
                 }
@@ -61,7 +62,7 @@ public final class SelfRun31FirstConversationAndroidTest {
                 assertEquals("true", evaluateValue(scenario, web,
                         "String(" + SelfRun3DispatchScript.arm("task-first", TURN, REQUEST) + ")"));
                 String submitStatus = status(evaluate(scenario, web,
-                        SelfRun3BootstrapTransport.submit(ORIGIN, PROMPT, "fixture-first")));
+                        SelfRun3BootstrapTransport.submit(ORIGIN, PROMPT, marker)));
                 assertEquals(SelfRun3BootstrapTransport.SUBMISSION_PENDING, submitStatus);
                 assertTrue("canonical first POST not observed", observed.await(5, TimeUnit.SECONDS));
                 assertEquals("1", evaluateValue(scenario, web, "String(window.fixturePosts.length)"));
