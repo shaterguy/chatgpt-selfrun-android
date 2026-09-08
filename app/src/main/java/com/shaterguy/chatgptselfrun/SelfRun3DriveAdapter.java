@@ -90,10 +90,20 @@ final class SelfRun3DriveAdapter {
                 return SelfRun3Engine.emptyResult(s).toString();
             }
             try {
-                SelfRun3Engine.parseResult(raw, s);
+                JSONObject parsed = SelfRun3Engine.parseResult(raw, s);
+                if (parsed == null) {
+                    diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_COMMIT;turn=" + s.turn());
+                    return raw;
+                }
                 diagnosticLog.record(projection, "V3_RESULT_READ", "stage=COMMITTED;turn=" + s.turn());
                 return raw;
             } catch (RuntimeException incompleteOrMalformed) {
+                String recovered = recoverSingleRedundantTrailingBrace(raw, s);
+                if (!recovered.isEmpty()) {
+                    diagnosticLog.record(projection, "V3_RESULT_READ",
+                            "stage=COMMITTED_RECOVERED_TRAILING_BRACE;turn=" + s.turn());
+                    return recovered;
+                }
                 if (isInvalidCommittedResult(raw, s)) {
                     diagnosticLog.record(projection, "V3_RESULT_READ", "stage=INVALID_COMMITTED;turn=" + s.turn());
                     throw new InvalidCommittedResultException();
@@ -116,6 +126,18 @@ final class SelfRun3DriveAdapter {
     private void releaseResultReadWakeLock() {
         if (resultReadWakeLock != null && resultReadWakeLock.isHeld()) {
             try { resultReadWakeLock.release(); } catch (Throwable ignored) { }
+        }
+    }
+    static String recoverSingleRedundantTrailingBrace(String raw, SelfRun3Engine.State s) {
+        if (raw == null || s == null || SelfRun3Engine.utf8(raw) > SelfRun3Engine.MAX_RESULT_BYTES) return "";
+        String trimmed = raw.trim();
+        if (trimmed.length() < 2 || !trimmed.endsWith("}")) return "";
+        String candidate = trimmed.substring(0, trimmed.length() - 1).trim();
+        if (candidate.isEmpty() || !candidate.endsWith("}")) return "";
+        try {
+            return SelfRun3Engine.parseResult(candidate, s) == null ? "" : candidate;
+        } catch (RuntimeException stillInvalid) {
+            return "";
         }
     }
     static boolean isInvalidCommittedResult(String raw, SelfRun3Engine.State s) {
