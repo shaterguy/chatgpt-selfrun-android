@@ -12,7 +12,7 @@ public final class BootstrapSendLivenessPolicyTest {
     @Test public void browserCallbacksAreBoundedButNormalResponseWaitDoesNotPoll() {
         assertEquals(5_000L, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
         assertEquals(90_000L, SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS);
-        assertEquals(60_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+        assertEquals(30_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
     }
 
     @Test public void preparedSendIsClaimedDurablyBeforeTheBrowserClick() throws Exception {

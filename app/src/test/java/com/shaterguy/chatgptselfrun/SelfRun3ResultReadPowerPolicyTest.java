@@ -11,7 +11,7 @@ public final class SelfRun3ResultReadPowerPolicyTest {
     @Test public void normalWaitUsesBoundedDriveMetadataInterval() throws Exception {
         String power = source("SelfRun3PowerPolicy.java");
         String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(power.contains("NORMAL_WAIT_POLL_MS = 60_000L"));
+        assertTrue(power.contains("NORMAL_WAIT_POLL_MS = 30_000L"));
         assertTrue(power.contains("WAKE_LOCK_MAX_MS = 90_000L"));
         assertTrue(coordinator.contains("drive.resultVersion"));
         assertTrue(coordinator.contains("resultVersions"));

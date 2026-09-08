@@ -8,7 +8,7 @@ import static org.junit.Assert.*;
 /** V3 waits on exact execution results; response completion is irrelevant. */
 public final class SelfRunDriveVersionPollingPolicyTest {
     @Test public void normalWaitingUsesLowFrequencyMetadataBudget() {
-        assertEquals(60_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+        assertEquals(30_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
     }
 
     @Test public void waitingStateIsEligibleForIndependentResultPolling() {
