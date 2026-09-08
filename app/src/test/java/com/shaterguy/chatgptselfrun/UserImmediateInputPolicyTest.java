@@ -39,7 +39,6 @@ public final class UserImmediateInputPolicyTest {
         String immediateDom = src("UserImmediateInputDom.java");
         String coordinator = src("UserImmediateInputCoordinator.java");
         String host = src("HeadlessWebViewHost.java");
-        String activity = src("MainActivity.java");
 
         int existingStop = existingDom.indexOf("const stop=controls.find(isStop);");
         int existingSend = existingDom.indexOf("const send=calibrated", existingStop);
@@ -67,8 +66,16 @@ public final class UserImmediateInputPolicyTest {
         assertFalse(coordinator.contains("void click(int retry)"));
         assertTrue(host.contains("static WebView activeWebView()"));
         assertTrue(host.contains("if (activeWebView == webView) activeWebView = null"));
-        assertTrue(activity.contains("\"즉시 보내기\""));
-        assertTrue(activity.contains("UserImmediateInputCoordinator.submit"));
+    }
+
+    @Test public void activeUiOnlySavesDurableNextExecutionInput() throws Exception {
+        String activity = src("MainActivity.java");
+        assertFalse(activity.contains("\"즉시 보내기\""));
+        assertFalse(activity.contains("UserImmediateInputCoordinator.submit"));
+        assertFalse(activity.contains("forceImmediateInput"));
+        assertTrue(activity.contains("v -> saveNextInput()"));
+        assertTrue(activity.contains("UserNextInputStore.save(runId, nextInputEditor.getText().toString())"));
+        assertTrue(activity.contains("다음 새 대화에 반영됩니다."));
     }
 
     private static String src(String file) throws Exception {
