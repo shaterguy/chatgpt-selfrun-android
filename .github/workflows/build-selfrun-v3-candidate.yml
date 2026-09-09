@@ -4,8 +4,8 @@ run-name: SelfRun 3 Candidate (${{ github.ref_name }}) #${{ github.run_number }}
 on:
   push:
     branches:
-      - 'selfrun-v3/v3.1.0-dev*'
-      - 'selfrun-v3/v3.1.0-rc*'
+      - 'selfrun-v3/v3.1.*-dev*'
+      - 'selfrun-v3/v3.1.*-rc*'
   workflow_dispatch:
 
 permissions:
