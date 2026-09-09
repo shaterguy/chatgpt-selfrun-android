@@ -5,20 +5,20 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-DEV6=previous/chatgpt-selfrun-drive-test-v3.1.0-dev6.apk
-DEV6_SHA256=15ffe38c1fe2bee8b3cfe86b6ab33729d89e62828b04249eaeafb94b043ee813
-DEV6_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/99d6d4cf3cb36bf1f604788f288c6a5bf85ee20d/deliverables/current-test.apk
+PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.0-rc2.apk
+PREVIOUS_TEST_SHA256=5c4b6e0d5d815dd74282949b8a87a902362181c4f5ab71260655fa0444837dfc
+PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/5195d95e30bd702fe757a82bfcf1693eff85d774/deliverables/current-test.apk
 
 mkdir -p previous
-curl --fail --location --retry 3 --retry-all-errors --output "$DEV6" "$DEV6_URL"
-echo "$DEV6_SHA256  $DEV6" | sha256sum -c -
+curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
+echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
 BT="$ANDROID_HOME/build-tools/36.0.0"
-"$BT/apksigner" verify --verbose --print-certs "$DEV6" > selfrun-v3-dev6-cert.txt
-grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-dev6-cert.txt
-"$BT/aapt" dump badging "$DEV6" | grep -F "versionName='3.1.0-dev6'"
+"$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_TEST" > selfrun-v3-previous-test-cert.txt
+grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-previous-test-cert.txt
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.1.0-rc2'"
 
-adb install -r stable/chatgpt-selfrun-drive-v3.0.0.apk >/dev/null
-adb install -r "$DEV6" >/dev/null
+adb install -r stable/chatgpt-selfrun-drive-v3.1.0.apk >/dev/null
+adb install -r "$PREVIOUS_TEST" >/dev/null
 adb install -r current/androidTest.apk >/dev/null
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\\([^ ]*\\) (target=$TEST)#\\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
@@ -34,7 +34,7 @@ adb shell am instrument -w -r \
 grep -Fq 'OK (' selfrun-v3-upgrade-verify.txt
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$FORMAL"
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$TEST"
-[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.0.0' ]]
+[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.1.0' ]]
 [[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == "$VERSION_NAME" ]]
 
 FORMAL_UID="$(adb shell pm list packages -U "$FORMAL" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"
