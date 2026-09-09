@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3011000
-def selfRunDriveVersionName = '3.1.0'
+def selfRunDriveVersionCode = 3011002
+def selfRunDriveVersionName = '3.1.1-dev2'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -142,7 +142,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
          'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
-         'SelfRun3StrictJson.java'].each { name ->
+         'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
@@ -150,6 +150,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def ledger = new File(src, 'SelfRun3Ledger.java').getText('UTF-8')
         def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')
         def drive = new File(src, 'SelfRun3DriveAdapter.java').getText('UTF-8')
+        def watchdog = new File(src, 'SelfRun3ResultWatchdog.java').getText('UTF-8')
         def web = new File(src, 'SelfRun3WebAdapter.java').getText('UTF-8')
         def dispatch = new File(src, 'SelfRun3DispatchScript.java').getText('UTF-8')
         def bootstrap = new File(src, 'SelfRun3BootstrapTransport.java').getText('UTF-8')
@@ -159,8 +160,13 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (!engine.contains('case REPAIR') || !engine.contains('repairTargetDocumentId')
                 || !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')
                 || !engine.contains('full handoff missing')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and full checkpoint are required')
+        if (!engine.contains('case RESULT_BASELINE') || !engine.contains('case RESULT_MUTATED')
+                || !engine.contains('canonicalPostConfirmedElapsed') || !engine.contains('resultBodyMutationObserved')
+                || !watchdog.contains('STALE_AFTER_MS = 7_200_000L')) throw new GradleException('V3 stale-result evidence ledger is required')
         if (!ledger.contains('beginTransaction') || !ledger.contains('PreserveCorruptionHandler')) throw new GradleException('V3 transactional ledger and non-destructive corruption handling are required')
         if (coordinator.contains('scheduleMissedProbe') || coordinator.contains('web.receipt')) throw new GradleException('V3 progression must use committed Drive results, not browser completion or receipt')
+        if (!coordinator.contains('drive.observeResult') || !coordinator.contains('SelfRun3ResultWatchdog.shouldRepair')
+                || !coordinator.contains('STALE_RESULT_WATCHDOG') || !drive.contains('ResultObservation')) throw new GradleException('V3 stale-result recovery must fresh-read Drive before repair')
         if (!coordinator.contains('clearRecoveredDriveWarning(store)')
                 || !coordinator.contains('service.stopForeground(Service.STOP_FOREGROUND_REMOVE)')
                 || !coordinator.contains('NotificationHelper.notifyUser(service, "작업 완료"')) throw new GradleException('V3 recovered Drive warning cleanup and terminal foreground teardown are required')
