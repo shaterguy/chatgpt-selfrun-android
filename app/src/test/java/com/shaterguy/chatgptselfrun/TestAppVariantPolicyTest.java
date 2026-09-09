@@ -14,15 +14,16 @@ public final class TestAppVariantPolicyTest {
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
         assertTrue(gradle.matches("(?s).*selfRunDriveVersionCode = 30[0-9]+.*"));
-        assertTrue(gradle.matches("(?s).*selfRunDriveVersionName = '3\\.1\\.0(?:-(?:dev|rc)[0-9]+)?'.*"));
+        assertTrue(gradle.matches("(?s).*selfRunDriveVersionName = '3\\.1\\.[0-9]+(?:-(?:dev|rc)[0-9]+)?'.*"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
 
     @Test public void candidateWorkflowOwns31DevBuilds() throws Exception {
         String candidate = read(".github/workflows/build-selfrun-v3-candidate.yml", "../.github/workflows/build-selfrun-v3-candidate.yml");
-        assertTrue(candidate.contains("selfrun-v3/v3.1.0-dev*"));
-        assertTrue(candidate.contains("selfrun-v3/v3.1.0-rc*"));
+        assertTrue(candidate.contains("selfrun-v3/v3.1.*-dev*"));
+        assertTrue(candidate.contains("selfrun-v3/v3.1.*-rc*"));
+        assertTrue(candidate.contains("^3\\.1\\.[0-9]+-(dev|rc)[0-9]+$"));
         assertTrue(candidate.contains(":app:compileQaAppJavaWithJavac"));
         assertTrue(candidate.contains(":app:compileQaAppAndroidTestJavaWithJavac"));
         assertTrue(candidate.contains(":app:testQaAppUnitTest"));

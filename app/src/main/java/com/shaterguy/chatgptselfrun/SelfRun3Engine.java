@@ -17,7 +17,7 @@ final class SelfRun3Engine {
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
     enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
-        RESULT, COMMIT, RECONCILE, REPAIR, PAUSE, RESUME, STOP, ERROR }
+        RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, PAUSE, RESUME, STOP, ERROR }
     enum Action { SETUP, PREPARE_TURN, PREPARE_WEB, WAIT, READ_RESULT, CHECK_RECEIPT, COMMIT, NONE }
     private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode");
     private static final Set<String> NO_SEND_PROOFS = Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING",
@@ -98,6 +98,7 @@ final class SelfRun3Engine {
             return persist(v,true);
         }
         State s=original.execution(e.turnId); if(s==null) return original;
+        if(s.flag("superseded") && e.kind!=Kind.RESOURCE) return original;
         if(s.terminal() && e.kind!=Kind.RESOURCE) return original;
         JSONObject v=s.json(), p=e.payload; Stage stage=Stage.valueOf(s.text("stage"));
         if(Set.of(Kind.STARTED,Kind.ACCEPTED,Kind.UNSENT,Kind.ENDED).contains(e.kind)
@@ -123,6 +124,16 @@ final class SelfRun3Engine {
                 put(v,"prompt",p.optString("prompt")); put(v,"inputText",p.optString("inputText"));
                 put(v,"inputRevision",p.optLong("inputRevision",-1)); put(v,"stage","READY");
             }
+            case RESULT_BASELINE -> {
+                String documentId=p.optString("documentId"), fingerprint=p.optString("fingerprint");
+                require(documentId.equals(s.resource("resultDocumentId")) && fingerprint.matches("[a-f0-9]{64}"),"valid result baseline required");
+                if(!s.text("resultSeedDocumentId").isEmpty() || !s.text("resultSeedFingerprint").isEmpty()) {
+                    require(documentId.equals(s.text("resultSeedDocumentId")) && fingerprint.equals(s.text("resultSeedFingerprint")),"result baseline changed");
+                    return original;
+                }
+                require(stage==Stage.PREPARING,"result baseline must precede dispatch");
+                put(v,"resultSeedDocumentId",documentId); put(v,"resultSeedFingerprint",fingerprint);
+            }
             case CLAIM_SEND -> {
                 if(stage!=Stage.READY || s.flag("sendClaimed") || original.flag("taskPaused")) return original;
                 require(activeCount(original)<2,"maximum two automatic conversations");
@@ -131,6 +142,16 @@ final class SelfRun3Engine {
             }
             case STARTED, ACCEPTED -> {
                 if(!s.flag("sendClaimed")) return original;
+                if(e.kind==Kind.STARTED && !v.has("canonicalPostConfirmedElapsed")
+                        && "canonical_post".equals(p.optString("source"))
+                        && "turn_request".equals(p.optString("protocolStage"))
+                        && p.has("atElapsed") && p.has("atWall") && p.has("bootCount")
+                        && p.optLong("atElapsed",-1L)>=0L && p.optLong("atWall",-1L)>0L
+                        && p.optInt("bootCount",-1)>=0) {
+                    put(v,"canonicalPostConfirmedElapsed",p.optLong("atElapsed"));
+                    put(v,"canonicalPostConfirmedAtWall",p.optLong("atWall"));
+                    put(v,"canonicalPostBootCount",p.optInt("bootCount"));
+                }
                 put(v,"dispatchObserved",true); put(v,"accepted",true);
                 if(!s.flag("committed")) put(v,"stage",s.hasResult()?"RECONCILING":"WAITING");
             }
@@ -140,6 +161,14 @@ final class SelfRun3Engine {
                 put(v,"sendClaimed",false); put(v,"stage","READY"); v.remove("submittedAt");
             }
             case ENDED -> { return original; } // Transport completion is never a result gate.
+            case RESULT_MUTATED -> {
+                if(s.flag("resultBodyMutationObserved")) return original;
+                String documentId=p.optString("documentId"), fingerprint=p.optString("fingerprint");
+                require(documentId.equals(s.resource("resultDocumentId")) && documentId.equals(s.text("resultSeedDocumentId")),"result mutation document mismatch");
+                require(fingerprint.matches("[a-f0-9]{64}") && !fingerprint.equals(s.text("resultSeedFingerprint")),"actual result body mutation required");
+                put(v,"resultBodyMutationObserved",true); put(v,"resultBodyMutationFingerprint",fingerprint);
+                if(p.optLong("atWall",0L)>0L) put(v,"resultBodyMutationObservedAtWall",p.optLong("atWall"));
+            }
             case RESULT -> {
                 if(!s.flag("sendClaimed")) return original;
                 JSONObject r=parseResult(p.optString("text"),s); if(r==null) return original;
@@ -261,7 +290,8 @@ final class SelfRun3Engine {
         JSONObject all=copy(v.optJSONObject("executions")); put(all,s.turnId(),record(v));
         JSONObject config=s.config(); applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
-                "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract"}) v.remove(k);
+                "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
+                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedAtWall"}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);
@@ -278,10 +308,11 @@ final class SelfRun3Engine {
         rows.sort((a,b)->Integer.compare(a.optInt("turn"),b.optInt("turn")));
         for(JSONObject x:rows) {
             JSONObject h=new JSONObject(), c=copy(x.optJSONObject("config")), r=copy(x.optJSONObject("resources"));
-            for(String k:new String[]{"turn","turnId","requestId","phase","executionKind","signalType","parallelGroupId","branchId","submittedAt"}) put(h,k,x.opt(k));
+            for(String k:new String[]{"turn","turnId","requestId","phase","executionKind","signalType","parallelGroupId","branchId","submittedAt","canonicalPostConfirmedAtWall"}) put(h,k,x.opt(k));
             put(h,"mode",c.optString("mode")); put(h,"model",c.optString("model")); put(h,"reasoning",c.optString("reasoning",c.optString("chatBootstrap")));
             put(h,"conversationUrl",r.optString("conversationUrl")); put(h,"resultDocumentId",r.optString("resultDocumentId"));
-            put(h,"previousResultDocumentId",x.optString("previousResultDocumentId"));
+            put(h,"previousResultDocumentId",x.optString("previousResultDocumentId")); put(h,"superseded",x.optBoolean("superseded"));
+            put(h,"resultBodyMutationObserved",x.optBoolean("resultBodyMutationObserved"));
             put(h,"dispatchStatus",x.optBoolean("dispatchObserved")?"CONFIRMED":x.optBoolean("sendClaimed")?"UNCERTAIN":"PENDING");
             JSONObject result=x.optString("result").isEmpty()?new JSONObject():object(x.optString("result"));
             put(h,"resultStatus",result.optString("status",x.optBoolean("committed")?"COMMITTED":"PENDING")); history.put(h);
