@@ -49,8 +49,9 @@ final class SelfRun3WebAdapter {
     private WebView web;
     private SelfRun3Engine.State state;
     private boolean preparing, loading, closed, dispatchConfirmed;
-    private int step, evaluation, generation;
+    private int step, evaluation, generation, projectCandidateIndex;
     private long prepareStarted;
+    private String projectDisplayName = "";
 
     SelfRun3WebAdapter(Context context, Listener listener) {
         this.context = context;
@@ -88,6 +89,7 @@ final class SelfRun3WebAdapter {
             quiesce();
             dispatchConfirmed = false;
             step = 0;
+            projectCandidateIndex = 0;
             prepareStarted = SystemClock.elapsedRealtime();
         } else if (restartPreparation) {
             prepareStarted = SystemClock.elapsedRealtime();
@@ -98,10 +100,12 @@ final class SelfRun3WebAdapter {
         if (newAttempt) {
             String target = s.config().optString("projectUrl");
             if (!trusted(target)) { fail("TARGET_INVALID"); return; }
+            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
+            projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
             generation++;
             evaluation++;
             loading = true;
-            web.loadUrl(target);
+            web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
         }
         if (host != null) host.attachOutput();
         if (!loading) advance();
@@ -138,7 +142,7 @@ final class SelfRun3WebAdapter {
                 if (view != web || closed) return true;
                 if (!request.isForMainFrame()) return false;
                 Uri u = request.getUrl();
-                if (!allowedRoute(String.valueOf(u))) {
+                if (!allowedPreparationRoute(String.valueOf(u))) {
                     fail("ROUTE_MISMATCH");
                     return true;
                 }
@@ -170,6 +174,7 @@ final class SelfRun3WebAdapter {
             fail("WEB_PREPARATION_TIMEOUT");
             return;
         }
+        if (prepareProjectEntryIfNeeded()) return;
         String script;
         if (step == 0) {
             BootstrapRunStateStore.touchBootstrap(
@@ -208,6 +213,55 @@ final class SelfRun3WebAdapter {
             }
             later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
         });
+    }
+
+    private boolean prepareProjectEntryIfNeeded() {
+        if (state == null || web == null) return false;
+        String target = state.config().optString("projectUrl");
+        if (!SelfRun3ProjectDirectoryNavigation.isProjectTarget(target)) return false;
+        String actual = web.getUrl();
+        if (ProjectUrlPolicy.sameProject(target, actual)) return false;
+        if (SelfRun3ProjectDirectoryNavigation.isWrongProjectRoute(target, actual)) {
+            projectCandidateIndex++;
+            loadProjectDirectory();
+            return true;
+        }
+        if (!SelfRun3ProjectDirectoryNavigation.isDirectoryPage(actual)) {
+            loadProjectDirectory();
+            return true;
+        }
+        evaluate(SelfRun3ProjectDirectoryNavigation.build(projectDisplayName, projectCandidateIndex), result -> {
+            String status = result.optString("status");
+            switch (status) {
+                case "PROJECT_ROW_CLICKED":
+                    later(this::advance, 1800L);
+                    break;
+                case "RETRY":
+                    later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
+                    break;
+                case "NAVIGATE_DIRECTORY":
+                    loadProjectDirectory();
+                    break;
+                case "AUTH_REQUIRED":
+                case "PROJECT_NOT_FOUND":
+                case "TARGET_CONTEXT_MISMATCH":
+                    fail(status);
+                    break;
+                default:
+                    fail("PROJECT_DIRECTORY_FAILED");
+                    break;
+            }
+        });
+        return true;
+    }
+
+    private void loadProjectDirectory() {
+        if (web == null || closed) return;
+        generation++;
+        evaluation++;
+        loading = true;
+        web.stopLoading();
+        web.loadUrl(SelfRun3ProjectDirectoryNavigation.DIRECTORY_URL);
     }
 
     void submit(SelfRun3Engine.State claimed) {
@@ -292,6 +346,15 @@ final class SelfRun3WebAdapter {
             listener.onConversation(state.taskId(), state.turnId(),
                     "https://chatgpt.com/c/" + conversationId);
         }
+    }
+
+    private boolean allowedPreparationRoute(String url) {
+        if (allowedRoute(url)) return true;
+        if (!preparing || state == null) return false;
+        String target = state.config().optString("projectUrl");
+        if (!SelfRun3ProjectDirectoryNavigation.isProjectTarget(target)) return false;
+        return SelfRun3ProjectDirectoryNavigation.isDirectoryPage(url)
+                || ProjectUrlPolicy.parseProject(url) != null;
     }
 
     private boolean allowedRoute(String url) {
