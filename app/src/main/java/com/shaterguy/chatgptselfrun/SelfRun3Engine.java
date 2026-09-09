@@ -347,18 +347,6 @@ final class SelfRun3Engine {
             require(Set.of("PLAN","WORK","VERIFY","DONE").contains(next),"unknown next phase");
             if("DONE".equals(status)) require("VERIFY".equals(s.text("phase")) && "VERIFY_DONE".equals(completed) && "DONE".equals(next),"verification required for DONE");
             else require(!"DONE".equals(next),"nonterminal result cannot advance DONE");
-            if("CONTINUE".equals(status)) {
-                boolean valid=switch(completed) {
-                    case "PLAN" -> "PLAN".equals(s.text("phase")) && "WORK".equals(next);
-                    case "PLAN_PARTIAL" -> "PLAN".equals(s.text("phase")) && "PLAN".equals(next);
-                    case "WORK" -> "WORK".equals(s.text("phase")) && "VERIFY".equals(next);
-                    case "WORK_PARTIAL" -> "WORK".equals(s.text("phase")) && "WORK".equals(next);
-                    case "VERIFY_PARTIAL","VERIFY_WORK_PARTIAL" -> "VERIFY".equals(s.text("phase")) && Set.of("WORK","VERIFY").contains(next);
-                    case "VERIFY_WORK" -> "VERIFY".equals(s.text("phase")) && "VERIFY".equals(next);
-                    default -> false;
-                };
-                require(valid,"invalid phase transition");
-            }
         }
         JSONObject handoff=r.optJSONObject("handoff");
         require(handoff!=null && !handoff.optString("objective").trim().isEmpty(),"full handoff required");

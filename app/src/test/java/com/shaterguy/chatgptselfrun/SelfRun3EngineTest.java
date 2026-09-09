@@ -64,6 +64,44 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(ended));
     }
 
+    @Test public void canonicalContinueNextPhaseCanBypassLegacyTransitionTable() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = continueResult(claimed);
+        SelfRun3Engine.put(result, "phase_completed", "PLAN_REVIEWED");
+        SelfRun3Engine.put(result, "next_phase", "VERIFY");
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State next = reduce(withResult, "commit", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.PREPARING, next.stage());
+        assertEquals("VERIFY", next.text("phase"));
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void unknownNextPhaseIsStillRejected() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = continueResult(claimed);
+        SelfRun3Engine.put(result, "next_phase", "REVIEW");
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void nonterminalResultCannotAdvanceDone() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = continueResult(claimed);
+        SelfRun3Engine.put(result, "next_phase", "DONE");
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void doneResultStillRequiresVerifyPhase() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = doneResult(claimed);
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+    }
+
     @Test public void lateUserInputPreventsTerminalDoneAndCreatesFreshPlanTurn() {
         SelfRun3Engine.State verify = verifyCompletedState();
         JSONObject commit = new JSONObject();
