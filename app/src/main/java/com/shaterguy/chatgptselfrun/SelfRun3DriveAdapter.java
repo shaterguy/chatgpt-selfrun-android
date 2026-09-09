@@ -66,7 +66,64 @@ final class SelfRun3DriveAdapter {
         }
         JSONObject parsed = SelfRun3Engine.parseResult(existing.text, s);
         require(parsed == null, "RESULT_EXISTS_BEFORE_DISPATCH");
+        String seed = SelfRun3Engine.emptyResult(s).toString();
+        if (SelfRun3ResultWatchdog.fingerprint(seed).equals(SelfRun3ResultWatchdog.fingerprint(existing.text))) {
+            JSONObject payload = new JSONObject();
+            SelfRun3Engine.put(payload, "documentId", s.resource("resultDocumentId"));
+            SelfRun3Engine.put(payload, "fingerprint", SelfRun3ResultWatchdog.fingerprint(existing.text));
+            s = ledger.apply(new SelfRun3Engine.Event(s.turnId() + ":result-baseline",
+                    SelfRun3Engine.Kind.RESULT_BASELINE, s.taskId(), s.turnId(), payload)).execution(s.turnId());
+        }
         return s;
+    }
+    static final class ResultObservation {
+        final String version;
+        final String rawBody;
+        final String candidateBody;
+        ResultObservation(String version, String rawBody, String candidateBody) {
+            this.version = version; this.rawBody = rawBody; this.candidateBody = candidateBody;
+        }
+    }
+    ResultObservation observeResult(String token, SelfRun3Engine.State s) throws Exception {
+        acquireResultReadWakeLock();
+        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=START;turn=" + s.turn());
+        try {
+            verifyAccount(token, s);
+            DriveApiClient.Metadata metadata = validateDocument(token, s, s.resource("resultDocumentId"));
+            checkpoint();
+            String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
+            if (raw == null) raw = "";
+            String candidate = raw;
+            if (raw.trim().isEmpty()) {
+                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_EMPTY;turn=" + s.turn());
+                candidate = SelfRun3Engine.emptyResult(s).toString();
+            } else {
+                try {
+                    JSONObject parsed = SelfRun3Engine.parseResult(raw, s);
+                    if (parsed == null) diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_COMMIT;turn=" + s.turn());
+                    else diagnosticLog.record(projection, "V3_RESULT_READ", "stage=COMMITTED;turn=" + s.turn());
+                } catch (RuntimeException incompleteOrMalformed) {
+                    String recovered = recoverSingleRedundantTrailingBrace(raw, s);
+                    if (!recovered.isEmpty()) {
+                        diagnosticLog.record(projection, "V3_RESULT_READ",
+                                "stage=COMMITTED_RECOVERED_TRAILING_BRACE;turn=" + s.turn());
+                        candidate = recovered;
+                    } else if (isInvalidCommittedResult(raw, s)) {
+                        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=INVALID_COMMITTED;turn=" + s.turn());
+                        throw new InvalidCommittedResultException();
+                    } else {
+                        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
+                        candidate = SelfRun3Engine.emptyResult(s).toString();
+                    }
+                }
+            }
+            return new ResultObservation(metadata.modifiedTime + ":" + metadata.version, raw, candidate);
+        } catch (Exception error) {
+            diagnosticLog.record(projection, "V3_RESULT_READ", "stage=ERROR;type=" + error.getClass().getSimpleName());
+            throw error;
+        } finally {
+            releaseResultReadWakeLock();
+        }
     }
     String resultVersion(String token, SelfRun3Engine.State s) throws Exception {
         acquireResultReadWakeLock();
@@ -79,44 +136,7 @@ final class SelfRun3DriveAdapter {
         }
     }
     String readResult(String token, SelfRun3Engine.State s) throws Exception {
-        acquireResultReadWakeLock();
-        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=START;turn=" + s.turn());
-        try {
-            verifyAccount(token, s); validateDocument(token, s, s.resource("resultDocumentId"));
-            checkpoint();
-            String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
-            if (raw == null || raw.trim().isEmpty()) {
-                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_EMPTY;turn=" + s.turn());
-                return SelfRun3Engine.emptyResult(s).toString();
-            }
-            try {
-                JSONObject parsed = SelfRun3Engine.parseResult(raw, s);
-                if (parsed == null) {
-                    diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_COMMIT;turn=" + s.turn());
-                    return raw;
-                }
-                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=COMMITTED;turn=" + s.turn());
-                return raw;
-            } catch (RuntimeException incompleteOrMalformed) {
-                String recovered = recoverSingleRedundantTrailingBrace(raw, s);
-                if (!recovered.isEmpty()) {
-                    diagnosticLog.record(projection, "V3_RESULT_READ",
-                            "stage=COMMITTED_RECOVERED_TRAILING_BRACE;turn=" + s.turn());
-                    return recovered;
-                }
-                if (isInvalidCommittedResult(raw, s)) {
-                    diagnosticLog.record(projection, "V3_RESULT_READ", "stage=INVALID_COMMITTED;turn=" + s.turn());
-                    throw new InvalidCommittedResultException();
-                }
-                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
-                return SelfRun3Engine.emptyResult(s).toString();
-            }
-        } catch (Exception error) {
-            diagnosticLog.record(projection, "V3_RESULT_READ", "stage=ERROR;type=" + error.getClass().getSimpleName());
-            throw error;
-        } finally {
-            releaseResultReadWakeLock();
-        }
+        return observeResult(token, s).candidateBody;
     }
     private void acquireResultReadWakeLock() {
         if (resultReadWakeLock != null && !resultReadWakeLock.isHeld()) {
