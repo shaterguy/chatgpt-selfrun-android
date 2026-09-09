@@ -2,50 +2,42 @@ package com.shaterguy.chatgptselfrun;
 
 import android.os.Bundle;
 import androidx.test.runner.AndroidJUnitRunner;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
-/** Single owner of the branch-critical Android instrumentation profile. */
+/** Central runner for the active SelfRun 3.1 disposable-conversation contract. */
 public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
-    private static final String[] V3_REQUIRED = {
+    private static final List<String> V3_REQUIRED = Arrays.asList(
+            "com.shaterguy.chatgptselfrun.SelfRun31FirstConversationAndroidTest",
             "com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest",
-            "com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest",
-            "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
-            "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3ParallelLedgerAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun3InputCommitAndroidTest",
             "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest",
-            "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest"
-    };
-    private static final String[] V2_REQUIRED = {
-            "com.shaterguy.chatgptselfrun.ProtocolDetachedSurfaceWebViewTest",
-            "com.shaterguy.chatgptselfrun.TurnProtocolStateWebViewTest",
-            "com.shaterguy.chatgptselfrun.WorkTurnProtocolIngressWebViewTest",
-            "com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest",
-            "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest",
-            "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest",
-            "com.shaterguy.chatgptselfrun.TurnDocumentRetryAndroidTest",
-            "com.shaterguy.chatgptselfrun.DriveSignalDocumentIdentityAndroidTest"
-    };
+            "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest"
+    );
 
     @Override public void onCreate(Bundle arguments) {
-        Bundle effective = arguments == null ? new Bundle() : new Bundle(arguments);
-        String[] required = BuildConfig.VERSION_NAME != null && BuildConfig.VERSION_NAME.startsWith("3.")
-                ? V3_REQUIRED : V2_REQUIRED;
-        for (String item : required) appendRequiredClass(effective, item);
-        super.onCreate(effective);
-    }
-
-    private static void appendRequiredClass(Bundle arguments,String required) {
-        String selected=arguments.getString("class","").trim();
-        if(!containsClass(selected,required)){
-            arguments.putString("class",selected.isEmpty()?required:selected+","+required);
+        Bundle args = arguments == null ? new Bundle() : new Bundle(arguments);
+        String selected = args.getString("class", "").trim();
+        String upgrade = "com.shaterguy.chatgptselfrun.SelfRun3UpgradePersistenceAndroidTest#";
+        if (selected.equals(upgrade + "seedUpgradeState")
+                || selected.equals(upgrade + "verifyUpgradeState")) {
+            super.onCreate(args);
+            return;
         }
-    }
-
-    static boolean containsClass(String selected,String required) {
-        if(selected==null||selected.isBlank())return false;
-        for(String entry:selected.split(",")){
-            String value=entry.trim();int method=value.indexOf('#');
-            if(method>=0)value=value.substring(0,method);
-            if(required.equals(value))return true;
+        Set<String> merged = new LinkedHashSet<>();
+        if (!selected.isEmpty()) {
+            for (String item : selected.split(",")) {
+                String value = item.trim();
+                if (!value.isEmpty()) merged.add(value);
+            }
         }
-        return false;
+        merged.addAll(V3_REQUIRED);
+        args.putString("class", String.join(",", new ArrayList<>(merged)));
+        super.onCreate(args);
     }
 }

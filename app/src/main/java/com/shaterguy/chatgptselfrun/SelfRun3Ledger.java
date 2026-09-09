@@ -41,6 +41,9 @@ final class SelfRun3Ledger extends SQLiteOpenHelper {
         } finally { db.endTransaction(); }
     }
     synchronized SelfRun3Engine.State load(String taskId) { return read(getReadableDatabase(), taskId); }
+    synchronized SelfRun3Engine.State loadExecution(String taskId, String turnId) {
+        SelfRun3Engine.State root=load(taskId); return root==null?null:root.execution(turnId);
+    }
     synchronized SelfRun3Engine.State apply(SelfRun3Engine.Event event) {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
@@ -54,8 +57,9 @@ final class SelfRun3Ledger extends SQLiteOpenHelper {
             if (after == before) { db.setTransactionSuccessful(); return before; }
             db.execSQL("INSERT INTO events(task_id,event_id,kind,turn_id) VALUES(?,?,?,?)", new Object[]{event.taskId,event.id,event.kind.name(),event.turnId});
             db.execSQL("UPDATE tasks SET snapshot=?,revision=revision+1 WHERE task_id=?", new Object[]{after.json().toString(), event.taskId});
-            if (event.kind == SelfRun3Engine.Kind.RESULT && after.hasResult()) saveTurn(db, after, false);
-            if (event.kind == SelfRun3Engine.Kind.COMMIT) saveTurn(db, before, true);
+            SelfRun3Engine.State changed=after.execution(event.turnId);
+            if (event.kind == SelfRun3Engine.Kind.RESULT && changed!=null && changed.hasResult()) saveTurn(db, changed, false);
+            if (event.kind == SelfRun3Engine.Kind.COMMIT && changed!=null && changed.hasResult()) saveTurn(db, changed, true);
             db.setTransactionSuccessful(); return after;
         } finally { db.endTransaction(); }
     }

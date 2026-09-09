@@ -25,7 +25,6 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertFalse(activity.contains("store.setPendingReasoning(workProfile.signalReasoning)"));
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_REASONING"));
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_MODEL"));
-        assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_REASONING"));
         assertFalse(activity.contains("Work 모드는 새 작업에서 수동 선택하지 않고"));
 
         assertTrue(preferences.contains("LEGACY_DEFAULT_MODEL = \"sol\""));
@@ -35,9 +34,13 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertTrue(preferences.contains("putString(KEY_REASONING, selection.reasoning)"));
 
         assertTrue(store.contains("void startWork(String runId, String projectUrl, String requirement"));
+        assertTrue(activity.contains("workProfile.signalModel, workProfile.signalReasoning, selectedTaskMode)"));
+        assertFalse(activity.contains("store.setTaskMode(selectedTaskMode)"));
         assertTrue(store.contains("SelfRunProtocol.validWorkProfile(model, reasoning)"));
-        assertTrue(store.contains("startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning)"));
-        assertTrue(store.contains("putString(\"pendingModel\",safe(initialModel)).putString(\"pendingReasoning\",safe(initialReasoning))"));
+        assertTrue(store.contains("startInternal(runId, MODE_WORK, projectUrl, requirement, attachments, model, reasoning, taskMode)"));
+        assertTrue(store.contains(".putString(\"taskMode\", taskMode)"));
+        assertTrue(store.contains(".putString(\"pendingModel\", safe(model))"));
+        assertTrue(store.contains(".putString(\"pendingReasoning\", safe(reasoning))"));
     }
 
     @Test public void workSelectionDoesNotReplaceTurnCompletedDynamicProfileFlow() throws Exception {

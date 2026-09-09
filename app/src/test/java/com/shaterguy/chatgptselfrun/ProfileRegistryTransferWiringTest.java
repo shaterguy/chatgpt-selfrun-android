@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Locks portable registry transfer and split Chat profile wiring into production sources. */
+/** Locks portable registry transfer and initial Chat profile wiring into production sources. */
 public final class ProfileRegistryTransferWiringTest {
     @Test public void registryActivityExposesModeSpecificImportAndExportThroughSaf() throws Exception {
         String activity = source("ProfileRegistryActivity.java");
@@ -34,13 +34,16 @@ public final class ProfileRegistryTransferWiringTest {
         assertTrue(registry.contains("if (!persistLocked(next.userProfiles, next.tombstones))"));
     }
 
-    @Test public void newRunSeparatesPlannerAndTaskProfilesAndEngineRoutesByLatestMessage() throws Exception {
+    @Test public void newRunRequiresConcreteInitialProfileAndPreservesTaskMode() throws Exception {
         String activity = source("SelfRunNewActivity.java");
         String preference = source("ChatReasoningPreferenceStore.java");
         String engine = source("RequestProfileScript.java");
-        assertTrue(activity.contains("추론 정도"));
-        assertTrue(activity.contains("첫 턴 추론 정도"));
-        assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, continuationReasoning)"));
+        assertTrue(activity.contains("첫 턴 모델 조합"));
+        assertTrue(activity.contains("초기 프로필 선택 필요"));
+        assertTrue(activity.contains("ProfileRegistry.resolveChat(bootstrapReasoning) == null"));
+        assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, bootstrapReasoning)"));
+        assertTrue(activity.contains("store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments), selectedTaskMode)"));
+        assertFalse(activity.contains("첫 턴 추론 정도"));
         assertTrue(preference.contains("KEY_BOOTSTRAP_SELECTION"));
         assertTrue(preference.contains("KEY_CONTINUATION_SELECTION"));
         assertTrue(engine.contains("setChatProfiles"));

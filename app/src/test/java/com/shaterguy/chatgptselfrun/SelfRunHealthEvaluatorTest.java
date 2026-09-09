@@ -7,47 +7,48 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class SelfRunHealthEvaluatorTest {
-    @Test public void normalRunIsNormal() {
-        SelfRunHealthSnapshot h = evaluate(base(SelfRunStore.PHASE_BOOTSTRAP));
+    @Test public void setupIsNormal() {
+        SelfRunHealthSnapshot h = evaluate(base(SelfRun3Coordinator.PHASE_SETUP));
         assertEquals(SelfRunHealthSnapshot.NORMAL, h.level);
         assertEquals("NORMAL", h.category);
     }
 
     @Test public void chatGptWaitIsNotAnError() {
-        SelfRunHealthSnapshot h = evaluate(base(SelfRunStore.PHASE_WAIT_TURN_COMPLETION));
+        SelfRunHealthSnapshot h = evaluate(base(SelfRun3Coordinator.PHASE_WAITING));
         assertEquals(SelfRunHealthSnapshot.WAITING, h.level);
         assertEquals("WAITING_CHATGPT", h.category);
     }
 
     @Test public void composerReasonsMapToComposerWait() {
         for (String reason : new String[]{"composer_wait", "input_wait", "composer_clearing", "composer_inputting", "input_reflection_wait"}) {
-            SelfRunHealthInput in = web(base(SelfRunStore.PHASE_SEND_CONTINUE), reason, "send_continue", 3_000L);
+            SelfRunHealthInput in = web(base(SelfRun3Coordinator.PHASE_PREPARING), reason, 3_000L);
             assertEquals("WAITING_COMPOSER", evaluate(in).category);
         }
     }
 
     @Test public void sendReasonsMapToSendWait() {
         for (String reason : new String[]{"send_wait", "send_disabled", "submission_pending"}) {
-            SelfRunHealthInput in = web(base(SelfRunStore.PHASE_SEND_CONTINUE), reason, "send_continue", 3_000L);
+            SelfRunHealthInput in = web(base(SelfRun3Coordinator.PHASE_DISPATCHING), reason, 3_000L);
             assertEquals("WAITING_SEND", evaluate(in).category);
         }
     }
 
     @Test public void modelAndReasoningWaitsRemainWaiting() {
-        SelfRunHealthInput model = web(base(SelfRunStore.PHASE_APPLY_PREFS), "model_wait", "apply_model", 3_000L);
-        SelfRunHealthInput reasoning = web(base(SelfRunStore.PHASE_APPLY_REASONING), "reasoning_wait", "apply_reasoning", 3_000L);
+        SelfRunHealthInput model = web(base(SelfRun3Coordinator.PHASE_PREPARING), "model_wait", 3_000L);
+        SelfRunHealthInput reasoning = web(base(SelfRun3Coordinator.PHASE_PREPARING), "reasoning_wait", 3_000L);
         assertEquals("WAITING_MODEL", evaluate(model).category);
         assertEquals("WAITING_REASONING", evaluate(reasoning).category);
     }
 
-    @Test public void driveSyncIsNormalWaiting() {
-        SelfRunHealthSnapshot h = evaluate(base(SelfRunStore.PHASE_POST_PROTOCOL_DRIVE_SYNC));
-        assertEquals(SelfRunHealthSnapshot.WAITING, h.level);
-        assertEquals("WAITING_DRIVE", h.category);
+    @Test public void reconciliationIsExplicitRecovery() {
+        SelfRunHealthSnapshot h = evaluate(base(SelfRun3Coordinator.PHASE_RECONCILING));
+        assertEquals(SelfRunHealthSnapshot.RECOVERING, h.level);
+        assertEquals("RECONCILING", h.category);
+        assertTrue(h.description.contains("결과"));
     }
 
     @Test public void offlineActiveRunIsRecovering() {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_WAIT_TURN_COMPLETION);
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_WAITING);
         in.networkKnown = true;
         in.networkValidated = false;
         in.networkObservedAt = 3_000L;
@@ -57,7 +58,7 @@ public final class SelfRunHealthEvaluatorTest {
     }
 
     @Test public void routeMismatchIsRecoveringWithoutRawUrl() {
-        SelfRunHealthInput in = web(base(SelfRunStore.PHASE_SEND_CONTINUE), "conversation_mismatch", "send_continue", 3_000L);
+        SelfRunHealthInput in = web(base(SelfRun3Coordinator.PHASE_PREPARING), "conversation_mismatch", 3_000L);
         SelfRunHealthSnapshot h = evaluate(in);
         assertEquals(SelfRunHealthSnapshot.RECOVERING, h.level);
         assertEquals("ROUTE_MISMATCH", h.category);
@@ -65,20 +66,15 @@ public final class SelfRunHealthEvaluatorTest {
     }
 
     @Test public void scriptAndSubmissionErrorsAreExplicitErrors() {
-        SelfRunHealthSnapshot script = evaluate(web(base(SelfRunStore.PHASE_SEND_CONTINUE), "script_error", "send_continue", 3_000L));
-        SelfRunHealthSnapshot submit = evaluate(web(base(SelfRunStore.PHASE_SEND_CONTINUE), "submission_failed", "send_continue", 3_000L));
+        SelfRunHealthSnapshot script = evaluate(web(base(SelfRun3Coordinator.PHASE_PREPARING), "script_error", 3_000L));
+        SelfRunHealthSnapshot submit = evaluate(web(base(SelfRun3Coordinator.PHASE_DISPATCHING), "submission_failed", 3_000L));
         assertEquals(SelfRunHealthSnapshot.ERROR, script.level);
         assertEquals("SCRIPT_ERROR", script.category);
         assertEquals(SelfRunHealthSnapshot.ERROR, submit.level);
         assertEquals("SUBMISSION_FAILED", submit.category);
     }
 
-    @Test public void userActionPauseAndStopAreDistinct() {
-        SelfRunHealthInput action = base(SelfRunStore.PHASE_PAUSED);
-        action.paused = true;
-        action.driveSignalType = "USER_ACTION_REQUIRED";
-        assertEquals("USER_ACTION_REQUIRED", evaluate(action).category);
-
+    @Test public void pauseAndStopAreDistinct() {
         SelfRunHealthInput paused = base(SelfRunStore.PHASE_PAUSED);
         paused.paused = true;
         assertEquals("PAUSED", evaluate(paused).category);
@@ -87,39 +83,39 @@ public final class SelfRunHealthEvaluatorTest {
         stopped.active = false;
         stopped.userStopped = true;
         stopped.terminal = true;
-        assertEquals("STOPPED", evaluate(stopped).category);
+        SelfRunHealthSnapshot h = evaluate(stopped);
+        assertEquals("STOPPED", h.category);
+        assertEquals("새 작업 시작", h.recommendedAction);
     }
 
     @Test public void doneHasHighestPriority() {
         SelfRunHealthInput in = base(SelfRunStore.PHASE_DONE);
         in.networkKnown = true;
         in.networkValidated = false;
-        in.paused = true;
-        in.driveSignalType = "DONE";
         SelfRunHealthSnapshot h = evaluate(in);
         assertEquals(SelfRunHealthSnapshot.TERMINAL, h.level);
         assertEquals("DONE", h.category);
     }
 
     @Test public void explicitRetryIsRecoveringNotError() {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_SEND_CONTINUE);
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_PREPARING);
         in.lastErrorCode = "WEB_STATE_RETRY";
-        in.status = "Drive V1 WebView 단계를 자동 재확인합니다";
+        in.status = "SelfRun 3 상태를 다시 확인합니다";
         assertEquals(SelfRunHealthSnapshot.RECOVERING, evaluate(in).level);
     }
 
     @Test public void staleWebObservationCannotOverrideNewPhase() {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_WAIT_TURN_COMPLETION);
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_WAITING);
         in.phaseStartedAt = 5_000L;
         in.webReason = "script_error";
-        in.webPhase = "send_continue";
+        in.webPhase = "v3_preparing";
         in.webObservedAt = 3_000L;
         SelfRunHealthSnapshot h = evaluate(in);
         assertEquals("WAITING_CHATGPT", h.category);
     }
 
     @Test public void processExitRequiresCurrentRunCorrelation() {
-        SelfRunHealthInput in = base(SelfRunStore.PHASE_WAIT_TURN_COMPLETION);
+        SelfRunHealthInput in = base(SelfRun3Coordinator.PHASE_WAITING);
         in.processCategory = "APP_CRASH";
         in.processReason = "crash";
         in.processObservedAt = 4_000L;
@@ -165,9 +161,9 @@ public final class SelfRunHealthEvaluatorTest {
         return in;
     }
 
-    private static SelfRunHealthInput web(SelfRunHealthInput in, String reason, String phase, long observedAt) {
+    private static SelfRunHealthInput web(SelfRunHealthInput in, String reason, long observedAt) {
         in.webReason = reason;
-        in.webPhase = phase;
+        in.webPhase = SelfRunWebDiagnostics.phaseKindForHealth(in.phase);
         in.webObservedAt = observedAt;
         return in;
     }

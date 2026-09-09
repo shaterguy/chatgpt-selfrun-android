@@ -25,7 +25,6 @@
         <activity android:name=".SelfRunLogMenuActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunDetailActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunHistoryActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
-        <activity android:name=".SelfRunRestartActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".SelfRunNewActivity" android:exported="false" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
         <activity android:name=".LoginActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
 
@@ -45,7 +44,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Runs a user-started Drive-committed ChatGPT SelfRun Drive session while preserving its app-private WebView conversation." />
+                android:value="Runs a user-started ledger-driven ChatGPT SelfRun 3 session while preserving its app-private WebView conversation and Drive artifacts." />
         </service>
     </application>
 </manifest>

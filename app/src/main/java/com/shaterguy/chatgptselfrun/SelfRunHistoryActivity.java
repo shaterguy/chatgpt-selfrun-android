@@ -127,10 +127,12 @@ public final class SelfRunHistoryActivity extends Activity {
         detailPane.removeAllViews();
         String runId = item.optString("runId");
         SelfRunHealthSnapshot runHealth = health.currentFor(item);
-        detailPane.addView(Ui.statusPill(this, runHealth == null ? item.optString("status", "STATE") : runHealth.rowLabel()));
+        detailPane.addView(Ui.statusPill(this,
+                runHealth == null ? item.optString("status", "STATE") : runHealth.rowLabel()));
         detailPane.addView(Ui.headline(this, preview(item.optString("requirement"))));
-        if (runHealth != null && !runHealth.recommendedAction.isEmpty())
+        if (runHealth != null && !runHealth.recommendedAction.isEmpty()) {
             detailPane.addView(Ui.body(this, runHealth.recommendedAction));
+        }
         detailPane.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
         detailPane.addView(Ui.keyValue(this, "모델 조합", model(item)));
         detailPane.addView(Ui.keyValue(this, "마지막 실행", time(item.optLong("updatedAt"))));
@@ -139,22 +141,11 @@ public final class SelfRunHistoryActivity extends Activity {
                 Ui.outlinedButton(this, "상세", v -> openDetail(runId)),
                 Ui.outlinedButton(this, "실행 로그", v -> openLogs(runId, SelfRunLogsActivity.KIND_EXECUTION)),
                 Ui.outlinedButton(this, "디버그", v -> openLogs(runId, SelfRunLogsActivity.KIND_DEBUG))));
-        if (SelfRunRestartPolicy.restartable(item)) {
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            params.topMargin = Ui.dp(this, 10);
-            detailPane.addView(Ui.button(this, "중지 작업 재시작", v -> openRestart(runId)), params);
-        }
     }
 
     private void openDetail(String runId) {
         startActivity(new Intent(this, SelfRunDetailActivity.class)
                 .putExtra(SelfRunDetailActivity.EXTRA_RUN_ID, runId));
-    }
-
-    private void openRestart(String runId) {
-        startActivity(new Intent(this, SelfRunRestartActivity.class)
-                .putExtra(SelfRunRestartActivity.EXTRA_RUN_ID, runId));
     }
 
     private void openLogs(String runId, String kind) {
@@ -173,11 +164,6 @@ public final class SelfRunHistoryActivity extends Activity {
         if (text == null || text.trim().isEmpty()) return "요청 내용 없음";
         String oneLine = text.replace('\n', ' ').replace('\r', ' ').trim();
         return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 120) + "…";
-    }
-
-    private static String shortId(String runId) {
-        if (runId == null || runId.isEmpty()) return "Run ID 없음";
-        return "Run · " + (runId.length() <= 34 ? runId : runId.substring(0, 34) + "…");
     }
 
     private static String empty(String value) {

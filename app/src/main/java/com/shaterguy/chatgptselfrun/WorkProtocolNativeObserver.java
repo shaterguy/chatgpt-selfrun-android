@@ -83,9 +83,10 @@ final class WorkProtocolNativeObserver {
     }
 
     static boolean observablePhase(String phase) {
-        return SelfRunStore.PHASE_BOOTSTRAP_SEND.equals(phase)
-                || SelfRunStore.PHASE_SEND_CONTINUE.equals(phase)
-                || SelfRunStore.PHASE_WAIT_TURN_COMPLETION.equals(phase);
+        return SelfRun3Coordinator.PHASE_PREPARING.equals(phase)
+                || SelfRun3Coordinator.PHASE_READY.equals(phase)
+                || SelfRun3Coordinator.PHASE_DISPATCHING.equals(phase)
+                || SelfRun3Coordinator.PHASE_WAITING.equals(phase);
     }
 
     static boolean observableMode(String mode) {

@@ -5,19 +5,20 @@ import org.junit.Test;
 
 import static org.junit.Assert.*;
 
-/** V3 does not poll Drive versions during a normal response; result reads begin after end evidence. */
+/** V3 waits on exact execution results; response completion is irrelevant. */
 public final class SelfRunDriveVersionPollingPolicyTest {
-    @Test public void normalWaitingHasZeroDrivePollingBudget() {
-        assertEquals(0L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+    @Test public void normalWaitingUsesLowFrequencyMetadataBudget() {
+        assertEquals(30_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
     }
 
-    @Test public void waitingStateDoesNotReadResultDocument() {
+    @Test public void waitingStateIsEligibleForIndependentResultPolling() {
         SelfRun3Engine.State waiting = waitingState();
         assertEquals(SelfRun3Engine.Stage.WAITING, waiting.stage());
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(waiting));
+        assertEquals(waiting.turnId(), SelfRun3Engine.waitingExecutions(waiting).get(0).turnId());
     }
 
-    @Test public void trustedEndEvidenceTransitionsToPinnedResultRead() {
+    @Test public void responseCompletionCannotChangeExecutionState() {
         SelfRun3Engine.State waiting = waitingState();
         JSONObject end = new JSONObject();
         SelfRun3Engine.put(end, "requestId", waiting.requestId());
@@ -25,12 +26,13 @@ public final class SelfRunDriveVersionPollingPolicyTest {
         SelfRun3Engine.State ended = SelfRun3Engine.reduce(waiting,
                 new SelfRun3Engine.Event("ended", SelfRun3Engine.Kind.ENDED,
                         waiting.taskId(), waiting.turnId(), end));
-        assertEquals(SelfRun3Engine.Stage.RECONCILING, ended.stage());
-        assertEquals(SelfRun3Engine.Action.READ_RESULT, SelfRun3Engine.nextAction(ended));
+        assertEquals(SelfRun3Engine.Stage.WAITING, ended.stage());
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(ended));
     }
 
     private static SelfRun3Engine.State waitingState() {
         JSONObject config = new JSONObject(); SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.put(config, "reasoning", "medium");
         SelfRun3Engine.State s = SelfRun3Engine.create("task", "task:turn:1", config);
         s = resource(s, "folderId", "folder");
         s = resource(s, "requirementDocumentId", "requirements");

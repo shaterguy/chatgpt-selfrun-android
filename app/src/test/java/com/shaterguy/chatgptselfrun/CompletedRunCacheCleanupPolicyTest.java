@@ -32,7 +32,7 @@ public class CompletedRunCacheCleanupPolicyTest {
 
     @Test public void nonterminalWaitOnlyDetachesOutputWithoutDestroyingBrowser() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        String wait = between(coordinator, "case WAIT ->", "case READ_RESULT ->");
+        String wait = between(coordinator, "case WAIT, READ_RESULT, CHECK_RECEIPT ->", "case COMMIT ->");
         assertTrue(wait.contains("web.detach()"));
         assertFalse(wait.contains("web.close()"));
         assertFalse(wait.contains("disposeHost"));

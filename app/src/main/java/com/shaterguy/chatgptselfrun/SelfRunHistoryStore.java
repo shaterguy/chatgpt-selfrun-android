@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+/** Durable user-visible history projection for active SelfRun 3 tasks. */
 final class SelfRunHistoryStore {
     private static final String PREFS = "selfrun_drive_history";
     private static final String KEY_PRIMARY = "runs";
@@ -25,16 +26,8 @@ final class SelfRunHistoryStore {
     synchronized boolean sync(SelfRunStore store) {
         if (store == null || store.runId().isEmpty()) return true;
         JSONArray current = read();
-        JSONObject prior = null;
-        for (int i = 0; i < current.length(); i++) {
-            JSONObject item = current.optJSONObject(i);
-            if (item != null && store.runId().equals(item.optString("runId"))) {
-                prior = item;
-                break;
-            }
-        }
         JSONArray next = new JSONArray();
-        next.put(snapshot(store, prior));
+        next.put(snapshot(store));
         for (int i = 0; i < current.length() && next.length() < MAX_RUNS; i++) {
             JSONObject item = current.optJSONObject(i);
             if (item == null || store.runId().equals(item.optString("runId"))) continue;
@@ -64,12 +57,10 @@ final class SelfRunHistoryStore {
         return null;
     }
 
-    synchronized boolean rolloverProgressObserved(String runId) {
-        JSONObject item = get(runId);
-        return item != null && item.optBoolean("rolloverProgressObserved", false);
-    }
+    /** Retained only for old UI callers; V3 has no rollover state. */
+    synchronized boolean rolloverProgressObserved(String runId) { return false; }
 
-    private JSONObject snapshot(SelfRunStore store, JSONObject prior) {
+    private JSONObject snapshot(SelfRunStore store) {
         JSONObject item = new JSONObject();
         try {
             item.put("runId", store.runId());
@@ -86,20 +77,6 @@ final class SelfRunHistoryStore {
             item.put("jobFolderId", store.jobFolderId());
             item.put("turnDocumentId", store.turnDocumentId());
             item.put("turnDocumentUrl", store.turnDocumentUrl());
-            item.put("driveSignalCursor", store.driveSignalCursor());
-            item.put("lastDriveSignalRaw", bounded(DriveSignalParser.historySafeRaw(store.lastDriveSignalRaw()), 1_000));
-            item.put("lastDriveSignalTimestamp", store.lastDriveSignalTimestamp());
-            item.put("lastDriveSignalType", store.lastDriveSignalType());
-            item.put("pendingDriveSignalRaw", bounded(DriveSignalParser.historySafeRaw(store.pendingDriveSignalRaw()), 1_000));
-            item.put("pendingDriveSignalTimestamp", store.pendingDriveSignalTimestamp());
-            item.put("pendingDriveSignalType", store.pendingDriveSignalType());
-            item.put("commitDetectedAt", store.commitDetectedAt());
-            item.put("awaitingCommandAck", store.awaitingCommandAck());
-            item.put("activeCommandKind", store.activeCommandKind());
-            item.put("commandAttempt", store.commandAttempt());
-            item.put("submissionRetryKind", store.submissionRetryKind());
-            item.put("submissionRetryDueAt", store.submissionRetryDueAt());
-            item.put("submissionRetryAttempt", store.submissionRetryAttempt());
             item.put("phase", store.phase());
             item.put("status", bounded(store.status(), 1_000));
             item.put("pendingModel", store.pendingModel());
@@ -110,11 +87,7 @@ final class SelfRunHistoryStore {
             item.put("userStopped", store.userStopped());
             item.put("lastErrorCode", store.lastErrorCode());
             item.put("lastErrorMessage", bounded(store.lastErrorMessage(), 1_000));
-            boolean priorProgress = prior != null && prior.optBoolean("rolloverProgressObserved", false);
-            boolean currentProgress = DriveSignalParser.Type.TURN_COMPLETED.name().equals(store.pendingDriveSignalType())
-                    && !store.pendingDriveSignalRaw().isEmpty();
-            item.put("rolloverProgressObserved", priorProgress || currentProgress);
-            item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || SelfRunRolloverCoordinator.PHASE_ROLLED_OVER.equals(store.phase()) || store.userStopped());
+            item.put("terminal", SelfRunStore.PHASE_DONE.equals(store.phase()) || store.userStopped());
             SelfRunHealthSnapshot healthSnapshot = health.updateFromStore(store);
             if (healthSnapshot != null) item.put("health", healthSnapshot.toJson());
             BootstrapRunStateStore.appendHistory(app, store.runId(), item);

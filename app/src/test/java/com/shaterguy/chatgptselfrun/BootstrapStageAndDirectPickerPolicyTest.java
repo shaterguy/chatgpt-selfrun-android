@@ -38,16 +38,17 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(interceptor.contains("XMLHttpRequest"));
     }
 
-    @Test public void newChatRunDefaultsFromRegistryWithoutOverridingRestoredSignal() throws Exception {
+    @Test public void newChatRunRequiresExplicitRegistrySelectionAndPreservesRestoredSignal() throws Exception {
         String activity = src("SelfRunNewActivity.java");
         int restoreMethod = activity.indexOf("private void restoreDraftState(Bundle state)");
-        int registryDefault = activity.indexOf(
-                "ProfileRegistry.resolveChat(ChatReasoningPreferenceStore.EXTRA_HIGH)", restoreMethod);
-        int defaultRefresh = activity.indexOf("refreshChatReasoningOptions(preferred);", registryDefault);
+        int defaultRefresh = activity.indexOf(
+                "refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);", restoreMethod);
         int restoredSelection = activity.indexOf("state.getString(STATE_CHAT_REASONING", restoreMethod);
         int restoredRefresh = activity.indexOf("refreshChatReasoningOptions(reasoning);", restoredSelection);
-        assertTrue(restoreMethod >= 0 && registryDefault > restoreMethod);
-        assertTrue(defaultRefresh > registryDefault);
+        assertTrue(restoreMethod >= 0 && defaultRefresh > restoreMethod);
+        assertTrue(activity.contains("초기 프로필 선택 필요"));
+        assertTrue(activity.contains("ProfileRegistry.resolveChat(bootstrapReasoning) == null"));
+        assertFalse(activity.contains("ProfileRegistry.resolveChat(ChatReasoningPreferenceStore.EXTRA_HIGH)"));
         assertTrue(restoredSelection > defaultRefresh);
         assertTrue(restoredRefresh > restoredSelection);
         assertTrue(activity.contains("for (ProfileRegistry.Profile profile : ProfileRegistry.listChat())"));

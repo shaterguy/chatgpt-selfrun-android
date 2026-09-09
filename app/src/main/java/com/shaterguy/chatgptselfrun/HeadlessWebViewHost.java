@@ -10,6 +10,7 @@ import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.ViewGroup;
@@ -18,9 +19,16 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import org.json.JSONTokener;
+
 /** Private mobile WebView host whose viewport mirrors the visible calibration WebView. */
 final class HeadlessWebViewHost {
+    private static final long OUTPUT_DETACH_SETTLE_MS = 1_000L;
+    private static final long OUTPUT_DETACH_FAST_PROBE_MS = 250L;
+    private static final long OUTPUT_DETACH_FAST_WINDOW_MS = 5_000L;
+    private static final long OUTPUT_DETACH_SLOW_PROBE_MS = 2_000L;
     private static volatile WebView activeWebView;
+    private static volatile HeadlessWebViewHost activeHost;
 
     private final WebView webView;
     private final Presentation presentation;
@@ -29,8 +37,12 @@ final class HeadlessWebViewHost {
     private final ImageReader imageReader;
     private final HandlerThread drainThread;
     private final DisplayDrainState drainState;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean outputAttached;
     private boolean completedRunResourceCacheCleared;
+    private boolean detachProbePending;
+    private long detachProbeStartedAt;
+    private int detachProbeGeneration;
 
     private HeadlessWebViewHost(WebView webView, Presentation presentation,
                                 VirtualDisplay virtualDisplay, Surface surface,
@@ -45,6 +57,7 @@ final class HeadlessWebViewHost {
         this.drainState = drainState;
         this.outputAttached = virtualDisplay != null && surface != null;
         activeWebView = webView;
+        activeHost = this;
     }
 
     static HeadlessWebViewHost create(Context context) {
@@ -167,6 +180,7 @@ final class HeadlessWebViewHost {
     }
 
     static WebView activeWebView() { return activeWebView; }
+    static HeadlessWebViewHost activeHost() { return activeHost; }
 
     WebView webView() { return webView; }
 
@@ -178,16 +192,95 @@ final class HeadlessWebViewHost {
         return outputAttached;
     }
 
+    /** Immediate detach for pause/stop/inspection paths that are not a fresh physical send. */
     boolean detachOutput() {
         requireMainThread();
+        cancelDetachProbe();
         if (!hasDetachableOutput() || !outputAttached) return false;
         virtualDisplay.setSurface(null);
         outputAttached = false;
         return true;
     }
 
+    /**
+     * Generation wait detach. Keep the surface attached through the submit-to-thinking UI transition,
+     * then detach only after the live message composer is available again. This never navigates,
+     * reloads or recreates the WebView. If the transition is unusually slow, probing becomes sparse
+     * after the initial fast window but continues until the composer actually returns or another
+     * lifecycle action explicitly cancels the pending detach.
+     */
+    boolean detachOutputWhenComposerReady() {
+        requireMainThread();
+        if (!hasDetachableOutput() || !outputAttached) return false;
+        if (detachProbePending) return true;
+        detachProbePending = true;
+        detachProbeStartedAt = SystemClock.elapsedRealtime();
+        int generation = ++detachProbeGeneration;
+        mainHandler.postDelayed(() -> probeDetachReadiness(generation), OUTPUT_DETACH_SETTLE_MS);
+        return true;
+    }
+
+    private void probeDetachReadiness(int generation) {
+        if (!detachProbeCurrent(generation)) return;
+        String script = "(()=>{const p=window.__selfRunTurnProtocol?.snapshot?.();"
+                + "const phase=String(p?.phase||'');"
+                + "const composer=Boolean(" + SelfRun3ComposerTransport.pinComposerReadyExpression() + ");"
+                + "return phase+'|'+(composer?'1':'0');})()";
+        try {
+            webView.evaluateJavascript(script, raw -> {
+                if (!detachProbeCurrent(generation)) return;
+                String value = decodeJavascriptString(raw);
+                int divider = value.indexOf('|');
+                String phase = divider < 0 ? "" : value.substring(0, divider);
+                boolean composerReady = divider >= 0 && value.substring(divider + 1).equals("1");
+                if (("THINKING".equals(phase) || "ANSWERING".equals(phase)
+                        || "COMPLETE".equals(phase)) && composerReady) {
+                    detachOutput();
+                    return;
+                }
+                if ("ERROR".equals(phase)) {
+                    detachOutput();
+                    return;
+                }
+                scheduleNextDetachProbe(generation);
+            });
+        } catch (Throwable ignored) {
+            if (detachProbeCurrent(generation)) scheduleNextDetachProbe(generation);
+        }
+    }
+
+    private void scheduleNextDetachProbe(int generation) {
+        if (!detachProbeCurrent(generation)) return;
+        long elapsed = SystemClock.elapsedRealtime() - detachProbeStartedAt;
+        long delay = elapsed < OUTPUT_DETACH_FAST_WINDOW_MS
+                ? OUTPUT_DETACH_FAST_PROBE_MS
+                : OUTPUT_DETACH_SLOW_PROBE_MS;
+        mainHandler.postDelayed(() -> probeDetachReadiness(generation), delay);
+    }
+
+    private boolean detachProbeCurrent(int generation) {
+        return detachProbePending && generation == detachProbeGeneration
+                && hasDetachableOutput() && outputAttached;
+    }
+
+    private void cancelDetachProbe() {
+        detachProbePending = false;
+        detachProbeGeneration++;
+        mainHandler.removeCallbacksAndMessages(null);
+    }
+
+    private static String decodeJavascriptString(String raw) {
+        try {
+            Object value = new JSONTokener(raw == null ? "null" : raw).nextValue();
+            return value instanceof String ? (String) value : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
     boolean attachOutput() {
         requireMainThread();
+        cancelDetachProbe();
         if (!hasDetachableOutput() || outputAttached) return false;
         virtualDisplay.setSurface(surface);
         outputAttached = true;
@@ -218,7 +311,9 @@ final class HeadlessWebViewHost {
     }
 
     void destroy() {
+        cancelDetachProbe();
         if (activeWebView == webView) activeWebView = null;
+        if (activeHost == this) activeHost = null;
         try {
             webView.setWebViewClient(null);
             webView.setWebChromeClient(null);

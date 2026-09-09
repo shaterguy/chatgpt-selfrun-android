@@ -3,7 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Distinguishes newly-created SelfRun 3 tasks from pre-upgrade SelfRun 2 runs. */
+/** Pins the single active SelfRun 3 task lineage. */
 final class SelfRun3RunMarker {
     private static final String PREFS = "selfrun3_run_marker";
     private static final String RUN_ID = "runId";

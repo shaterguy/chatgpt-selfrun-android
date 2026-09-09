@@ -6,7 +6,7 @@ import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 
-/** Foreground shell for the ledger-driven SelfRun 3 coordinator. */
+/** Foreground shell for the single active ledger-driven SelfRun 3 coordinator. */
 public final class SelfRunService extends Service {
     static final String ACTION_RUN = BuildConfig.APPLICATION_ID + ".RUN";
     static final String ACTION_PAUSE = BuildConfig.APPLICATION_ID + ".PAUSE";
@@ -34,24 +34,10 @@ public final class SelfRunService extends Service {
             return START_NOT_STICKY;
         }
 
-        if (ACTION_STOP.equals(action) && !coordinator.ownsCurrentRun()) {
-            if (!store.runId().isEmpty()) store.stopByUser();
-            stopSelf(startId);
-            return START_NOT_STICKY;
-        }
-
         if (!coordinator.ownsCurrentRun()) {
-            // Never reinterpret an in-progress 2.x run as a 3.x task. Preserve it until the user
-            // explicitly stops/restarts it; all newly-created 3.x runs carry an explicit marker.
-            if (store.active() && !store.userStopped()
-                    && !SelfRunStore.PHASE_DONE.equals(store.phase())
-                    && !SelfRunStore.PHASE_IDLE.equals(store.phase())) {
-                startForegroundCompat();
-                store.setPaused(true);
-                store.setLastError("V3_LEGACY_RUN_PRESERVED",
-                        "업그레이드 전 실행은 자동 변환하지 않았습니다. 기존 상태를 보존했습니다.");
-                runLog.record(store, "V3_LEGACY_RUN_PRESERVED", "action=" + action);
-                return START_STICKY;
+            if (!store.runId().isEmpty()) {
+                runLog.record(store, "V3_STALE_RUN_RETIRED", "action=" + action);
+                store.stopByUser();
             }
             stopSelf(startId);
             return START_NOT_STICKY;

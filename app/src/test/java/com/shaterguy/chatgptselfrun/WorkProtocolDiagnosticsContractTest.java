@@ -36,7 +36,7 @@ public final class WorkProtocolDiagnosticsContractTest {
         assertTrue(protocol.contains("value.type==='message_stream_complete'"));
     }
 
-    @Test public void workDiagnosticsCanSeeSubframesWithoutPromotingThemToTurnState() throws Exception {
+    @Test public void workDiagnosticsCanSeeSubframesWithoutPromotingThemToV3TurnState() throws Exception {
         String work = source("WorkTurnProtocolIngressScript.java");
         String bridge = source("TurnProtocolLogBridge.java");
 
@@ -52,13 +52,16 @@ public final class WorkProtocolDiagnosticsContractTest {
         int diagnostic = bridge.indexOf("if (WORK_DIAGNOSTIC_STAGES.contains(stage))");
         int mainFrameGate = bridge.indexOf("if (!isMainFrame) return;", diagnostic);
         int tokenExtraction = bridge.indexOf("String turnToken = item.optString(\"turnToken\", \"\")", mainFrameGate);
-        int exactTokenGate = bridge.indexOf("!turnToken.equals(store.turnProtocolToken())", tokenExtraction);
-        int stateMutation = bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase)");
+        int ownershipGate = bridge.indexOf("if (!SelfRun3WebAdapter.ownsProtocolView(view)) return;", tokenExtraction);
+        int protocolEvent = bridge.indexOf("SelfRun3WebAdapter.protocolEvent(view, item)", ownershipGate);
+        int stateMutation = bridge.indexOf("TurnProtocolUiState.record(context, eventRunId, turnToken, stage, phase)", protocolEvent);
         assertTrue(diagnostic >= 0);
         assertTrue(mainFrameGate > diagnostic);
         assertTrue(tokenExtraction > mainFrameGate);
-        assertTrue(exactTokenGate > tokenExtraction);
-        assertTrue(stateMutation > exactTokenGate);
+        assertTrue(ownershipGate > tokenExtraction);
+        assertTrue(protocolEvent > ownershipGate);
+        assertTrue(stateMutation > protocolEvent);
+        assertFalse(bridge.contains("store.turnProtocolToken()"));
         assertFalse(bridge.contains("\"observer_bound\""));
         assertTrue(work.contains("topKeys"));
         assertTrue(work.contains("encodedItemFound"));
