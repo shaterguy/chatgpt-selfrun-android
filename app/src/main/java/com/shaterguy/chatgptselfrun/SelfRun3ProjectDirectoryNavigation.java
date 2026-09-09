@@ -17,10 +17,15 @@ final class SelfRun3ProjectDirectoryNavigation {
     }
 
     static boolean isDirectoryPage(String actualUrl) {
-        if (!ProjectUrlPolicy.isTrustedChatgptPage(actualUrl)) return false;
+        if (actualUrl == null || actualUrl.isEmpty()) return false;
         try {
-            String path = new URI(actualUrl).getPath();
-            return "/projects".equals(path) || "/projects/".equals(path);
+            URI uri = new URI(actualUrl);
+            String host = uri.getHost();
+            String path = uri.getPath();
+            return "https".equals(uri.getScheme())
+                    && ("chatgpt.com".equals(host) || "www.chatgpt.com".equals(host))
+                    && uri.getRawUserInfo() == null && (uri.getPort() == -1 || uri.getPort() == 443)
+                    && ("/projects".equals(path) || "/projects/".equals(path));
         } catch (Exception ignored) {
             return false;
         }
