@@ -94,33 +94,50 @@ final class SelfRun3WebAdapter {
             quiesce();
             dispatchConfirmed = false;
             step = 0;
-            projectCandidateIndex = 0;
-            projectProbeRetries = 0;
-            projectClickAttempts = 0;
-            projectDirectoryRecoveries = 0;
-            projectDirectoryReadyAt = 0L;
-            projectRouteReadyLogged = false;
+            resetProjectNavigationState();
             prepareStarted = SystemClock.elapsedRealtime();
         } else if (restartPreparation) {
             prepareStarted = SystemClock.elapsedRealtime();
         }
         preparing = true;
+        String target = s.config().optString("projectUrl");
+        if (!trusted(target)) { fail("TARGET_INVALID"); return; }
+        boolean rebuildProjectHost = restartPreparation && !newAttempt
+                && SelfRun3ProjectDirectoryNavigation.isProjectTarget(target);
+        if (rebuildProjectHost) {
+            trace("PROJECT_DIRECTORY_RECOVERY", "status=preparation-restart;strategy=recreate-webview");
+            resetProjectNavigationState();
+            disposeHost();
+        }
         ensureWeb();
         if (web == null || closed) return;
+        if (host != null) host.attachOutput();
         if (newAttempt) {
-            String target = s.config().optString("projectUrl");
-            if (!trusted(target)) { fail("TARGET_INVALID"); return; }
             ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
-            projectDisplayName = ref == null ? "" : new ProjectCatalog(context).recordedDisplayName(ref);
-            if (ref != null && projectDisplayName.isEmpty()) { fail("PROJECT_NAME_UNAVAILABLE"); return; }
+            projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
             trace("WEBVIEW_LAUNCH", "route=" + (ref == null ? "general" : "projects"));
             generation++;
             evaluation++;
             loading = true;
             web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+            return;
         }
-        if (host != null) host.attachOutput();
+        if (rebuildProjectHost) {
+            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
+            projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
+            loadProjectDirectory("preparation-restart");
+            return;
+        }
         if (!loading) advance();
+    }
+
+    private void resetProjectNavigationState() {
+        projectCandidateIndex = 0;
+        projectProbeRetries = 0;
+        projectClickAttempts = 0;
+        projectDirectoryRecoveries = 0;
+        projectDirectoryReadyAt = 0L;
+        projectRouteReadyLogged = false;
     }
 
     private void ensureWeb() {
@@ -321,12 +338,6 @@ final class SelfRun3WebAdapter {
     }
 
     private void recoverProjectDirectory(String reason) {
-        if (!SelfRun3ProjectDirectoryRecoveryPolicy.canRecover(projectDirectoryRecoveries)) {
-            trace("PROJECT_DIRECTORY_RECOVERY", "status=exhausted;reason=" + safeStatus(reason)
-                    + ";recoveries=" + projectDirectoryRecoveries);
-            fail("PROJECT_DIRECTORY_STALLED");
-            return;
-        }
         projectDirectoryRecoveries++;
         projectProbeRetries = 0;
         projectClickAttempts = 0;
