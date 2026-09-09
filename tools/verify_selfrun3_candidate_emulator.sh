@@ -58,3 +58,7 @@ adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun31WorkFixAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-work-fix-evidence.txt
 grep -Fq 'OK (' selfrun-v3-work-fix-evidence.txt
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3ProjectDirectoryNavigationWebViewTest \
+  "$INSTRUMENTATION" | tee selfrun-v3-project-directory-evidence.txt
+grep -Fq 'OK (' selfrun-v3-project-directory-evidence.txt
