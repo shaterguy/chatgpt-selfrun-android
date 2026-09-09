@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
 
@@ -266,19 +267,40 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     after = ledger.apply(event(after, after.turnId() + ":turn-ready",
                             SelfRun3Engine.Kind.TURN_READY, payload));
                 } else {
-                    String version = drive.resultVersion(token, state);
-                    if (version.equals(resultVersions.get(state.turnId()))) throw new ResultPendingException();
-                    String raw = drive.readResult(token, state);
-                    JSONObject parsed = SelfRun3Engine.parseResult(raw, state);
-                    if (parsed == null) {
-                        resultVersions.put(state.turnId(), version);
+                    SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, state);
+                    SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);
+                    if (current == null) throw new ResultPendingException();
+                    String bodyFingerprint = SelfRun3ResultWatchdog.fingerprint(observation.rawBody);
+                    if (!current.text("resultSeedFingerprint").isEmpty()
+                            && !bodyFingerprint.equals(current.text("resultSeedFingerprint"))
+                            && !current.flag("resultBodyMutationObserved")) {
+                        JSONObject mutation = new JSONObject();
+                        SelfRun3Engine.put(mutation, "documentId", current.resource("resultDocumentId"));
+                        SelfRun3Engine.put(mutation, "fingerprint", bodyFingerprint);
+                        SelfRun3Engine.put(mutation, "atWall", System.currentTimeMillis());
+                        current = ledger.apply(event(current, current.turnId() + ":result-body-mutated",
+                                SelfRun3Engine.Kind.RESULT_MUTATED, mutation)).execution(current.turnId());
+                    }
+                    JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);
+                    if (parsed != null) {
+                        JSONObject payload = new JSONObject();
+                        SelfRun3Engine.put(payload, "text", observation.candidateBody);
+                        after = ledger.apply(event(current, current.turnId() + ":result:" + observation.version,
+                                SelfRun3Engine.Kind.RESULT, payload));
+                    } else if (SelfRun3ResultWatchdog.shouldRepair(current,
+                            SystemClock.elapsedRealtime(), currentBootCount())) {
+                        JSONObject payload = new JSONObject();
+                        SelfRun3Engine.put(payload, "safeToRepair", true);
+                        SelfRun3Engine.put(payload, "reason", "STALE_RESULT_WATCHDOG");
+                        after = ledger.apply(event(current, current.turnId() + ":repair-stale-result",
+                                SelfRun3Engine.Kind.REPAIR, payload));
+                        log.record(store, "V3_STALE_RESULT_REPAIR",
+                                "turn=" + current.turn() + ";document=" + current.resource("resultDocumentId"));
+                    } else {
+                        resultVersions.put(current.turnId(), observation.version);
                         throw new ResultPendingException();
                     }
-                    JSONObject payload = new JSONObject();
-                    SelfRun3Engine.put(payload, "text", raw);
-                    after = ledger.apply(event(state, state.turnId() + ":result:" + version,
-                            SelfRun3Engine.Kind.RESULT, payload));
-                    resultVersions.put(state.turnId(), version);
+                    resultVersions.put(expectedTurn, observation.version);
                 }
                 SelfRun3Engine.State completed = after;
                 main.post(() -> {
@@ -288,8 +310,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                             || !expectedTask.equals(store.runId())) return;
                     clearRecoveredDriveWarning(store);
                     networkAttempt = 0;
-                    if (step == DriveStep.READ_RESULT) nextResultPoll.put(expectedTurn,
-                            SystemClock.elapsedRealtime() + SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+                    if (step == DriveStep.READ_RESULT) {
+                        nextResultPoll.remove(expectedTurn);
+                        if (completed.turnId().equals(expectedTurn)) nextResultPoll.put(expectedTurn,
+                                SystemClock.elapsedRealtime() + SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+                    }
                     syncProjection(completed);
                     scheduleNext(0L);
                 });
@@ -334,7 +359,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         io.execute(() -> {
             try {
                 SelfRun3Engine.State current = ledger.loadExecution(original.taskId(), original.turnId());
-                if (current == null) return;
+                if (current == null || current.flag("superseded")) return;
                 if (current.number("repairAttempt") != 0) {
                     main.post(() -> pause("V3_RESULT_REPAIR_EXHAUSTED"));
                     return;
@@ -451,8 +476,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     @Override public void onStarted(String task, String turn, String request) {
-        recordCallback(task, turn, request, request + ":started", SelfRun3Engine.Kind.STARTED,
-                requestPayload(request));
+        JSONObject payload = requestPayload(request);
+        SelfRun3Engine.put(payload, "source", "canonical_post");
+        SelfRun3Engine.put(payload, "protocolStage", "turn_request");
+        SelfRun3Engine.put(payload, "atElapsed", SystemClock.elapsedRealtime());
+        SelfRun3Engine.put(payload, "atWall", System.currentTimeMillis());
+        SelfRun3Engine.put(payload, "bootCount", currentBootCount());
+        recordCallback(task, turn, request, request + ":started", SelfRun3Engine.Kind.STARTED, payload);
     }
 
     @Override public void onAccepted(String task, String turn, String request) {
@@ -709,7 +739,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private static boolean callbackMatches(SelfRun3Engine.State state, String task, String turn, String request) {
         return state != null && task.equals(state.taskId()) && turn.equals(state.turnId())
-                && request.equals(state.requestId()) && !state.terminal();
+                && request.equals(state.requestId()) && !state.terminal() && !state.flag("superseded");
     }
 
     private static SelfRun3Engine.Event event(SelfRun3Engine.State state, String id,
@@ -719,6 +749,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private static JSONObject requestPayload(String request) {
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "requestId", request); return payload;
+    }
+
+    private int currentBootCount() {
+        try {
+            return Settings.Global.getInt(service.getContentResolver(), Settings.Global.BOOT_COUNT);
+        } catch (Throwable unavailable) {
+            return -1;
+        }
     }
 
     private static String turnId(String task, int turn) { return task + ":turn:" + turn; }
