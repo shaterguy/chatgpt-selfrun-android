@@ -5,10 +5,12 @@ cd "$(cd "$(dirname "$0")/.." && pwd)"
 BUILD=app/build.gradle
 MANIFEST=app/src/main/AndroidManifest.xml
 SRC=app/src/main/java/com/shaterguy/chatgptselfrun
+UNIT_TEST=app/src/test/java/com/shaterguy/chatgptselfrun
 ANDROID_TEST=app/src/androidTest/java/com/shaterguy/chatgptselfrun
 SERVICE=$SRC/SelfRunService.java
 COORD=$SRC/SelfRun3Coordinator.java
 ENGINE=$SRC/SelfRun3Engine.java
+ENGINE_TEST=$UNIT_TEST/SelfRun3EngineTest.java
 LEDGER=$SRC/SelfRun3Ledger.java
 CONTRACT=$SRC/SelfRun3Protocol.java
 DRIVE=$SRC/SelfRun3DriveAdapter.java
@@ -44,7 +46,7 @@ grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
-for file in "$SERVICE" "$COORD" "$ENGINE" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST"; do
+for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST"; do
   test -s "$file"
 done
 
@@ -73,6 +75,11 @@ grep -Fq 'canonicalPostConfirmedElapsed' "$ENGINE"
 grep -Fq 'resultSeedFingerprint' "$ENGINE"
 grep -Fq 'resultBodyMutationObserved' "$ENGINE"
 grep -Fq 's.flag("superseded") && e.kind!=Kind.RESOURCE' "$ENGINE"
+! grep -Fq 'invalid phase transition' "$ENGINE"
+grep -Fq 'canonicalContinueNextPhaseCanBypassLegacyTransitionTable' "$ENGINE_TEST"
+grep -Fq 'unknownNextPhaseIsStillRejected' "$ENGINE_TEST"
+grep -Fq 'nonterminalResultCannotAdvanceDone' "$ENGINE_TEST"
+grep -Fq 'doneResultStillRequiresVerifyPhase' "$ENGINE_TEST"
 
 grep -Fq 'STALE_AFTER_MS = 7_200_000L' "$WATCHDOG"
 grep -Fq 'state.stage() != SelfRun3Engine.Stage.WAITING' "$WATCHDOG"
