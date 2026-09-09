@@ -34,8 +34,35 @@ public final class SelfRun3ProjectDirectoryWiringTest {
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(web.contains("SelfRun3ProjectDirectoryNavigation.isWrongProjectRoute(target, actual)"));
         assertTrue(web.contains("projectCandidateIndex++;"));
-        assertTrue(web.contains("loadProjectDirectory();"));
+        assertTrue(web.contains("loadProjectDirectory(\"wrong-project-candidate\")"));
         assertTrue(web.contains("SelfRun3ProjectDirectoryNavigation.build(projectDisplayName, projectCandidateIndex)"));
+    }
+
+    @Test public void projectDirectoryWaitsForHydrationAndDoesNotReclickSameDocumentForever() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("SelfRun3ProjectDirectoryRecoveryPolicy.HYDRATION_SETTLE_MS"));
+        assertTrue(web.contains("SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecoverAfterClick(projectClickAttempts)"));
+        assertTrue(web.contains("recoverProjectDirectory(\"click-no-transition\")"));
+        assertTrue(web.contains("SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecoverAfterRetry(projectProbeRetries)"));
+        assertTrue(web.contains("recoverProjectDirectory(\"directory-hydration-stalled\")"));
+    }
+
+    @Test public void repeatedRecoveryRecreatesHostAndPreparationRestartNeverReusesStalledHost() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecreateHost(projectDirectoryRecoveries)"));
+        assertTrue(web.contains("disposeHost();\n            ensureWeb();"));
+        assertTrue(web.contains("status=preparation-restart;strategy=recreate-webview"));
+        assertTrue(web.contains("loadProjectDirectory(\"preparation-restart\")"));
+    }
+
+    @Test public void recurringProjectFailureWritesActionableDebugEvents() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("PROJECT_DIRECTORY_RESULT"));
+        assertTrue(web.contains("PROJECT_DIRECTORY_RECOVERY"));
+        assertTrue(web.contains("PROJECT_DIRECTORY_LOAD"));
+        assertTrue(web.contains("PROJECT_ROUTE_READY"));
+        assertTrue(web.contains("rows="));
+        assertTrue(web.contains("matches="));
     }
 
     private static String source(String name) throws Exception {
