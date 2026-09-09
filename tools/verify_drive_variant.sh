@@ -12,6 +12,7 @@ ENGINE=$SRC/SelfRun3Engine.java
 LEDGER=$SRC/SelfRun3Ledger.java
 CONTRACT=$SRC/SelfRun3Protocol.java
 DRIVE=$SRC/SelfRun3DriveAdapter.java
+WATCHDOG=$SRC/SelfRun3ResultWatchdog.java
 LOOKUP=$SRC/SelfRun3DriveLookup.java
 WEB=$SRC/SelfRun3WebAdapter.java
 DISPATCH=$SRC/SelfRun3DispatchScript.java
@@ -36,14 +37,14 @@ VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$
 VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUILD" | head -1)"
 [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
 [[ "$VERSION_CODE" -gt 2020048 ]]
-[[ "$VERSION_NAME" =~ ^3\.1\.0(-(dev|rc)[0-9]+)?$ ]]
+[[ "$VERSION_NAME" =~ ^3\.1\.[0-9]+(-(dev|rc)[0-9]+)?$ ]]
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
 grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
-for file in "$SERVICE" "$COORD" "$ENGINE" "$LEDGER" "$CONTRACT" "$DRIVE" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST"; do
+for file in "$SERVICE" "$COORD" "$ENGINE" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST"; do
   test -s "$file"
 done
 
@@ -66,6 +67,18 @@ grep -Fq 'activeCount(original)<2' "$ENGINE"
 grep -Fq 'maybeMerge' "$ENGINE"
 grep -Fq 'full handoff missing' "$ENGINE"
 grep -Fq 'case ENDED -> { return original; }' "$ENGINE"
+grep -Fq 'case RESULT_BASELINE' "$ENGINE"
+grep -Fq 'case RESULT_MUTATED' "$ENGINE"
+grep -Fq 'canonicalPostConfirmedElapsed' "$ENGINE"
+grep -Fq 'resultSeedFingerprint' "$ENGINE"
+grep -Fq 'resultBodyMutationObserved' "$ENGINE"
+grep -Fq 's.flag("superseded") && e.kind!=Kind.RESOURCE' "$ENGINE"
+
+grep -Fq 'STALE_AFTER_MS = 7_200_000L' "$WATCHDOG"
+grep -Fq 'state.stage() != SelfRun3Engine.Stage.WAITING' "$WATCHDOG"
+grep -Fq 'canonicalPostBootCount' "$WATCHDOG"
+grep -Fq 'resultBodyMutationObserved' "$WATCHDOG"
+grep -Fq 'MessageDigest.getInstance("SHA-256")' "$WATCHDOG"
 
 grep -Fq 'beginTransaction' "$LEDGER"
 grep -Fq 'PreserveCorruptionHandler' "$LEDGER"
@@ -100,7 +113,9 @@ grep -Fq '사용자 추가 지시 원문' "$CONTRACT"
 grep -Fq 'SelfRun3DriveLookup.findSingleDocumentId' "$DRIVE"
 grep -Fq 'DOCUMENT_CREATE_UNCONFIRMED' "$DRIVE"
 grep -Fq 'REQUIREMENT_READBACK_MISMATCH' "$DRIVE"
-grep -Fq 'String resultVersion(' "$DRIVE"
+grep -Fq 'static final class ResultObservation' "$DRIVE"
+grep -Fq 'ResultObservation observeResult(' "$DRIVE"
+grep -Fq 'SelfRun3ResultWatchdog.fingerprint(existing.text)' "$DRIVE"
 grep -Fq 'acquireResultReadWakeLock();' "$DRIVE"
 grep -Fq 'PowerManager.PARTIAL_WAKE_LOCK' "$DRIVE"
 grep -Fq ':selfrun3-result-read' "$DRIVE"
@@ -135,7 +150,11 @@ grep -Fq 'READY_TO_SUBMIT' "$BOOTSTRAP"
 grep -Fq 'baselineUserCount' "$BOOTSTRAP"
 ! grep -Fq 'scheduleMissedProbe' "$COORD"
 ! grep -Fq 'web.receipt' "$COORD"
-grep -Fq 'drive.resultVersion' "$COORD"
+grep -Fq 'drive.observeResult' "$COORD"
+grep -Fq 'SelfRun3ResultWatchdog.shouldRepair' "$COORD"
+grep -Fq 'STALE_RESULT_WATCHDOG' "$COORD"
+grep -Fq '"source", "canonical_post"' "$COORD"
+grep -Fq 'Settings.Global.BOOT_COUNT' "$COORD"
 grep -Fq 'web.detach();' "$COORD"
 grep -Fq 'SelfRun3RunMarker' "$COORD"
 grep -Fq 'SelfRun3UserInput' "$COORD"
