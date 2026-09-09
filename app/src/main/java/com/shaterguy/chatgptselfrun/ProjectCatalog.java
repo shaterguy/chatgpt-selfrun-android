@@ -81,8 +81,8 @@ final class ProjectCatalog {
 
     void clear() { if (!prefs.edit().clear().commit()) throw new IllegalStateException("catalog clear failed"); }
 
-    String displayName(ProjectUrlPolicy.ProjectRef ref) {
-        if (ref == null) return fallbackDisplayName(null);
+    String recordedDisplayName(ProjectUrlPolicy.ProjectRef ref) {
+        if (ref == null) return "";
         String stored = normalizeDisplayName(prefs.getString(nameKey(ref.projectId), ""));
         if (!stored.isEmpty()) return stored;
         String recovered = legacyDisplayName(prefs.getAll(), ref.projectId);
@@ -90,7 +90,12 @@ final class ProjectCatalog {
             prefs.edit().putString(nameKey(ref.projectId), recovered).commit();
             return recovered;
         }
-        return fallbackDisplayName(ref);
+        return "";
+    }
+
+    String displayName(ProjectUrlPolicy.ProjectRef ref) {
+        String recorded = recordedDisplayName(ref);
+        return recorded.isEmpty() ? fallbackDisplayName(ref) : recorded;
     }
 
     static LinkedHashSet<String> canonicalizeStoredUrls(Set<String> raw) {
