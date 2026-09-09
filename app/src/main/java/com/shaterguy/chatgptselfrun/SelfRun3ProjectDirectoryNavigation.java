@@ -1,5 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
+import java.net.URI;
+
 /** Project entry policy for SelfRun 3: enter through ChatGPT's projects directory and click the real row. */
 final class SelfRun3ProjectDirectoryNavigation {
     static final String DIRECTORY_URL = "https://chatgpt.com/projects";
@@ -12,6 +14,16 @@ final class SelfRun3ProjectDirectoryNavigation {
 
     static String entryUrl(String targetUrl) {
         return isProjectTarget(targetUrl) ? DIRECTORY_URL : targetUrl;
+    }
+
+    static boolean isDirectoryPage(String actualUrl) {
+        if (!ProjectUrlPolicy.isTrustedChatgptPage(actualUrl)) return false;
+        try {
+            String path = new URI(actualUrl).getPath();
+            return "/projects".equals(path) || "/projects/".equals(path);
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     static boolean needsDirectoryStep(String targetUrl, String actualUrl) {
