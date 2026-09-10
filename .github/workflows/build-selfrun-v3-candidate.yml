@@ -54,6 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           tools/verify_drive_variant.sh
+          bash tools/verify_selfrun3_dev4_limits_settings.sh
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:verifyDriveVariantIdentity \
             :app:compileQaAppJavaWithJavac \
@@ -203,6 +204,12 @@ jobs:
           name: selfrun-v3-runtime-evidence-${{ github.run_attempt }}
           path: |
             selfrun-v3-runtime-evidence.txt
+            selfrun-v3-runtime-settings-evidence.txt
+            selfrun-v3-runtime-settings-restart-seed.txt
+            selfrun-v3-runtime-settings-restart-verify.txt
+            selfrun-v3-unbounded-limits-evidence.txt
+            selfrun-v3-work-fix-evidence.txt
+            selfrun-v3-project-directory-evidence.txt
             stable-cert.txt
             selfrun-v3-previous-test-cert.txt
             selfrun-v3-upgrade-seed.txt
@@ -235,6 +242,8 @@ jobs:
           test -n "$VERSION_NAME"
           ARTIFACT_BRANCH="artifacts/selfrun-v3-v${VERSION_NAME}"
           APK="current/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
+          NAMED_FILE="SelfRun-Drive-TEST-${VERSION_NAME}.apk"
+          NAMED_PATH="deliverables/${NAMED_FILE}"
           SUM_FILE='current/SHA256SUMS.txt'
           SOURCE_FILE='current/SOURCE_COMMIT.txt'
           CERT_FILE='current/TARGET_CERT.txt'
@@ -254,12 +263,14 @@ jobs:
           git read-tree --empty
           APK_BLOB="$(git hash-object -w "$APK")"
           git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
+          git update-index --add --cacheinfo 100644,"$APK_BLOB","$NAMED_PATH"
           APK_TREE="$(git write-tree)"
           APK_COMMIT="$(printf '%s\n' "publish: SelfRun 3 ${VERSION_NAME} TEST APK" | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
-          RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/deliverables/current-test.apk"
+          RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/$NAMED_PATH"
           {
             echo "SOURCE_SHA=$GITHUB_SHA"
             echo "ARTIFACT_COMMIT_SHA=$APK_COMMIT"
+            echo "APK_FILE=$NAMED_FILE"
             echo "APK_SHA256=$APK_SHA256"
             echo "APK_URL=$RAW_URL"
           } > direct-apk.txt
@@ -284,16 +295,19 @@ jobs:
           set -euo pipefail
           RAW_URL="$(sed -n 's/^APK_URL=//p' direct-apk.txt)"
           EXPECTED_SHA="$(sed -n 's/^APK_SHA256=//p' direct-apk.txt)"
-          test -n "$RAW_URL"; test -n "$EXPECTED_SHA"
-          curl --fail --location --retry 4 --retry-delay 2 --output delivered-test.apk "$RAW_URL"
-          test -s delivered-test.apk
-          ACTUAL_SHA="$(sha256sum delivered-test.apk | awk '{print $1}')"
+          EXPECTED_FILE="$(sed -n 's/^APK_FILE=//p' direct-apk.txt)"
+          test -n "$RAW_URL"; test -n "$EXPECTED_SHA"; test -n "$EXPECTED_FILE"
+          [[ "$EXPECTED_FILE" == "SelfRun-Drive-TEST-${VERSION_NAME}.apk" ]]
+          curl --fail --location --retry 4 --retry-delay 2 --output "$EXPECTED_FILE" "$RAW_URL"
+          test -s "$EXPECTED_FILE"
+          ACTUAL_SHA="$(sha256sum "$EXPECTED_FILE" | awk '{print $1}')"
           [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
           {
             echo "SOURCE_SHA=$GITHUB_SHA"
+            echo "APK_FILE=$EXPECTED_FILE"
             echo "APK_URL=$RAW_URL"
             echo "APK_SHA256=$ACTUAL_SHA"
-            echo "APK_SIZE_BYTES=$(stat -c%s delivered-test.apk)"
+            echo "APK_SIZE_BYTES=$(stat -c%s "$EXPECTED_FILE")"
             echo "HTTP_DOWNLOAD=PASS"
           } > direct-apk-access.txt
           cat direct-apk-access.txt
