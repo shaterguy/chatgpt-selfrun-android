@@ -133,6 +133,7 @@ public final class SelfRun31WorkFixAndroidTest {
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
 
             RunControlSnapshot after = snapshotRunControls(scenario);
+            assertEquals(before.actionStripOrientation, after.actionStripOrientation);
             assertEquals(before.pauseToConversationGap, after.pauseToConversationGap);
             assertEquals(before.slotToStopGap, after.slotToStopGap);
         }
@@ -218,11 +219,12 @@ public final class SelfRun31WorkFixAndroidTest {
             Button resume = field(activity, "resumeButton", Button.class);
             Button conversation = currentConversationButton(activity);
             Button stop = field(activity, "stopButton", Button.class);
+            LinearLayout actionStrip = (LinearLayout) slot.getParent();
 
             assertSame(slot, pause.getParent());
             assertSame(slot, resume.getParent());
             assertSame(slot, conversation.getParent());
-            assertSame(slot.getParent(), stop.getParent());
+            assertSame(actionStrip, stop.getParent());
             assertNotSame(pause.getParent(), stop.getParent());
             assertEquals(View.VISIBLE, pause.getVisibility());
             assertEquals(View.GONE, resume.getVisibility());
@@ -234,7 +236,9 @@ public final class SelfRun31WorkFixAndroidTest {
             assertTrue(pause.getWidth() > 0);
             assertTrue(conversation.getWidth() > 0);
             assertTrue(slot.getWidth() > 0);
+            assertTrue(slot.getHeight() > 0);
             assertTrue(stop.getWidth() > 0);
+            assertTrue(stop.getHeight() > 0);
 
             int[] pauseLocation = new int[2];
             int[] conversationLocation = new int[2];
@@ -245,10 +249,15 @@ public final class SelfRun31WorkFixAndroidTest {
             slot.getLocationOnScreen(slotLocation);
             stop.getLocationOnScreen(stopLocation);
             int pauseToConversationGap = conversationLocation[0] - (pauseLocation[0] + pause.getWidth());
-            int slotToStopGap = stopLocation[0] - (slotLocation[0] + slot.getWidth());
+            int actionStripOrientation = actionStrip.getOrientation();
+            assertTrue(actionStripOrientation == LinearLayout.HORIZONTAL
+                    || actionStripOrientation == LinearLayout.VERTICAL);
+            int slotToStopGap = actionStripOrientation == LinearLayout.HORIZONTAL
+                    ? stopLocation[0] - (slotLocation[0] + slot.getWidth())
+                    : stopLocation[1] - (slotLocation[1] + slot.getHeight());
             assertTrue(pauseToConversationGap >= Ui.dp(activity, 8));
             assertTrue(slotToStopGap >= Ui.dp(activity, 8));
-            result.set(new RunControlSnapshot(pauseToConversationGap, slotToStopGap));
+            result.set(new RunControlSnapshot(actionStripOrientation, pauseToConversationGap, slotToStopGap));
         });
         assertNotNull(result.get());
         return result.get();
@@ -279,10 +288,12 @@ public final class SelfRun31WorkFixAndroidTest {
     }
 
     private static final class RunControlSnapshot {
+        final int actionStripOrientation;
         final int pauseToConversationGap;
         final int slotToStopGap;
 
-        RunControlSnapshot(int pauseToConversationGap, int slotToStopGap) {
+        RunControlSnapshot(int actionStripOrientation, int pauseToConversationGap, int slotToStopGap) {
+            this.actionStripOrientation = actionStripOrientation;
             this.pauseToConversationGap = pauseToConversationGap;
             this.slotToStopGap = slotToStopGap;
         }
