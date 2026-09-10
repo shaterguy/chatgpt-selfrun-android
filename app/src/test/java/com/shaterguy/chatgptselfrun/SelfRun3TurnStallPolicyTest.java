@@ -10,9 +10,10 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRun3TurnStallPolicyTest {
-    @Test public void exact125MinuteThresholdExposesOneShotRemainingDelay() {
+    @Test public void exact125MinuteDefaultExposesOneShotRemainingDelay() {
         SelfRun3Engine.State state = waiting(1_000L, 50_000L, 7);
         long due = 1_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS;
+        assertEquals(125L, SelfRun3RuntimeSettings.DEFAULT_STALL_ALERT_MINUTES);
         assertEquals(7_500_000L, SelfRun3TurnStallPolicy.ALERT_AFTER_MS);
         assertFalse(state.flag("resultBodyMutationObserved"));
         assertEquals(SelfRun3TurnStallPolicy.ALERT_AFTER_MS,
@@ -25,6 +26,15 @@ public final class SelfRun3TurnStallPolicyTest {
                 50_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS - 1L, 7));
         assertTrue(SelfRun3TurnStallPolicy.shouldAlert(state, due,
                 50_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS, 7));
+    }
+
+    @Test public void customThresholdChangesDeadlineWithoutMovingAnchor() {
+        SelfRun3Engine.State state = waiting(2_000L, 80_000L, 9);
+        long custom = 60_000L;
+        assertEquals(custom, SelfRun3TurnStallPolicy.remainingDelayMs(state, 2_000L, 80_000L, 9, custom));
+        assertFalse(SelfRun3TurnStallPolicy.shouldAlert(state, 61_999L, 139_999L, 9, custom));
+        assertTrue(SelfRun3TurnStallPolicy.shouldAlert(state, 62_000L, 140_000L, 9, custom));
+        assertEquals(2_000L, state.time("canonicalPostConfirmedElapsed"));
     }
 
     @Test public void rebootFallsBackToPersistedWallClockRemainingDelay() {
@@ -64,33 +74,35 @@ public final class SelfRun3TurnStallPolicyTest {
         assertFalse(SelfRun3TurnStallPolicy.shouldAlert(committed, dueElapsed, dueWall, 2));
     }
 
-    @Test public void integrationUsesOneShotEventDrivenReservationAndPreservesResultPolling() throws Exception {
+    @Test public void integrationUsesDynamicOneShotReservationAndPreservesResultPolling() throws Exception {
         String service = source("SelfRunService.java");
         String notifier = source("SelfRun3TurnStallNotifier.java");
         String watchdog = source("SelfRun3ResultWatchdog.java");
-        String power = source("SelfRun3PowerPolicy.java");
         String coordinator = source("SelfRun3Coordinator.java");
-        String store = source("SelfRunStore.java");
+        String settings = source("SelfRun3RuntimeSettings.java");
 
         assertTrue(service.contains("new SelfRun3TurnStallNotifier(this, store)"));
         assertTrue(service.contains("turnStallNotifier.start()"));
         assertTrue(service.contains("turnStallNotifier.close()"));
         assertTrue(notifier.contains("registerOnSharedPreferenceChangeListener"));
+        assertTrue(notifier.contains("settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)"));
         assertTrue(notifier.contains("unregisterOnSharedPreferenceChangeListener"));
         assertTrue(notifier.contains("SelfRun3TurnStallPolicy.remainingDelayMs"));
+        assertTrue(notifier.contains("runtimeSettings.stallAlertMs()"));
         assertTrue(notifier.contains("main.postDelayed(check, candidate.remainingMs)"));
         assertTrue(notifier.contains("generation == expectedGeneration"));
         assertTrue(notifier.contains("main.removeCallbacks(scheduledCheck)"));
         assertTrue(notifier.contains("NotificationHelper.notifyUser(context, \"다음 턴 전환 지연\""));
-        assertTrue(store.contains("private static final String PREFS = \"selfrun_drive\""));
         assertFalse(notifier.contains("CHECK_INTERVAL_MS"));
         assertFalse(notifier.contains("scheduleNext()"));
         assertFalse(notifier.contains("postDelayed(poll"));
         assertFalse(notifier.contains("Kind.REPAIR"));
         assertFalse(notifier.contains("ledger.apply("));
-        assertTrue(watchdog.contains("STALE_AFTER_MS = 7_200_000L"));
-        assertTrue(power.contains("NORMAL_WAIT_POLL_MS = 30_000L"));
+        assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 120L"));
+        assertTrue(settings.contains("DEFAULT_RESULT_POLL_SECONDS = 30L"));
+        assertTrue(watchdog.contains("DEFAULT_RESULT_REPAIR_MINUTES * 60_000L"));
         assertTrue(coordinator.contains("drive.observeResult(token, current)"));
+        assertTrue(coordinator.contains("runtimeSettings.resultPollMs()"));
         assertFalse(coordinator.contains("SelfRun3TurnStall"));
     }
 
