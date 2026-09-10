@@ -9,10 +9,18 @@ import static org.junit.Assert.*;
 
 /** V3 submission liveness: bounded active preparation, passive normal wait, bounded reconciliation. */
 public final class BootstrapSendLivenessPolicyTest {
-    @Test public void browserCallbacksAreBoundedButNormalResponseWaitDoesNotPoll() {
+    @Test public void callbacksStayFixedWhileOperatorTimingsKeepLegacyDefaults() throws Exception {
         assertEquals(5_000L, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
-        assertEquals(90_000L, SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS);
-        assertEquals(30_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+        assertEquals(90L, SelfRun3RuntimeSettings.DEFAULT_WEB_PREPARATION_SECONDS);
+        assertEquals(30L, SelfRun3RuntimeSettings.DEFAULT_RESULT_POLL_SECONDS);
+        String web = source("SelfRun3WebAdapter.java");
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(web.contains("prepareTimeoutMs = runtimeSettings.webPreparationMs()"));
+        assertTrue(web.contains("prepareStarted >= prepareTimeoutMs")
+                || web.contains("prepareStarted >= prepareTimeoutMs"));
+        assertTrue(coordinator.contains("runtimeSettings.resultPollMs()"));
+        assertFalse(coordinator.contains("SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS"));
+        assertFalse(web.contains("SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS"));
     }
 
     @Test public void preparedSendIsClaimedDurablyBeforeTheBrowserClick() throws Exception {
