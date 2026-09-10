@@ -5,9 +5,9 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.1-dev9.apk
-PREVIOUS_TEST_SHA256=e53de2a201d7468ec8c37f7a3fb73380b7d547364c306e7110b009eb5a38bd3c
-PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/32ce17b55f81b0db8d1425468e08bfc877cfcfa5/deliverables/current-test.apk
+PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.2-dev1.apk
+PREVIOUS_TEST_SHA256=d04375e585b94d5e6c7ac174989a6eb3b11704577fe3b2a90d9f94ba43a2ac13
+PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/e0d51ea787bd9af8bd8e25f01a4c4c603f1800a5/deliverables/current-test.apk
 
 mkdir -p previous
 curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
@@ -15,7 +15,7 @@ echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
 BT="$ANDROID_HOME/build-tools/36.0.0"
 "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_TEST" > selfrun-v3-previous-test-cert.txt
 grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-previous-test-cert.txt
-"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.1.1-dev9'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.1.2-dev1'"
 
 adb install -r stable/chatgpt-selfrun-drive-v3.1.1.apk >/dev/null
 adb install -r "$PREVIOUS_TEST" >/dev/null
