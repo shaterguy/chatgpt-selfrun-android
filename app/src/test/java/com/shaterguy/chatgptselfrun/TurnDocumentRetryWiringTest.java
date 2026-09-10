@@ -37,12 +37,13 @@ public final class TurnDocumentRetryWiringTest {
     @Test public void retrySchedulerFreshReadsBeforeWatchdogRepair() throws Exception {
         String coordinator = src("SelfRun3Coordinator.java");
         String pending = between(coordinator, "private void scheduleResultRetry", "private void repairResult");
-        assertTrue(pending.contains("NORMAL_WAIT_POLL_MS"));
+        assertTrue(pending.contains("runtimeSettings.resultPollMs()"));
         assertFalse(pending.contains("repairResult("));
         int current = coordinator.indexOf("SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);");
         int observe = coordinator.indexOf("drive.observeResult(token, current)", current);
         int watchdog = coordinator.indexOf("SelfRun3ResultWatchdog.shouldRepair(current,", observe);
         assertTrue(current >= 0 && observe > current && watchdog > observe);
+        assertTrue(coordinator.contains("runtimeSettings.resultRepairMs()"));
         assertFalse(coordinator.contains("drive.resultVersion(token, state)"));
         assertFalse(coordinator.contains("resultVersions"));
         assertTrue(coordinator.contains("InvalidCommittedResultException"));
