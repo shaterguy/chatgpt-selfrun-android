@@ -280,7 +280,6 @@ public final class SelfRunNewActivity extends Activity {
         for (SelfRunStore.Attachment item : selectedAttachments) existing.add(item.uri);
         for (Uri uri : uris) {
             if (uri == null || !"content".equals(uri.getScheme()) || !existing.add(uri.toString())) continue;
-            if (selectedAttachments.size() >= SelfRunStore.MAX_ATTACHMENTS_PER_RUN) { rejected++; continue; }
             try {
                 int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
                 if (flags == 0) throw new SecurityException("read grant missing");
@@ -290,8 +289,7 @@ public final class SelfRunNewActivity extends Activity {
         }
         renderAttachments();
         if (rejected > 0) {
-            Toast.makeText(this, "일부 파일은 읽기 권한·형식·크기 제한 때문에 제외했습니다. 첨부는 최대 "
-                    + SelfRunStore.MAX_ATTACHMENTS_PER_RUN + "개, 파일당 최대 100 MB입니다.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "일부 파일은 읽기 권한 또는 형식 문제로 제외했습니다.", Toast.LENGTH_LONG).show();
         } else if (accepted > 0) {
             Toast.makeText(this, "첨부파일 " + accepted + "개를 추가했습니다.", Toast.LENGTH_SHORT).show();
         }
@@ -310,7 +308,6 @@ public final class SelfRunNewActivity extends Activity {
             }
         }
         name = sanitizeDisplayName(name, index);
-        if (size > SelfRunStore.MAX_ATTACHMENT_BYTES) throw new IllegalArgumentException("attachment too large");
         String mimeType = DriveApiClient.normalizeAttachmentMimeType(getContentResolver().getType(uri));
         return SelfRunStore.Attachment.draft(index, uri.toString(), name, mimeType, size);
     }
@@ -503,7 +500,7 @@ public final class SelfRunNewActivity extends Activity {
             persistedBefore = persistedReadGrantUris();
             store.prepareAttachmentGrantHandoff(attachmentsNeedingPersistableGrant(persistedBefore));
         } catch (RuntimeException invalid) {
-            Toast.makeText(this, "첨부파일 권한 상태를 확인할 수 없거나 첨부 제한을 초과했습니다.", Toast.LENGTH_LONG).show(); return;
+            Toast.makeText(this, "첨부파일 권한 상태를 확인할 수 없습니다.", Toast.LENGTH_LONG).show(); return;
         }
         if (!persistSelectedAttachmentGrants(persistedBefore)) {
             store.cancelAttachmentGrantHandoff();
