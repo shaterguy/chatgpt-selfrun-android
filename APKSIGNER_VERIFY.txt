@@ -1,0 +1,22 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: O=shaterguy, CN=ChatGPT SelfRun Android Test
+Signer #1 certificate SHA-256 digest: 2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e
+Signer #1 certificate SHA-1 digest: 91f7420d62af199020848cf87e0758ce60c3b009
+Signer #1 certificate MD5 digest: f5955a83c44fd959f5828bdc896b546d
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: 9ca75728284064f2a60d330d20082ab1a9de45561124a7e8c519d8614e640c73
+Signer #1 public key SHA-1 digest: 13c10180112321d5f56fece83622ee6ec465289a
+Signer #1 public key MD5 digest: 277b0d2427bb4e7dc52a14fe72b4ae1a
+11f1e0f516dfa1ac423ff2d31d565bae9f1dd7267bceb77d7b02b1d9e2402fe0  deliverable/chatgpt-selfrun-drive-test-v3.1.0-ai-routing-5c446ba.apk
+certificate_sha256=2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e
+signature_v2=true
+signature_v3=true
+signers=1
