@@ -391,6 +391,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (!validEpoch(expectedEpoch) || !current.taskId().equals(store.runId())) return;
                     nextResultPoll.remove(current.turnId());
                     syncProjection(after);
+                    if (after.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION) {
+                        notifyUserActionRequired();
+                    } else if (after.stage() == SelfRun3Engine.Stage.PAUSED) {
+                        notifyPaused();
+                    }
                     if (after.stage() == SelfRun3Engine.Stage.DONE) {
                         epoch++;
                         main.removeCallbacksAndMessages(null);
@@ -596,6 +601,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     store.setPaused(true);
                     store.setLastError(reason, "SelfRun 3 실행이 상태를 보존한 채 일시정지되었습니다.");
                     if (paused != null) syncProjection(paused);
+                    notifyPaused();
                 });
             } catch (Throwable error) {
                 main.post(() -> hardPause("V3_PAUSE_FAILED", error));
@@ -716,6 +722,17 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         store.setLastError(code, "SelfRun 3 상태를 안전하게 확정하지 못해 자동 전송을 중지했습니다.");
         log.record(store, "V3_HARD_PAUSE", "code=" + code + ";error="
                 + (error == null ? "" : error.getClass().getSimpleName()));
+        notifyPaused();
+    }
+
+    private void notifyUserActionRequired() {
+        NotificationHelper.notifyUser(service, "사용자 조치 필요",
+                "SelfRun 실행을 계속하려면 사용자 조치가 필요합니다.");
+    }
+
+    private void notifyPaused() {
+        NotificationHelper.notifyUser(service, "일시정지",
+                "SelfRun 실행이 상태를 보존한 채 일시정지되었습니다.");
     }
 
     private void acquireWakeLock() {
