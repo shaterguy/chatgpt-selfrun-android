@@ -1,0 +1,174 @@
+from pathlib import Path
+
+
+def replace_once(path, old, new):
+    p = Path(path)
+    s = p.read_text()
+    count = s.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected one match, got {count}: {old[:100]!r}")
+    p.write_text(s.replace(old, new, 1))
+
+
+engine = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java')
+s = engine.read_text()
+
+old = '''                        JSONObject plan=r.optJSONObject("next_execution");
+                        if(plan!=null && "PARALLEL".equals(plan.optString("type")) && !p.optBoolean("lateInput")) {
+                            v=fanout(saved,r,plan);
+                        } else {
+                            JSONObject profile=nextProfile(r,s);
+                            String phase=p.optBoolean("lateInput") ? "PLAN" : r.optString("next_phase",s.text("phase"));
+                            String signal="USER_ACTION_RESOLVED".equals(status) ? "USER_ACTION_RESUME" : p.optBoolean("lateInput") ? "USER_INPUT" : "AUTO_NEXT_TURN";
+                            v=fresh(saved,phase,profile,"NORMAL",signal,s.resource("resultDocumentId"));
+                            put(v,"checkpoint",r.toString()); put(v,"nextInput",r.optString("next_input"));
+                            if(r.has("intervention")) put(v,"intervention",r.optJSONObject("intervention"));
+                            if("PAUSED".equals(status)) put(v,"taskPaused",true);
+                        }'''
+new = '''                        JSONObject plan=r.optJSONObject("next_execution");
+                        if(usableParallelPlan(plan,s) && !p.optBoolean("lateInput")) {
+                            v=fanout(saved,r,plan);
+                        } else {
+                            JSONObject profile=nextProfile(r,s);
+                            String phase=p.optBoolean("lateInput") ? "PLAN" : routingPhase(r,s);
+                            String signal="USER_ACTION_RESOLVED".equals(status) ? "USER_ACTION_RESUME" : p.optBoolean("lateInput") ? "USER_INPUT" : "AUTO_NEXT_TURN";
+                            v=fresh(saved,phase,profile,"NORMAL",signal,s.resource("resultDocumentId"));
+                            put(v,"checkpoint",r.toString()); put(v,"nextInput",routingNextInput(r));
+                            if(r.optJSONObject("intervention")!=null) put(v,"intervention",r.optJSONObject("intervention"));
+                            if("PAUSED".equals(status)) put(v,"taskPaused",true);
+                        }'''
+if s.count(old) != 1:
+    raise SystemExit('engine COMMIT routing block mismatch')
+s = s.replace(old, new, 1)
+
+old = '''        JSONObject v=s.json(); String group=plan.optString("parallel_group_id");
+        for(int i=0;i<2;i++) {
+            JSONObject branch=branches.optJSONObject(i); State base=new State(v);
+            v=fresh(base,result.optString("next_phase"),branch.optJSONObject("profile"),"PARALLEL_BRANCH","PARALLEL_BRANCH",s.resource("resultDocumentId"));
+            put(v,"parallelGroupId",group); put(v,"branchId",branch.optString("branch_id")); put(v,"branchDepth",1);
+            put(v,"branchObjective",branch.optString("objective")); put(v,"mutationBoundary",branch.optJSONArray("mutation_boundary"));
+            put(v,"branchPlan",branches); put(v,"mergeProfile",nextProfile(result,s)); put(v,"mergePhase",result.optString("next_phase"));'''
+new = '''        JSONObject v=s.json(); String group=plan.optString("parallel_group_id"), phase=routingPhase(result,s);
+        for(int i=0;i<2;i++) {
+            JSONObject branch=branches.optJSONObject(i); State base=new State(v);
+            v=fresh(base,phase,branch.optJSONObject("profile"),"PARALLEL_BRANCH","PARALLEL_BRANCH",s.resource("resultDocumentId"));
+            put(v,"parallelGroupId",group); put(v,"branchId",branch.optString("branch_id")); put(v,"branchDepth",1);
+            put(v,"branchObjective",branch.optString("objective")); put(v,"mutationBoundary",branch.optJSONArray("mutation_boundary"));
+            put(v,"branchPlan",branches); put(v,"mergeProfile",nextProfile(result,s)); put(v,"mergePhase",phase);'''
+if s.count(old) != 1:
+    raise SystemExit('engine fanout routing block mismatch')
+s = s.replace(old, new, 1)
+
+old = '''        if(p==null) p=r.optJSONObject("next_profile"); if(p==null) p=r.optJSONObject("profile");
+        return p==null?executionProfile(s):copy(p);'''
+new = '''        if(p==null) p=r.optJSONObject("next_profile"); if(p==null) p=r.optJSONObject("profile");
+        if(p==null || !validRoutingProfile(p,s)) return executionProfile(s);
+        return copy(p);'''
+if s.count(old) != 1:
+    raise SystemExit('engine nextProfile block mismatch')
+s = s.replace(old, new, 1)
+
+start_marker = '        String status=r.optString("status"); boolean branch=isBranch(s);\n'
+end_marker = '    static JSONObject emptyResult(State s) {'
+start = s.find(start_marker)
+end = s.find(end_marker, start)
+if start < 0 or end < 0:
+    raise SystemExit('engine semantic result gate markers not found')
+helpers = '''        return r;
+    }
+    private static String routingPhase(JSONObject r,State s) {
+        String requested=r.optString("next_phase"), current=s.text("phase");
+        if(Set.of("PLAN","WORK","VERIFY").contains(requested)) return requested;
+        return Set.of("PLAN","WORK","VERIFY").contains(current) ? current : "PLAN";
+    }
+    private static String routingNextInput(JSONObject r) {
+        Object value=r.opt("next_input");
+        return value instanceof String ? (String)value : "";
+    }
+    private static boolean validRoutingProfile(JSONObject p,State s) {
+        if(p==null) return false;
+        try { JSONObject check=s.config(); applyProfile(check,p,s.taskMode()); return true; }
+        catch(RuntimeException invalid) { return false; }
+    }
+    private static boolean usableParallelPlan(JSONObject plan,State s) {
+        if(plan==null || !"PARALLEL".equals(plan.optString("type"))) return false;
+        try {
+            String group=plan.optString("parallel_group_id");
+            if(!validId(group)) return false;
+            for(State prior:s.executions()) if(group.equals(prior.text("parallelGroupId"))) return false;
+            JSONArray branches=plan.optJSONArray("branches");
+            if(branches==null || branches.length()!=2) return false;
+            Set<String> ids=new java.util.HashSet<>(), writes=new java.util.HashSet<>();
+            for(int i=0;i<2;i++) {
+                JSONObject b=branches.optJSONObject(i);
+                if(b==null || !validId(b.optString("branch_id")) || !ids.add(b.optString("branch_id"))
+                        || b.optString("objective").trim().isEmpty() || !validRoutingProfile(b.optJSONObject("profile"),s)) return false;
+                JSONArray boundary=b.optJSONArray("mutation_boundary");
+                if(boundary==null) return false;
+                for(int j=0;j<boundary.length();j++) {
+                    Object rawTarget=boundary.opt(j); if(!(rawTarget instanceof String)) return false;
+                    String target=canonicalBoundary((String)rawTarget);
+                    for(String prior:writes) if(target.equals(prior) || target.startsWith(prior+"/") || prior.startsWith(target+"/")) return false;
+                    writes.add(target);
+                }
+            }
+            return true;
+        } catch(RuntimeException invalid) { return false; }
+    }
+'''
+s = s[:start] + helpers + s[end:]
+engine.write_text(s)
+
+replace_once('app/build.gradle', 'def selfRunDriveVersionCode = 3011004', 'def selfRunDriveVersionCode = 3011005')
+replace_once('app/build.gradle', "def selfRunDriveVersionName = '3.1.1-dev4'", "def selfRunDriveVersionName = '3.1.1-dev5'")
+replace_once(
+    'app/build.gradle',
+    "|| !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result contract are required')",
+    "|| !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result identity contract are required')",
+)
+replace_once(
+    'app/build.gradle',
+    "|| !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')\n                || !engine.contains('full handoff missing')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and full checkpoint are required')",
+    "|| !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')\n                || !engine.contains('routingPhase') || !engine.contains('usableParallelPlan')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and resilient result routing are required')\n        if (engine.contains('full handoff missing') || engine.contains('verification required for DONE')\n                || engine.contains('branch identity mismatch')) throw new GradleException('V3 app must not reject committed results for AI checkpoint semantics')",
+)
+
+verify = Path('tools/verify_drive_variant.sh')
+t = verify.read_text()
+old = '''grep -Fq 'maybeMerge' "$ENGINE"
+grep -Fq 'full handoff missing' "$ENGINE"
+grep -Fq 'case ENDED -> { return original; }' "$ENGINE"'''
+new = '''grep -Fq 'maybeMerge' "$ENGINE"
+grep -Fq 'routingPhase' "$ENGINE"
+grep -Fq 'usableParallelPlan' "$ENGINE"
+! grep -Fq 'full handoff missing' "$ENGINE"
+! grep -Fq 'verification required for DONE' "$ENGINE"
+! grep -Fq 'branch identity mismatch' "$ENGINE"
+grep -Fq 'case ENDED -> { return original; }' "$ENGINE"'''
+if t.count(old) != 1:
+    raise SystemExit('verify engine policy block mismatch')
+t = t.replace(old, new, 1)
+old = '''grep -Fq 'canonicalContinueNextPhaseCanBypassLegacyTransitionTable' "$ENGINE_TEST"
+grep -Fq 'unknownNextPhaseIsStillRejected' "$ENGINE_TEST"
+grep -Fq 'nonterminalResultCannotAdvanceDone' "$ENGINE_TEST"
+grep -Fq 'doneResultStillRequiresVerifyPhase' "$ENGINE_TEST"'''
+new = '''grep -Fq 'canonicalContinueNextPhaseCanBypassLegacyTransitionTable' "$ENGINE_TEST"
+grep -Fq 'unknownNextPhaseDoesNotInvalidateCommittedResult' "$ENGINE_TEST"
+grep -Fq 'nonterminalDoneRoutingHintFallsBackInsteadOfRejectingTurn' "$ENGINE_TEST"
+grep -Fq 'doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp' "$ENGINE_TEST"
+grep -Fq 'identityOnlyCommittedResultCreatesRecoveryTurn' "$ENGINE_TEST"'''
+if t.count(old) != 1:
+    raise SystemExit('verify engine test policy block mismatch')
+verify.write_text(t.replace(old, new, 1))
+
+emulator = Path('tools/verify_selfrun3_candidate_emulator.sh')
+e = emulator.read_text()
+for old, new in [
+    ('PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.1-dev1.apk', 'PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.1-dev4.apk'),
+    ('PREVIOUS_TEST_SHA256=82857f61844ddbf250d63831dae5718a840f0eafa614c6b35aa53f0038ea2694', 'PREVIOUS_TEST_SHA256=41ddeef4c893334f39dc93a9ab76cb9f3267d869b1ce54da47aa1eb8d8e749cf'),
+    ('PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/439965c11f89def7824243f7f0483bdf7b251edc/deliverables/current-test.apk', 'PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/21a6168909c4efda361daba9cd0474ba1ad07d36/deliverables/current-test.apk'),
+    ("versionName='3.1.1-dev1'", "versionName='3.1.1-dev4'"),
+]:
+    if e.count(old) != 1:
+        raise SystemExit(f'emulator baseline mismatch: {old}')
+    e = e.replace(old, new, 1)
+emulator.write_text(e)
