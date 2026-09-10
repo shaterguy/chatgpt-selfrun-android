@@ -221,14 +221,9 @@ final class SelfRun3DriveAdapter {
             }
             Uri uri = Uri.parse(a.uri); require("content".equals(uri.getScheme()), "ATTACHMENT_URI_INVALID");
             if (a.size < 0) {
-                long size = 0; byte[] buffer = new byte[64 * 1024];
+                long size;
                 try (InputStream in = context.getContentResolver().openInputStream(uri)) {
-                    require(in != null, "ATTACHMENT_UNAVAILABLE"); int n;
-                    while ((n = in.read(buffer)) != -1) {
-                        checkpoint();
-                        require(size <= Long.MAX_VALUE - n, "ATTACHMENT_SIZE_OVERFLOW");
-                        size += n;
-                    }
+                    size = SelfRun3AttachmentSizeProbe.count(in, permitted);
                 }
                 projection.updateAttachmentSize(a.index, size); a = projection.nextUncommittedAttachment();
             }
