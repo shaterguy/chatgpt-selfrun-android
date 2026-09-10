@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3011004
-def selfRunDriveVersionName = '3.1.1-dev4'
+def selfRunDriveVersionCode = 3011005
+def selfRunDriveVersionName = '3.1.1-dev5'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -156,10 +156,12 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def bootstrap = new File(src, 'SelfRun3BootstrapTransport.java').getText('UTF-8')
         def power = new File(src, 'SelfRun3PowerPolicy.java').getText('UTF-8')
         if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
-                || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result contract are required')
+                || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result identity contract are required')
         if (!engine.contains('case REPAIR') || !engine.contains('repairTargetDocumentId')
                 || !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')
-                || !engine.contains('full handoff missing')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and full checkpoint are required')
+                || !engine.contains('routingPhase') || !engine.contains('usableParallelPlan')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and resilient result routing are required')
+        if (engine.contains('full handoff missing') || engine.contains('verification required for DONE')
+                || engine.contains('branch identity mismatch')) throw new GradleException('V3 app must not reject committed results for AI checkpoint semantics')
         if (!engine.contains('case RESULT_BASELINE') || !engine.contains('case RESULT_MUTATED')
                 || !engine.contains('canonicalPostConfirmedElapsed') || !engine.contains('resultBodyMutationObserved')
                 || !watchdog.contains('STALE_AFTER_MS = 7_200_000L')) throw new GradleException('V3 stale-result evidence ledger is required')

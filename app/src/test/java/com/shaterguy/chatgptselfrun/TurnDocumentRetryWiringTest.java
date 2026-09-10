@@ -10,9 +10,9 @@ import java.nio.file.Paths;
 
 import static org.junit.Assert.*;
 
-/** V3 result recovery is pinned-document reconciliation, with stale-result repair only after guarded fresh observation. */
+/** V3 result recovery is pinned-document reconciliation, not a V2 title-signal retry cycle. */
 public final class TurnDocumentRetryWiringTest {
-    @Test public void exactCommittedInvalidPayloadStillAllowsImmediateRepairClassification() {
+    @Test public void onlyMachineIntegrityFailureOfCurrentCommittedPayloadAllowsRepair() {
         JSONObject config = new JSONObject(); SelfRun3Engine.put(config, "mode", "CHAT");
         SelfRun3Engine.put(config, "reasoning", "medium");
         SelfRun3Engine.State state = SelfRun3Engine.create("task", "task:turn:1", config);
@@ -25,33 +25,29 @@ public final class TurnDocumentRetryWiringTest {
         SelfRun3Engine.put(body, "committed", "true");
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
         SelfRun3Engine.put(body, "committed", true);
+        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "turn", 2);
         assertTrue(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "turn", 1);
         SelfRun3Engine.put(body, "turn_id", "other");
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult("{\"committed\":true", state));
     }
 
-    @Test public void retrySchedulerDoesNotBypassGuardedFreshObservationIntoRepair() throws Exception {
+    @Test public void pendingReadsNeverLaunchRepairByElapsedTime() throws Exception {
         String coordinator = src("SelfRun3Coordinator.java");
         String pending = between(coordinator, "private void scheduleResultRetry", "private void repairResult");
         assertTrue(pending.contains("NORMAL_WAIT_POLL_MS"));
         assertFalse(pending.contains("repairResult("));
-        int version = coordinator.indexOf("String version = drive.resultVersion(token, state);");
-        int gate = coordinator.indexOf("if (version.equals(resultVersions.get(current.turnId())) && !watchdogDue)", version);
-        int observe = coordinator.indexOf("drive.observeResult(token, current)", gate);
-        assertTrue(version >= 0 && gate > version && observe > gate);
-        assertTrue(coordinator.contains("SelfRun3ResultWatchdog.shouldRepair"));
         assertTrue(coordinator.contains("InvalidCommittedResultException"));
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.REPAIR"));
     }
 
-    @Test public void malformedOrPartiallyWrittenResultPreservesRawObservationWithoutCreatingAnotherDocument() throws Exception {
+    @Test public void malformedOrPartiallyWrittenResultIsPendingInsteadOfBlindlyCreatingAnotherDocument() throws Exception {
         String drive = src("SelfRun3DriveAdapter.java");
         assertTrue(drive.contains("SelfRun3DriveLookup.findSingleDocumentId"));
         assertTrue(drive.contains("DOCUMENT_CREATE_UNCONFIRMED"));
-        assertTrue(drive.contains("static final class ResultObservation"));
-        assertTrue(drive.contains("candidate = SelfRun3Engine.emptyResult(s).toString();"));
-        assertTrue(drive.contains("new ResultObservation(metadata.modifiedTime + \":\" + metadata.version, raw, candidate)"));
+        assertTrue(drive.contains("return SelfRun3Engine.emptyResult(s).toString()"));
         assertFalse(drive.contains("SELF_RUN_TURN_DOCUMENT_RETRY"));
         assertFalse(drive.contains("DriveSignalParser"));
     }

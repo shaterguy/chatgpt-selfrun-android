@@ -22,7 +22,7 @@ public final class SelfRun3ArchitectureTest {
         assertTrue(c.contains("releaseWakeLock()"));
         assertTrue(source("HeadlessWebViewHost.java").contains("virtualDisplay.setSurface(null)"));
     }
-    @Test public void promptIsEnvelopeWhileEngineRetainsExecutionContract() throws Exception {
+    @Test public void promptIsEnvelopeWhileEngineOwnsOnlyMachineIntegrityAndSafeRouting() throws Exception {
         String protocol=source("SelfRun3Protocol.java");
         String engine=source("SelfRun3Engine.java");
         assertTrue(protocol.contains("Dynamic SelfRun 3 envelope"));
@@ -31,7 +31,11 @@ public final class SelfRun3ArchitectureTest {
         assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(protocol.contains("ProfileRegistry.export"));
         assertFalse(protocol.contains("full checkpoint"));
-        assertTrue(engine.contains("full handoff missing"));
+        assertFalse(engine.contains("full handoff missing"));
+        assertFalse(engine.contains("verification required for DONE"));
+        assertFalse(engine.contains("branch identity mismatch"));
+        assertTrue(engine.contains("routingPhase"));
+        assertTrue(engine.contains("usableParallelPlan"));
         assertTrue(engine.contains("case REPAIR"));
         assertTrue(engine.contains("maybeMerge"));
         assertTrue(engine.contains("RESULT_SCHEMA"));

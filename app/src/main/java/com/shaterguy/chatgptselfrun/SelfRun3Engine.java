@@ -197,15 +197,15 @@ final class SelfRun3Engine {
                         if("PAUSED".equals(status)) put(v,"taskPaused",true);
                         State saved=persist(v,false);
                         JSONObject plan=r.optJSONObject("next_execution");
-                        if(plan!=null && "PARALLEL".equals(plan.optString("type")) && !p.optBoolean("lateInput")) {
+                        if(usableParallelPlan(plan,s) && !p.optBoolean("lateInput")) {
                             v=fanout(saved,r,plan);
                         } else {
                             JSONObject profile=nextProfile(r,s);
-                            String phase=p.optBoolean("lateInput") ? "PLAN" : r.optString("next_phase",s.text("phase"));
+                            String phase=p.optBoolean("lateInput") ? "PLAN" : routingPhase(r,s);
                             String signal="USER_ACTION_RESOLVED".equals(status) ? "USER_ACTION_RESUME" : p.optBoolean("lateInput") ? "USER_INPUT" : "AUTO_NEXT_TURN";
                             v=fresh(saved,phase,profile,"NORMAL",signal,s.resource("resultDocumentId"));
-                            put(v,"checkpoint",r.toString()); put(v,"nextInput",r.optString("next_input"));
-                            if(r.has("intervention")) put(v,"intervention",r.optJSONObject("intervention"));
+                            put(v,"checkpoint",r.toString()); put(v,"nextInput",routingNextInput(r));
+                            if(r.optJSONObject("intervention")!=null) put(v,"intervention",r.optJSONObject("intervention"));
                             if("PAUSED".equals(status)) put(v,"taskPaused",true);
                         }
                     }
@@ -273,13 +273,13 @@ final class SelfRun3Engine {
     }
     private static JSONObject fanout(State s, JSONObject result, JSONObject plan) {
         JSONArray branches=plan.optJSONArray("branches"); require(branches!=null && branches.length()==2,"exactly two branches required");
-        JSONObject v=s.json(); String group=plan.optString("parallel_group_id");
+        JSONObject v=s.json(); String group=plan.optString("parallel_group_id"), phase=routingPhase(result,s);
         for(int i=0;i<2;i++) {
             JSONObject branch=branches.optJSONObject(i); State base=new State(v);
-            v=fresh(base,result.optString("next_phase"),branch.optJSONObject("profile"),"PARALLEL_BRANCH","PARALLEL_BRANCH",s.resource("resultDocumentId"));
+            v=fresh(base,phase,branch.optJSONObject("profile"),"PARALLEL_BRANCH","PARALLEL_BRANCH",s.resource("resultDocumentId"));
             put(v,"parallelGroupId",group); put(v,"branchId",branch.optString("branch_id")); put(v,"branchDepth",1);
             put(v,"branchObjective",branch.optString("objective")); put(v,"mutationBoundary",branch.optJSONArray("mutation_boundary"));
-            put(v,"branchPlan",branches); put(v,"mergeProfile",nextProfile(result,s)); put(v,"mergePhase",result.optString("next_phase"));
+            put(v,"branchPlan",branches); put(v,"mergeProfile",nextProfile(result,s)); put(v,"mergePhase",phase);
             put(v,"checkpoint",result.toString()); put(v,"branchInputRevision",s.time("inputRevision")); put(v,"branchInputText",""); v=persist(v,false).json();
         }
         return v;
@@ -339,7 +339,8 @@ final class SelfRun3Engine {
     static JSONObject nextProfile(JSONObject r,State s) {
         JSONObject plan=r.optJSONObject("next_execution"), p=plan==null?null:plan.optJSONObject("profile");
         if(p==null) p=r.optJSONObject("next_profile"); if(p==null) p=r.optJSONObject("profile");
-        return p==null?executionProfile(s):copy(p);
+        if(p==null || !validRoutingProfile(p,s)) return executionProfile(s);
+        return copy(p);
     }
     static void applyProfile(JSONObject config,JSONObject p,String policy) {
         require(p!=null,"execution profile required"); String mode=p.optString("mode",config.optString("mode"));
@@ -361,69 +362,46 @@ final class SelfRun3Engine {
         require((ordinal instanceof Integer || ordinal instanceof Long) && ((Number)ordinal).longValue()==s.turn(),"turn ordinal mismatch");
         if(Boolean.FALSE.equals(r.opt("committed"))) return null;
         require(Boolean.TRUE.equals(r.opt("committed")),"boolean commit required");
-        String status=r.optString("status"); boolean branch=isBranch(s);
-        require(Set.of("CONTINUE","DONE","PAUSED","USER_ACTION_REQUIRED","USER_ACTION_RESOLVED","COMPLETE","PARTIAL").contains(status),"unknown result status");
-        JSONObject context=r.optJSONObject("execution_context");
-        if(branch) {
-            require(context!=null && "PARALLEL_BRANCH".equals(context.optString("type"))
-                    && s.text("parallelGroupId").equals(context.optString("parallel_group_id"))
-                    && s.text("branchId").equals(context.optString("branch_id"))
-                    && context.optInt("branch_depth")==1,"branch identity mismatch");
-            require(!r.has("next_execution") && !r.has("next_profile"),"branch cannot schedule work");
-            JSONObject br=r.optJSONObject("branch_result");
-            require(br!=null && Set.of("COMPLETE","PARTIAL","USER_ACTION_REQUIRED","USER_ACTION_RESOLVED").contains(status) && status.equals(br.optString("status")),"matching branch result required");
-        } else {
-            require(!"COMPLETE".equals(status) && !"PARTIAL".equals(status),"branch-only status");
-            String completed=r.optString("phase_completed"), next=r.optString("next_phase");
-            require(Set.of("PLAN","WORK","VERIFY","DONE").contains(next),"unknown next phase");
-            if("DONE".equals(status)) require("VERIFY".equals(s.text("phase")) && "VERIFY_DONE".equals(completed) && "DONE".equals(next),"verification required for DONE");
-            else require(!"DONE".equals(next),"nonterminal result cannot advance DONE");
-        }
-        JSONObject handoff=r.optJSONObject("handoff");
-        require(handoff!=null && !handoff.optString("objective").trim().isEmpty(),"full handoff required");
-        for(String key:new String[]{"completed","remaining","evidence","constraints","next_action"}) require(handoff.has(key),"full handoff missing "+key);
-        if(!s.flag("legacyContract")) for(String key:new String[]{"requirements","decisions","assumptions","materials","external_state","verification_state","do_not_repeat"})
-            require(handoff.has(key),"full handoff missing "+key);
-        if(r.has("next_input")) require(r.opt("next_input") instanceof String && utf8(r.optString("next_input"))<=64*1024,"bounded next input required");
-        if("USER_ACTION_RESOLVED".equals(status)) {
-            require(s.flag("interventionRequested"),"resolution must follow intervention");
-            JSONObject intervention=r.optJSONObject("intervention");
-            require(intervention!=null && Boolean.TRUE.equals(intervention.opt("user_reported_complete"))
-                    && !intervention.optString("resume_action").trim().isEmpty(),"intervention resolution required");
-        }
-        if("USER_ACTION_REQUIRED".equals(status)) require(!r.optString("reason").trim().isEmpty(),"concrete user action required");
-        if("PARALLEL_MERGE".equals(s.text("executionKind"))) {
-            require(context!=null && "PARALLEL_MERGE".equals(context.optString("type"))
-                    && s.text("parallelGroupId").equals(context.optString("parallel_group_id")),"merge identity mismatch");
-            require(equivalent(s.json().optJSONArray("mergedFrom"),r.optJSONArray("merged_from")),"exact merged predecessors required");
-        }
-        if(!branch && !"DONE".equals(status)) {
-            JSONObject profile=nextProfile(r,s); JSONObject check=s.config(); applyProfile(check,profile,s.taskMode());
-            JSONObject plan=r.optJSONObject("next_execution");
-            if(plan!=null) {
-                String type=plan.optString("type"); require(Set.of("SERIAL","PARALLEL").contains(type),"unknown execution type");
-                if("PARALLEL".equals(type)) {
-                    String group=plan.optString("parallel_group_id");
-                    require(validId(group),"parallel group identity");
-                    for(State prior:s.executions()) require(!group.equals(prior.text("parallelGroupId")),"parallel group already used");
-                    JSONArray branches=plan.optJSONArray("branches"); require(branches!=null && branches.length()==2,"exactly two branches required");
-                    Set<String> ids=new java.util.HashSet<>(), writes=new java.util.HashSet<>();
-                    for(int i=0;i<2;i++) {
-                        JSONObject b=branches.optJSONObject(i); require(b!=null && validId(b.optString("branch_id")) && ids.add(b.optString("branch_id")),"unique branch identity");
-                        require(!b.optString("objective").trim().isEmpty(),"branch objective required");
-                        applyProfile(s.config(),b.optJSONObject("profile"),s.taskMode());
-                        JSONArray boundary=b.optJSONArray("mutation_boundary"); require(boundary!=null,"explicit mutation boundary required (empty for read-only)");
-                        for(int j=0;j<boundary.length();j++) {
-                            Object rawTarget=boundary.opt(j); require(rawTarget instanceof String,"string mutation boundary required");
-                            String target=canonicalBoundary((String)rawTarget);
-                            for(String prior:writes) require(!target.equals(prior) && !target.startsWith(prior+"/") && !prior.startsWith(target+"/"),"overlapping mutation boundary");
-                            writes.add(target);
-                        }
-                    }
+        return r;
+    }
+    private static String routingPhase(JSONObject r,State s) {
+        String requested=r.optString("next_phase"), current=s.text("phase");
+        if(Set.of("PLAN","WORK","VERIFY").contains(requested)) return requested;
+        return Set.of("PLAN","WORK","VERIFY").contains(current) ? current : "PLAN";
+    }
+    private static String routingNextInput(JSONObject r) {
+        Object value=r.opt("next_input");
+        return value instanceof String ? (String)value : "";
+    }
+    private static boolean validRoutingProfile(JSONObject p,State s) {
+        if(p==null) return false;
+        try { JSONObject check=s.config(); applyProfile(check,p,s.taskMode()); return true; }
+        catch(RuntimeException invalid) { return false; }
+    }
+    private static boolean usableParallelPlan(JSONObject plan,State s) {
+        if(plan==null || !"PARALLEL".equals(plan.optString("type"))) return false;
+        try {
+            String group=plan.optString("parallel_group_id");
+            if(!validId(group)) return false;
+            for(State prior:s.executions()) if(group.equals(prior.text("parallelGroupId"))) return false;
+            JSONArray branches=plan.optJSONArray("branches");
+            if(branches==null || branches.length()!=2) return false;
+            Set<String> ids=new java.util.HashSet<>(), writes=new java.util.HashSet<>();
+            for(int i=0;i<2;i++) {
+                JSONObject b=branches.optJSONObject(i);
+                if(b==null || !validId(b.optString("branch_id")) || !ids.add(b.optString("branch_id"))
+                        || b.optString("objective").trim().isEmpty() || !validRoutingProfile(b.optJSONObject("profile"),s)) return false;
+                JSONArray boundary=b.optJSONArray("mutation_boundary");
+                if(boundary==null) return false;
+                for(int j=0;j<boundary.length();j++) {
+                    Object rawTarget=boundary.opt(j); if(!(rawTarget instanceof String)) return false;
+                    String target=canonicalBoundary((String)rawTarget);
+                    for(String prior:writes) if(target.equals(prior) || target.startsWith(prior+"/") || prior.startsWith(target+"/")) return false;
+                    writes.add(target);
                 }
             }
-        }
-        return r;
+            return true;
+        } catch(RuntimeException invalid) { return false; }
     }
     static JSONObject emptyResult(State s) {
         JSONObject r=new JSONObject(); put(r,"schema",RESULT_SCHEMA); put(r,"task_id",s.taskId()); put(r,"turn_id",s.turnId());
