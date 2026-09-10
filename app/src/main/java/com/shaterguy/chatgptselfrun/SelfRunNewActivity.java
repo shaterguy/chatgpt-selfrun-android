@@ -7,6 +7,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.InputType;
@@ -33,6 +34,8 @@ public final class SelfRunNewActivity extends Activity {
     private static final String[] MODE_LABELS = {"일반 채팅", "워크", "하이브리드"};
     private static final String[] MODE_VALUES = {SelfRunStore.MODE_CHAT, SelfRunStore.MODE_WORK, SelfRunStore.MODE_HYBRID};
     private static final int REQUEST_ATTACHMENTS = 3017;
+    private static final String DOWNLOADS_DOCUMENTS_AUTHORITY = "com.android.providers.downloads.documents";
+    private static final String DOWNLOADS_DOCUMENT_ID = "downloads";
     private static final String STATE_REQUIREMENT = "requirement";
     private static final String STATE_MODE = "mode";
     private static final String STATE_PROJECT = "project";
@@ -259,6 +262,8 @@ public final class SelfRunNewActivity extends Activity {
         picker.addCategory(Intent.CATEGORY_OPENABLE);
         picker.setType("*/*");
         picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        picker.putExtra(DocumentsContract.EXTRA_INITIAL_URI,
+                DocumentsContract.buildDocumentUri(DOWNLOADS_DOCUMENTS_AUTHORITY, DOWNLOADS_DOCUMENT_ID));
         picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(picker, REQUEST_ATTACHMENTS);
     }
