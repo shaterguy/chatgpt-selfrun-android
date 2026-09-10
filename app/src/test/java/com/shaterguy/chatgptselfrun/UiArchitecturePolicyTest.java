@@ -22,6 +22,18 @@ public final class UiArchitecturePolicyTest {
         assertFalse(main.contains("빠른 실행"));
     }
 
+    @Test public void currentRunControlsUseStablePauseSlotAndCanonicalConversationRoute() throws Exception {
+        String main = src("MainActivity.java");
+        assertTrue(main.contains("runControlSlot.addView(pauseButton"));
+        assertTrue(main.contains("runControlSlot.addView(resumeButton"));
+        assertTrue(main.contains("runControlSlot.addView(currentConversationButton"));
+        assertTrue(main.contains("Ui.actionStrip(this, runControlSlot, stopButton)"));
+        assertTrue(main.contains("currentConversationButton = Ui.outlinedButton(this, \"현재 대화\""));
+        assertTrue(main.contains("SelfRunDetailActivity.canonicalConversationUrl(store.conversationUrl())"));
+        assertTrue(main.contains("new Intent(Intent.ACTION_VIEW, Uri.parse(url))"));
+        assertFalse(main.contains("Ui.actionStrip(this, pauseButton, resumeButton, stopButton)"));
+    }
+
     @Test public void primaryNavigationChangesByWindowWidth() throws Exception {
         String ui = src("Ui.java");
         assertTrue(ui.contains("WIDTH_MEDIUM_DP = 600"));

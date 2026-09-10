@@ -1,7 +1,9 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -34,7 +36,8 @@ public final class MainActivity extends Activity {
     private TextView jobTitle, currentStatus, runMeta, technicalDetails, nextInputStatus;
     private EditText nextInputEditor;
     private Button newRunButton, nextInputSaveButton, nextInputDeleteButton;
-    private Button pauseButton, resumeButton, stopButton, currentLogsButton;
+    private Button pauseButton, resumeButton, stopButton, currentConversationButton, currentLogsButton;
+    private LinearLayout runControlSlot;
     private String lastNextInputRunId = "", lastNextInputStored = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -86,7 +89,20 @@ public final class MainActivity extends Activity {
         technicalDetails.setTextIsSelectable(true);
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
+        currentConversationButton = Ui.outlinedButton(this, "현재 대화", v -> openCurrentConversation());
+        currentConversationButton.setEnabled(false);
         stopButton = Ui.dangerButton(this, "중지", v -> stopSelfRun());
+        runControlSlot = new LinearLayout(this);
+        runControlSlot.setOrientation(LinearLayout.HORIZONTAL);
+        runControlSlot.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        runControlSlot.addView(pauseButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        runControlSlot.addView(resumeButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams conversationButtonParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        conversationButtonParams.setMarginStart(Ui.dp(this, 8));
+        runControlSlot.addView(currentConversationButton, conversationButtonParams);
         currentLogsButton = Ui.textButton(this, "대화 이력·로그", v -> {
             if (!store.runId().isEmpty()) startActivity(new Intent(this, SelfRunDetailActivity.class)
                     .putExtra(SelfRunDetailActivity.EXTRA_RUN_ID, store.runId()));
@@ -94,7 +110,7 @@ public final class MainActivity extends Activity {
         Button detailsButton = Ui.textButton(this, "실행 정보", v -> technicalDetails.setVisibility(
                 technicalDetails.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
         runStage = Ui.card(this, jobTitle, currentStatus, runMeta,
-                Ui.actionStrip(this, pauseButton, resumeButton, stopButton),
+                Ui.actionStrip(this, runControlSlot, stopButton),
                 Ui.divider(this), Ui.actionStrip(this, currentLogsButton, detailsButton), technicalDetails);
         runPage.addView(runStage);
 
@@ -171,12 +187,14 @@ public final class MainActivity extends Activity {
                 + "\nRun 폴더  " + dash(store.runBaseFolderId())
                 + "\n마지막 오류  " + errorSummary());
 
+        String conversationUrl = SelfRunDetailActivity.canonicalConversationUrl(store.conversationUrl());
         pauseButton.setVisibility(running ? View.VISIBLE : View.GONE);
         resumeButton.setVisibility(paused ? View.VISIBLE : View.GONE);
         stopButton.setVisibility(running || paused ? View.VISIBLE : View.GONE);
         pauseButton.setEnabled(running);
         resumeButton.setEnabled(paused);
         stopButton.setEnabled(running || paused);
+        currentConversationButton.setEnabled(!conversationUrl.isEmpty());
         currentLogsButton.setVisibility(View.VISIBLE);
         refreshNextInput(runId);
     }
@@ -264,6 +282,19 @@ public final class MainActivity extends Activity {
         runLog.record(store, "UI_STOP", "user_stop");
         stopService(new Intent(this, SelfRunService.class));
         refreshCurrent();
+    }
+
+    private void openCurrentConversation() {
+        String url = SelfRunDetailActivity.canonicalConversationUrl(store.conversationUrl());
+        if (url.isEmpty()) {
+            currentConversationButton.setEnabled(false);
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException error) {
+            Toast.makeText(this, "대화를 열 수 있는 앱이나 브라우저가 없습니다.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void openNewRun() { startActivity(new Intent(this, SelfRunNewActivity.class)); }
