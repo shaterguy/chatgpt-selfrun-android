@@ -112,6 +112,7 @@ public class AttachmentUploadPolicyTest {
 
         String store = src("SelfRunStore.java");
         String drive = src("SelfRun3DriveAdapter.java");
+        String probe = src("SelfRun3AttachmentSizeProbe.java");
         String activity = src("SelfRunNewActivity.java");
         assertFalse(store.contains("MAX_ATTACHMENTS_PER_RUN"));
         assertFalse(store.contains("MAX_ATTACHMENT_BYTES"));
@@ -119,7 +120,9 @@ public class AttachmentUploadPolicyTest {
         assertFalse(drive.contains("MAX_ATTACHMENT_BYTES"));
         assertFalse(activity.contains("MAX_ATTACHMENTS_PER_RUN"));
         assertFalse(activity.contains("attachment too large"));
-        assertTrue(drive.contains("size <= Long.MAX_VALUE - n"));
+        assertTrue(drive.contains("SelfRun3AttachmentSizeProbe.count(in, permitted)"));
+        assertTrue(probe.contains("size > Long.MAX_VALUE - n"));
+        assertTrue(probe.contains("byte[] buffer = new byte[BUFFER_BYTES]"));
         assertTrue(drive.contains("api.uploadAttachmentResumable"));
         assertTrue(drive.contains("projection.markAttachmentUploading(a.index)"));
     }
