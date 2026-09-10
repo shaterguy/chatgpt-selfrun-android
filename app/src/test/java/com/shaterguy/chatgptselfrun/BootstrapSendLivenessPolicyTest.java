@@ -16,8 +16,7 @@ public final class BootstrapSendLivenessPolicyTest {
         String web = source("SelfRun3WebAdapter.java");
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(web.contains("prepareTimeoutMs = runtimeSettings.webPreparationMs()"));
-        assertTrue(web.contains("prepareStarted >= prepareTimeoutMs")
-                || web.contains("prepareStarted >= prepareTimeoutMs"));
+        assertTrue(web.contains("SystemClock.elapsedRealtime() - prepareStarted >= prepareTimeoutMs"));
         assertTrue(coordinator.contains("runtimeSettings.resultPollMs()"));
         assertFalse(coordinator.contains("SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS"));
         assertFalse(web.contains("SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS"));
