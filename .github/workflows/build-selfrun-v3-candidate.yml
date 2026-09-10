@@ -6,6 +6,8 @@ on:
     branches:
       - 'selfrun-v3/v3.1.*-dev*'
       - 'selfrun-v3/v3.1.*-rc*'
+      - 'v3.1.*-dev*'
+      - 'v3.1.*-rc*'
   workflow_dispatch:
 
 permissions:
