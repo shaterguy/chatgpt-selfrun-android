@@ -49,6 +49,8 @@ EXECUTION_PROFILE={"mode":"...","model":"...","reasoning":"..."}
 
 결과 판정은 파일 제목이나 새 파일 탐색 순서가 아니라 고정된 결과 문서 ID와 strict result identity를 사용합니다. V1 `TURN_COMPLETED`, Drive cursor, title signal document는 V3 실행 계약이 아닙니다.
 
+앱은 Result의 parse 가능한 JSON, 현재 task/turn/result-document/event identity와 boolean `committed`만 완료 무결성 hard gate로 검사합니다. `handoff`, `phase_completed`, 완료 근거와 같은 semantic checkpoint의 형식·충분성은 AI가 canonical 운영문서와 실제 권위 상태를 읽어 판단하며, semantic 필드 누락·별칭·shape drift만으로 committed Result를 거부하거나 Repair를 만들지 않습니다. 다음 실행 routing 힌트가 앱이 안전하게 실행할 수 없는 형태이면 Result 자체를 폐기하지 않고 현재 phase/profile의 SERIAL 경로로 폴백하여 다음 AI가 복구합니다.
+
 ## ChatGPT 실행
 
 CHAT과 WORK 두 모드를 지원합니다. 앱은 사용자 선택 profile을 적용한 후 App-private WebView에서 요청을 제출하고 response protocol을 관측합니다. `TurnProtocolLogBridge`는 V3 WebAdapter가 소유한 WebView 이벤트만 수용하며 V3가 아닌 protocol ownership은 거부합니다.
@@ -77,16 +79,3 @@ Candidate 검증은 `.github/workflows/build-selfrun-v3-candidate.yml`에서 수
 6. V3 runtime instrumentation
 
 개발 TEST application ID는 `com.shaterguy.chatgptselfrun.drive.test`, 정식 application ID는 `com.shaterguy.chatgptselfrun.drive`입니다. TEST와 정식판은 별도 UID로 동시 설치됩니다.
-
-## 릴리스 계보
-
-- 개발: `selfrun-v3/v<version>-devN`
-- RC: `selfrun-v3/v<version>-rcN`
-- 정식 태그: `drive-v<version>`
-- 정식 기준 앱: SelfRun 3
-
-활성 V3 소스에는 V1/V2 호환 실행기를 두지 않습니다. 과거 커밋·이미 발행된 태그·Release는 저장소 이력이며 현재 런타임 계약으로 사용하지 않습니다.
-
-## Google Cloud
-
-Android OAuth는 정식 package와 실제 서명 인증서 조합으로 등록합니다. Drive/Docs 접근은 `drive.file` 범위로 제한하며 client secret이나 OAuth access token을 소스·로그에 저장하지 않습니다.
