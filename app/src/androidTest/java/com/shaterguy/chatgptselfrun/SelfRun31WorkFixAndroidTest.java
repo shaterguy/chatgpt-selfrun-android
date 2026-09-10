@@ -1,14 +1,23 @@
 package com.shaterguy.chatgptselfrun;
 
 import android.Manifest;
+import android.app.Activity;
+import android.app.Instrumentation;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.PatternMatcher;
 import android.service.notification.StatusBarNotification;
+import android.view.View;
+import android.widget.Button;
+import android.widget.LinearLayout;
 
+import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -18,12 +27,18 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public final class SelfRun31WorkFixAndroidTest {
     private static final String REGISTRY_PREFS = "selfrun_drive_profile_registry";
     private static final String STORE_PREFS = "selfrun_drive";
+    private static final String TEST_RUN_ID = "SR-20260910-221032-JVVH29";
+    private static final String CONVERSATION_ID = "11111111-2222-4333-8444-555555555555";
     private Context context;
     private NotificationManager notifications;
 
@@ -106,6 +121,53 @@ public final class SelfRun31WorkFixAndroidTest {
         assertEquals("Orion · balanced", ProfileRegistry.resolveWork("orion", "balanced").displayLabel());
     }
 
+    @Test public void mainRunControlsKeepStableSpacingAcrossHistoryRoundTrip() {
+        seedRunningProjection("https://chatgpt.com/c/" + CONVERSATION_ID);
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            RunControlSnapshot before = snapshotRunControls(scenario);
+
+            try (ActivityScenario<SelfRunHistoryActivity> ignored = ActivityScenario.launch(SelfRunHistoryActivity.class)) {
+                InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            }
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+
+            RunControlSnapshot after = snapshotRunControls(scenario);
+            assertEquals(before.pauseToConversationGap, after.pauseToConversationGap);
+            assertEquals(before.slotToStopGap, after.slotToStopGap);
+        }
+    }
+
+    @Test public void currentConversationButtonUsesCanonicalActionViewAndDisablesWithoutUrl() {
+        seedRunningProjection("https://www.chatgpt.com/c/" + CONVERSATION_ID + "?temporary=1");
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+            instrumentation.waitForIdleSync();
+            scenario.onActivity(activity -> assertTrue(currentConversationButton(activity).isEnabled()));
+
+            IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
+            filter.addDataScheme("https");
+            filter.addDataAuthority("chatgpt.com", null);
+            filter.addDataPath("/c/" + CONVERSATION_ID, PatternMatcher.PATTERN_LITERAL);
+            Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
+                    filter, new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true);
+            try {
+                scenario.onActivity(activity -> currentConversationButton(activity).performClick());
+                instrumentation.waitForIdleSync();
+                assertEquals(1, monitor.getHits());
+            } finally {
+                instrumentation.removeMonitor(monitor);
+            }
+
+            scenario.onActivity(activity -> {
+                SelfRunStore store = new SelfRunStore(activity);
+                store.setExecutionProjection(SelfRunStore.MODE_CHAT, "", "", "");
+                invokeRefreshCurrent(activity);
+                assertFalse(currentConversationButton(activity).isEnabled());
+            });
+        }
+    }
+
     @Test public void completionAlertUsesExistingImportantChannel() throws Exception {
         NotificationHelper.notifyUser(context, "작업 완료", "SelfRun 작업이 완료되었습니다.");
 
@@ -127,5 +189,102 @@ public final class SelfRun31WorkFixAndroidTest {
         assertEquals(NotificationManager.IMPORTANCE_HIGH, channel.getImportance());
         assertEquals("SelfRun Drive · 작업 완료",
                 completion.getNotification().extras.getCharSequence(Notification.EXTRA_TITLE).toString());
+    }
+
+    private void seedRunningProjection(String conversationUrl) {
+        long now = System.currentTimeMillis();
+        assertTrue(context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE).edit()
+                .putString("runId", TEST_RUN_ID)
+                .putLong("createdAt", now)
+                .putLong("phaseStartedAt", now)
+                .putString("taskMode", SelfRunStore.MODE_CHAT)
+                .putString("mode", SelfRunStore.MODE_CHAT)
+                .putString("requirement", "run controls runtime contract")
+                .putString("conversationUrl", conversationUrl)
+                .putString("phase", SelfRunStore.PHASE_WAIT_TURN_COMPLETION)
+                .putString("status", "실행 중")
+                .putInt("turn", 7)
+                .putBoolean("active", true)
+                .putBoolean("paused", false)
+                .putBoolean("userStopped", false)
+                .commit());
+    }
+
+    private static RunControlSnapshot snapshotRunControls(ActivityScenario<MainActivity> scenario) {
+        AtomicReference<RunControlSnapshot> result = new AtomicReference<>();
+        scenario.onActivity(activity -> {
+            LinearLayout slot = field(activity, "runControlSlot", LinearLayout.class);
+            Button pause = field(activity, "pauseButton", Button.class);
+            Button resume = field(activity, "resumeButton", Button.class);
+            Button conversation = currentConversationButton(activity);
+            Button stop = field(activity, "stopButton", Button.class);
+
+            assertSame(slot, pause.getParent());
+            assertSame(slot, resume.getParent());
+            assertSame(slot, conversation.getParent());
+            assertSame(slot.getParent(), stop.getParent());
+            assertNotSame(pause.getParent(), stop.getParent());
+            assertEquals(View.VISIBLE, pause.getVisibility());
+            assertEquals(View.GONE, resume.getVisibility());
+            assertEquals(View.VISIBLE, conversation.getVisibility());
+            assertEquals(View.VISIBLE, stop.getVisibility());
+            assertTrue(pause.isEnabled());
+            assertTrue(conversation.isEnabled());
+            assertTrue(stop.isEnabled());
+            assertTrue(pause.getWidth() > 0);
+            assertTrue(conversation.getWidth() > 0);
+            assertTrue(slot.getWidth() > 0);
+            assertTrue(stop.getWidth() > 0);
+
+            int[] pauseLocation = new int[2];
+            int[] conversationLocation = new int[2];
+            int[] slotLocation = new int[2];
+            int[] stopLocation = new int[2];
+            pause.getLocationOnScreen(pauseLocation);
+            conversation.getLocationOnScreen(conversationLocation);
+            slot.getLocationOnScreen(slotLocation);
+            stop.getLocationOnScreen(stopLocation);
+            int pauseToConversationGap = conversationLocation[0] - (pauseLocation[0] + pause.getWidth());
+            int slotToStopGap = stopLocation[0] - (slotLocation[0] + slot.getWidth());
+            assertTrue(pauseToConversationGap >= Ui.dp(activity, 8));
+            assertTrue(slotToStopGap >= Ui.dp(activity, 12));
+            result.set(new RunControlSnapshot(pauseToConversationGap, slotToStopGap));
+        });
+        assertNotNull(result.get());
+        return result.get();
+    }
+
+    private static Button currentConversationButton(MainActivity activity) {
+        return field(activity, "currentConversationButton", Button.class);
+    }
+
+    private static void invokeRefreshCurrent(MainActivity activity) {
+        try {
+            Method method = MainActivity.class.getDeclaredMethod("refreshCurrent");
+            method.setAccessible(true);
+            method.invoke(activity);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError(error);
+        }
+    }
+
+    private static <T> T field(MainActivity activity, String name, Class<T> type) {
+        try {
+            Field field = MainActivity.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return type.cast(field.get(activity));
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError(error);
+        }
+    }
+
+    private static final class RunControlSnapshot {
+        final int pauseToConversationGap;
+        final int slotToStopGap;
+
+        RunControlSnapshot(int pauseToConversationGap, int slotToStopGap) {
+            this.pauseToConversationGap = pauseToConversationGap;
+            this.slotToStopGap = slotToStopGap;
+        }
     }
 }
