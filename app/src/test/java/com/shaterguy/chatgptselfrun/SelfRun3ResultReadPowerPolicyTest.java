@@ -6,13 +6,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import static org.junit.Assert.*;
 
-/** Screen-off 3.1 waiting policy: bounded 30-second full Drive result reads. */
+/** Screen-off 3.1 waiting policy: configurable full Drive result reads with the legacy 30-second default. */
 public final class SelfRun3ResultReadPowerPolicyTest {
-    @Test public void normalWaitUsesBoundedFullResultPollInterval() throws Exception {
-        String power = source("SelfRun3PowerPolicy.java");
+    @Test public void normalWaitUsesConfiguredFullResultPollInterval() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(power.contains("NORMAL_WAIT_POLL_MS = 30_000L"));
-        assertTrue(power.contains("WAKE_LOCK_MAX_MS = 90_000L"));
+        assertEquals(30L, SelfRun3RuntimeSettings.DEFAULT_RESULT_POLL_SECONDS);
+        assertEquals(90_000L, SelfRun3PowerPolicy.WAKE_LOCK_MAX_MS);
+        assertTrue(coordinator.contains("long resultPollMs = runtimeSettings.resultPollMs()"));
+        assertTrue(coordinator.contains("SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs()"));
         assertTrue(coordinator.contains("drive.observeResult(token, current)"));
         assertFalse(coordinator.contains("drive.resultVersion(token, state)"));
         assertFalse(coordinator.contains("resultVersions"));
