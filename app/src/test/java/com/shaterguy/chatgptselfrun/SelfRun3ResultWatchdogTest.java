@@ -9,6 +9,8 @@ public final class SelfRun3ResultWatchdogTest {
     @Test public void thresholdIsExactAndCanonicalPostAnchorNeverMoves() {
         SelfRun3Engine.State s = waiting(1_000L, 7);
         long anchor = s.time("canonicalPostConfirmedElapsed");
+        assertEquals(120L, SelfRun3RuntimeSettings.DEFAULT_RESULT_REPAIR_MINUTES);
+        assertEquals(7_200_000L, SelfRun3ResultWatchdog.STALE_AFTER_MS);
         assertEquals(1_000L, anchor);
         assertFalse(SelfRun3ResultWatchdog.shouldRepair(s,
                 anchor + SelfRun3ResultWatchdog.STALE_AFTER_MS - 1L, 7));
@@ -18,6 +20,15 @@ public final class SelfRun3ResultWatchdogTest {
         JSONObject duplicate = startedPayload(s, 99_000L, 100_000L, 7);
         s = event(s, s.turnId(), s.turnId() + ":duplicate-start", SelfRun3Engine.Kind.STARTED, duplicate);
         assertEquals(anchor, s.time("canonicalPostConfirmedElapsed"));
+    }
+
+    @Test public void customRepairThresholdUsesExistingAnchorAndEligibilityEvidence() {
+        SelfRun3Engine.State s = waiting(10_000L, 8);
+        long custom = 60_000L;
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, 69_999L, 8, custom));
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(s, 70_000L, 8, custom));
+        assertEquals(10_000L, s.time("canonicalPostConfirmedElapsed"));
+        assertTrue(s.flag("resultBodyMutationObserved"));
     }
 
     @Test public void mutationLatchSurvivesRestartAndBodyRestoration() {
