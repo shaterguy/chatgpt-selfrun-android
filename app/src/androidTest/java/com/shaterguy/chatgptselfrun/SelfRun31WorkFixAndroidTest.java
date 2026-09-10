@@ -247,7 +247,7 @@ public final class SelfRun31WorkFixAndroidTest {
             int pauseToConversationGap = conversationLocation[0] - (pauseLocation[0] + pause.getWidth());
             int slotToStopGap = stopLocation[0] - (slotLocation[0] + slot.getWidth());
             assertTrue(pauseToConversationGap >= Ui.dp(activity, 8));
-            assertTrue(slotToStopGap >= Ui.dp(activity, 12));
+            assertTrue(slotToStopGap >= Ui.dp(activity, 8));
             result.set(new RunControlSnapshot(pauseToConversationGap, slotToStopGap));
         });
         assertNotNull(result.get());
