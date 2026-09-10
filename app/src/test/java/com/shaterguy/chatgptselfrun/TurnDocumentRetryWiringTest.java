@@ -31,12 +31,15 @@ public final class TurnDocumentRetryWiringTest {
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult("{\"committed\":true", state));
     }
 
-    @Test public void retrySchedulerDoesNotBypassFreshObservationIntoRepair() throws Exception {
+    @Test public void retrySchedulerDoesNotBypassGuardedFreshObservationIntoRepair() throws Exception {
         String coordinator = src("SelfRun3Coordinator.java");
         String pending = between(coordinator, "private void scheduleResultRetry", "private void repairResult");
         assertTrue(pending.contains("NORMAL_WAIT_POLL_MS"));
         assertFalse(pending.contains("repairResult("));
-        assertTrue(coordinator.contains("drive.observeResult(token, state)"));
+        int version = coordinator.indexOf("String version = drive.resultVersion(token, state);");
+        int gate = coordinator.indexOf("if (version.equals(resultVersions.get(current.turnId())) && !watchdogDue)", version);
+        int observe = coordinator.indexOf("drive.observeResult(token, current)", gate);
+        assertTrue(version >= 0 && gate > version && observe > gate);
         assertTrue(coordinator.contains("SelfRun3ResultWatchdog.shouldRepair"));
         assertTrue(coordinator.contains("InvalidCommittedResultException"));
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.REPAIR"));

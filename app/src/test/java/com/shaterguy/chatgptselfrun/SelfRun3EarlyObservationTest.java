@@ -21,13 +21,15 @@ public final class SelfRun3EarlyObservationTest {
         assertFalse(web.contains("message_stream_complete"));
     }
 
-    @Test public void coordinatorFreshReadsDriveNotBrowserCompletion() throws Exception {
+    @Test public void coordinatorMetadataGatesFreshDriveReadNotBrowserCompletion() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(coordinator.contains("drive.observeResult(token, state)"));
+        int version = coordinator.indexOf("String version = drive.resultVersion(token, state);");
+        int gate = coordinator.indexOf("if (version.equals(resultVersions.get(current.turnId())) && !watchdogDue)", version);
+        int observe = coordinator.indexOf("drive.observeResult(token, current)", gate);
+        assertTrue(version >= 0 && gate > version && observe > gate);
         assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
         assertTrue(coordinator.contains("web.detach()"));
         assertTrue(coordinator.contains("releaseWakeLock()"));
-        assertFalse(coordinator.contains("if (version.equals(resultVersions.get(state.turnId())))"));
         assertFalse(coordinator.contains("scheduleMissedProbe"));
         assertFalse(coordinator.contains("web.receipt"));
     }
