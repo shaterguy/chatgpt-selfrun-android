@@ -6,7 +6,7 @@ import java.security.NoSuchAlgorithmException;
 
 /** Pure eligibility and body-identity policy for stale Drive result recovery. */
 final class SelfRun3ResultWatchdog {
-    static final long STALE_AFTER_MS = 7_200_000L;
+    static final long STALE_AFTER_MS = SelfRun3RuntimeSettings.DEFAULT_RESULT_REPAIR_MINUTES * 60_000L;
 
     static String normalizeDriveBody(String raw) {
         if (raw == null) return "";
@@ -28,7 +28,12 @@ final class SelfRun3ResultWatchdog {
     }
 
     static boolean shouldRepair(SelfRun3Engine.State state, long nowElapsed, int currentBootCount) {
-        if (state == null || state.stage() != SelfRun3Engine.Stage.WAITING
+        return shouldRepair(state, nowElapsed, currentBootCount, STALE_AFTER_MS);
+    }
+
+    static boolean shouldRepair(SelfRun3Engine.State state, long nowElapsed, int currentBootCount,
+                                long staleAfterMs) {
+        if (staleAfterMs <= 0L || state == null || state.stage() != SelfRun3Engine.Stage.WAITING
                 || !"WAITING".equals(state.text("stage"))) return false;
         if (!state.flag("sendClaimed") || state.flag("committed") || state.hasResult()
                 || state.flag("superseded") || state.number("repairAttempt") != 0) return false;
@@ -42,7 +47,7 @@ final class SelfRun3ResultWatchdog {
         int submittedBootCount = state.number("canonicalPostBootCount");
         if (submittedElapsed < 0L || currentBootCount < 0 || submittedBootCount != currentBootCount
                 || nowElapsed < submittedElapsed) return false;
-        return nowElapsed - submittedElapsed >= STALE_AFTER_MS;
+        return nowElapsed - submittedElapsed >= staleAfterMs;
     }
 
     private SelfRun3ResultWatchdog() { }
