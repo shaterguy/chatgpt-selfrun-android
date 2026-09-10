@@ -1,0 +1,123 @@
+name: Build AI Result Routing APK
+
+on:
+  push:
+    branches:
+      - build/selfrun3-ai-result-routing-apk
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: selfrun3-ai-result-routing-apk
+  cancel-in-progress: true
+
+jobs:
+  build-test-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Static policy, compile and JVM regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/verify_drive_variant.sh
+          gradle --build-cache --no-daemon --console=plain --stacktrace \
+            :app:verifyDriveVariantIdentity \
+            :app:compileQaAppJavaWithJavac \
+            :app:compileQaAppUnitTestJavaWithJavac \
+            :app:compileQaAppAndroidTestJavaWithJavac \
+            :app:testQaAppUnitTest \
+            :app:assembleQaApp
+      - name: Align TEST APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          RAW="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -s "$RAW"
+          mkdir -p deliverable
+          "$BT/zipalign" -p -f 4 "$RAW" deliverable/test-aligned.apk
+      - name: Install signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Sign, verify and checksum TEST APK
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          PASS_FILE="$RUNNER_TEMP/selfrun-test-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          APK=deliverable/chatgpt-selfrun-drive-test-v3.1.0-ai-routing-5c446ba.apk
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh deliverable/test-aligned.apk "$PASS_FILE" "$APK" > deliverable/APKSIGNER_VERIFY.txt
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > deliverable/CERT.txt
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' deliverable/CERT.txt
+          BADGING="$($BT/aapt dump badging "$APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$BADGING"
+          grep -Fq "versionCode='3011000'" <<<"$BADGING"
+          grep -Fq "versionName='3.1.0'" <<<"$BADGING"
+          sha256sum "$APK" > deliverable/SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_SHA" > deliverable/BUILD_COMMIT.txt
+          printf '%s\n' '5c446ba8c8d4ff0a33df67508041e87a467201af' > deliverable/PRODUCT_SOURCE_COMMIT.txt
+      - name: Upload build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun3-ai-result-routing-apk
+          path: |
+            deliverable/chatgpt-selfrun-drive-test-v3.1.0-ai-routing-5c446ba.apk
+            deliverable/SHA256SUMS.txt
+            deliverable/APKSIGNER_VERIFY.txt
+            deliverable/CERT.txt
+            deliverable/BUILD_COMMIT.txt
+            deliverable/PRODUCT_SOURCE_COMMIT.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Publish direct APK branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_BRANCH='artifacts/selfrun3-ai-result-routing-5c446ba'
+          if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
+            echo "artifact branch already exists: $ARTIFACT_BRANCH" >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_INDEX_FILE="$RUNNER_TEMP/selfrun3-ai-routing.index"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree --empty
+          for file in deliverable/chatgpt-selfrun-drive-test-v3.1.0-ai-routing-5c446ba.apk deliverable/SHA256SUMS.txt deliverable/APKSIGNER_VERIFY.txt deliverable/CERT.txt deliverable/BUILD_COMMIT.txt deliverable/PRODUCT_SOURCE_COMMIT.txt; do
+            blob="$(git hash-object -w "$file")"
+            name="$(basename "$file")"
+            git update-index --add --cacheinfo 100644,"$blob","$name"
+          done
+          tree="$(git write-tree)"
+          commit="$(printf '%s\n' 'artifact: signed SelfRun 3 AI result routing TEST APK' | git commit-tree "$tree")"
+          git push origin "$commit:refs/heads/$ARTIFACT_BRANCH"
