@@ -5,7 +5,7 @@ import android.content.SharedPreferences;
 
 /** Persisted SelfRun 3 operator-tunable timing policy. */
 final class SelfRun3RuntimeSettings {
-    static final String PREFS = "selfrun_drive";
+    static final String PREFS = "selfrun3_runtime_settings";
     static final String KEY_RESULT_REPAIR_MINUTES = "selfrun3ResultRepairMinutes";
     static final String KEY_STALL_ALERT_MINUTES = "selfrun3StallAlertMinutes";
     static final String KEY_RESULT_POLL_SECONDS = "selfrun3ResultPollSeconds";
