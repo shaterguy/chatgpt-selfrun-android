@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3011005
-def selfRunDriveVersionName = '3.1.1-dev5'
+def selfRunDriveVersionCode = 3011006
+def selfRunDriveVersionName = '3.1.1-dev6'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -167,8 +167,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !watchdog.contains('STALE_AFTER_MS = 7_200_000L')) throw new GradleException('V3 stale-result evidence ledger is required')
         if (!ledger.contains('beginTransaction') || !ledger.contains('PreserveCorruptionHandler')) throw new GradleException('V3 transactional ledger and non-destructive corruption handling are required')
         if (coordinator.contains('scheduleMissedProbe') || coordinator.contains('web.receipt')) throw new GradleException('V3 progression must use committed Drive results, not browser completion or receipt')
-        if (!coordinator.contains('drive.observeResult') || !coordinator.contains('SelfRun3ResultWatchdog.shouldRepair')
-                || !coordinator.contains('STALE_RESULT_WATCHDOG') || !drive.contains('ResultObservation')) throw new GradleException('V3 stale-result recovery must fresh-read Drive before repair')
+        if (!coordinator.contains('drive.observeResult(token, current)') || coordinator.contains('drive.resultVersion(token, state)')
+                || coordinator.contains('resultVersions') || !coordinator.contains('SelfRun3ResultWatchdog.shouldRepair')
+                || !coordinator.contains('STALE_RESULT_WATCHDOG') || !drive.contains('ResultObservation')) throw new GradleException('V3 result polling must fresh-read the full Drive result body on every due poll')
         if (!coordinator.contains('clearRecoveredDriveWarning(store)')
                 || !coordinator.contains('service.stopForeground(Service.STOP_FOREGROUND_REMOVE)')
                 || !coordinator.contains('NotificationHelper.notifyUser(service, "작업 완료"')) throw new GradleException('V3 recovered Drive warning cleanup and terminal foreground teardown are required')
@@ -190,7 +191,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || protocol.contains('USER_ACTION_RESOLVED')) throw new GradleException('V3.1 prompt must remain a dynamic compact envelope')
         if (!drive.contains('SelfRun3DriveLookup.findSingleDocumentId') || !drive.contains('REQUIREMENT_READBACK_MISMATCH')
                 || drive.contains('DriveSignalParser')) throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
-        if (!power.contains('NORMAL_WAIT_POLL_MS = 30_000L')) throw new GradleException('V3 Drive metadata observation must use bounded 30-second low-frequency polling')
+        if (!power.contains('NORMAL_WAIT_POLL_MS = 30_000L')) throw new GradleException('V3 Drive result observation must use bounded 30-second polling')
         def host = new File(src, 'HeadlessWebViewHost.java').getText('UTF-8')
         if (!host.contains('virtualDisplay.setSurface(null)') || !host.contains('virtualDisplay.setSurface(surface)')) throw new GradleException('detachable VirtualDisplay Surface support must be preserved')
         def webConfig = new File(src, 'WebViewConfig.java').getText('UTF-8')
