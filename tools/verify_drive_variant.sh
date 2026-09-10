@@ -15,6 +15,10 @@ LEDGER=$SRC/SelfRun3Ledger.java
 CONTRACT=$SRC/SelfRun3Protocol.java
 DRIVE=$SRC/SelfRun3DriveAdapter.java
 WATCHDOG=$SRC/SelfRun3ResultWatchdog.java
+SETTINGS=$SRC/SelfRun3RuntimeSettings.java
+STALL=$SRC/SelfRun3TurnStallPolicy.java
+NOTIFIER=$SRC/SelfRun3TurnStallNotifier.java
+USER_NEXT=$SRC/UserNextInputStore.java
 LOOKUP=$SRC/SelfRun3DriveLookup.java
 WEB=$SRC/SelfRun3WebAdapter.java
 DISPATCH=$SRC/SelfRun3DispatchScript.java
@@ -33,6 +37,9 @@ PROFILE=$SRC/RequestProfileScript.java
 PROFILE_REGISTRY=$SRC/ProfileRegistry.java
 RUNNER=$ANDROID_TEST/SelfRunAndroidTestRunner.java
 FIRST_TEST=$ANDROID_TEST/SelfRun31FirstConversationAndroidTest.java
+UNBOUNDED_TEST=$UNIT_TEST/SelfRun3UnboundedPayloadPolicyTest.java
+SETTINGS_TEST=$UNIT_TEST/SelfRun3RuntimeSettingsTest.java
+SETTINGS_ANDROID_TEST=$ANDROID_TEST/SelfRun3RuntimeSettingsAndroidTest.java
 TEST_SIGN=tools/sign_test.sh
 
 VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$BUILD" | head -1)"
@@ -46,7 +53,7 @@ grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
-for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST"; do
+for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST"; do
   test -s "$file"
 done
 
@@ -86,11 +93,25 @@ grep -Fq 'nonterminalDoneRoutingHintFallsBackInsteadOfRejectingTurn' "$ENGINE_TE
 grep -Fq 'doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp' "$ENGINE_TEST"
 grep -Fq 'identityOnlyCommittedResultCreatesRecoveryTurn' "$ENGINE_TEST"
 
-grep -Fq 'STALE_AFTER_MS = 7_200_000L' "$WATCHDOG"
+grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES * 60_000L' "$WATCHDOG"
 grep -Fq 'state.stage() != SelfRun3Engine.Stage.WAITING' "$WATCHDOG"
 grep -Fq 'canonicalPostBootCount' "$WATCHDOG"
 grep -Fq 'resultBodyMutationObserved' "$WATCHDOG"
 grep -Fq 'MessageDigest.getInstance("SHA-256")' "$WATCHDOG"
+grep -Fq 'PREFS = "selfrun3_runtime_settings"' "$SETTINGS"
+grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES = 120L' "$SETTINGS"
+grep -Fq 'DEFAULT_STALL_ALERT_MINUTES = 125L' "$SETTINGS"
+grep -Fq 'DEFAULT_RESULT_POLL_SECONDS = 30L' "$SETTINGS"
+grep -Fq 'DEFAULT_WEB_PREPARATION_SECONDS = 90L' "$SETTINGS"
+grep -Fq 'value <= Long.MAX_VALUE / multiplier' "$SETTINGS"
+grep -Fq 'runtimeSettings.resultRepairMs()' "$COORD"
+grep -Fq 'runtimeSettings.resultPollMs()' "$COORD"
+grep -Fq 'runtimeSettings.stallAlertMs()' "$NOTIFIER"
+grep -Fq 'settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)' "$NOTIFIER"
+grep -Fq 'prepareTimeoutMs = runtimeSettings.webPreparationMs()' "$WEB"
+grep -Fq 'long alertAfterMs' "$STALL"
+! grep -Fq 'NORMAL_WAIT_POLL_MS' "$POWER"
+! grep -Fq 'WEB_PREPARATION_MAX_MS' "$POWER"
 
 grep -Fq 'beginTransaction' "$LEDGER"
 grep -Fq 'PreserveCorruptionHandler' "$LEDGER"
@@ -135,6 +156,22 @@ grep -Fq 'resultReadWakeLock.acquire(SelfRun3PowerPolicy.WAKE_LOCK_MAX_MS)' "$DR
 grep -Fq 'releaseResultReadWakeLock();' "$DRIVE"
 grep -Fq 'InvalidCommittedResultException' "$DRIVE"
 ! grep -Fq 'DriveSignalParser' "$DRIVE"
+! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
+! grep -Fq 'MAX_RESULT_BYTES' "$DRIVE"
+! grep -Fq 'MAX_USER_UTF8_BYTES' "$USER_NEXT"
+! grep -Fq 'MAX_COMBINED_UTF8_BYTES' "$USER_NEXT"
+! grep -Fq 'withinUtf8Limit' "$USER_NEXT"
+! grep -Fq 'MAX_ATTACHMENTS_PER_RUN' "$STORE"
+! grep -Fq 'MAX_ATTACHMENT_BYTES' "$STORE"
+! grep -Fq 'MAX_ATTACHMENT_BYTES' "$DRIVE"
+! grep -Fq 'ATTACHMENT_TOO_LARGE' "$DRIVE"
+! grep -Fq 'MAX_ATTACHMENTS_PER_RUN' "$ACTIVITY"
+grep -Fq 'turnReadyAcceptsPromptBeyondFormerOneMiBGate' "$UNBOUNDED_TEST"
+grep -Fq 'committedResultBeyondFormer512KiBGateKeepsStrictIdentityChecks' "$UNBOUNDED_TEST"
+grep -Fq 'additionalInputMergeExceedsFormer64KiBWithoutTruncation' "$UNBOUNDED_TEST"
+grep -Fq 'DriveAndPickerContainNoFormerAttachmentOrResultCeilings' "$UNBOUNDED_TEST"
+grep -Fq 'positiveIntegerParserRejectsBlankZeroNegativeTextAndOverflow' "$SETTINGS_TEST"
+grep -Fq 'committedSettingsSurviveNewSettingsInstanceAndUseRequestedUnits' "$SETTINGS_ANDROID_TEST"
 grep -Fq 'multiple V3 documents match exact identity' "$LOOKUP"
 grep -Fq 'isAppAuthorized' "$LOOKUP"
 grep -Fq 'MAX_RESPONSE_BYTES = 256 * 1024' "$LOOKUP"
@@ -173,7 +210,6 @@ grep -Fq 'SelfRun3UserInput' "$COORD"
 grep -Fq 'clearRecoveredDriveWarning(store);' "$COORD"
 grep -Fq 'service.stopForeground(Service.STOP_FOREGROUND_REMOVE);' "$COORD"
 grep -Fq 'NotificationHelper.notifyUser(service, "작업 완료"' "$COORD"
-grep -Fq 'NORMAL_WAIT_POLL_MS = 30_000L' "$POWER"
 grep -Fq 'WAKE_LOCK_MAX_MS = 90_000L' "$POWER"
 grep -Fq 'modelLabel + " · " + reasoningLabel' "$PROFILE_REGISTRY"
 ! grep -Fq 'while (true)' "$COORD"
