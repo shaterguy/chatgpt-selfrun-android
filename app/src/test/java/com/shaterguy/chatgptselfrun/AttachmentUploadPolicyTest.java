@@ -100,17 +100,27 @@ public class AttachmentUploadPolicyTest {
         assertTrue(drive.contains("if (existing != null)"));
     }
 
-    @Test public void nativeGoogleMimeIsNormalizedAndLimitsAreFinite() throws Exception {
+    @Test public void nativeGoogleMimeIsNormalizedAndArbitraryAttachmentCapsAreAbsent() throws Exception {
         assertEquals(DriveApiClient.MIME_OCTET_STREAM,
                 DriveApiClient.normalizeAttachmentMimeType("application/vnd.google-apps.document"));
         assertEquals("application/pdf", DriveApiClient.normalizeAttachmentMimeType("application/pdf"));
         assertFalse(DriveApiClient.validAttachmentMimeType("application/vnd.google-apps.spreadsheet"));
-        assertEquals(10, SelfRunStore.MAX_ATTACHMENTS_PER_RUN);
-        assertEquals(100L * 1024L * 1024L, SelfRunStore.MAX_ATTACHMENT_BYTES);
         assertEquals(3, SelfRunStore.MAX_ATTACHMENT_UPLOAD_ATTEMPTS);
+        SelfRunStore.Attachment large = SelfRunStore.Attachment.draft(0, "content://fixture/large",
+                "large.bin", DriveApiClient.MIME_OCTET_STREAM, 101L * 1024L * 1024L);
+        assertEquals(101L * 1024L * 1024L, large.size);
 
+        String store = src("SelfRunStore.java");
         String drive = src("SelfRun3DriveAdapter.java");
-        assertTrue(drive.contains("size <= SelfRunStore.MAX_ATTACHMENT_BYTES"));
+        String activity = src("SelfRunNewActivity.java");
+        assertFalse(store.contains("MAX_ATTACHMENTS_PER_RUN"));
+        assertFalse(store.contains("MAX_ATTACHMENT_BYTES"));
+        assertFalse(drive.contains("ATTACHMENT_TOO_LARGE"));
+        assertFalse(drive.contains("MAX_ATTACHMENT_BYTES"));
+        assertFalse(activity.contains("MAX_ATTACHMENTS_PER_RUN"));
+        assertFalse(activity.contains("attachment too large"));
+        assertTrue(drive.contains("size <= Long.MAX_VALUE - n"));
+        assertTrue(drive.contains("api.uploadAttachmentResumable"));
         assertTrue(drive.contains("projection.markAttachmentUploading(a.index)"));
     }
 
