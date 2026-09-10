@@ -20,6 +20,23 @@ public final class SelfRun3ResultWatchdogTest {
         assertEquals(anchor, s.time("canonicalPostConfirmedElapsed"));
     }
 
+    @Test public void timeoutRepairDoesNotDependOnResultBodyState() {
+        SelfRun3Engine.State s = waiting(5_000L, 12);
+        long due = 5_000L + SelfRun3ResultWatchdog.STALE_AFTER_MS;
+
+        JSONObject untouched = s.json();
+        untouched.remove("resultBodyMutationObserved");
+        untouched.remove("resultBodyMutationFingerprint");
+        untouched.remove("resultBodyMutationObservedAtWall");
+        SelfRun3Engine.State noMutation = new SelfRun3Engine.State(untouched);
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(noMutation, due, 12));
+
+        JSONObject noBodyEvidence = noMutation.json();
+        noBodyEvidence.remove("resultSeedDocumentId");
+        noBodyEvidence.remove("resultSeedFingerprint");
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(new SelfRun3Engine.State(noBodyEvidence), due, 12));
+    }
+
     @Test public void mutationLatchSurvivesRestartAndBodyRestoration() {
         SelfRun3Engine.State s = waiting(10L, 3);
         assertTrue(s.flag("resultBodyMutationObserved"));
@@ -46,9 +63,6 @@ public final class SelfRun3ResultWatchdogTest {
         raw.remove("canonicalPostConfirmedElapsed");
         SelfRun3Engine.State missingAnchor = new SelfRun3Engine.State(raw);
         assertFalse(SelfRun3ResultWatchdog.shouldRepair(missingAnchor, due, 12));
-
-        raw = s.json(); raw.remove("resultBodyMutationObserved");
-        assertFalse(SelfRun3ResultWatchdog.shouldRepair(new SelfRun3Engine.State(raw), due, 12));
     }
 
     @Test public void pauseAndStopBlockRepairEligibility() {

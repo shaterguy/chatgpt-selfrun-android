@@ -32,10 +32,7 @@ final class SelfRun3ResultWatchdog {
                 || !"WAITING".equals(state.text("stage"))) return false;
         if (!state.flag("sendClaimed") || state.flag("committed") || state.hasResult()
                 || state.flag("superseded") || state.number("repairAttempt") != 0) return false;
-        String resultDocumentId = state.resource("resultDocumentId");
-        if (resultDocumentId.isEmpty() || !resultDocumentId.equals(state.text("resultSeedDocumentId"))
-                || state.text("resultSeedFingerprint").isEmpty()
-                || !state.flag("resultBodyMutationObserved")) return false;
+        if (state.resource("resultDocumentId").isEmpty()) return false;
         org.json.JSONObject snapshot = state.json();
         if (!snapshot.has("canonicalPostConfirmedElapsed") || !snapshot.has("canonicalPostBootCount")) return false;
         long submittedElapsed = state.time("canonicalPostConfirmedElapsed");
