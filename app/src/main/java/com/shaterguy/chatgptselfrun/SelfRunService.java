@@ -17,6 +17,7 @@ public final class SelfRunService extends Service {
     private SelfRunStore store;
     private SelfRunRunLog runLog;
     private SelfRun3Coordinator coordinator;
+    private SelfRun3TurnStallNotifier turnStallNotifier;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -24,6 +25,7 @@ public final class SelfRunService extends Service {
         runLog = new SelfRunRunLog(this);
         NotificationHelper.ensureChannel(this);
         coordinator = new SelfRun3Coordinator(this, store, runLog);
+        turnStallNotifier = new SelfRun3TurnStallNotifier(this, store);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -48,6 +50,7 @@ public final class SelfRunService extends Service {
             return START_NOT_STICKY;
         }
         startForegroundCompat();
+        turnStallNotifier.start();
         return coordinator.onStart(action);
     }
 
@@ -61,6 +64,7 @@ public final class SelfRunService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (turnStallNotifier != null) turnStallNotifier.close();
         if (coordinator != null) coordinator.destroy();
         super.onDestroy();
     }
