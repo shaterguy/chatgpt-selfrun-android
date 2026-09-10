@@ -52,8 +52,6 @@ final class SelfRunStore {
     static final String ATTACHMENT_ID_RESERVED = "ID_RESERVED";
     static final String ATTACHMENT_UPLOADING = "UPLOADING";
     static final String ATTACHMENT_COMMITTED = "COMMITTED";
-    static final int MAX_ATTACHMENTS_PER_RUN = 10;
-    static final long MAX_ATTACHMENT_BYTES = 100L * 1024L * 1024L;
     static final int MAX_ATTACHMENT_UPLOAD_ATTEMPTS = 3;
 
     private static final String PREFS = "selfrun_drive";
@@ -421,7 +419,7 @@ final class SelfRunStore {
     }
 
     void updateAttachmentSize(int index, long size) {
-        if (size < 0 || size > MAX_ATTACHMENT_BYTES) throw new IllegalArgumentException("known attachment size required");
+        if (size < 0) throw new IllegalArgumentException("known attachment size required");
         synchronized (RUN_STATE_LOCK) {
             Attachment item = requireAttachment(index);
             if (item.committed()) return;
@@ -486,14 +484,13 @@ final class SelfRunStore {
         Set<Integer> indexes = new HashSet<>();
         Set<String> uris = new HashSet<>();
         if (source == null) return result;
-        if (source.size() > MAX_ATTACHMENTS_PER_RUN) throw new IllegalArgumentException("too many attachments");
         for (Attachment item : source) {
             if (item == null || item.index < 0 || !indexes.add(item.index)) throw new IllegalArgumentException("unique attachment index required");
             Uri parsed = Uri.parse(item.uri);
             if (!"content".equals(parsed.getScheme()) || item.uri.isEmpty() || !uris.add(item.uri)) throw new IllegalArgumentException("unique content attachment URI required");
             if (item.name.isEmpty() || item.name.length() > 180) throw new IllegalArgumentException("safe attachment name required");
             if (!DriveApiClient.validAttachmentMimeType(item.mimeType)) throw new IllegalArgumentException("safe attachment MIME type required");
-            if (item.size < -1 || item.size > MAX_ATTACHMENT_BYTES) throw new IllegalArgumentException("attachment size invalid");
+            if (item.size < -1) throw new IllegalArgumentException("attachment size invalid");
             result.add(Attachment.draft(item.index, item.uri, item.name, item.mimeType, item.size));
         }
         return result;
@@ -519,7 +516,6 @@ final class SelfRunStore {
         if (raw == null || raw.isEmpty()) return result;
         try {
             JSONArray array = new JSONArray(raw);
-            if (array.length() > MAX_ATTACHMENTS_PER_RUN) throw new IllegalStateException("too many attachments");
             Set<Integer> indexes = new HashSet<>();
             for (int i = 0; i < array.length(); i++) {
                 JSONObject json = array.getJSONObject(i);
@@ -528,7 +524,7 @@ final class SelfRunStore {
                         json.optString("driveFileId", ""), json.optString("stage", ATTACHMENT_PENDING),
                         json.optInt("uploadAttempts", 0));
                 if (item.index < 0 || !indexes.add(item.index) || item.name.isEmpty() || item.name.length() > 180
-                        || !DriveApiClient.validAttachmentMimeType(item.mimeType) || item.size < -1 || item.size > MAX_ATTACHMENT_BYTES
+                        || !DriveApiClient.validAttachmentMimeType(item.mimeType) || item.size < -1
                         || item.uploadAttempts < 0 || item.uploadAttempts > MAX_ATTACHMENT_UPLOAD_ATTEMPTS
                         || !validAttachmentStage(item.stage)
                         || (!item.driveFileId.isEmpty() && !DriveApiClient.validFileId(item.driveFileId))) {
