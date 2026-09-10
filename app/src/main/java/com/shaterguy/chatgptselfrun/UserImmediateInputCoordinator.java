@@ -38,8 +38,7 @@ final class UserImmediateInputCoordinator {
             if (callback != null) callback.onResult(new Result(OUTCOME_FAILED, "run unavailable"));
             return;
         }
-        if (value.trim().isEmpty() || !UserNextInputStore.withinUtf8Limit(
-                value, UserNextInputStore.MAX_USER_UTF8_BYTES)) {
+        if (value.trim().isEmpty()) {
             callback.onResult(new Result(OUTCOME_FAILED, "invalid input"));
             return;
         }
