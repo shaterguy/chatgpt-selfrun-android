@@ -240,6 +240,7 @@ jobs:
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           ARTIFACT_BRANCH="artifacts/selfrun-v3-v${VERSION_NAME}"
           APK="current/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
           NAMED_FILE="SelfRun-Drive-TEST-${VERSION_NAME}.apk"
