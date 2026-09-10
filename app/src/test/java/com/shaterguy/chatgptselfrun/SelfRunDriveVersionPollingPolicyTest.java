@@ -3,12 +3,20 @@ package com.shaterguy.chatgptselfrun;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.Assert.*;
 
 /** V3 waits on exact execution results; response completion is irrelevant. */
 public final class SelfRunDriveVersionPollingPolicyTest {
-    @Test public void normalWaitingUsesLowFrequencyMetadataBudget() {
-        assertEquals(30_000L, SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+    @Test public void normalWaitingKeepsThirtySecondDefaultButConsumesRuntimeSetting() throws Exception {
+        assertEquals(30L, SelfRun3RuntimeSettings.DEFAULT_RESULT_POLL_SECONDS);
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(coordinator.contains("long resultPollMs = runtimeSettings.resultPollMs()"));
+        assertTrue(coordinator.contains("SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs()"));
+        assertFalse(coordinator.contains("SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS"));
     }
 
     @Test public void waitingStateIsEligibleForIndependentResultPolling() {
@@ -54,5 +62,11 @@ public final class SelfRunDriveVersionPollingPolicyTest {
         JSONObject p = new JSONObject(); SelfRun3Engine.put(p, "key", key); SelfRun3Engine.put(p, "value", value);
         return SelfRun3Engine.reduce(s, new SelfRun3Engine.Event("resource:" + key,
                 SelfRun3Engine.Kind.RESOURCE, s.taskId(), s.turnId(), p));
+    }
+
+    private static String source(String name) throws Exception {
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
