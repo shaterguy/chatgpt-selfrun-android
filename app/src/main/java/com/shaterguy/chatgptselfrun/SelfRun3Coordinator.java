@@ -38,7 +38,6 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final SelfRun3WebAdapter web;
     private final PowerManager.WakeLock wakeLock;
     private final Map<String, Long> nextResultPoll = new HashMap<>();
-    private final Map<String, String> resultVersions = new HashMap<>();
     private Runnable scheduledNext;
     private String preparingRequest = "";
     private String completedTaskNotification = "";
@@ -267,14 +266,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     after = ledger.apply(event(after, after.turnId() + ":turn-ready",
                             SelfRun3Engine.Kind.TURN_READY, payload));
                 } else {
-                    String version = drive.resultVersion(token, state);
                     SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
-                    boolean watchdogDue = SelfRun3ResultWatchdog.shouldRepair(current,
-                            SystemClock.elapsedRealtime(), currentBootCount());
-                    if (version.equals(resultVersions.get(current.turnId())) && !watchdogDue) {
-                        throw new ResultPendingException();
-                    }
                     SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, current);
                     current = ledger.loadExecution(expectedTask, expectedTurn);
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
@@ -305,10 +298,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         log.record(store, "V3_STALE_RESULT_REPAIR",
                                 "turn=" + current.turn() + ";document=" + current.resource("resultDocumentId"));
                     } else {
-                        resultVersions.put(current.turnId(), observation.version);
                         throw new ResultPendingException();
                     }
-                    resultVersions.put(expectedTurn, observation.version);
                 }
                 SelfRun3Engine.State completed = after;
                 main.post(() -> {
@@ -405,7 +396,6 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         main.removeCallbacksAndMessages(null);
                         preparingRequest = "";
                         nextResultPoll.clear();
-                        resultVersions.clear();
                         web.close();
                         releaseWakeLock();
                         log.record(store, "V3_DONE", "turn=" + after.turn() + ";task=" + after.taskId());
