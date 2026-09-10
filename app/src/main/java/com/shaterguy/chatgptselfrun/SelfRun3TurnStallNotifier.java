@@ -21,16 +21,20 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
     private final SelfRun3Ledger ledger;
     private final SelfRun3RuntimeSettings runtimeSettings;
     private final SharedPreferences projectionPrefs;
+    private final SharedPreferences settingsPrefs;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Runnable rearm = this::rearmNow;
     private final SharedPreferences.OnSharedPreferenceChangeListener projectionListener =
             (prefs, key) -> {
                 if (key == null || "runId".equals(key) || "turn".equals(key) || "phase".equals(key)
-                        || "active".equals(key) || "paused".equals(key) || "userStopped".equals(key)
-                        || SelfRun3RuntimeSettings.KEY_STALL_ALERT_MINUTES.equals(key)) {
+                        || "active".equals(key) || "paused".equals(key) || "userStopped".equals(key)) {
                     requestRearm();
                 }
+            };
+    private final SharedPreferences.OnSharedPreferenceChangeListener settingsListener =
+            (prefs, key) -> {
+                if (key == null || SelfRun3RuntimeSettings.KEY_STALL_ALERT_MINUTES.equals(key)) requestRearm();
             };
 
     private boolean started;
@@ -45,12 +49,14 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
         this.ledger = new SelfRun3Ledger(this.context);
         this.runtimeSettings = new SelfRun3RuntimeSettings(this.context);
         this.projectionPrefs = this.context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE);
+        this.settingsPrefs = this.context.getSharedPreferences(SelfRun3RuntimeSettings.PREFS, Context.MODE_PRIVATE);
     }
 
     void start() {
         if (closed || started) return;
         started = true;
         projectionPrefs.registerOnSharedPreferenceChangeListener(projectionListener);
+        settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener);
         listenerRegistered = true;
         requestRearm();
     }
@@ -171,6 +177,7 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
         }
         if (listenerRegistered) {
             projectionPrefs.unregisterOnSharedPreferenceChangeListener(projectionListener);
+            settingsPrefs.unregisterOnSharedPreferenceChangeListener(settingsListener);
             listenerRegistered = false;
         }
         io.shutdownNow();
