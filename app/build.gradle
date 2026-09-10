@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3012003
-def selfRunDriveVersionName = '3.1.2-dev3'
+def selfRunDriveVersionCode = 3012004
+def selfRunDriveVersionName = '3.1.2-dev4'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -142,7 +142,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
          'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
-         'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java'].each { name ->
+         'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java', 'SelfRun3RuntimeSettings.java',
+         'SelfRun3TurnStallPolicy.java', 'SelfRun3TurnStallNotifier.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
@@ -151,10 +152,16 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')
         def drive = new File(src, 'SelfRun3DriveAdapter.java').getText('UTF-8')
         def watchdog = new File(src, 'SelfRun3ResultWatchdog.java').getText('UTF-8')
+        def settings = new File(src, 'SelfRun3RuntimeSettings.java').getText('UTF-8')
+        def stall = new File(src, 'SelfRun3TurnStallPolicy.java').getText('UTF-8')
+        def notifier = new File(src, 'SelfRun3TurnStallNotifier.java').getText('UTF-8')
         def web = new File(src, 'SelfRun3WebAdapter.java').getText('UTF-8')
         def dispatch = new File(src, 'SelfRun3DispatchScript.java').getText('UTF-8')
         def bootstrap = new File(src, 'SelfRun3BootstrapTransport.java').getText('UTF-8')
         def power = new File(src, 'SelfRun3PowerPolicy.java').getText('UTF-8')
+        def userNext = new File(src, 'UserNextInputStore.java').getText('UTF-8')
+        def store = new File(src, 'SelfRunStore.java').getText('UTF-8')
+        def activity = new File(src, 'SelfRunNewActivity.java').getText('UTF-8')
         if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
                 || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result identity contract are required')
         if (!engine.contains('case REPAIR') || !engine.contains('repairTargetDocumentId')
@@ -164,7 +171,25 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || engine.contains('branch identity mismatch')) throw new GradleException('V3 app must not reject committed results for AI checkpoint semantics')
         if (!engine.contains('case RESULT_BASELINE') || !engine.contains('case RESULT_MUTATED')
                 || !engine.contains('canonicalPostConfirmedElapsed') || !engine.contains('resultBodyMutationObserved')
-                || !watchdog.contains('STALE_AFTER_MS = 7_200_000L')) throw new GradleException('V3 stale-result evidence ledger is required')
+                || !watchdog.contains('DEFAULT_RESULT_REPAIR_MINUTES * 60_000L')) throw new GradleException('V3 stale-result evidence ledger is required')
+        if (!settings.contains('PREFS = "selfrun3_runtime_settings"')
+                || !settings.contains('DEFAULT_RESULT_REPAIR_MINUTES = 120L')
+                || !settings.contains('DEFAULT_STALL_ALERT_MINUTES = 125L')
+                || !settings.contains('DEFAULT_RESULT_POLL_SECONDS = 30L')
+                || !settings.contains('DEFAULT_WEB_PREPARATION_SECONDS = 90L')
+                || !settings.contains('value <= Long.MAX_VALUE / multiplier')) throw new GradleException('V3 configurable timing defaults and overflow-safe persistence are required')
+        if (!coordinator.contains('runtimeSettings.resultRepairMs()')
+                || !coordinator.contains('runtimeSettings.resultPollMs()')
+                || !notifier.contains('runtimeSettings.stallAlertMs()')
+                || !notifier.contains('settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)')
+                || !web.contains('prepareTimeoutMs = runtimeSettings.webPreparationMs()')
+                || !stall.contains('long alertAfterMs')) throw new GradleException('V3 runtime must consume all four operator timing settings')
+        if (power.contains('NORMAL_WAIT_POLL_MS') || power.contains('WEB_PREPARATION_MAX_MS')) throw new GradleException('operator-configurable timings must not remain fixed in power policy')
+        if (engine.contains('MAX_RESULT_BYTES') || drive.contains('MAX_RESULT_BYTES')
+                || userNext.contains('MAX_USER_UTF8_BYTES') || userNext.contains('MAX_COMBINED_UTF8_BYTES')
+                || userNext.contains('withinUtf8Limit') || store.contains('MAX_ATTACHMENTS_PER_RUN')
+                || store.contains('MAX_ATTACHMENT_BYTES') || drive.contains('MAX_ATTACHMENT_BYTES')
+                || drive.contains('ATTACHMENT_TOO_LARGE') || activity.contains('MAX_ATTACHMENTS_PER_RUN')) throw new GradleException('arbitrary SelfRun payload and attachment ceilings must remain removed')
         if (!ledger.contains('beginTransaction') || !ledger.contains('PreserveCorruptionHandler')) throw new GradleException('V3 transactional ledger and non-destructive corruption handling are required')
         if (coordinator.contains('scheduleMissedProbe') || coordinator.contains('web.receipt')) throw new GradleException('V3 progression must use committed Drive results, not browser completion or receipt')
         if (!coordinator.contains('drive.observeResult(token, current)') || coordinator.contains('drive.resultVersion(token, state)')
@@ -196,7 +221,6 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || protocol.contains('USER_ACTION_RESOLVED')) throw new GradleException('V3.1 prompt must remain a dynamic compact envelope')
         if (!drive.contains('SelfRun3DriveLookup.findSingleDocumentId') || !drive.contains('REQUIREMENT_READBACK_MISMATCH')
                 || drive.contains('DriveSignalParser')) throw new GradleException('V3 must use pinned Drive documents with exact original-requirement readback')
-        if (!power.contains('NORMAL_WAIT_POLL_MS = 30_000L')) throw new GradleException('V3 Drive result observation must use bounded 30-second polling')
         def host = new File(src, 'HeadlessWebViewHost.java').getText('UTF-8')
         if (!host.contains('virtualDisplay.setSurface(null)') || !host.contains('virtualDisplay.setSurface(surface)')) throw new GradleException('detachable VirtualDisplay Surface support must be preserved')
         def webConfig = new File(src, 'WebViewConfig.java').getText('UTF-8')
