@@ -13,7 +13,6 @@ import java.util.Set;
 final class SelfRun3Engine {
     static final String STATE_SCHEMA = "selfrun-task-state-v3";
     static final String RESULT_SCHEMA = "selfrun-turn-result-v3";
-    static final int MAX_RESULT_BYTES = 512 * 1024;
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
     enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
@@ -120,7 +119,7 @@ final class SelfRun3Engine {
             }
             case TURN_READY -> {
                 require(stage==Stage.PREPARING && !s.resource("resultDocumentId").isEmpty(),"turn resources required");
-                require(!p.optString("prompt").isEmpty() && utf8(p.optString("prompt"))<=1024*1024,"bounded prompt required");
+                require(!p.optString("prompt").isEmpty(),"prompt required");
                 put(v,"prompt",p.optString("prompt")); put(v,"inputText",p.optString("inputText"));
                 put(v,"inputRevision",p.optLong("inputRevision",-1)); put(v,"stage","READY");
             }
@@ -352,7 +351,7 @@ final class SelfRun3Engine {
 
     static JSONObject parseResult(String raw,State s) {
         if(raw==null || raw.trim().isEmpty()) return null;
-        require(utf8(raw)<=MAX_RESULT_BYTES && raw.indexOf('\0')<0,"result size or NUL");
+        require(raw.indexOf('\0')<0,"result NUL");
         JSONObject r=SelfRun3StrictJson.parseObject(raw.trim());
         require(RESULT_SCHEMA.equals(r.optString("schema")),"result schema mismatch");
         require(s.taskId().equals(r.optString("task_id")) && s.turnId().equals(r.optString("turn_id")),"result identity mismatch");
