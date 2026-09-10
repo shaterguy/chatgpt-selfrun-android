@@ -267,9 +267,17 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     after = ledger.apply(event(after, after.turnId() + ":turn-ready",
                             SelfRun3Engine.Kind.TURN_READY, payload));
                 } else {
-                    SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, state);
+                    String version = drive.resultVersion(token, state);
                     SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);
-                    if (current == null) throw new ResultPendingException();
+                    if (current == null || current.flag("superseded")) throw new ResultPendingException();
+                    boolean watchdogDue = SelfRun3ResultWatchdog.shouldRepair(current,
+                            SystemClock.elapsedRealtime(), currentBootCount());
+                    if (version.equals(resultVersions.get(current.turnId())) && !watchdogDue) {
+                        throw new ResultPendingException();
+                    }
+                    SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, current);
+                    current = ledger.loadExecution(expectedTask, expectedTurn);
+                    if (current == null || current.flag("superseded")) throw new ResultPendingException();
                     String bodyFingerprint = SelfRun3ResultWatchdog.fingerprint(observation.rawBody);
                     if (!current.text("resultSeedFingerprint").isEmpty()
                             && !bodyFingerprint.equals(current.text("resultSeedFingerprint"))

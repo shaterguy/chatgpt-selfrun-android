@@ -6,14 +6,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import static org.junit.Assert.*;
 
-/** Screen-off 3.1 waiting policy: bounded polling fresh-reads Drive under a dedicated wake lock. */
+/** Screen-off 3.1 waiting policy: bounded metadata polling and deadline-safe fresh Drive reads. */
 public final class SelfRun3ResultReadPowerPolicyTest {
     @Test public void normalWaitUsesBoundedDrivePollInterval() throws Exception {
         String power = source("SelfRun3PowerPolicy.java");
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(power.contains("NORMAL_WAIT_POLL_MS = 30_000L"));
         assertTrue(power.contains("WAKE_LOCK_MAX_MS = 90_000L"));
-        assertTrue(coordinator.contains("drive.observeResult(token, state)"));
+        assertTrue(coordinator.contains("drive.resultVersion(token, state)"));
+        assertTrue(coordinator.contains("drive.observeResult(token, current)"));
         assertTrue(coordinator.contains("nextResultPoll"));
     }
 
@@ -58,12 +59,17 @@ public final class SelfRun3ResultReadPowerPolicyTest {
         assertTrue(releaseBlock.contains("resultReadWakeLock.release()"));
     }
 
-    @Test public void fullResultBodyIsFreshReadOnEveryDuePoll() throws Exception {
+    @Test public void fullResultBodyReadIsVersionGatedUntilWatchdogDeadline() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         String drive = source("SelfRun3DriveAdapter.java");
-        assertTrue(coordinator.contains("drive.observeResult(token, state)"));
-        assertTrue(coordinator.contains("SelfRun3Engine.parseResult(observation.candidateBody, current)"));
-        assertFalse(coordinator.contains("if (version.equals(resultVersions.get(state.turnId())))"));
+        int version = coordinator.indexOf("String version = drive.resultVersion(token, state);");
+        int firstLedgerRead = coordinator.indexOf("SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);", version);
+        int watchdog = coordinator.indexOf("boolean watchdogDue = SelfRun3ResultWatchdog.shouldRepair(current,", firstLedgerRead);
+        int cacheGate = coordinator.indexOf("if (version.equals(resultVersions.get(current.turnId())) && !watchdogDue)", watchdog);
+        int freshBody = coordinator.indexOf("drive.observeResult(token, current)", cacheGate);
+        int finalLedgerRead = coordinator.indexOf("current = ledger.loadExecution(expectedTask, expectedTurn);", freshBody);
+        assertTrue(version >= 0 && firstLedgerRead > version && watchdog > firstLedgerRead
+                && cacheGate > watchdog && freshBody > cacheGate && finalLedgerRead > freshBody);
         assertTrue(drive.contains("ResultObservation observeResult("));
         assertTrue(drive.contains("readTurnDocumentSnapshot(token, s.resource(\"resultDocumentId\"))"));
         assertTrue(drive.contains("new ResultObservation(metadata.modifiedTime + \":\" + metadata.version, raw, candidate)"));
