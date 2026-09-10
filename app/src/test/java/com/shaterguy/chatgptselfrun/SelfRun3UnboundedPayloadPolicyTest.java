@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -71,13 +72,36 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
         assertFalse(engine.contains("utf8(p.optString(\"prompt\"))"));
     }
 
+    @Test public void unknownAttachmentSizeProbeStreamsBeyondFormer100MiBCeiling() throws Exception {
+        long expected = 101L * 1024L * 1024L;
+        InputStream synthetic = new InputStream() {
+            long remaining = expected;
+            @Override public int read() {
+                if (remaining <= 0L) return -1;
+                remaining--;
+                return 0;
+            }
+            @Override public int read(byte[] buffer, int offset, int length) {
+                if (remaining <= 0L) return -1;
+                int count = (int)Math.min((long)length, remaining);
+                remaining -= count;
+                return count;
+            }
+        };
+        assertEquals(expected, SelfRun3AttachmentSizeProbe.count(synthetic, () -> true));
+    }
+
     @Test public void DriveAndPickerContainNoFormerAttachmentOrResultCeilings() throws Exception {
         String drive = source("SelfRun3DriveAdapter.java");
+        String probe = source("SelfRun3AttachmentSizeProbe.java");
         String store = source("SelfRunStore.java");
         String activity = source("SelfRunNewActivity.java");
         assertFalse(drive.contains("MAX_RESULT_BYTES"));
         assertFalse(drive.contains("MAX_ATTACHMENT_BYTES"));
         assertFalse(drive.contains("ATTACHMENT_TOO_LARGE"));
+        assertTrue(drive.contains("SelfRun3AttachmentSizeProbe.count(in, permitted)"));
+        assertTrue(probe.contains("byte[] buffer = new byte[BUFFER_BYTES]"));
+        assertTrue(probe.contains("size > Long.MAX_VALUE - n"));
         assertFalse(store.contains("MAX_ATTACHMENTS_PER_RUN"));
         assertFalse(store.contains("MAX_ATTACHMENT_BYTES"));
         assertFalse(activity.contains("MAX_ATTACHMENTS_PER_RUN"));
