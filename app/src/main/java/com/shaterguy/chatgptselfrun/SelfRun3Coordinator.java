@@ -36,6 +36,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final SelfRun3Ledger ledger;
     private final SelfRun3DriveAdapter drive;
     private final SelfRun3WebAdapter web;
+    private final SelfRun3RuntimeSettings runtimeSettings;
     private final PowerManager.WakeLock wakeLock;
     private final Map<String, Long> nextResultPoll = new HashMap<>();
     private Runnable scheduledNext;
@@ -56,6 +57,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         ledger = new SelfRun3Ledger(service);
         drive = new SelfRun3DriveAdapter(service, store, ledger, this::operationPermitted);
         web = new SelfRun3WebAdapter(service, this);
+        runtimeSettings = new SelfRun3RuntimeSettings(service);
         PowerManager power = service.getSystemService(PowerManager.class);
         wakeLock = power == null ? null : power.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, BuildConfig.APPLICATION_ID + ":selfrun3-active");
@@ -163,13 +165,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (!canRun() || state.terminal() || state.stage() == SelfRun3Engine.Stage.PAUSED) return;
         if (driveInFlight || authorizationInFlight) return;
+        long resultPollMs = runtimeSettings.resultPollMs();
         // A single WebView dispatches branches sequentially. Result timers never inspect its UI.
         if (!preparingRequest.isEmpty()) {
-            scheduleNext(SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+            scheduleNext(resultPollMs);
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        long nextDelay = SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS;
+        long nextDelay = resultPollMs;
         for (SelfRun3Engine.State execution : SelfRun3Engine.waitingExecutions(state)) {
             if (execution.resource("resultDocumentId").isEmpty()) continue;
             long due = nextResultPoll.getOrDefault(execution.turnId(), 0L);
@@ -289,7 +292,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         after = ledger.apply(event(current, current.turnId() + ":result:" + observation.version,
                                 SelfRun3Engine.Kind.RESULT, payload));
                     } else if (SelfRun3ResultWatchdog.shouldRepair(current,
-                            SystemClock.elapsedRealtime(), currentBootCount())) {
+                            SystemClock.elapsedRealtime(), currentBootCount(), runtimeSettings.resultRepairMs())) {
                         JSONObject payload = new JSONObject();
                         SelfRun3Engine.put(payload, "safeToRepair", true);
                         SelfRun3Engine.put(payload, "reason", "STALE_RESULT_WATCHDOG");
@@ -312,7 +315,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (step == DriveStep.READ_RESULT) {
                         nextResultPoll.remove(expectedTurn);
                         if (completed.turnId().equals(expectedTurn)) nextResultPoll.put(expectedTurn,
-                                SystemClock.elapsedRealtime() + SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+                                SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
                     }
                     syncProjection(completed);
                     scheduleNext(0L);
@@ -348,8 +351,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void scheduleResultRetry(SelfRun3Engine.State state) {
-        nextResultPoll.put(state.turnId(), SystemClock.elapsedRealtime()
-                + SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS);
+        nextResultPoll.put(state.turnId(), SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
         scheduleNext(0L);
     }
 
