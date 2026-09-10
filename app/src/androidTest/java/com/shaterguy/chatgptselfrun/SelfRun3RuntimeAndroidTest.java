@@ -1,9 +1,17 @@
 package com.shaterguy.chatgptselfrun;
 
+import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationManager;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.SystemClock;
+import android.service.notification.StatusBarNotification;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.json.JSONObject;
 import org.junit.After;
@@ -33,6 +41,8 @@ public final class SelfRun3RuntimeAndroidTest {
         deleteLedgerFiles();
         context.getSharedPreferences("selfrun3_run_marker", Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences("selfrun_drive_user_next_input", Context.MODE_PRIVATE).edit().clear().commit();
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager != null) manager.cancelAll();
     }
 
     @Test public void ledgerPersistsClaimAcrossCloseAndIgnoresDuplicateEvent() {
@@ -92,6 +102,43 @@ public final class SelfRun3RuntimeAndroidTest {
         String databasePath = ledger.getReadableDatabase().getPath();
         ledger.close();
         assertTrue(databasePath.startsWith(context.getNoBackupFilesDir().getAbsolutePath()));
+    }
+
+    @Test public void importantUserAlertPostsWhenNotificationPermissionGranted() {
+        if (Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                    .grantRuntimePermission(context.getPackageName(), Manifest.permission.POST_NOTIFICATIONS);
+        }
+        assertTrue(Build.VERSION.SDK_INT < 33
+                || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED);
+
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        assertNotNull(manager);
+        manager.cancelAll();
+        NotificationHelper.notifyUser(context, "사용자 조치 필요",
+                "SelfRun 실행을 계속하려면 사용자 조치가 필요합니다.");
+        if (Build.VERSION.SDK_INT >= 26) {
+            assertNotNull(manager.getNotificationChannel("selfrun-drive-alerts-v2"));
+            assertEquals(NotificationManager.IMPORTANCE_HIGH,
+                    manager.getNotificationChannel("selfrun-drive-alerts-v2").getImportance());
+        }
+        assertTrue("important SelfRun alert was not posted",
+                awaitNotificationTitle(manager, "SelfRun Drive · 사용자 조치 필요"));
+    }
+
+    private static boolean awaitNotificationTitle(NotificationManager manager, String expected) {
+        long deadline = SystemClock.elapsedRealtime() + 2_000L;
+        do {
+            for (StatusBarNotification item : manager.getActiveNotifications()) {
+                CharSequence title = item.getNotification().extras.getCharSequence(Notification.EXTRA_TITLE);
+                if (title != null && expected.contentEquals(title)) return true;
+            }
+            SystemClock.sleep(50L);
+        } while (SystemClock.elapsedRealtime() < deadline);
+        return false;
     }
 
     private SelfRun3Engine.State initial() {
