@@ -44,6 +44,29 @@ public final class SelfRun3ArchitectureTest {
         String c=source("SelfRun3Coordinator.java");
         assertFalse(c.contains("downloadCode")); assertFalse(c.contains("applyPatch"));
     }
+    @Test public void interventionAndPauseAlertsAreEventDriven() throws Exception {
+        String c=source("SelfRun3Coordinator.java");
+        String commit=section(c,"private void commitTurn","private void scheduleNetworkRetry");
+        String pause=section(c,"private void pause(String reason)","private void resume()");
+        String hardPause=section(c,"private void hardPause","private void notifyUserActionRequired");
+        String helper=source("NotificationHelper.java");
+        assertTrue(helper.contains("ALERT_CHANNEL = \"selfrun-drive-alerts-v2\""));
+        assertTrue(helper.contains("NotificationManager.IMPORTANCE_HIGH"));
+        assertTrue(commit.contains("Stage.WAITING_USER_INTERVENTION"));
+        assertTrue(commit.contains("notifyUserActionRequired();"));
+        assertTrue(commit.contains("Stage.PAUSED"));
+        assertTrue(commit.contains("notifyPaused();"));
+        assertTrue(pause.contains("notifyPaused();"));
+        assertTrue(hardPause.contains("notifyPaused();"));
+        assertTrue(c.contains("NotificationHelper.notifyUser(service, \"사용자 조치 필요\""));
+        assertTrue(c.contains("NotificationHelper.notifyUser(service, \"일시정지\""));
+    }
+    private static String section(String text,String start,String end) {
+        int from=text.indexOf(start), to=text.indexOf(end,from+start.length());
+        assertTrue("missing section start: "+start,from>=0);
+        assertTrue("missing section end: "+end,to>from);
+        return text.substring(from,to);
+    }
     private static String source(String name) throws Exception {
         Path p=Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/"+name);
         if(!Files.exists(p)) p=Path.of("src/main/java/com/shaterguy/chatgptselfrun/"+name);
