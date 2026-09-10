@@ -10,26 +10,36 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRun3TurnStallPolicyTest {
-    @Test public void exact125MinuteThresholdDoesNotDependOnResultMutation() {
+    @Test public void exact125MinuteThresholdExposesOneShotRemainingDelay() {
         SelfRun3Engine.State state = waiting(1_000L, 50_000L, 7);
         long due = 1_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS;
         assertEquals(7_500_000L, SelfRun3TurnStallPolicy.ALERT_AFTER_MS);
         assertFalse(state.flag("resultBodyMutationObserved"));
+        assertEquals(SelfRun3TurnStallPolicy.ALERT_AFTER_MS,
+                SelfRun3TurnStallPolicy.remainingDelayMs(state, 1_000L, 50_000L, 7));
+        assertEquals(1L, SelfRun3TurnStallPolicy.remainingDelayMs(state, due - 1L,
+                50_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS - 1L, 7));
+        assertEquals(0L, SelfRun3TurnStallPolicy.remainingDelayMs(state, due,
+                50_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS, 7));
         assertFalse(SelfRun3TurnStallPolicy.shouldAlert(state, due - 1L,
                 50_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS - 1L, 7));
         assertTrue(SelfRun3TurnStallPolicy.shouldAlert(state, due,
                 50_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS, 7));
     }
 
-    @Test public void rebootFallsBackToPersistedWallClockAnchor() {
+    @Test public void rebootFallsBackToPersistedWallClockRemainingDelay() {
         SelfRun3Engine.State state = waiting(5_000L, 100_000L, 3);
+        assertEquals(1L, SelfRun3TurnStallPolicy.remainingDelayMs(state, 1_000L,
+                100_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS - 1L, 4));
+        assertEquals(0L, SelfRun3TurnStallPolicy.remainingDelayMs(state, 1_000L,
+                100_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS, 4));
         assertFalse(SelfRun3TurnStallPolicy.shouldAlert(state, 1_000L,
                 100_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS - 1L, 4));
         assertTrue(SelfRun3TurnStallPolicy.shouldAlert(state, 1_000L,
                 100_000L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS, 4));
     }
 
-    @Test public void pauseAndSuccessfulNextTurnBlockAlert() {
+    @Test public void pauseAndSuccessfulNextTurnInvalidateReservation() {
         SelfRun3Engine.State state = waiting(10L, 20L, 2);
         long dueElapsed = 10L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS;
         long dueWall = 20L + SelfRun3TurnStallPolicy.ALERT_AFTER_MS;
@@ -37,6 +47,8 @@ public final class SelfRun3TurnStallPolicyTest {
         JSONObject pause = new JSONObject(); put(pause, "reason", "USER_PAUSE");
         SelfRun3Engine.State paused = event(state, state.turnId(), state.taskId() + ":pause",
                 SelfRun3Engine.Kind.PAUSE, pause);
+        assertEquals(SelfRun3TurnStallPolicy.NO_ALERT_DELAY_MS,
+                SelfRun3TurnStallPolicy.remainingDelayMs(paused, dueElapsed, dueWall, 2));
         assertFalse(SelfRun3TurnStallPolicy.shouldAlert(paused, dueElapsed, dueWall, 2));
 
         JSONObject result = SelfRun3Engine.emptyResult(state);
@@ -47,20 +59,33 @@ public final class SelfRun3TurnStallPolicyTest {
         committed = event(committed, committed.turnId(), committed.turnId() + ":commit",
                 SelfRun3Engine.Kind.COMMIT, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.PREPARING, committed.stage());
+        assertEquals(SelfRun3TurnStallPolicy.NO_ALERT_DELAY_MS,
+                SelfRun3TurnStallPolicy.remainingDelayMs(committed, dueElapsed, dueWall, 2));
         assertFalse(SelfRun3TurnStallPolicy.shouldAlert(committed, dueElapsed, dueWall, 2));
     }
 
-    @Test public void integrationIsNotificationOnlyAndPreservesExistingPollingAndRepair() throws Exception {
+    @Test public void integrationUsesOneShotEventDrivenReservationAndPreservesResultPolling() throws Exception {
         String service = source("SelfRunService.java");
         String notifier = source("SelfRun3TurnStallNotifier.java");
         String watchdog = source("SelfRun3ResultWatchdog.java");
         String power = source("SelfRun3PowerPolicy.java");
         String coordinator = source("SelfRun3Coordinator.java");
+        String store = source("SelfRunStore.java");
 
         assertTrue(service.contains("new SelfRun3TurnStallNotifier(this, store)"));
         assertTrue(service.contains("turnStallNotifier.start()"));
         assertTrue(service.contains("turnStallNotifier.close()"));
+        assertTrue(notifier.contains("registerOnSharedPreferenceChangeListener"));
+        assertTrue(notifier.contains("unregisterOnSharedPreferenceChangeListener"));
+        assertTrue(notifier.contains("SelfRun3TurnStallPolicy.remainingDelayMs"));
+        assertTrue(notifier.contains("main.postDelayed(check, candidate.remainingMs)"));
+        assertTrue(notifier.contains("generation == expectedGeneration"));
+        assertTrue(notifier.contains("main.removeCallbacks(scheduledCheck)"));
         assertTrue(notifier.contains("NotificationHelper.notifyUser(context, \"다음 턴 전환 지연\""));
+        assertTrue(store.contains("private static final String PREFS = \"selfrun_drive\""));
+        assertFalse(notifier.contains("CHECK_INTERVAL_MS"));
+        assertFalse(notifier.contains("scheduleNext()"));
+        assertFalse(notifier.contains("postDelayed(poll"));
         assertFalse(notifier.contains("Kind.REPAIR"));
         assertFalse(notifier.contains("ledger.apply("));
         assertTrue(watchdog.contains("STALE_AFTER_MS = 7_200_000L"));
