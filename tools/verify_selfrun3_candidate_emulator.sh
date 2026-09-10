@@ -5,9 +5,9 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.2-dev1.apk
-PREVIOUS_TEST_SHA256=d04375e585b94d5e6c7ac174989a6eb3b11704577fe3b2a90d9f94ba43a2ac13
-PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/e0d51ea787bd9af8bd8e25f01a4c4c603f1800a5/deliverables/current-test.apk
+PREVIOUS_TEST=previous/chatgpt-selfrun-drive-test-v3.1.2-dev3.apk
+PREVIOUS_TEST_SHA256=8a5e2125d7311dbbdd3b925e8faa5791c87bb50a4420f687dd4347029ff7d2cb
+PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/aa430205136f9215fc144b396c319705b8184516/deliverables/current-test.apk
 
 mkdir -p previous
 curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
@@ -15,7 +15,8 @@ echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
 BT="$ANDROID_HOME/build-tools/36.0.0"
 "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_TEST" > selfrun-v3-previous-test-cert.txt
 grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-previous-test-cert.txt
-"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.1.2-dev1'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.1.2-dev3'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionCode='3012003'"
 
 adb install -r stable/chatgpt-selfrun-drive-v3.1.1.apk >/dev/null
 adb install -r "$PREVIOUS_TEST" >/dev/null
@@ -54,6 +55,23 @@ adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-runtime-evidence.txt
 grep -Fq 'OK (' selfrun-v3-runtime-evidence.txt
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeSettingsAndroidTest \
+  "$INSTRUMENTATION" | tee selfrun-v3-runtime-settings-evidence.txt
+grep -Fq 'OK (' selfrun-v3-runtime-settings-evidence.txt
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart \
+  "$INSTRUMENTATION" | tee selfrun-v3-runtime-settings-restart-seed.txt
+grep -Fq 'OK (' selfrun-v3-runtime-settings-restart-seed.txt
+adb shell am force-stop "$TEST"
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart \
+  "$INSTRUMENTATION" | tee selfrun-v3-runtime-settings-restart-verify.txt
+grep -Fq 'OK (' selfrun-v3-runtime-settings-restart-verify.txt
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3UnboundedLimitsAndroidTest \
+  "$INSTRUMENTATION" | tee selfrun-v3-unbounded-limits-evidence.txt
+grep -Fq 'OK (' selfrun-v3-unbounded-limits-evidence.txt
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun31WorkFixAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-work-fix-evidence.txt
