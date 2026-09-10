@@ -10,7 +10,7 @@ import android.provider.Settings;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Read-only app-side observer that only warns about a conversation stalled past 125 minutes. */
+/** Read-only app-side observer that only warns about a conversation stalled past the configured threshold. */
 final class SelfRun3TurnStallNotifier implements AutoCloseable {
     private static final String STORE_PREFS = "selfrun_drive";
     private static final String ALERT_PREFS = "selfrun3-turn-stall-alert-v1";
@@ -19,6 +19,7 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
     private final Context context;
     private final SelfRunStore store;
     private final SelfRun3Ledger ledger;
+    private final SelfRun3RuntimeSettings runtimeSettings;
     private final SharedPreferences projectionPrefs;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -26,8 +27,8 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
     private final SharedPreferences.OnSharedPreferenceChangeListener projectionListener =
             (prefs, key) -> {
                 if (key == null || "runId".equals(key) || "turn".equals(key) || "phase".equals(key)
-                        || "active".equals(key) || "paused".equals(key)
-                        || "userStopped".equals(key)) {
+                        || "active".equals(key) || "paused".equals(key) || "userStopped".equals(key)
+                        || SelfRun3RuntimeSettings.KEY_STALL_ALERT_MINUTES.equals(key)) {
                     requestRearm();
                 }
             };
@@ -42,6 +43,7 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
         this.context = context.getApplicationContext();
         this.store = store;
         this.ledger = new SelfRun3Ledger(this.context);
+        this.runtimeSettings = new SelfRun3RuntimeSettings(this.context);
         this.projectionPrefs = this.context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE);
     }
 
@@ -87,7 +89,8 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
             if (!SelfRun3RunMarker.current(context, taskId)) return null;
             SelfRun3Engine.State state = ledger.load(taskId);
             long remaining = SelfRun3TurnStallPolicy.remainingDelayMs(state,
-                    SystemClock.elapsedRealtime(), System.currentTimeMillis(), currentBootCount());
+                    SystemClock.elapsedRealtime(), System.currentTimeMillis(), currentBootCount(),
+                    runtimeSettings.stallAlertMs());
             if (remaining < 0L) return null;
             return new ScheduledCandidate(state.taskId(), state.turnId(), state.turn(), remaining);
         } catch (Throwable ignored) {
@@ -127,7 +130,7 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
 
     private boolean eligible(SelfRun3Engine.State state) {
         return SelfRun3TurnStallPolicy.shouldAlert(state, SystemClock.elapsedRealtime(),
-                System.currentTimeMillis(), currentBootCount());
+                System.currentTimeMillis(), currentBootCount(), runtimeSettings.stallAlertMs());
     }
 
     private boolean storeReady() {
@@ -145,7 +148,8 @@ final class SelfRun3TurnStallNotifier implements AutoCloseable {
         if (identity.equals(prefs.getString(LAST_ALERTED_EXECUTION, ""))) return;
         prefs.edit().putString(LAST_ALERTED_EXECUTION, identity).apply();
         NotificationHelper.notifyUser(context, "다음 턴 전환 지연",
-                "현재 SelfRun 대화가 125분 이상 다음 턴으로 전환되지 않았습니다.");
+                "현재 SelfRun 대화가 " + runtimeSettings.stallAlertMinutes()
+                        + "분 이상 다음 턴으로 전환되지 않았습니다.");
     }
 
     private int currentBootCount() {
