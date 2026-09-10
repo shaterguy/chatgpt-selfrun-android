@@ -170,12 +170,12 @@ jobs:
           grep -F "$(sha256sum current/candidate.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
           grep -F "$(sha256sum current/androidTest.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
           mkdir -p stable
-          gh release download drive-v3.1.0 --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v3.1.0.apk' --dir stable
-          test -s stable/chatgpt-selfrun-drive-v3.1.0.apk
-          echo 'fa05dc019c1247bbf3a16cfe72630fbd839585cd6e8d1b5b203dd4b78f750496  stable/chatgpt-selfrun-drive-v3.1.0.apk' | sha256sum -c -
+          gh release download drive-v3.1.1 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chatgpt-selfrun-drive-v3.1.1.apk' --dir stable
+          test -s stable/chatgpt-selfrun-drive-v3.1.1.apk
+          echo '337eb8150d87f60bdec73a72ab0877845b2769cd6b5c68d67439b7608f956e33  stable/chatgpt-selfrun-drive-v3.1.1.apk' | sha256sum -c -
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.1.0.apk > stable-cert.txt
+          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.1.1.apk > stable-cert.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
       - name: Enable hardware acceleration
         shell: bash
