@@ -47,13 +47,14 @@ final class SelfRun3WebAdapter {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final SelfRunStore runStore;
     private final SelfRunRunLog runLog;
+    private final SelfRun3RuntimeSettings runtimeSettings;
     private HeadlessWebViewHost host;
     private WebView web;
     private SelfRun3Engine.State state;
     private boolean preparing, loading, closed, dispatchConfirmed, projectRouteReadyLogged;
     private int step, evaluation, generation, projectCandidateIndex;
     private int projectProbeRetries, projectClickAttempts, projectDirectoryRecoveries;
-    private long prepareStarted, projectDirectoryReadyAt;
+    private long prepareStarted, prepareTimeoutMs, projectDirectoryReadyAt;
     private String projectDisplayName = "";
 
     SelfRun3WebAdapter(Context context, Listener listener) {
@@ -61,6 +62,7 @@ final class SelfRun3WebAdapter {
         this.listener = listener;
         this.runStore = new SelfRunStore(context);
         this.runLog = new SelfRunRunLog(context);
+        this.runtimeSettings = new SelfRun3RuntimeSettings(context);
     }
 
     static boolean ownsProtocolView(WebView view) {
@@ -95,9 +97,9 @@ final class SelfRun3WebAdapter {
             dispatchConfirmed = false;
             step = 0;
             resetProjectNavigationState();
-            prepareStarted = SystemClock.elapsedRealtime();
+            startPreparationTimer();
         } else if (restartPreparation) {
-            prepareStarted = SystemClock.elapsedRealtime();
+            startPreparationTimer();
         }
         preparing = true;
         String target = s.config().optString("projectUrl");
@@ -129,6 +131,11 @@ final class SelfRun3WebAdapter {
             return;
         }
         if (!loading) advance();
+    }
+
+    private void startPreparationTimer() {
+        prepareStarted = SystemClock.elapsedRealtime();
+        prepareTimeoutMs = runtimeSettings.webPreparationMs();
     }
 
     private void resetProjectNavigationState() {
@@ -218,7 +225,7 @@ final class SelfRun3WebAdapter {
 
     private void advance() {
         if (!preparing || closed || loading || web == null || state == null) return;
-        if (SystemClock.elapsedRealtime() - prepareStarted >= SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS) {
+        if (SystemClock.elapsedRealtime() - prepareStarted >= prepareTimeoutMs) {
             fail("WEB_PREPARATION_TIMEOUT");
             return;
         }
