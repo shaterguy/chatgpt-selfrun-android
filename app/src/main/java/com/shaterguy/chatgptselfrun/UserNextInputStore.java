@@ -3,13 +3,8 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import java.nio.charset.StandardCharsets;
-
 /** Durable user-authored text consumed by SelfRun 3 through revision-checked snapshots. */
 final class UserNextInputStore {
-    static final int MAX_USER_UTF8_BYTES = 64 * 1024;
-    static final int MAX_COMBINED_UTF8_BYTES = MAX_USER_UTF8_BYTES * 2 + 2;
-
     private static final String PREFS = "selfrun_drive_user_next_input";
     private static final String RUN_ID = "runId";
     private static final String TEXT = "text";
@@ -49,7 +44,6 @@ final class UserNextInputStore {
         ensureInitialized();
         if (!editable(runId)) return false;
         String value = safe(text);
-        if (!withinUtf8Limit(value, MAX_USER_UTF8_BYTES)) return false;
         if (value.isEmpty()) return delete(runId);
         String storedRunId = prefs.getString(RUN_ID, "");
         long revision = runId.equals(storedRunId) ? prefs.getLong(REVISION, 0L) : 0L;
@@ -65,10 +59,6 @@ final class UserNextInputStore {
         if (!safe(runId).equals(prefs.getString(RUN_ID, ""))) return true;
         long revision = prefs.getLong(REVISION, 0L);
         return prefs.edit().putString(TEXT, "").putLong(REVISION, revision + 1L).commit();
-    }
-
-    static boolean withinUtf8Limit(String value, int limit) {
-        return limit >= 0 && safe(value).getBytes(StandardCharsets.UTF_8).length <= limit;
     }
 
     static boolean phaseAllowsEditing(String phase, boolean ignoredSubmissionLock) {
