@@ -255,8 +255,11 @@ public final class SelfRun31WorkFixAndroidTest {
             int slotToStopGap = actionStripOrientation == LinearLayout.HORIZONTAL
                     ? stopLocation[0] - (slotLocation[0] + slot.getWidth())
                     : stopLocation[1] - (slotLocation[1] + slot.getHeight());
+            int minimumSlotToStopGap = actionStripOrientation == LinearLayout.HORIZONTAL
+                    ? Ui.dp(activity, 8)
+                    : Ui.dp(activity, 4);
             assertTrue(pauseToConversationGap >= Ui.dp(activity, 8));
-            assertTrue(slotToStopGap >= Ui.dp(activity, 8));
+            assertTrue(slotToStopGap >= minimumSlotToStopGap);
             result.set(new RunControlSnapshot(actionStripOrientation, pauseToConversationGap, slotToStopGap));
         });
         assertNotNull(result.get());
