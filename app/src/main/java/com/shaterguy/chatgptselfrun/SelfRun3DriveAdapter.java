@@ -149,7 +149,7 @@ final class SelfRun3DriveAdapter {
         }
     }
     static String recoverSingleRedundantTrailingBrace(String raw, SelfRun3Engine.State s) {
-        if (raw == null || s == null || SelfRun3Engine.utf8(raw) > SelfRun3Engine.MAX_RESULT_BYTES) return "";
+        if (raw == null || s == null) return "";
         String trimmed = raw.trim();
         if (trimmed.length() < 2 || !trimmed.endsWith("}")) return "";
         String candidate = trimmed.substring(0, trimmed.length() - 1).trim();
@@ -161,7 +161,7 @@ final class SelfRun3DriveAdapter {
         }
     }
     static boolean isInvalidCommittedResult(String raw, SelfRun3Engine.State s) {
-        if (raw == null || SelfRun3Engine.utf8(raw) > SelfRun3Engine.MAX_RESULT_BYTES) return false;
+        if (raw == null) return false;
         try {
             JSONObject body = SelfRun3StrictJson.parseObject(raw);
             if (!SelfRun3Engine.RESULT_SCHEMA.equals(body.opt("schema"))
@@ -224,11 +224,14 @@ final class SelfRun3DriveAdapter {
                 long size = 0; byte[] buffer = new byte[64 * 1024];
                 try (InputStream in = context.getContentResolver().openInputStream(uri)) {
                     require(in != null, "ATTACHMENT_UNAVAILABLE"); int n;
-                    while ((n = in.read(buffer)) != -1) { checkpoint(); size += n; require(size <= SelfRunStore.MAX_ATTACHMENT_BYTES, "ATTACHMENT_TOO_LARGE"); }
+                    while ((n = in.read(buffer)) != -1) {
+                        checkpoint();
+                        require(size <= Long.MAX_VALUE - n, "ATTACHMENT_SIZE_OVERFLOW");
+                        size += n;
+                    }
                 }
                 projection.updateAttachmentSize(a.index, size); a = projection.nextUncommittedAttachment();
             }
-            require(a.size <= SelfRunStore.MAX_ATTACHMENT_BYTES, "ATTACHMENT_TOO_LARGE");
             projection.markAttachmentUploading(a.index); checkpoint();
             try (InputStream in = context.getContentResolver().openInputStream(uri)) {
                 api.uploadAttachmentResumable(token, a.driveFileId, s.taskId(), s.resource("folderId"), a.index, a.name, a.mimeType, a.size, in);
