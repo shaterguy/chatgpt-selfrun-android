@@ -10,10 +10,14 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public class AttachmentUploadPolicyTest {
-    @Test public void pickerUsesSafReadOnlyPersistableGrants() throws Exception {
+    @Test public void pickerStartsInNewestFirstDownloadsAndKeepsSafReadOnlyPersistableGrants() throws Exception {
         String activity = src("SelfRunNewActivity.java");
         assertTrue(activity.contains("Intent.ACTION_OPEN_DOCUMENT"));
         assertTrue(activity.contains("Intent.EXTRA_ALLOW_MULTIPLE"));
+        assertTrue(activity.contains("DocumentsContract.EXTRA_INITIAL_URI"));
+        assertTrue(activity.contains("DocumentsContract.buildDocumentUri(DOWNLOADS_DOCUMENTS_AUTHORITY, DOWNLOADS_DOCUMENT_ID)"));
+        assertTrue(activity.contains("com.android.providers.downloads.documents"));
+        assertTrue(activity.contains("private static final String DOWNLOADS_DOCUMENT_ID = \"downloads\""));
         assertTrue(activity.contains("takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)"));
         String pickerResult = between(activity, "onActivityResult", "readAttachmentDraft");
         assertFalse(pickerResult.contains("takePersistableUriPermission"));
