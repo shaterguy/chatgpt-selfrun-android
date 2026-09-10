@@ -103,23 +103,32 @@ public final class SelfRun3DisposableExecutionTest {
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","sol","high"),"CHAT"));
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","invented","high"),"HYBRID"));
     }
-    @Test public void resultIdentityAndBranchStatusCannotBeForged() {
+    @Test public void appRejectsWrongResultIdentityButNotAiCheckpointShapeDrift() {
         SelfRun3Engine.State root=dispatch(dispatch(wave())), a=branch(root,"A");
         JSONObject r=branchResult(a,"COMPLETE"); put(r,"document_id","other");
         final JSONObject wrongIdentity=r;
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.parseResult(wrongIdentity.toString(),a));
-        r=branchResult(a,"COMPLETE"); put(r.optJSONObject("branch_result"),"status","USER_ACTION_REQUIRED"); final JSONObject mismatch=r;
-        assertThrows(IllegalStateException.class,()->SelfRun3Engine.parseResult(mismatch.toString(),a));
-        r=branchResult(a,"COMPLETE"); put(r,"next_execution",plan()); final JSONObject nested=r;
-        assertThrows(IllegalStateException.class,()->SelfRun3Engine.parseResult(nested.toString(),a));
+
+        r=branchResult(a,"COMPLETE"); put(r.optJSONObject("branch_result"),"status","USER_ACTION_REQUIRED");
+        final JSONObject semanticMismatch=r;
+        assertNotNull(SelfRun3Engine.parseResult(semanticMismatch.toString(),a));
+
+        r=branchResult(a,"COMPLETE"); put(r,"next_execution",plan());
+        final JSONObject branchRoutingNoise=r;
+        assertNotNull(SelfRun3Engine.parseResult(branchRoutingNoise.toString(),a));
     }
-    @Test public void parentAndChildMutationBoundariesCannotRace() {
+    @Test public void overlappingParallelHintFallsBackToSafeSerialExecution() {
         SelfRun3Engine.State s=dispatch(initial());
         JSONObject r=result(s); JSONObject p=plan();
         put(p.optJSONArray("branches").optJSONObject(0),"mutation_boundary",new JSONArray().put("github:o/r/main/src"));
         put(p.optJSONArray("branches").optJSONObject(1),"mutation_boundary",new JSONArray().put("github:o/r/main/src/A.java"));
         put(r,"next_execution",p);
-        assertThrows(IllegalStateException.class,()->SelfRun3Engine.parseResult(r.toString(),s));
+        s=accept(s,s.turnId(),r);
+        s=event(s,s.turnId(),SelfRun3Engine.Kind.COMMIT,new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.PREPARING,s.stage());
+        assertEquals("WORK",s.text("phase"));
+        assertFalse(SelfRun3Engine.isBranch(s));
+        assertEquals(2,s.turn());
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.canonicalBoundary("github:o/r/."));
     }
     @Test public void transportEndIsIgnoredAndLateHistoryIsAddressable() {

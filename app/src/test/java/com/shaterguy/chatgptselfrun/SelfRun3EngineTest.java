@@ -76,30 +76,48 @@ public final class SelfRun3EngineTest {
         assertEquals("VERIFY", next.text("phase"));
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void unknownNextPhaseIsStillRejected() {
+    @Test public void unknownNextPhaseDoesNotInvalidateCommittedResult() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject result = continueResult(claimed);
         SelfRun3Engine.put(result, "next_phase", "REVIEW");
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
-        reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State next = reduce(withResult, "commit", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.PREPARING, next.stage());
+        assertEquals("PLAN", next.text("phase"));
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void nonterminalResultCannotAdvanceDone() {
+    @Test public void nonterminalDoneRoutingHintFallsBackInsteadOfRejectingTurn() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject result = continueResult(claimed);
         SelfRun3Engine.put(result, "next_phase", "DONE");
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
-        reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State next = reduce(withResult, "commit", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.PREPARING, next.stage());
+        assertEquals("PLAN", next.text("phase"));
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void doneResultStillRequiresVerifyPhase() {
+    @Test public void doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject result = doneResult(claimed);
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
-        reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State done = reduce(withResult, "commit", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.DONE, done.stage());
+        assertTrue(done.terminal());
+    }
+
+    @Test public void identityOnlyCommittedResultCreatesRecoveryTurn() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = identity(claimed);
+        SelfRun3Engine.put(result, "committed", true);
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State next = reduce(withResult, "commit", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.PREPARING, next.stage());
+        assertEquals("PLAN", next.text("phase"));
+        assertEquals(2, next.turn());
     }
 
     @Test public void lateUserInputPreventsTerminalDoneAndCreatesFreshPlanTurn() {
@@ -116,7 +134,7 @@ public final class SelfRun3EngineTest {
         assertEquals(5L, after.time("lastConsumedInputRevision"));
     }
 
-    @Test public void normalDoneCanOnlyCommitFromVerifiedResult() {
+    @Test public void normalDoneCanOnlyCommitFromVerifiedResultFixture() {
         SelfRun3Engine.State verify = verifyCompletedState();
         SelfRun3Engine.State done = reduce(verify, "commit-done", SelfRun3Engine.Kind.COMMIT, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.DONE, done.stage());

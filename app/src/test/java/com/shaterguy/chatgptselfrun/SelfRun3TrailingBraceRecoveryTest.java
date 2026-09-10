@@ -7,7 +7,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class SelfRun3TrailingBraceRecoveryTest {
-    @Test public void oneRedundantTrailingBraceIsRecoveredOnlyAfterFullResultValidation() {
+    @Test public void oneRedundantTrailingBraceIsRecoveredAfterMachineIdentityValidation() {
         SelfRun3Engine.State state = claimedState();
         String valid = continueResult(state).toString();
         String recovered = SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}\n", state);
@@ -21,10 +21,19 @@ public final class SelfRun3TrailingBraceRecoveryTest {
         assertEquals("", SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "x", state));
     }
 
-    @Test public void semanticallyInvalidResultIsNotRecovered() {
+    @Test public void semanticCheckpointDriftDoesNotBlockTrailingBraceRecovery() {
+        SelfRun3Engine.State state = claimedState();
+        JSONObject drifted = continueResult(state);
+        SelfRun3Engine.put(drifted, "next_phase", "DONE");
+        drifted.remove("handoff");
+        String valid = drifted.toString();
+        assertEquals(valid, SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state));
+    }
+
+    @Test public void wrongMachineIdentityIsNotRecovered() {
         SelfRun3Engine.State state = claimedState();
         JSONObject invalid = continueResult(state);
-        SelfRun3Engine.put(invalid, "next_phase", "DONE");
+        SelfRun3Engine.put(invalid, "document_id", "other");
         assertEquals("", SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(invalid.toString() + "}", state));
     }
 

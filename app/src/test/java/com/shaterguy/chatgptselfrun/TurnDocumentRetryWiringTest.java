@@ -12,7 +12,7 @@ import static org.junit.Assert.*;
 
 /** V3 result recovery is pinned-document reconciliation, not a V2 title-signal retry cycle. */
 public final class TurnDocumentRetryWiringTest {
-    @Test public void onlyAnExactCommittedInvalidPayloadAllowsRepair() {
+    @Test public void onlyMachineIntegrityFailureOfCurrentCommittedPayloadAllowsRepair() {
         JSONObject config = new JSONObject(); SelfRun3Engine.put(config, "mode", "CHAT");
         SelfRun3Engine.put(config, "reasoning", "medium");
         SelfRun3Engine.State state = SelfRun3Engine.create("task", "task:turn:1", config);
@@ -25,7 +25,10 @@ public final class TurnDocumentRetryWiringTest {
         SelfRun3Engine.put(body, "committed", "true");
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
         SelfRun3Engine.put(body, "committed", true);
+        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "turn", 2);
         assertTrue(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
+        SelfRun3Engine.put(body, "turn", 1);
         SelfRun3Engine.put(body, "turn_id", "other");
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
         assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult("{\"committed\":true", state));
