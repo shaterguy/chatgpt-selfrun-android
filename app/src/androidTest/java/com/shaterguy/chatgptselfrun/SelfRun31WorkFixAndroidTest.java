@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.PatternMatcher;
 import android.service.notification.StatusBarNotification;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 
@@ -21,6 +22,8 @@ import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+
+import com.google.android.material.navigation.NavigationBarView;
 
 import org.junit.After;
 import org.junit.Before;
@@ -124,13 +127,34 @@ public final class SelfRun31WorkFixAndroidTest {
     @Test public void mainRunControlsKeepStableSpacingAcrossHistoryRoundTrip() {
         seedRunningProjection("https://chatgpt.com/c/" + CONVERSATION_ID);
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+            instrumentation.waitForIdleSync();
             RunControlSnapshot before = snapshotRunControls(scenario);
 
-            try (ActivityScenario<SelfRunHistoryActivity> ignored = ActivityScenario.launch(SelfRunHistoryActivity.class)) {
-                InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            Instrumentation.ActivityMonitor historyMonitor = instrumentation.addMonitor(
+                    SelfRunHistoryActivity.class.getName(), null, false);
+            Activity history = null;
+            try {
+                scenario.onActivity(activity -> {
+                    NavigationBarView navigation = findDescendant(
+                            activity.getWindow().getDecorView(), NavigationBarView.class);
+                    assertNotNull(navigation);
+                    assertNotNull(navigation.getMenu().findItem(Ui.DEST_HISTORY + 1));
+                    navigation.setSelectedItemId(Ui.DEST_HISTORY + 1);
+                });
+                history = instrumentation.waitForMonitorWithTimeout(historyMonitor, 5000L);
+                assertNotNull(history);
+                Activity openedHistory = history;
+                instrumentation.runOnMainSync(openedHistory::finish);
+                instrumentation.waitForIdleSync();
+            } finally {
+                instrumentation.removeMonitor(historyMonitor);
+                if (history != null && !history.isFinishing()) {
+                    Activity openedHistory = history;
+                    instrumentation.runOnMainSync(openedHistory::finish);
+                    instrumentation.waitForIdleSync();
+                }
             }
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
 
             RunControlSnapshot after = snapshotRunControls(scenario);
             assertEquals(before.actionStripOrientation, after.actionStripOrientation);
@@ -268,6 +292,17 @@ public final class SelfRun31WorkFixAndroidTest {
 
     private static Button currentConversationButton(MainActivity activity) {
         return field(activity, "currentConversationButton", Button.class);
+    }
+
+    private static <T extends View> T findDescendant(View root, Class<T> type) {
+        if (type.isInstance(root)) return type.cast(root);
+        if (!(root instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) root;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            T match = findDescendant(group.getChildAt(i), type);
+            if (match != null) return match;
+        }
+        return null;
     }
 
     private static void invokeRefreshCurrent(MainActivity activity) {
