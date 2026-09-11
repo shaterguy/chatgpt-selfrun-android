@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3012004
-def selfRunDriveVersionName = '3.1.2-dev4'
+def selfRunDriveVersionCode = 3012005
+def selfRunDriveVersionName = '3.1.2-dev5'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -173,7 +173,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !engine.contains('canonicalPostConfirmedElapsed') || !engine.contains('resultBodyMutationObserved')
                 || !watchdog.contains('DEFAULT_RESULT_REPAIR_MINUTES * 60_000L')) throw new GradleException('V3 stale-result evidence ledger is required')
         if (!settings.contains('PREFS = "selfrun3_runtime_settings"')
-                || !settings.contains('DEFAULT_RESULT_REPAIR_MINUTES = 120L')
+                || !settings.contains('DEFAULT_RESULT_REPAIR_MINUTES = 10L')
                 || !settings.contains('DEFAULT_STALL_ALERT_MINUTES = 125L')
                 || !settings.contains('DEFAULT_RESULT_POLL_SECONDS = 30L')
                 || !settings.contains('DEFAULT_WEB_PREPARATION_SECONDS = 90L')
