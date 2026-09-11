@@ -137,6 +137,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         }
         if (!service.contains('SelfRun3Coordinator') || service.contains('SelfRunRolloverCoordinator')
                 || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) throw new GradleException('SelfRunService must be the V3 foreground shell')
+
         ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
          'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
