@@ -242,7 +242,6 @@ jobs:
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           test -n "$VERSION_NAME"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
-          ARTIFACT_BRANCH="artifacts/selfrun-v3-v${VERSION_NAME}"
           APK="current/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
           NAMED_FILE="SelfRun-Drive-TEST-${VERSION_NAME}.apk"
           NAMED_PATH="deliverables/${NAMED_FILE}"
@@ -254,6 +253,7 @@ jobs:
           APK_SHA256="$(sha256sum "$APK" | awk '{print $1}')"
           grep -F "$APK_SHA256" "$SUM_FILE" >/dev/null
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$CERT_FILE"
+          ARTIFACT_BRANCH="artifacts/selfrun-v3-v${VERSION_NAME}-sha256-${APK_SHA256}"
           if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
             git fetch --no-tags --depth=2 origin "refs/heads/$ARTIFACT_BRANCH:refs/remotes/origin/$ARTIFACT_BRANCH"
             git show "refs/remotes/origin/$ARTIFACT_BRANCH:deliverables/direct-apk.txt" > direct-apk.txt
