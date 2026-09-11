@@ -47,6 +47,14 @@ public final class SelfRunDetailActivity extends Activity {
         page.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
         page.addView(Ui.keyValue(this, "턴", String.valueOf(item.optInt("turn"))));
         page.addView(Ui.keyValue(this, "모델 조합", model(item)));
+        if (SelfRunStoppedResume.isEligible(item)) {
+            page.addView(Ui.button(this, "중지된 작업 재개", v -> {
+                if (SelfRunStoppedResume.request(this, item.optString("runId"))) {
+                    v.setEnabled(false);
+                    v.setVisibility(android.view.View.GONE);
+                }
+            }));
+        }
 
         detailRunId = item.optString("runId");
         page.addView(Ui.section(this, "대화 이력"));
