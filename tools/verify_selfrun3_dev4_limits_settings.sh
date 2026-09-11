@@ -26,13 +26,14 @@ WEB=$SRC/SelfRun3WebAdapter.java
 UNBOUNDED=$UNIT/SelfRun3UnboundedPayloadPolicyTest.java
 WATCHDOG_UNIT=$UNIT/SelfRun3ResultWatchdogTest.java
 SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
+TURN_STALL_UNIT=$UNIT/SelfRun3TurnStallPolicyTest.java
 UNBOUNDED_ANDROID=$ANDROID/SelfRun3UnboundedLimitsAndroidTest.java
 SETTINGS_ANDROID=$ANDROID/SelfRun3RuntimeSettingsAndroidTest.java
 SETTINGS_PROCESS=$ANDROID/SelfRun3RuntimeSettingsProcessAndroidTest.java
 UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
-  "$SETTINGS" "$COORD" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" \
+  "$SETTINGS" "$COORD" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
   "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
@@ -81,6 +82,8 @@ grep -Fq 'prepareTimeoutMs = runtimeSettings.webPreparationMs()' "$WEB"
 grep -Fq 'long alertAfterMs' "$STALL"
 grep -Fq 'freshInstallDefaultsMatchCurrentBehavior' "$SETTINGS_ANDROID"
 grep -Fq 'assertEquals(10L, settings.resultRepairMinutes())' "$SETTINGS_ANDROID"
+grep -Fq 'assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 10L"));' "$TURN_STALL_UNIT"
+! grep -Fq 'assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 120L"));' "$TURN_STALL_UNIT"
 
 # Result repair is anchored to the latest actual incomplete body mutation, not the first canonical POST.
 grep -Fq 'resultBodyMutationObservedElapsed' "$ENGINE"
