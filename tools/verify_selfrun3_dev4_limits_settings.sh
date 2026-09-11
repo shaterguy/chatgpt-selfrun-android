@@ -20,6 +20,8 @@ STORE=$SRC/SelfRunStore.java
 ACTIVITY=$SRC/SelfRunNewActivity.java
 SETTINGS=$SRC/SelfRun3RuntimeSettings.java
 COORD=$SRC/SelfRun3Coordinator.java
+SERVICE=$SRC/SelfRunService.java
+STOPPED_RESUME=$SRC/SelfRunStoppedResume.java
 STALL=$SRC/SelfRun3TurnStallPolicy.java
 NOTIFIER=$SRC/SelfRun3TurnStallNotifier.java
 WEB=$SRC/SelfRun3WebAdapter.java
@@ -27,19 +29,21 @@ UNBOUNDED=$UNIT/SelfRun3UnboundedPayloadPolicyTest.java
 WATCHDOG_UNIT=$UNIT/SelfRun3ResultWatchdogTest.java
 SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
 TURN_STALL_UNIT=$UNIT/SelfRun3TurnStallPolicyTest.java
+STOPPED_RESUME_UNIT=$UNIT/SelfRunStoppedResumePolicyTest.java
 UNBOUNDED_ANDROID=$ANDROID/SelfRun3UnboundedLimitsAndroidTest.java
 SETTINGS_ANDROID=$ANDROID/SelfRun3RuntimeSettingsAndroidTest.java
 SETTINGS_PROCESS=$ANDROID/SelfRun3RuntimeSettingsProcessAndroidTest.java
 UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
+STOPPED_RESUME_ANDROID=$ANDROID/SelfRunStoppedResumeAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
-  "$SETTINGS" "$COORD" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
-  "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$WORKFLOW" "$EMULATOR"; do
+  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
+  "$STOPPED_RESUME_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3012005" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.1.2-dev5'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3020001" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.0-dev1'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -107,6 +111,18 @@ grep -Fq '지정된 기존 RESULT_DOCUMENT_ID의 초기 identity를 보존' "$PR
 grep -Fq 'committed를 boolean true로 확정' "$PROTOCOL"
 grep -Fq '같은 문서를 다시 읽어 저장된 내용을 검증' "$PROTOCOL"
 
+# Explicit user-stopped recovery keeps the exact ledger lineage and cannot be reached by ordinary resume.
+grep -Fq 'RESUME_STOPPED' "$ENGINE"
+grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
+grep -Fq 'ACTION_RESUME_STOPPED' "$SERVICE"
+grep -Fq 'stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN' "$SERVICE"
+grep -Fq 'ledger.load(target)' "$STOPPED_RESUME"
+grep -Fq 'DRIVE_BINDING_MISMATCH' "$STOPPED_RESUME"
+grep -Fq 'coordinator.onStart(SelfRunService.ACTION_RUN)' "$STOPPED_RESUME"
+grep -Fq 'stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim' "$UNIT/SelfRun3EngineTest.java"
+grep -Fq 'recoveryReusesExistingLedgerAndPinnedDriveIdentity' "$STOPPED_RESUME_UNIT"
+grep -Fq 'stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent' "$STOPPED_RESUME_ANDROID"
+
 # Regression fixtures execute the former boundaries rather than only scanning source text.
 grep -Fq 'turnReadyAcceptsPromptBeyondFormerOneMiBGate' "$UNBOUNDED"
 grep -Fq 'committedResultBeyondFormer512KiBGateKeepsStrictIdentityChecks' "$UNBOUNDED"
@@ -120,19 +136,22 @@ grep -Fq 'seedSettingsBeforeProcessRestart' "$SETTINGS_PROCESS"
 grep -Fq 'verifySettingsAfterProcessRestart' "$SETTINGS_PROCESS"
 grep -Fq 'RUNTIME_RESULT_REPAIR_OVERRIDE = 77L' "$UPGRADE_ANDROID"
 grep -Fq 'runtime result repair override preserved' "$UPGRADE_ANDROID"
-grep -Fq 'dev5 reads persisted runtime override instead of new default' "$UPGRADE_ANDROID"
+grep -Fq 'reads persisted runtime override instead of new default' "$UPGRADE_ANDROID"
 
-# Candidate upgrade fixture must be the exact dev4 direct TEST baseline for this task.
-grep -Fq 'chatgpt-selfrun-drive-test-v3.1.2-dev4.apk' "$EMULATOR"
-grep -Fq '22bbc785a96a26b695220b4ddad20687aaf137dd3d52d37f7c56110ff8fde6cf' "$EMULATOR"
-grep -Fq 'b22da7f68e7222c7daf2ee49569c0134125ef925/deliverables/current-test.apk' "$EMULATOR"
-grep -Fq "versionCode='3012004'" "$EMULATOR"
+# Candidate upgrade fixture must be the exact latest delivered TEST baseline for this task.
+grep -Fq 'SelfRun-Drive-TEST-3.1.2-dev5.apk' "$EMULATOR"
+grep -Fq '2fb44ed0bda167886eea73f6116913947970873820d04013d175f4bd9b842231' "$EMULATOR"
+grep -Fq '4e7219652a2ada3a71751f74b4ca4859a3152160/deliverables/SelfRun-Drive-TEST-3.1.2-dev5.apk' "$EMULATOR"
+grep -Fq "versionCode='3012005'" "$EMULATOR"
+grep -Fq "versionName='3.1.2-dev5'" "$EMULATOR"
+grep -Fq 'stable/chatgpt-selfrun-drive-v3.1.2.apk' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
 grep -Fq 'SelfRun3UnboundedLimitsAndroidTest' "$EMULATOR"
+grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.1.2-dev5 result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.0-dev1 stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
