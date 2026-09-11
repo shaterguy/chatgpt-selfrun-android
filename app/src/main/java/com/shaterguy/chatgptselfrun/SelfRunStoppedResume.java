@@ -158,12 +158,6 @@ final class SelfRunStoppedResume {
 
     private String pendingTarget() { return prefs(service).getString(KEY_TARGET_RUN_ID, ""); }
 
-    private static void clearPending(String target) {
-        SharedPreferences prefs = prefsHolder(target);
-    }
-
-    private static SharedPreferences prefsHolder(String ignored) { return null; }
-
     private void clearPending(String target) {
         SharedPreferences p = prefs(service);
         synchronized (SelfRunStoppedResume.class) {
