@@ -462,8 +462,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 SelfRun3Engine.State before = ledger.loadExecution(task, turn);
                 if (!callbackMatches(before, task, turn, request) || before.stage() != SelfRun3Engine.Stage.READY) return;
                 JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
-                SelfRun3Engine.State claimed = ledger.apply(event(before, request + ":claim",
-                        SelfRun3Engine.Kind.CLAIM_SEND, payload));
+                SelfRun3Engine.State claimed = ledger.apply(event(before,
+                        request + ":claim:" + UUID.randomUUID(), SelfRun3Engine.Kind.CLAIM_SEND, payload));
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch) || !SelfRun3PowerPolicy.maySend(claimed.execution(turn))) return;
                     syncProjection(claimed);
@@ -536,6 +536,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "code", safeCode(code));
                 SelfRun3Engine.State after = ledger.apply(event(state, request + ":error:" + safeCode(code),
                         SelfRun3Engine.Kind.ERROR, payload));
+                boolean retryingPreparation = state.stage() == SelfRun3Engine.Stage.READY && !state.flag("sendClaimed");
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
                     syncProjection(after);
@@ -543,6 +544,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         preparingRequest = "";
                         web.quiesce();
                         releaseWakeLock();
+                    }
+                    if (retryingPreparation) {
+                        log.record(store, "V3_WEB_PREPARATION_RETRY",
+                                "turn=" + turn + ";request=" + request + ";code=" + safeCode(code)
+                                        + ";delayMs=5000");
                     }
                     scheduleNext(5_000L);
                 });
