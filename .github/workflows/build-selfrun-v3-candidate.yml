@@ -4,10 +4,10 @@ run-name: SelfRun 3 Candidate (${{ github.ref_name }}) #${{ github.run_number }}
 on:
   push:
     branches:
-      - 'selfrun-v3/v3.1.*-dev*'
-      - 'selfrun-v3/v3.1.*-rc*'
-      - 'v3.1.*-dev*'
-      - 'v3.1.*-rc*'
+      - 'selfrun-v3/v3.*-dev*'
+      - 'selfrun-v3/v3.*-rc*'
+      - 'v3.*-dev*'
+      - 'v3.*-rc*'
   workflow_dispatch:
 
 permissions:
@@ -47,7 +47,7 @@ jobs:
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           test -n "$VERSION_NAME"; test -n "$VERSION_CODE"
-          [[ "$VERSION_NAME" =~ ^3\.1\.[0-9]+-(dev|rc)[0-9]+$ ]]
+          [[ "$VERSION_NAME" =~ ^3\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+$ ]]
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
       - name: STATIC_PREFLIGHT - V3 policy and all test-source compile
         shell: bash
@@ -171,12 +171,12 @@ jobs:
           grep -F "$(sha256sum current/candidate.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
           grep -F "$(sha256sum current/androidTest.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
           mkdir -p stable
-          gh release download drive-v3.1.1 --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v3.1.1.apk' --dir stable
-          test -s stable/chatgpt-selfrun-drive-v3.1.1.apk
-          echo '337eb8150d87f60bdec73a72ab0877845b2769cd6b5c68d67439b7608f956e33  stable/chatgpt-selfrun-drive-v3.1.1.apk' | sha256sum -c -
+          gh release download drive-v3.1.2 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chatgpt-selfrun-drive-v3.1.2.apk' --dir stable
+          test -s stable/chatgpt-selfrun-drive-v3.1.2.apk
+          echo 'e206cc0e54d685884d12ecd00160eb3b3ad257b9e5e49c95f7ce1b639f45016b  stable/chatgpt-selfrun-drive-v3.1.2.apk' | sha256sum -c -
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.1.1.apk > stable-cert.txt
+          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.1.2.apk > stable-cert.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
       - name: Enable hardware acceleration
         shell: bash
@@ -210,6 +210,7 @@ jobs:
             selfrun-v3-unbounded-limits-evidence.txt
             selfrun-v3-work-fix-evidence.txt
             selfrun-v3-project-directory-evidence.txt
+            selfrun-v3-stopped-resume-evidence.txt
             stable-cert.txt
             selfrun-v3-previous-test-cert.txt
             selfrun-v3-upgrade-seed.txt
