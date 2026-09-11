@@ -28,9 +28,9 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertTrue(prefs.edit().clear().commit());
     }
 
-    @Test public void freshInstallDefaultsMatchDev3Behavior() {
+    @Test public void freshInstallDefaultsMatchCurrentBehavior() {
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
-        assertEquals(120L, settings.resultRepairMinutes());
+        assertEquals(10L, settings.resultRepairMinutes());
         assertEquals(125L, settings.stallAlertMinutes());
         assertEquals(30L, settings.resultPollSeconds());
         assertEquals(90L, settings.webPreparationSeconds());

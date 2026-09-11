@@ -3,68 +3,110 @@ package com.shaterguy.chatgptselfrun;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.Assert.*;
 
 public final class SelfRun3ResultWatchdogTest {
-    @Test public void thresholdIsExactAndCanonicalPostAnchorNeverMoves() {
-        SelfRun3Engine.State s = waiting(1_000L, 7);
-        long anchor = s.time("canonicalPostConfirmedElapsed");
-        assertEquals(120L, SelfRun3RuntimeSettings.DEFAULT_RESULT_REPAIR_MINUTES);
-        assertEquals(7_200_000L, SelfRun3ResultWatchdog.STALE_AFTER_MS);
-        assertEquals(1_000L, anchor);
-        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s,
-                anchor + SelfRun3ResultWatchdog.STALE_AFTER_MS - 1L, 7));
-        assertTrue(SelfRun3ResultWatchdog.shouldRepair(s,
-                anchor + SelfRun3ResultWatchdog.STALE_AFTER_MS, 7));
-
-        JSONObject duplicate = startedPayload(s, 99_000L, 100_000L, 7);
-        s = event(s, s.turnId(), s.turnId() + ":duplicate-start", SelfRun3Engine.Kind.STARTED, duplicate);
-        assertEquals(anchor, s.time("canonicalPostConfirmedElapsed"));
+    @Test public void thresholdIsExactFromLastIncompleteBodyMutation() {
+        SelfRun3Engine.State s = waiting(1_000L, 2_000L, 7);
+        assertEquals(10L, SelfRun3RuntimeSettings.DEFAULT_RESULT_REPAIR_MINUTES);
+        assertEquals(600_000L, SelfRun3ResultWatchdog.STALE_AFTER_MS);
+        assertEquals(1_000L, s.time("canonicalPostConfirmedElapsed"));
+        assertEquals(2_000L, s.time("resultBodyMutationObservedElapsed"));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, 601_999L, 7));
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(s, 602_000L, 7));
     }
 
-    @Test public void customRepairThresholdUsesExistingAnchorAndEligibilityEvidence() {
-        SelfRun3Engine.State s = waiting(10_000L, 8);
+    @Test public void customRepairThresholdUsesMutationAnchorNotCanonicalPost() {
+        SelfRun3Engine.State s = waiting(10_000L, 20_000L, 8);
         long custom = 60_000L;
-        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, 69_999L, 8, custom));
-        assertTrue(SelfRun3ResultWatchdog.shouldRepair(s, 70_000L, 8, custom));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, 79_999L, 8, custom));
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(s, 80_000L, 8, custom));
         assertEquals(10_000L, s.time("canonicalPostConfirmedElapsed"));
-        assertTrue(s.flag("resultBodyMutationObserved"));
+        assertEquals(20_000L, s.time("resultBodyMutationObservedElapsed"));
     }
 
-    @Test public void mutationLatchSurvivesRestartAndBodyRestoration() {
-        SelfRun3Engine.State s = waiting(10L, 3);
-        assertTrue(s.flag("resultBodyMutationObserved"));
-        String seed = s.text("resultSeedFingerprint");
-        s = new SelfRun3Engine.State(s.json());
-        assertTrue(s.flag("resultBodyMutationObserved"));
-        assertEquals(seed, s.text("resultSeedFingerprint"));
+    @Test public void sameBodyDoesNotResetButEveryActualBodyChangeDoes() {
+        SelfRun3Engine.State s = waiting(10L, 100L, 3);
+        String first = s.text("resultBodyMutationFingerprint");
 
-        JSONObject repeated = new JSONObject();
-        put(repeated, "documentId", s.resource("resultDocumentId"));
-        put(repeated, "fingerprint", SelfRun3ResultWatchdog.fingerprint("different-again"));
-        SelfRun3Engine.State same = event(s, s.turnId(), s.turnId() + ":mutation-repeat",
-                SelfRun3Engine.Kind.RESULT_MUTATED, repeated);
-        assertEquals(s.text("resultBodyMutationFingerprint"), same.text("resultBodyMutationFingerprint"));
+        SelfRun3Engine.State same = event(s, s.turnId(), s.turnId() + ":mutation-same",
+                SelfRun3Engine.Kind.RESULT_MUTATED,
+                mutationPayload(s, first, 500L, 3));
+        assertEquals(100L, same.time("resultBodyMutationObservedElapsed"));
+
+        String second = SelfRun3ResultWatchdog.fingerprint("partial body B");
+        SelfRun3Engine.State changed = event(same, same.turnId(), same.turnId() + ":mutation-b",
+                SelfRun3Engine.Kind.RESULT_MUTATED,
+                mutationPayload(same, second, 500L, 3));
+        assertEquals(second, changed.text("resultBodyMutationFingerprint"));
+        assertEquals(500L, changed.time("resultBodyMutationObservedElapsed"));
+
+        SelfRun3Engine.State changedBack = event(changed, changed.turnId(), changed.turnId() + ":mutation-a-again",
+                SelfRun3Engine.Kind.RESULT_MUTATED,
+                mutationPayload(changed, first, 900L, 3));
+        assertEquals(first, changedBack.text("resultBodyMutationFingerprint"));
+        assertEquals(900L, changedBack.time("resultBodyMutationObservedElapsed"));
     }
 
-    @Test public void legacyOrClockUncertaintyCannotTriggerWatchdog() {
-        SelfRun3Engine.State s = waiting(5_000L, 12);
-        long due = 5_000L + SelfRun3ResultWatchdog.STALE_AFTER_MS;
+    @Test public void returningToSeedClearsWaitAndLaterMutationStartsFresh() {
+        SelfRun3Engine.State s = waiting(10L, 100L, 3);
+        JSONObject seed = new JSONObject();
+        put(seed, "documentId", s.resource("resultDocumentId"));
+        put(seed, "fingerprint", s.text("resultSeedFingerprint"));
+        SelfRun3Engine.State cleared = event(s, s.turnId(), s.turnId() + ":seed-return",
+                SelfRun3Engine.Kind.RESULT_MUTATED, seed);
+        assertFalse(cleared.flag("resultBodyMutationObserved"));
+        assertEquals("", cleared.text("resultBodyMutationFingerprint"));
+        assertFalse(cleared.json().has("resultBodyMutationObservedElapsed"));
+        assertFalse(cleared.json().has("resultBodyMutationBootCount"));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(cleared, 1_000_000L, 3));
+
+        String next = SelfRun3ResultWatchdog.fingerprint("new partial body");
+        SelfRun3Engine.State restarted = event(cleared, cleared.turnId(), cleared.turnId() + ":new-mutation",
+                SelfRun3Engine.Kind.RESULT_MUTATED,
+                mutationPayload(cleared, next, 2_000L, 3));
+        assertTrue(restarted.flag("resultBodyMutationObserved"));
+        assertEquals(2_000L, restarted.time("resultBodyMutationObservedElapsed"));
+    }
+
+    @Test public void processRestartPreservesClockAndRebootRequiresOneRebaseline() {
+        SelfRun3Engine.State s = waiting(5_000L, 6_000L, 12);
+        SelfRun3Engine.State restarted = new SelfRun3Engine.State(s.json());
+        assertEquals(6_000L, restarted.time("resultBodyMutationObservedElapsed"));
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(restarted, 606_000L, 12));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(restarted, 606_000L, 13));
+
+        SelfRun3Engine.State rebooted = event(restarted, restarted.turnId(), restarted.turnId() + ":boot-rebaseline",
+                SelfRun3Engine.Kind.RESULT_MUTATED,
+                mutationPayload(restarted, restarted.text("resultBodyMutationFingerprint"), 20_000L, 13));
+        assertEquals(13, rebooted.number("resultBodyMutationBootCount"));
+        assertEquals(20_000L, rebooted.time("resultBodyMutationObservedElapsed"));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(rebooted, 619_999L, 13));
+        assertTrue(SelfRun3ResultWatchdog.shouldRepair(rebooted, 620_000L, 13));
+    }
+
+    @Test public void missingOrUncertainMutationClockCannotTriggerWatchdog() {
+        SelfRun3Engine.State s = waiting(5_000L, 6_000L, 12);
+        long due = 606_000L;
         assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, due, 13));
-        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, 4_999L, 12));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(s, 5_999L, 12));
 
         JSONObject raw = s.json();
-        raw.remove("canonicalPostConfirmedElapsed");
-        SelfRun3Engine.State missingAnchor = new SelfRun3Engine.State(raw);
-        assertFalse(SelfRun3ResultWatchdog.shouldRepair(missingAnchor, due, 12));
-
+        raw.remove("resultBodyMutationObservedElapsed");
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(new SelfRun3Engine.State(raw), due, 12));
+        raw = s.json(); raw.remove("resultBodyMutationBootCount");
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(new SelfRun3Engine.State(raw), due, 12));
         raw = s.json(); raw.remove("resultBodyMutationObserved");
         assertFalse(SelfRun3ResultWatchdog.shouldRepair(new SelfRun3Engine.State(raw), due, 12));
     }
 
     @Test public void pauseAndStopBlockRepairEligibility() {
-        SelfRun3Engine.State s = waiting(100L, 2);
-        long due = 100L + SelfRun3ResultWatchdog.STALE_AFTER_MS;
+        SelfRun3Engine.State s = waiting(100L, 200L, 2);
+        long due = 200L + SelfRun3ResultWatchdog.STALE_AFTER_MS;
         JSONObject reason = new JSONObject(); put(reason, "reason", "USER_PAUSE");
         SelfRun3Engine.State paused = event(s, s.turnId(), s.taskId() + ":pause-test",
                 SelfRun3Engine.Kind.PAUSE, reason);
@@ -78,7 +120,7 @@ public final class SelfRun3ResultWatchdogTest {
     }
 
     @Test public void supersededExecutionRejectsLateProgressButKeepsHistoryUrlEnrichment() {
-        SelfRun3Engine.State s = waiting(1L, 1);
+        SelfRun3Engine.State s = waiting(1L, 2L, 1);
         String oldTurn = s.turnId();
         JSONObject repair = new JSONObject(); put(repair, "safeToRepair", true);
         SelfRun3Engine.State replacement = event(s, oldTurn, oldTurn + ":repair-stale-result",
@@ -100,15 +142,24 @@ public final class SelfRun3ResultWatchdogTest {
     }
 
     @Test public void nextExecutionResetsAllWatchdogEvidence() {
-        SelfRun3Engine.State s = waiting(20L, 4);
+        SelfRun3Engine.State s = waiting(20L, 30L, 4);
         JSONObject resultPayload = new JSONObject(); put(resultPayload, "text", committedResult(s).toString());
         s = event(s, s.turnId(), s.turnId() + ":result-test", SelfRun3Engine.Kind.RESULT, resultPayload);
         s = event(s, s.turnId(), s.turnId() + ":commit-test", SelfRun3Engine.Kind.COMMIT, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.PREPARING, s.stage());
         for (String key : new String[]{"canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
-                "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedAtWall"}) {
+                "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint",
+                "resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) {
             assertFalse("must reset " + key, s.json().has(key));
         }
+    }
+
+    @Test public void driveAdapterFreshReadsAgainBeforeRepairingStaleSnapshot() throws Exception {
+        String drive = source("SelfRun3DriveAdapter.java");
+        assertTrue(drive.contains("stage=STALE_CONFIRM"));
+        assertTrue(drive.contains("ResultObservation finalObservation = readObservation(token, current)"));
+        assertTrue(drive.contains("recordResultBodyObservation(current, finalObservation)"));
+        assertTrue(drive.contains("runtimeSettings.resultRepairMs()"));
     }
 
     @Test public void fingerprintOnlyNormalizesOneProviderTerminalNewline() {
@@ -119,7 +170,7 @@ public final class SelfRun3ResultWatchdogTest {
         assertNotEquals(SelfRun3ResultWatchdog.fingerprint(seed), SelfRun3ResultWatchdog.fingerprint(""));
     }
 
-    private static SelfRun3Engine.State waiting(long submittedElapsed, int bootCount) {
+    private static SelfRun3Engine.State waiting(long submittedElapsed, long mutationElapsed, int bootCount) {
         JSONObject config = new JSONObject(); put(config, "mode", "CHAT"); put(config, "reasoning", "medium");
         SelfRun3Engine.State s = SelfRun3Engine.create("watchdog-task", "watchdog-task:turn:1", config);
         s = resource(s, "folderId", "folder"); s = resource(s, "requirementDocumentId", "requirements");
@@ -135,11 +186,18 @@ public final class SelfRun3ResultWatchdogTest {
         s = event(s, s.turnId(), s.turnId() + ":claim", SelfRun3Engine.Kind.CLAIM_SEND, claim);
         s = event(s, s.turnId(), s.turnId() + ":started", SelfRun3Engine.Kind.STARTED,
                 startedPayload(s, submittedElapsed, 50_000L, bootCount));
-        JSONObject mutation = new JSONObject();
-        put(mutation, "documentId", s.resource("resultDocumentId"));
-        put(mutation, "fingerprint", SelfRun3ResultWatchdog.fingerprint("partial malformed body"));
-        put(mutation, "atWall", 60_000L);
-        return event(s, s.turnId(), s.turnId() + ":result-body-mutated", SelfRun3Engine.Kind.RESULT_MUTATED, mutation);
+        return event(s, s.turnId(), s.turnId() + ":result-body-mutated", SelfRun3Engine.Kind.RESULT_MUTATED,
+                mutationPayload(s, SelfRun3ResultWatchdog.fingerprint("partial body A"), mutationElapsed, bootCount));
+    }
+
+    private static JSONObject mutationPayload(SelfRun3Engine.State s, String fingerprint, long elapsed, int bootCount) {
+        JSONObject p = new JSONObject();
+        put(p, "documentId", s.resource("resultDocumentId"));
+        put(p, "fingerprint", fingerprint);
+        put(p, "atElapsed", elapsed);
+        put(p, "atWall", 60_000L + elapsed);
+        put(p, "bootCount", bootCount);
+        return p;
     }
 
     private static JSONObject startedPayload(SelfRun3Engine.State s, long elapsed, long wall, int bootCount) {
@@ -168,6 +226,12 @@ public final class SelfRun3ResultWatchdogTest {
     private static SelfRun3Engine.State event(SelfRun3Engine.State root, String turn, String id,
                                               SelfRun3Engine.Kind kind, JSONObject payload) {
         return SelfRun3Engine.reduce(root, new SelfRun3Engine.Event(id, kind, root.taskId(), turn, payload));
+    }
+
+    private static String source(String name) throws Exception {
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
     private static void put(JSONObject object, String key, Object value) { SelfRun3Engine.put(object, key, value); }

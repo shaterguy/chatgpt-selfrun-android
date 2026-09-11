@@ -8,6 +8,12 @@ final class SelfRun3Protocol {
     static final String CONTRACT_VERSION="3.1.0";
     static final String SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo";
     static final String SELF_RUN_SKILL_DOCUMENT_ID=SKILL_DOCUMENT_ID;
+    private static final String RESULT_DOCUMENT_RULES =
+            "작업문서는 반드시 SELF_RUN_SKILL_DOCUMENT_ID의 최신 전체 원문에 정의된 Result 작성양식과 의미 규칙을 그대로 따라 작성하십시오. " +
+            "정해진 필드명, 구조, 값의 타입과 상태전이를 임의로 변경하거나 필요한 내용을 생략하지 마십시오. " +
+            "앱이 허용하거나 다음 AI가 복구할 수 있다는 이유로 양식을 바꾸지 마십시오. " +
+            "지정된 기존 RESULT_DOCUMENT_ID의 초기 identity를 보존하고 본문에는 설명이나 코드블록 없이 단일 JSON 객체만 기록하십시오. " +
+            "작성 완료 후에만 committed를 boolean true로 확정하고 같은 문서를 다시 읽어 저장된 내용을 검증하십시오.";
 
     static String receipt(SelfRun3Engine.State s) {
         return "[SELF_RUN_3_RESULT "+s.turnId()+"]";
@@ -55,6 +61,7 @@ final class SelfRun3Protocol {
         if(repair)
             field(out,"REPAIR_TARGET_DOCUMENT_ID",s.text("repairTargetDocumentId"));
 
+        out.append("\n[RESULT_DOCUMENT_CONTRACT]\n").append(RESULT_DOCUMENT_RULES).append('\n');
         if(!SelfRun3Engine.isBranch(s)) appendProfileChoices(out,s.taskMode());
         if(!s.text("nextInput").isEmpty())
             out.append("\n[이전 턴에서 확정된 다음 입력]\n").append(s.text("nextInput")).append('\n');

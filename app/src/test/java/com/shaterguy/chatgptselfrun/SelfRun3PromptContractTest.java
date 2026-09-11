@@ -21,7 +21,9 @@ public final class SelfRun3PromptContractTest {
                 "RESULT_DOCUMENT_ID=result","REQUIREMENT_DOCUMENT_ID=requirement",
                 "PREVIOUS_RESULT_DOCUMENT_ID=previous","FOLDER_ID=folder",
                 "RECEIPT=[SELF_RUN_3_RESULT task:turn:2]","EXECUTION_PROFILE=",
+                "[RESULT_DOCUMENT_CONTRACT]","정해진 필드명, 구조, 값의 타입과 상태전이를 임의로 변경",
                 "[PROFILE_REGISTRY_WORK]","current user constraint"}) assertTrue(value,prompt.contains(value));
+        assertEquals(1,count(prompt,"[RESULT_DOCUMENT_CONTRACT]"));
 
         assertFalse(prompt.contains("[PROFILE_REGISTRY_CHAT]"));
         assertFalse(prompt.contains("requirement body must not be copied"));
@@ -68,6 +70,7 @@ public final class SelfRun3PromptContractTest {
         assertTrue(branch.contains("MUTATION_BOUNDARY="));
         assertTrue(branch.contains("BRANCH_PLAN="));
         assertFalse(branch.contains("PROFILE_REGISTRY_"));
+        assertEquals(1,count(branch,"[RESULT_DOCUMENT_CONTRACT]"));
 
         JSONObject mergeRaw=state("HYBRID","WORK","PARALLEL_MERGE").json();
         SelfRun3Engine.put(mergeRaw,"parallelGroupId","group-1");
@@ -75,6 +78,7 @@ public final class SelfRun3PromptContractTest {
         String merge=SelfRun3Protocol.prompt(new SelfRun3Engine.State(mergeRaw),"");
         assertTrue(merge.contains("MERGED_FROM=[\"result-a\",\"result-b\"]"));
         assertFalse(merge.contains("BRANCH_OBJECTIVE="));
+        assertEquals(1,count(merge,"[RESULT_DOCUMENT_CONTRACT]"));
 
         JSONObject repairRaw=state("WORK","WORK","REPAIR").json();
         SelfRun3Engine.put(repairRaw,"repairTargetDocumentId","bad-result");
@@ -85,12 +89,15 @@ public final class SelfRun3PromptContractTest {
         assertTrue(repair.contains("REPAIR_TARGET_DOCUMENT_ID=bad-result"));
         assertTrue(repair.contains("[이전 턴에서 확정된 다음 입력]\nconfirmed correction"));
         assertTrue(repair.contains("[사용자 개입 결과·실제 상태 검증 필요]"));
+        assertEquals(1,count(repair,"[RESULT_DOCUMENT_CONTRACT]"));
     }
 
     @Test public void sourceCannotReintroduceStaticContractOrDriveOwnedPayloads() throws Exception {
         String source=src("SelfRun3Protocol.java");
         assertTrue(source.contains("REQUEST_ID"));
         assertTrue(source.contains("compactProfileChoices"));
+        assertTrue(source.contains("RESULT_DOCUMENT_RULES"));
+        assertTrue(source.contains("[RESULT_DOCUMENT_CONTRACT]"));
         assertFalse(source.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));
         assertFalse(source.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(source.contains("SelfRun3Engine.emptyResult"));
@@ -147,6 +154,12 @@ public final class SelfRun3PromptContractTest {
 
     private static String after(String source,String marker) {
         return source.substring(source.indexOf(marker)+marker.length());
+    }
+
+    private static int count(String source,String marker) {
+        int n=0, from=0;
+        while((from=source.indexOf(marker,from))>=0) { n++; from+=marker.length(); }
+        return n;
     }
 
     private static String src(String name) throws Exception {

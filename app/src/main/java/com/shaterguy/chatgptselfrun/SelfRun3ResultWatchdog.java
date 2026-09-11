@@ -38,16 +38,19 @@ final class SelfRun3ResultWatchdog {
         if (!state.flag("sendClaimed") || state.flag("committed") || state.hasResult()
                 || state.flag("superseded") || state.number("repairAttempt") != 0) return false;
         String resultDocumentId = state.resource("resultDocumentId");
+        String seedFingerprint = state.text("resultSeedFingerprint");
+        String mutationFingerprint = state.text("resultBodyMutationFingerprint");
         if (resultDocumentId.isEmpty() || !resultDocumentId.equals(state.text("resultSeedDocumentId"))
-                || state.text("resultSeedFingerprint").isEmpty()
-                || !state.flag("resultBodyMutationObserved")) return false;
+                || seedFingerprint.isEmpty() || !state.flag("resultBodyMutationObserved")
+                || mutationFingerprint.isEmpty() || mutationFingerprint.equals(seedFingerprint)) return false;
         org.json.JSONObject snapshot = state.json();
-        if (!snapshot.has("canonicalPostConfirmedElapsed") || !snapshot.has("canonicalPostBootCount")) return false;
-        long submittedElapsed = state.time("canonicalPostConfirmedElapsed");
-        int submittedBootCount = state.number("canonicalPostBootCount");
-        if (submittedElapsed < 0L || currentBootCount < 0 || submittedBootCount != currentBootCount
-                || nowElapsed < submittedElapsed) return false;
-        return nowElapsed - submittedElapsed >= staleAfterMs;
+        if (!snapshot.has("resultBodyMutationObservedElapsed")
+                || !snapshot.has("resultBodyMutationBootCount")) return false;
+        long mutationElapsed = state.time("resultBodyMutationObservedElapsed");
+        int mutationBootCount = state.number("resultBodyMutationBootCount");
+        if (mutationElapsed < 0L || currentBootCount < 0 || mutationBootCount != currentBootCount
+                || nowElapsed < mutationElapsed) return false;
+        return nowElapsed - mutationElapsed >= staleAfterMs;
     }
 
     private SelfRun3ResultWatchdog() { }

@@ -159,14 +159,37 @@ final class SelfRun3Engine {
                 require(NO_SEND_PROOFS.contains(p.optString("status")),"positive no-dispatch proof required");
                 put(v,"sendClaimed",false); put(v,"stage","READY"); v.remove("submittedAt");
             }
-            case ENDED -> { return original; } // Transport completion is never a result gate.
+            case ENDED -> { return original; }
             case RESULT_MUTATED -> {
-                if(s.flag("resultBodyMutationObserved")) return original;
                 String documentId=p.optString("documentId"), fingerprint=p.optString("fingerprint");
                 require(documentId.equals(s.resource("resultDocumentId")) && documentId.equals(s.text("resultSeedDocumentId")),"result mutation document mismatch");
-                require(fingerprint.matches("[a-f0-9]{64}") && !fingerprint.equals(s.text("resultSeedFingerprint")),"actual result body mutation required");
-                put(v,"resultBodyMutationObserved",true); put(v,"resultBodyMutationFingerprint",fingerprint);
-                if(p.optLong("atWall",0L)>0L) put(v,"resultBodyMutationObservedAtWall",p.optLong("atWall"));
+                require(fingerprint.matches("[a-f0-9]{64}"),"valid result body fingerprint required");
+                if(fingerprint.equals(s.text("resultSeedFingerprint"))) {
+                    if(!s.flag("resultBodyMutationObserved") && s.text("resultBodyMutationFingerprint").isEmpty()
+                            && !v.has("resultBodyMutationObservedElapsed") && !v.has("resultBodyMutationBootCount")
+                            && !v.has("resultBodyMutationObservedAtWall")) return original;
+                    put(v,"resultBodyMutationObserved",false);
+                    v.remove("resultBodyMutationFingerprint");
+                    v.remove("resultBodyMutationObservedElapsed");
+                    v.remove("resultBodyMutationBootCount");
+                    v.remove("resultBodyMutationObservedAtWall");
+                } else {
+                    require(p.has("atElapsed") && p.has("atWall") && p.has("bootCount")
+                            && p.optLong("atElapsed",-1L)>=0L && p.optLong("atWall",-1L)>0L
+                            && p.optInt("bootCount",-1)>=0,"result mutation clock required");
+                    int bootCount=p.optInt("bootCount");
+                    long observedElapsed=p.optLong("atElapsed");
+                    boolean sameBodyClock=s.flag("resultBodyMutationObserved")
+                            && fingerprint.equals(s.text("resultBodyMutationFingerprint"))
+                            && v.has("resultBodyMutationObservedElapsed") && s.time("resultBodyMutationObservedElapsed")>=0L
+                            && s.time("resultBodyMutationObservedElapsed")<=observedElapsed
+                            && v.has("resultBodyMutationBootCount") && s.number("resultBodyMutationBootCount")==bootCount;
+                    if(sameBodyClock) return original;
+                    put(v,"resultBodyMutationObserved",true); put(v,"resultBodyMutationFingerprint",fingerprint);
+                    put(v,"resultBodyMutationObservedElapsed",observedElapsed);
+                    put(v,"resultBodyMutationBootCount",bootCount);
+                    put(v,"resultBodyMutationObservedAtWall",p.optLong("atWall"));
+                }
             }
             case RESULT -> {
                 if(!s.flag("sendClaimed")) return original;
@@ -290,7 +313,7 @@ final class SelfRun3Engine {
         JSONObject config=s.config(); applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
-                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedAtWall"}) v.remove(k);
+                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);

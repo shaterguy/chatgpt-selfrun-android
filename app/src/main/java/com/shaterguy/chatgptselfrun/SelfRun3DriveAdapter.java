@@ -3,6 +3,8 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.net.Uri;
 import android.os.PowerManager;
+import android.os.SystemClock;
+import android.provider.Settings;
 import org.json.JSONObject;
 import java.io.InputStream;
 import java.io.IOException;
@@ -11,6 +13,7 @@ import java.util.function.BooleanSupplier;
 
 /** Drive transports pinned objects only. No title parsing, folder-order cursors or signal synthesis. */
 final class SelfRun3DriveAdapter {
+    private static final int UNKNOWN_BOOT_COUNT = Integer.MAX_VALUE;
     private final Context context;
     private final SelfRunStore projection;
     private final SelfRun3Ledger ledger;
@@ -18,6 +21,7 @@ final class SelfRun3DriveAdapter {
     private final BooleanSupplier permitted;
     private final PowerManager.WakeLock resultReadWakeLock;
     private final SelfRunRunLog diagnosticLog;
+    private final SelfRun3RuntimeSettings runtimeSettings;
     private String verifiedToken = "";
     SelfRun3DriveAdapter(Context context, SelfRunStore projection, SelfRun3Ledger ledger, BooleanSupplier permitted) {
         this.context = context.getApplicationContext(); this.projection = projection; this.ledger = ledger; this.permitted = permitted;
@@ -26,6 +30,7 @@ final class SelfRun3DriveAdapter {
                 PowerManager.PARTIAL_WAKE_LOCK, BuildConfig.APPLICATION_ID + ":selfrun3-result-read");
         if (resultReadWakeLock != null) resultReadWakeLock.setReferenceCounted(false);
         diagnosticLog = new SelfRunRunLog(this.context);
+        runtimeSettings = new SelfRun3RuntimeSettings(this.context);
     }
     SelfRun3Engine.State setup(String token, SelfRun3Engine.State original) throws Exception {
         verifyAccount(token, original);
@@ -86,6 +91,22 @@ final class SelfRun3DriveAdapter {
     }
     ResultObservation observeResult(String token, SelfRun3Engine.State s) throws Exception {
         acquireResultReadWakeLock();
+        try {
+            ResultObservation observation = readObservation(token, s);
+            SelfRun3Engine.State current = recordResultBodyObservation(s, observation);
+            if (SelfRun3ResultWatchdog.shouldRepair(current, SystemClock.elapsedRealtime(), currentBootCountForRepair(),
+                    runtimeSettings.resultRepairMs())) {
+                diagnosticLog.record(projection, "V3_RESULT_READ", "stage=STALE_CONFIRM;turn=" + current.turn());
+                ResultObservation finalObservation = readObservation(token, current);
+                recordResultBodyObservation(current, finalObservation);
+                return finalObservation;
+            }
+            return observation;
+        } finally {
+            releaseResultReadWakeLock();
+        }
+    }
+    private ResultObservation readObservation(String token, SelfRun3Engine.State s) throws Exception {
         diagnosticLog.record(projection, "V3_RESULT_READ", "stage=START;turn=" + s.turn());
         try {
             verifyAccount(token, s);
@@ -121,8 +142,58 @@ final class SelfRun3DriveAdapter {
         } catch (Exception error) {
             diagnosticLog.record(projection, "V3_RESULT_READ", "stage=ERROR;type=" + error.getClass().getSimpleName());
             throw error;
-        } finally {
-            releaseResultReadWakeLock();
+        }
+    }
+    private SelfRun3Engine.State recordResultBodyObservation(SelfRun3Engine.State original,
+                                                              ResultObservation observation) {
+        SelfRun3Engine.State current = ledger.loadExecution(original.taskId(), original.turnId());
+        if (current == null || current.flag("superseded") || current.text("resultSeedFingerprint").isEmpty()) return original;
+        String fingerprint = SelfRun3ResultWatchdog.fingerprint(observation.rawBody);
+        String seed = current.text("resultSeedFingerprint");
+        JSONObject snapshot = current.json();
+        int bootCount = currentBootCountForRecord();
+        long nowElapsed = SystemClock.elapsedRealtime();
+        boolean hasEvidence = current.flag("resultBodyMutationObserved")
+                || !current.text("resultBodyMutationFingerprint").isEmpty()
+                || snapshot.has("resultBodyMutationObservedElapsed")
+                || snapshot.has("resultBodyMutationBootCount")
+                || snapshot.has("resultBodyMutationObservedAtWall");
+        if (fingerprint.equals(seed) && !hasEvidence) return current;
+        boolean sameBodyClock = current.flag("resultBodyMutationObserved")
+                && fingerprint.equals(current.text("resultBodyMutationFingerprint"))
+                && snapshot.has("resultBodyMutationObservedElapsed")
+                && current.time("resultBodyMutationObservedElapsed") >= 0L
+                && current.time("resultBodyMutationObservedElapsed") <= nowElapsed
+                && snapshot.has("resultBodyMutationBootCount")
+                && current.number("resultBodyMutationBootCount") == bootCount;
+        if (!fingerprint.equals(seed) && sameBodyClock) return current;
+        JSONObject mutation = new JSONObject();
+        SelfRun3Engine.put(mutation, "documentId", current.resource("resultDocumentId"));
+        SelfRun3Engine.put(mutation, "fingerprint", fingerprint);
+        if (!fingerprint.equals(seed)) {
+            SelfRun3Engine.put(mutation, "atElapsed", nowElapsed);
+            SelfRun3Engine.put(mutation, "atWall", System.currentTimeMillis());
+            SelfRun3Engine.put(mutation, "bootCount", bootCount);
+        }
+        String identity = observation.version + ":" + fingerprint + ":" + bootCount;
+        String eventId = current.turnId() + ":result-body-observed:"
+                + SelfRun3ResultWatchdog.fingerprint(identity);
+        return ledger.apply(new SelfRun3Engine.Event(eventId, SelfRun3Engine.Kind.RESULT_MUTATED,
+                current.taskId(), current.turnId(), mutation)).execution(current.turnId());
+    }
+    private int currentBootCountForRecord() {
+        int count = currentBootCount();
+        return count < 0 ? UNKNOWN_BOOT_COUNT : count;
+    }
+    private int currentBootCountForRepair() {
+        int count = currentBootCount();
+        return count < 0 ? -1 : count;
+    }
+    private int currentBootCount() {
+        try {
+            return Settings.Global.getInt(context.getContentResolver(), Settings.Global.BOOT_COUNT);
+        } catch (Throwable unavailable) {
+            return -1;
         }
     }
     String resultVersion(String token, SelfRun3Engine.State s) throws Exception {
@@ -183,11 +254,9 @@ final class SelfRun3DriveAdapter {
         String foundId = SelfRun3DriveLookup.findSingleDocumentId(token, name, s.resource("folderId"));
         DriveApiClient.Metadata found = foundId.isEmpty() ? null : api.getMetadata(token, foundId);
         if (found != null) return pin(s, key, found.id);
-        // An earlier ambiguous native-Doc create can become visible later; never blindly repeat it.
         require(s.resource(intentKey).isEmpty(), "DOCUMENT_CREATE_UNCONFIRMED");
         s = pin(s, intentKey, name); checkpoint();
         DriveApiClient.Metadata created = api.createTurnDocument(token, name, s.resource("folderId"));
-        // Preserve a successful create even when a pause arrives while the HTTP call is in flight.
         s = pin(s, key, created.id);
         validateDocument(token, s, created.id); return s;
     }
@@ -231,7 +300,6 @@ final class SelfRun3DriveAdapter {
             try (InputStream in = context.getContentResolver().openInputStream(uri)) {
                 api.uploadAttachmentResumable(token, a.driveFileId, s.taskId(), s.resource("folderId"), a.index, a.name, a.mimeType, a.size, in);
             }
-            // The next iteration validates the exact persisted file, including an ambiguous upload.
         }
     }
     private SelfRun3Engine.State pin(SelfRun3Engine.State s, String key, String value) {

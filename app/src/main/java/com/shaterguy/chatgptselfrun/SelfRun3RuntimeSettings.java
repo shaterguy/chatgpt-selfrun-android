@@ -11,7 +11,7 @@ final class SelfRun3RuntimeSettings {
     static final String KEY_RESULT_POLL_SECONDS = "selfrun3ResultPollSeconds";
     static final String KEY_WEB_PREPARATION_SECONDS = "selfrun3WebPreparationSeconds";
 
-    static final long DEFAULT_RESULT_REPAIR_MINUTES = 120L;
+    static final long DEFAULT_RESULT_REPAIR_MINUTES = 10L;
     static final long DEFAULT_STALL_ALERT_MINUTES = 125L;
     static final long DEFAULT_RESULT_POLL_SECONDS = 30L;
     static final long DEFAULT_WEB_PREPARATION_SECONDS = 90L;

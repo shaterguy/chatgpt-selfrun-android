@@ -9,8 +9,8 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRun3RuntimeSettingsTest {
-    @Test public void legacyDefaultsArePreservedInOperatorUnits() {
-        assertEquals(120L, SelfRun3RuntimeSettings.DEFAULT_RESULT_REPAIR_MINUTES);
+    @Test public void currentDefaultsArePreservedInOperatorUnits() {
+        assertEquals(10L, SelfRun3RuntimeSettings.DEFAULT_RESULT_REPAIR_MINUTES);
         assertEquals(125L, SelfRun3RuntimeSettings.DEFAULT_STALL_ALERT_MINUTES);
         assertEquals(30L, SelfRun3RuntimeSettings.DEFAULT_RESULT_POLL_SECONDS);
         assertEquals(90L, SelfRun3RuntimeSettings.DEFAULT_WEB_PREPARATION_SECONDS);
