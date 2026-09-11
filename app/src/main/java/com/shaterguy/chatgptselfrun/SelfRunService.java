@@ -11,12 +11,14 @@ public final class SelfRunService extends Service {
     static final String ACTION_RUN = BuildConfig.APPLICATION_ID + ".RUN";
     static final String ACTION_PAUSE = BuildConfig.APPLICATION_ID + ".PAUSE";
     static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME";
+    static final String ACTION_RESUME_STOPPED = BuildConfig.APPLICATION_ID + ".RESUME_STOPPED";
     static final String ACTION_STOP = BuildConfig.APPLICATION_ID + ".STOP";
     private static final int NOTIFICATION_ID = 17021;
 
     private SelfRunStore store;
     private SelfRunRunLog runLog;
     private SelfRun3Coordinator coordinator;
+    private SelfRunStoppedResume stoppedResume;
     private SelfRun3TurnStallNotifier turnStallNotifier;
 
     @Override public void onCreate() {
@@ -25,15 +27,30 @@ public final class SelfRunService extends Service {
         runLog = new SelfRunRunLog(this);
         NotificationHelper.ensureChannel(this);
         coordinator = new SelfRun3Coordinator(this, store, runLog);
+        stoppedResume = new SelfRunStoppedResume(this, store, runLog, coordinator);
         turnStallNotifier = new SelfRun3TurnStallNotifier(this, store);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        String action = intent == null || intent.getAction() == null ? ACTION_RUN : intent.getAction();
+        String action = intent == null || intent.getAction() == null
+                ? (stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN)
+                : intent.getAction();
         if (!ACTION_RUN.equals(action) && !ACTION_PAUSE.equals(action)
-                && !ACTION_RESUME.equals(action) && !ACTION_STOP.equals(action)) {
+                && !ACTION_RESUME.equals(action) && !ACTION_RESUME_STOPPED.equals(action)
+                && !ACTION_STOP.equals(action)) {
             stopSelf(startId);
             return START_NOT_STICKY;
+        }
+
+        if (ACTION_RESUME_STOPPED.equals(action)) {
+            if (!stoppedResume.hasPending()) {
+                stopSelf(startId);
+                return START_NOT_STICKY;
+            }
+            startForegroundCompat();
+            turnStallNotifier.start();
+            stoppedResume.resumePending();
+            return START_STICKY;
         }
 
         if (!coordinator.ownsCurrentRun()) {
