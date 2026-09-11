@@ -52,7 +52,7 @@ final class SelfRun3WebAdapter {
     private WebView web;
     private SelfRun3Engine.State state;
     private boolean preparing, loading, closed, dispatchConfirmed, projectRouteReadyLogged;
-    private int step, evaluation, generation, projectCandidateIndex;
+    private int step, evaluation, generation, preparationAttempt, projectCandidateIndex;
     private int projectProbeRetries, projectClickAttempts, projectDirectoryRecoveries;
     private long prepareStarted, prepareTimeoutMs, projectDirectoryReadyAt;
     private String projectDisplayName = "";
@@ -88,46 +88,45 @@ final class SelfRun3WebAdapter {
 
     void prepare(SelfRun3Engine.State s) {
         requireMain();
-        boolean newAttempt = state == null || !state.requestId().equals(s.requestId());
-        boolean restartPreparation = newAttempt || !preparing;
+        boolean newRequest = state == null || !state.requestId().equals(s.requestId());
+        boolean restartPreparation = newRequest || !preparing;
         state = s;
         closed = false;
-        if (newAttempt) {
+        if (newRequest) {
             quiesce();
             dispatchConfirmed = false;
+            preparationAttempt = 0;
             step = 0;
             resetProjectNavigationState();
-            startPreparationTimer();
         } else if (restartPreparation) {
-            startPreparationTimer();
-        }
-        preparing = true;
-        String target = s.config().optString("projectUrl");
-        if (!trusted(target)) { fail("TARGET_INVALID"); return; }
-        boolean rebuildProjectHost = restartPreparation && !newAttempt
-                && SelfRun3ProjectDirectoryNavigation.isProjectTarget(target);
-        if (rebuildProjectHost) {
-            trace("PROJECT_DIRECTORY_RECOVERY", "status=preparation-restart;strategy=recreate-webview");
+            trace("WEB_PREPARATION_RECOVERY", "status=start;attempt=" + (preparationAttempt + 1)
+                    + ";strategy=recreate-webview");
+            quiesce();
+            step = 0;
             resetProjectNavigationState();
             disposeHost();
         }
+        if (restartPreparation) startPreparationTimer();
+        preparing = true;
+        String target = s.config().optString("projectUrl");
+        if (!trusted(target)) { fail("TARGET_INVALID"); return; }
         ensureWeb();
         if (web == null || closed) return;
         if (host != null) host.attachOutput();
-        if (newAttempt) {
+        if (restartPreparation) {
             ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
             projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
-            trace("WEBVIEW_LAUNCH", "route=" + (ref == null ? "general" : "projects"));
+            trace("WEBVIEW_LAUNCH", "route=" + (ref == null ? "general" : "projects")
+                    + ";attempt=" + preparationAttempt);
             generation++;
             evaluation++;
             loading = true;
+            web.stopLoading();
             web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
-            return;
-        }
-        if (rebuildProjectHost) {
-            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
-            projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
-            loadProjectDirectory("preparation-restart");
+            if (!newRequest) {
+                trace("WEB_PREPARATION_RECOVERY", "status=reentry;attempt=" + preparationAttempt
+                        + ";route=" + (ref == null ? "general" : "projects"));
+            }
             return;
         }
         if (!loading) advance();
@@ -136,6 +135,19 @@ final class SelfRun3WebAdapter {
     private void startPreparationTimer() {
         prepareStarted = SystemClock.elapsedRealtime();
         prepareTimeoutMs = runtimeSettings.webPreparationMs();
+        int attempt = ++preparationAttempt;
+        String request = state == null ? "" : state.requestId();
+        trace("WEB_PREPARATION_WATCHDOG", "status=armed;attempt=" + attempt
+                + ";timeoutMs=" + prepareTimeoutMs);
+        handler.postDelayed(() -> {
+            if (closed || !preparing || state == null || attempt != preparationAttempt
+                    || !request.equals(state.requestId())) return;
+            long elapsed = Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted);
+            trace("WEB_PREPARATION_WATCHDOG", "status=expired;attempt=" + attempt
+                    + ";elapsedMs=" + elapsed + ";timeoutMs=" + prepareTimeoutMs
+                    + ";loading=" + loading + ";route=" + routeClass(web == null ? "" : web.getUrl()));
+            fail("WEB_PREPARATION_TIMEOUT");
+        }, Math.max(1L, prepareTimeoutMs));
     }
 
     private void resetProjectNavigationState() {
@@ -158,6 +170,7 @@ final class SelfRun3WebAdapter {
         loading = true;
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageStarted(WebView view, String url, Bitmap icon) {
+                if (view != web || closed) return;
                 generation++;
                 evaluation++;
                 loading = true;
@@ -205,7 +218,7 @@ final class SelfRun3WebAdapter {
 
             @Override public void onReceivedSslError(WebView view, SslErrorHandler response, SslError error) {
                 response.cancel();
-                fail("TLS_REJECTED");
+                if (view == web && !closed) fail("TLS_REJECTED");
             }
 
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -224,11 +237,12 @@ final class SelfRun3WebAdapter {
     }
 
     private void advance() {
-        if (!preparing || closed || loading || web == null || state == null) return;
+        if (!preparing || closed || web == null || state == null) return;
         if (SystemClock.elapsedRealtime() - prepareStarted >= prepareTimeoutMs) {
             fail("WEB_PREPARATION_TIMEOUT");
             return;
         }
+        if (loading) return;
         if (prepareProjectEntryIfNeeded()) return;
         String script;
         if (step == 0) {
@@ -255,6 +269,10 @@ final class SelfRun3WebAdapter {
                 return;
             }
             if (SelfRun3BootstrapTransport.READY_TO_SUBMIT.equals(status)) {
+                if (preparationAttempt > 1) {
+                    trace("WEB_PREPARATION_RECOVERY", "status=recovered;attempt=" + preparationAttempt
+                            + ";route=" + routeClass(web == null ? "" : web.getUrl()));
+                }
                 preparing = false;
                 listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
                 return;
@@ -514,7 +532,9 @@ final class SelfRun3WebAdapter {
     }
 
     private void fail(String code) {
-        trace("WEBVIEW_ERROR", "code=" + safeStatus(code) + ";route=" + routeClass(web == null ? "" : web.getUrl()));
+        long elapsed = prepareStarted <= 0L ? 0L : Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted);
+        trace("WEBVIEW_ERROR", "code=" + safeStatus(code) + ";route=" + routeClass(web == null ? "" : web.getUrl())
+                + ";attempt=" + preparationAttempt + ";elapsedMs=" + elapsed);
         quiesce();
         if (state != null) listener.onFailure(state.taskId(), state.turnId(), state.requestId(), code);
     }
