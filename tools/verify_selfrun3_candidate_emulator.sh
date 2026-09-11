@@ -21,7 +21,7 @@ grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' sel
 adb install -r stable/chatgpt-selfrun-drive-v3.2.0.apk >/dev/null
 adb install -r "$PREVIOUS_TEST" >/dev/null
 adb install -r current/androidTest.apk >/dev/null
-INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\\([^ ]*\\) (target=$TEST)#\\1#p" | head -1)"
+INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\([^ ]*\) (target=$TEST)#\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3UpgradePersistenceAndroidTest#seedUpgradeState \
@@ -51,9 +51,33 @@ adb shell pidof "$TEST" >/dev/null
 adb install -r current/androidTest.apk >/dev/null
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\([^ ]*\) (target=$TEST)#\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
+RECOVERY_CLASS=com.shaterguy.chatgptselfrun.SelfRun3PreparationRecoveryAndroidTest
+CURRENT_31_REQUIRED=(
+  com.shaterguy.chatgptselfrun.SelfRun31FirstConversationAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3ParallelLedgerAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3InputCommitAndroidTest
+  com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest
+  com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest
+)
+DIRECT_CLASSES="$RECOVERY_CLASS"
+for required in "${CURRENT_31_REQUIRED[@]}"; do
+  DIRECT_CLASSES+=",$required"
+done
+adb shell am instrument -w -r \
+  -e class "$DIRECT_CLASSES" \
+  "$INSTRUMENTATION" | tee selfrun-v3-preparation-recovery-evidence.txt
+grep -Fq 'OK (' selfrun-v3-preparation-recovery-evidence.txt
+grep -Fq "class=$RECOVERY_CLASS" selfrun-v3-preparation-recovery-evidence.txt
+for required in "${CURRENT_31_REQUIRED[@]}"; do
+  grep -Fq "class=$required" selfrun-v3-preparation-recovery-evidence.txt
+done
+cat selfrun-v3-preparation-recovery-evidence.txt > selfrun-v3-runtime-evidence.txt
+
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
-  "$INSTRUMENTATION" | tee selfrun-v3-runtime-evidence.txt
+  "$INSTRUMENTATION" | tee -a selfrun-v3-runtime-evidence.txt
 grep -Fq 'OK (' selfrun-v3-runtime-evidence.txt
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeSettingsAndroidTest \

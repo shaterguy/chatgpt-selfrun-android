@@ -38,6 +38,25 @@ public final class SelfRun3InstrumentationRunnerPolicyTest {
         assertFalse(runner.contains("BuildConfig.VERSION_NAME"));
     }
 
+    @Test public void candidateEmulatorExplicitlyRunsRecoveryAndLocked31Set() throws Exception {
+        String emulator = source("tools/verify_selfrun3_candidate_emulator.sh",
+                "../tools/verify_selfrun3_candidate_emulator.sh");
+        assertTrue(emulator.contains("SelfRun3PreparationRecoveryAndroidTest"));
+        assertTrue(emulator.contains("selfrun-v3-preparation-recovery-evidence.txt"));
+        assertTrue(emulator.contains("DIRECT_CLASSES"));
+        for (String required : new String[]{
+                "SelfRun31FirstConversationAndroidTest",
+                "SelfRun3RuntimeAndroidTest",
+                "SelfRun3DispatchAndroidTest",
+                "SelfRun3ParallelLedgerAndroidTest",
+                "SelfRun3InputCommitAndroidTest",
+                "RequestProfileRecreationAndroidTest",
+                "ChatReasoningProcessRecreationAndroidTest"}) {
+            assertTrue("canonical emulator path must explicitly select current V3.1 class: " + required,
+                    emulator.contains(required));
+        }
+    }
+
     @Test public void upgradeSeedAndVerifyRemainIsolatedAcrossTargetReplacement() throws Exception {
         String runner = source("app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunAndroidTestRunner.java",
                 "src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunAndroidTestRunner.java");
