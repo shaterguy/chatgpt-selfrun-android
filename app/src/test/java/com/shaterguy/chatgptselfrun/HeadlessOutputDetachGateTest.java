@@ -98,7 +98,7 @@ public final class HeadlessOutputDetachGateTest {
         String prepare = web.substring(web.indexOf("void prepare("),
                 web.indexOf("private void ensureWeb"));
 
-        assertTrue(prepare.contains("boolean restartPreparation = newAttempt || !preparing"));
+        assertTrue(prepare.contains("boolean restartPreparation = newRequest || !preparing"));
         assertTrue(prepare.contains("else if (restartPreparation)"));
         assertTrue(prepare.contains("prepareStarted = SystemClock.elapsedRealtime()"));
         assertFalse(prepare.contains("state = null"));
