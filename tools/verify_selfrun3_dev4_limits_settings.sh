@@ -11,6 +11,8 @@ EMULATOR=tools/verify_selfrun3_candidate_emulator.sh
 
 ENGINE=$SRC/SelfRun3Engine.java
 DRIVE=$SRC/SelfRun3DriveAdapter.java
+WATCHDOG=$SRC/SelfRun3ResultWatchdog.java
+PROTOCOL=$SRC/SelfRun3Protocol.java
 PROBE=$SRC/SelfRun3AttachmentSizeProbe.java
 INPUT=$SRC/UserNextInputStore.java
 IMMEDIATE=$SRC/UserImmediateInputCoordinator.java
@@ -22,19 +24,20 @@ STALL=$SRC/SelfRun3TurnStallPolicy.java
 NOTIFIER=$SRC/SelfRun3TurnStallNotifier.java
 WEB=$SRC/SelfRun3WebAdapter.java
 UNBOUNDED=$UNIT/SelfRun3UnboundedPayloadPolicyTest.java
+WATCHDOG_UNIT=$UNIT/SelfRun3ResultWatchdogTest.java
 SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
 UNBOUNDED_ANDROID=$ANDROID/SelfRun3UnboundedLimitsAndroidTest.java
 SETTINGS_ANDROID=$ANDROID/SelfRun3RuntimeSettingsAndroidTest.java
 SETTINGS_PROCESS=$ANDROID/SelfRun3RuntimeSettingsProcessAndroidTest.java
 
-for file in "$ENGINE" "$DRIVE" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
-  "$SETTINGS" "$COORD" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$SETTINGS_UNIT" \
+for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
+  "$SETTINGS" "$COORD" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" \
   "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3012004" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.1.2-dev4'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3012005" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.1.2-dev5'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -62,9 +65,9 @@ grep -Fq 'size > Long.MAX_VALUE - n' "$PROBE"
 grep -Fq 'api.uploadAttachmentResumable' "$DRIVE"
 grep -Fq 'MAX_ATTACHMENT_UPLOAD_ATTEMPTS = 3' "$STORE"
 
-# Four operator timings keep dev3 defaults, persist separately, and reach the live consumers.
+# Operator timings keep persisted overrides, while result auto-repair defaults to 10 minutes.
 grep -Fq 'PREFS = "selfrun3_runtime_settings"' "$SETTINGS"
-grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES = 120L' "$SETTINGS"
+grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES = 10L' "$SETTINGS"
 grep -Fq 'DEFAULT_STALL_ALERT_MINUTES = 125L' "$SETTINGS"
 grep -Fq 'DEFAULT_RESULT_POLL_SECONDS = 30L' "$SETTINGS"
 grep -Fq 'DEFAULT_WEB_PREPARATION_SECONDS = 90L' "$SETTINGS"
@@ -75,6 +78,30 @@ grep -Fq 'runtimeSettings.stallAlertMs()' "$NOTIFIER"
 grep -Fq 'settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)' "$NOTIFIER"
 grep -Fq 'prepareTimeoutMs = runtimeSettings.webPreparationMs()' "$WEB"
 grep -Fq 'long alertAfterMs' "$STALL"
+grep -Fq 'freshInstallDefaultsMatchCurrentBehavior' "$SETTINGS_ANDROID"
+grep -Fq 'assertEquals(10L, settings.resultRepairMinutes())' "$SETTINGS_ANDROID"
+
+# Result repair is anchored to the latest actual incomplete body mutation, not the first canonical POST.
+grep -Fq 'resultBodyMutationObservedElapsed' "$ENGINE"
+grep -Fq 'resultBodyMutationBootCount' "$ENGINE"
+grep -Fq 'recordResultBodyObservation' "$DRIVE"
+grep -Fq 'stage=STALE_CONFIRM' "$DRIVE"
+grep -Fq 'ResultObservation finalObservation = readObservation(token, current);' "$DRIVE"
+grep -Fq 'recordResultBodyObservation(current, finalObservation);' "$DRIVE"
+grep -Fq 'mutationBootCount != currentBootCount' "$WATCHDOG"
+grep -Fq 'nowElapsed - mutationElapsed >= staleAfterMs' "$WATCHDOG"
+grep -Fq 'thresholdIsExactFromLastIncompleteBodyMutation' "$WATCHDOG_UNIT"
+grep -Fq 'sameBodyDoesNotResetButEveryActualBodyChangeDoes' "$WATCHDOG_UNIT"
+grep -Fq 'returningToSeedClearsWaitAndLaterMutationStartsFresh' "$WATCHDOG_UNIT"
+grep -Fq 'processRestartPreservesClockAndRebootRequiresOneRebaseline' "$WATCHDOG_UNIT"
+grep -Fq 'driveAdapterFreshReadsAgainBeforeRepairingStaleSnapshot' "$WATCHDOG_UNIT"
+
+# Every normal/branch/merge/repair prompt carries one strict Result-document contract.
+grep -Fq 'RESULT_DOCUMENT_RULES' "$PROTOCOL"
+grep -Fq '[RESULT_DOCUMENT_CONTRACT]' "$PROTOCOL"
+grep -Fq '지정된 기존 RESULT_DOCUMENT_ID의 초기 identity를 보존' "$PROTOCOL"
+grep -Fq 'committed를 boolean true로 확정' "$PROTOCOL"
+grep -Fq '같은 문서를 다시 읽어 저장된 내용을 검증' "$PROTOCOL"
 
 # Regression fixtures execute the former boundaries rather than only scanning source text.
 grep -Fq 'turnReadyAcceptsPromptBeyondFormerOneMiBGate' "$UNBOUNDED"
@@ -88,11 +115,11 @@ grep -Fq 'invalidSaveNeverOverwritesLastGoodValueAndCorruptStoredTypeFallsBack' 
 grep -Fq 'seedSettingsBeforeProcessRestart' "$SETTINGS_PROCESS"
 grep -Fq 'verifySettingsAfterProcessRestart' "$SETTINGS_PROCESS"
 
-# Candidate upgrade fixture must be the exact dev3 baseline for this task.
-grep -Fq 'chatgpt-selfrun-drive-test-v3.1.2-dev3.apk' "$EMULATOR"
-grep -Fq '8a5e2125d7311dbbdd3b925e8faa5791c87bb50a4420f687dd4347029ff7d2cb' "$EMULATOR"
-grep -Fq 'aa430205136f9215fc144b396c319705b8184516/deliverables/current-test.apk' "$EMULATOR"
-grep -Fq "versionCode='3012003'" "$EMULATOR"
+# Candidate upgrade fixture must be the exact dev4 direct TEST baseline for this task.
+grep -Fq 'chatgpt-selfrun-drive-test-v3.1.2-dev4.apk' "$EMULATOR"
+grep -Fq '22bbc785a96a26b695220b4ddad20687aaf137dd3d52d37f7c56110ff8fde6cf' "$EMULATOR"
+grep -Fq 'b22da7f68e7222c7daf2ee49569c0134125ef925/deliverables/current-test.apk' "$EMULATOR"
+grep -Fq "versionCode='3012004'" "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
@@ -101,4 +128,4 @@ grep -Fq 'SelfRun3UnboundedLimitsAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.1.2-dev4 unbounded payload and runtime-settings checks passed.'
+echo 'SelfRun 3.1.2-dev5 result-repair, prompt-contract, unbounded-payload and runtime-settings checks passed.'
