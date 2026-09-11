@@ -98,7 +98,7 @@ public final class SelfRun3TurnStallPolicyTest {
         assertFalse(notifier.contains("postDelayed(poll"));
         assertFalse(notifier.contains("Kind.REPAIR"));
         assertFalse(notifier.contains("ledger.apply("));
-        assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 120L"));
+        assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 10L"));
         assertTrue(settings.contains("DEFAULT_RESULT_POLL_SECONDS = 30L"));
         assertTrue(watchdog.contains("DEFAULT_RESULT_REPAIR_MINUTES * 60_000L"));
         assertTrue(coordinator.contains("drive.observeResult(token, current)"));
@@ -142,5 +142,7 @@ public final class SelfRun3TurnStallPolicyTest {
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
-    private static void put(JSONObject object, String key, Object value) { SelfRun3Engine.put(object, key, value); }
+    private static void put(JSONObject o, String k, Object v) {
+        try { o.put(k, v); } catch (Exception e) { throw new AssertionError(e); }
+    }
 }
