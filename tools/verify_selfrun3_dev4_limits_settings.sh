@@ -29,10 +29,11 @@ SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
 UNBOUNDED_ANDROID=$ANDROID/SelfRun3UnboundedLimitsAndroidTest.java
 SETTINGS_ANDROID=$ANDROID/SelfRun3RuntimeSettingsAndroidTest.java
 SETTINGS_PROCESS=$ANDROID/SelfRun3RuntimeSettingsProcessAndroidTest.java
+UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
   "$SETTINGS" "$COORD" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" \
-  "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$WORKFLOW" "$EMULATOR"; do
+  "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
@@ -114,6 +115,9 @@ grep -Fq 'positiveIntegerParserRejectsBlankZeroNegativeTextAndOverflow' "$SETTIN
 grep -Fq 'invalidSaveNeverOverwritesLastGoodValueAndCorruptStoredTypeFallsBack' "$SETTINGS_ANDROID"
 grep -Fq 'seedSettingsBeforeProcessRestart' "$SETTINGS_PROCESS"
 grep -Fq 'verifySettingsAfterProcessRestart' "$SETTINGS_PROCESS"
+grep -Fq 'RUNTIME_RESULT_REPAIR_OVERRIDE = 77L' "$UPGRADE_ANDROID"
+grep -Fq 'runtime result repair override preserved' "$UPGRADE_ANDROID"
+grep -Fq 'dev5 reads persisted runtime override instead of new default' "$UPGRADE_ANDROID"
 
 # Candidate upgrade fixture must be the exact dev4 direct TEST baseline for this task.
 grep -Fq 'chatgpt-selfrun-drive-test-v3.1.2-dev4.apk' "$EMULATOR"
@@ -128,4 +132,4 @@ grep -Fq 'SelfRun3UnboundedLimitsAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.1.2-dev5 result-repair, prompt-contract, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.1.2-dev5 result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
