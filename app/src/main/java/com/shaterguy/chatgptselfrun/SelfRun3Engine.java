@@ -16,7 +16,7 @@ final class SelfRun3Engine {
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
     enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
-        RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, PAUSE, RESUME, STOP, ERROR }
+        RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, PAUSE, RESUME, RESUME_STOPPED, STOP, ERROR }
     enum Action { SETUP, PREPARE_TURN, PREPARE_WEB, WAIT, READ_RESULT, CHECK_RECEIPT, COMMIT, NONE }
     private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode");
     private static final Set<String> NO_SEND_PROOFS = Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING",
@@ -88,12 +88,16 @@ final class SelfRun3Engine {
         return persist(v, false);
     }
     static State reduce(State original, Event e) {
-        if (!original.taskId().equals(e.taskId) || original.flag("taskStopped")) return original;
-        if (e.kind==Kind.PAUSE || e.kind==Kind.RESUME || e.kind==Kind.STOP) {
+        if (!original.taskId().equals(e.taskId)) return original;
+        if (original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED) return original;
+        if (e.kind==Kind.PAUSE || e.kind==Kind.RESUME || e.kind==Kind.RESUME_STOPPED || e.kind==Kind.STOP) {
             JSONObject v=original.json();
             if(e.kind==Kind.STOP) { put(v,"taskStopped",true); put(v,"pauseReason","USER_STOP"); }
             else if(e.kind==Kind.PAUSE) { put(v,"taskPaused",true); put(v,"pauseReason",e.payload.optString("reason")); }
-            else { put(v,"taskPaused",false); v.remove("pauseReason"); }
+            else if(e.kind==Kind.RESUME_STOPPED) {
+                if(!original.flag("taskStopped")) return original;
+                put(v,"taskStopped",false); put(v,"taskPaused",false); v.remove("pauseReason");
+            } else { put(v,"taskPaused",false); v.remove("pauseReason"); }
             return persist(v,true);
         }
         State s=original.execution(e.turnId); if(s==null) return original;
