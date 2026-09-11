@@ -35,25 +35,28 @@ WEB_CONFIG=$SRC/WebViewConfig.java
 HEADLESS=$SRC/HeadlessWebViewHost.java
 PROFILE=$SRC/RequestProfileScript.java
 PROFILE_REGISTRY=$SRC/ProfileRegistry.java
+STOPPED_RESUME=$SRC/SelfRunStoppedResume.java
 RUNNER=$ANDROID_TEST/SelfRunAndroidTestRunner.java
 FIRST_TEST=$ANDROID_TEST/SelfRun31FirstConversationAndroidTest.java
 UNBOUNDED_TEST=$UNIT_TEST/SelfRun3UnboundedPayloadPolicyTest.java
 SETTINGS_TEST=$UNIT_TEST/SelfRun3RuntimeSettingsTest.java
 SETTINGS_ANDROID_TEST=$ANDROID_TEST/SelfRun3RuntimeSettingsAndroidTest.java
+STOPPED_RESUME_TEST=$UNIT_TEST/SelfRunStoppedResumePolicyTest.java
+STOPPED_RESUME_ANDROID_TEST=$ANDROID_TEST/SelfRunStoppedResumeAndroidTest.java
 TEST_SIGN=tools/sign_test.sh
 
 VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$BUILD" | head -1)"
 VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUILD" | head -1)"
 [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
 [[ "$VERSION_CODE" -gt 2020048 ]]
-[[ "$VERSION_NAME" =~ ^3\.1\.[0-9]+(-(dev|rc)[0-9]+)?$ ]]
+[[ "$VERSION_NAME" =~ ^3\.[0-9]+\.[0-9]+(-(dev|rc)[0-9]+)?$ ]]
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
 grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
-for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST"; do
+for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST" "$STOPPED_RESUME" "$STOPPED_RESUME_TEST" "$STOPPED_RESUME_ANDROID_TEST"; do
   test -s "$file"
 done
 
@@ -61,7 +64,7 @@ grep -Fq 'SelfRun3Coordinator' "$SERVICE"
 grep -Fq 'V3_STALE_RUN_RETIRED' "$SERVICE"
 ! grep -Fq 'SelfRunRolloverCoordinator' "$SERVICE"
 ! grep -Fq 'PHASE_POST_PROTOCOL_DRIVE_SYNC' "$SERVICE"
-for action in RUN PAUSE RESUME STOP; do
+for action in RUN PAUSE RESUME RESUME_STOPPED STOP; do
   grep -Fq "BuildConfig.APPLICATION_ID + \".${action}\"" "$SERVICE"
 done
 
@@ -76,6 +79,8 @@ grep -Fq 'activeCount(original)<2' "$ENGINE"
 grep -Fq 'maybeMerge' "$ENGINE"
 grep -Fq 'routingPhase' "$ENGINE"
 grep -Fq 'usableParallelPlan' "$ENGINE"
+grep -Fq 'RESUME_STOPPED' "$ENGINE"
+grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
 ! grep -Fq 'full handoff missing' "$ENGINE"
 ! grep -Fq 'verification required for DONE' "$ENGINE"
 ! grep -Fq 'branch identity mismatch' "$ENGINE"
@@ -94,6 +99,7 @@ grep -Fq 'unknownNextPhaseDoesNotInvalidateCommittedResult' "$ENGINE_TEST"
 grep -Fq 'nonterminalDoneRoutingHintFallsBackInsteadOfRejectingTurn' "$ENGINE_TEST"
 grep -Fq 'doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp' "$ENGINE_TEST"
 grep -Fq 'identityOnlyCommittedResultCreatesRecoveryTurn' "$ENGINE_TEST"
+grep -Fq 'stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim' "$ENGINE_TEST"
 
 grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES * 60_000L' "$WATCHDOG"
 grep -Fq 'state.stage() != SelfRun3Engine.Stage.WAITING' "$WATCHDOG"
@@ -256,6 +262,11 @@ grep -Fq 'SelfRun3BootstrapTransport.prepare' "$FIRST_TEST"
 grep -Fq 'SelfRun3BootstrapTransport.submit' "$FIRST_TEST"
 grep -Fq '/backend-api/f/conversation' "$FIRST_TEST"
 grep -Fq 'detachOutput()' "$FIRST_TEST"
+grep -Fq 'ledger.load(target)' "$STOPPED_RESUME"
+grep -Fq 'DRIVE_BINDING_MISMATCH' "$STOPPED_RESUME"
+grep -Fq 'coordinator.onStart(SelfRunService.ACTION_RUN)' "$STOPPED_RESUME"
+grep -Fq 'recoveryReusesExistingLedgerAndPinnedDriveIdentity' "$STOPPED_RESUME_TEST"
+grep -Fq 'stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent' "$STOPPED_RESUME_ANDROID_TEST"
 grep -Fq '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$TEST_SIGN"
 
 ! grep -Fq 'DriveSignalParser.scan' "$SERVICE"
@@ -264,4 +275,4 @@ grep -Fq '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$TE
 ! grep -Fq 'rolloverConversation' "$SERVICE"
 ! grep -Fq 'CONTINUATION_VERIFY_INTERVAL_MS' "$SERVICE"
 
-echo "SelfRun Drive ${VERSION_NAME} V3.1 policy checks passed (versionCode=${VERSION_CODE})."
+echo "SelfRun Drive ${VERSION_NAME} V3 policy checks passed (versionCode=${VERSION_CODE})."
