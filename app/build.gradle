@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3013000
-def selfRunDriveVersionName = '3.1.2'
+def selfRunDriveVersionCode = 3020001
+def selfRunDriveVersionName = '3.2.0-dev1'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -132,18 +132,18 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
 
         def src = file('src/main/java/com/shaterguy/chatgptselfrun')
         def service = new File(src, 'SelfRunService.java').getText('UTF-8')
-        ['RUN', 'PAUSE', 'RESUME', 'STOP'].each { action ->
+        ['RUN', 'PAUSE', 'RESUME', 'RESUME_STOPPED', 'STOP'].each { action ->
             if (!service.contains('BuildConfig.APPLICATION_ID + ".' + action + '"')) throw new GradleException("${action} action must derive from applicationId")
         }
-        if (!service.contains('SelfRun3Coordinator') || service.contains('SelfRunRolloverCoordinator')
-                || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) throw new GradleException('SelfRunService must be the V3 foreground shell')
+        if (!service.contains('SelfRun3Coordinator') || !service.contains('SelfRunStoppedResume')
+                || service.contains('SelfRunRolloverCoordinator') || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) throw new GradleException('SelfRunService must be the V3 foreground shell')
 
         ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
          'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
          'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java', 'SelfRun3RuntimeSettings.java',
-         'SelfRun3TurnStallPolicy.java', 'SelfRun3TurnStallNotifier.java'].each { name ->
+         'SelfRun3TurnStallPolicy.java', 'SelfRun3TurnStallNotifier.java', 'SelfRunStoppedResume.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
@@ -162,11 +162,15 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def userNext = new File(src, 'UserNextInputStore.java').getText('UTF-8')
         def store = new File(src, 'SelfRunStore.java').getText('UTF-8')
         def activity = new File(src, 'SelfRunNewActivity.java').getText('UTF-8')
+        def stoppedResume = new File(src, 'SelfRunStoppedResume.java').getText('UTF-8')
         if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
                 || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result identity contract are required')
         if (!engine.contains('case REPAIR') || !engine.contains('repairTargetDocumentId')
                 || !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')
                 || !engine.contains('routingPhase') || !engine.contains('usableParallelPlan')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and resilient result routing are required')
+        if (!engine.contains('RESUME_STOPPED') || !stoppedResume.contains('ledger.load(target)')
+                || !stoppedResume.contains('DRIVE_BINDING_MISMATCH') || !stoppedResume.contains('coordinator.onStart(SelfRunService.ACTION_RUN)'))
+            throw new GradleException('V3 user-stopped task recovery must reuse the pinned ledger and Drive identity')
         if (engine.contains('full handoff missing') || engine.contains('verification required for DONE')
                 || engine.contains('branch identity mismatch')) throw new GradleException('V3 app must not reject committed results for AI checkpoint semantics')
         if (!engine.contains('case RESULT_BASELINE') || !engine.contains('case RESULT_MUTATED')
