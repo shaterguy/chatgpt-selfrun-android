@@ -141,6 +141,14 @@ public final class SelfRunHistoryActivity extends Activity {
                 Ui.outlinedButton(this, "상세", v -> openDetail(runId)),
                 Ui.outlinedButton(this, "실행 로그", v -> openLogs(runId, SelfRunLogsActivity.KIND_EXECUTION)),
                 Ui.outlinedButton(this, "디버그", v -> openLogs(runId, SelfRunLogsActivity.KIND_DEBUG))));
+        if (SelfRunStoppedResume.isEligible(item)) {
+            detailPane.addView(Ui.button(this, "중지된 작업 재개", v -> {
+                if (SelfRunStoppedResume.request(this, runId)) {
+                    v.setEnabled(false);
+                    v.setVisibility(android.view.View.GONE);
+                }
+            }));
+        }
     }
 
     private void openDetail(String runId) {
