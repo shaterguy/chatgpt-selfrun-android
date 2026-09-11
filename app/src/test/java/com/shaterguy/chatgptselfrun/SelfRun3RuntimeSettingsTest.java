@@ -47,10 +47,10 @@ public final class SelfRun3RuntimeSettingsTest {
         assertTrue(notifier.contains("runtimeSettings.stallAlertMs()"));
         assertTrue(notifier.contains("settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)"));
         assertTrue(web.contains("prepareTimeoutMs = runtimeSettings.webPreparationMs()"));
-        assertTrue(ui.contains("runtimeSettings.saveResultRepairMinutes"));
-        assertTrue(ui.contains("runtimeSettings.saveStallAlertMinutes"));
-        assertTrue(ui.contains("runtimeSettings.saveResultPollSeconds"));
-        assertTrue(ui.contains("runtimeSettings.saveWebPreparationSeconds"));
+        assertTrue(ui.contains("runtimeSettings::saveResultRepairMinutes"));
+        assertTrue(ui.contains("runtimeSettings::saveStallAlertMinutes"));
+        assertTrue(ui.contains("runtimeSettings::saveResultPollSeconds"));
+        assertTrue(ui.contains("runtimeSettings::saveWebPreparationSeconds"));
     }
 
     @Test public void removedTimingsNoLongerHideInPowerPolicy() throws Exception {
