@@ -51,6 +51,42 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
+    @Test public void stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim() {
+        SelfRun3Engine.State claimed = claimedState();
+        SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
+        SelfRun3Engine.State stopped = reduce(waiting, "stop", SelfRun3Engine.Kind.STOP, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.STOPPED, stopped.stage());
+        assertTrue(stopped.flag("taskStopped"));
+        assertTrue(stopped.flag("sendClaimed"));
+
+        SelfRun3Engine.State normalResume = reduce(stopped, "normal-resume", SelfRun3Engine.Kind.RESUME, new JSONObject());
+        assertSame(stopped, normalResume);
+
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
+        assertFalse(resumed.flag("taskStopped"));
+        assertTrue(resumed.flag("sendClaimed"));
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
+
+        SelfRun3Engine.State duplicate = reduce(resumed, "resume-stopped-again", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertSame(resumed, duplicate);
+    }
+
+    @Test public void stoppedTaskWithCommittedDriveResultResumesAtCommitWithoutRedispatch() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject resultPayload = new JSONObject();
+        SelfRun3Engine.put(resultPayload, "text", continueResult(claimed).toString());
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, resultPayload);
+        assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(withResult));
+
+        SelfRun3Engine.State stopped = reduce(withResult, "stop-with-result", SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped-result", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.RECONCILING, resumed.stage());
+        assertTrue(resumed.flag("sendClaimed"));
+        assertTrue(resumed.hasResult());
+        assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(resumed));
+    }
+
     @Test public void committedResultAdvancesWithoutTransportEnd() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject resultPayload = new JSONObject();
