@@ -47,12 +47,14 @@ public final class SelfRun3ProjectDirectoryWiringTest {
         assertTrue(web.contains("recoverProjectDirectory(\"directory-hydration-stalled\")"));
     }
 
-    @Test public void repeatedRecoveryRecreatesHostAndPreparationRestartNeverReusesStalledHost() throws Exception {
+    @Test public void repeatedRecoveryRecreatesHostAndPreparationRestartUsesCanonicalEntry() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(web.contains("SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecreateHost(projectDirectoryRecoveries)"));
         assertTrue(web.contains("disposeHost();\n            ensureWeb();"));
-        assertTrue(web.contains("status=preparation-restart;strategy=recreate-webview"));
-        assertTrue(web.contains("loadProjectDirectory(\"preparation-restart\")"));
+        assertTrue(web.contains("WEB_PREPARATION_RECOVERY"));
+        assertTrue(web.contains("strategy=recreate-webview"));
+        assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
+        assertFalse(web.contains("loadProjectDirectory(\"preparation-restart\")"));
     }
 
     @Test public void recurringProjectFailureWritesActionableDebugEvents() throws Exception {
