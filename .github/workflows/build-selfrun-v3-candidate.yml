@@ -255,8 +255,29 @@ jobs:
           grep -F "$APK_SHA256" "$SUM_FILE" >/dev/null
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$CERT_FILE"
           if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
-            echo "immutable artifact branch already exists: $ARTIFACT_BRANCH" >&2
-            exit 1
+            git fetch --no-tags --depth=2 origin "refs/heads/$ARTIFACT_BRANCH:refs/remotes/origin/$ARTIFACT_BRANCH"
+            git show "refs/remotes/origin/$ARTIFACT_BRANCH:deliverables/direct-apk.txt" > direct-apk.txt
+            PUBLISHED_SOURCE_SHA="$(sed -n 's/^SOURCE_SHA=//p' direct-apk.txt)"
+            ARTIFACT_COMMIT_SHA="$(sed -n 's/^ARTIFACT_COMMIT_SHA=//p' direct-apk.txt)"
+            PUBLISHED_FILE="$(sed -n 's/^APK_FILE=//p' direct-apk.txt)"
+            PUBLISHED_SHA="$(sed -n 's/^APK_SHA256=//p' direct-apk.txt)"
+            PUBLISHED_URL="$(sed -n 's/^APK_URL=//p' direct-apk.txt)"
+            test -n "$PUBLISHED_SOURCE_SHA"; test -n "$ARTIFACT_COMMIT_SHA"
+            test -n "$PUBLISHED_FILE"; test -n "$PUBLISHED_SHA"; test -n "$PUBLISHED_URL"
+            [[ "$PUBLISHED_FILE" == "$NAMED_FILE" ]]
+            [[ "$PUBLISHED_URL" == "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$ARTIFACT_COMMIT_SHA/$NAMED_PATH" ]]
+            EXISTING_APK="$RUNNER_TEMP/$PUBLISHED_FILE"
+            curl --fail --location --retry 4 --retry-delay 2 --output "$EXISTING_APK" "$PUBLISHED_URL"
+            test -s "$EXISTING_APK"
+            EXISTING_SHA="$(sha256sum "$EXISTING_APK" | awk '{print $1}')"
+            [[ "$EXISTING_SHA" == "$PUBLISHED_SHA" ]]
+            [[ "$APK_SHA256" == "$PUBLISHED_SHA" ]]
+            echo "REUSE_EXISTING_IDENTICAL_APK=$PUBLISHED_FILE sha256=$PUBLISHED_SHA source=$PUBLISHED_SOURCE_SHA"
+            echo "publish_mode=reuse" >> "$GITHUB_OUTPUT"
+            echo "artifact_branch=$ARTIFACT_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "existing_source_sha=$PUBLISHED_SOURCE_SHA" >> "$GITHUB_OUTPUT"
+            echo "existing_artifact_commit=$ARTIFACT_COMMIT_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -280,9 +301,11 @@ jobs:
           git update-index --add --cacheinfo 100644,"$META_BLOB",deliverables/direct-apk.txt
           META_TREE="$(git write-tree)"
           META_COMMIT="$(printf '%s\n' 'docs: record immutable SelfRun 3 TEST APK identity' | git commit-tree "$META_TREE" -p "$APK_COMMIT")"
+          echo "publish_mode=create" >> "$GITHUB_OUTPUT"
           echo "meta_commit=$META_COMMIT" >> "$GITHUB_OUTPUT"
           echo "artifact_branch=$ARTIFACT_BRANCH" >> "$GITHUB_OUTPUT"
       - name: PUBLISH_DELIVER - publish immutable artifact ref
+        if: ${{ steps.prepare_publish.outputs.publish_mode == 'create' }}
         shell: bash
         env:
           META_COMMIT: ${{ steps.prepare_publish.outputs.meta_commit }}
@@ -293,23 +316,40 @@ jobs:
           git push origin "$META_COMMIT:refs/heads/$ARTIFACT_BRANCH"
       - name: Verify direct APK accessibility and identity
         shell: bash
+        env:
+          PUBLISH_MODE: ${{ steps.prepare_publish.outputs.publish_mode }}
         run: |
           set -euo pipefail
+          PUBLISHED_SOURCE_SHA="$(sed -n 's/^SOURCE_SHA=//p' direct-apk.txt)"
+          ARTIFACT_COMMIT_SHA="$(sed -n 's/^ARTIFACT_COMMIT_SHA=//p' direct-apk.txt)"
           RAW_URL="$(sed -n 's/^APK_URL=//p' direct-apk.txt)"
           EXPECTED_SHA="$(sed -n 's/^APK_SHA256=//p' direct-apk.txt)"
           EXPECTED_FILE="$(sed -n 's/^APK_FILE=//p' direct-apk.txt)"
+          test -n "$PUBLISH_MODE"; test -n "$PUBLISHED_SOURCE_SHA"; test -n "$ARTIFACT_COMMIT_SHA"
           test -n "$RAW_URL"; test -n "$EXPECTED_SHA"; test -n "$EXPECTED_FILE"
           [[ "$EXPECTED_FILE" == "SelfRun-Drive-TEST-${VERSION_NAME}.apk" ]]
+          [[ "$RAW_URL" == "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$ARTIFACT_COMMIT_SHA/deliverables/$EXPECTED_FILE" ]]
+          CURRENT_APK="current/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
+          test -s "$CURRENT_APK"
+          [[ "$(sha256sum "$CURRENT_APK" | awk '{print $1}')" == "$EXPECTED_SHA" ]]
           curl --fail --location --retry 4 --retry-delay 2 --output "$EXPECTED_FILE" "$RAW_URL"
           test -s "$EXPECTED_FILE"
           ACTUAL_SHA="$(sha256sum "$EXPECTED_FILE" | awk '{print $1}')"
           [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
           {
-            echo "SOURCE_SHA=$GITHUB_SHA"
+            echo "RUN_SOURCE_SHA=$GITHUB_SHA"
+            echo "PUBLISHED_SOURCE_SHA=$PUBLISHED_SOURCE_SHA"
+            echo "ARTIFACT_COMMIT_SHA=$ARTIFACT_COMMIT_SHA"
+            echo "PUBLISH_MODE=$PUBLISH_MODE"
             echo "APK_FILE=$EXPECTED_FILE"
             echo "APK_URL=$RAW_URL"
             echo "APK_SHA256=$ACTUAL_SHA"
             echo "APK_SIZE_BYTES=$(stat -c%s "$EXPECTED_FILE")"
+            if [[ "$PUBLISH_MODE" == 'reuse' ]]; then
+              echo "REUSE_EXISTING_IDENTICAL_APK=PASS"
+            else
+              echo "NEW_IMMUTABLE_ARTIFACT=PASS"
+            fi
             echo "HTTP_DOWNLOAD=PASS"
           } > direct-apk-access.txt
           cat direct-apk-access.txt
