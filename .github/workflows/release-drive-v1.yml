@@ -96,7 +96,6 @@ jobs:
           ANDROID_TEST="release-output/chatgpt-selfrun-drive-test-v${FORMAL_VERSION_NAME}-androidTest.apk"
           APKSIGNER="$BT/apksigner" bash tools/sign_release.sh release-output/formal-aligned.apk "$PASS_FILE" "$FORMAL" > release-output/FORMAL_APKSIGNER_VERIFY.txt
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh release-output/test-aligned.apk "$PASS_FILE" "$TEST" > release-output/TEST_APKSIGNER_VERIFY.txt
-          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh release-output/androidTest-aligned.apk "$PASS_FILE" "$TEST_APK" > /dev/null 2>&1 || true
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh release-output/androidTest-aligned.apk "$PASS_FILE" "$ANDROID_TEST" > release-output/ANDROIDTEST_APKSIGNER_VERIFY.txt
           "$BT/apksigner" verify --verbose --print-certs "$FORMAL" > release-output/FORMAL_CERT.txt
           "$BT/apksigner" verify --verbose --print-certs "$TEST" > release-output/TEST_CERT.txt
