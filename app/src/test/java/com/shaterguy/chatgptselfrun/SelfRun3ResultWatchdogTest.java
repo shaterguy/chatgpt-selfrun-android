@@ -186,6 +186,10 @@ public final class SelfRun3ResultWatchdogTest {
         s = event(s, s.turnId(), s.turnId() + ":claim", SelfRun3Engine.Kind.CLAIM_SEND, claim);
         s = event(s, s.turnId(), s.turnId() + ":started", SelfRun3Engine.Kind.STARTED,
                 startedPayload(s, submittedElapsed, 50_000L, bootCount));
+        s = resource(s, "conversationUrl", "https://chatgpt.com/c/watchdog-confirmed");
+        JSONObject accepted = startedPayload(s, submittedElapsed, 50_000L, bootCount);
+        put(accepted, "proof", "conversation_url");
+        s = event(s, s.turnId(), s.turnId() + ":accepted", SelfRun3Engine.Kind.ACCEPTED, accepted);
         return event(s, s.turnId(), s.turnId() + ":result-body-mutated", SelfRun3Engine.Kind.RESULT_MUTATED,
                 mutationPayload(s, SelfRun3ResultWatchdog.fingerprint("partial body A"), mutationElapsed, bootCount));
     }
