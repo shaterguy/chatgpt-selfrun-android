@@ -1,0 +1,136 @@
+name: One-shot SelfRun 3.2.4 transport retry patch
+
+on:
+  push:
+    branches:
+      - fix/selfrun3-read-result-transport-retry
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 055b7384fa3323386fbe68edf47904157a994295
+  WORK_BRANCH: fix/selfrun3-read-result-transport-retry
+  FINAL_BRANCH: v3.2.4-dev1
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "app/build.gradle",
+              "def selfRunDriveVersionCode = 3024000\ndef selfRunDriveVersionName = '3.2.3'",
+              "def selfRunDriveVersionCode = 3024001\ndef selfRunDriveVersionName = '3.2.4-dev1'",
+          )
+
+          coordinator = "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java"
+          replace_once(
+              coordinator,
+              '''                    if (step == DriveStep.READ_RESULT) {\n                        clearRecoveredDriveWarning(store);\n                        networkAttempt = 0;\n                        repairResult(state, "READ_RESULT_FAILURE_" + safeCode(error.getClass().getSimpleName()));\n                    } else {\n                        handleDriveFailure(state, step, error);\n                    }''',
+              '''                    if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error)) {\n                        clearRecoveredDriveWarning(store);\n                        networkAttempt = 0;\n                        repairResult(state, "READ_RESULT_FAILURE_" + safeCode(error.getClass().getSimpleName()));\n                    } else {\n                        handleDriveFailure(state, step, error);\n                    }''',
+          )
+          replace_once(
+              coordinator,
+              '''    private void handleDriveFailure(SelfRun3Engine.State state, DriveStep step, Throwable error) {''',
+              '''    static boolean readResultTransportFailure(Throwable error) {\n        return error instanceof DriveApiClient.ApiException || error instanceof IOException;\n    }\n\n    private void handleDriveFailure(SelfRun3Engine.State state, DriveStep step, Throwable error) {''',
+          )
+
+          test = "app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3AlwaysRepairPolicyTest.java"
+          replace_once(
+              test,
+              "/** Result-read failures must roll forward through disposable repair turns instead of hard-pausing the task. */",
+              "/** Result-content failures repair; transport failures stay on the same logical turn and use Drive recovery. */",
+          )
+          replace_once(
+              test,
+              '''    @Test public void readResultFailuresRouteToRepairAndRepairFailureRetries() throws Exception {\n        String coordinator = source("SelfRun3Coordinator.java");\n        assertTrue(coordinator.contains("if (step == DriveStep.READ_RESULT)"));\n        assertTrue(coordinator.contains("repairResult(state, \\"READ_RESULT_FAILURE_\\""));\n        assertTrue(coordinator.contains("V3_RESULT_REPAIR_RETRY"));''',
+              '''    @Test public void readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair() throws Exception {\n        assertTrue(SelfRun3Coordinator.readResultTransportFailure(new DriveApiClient.ApiException(503, "temporary")));\n        assertTrue(SelfRun3Coordinator.readResultTransportFailure(new java.io.IOException("network")));\n        assertFalse(SelfRun3Coordinator.readResultTransportFailure(new IllegalStateException("result state")));\n\n        String coordinator = source("SelfRun3Coordinator.java");\n        assertTrue(coordinator.contains("if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))"));\n        assertTrue(coordinator.contains("repairResult(state, \\"READ_RESULT_FAILURE_\\""));\n        assertTrue(coordinator.contains("handleDriveFailure(state, step, error);"));\n        assertTrue(coordinator.contains("V3_RESULT_REPAIR_RETRY"));''',
+          )
+
+          static = "tools/verify_selfrun3_dev4_limits_settings.sh"
+          replacements = [
+              ("selfRunDriveVersionCode = 3024000", "selfRunDriveVersionCode = 3024001"),
+              ("selfRunDriveVersionName = '3.2.3'", "selfRunDriveVersionName = '3.2.4-dev1'"),
+              ("# Any actual READ_RESULT failure rolls forward into a fresh repair turn, and repairs can repeat.\ngrep -Fq 'repairResult(state, \"READ_RESULT_FAILURE_\"' \"$COORD\"",
+               "# READ_RESULT transport failures stay on the same logical turn; content/state failures can still repair.\ngrep -Fq 'if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))' \"$COORD\"\ngrep -Fq 'error instanceof DriveApiClient.ApiException || error instanceof IOException' \"$COORD\"\ngrep -Fq 'handleDriveFailure(state, step, error);' \"$COORD\"\ngrep -Fq 'repairResult(state, \"READ_RESULT_FAILURE_\"' \"$COORD\""),
+              ("readResultFailuresRouteToRepairAndRepairFailureRetries", "readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair"),
+              ("SelfRun-Drive-TEST-3.2.2-dev2.apk", "SelfRun-Drive-TEST-3.2.3-dev1.apk"),
+              ("bf7a325c08f3be363d28bf757ee9792235b0b8dede6205bdda4ff147fca5b258", "662424cc10f38bf42feb8b156c6cf5ea1840fe4f52692dab09da72816ab86277"),
+              ("eb6908a15b6dadb5de108b97446875f4312e6257/deliverables/SelfRun-Drive-TEST-3.2.2-dev2.apk", "0e07dfabeef0ff6300add826e01afc6689f2e49d/deliverables/SelfRun-Drive-TEST-3.2.3-dev1.apk"),
+              ("versionCode='3022002'", "versionCode='3023001'"),
+              ("versionName='3.2.2-dev2'", "versionName='3.2.3-dev1'"),
+              ("stable/chatgpt-selfrun-drive-v3.2.2.apk", "stable/chatgpt-selfrun-drive-v3.2.3.apk"),
+              ("SelfRun 3.2.3 always-repair, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.",
+               "SelfRun 3.2.4 transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed."),
+          ]
+          for old, new in replacements:
+              replace_once(static, old, new)
+
+          emulator = "tools/verify_selfrun3_candidate_emulator.sh"
+          for old, new in [
+              ("SelfRun-Drive-TEST-3.2.2-dev2.apk", "SelfRun-Drive-TEST-3.2.3-dev1.apk"),
+              ("bf7a325c08f3be363d28bf757ee9792235b0b8dede6205bdda4ff147fca5b258", "662424cc10f38bf42feb8b156c6cf5ea1840fe4f52692dab09da72816ab86277"),
+              ("https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/eb6908a15b6dadb5de108b97446875f4312e6257/deliverables/SelfRun-Drive-TEST-3.2.2-dev2.apk", "https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/0e07dfabeef0ff6300add826e01afc6689f2e49d/deliverables/SelfRun-Drive-TEST-3.2.3-dev1.apk"),
+              ("versionName='3.2.2-dev2'", "versionName='3.2.3-dev1'"),
+              ("versionCode='3022002'", "versionCode='3023001'"),
+              ("stable/chatgpt-selfrun-drive-v3.2.2.apk", "stable/chatgpt-selfrun-drive-v3.2.3.apk"),
+              ("== '3.2.2'", "== '3.2.3'"),
+          ]:
+              replace_once(emulator, old, new)
+
+          workflow = ".github/workflows/build-selfrun-v3-candidate.yml"
+          for old, new in [
+              ("gh release download drive-v3.2.2 --repo \"$GITHUB_REPOSITORY\" \\\n            --pattern 'chatgpt-selfrun-drive-v3.2.2.apk' --dir stable",
+               "gh release download drive-v3.2.3 --repo \"$GITHUB_REPOSITORY\" \\\n            --pattern 'chatgpt-selfrun-drive-v3.2.3.apk' --dir stable"),
+              ("test -s stable/chatgpt-selfrun-drive-v3.2.2.apk", "test -s stable/chatgpt-selfrun-drive-v3.2.3.apk"),
+              ("echo '1684c6518e4babe607ba2e4b03d4a14074e29e5d6759e6ba6827f5aa434b70c9  stable/chatgpt-selfrun-drive-v3.2.2.apk' | sha256sum -c -",
+               "echo '270539a5eccfaeae6860cd42fcc6747e04948b7005260a88e6b74bfec79bcabb  stable/chatgpt-selfrun-drive-v3.2.3.apk' | sha256sum -c -"),
+              ("\"$BT/apksigner\" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.2.2.apk > stable-cert.txt",
+               "\"$BT/apksigner\" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.2.3.apk > stable-cert.txt"),
+          ]:
+              replace_once(workflow, old, new)
+          PY
+          git diff --check
+          grep -Fq "selfRunDriveVersionName = '3.2.4-dev1'" app/build.gradle
+          grep -Fq 'if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java
+          grep -Fq 'drive-v3.2.3' .github/workflows/build-selfrun-v3-candidate.yml
+          grep -Fq 'SelfRun-Drive-TEST-3.2.3-dev1.apk' tools/verify_selfrun3_candidate_emulator.sh
+      - name: Build clean final commit from formal baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/oneshot-selfrun324-transport-retry.yml
+          git add app/build.gradle \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java \
+            app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3AlwaysRepairPolicyTest.java \
+            tools/verify_selfrun3_dev4_limits_settings.sh \
+            tools/verify_selfrun3_candidate_emulator.sh \
+            .github/workflows/build-selfrun-v3-candidate.yml
+          TREE="$(git write-tree)"
+          FINAL_COMMIT="$(printf '%s\n\n%s\n' \
+            'fix(selfrun3): retry result transport failures in same turn' \
+            'Base on SelfRun Drive v3.2.3; advance TEST candidate to v3.2.4-dev1.' \
+            | git commit-tree "$TREE" -p "$BASE_SHA")"
+          echo "FINAL_COMMIT=$FINAL_COMMIT" >> "$GITHUB_ENV"
+          git diff --exit-code "$BASE_SHA" "$FINAL_COMMIT" -- .github/workflows/oneshot-selfrun324-transport-retry.yml
+          git push origin "$FINAL_COMMIT:refs/heads/$FINAL_BRANCH"
+          echo "FINAL_COMMIT=$FINAL_COMMIT"
