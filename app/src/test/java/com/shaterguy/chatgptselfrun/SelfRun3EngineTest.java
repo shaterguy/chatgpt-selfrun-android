@@ -8,12 +8,98 @@ import static org.junit.Assert.*;
 public final class SelfRun3EngineTest {
     @Test public void sendClaimIsDurableAndDuplicateClaimDoesNotDispatchAgain() {
         SelfRun3Engine.State ready = readyState();
-        JSONObject p = new JSONObject(); SelfRun3Engine.put(p, "at", 100L);
+        JSONObject p = claimPayload();
         SelfRun3Engine.State claimed = reduce(ready, "claim", SelfRun3Engine.Kind.CLAIM_SEND, p);
         assertEquals(SelfRun3Engine.Stage.DISPATCHING, claimed.stage());
         assertTrue(claimed.flag("sendClaimed"));
+        assertEquals(100L + SelfRun3Engine.SUBMISSION_RECEIPT_TIMEOUT_MS, claimed.time("receiptDeadlineElapsed"));
         SelfRun3Engine.State duplicate = reduce(claimed, "claim2", SelfRun3Engine.Kind.CLAIM_SEND, p);
         assertSame(claimed, duplicate);
+    }
+
+    @Test public void canonicalPostStartDoesNotMeanAccepted() {
+        SelfRun3Engine.State claimed = claimedState();
+        SelfRun3Engine.State started = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, startedPayload(claimed));
+        assertEquals(SelfRun3Engine.Stage.DISPATCHING, started.stage());
+        assertTrue(started.flag("canonicalPostStarted"));
+        assertFalse(started.flag("accepted"));
+        assertFalse(started.flag("dispatchObserved"));
+        assertEquals(SelfRun3Engine.Action.CHECK_RECEIPT, SelfRun3Engine.nextAction(started));
+    }
+
+    @Test public void positiveConversationProofMovesDispatchToWaiting() {
+        SelfRun3Engine.State started = startedState();
+        SelfRun3Engine.State bound = resource(started, "conversationUrl", "https://chatgpt.com/c/new-conversation");
+        JSONObject proof = request(bound);
+        SelfRun3Engine.put(proof, "proof", "conversation_url");
+        SelfRun3Engine.put(proof, "atElapsed", 500L);
+        SelfRun3Engine.put(proof, "atWall", 1_500L);
+        SelfRun3Engine.put(proof, "bootCount", 7);
+        SelfRun3Engine.State accepted = reduce(bound, "accepted", SelfRun3Engine.Kind.ACCEPTED, proof);
+        assertEquals(SelfRun3Engine.Stage.WAITING, accepted.stage());
+        assertTrue(accepted.flag("accepted"));
+        assertTrue(accepted.flag("dispatchObserved"));
+        assertEquals("conversation_url", accepted.text("acceptanceProof"));
+        assertEquals(500L, accepted.time("canonicalPostConfirmedElapsed"));
+    }
+
+    @Test public void committedResultIsPositiveAcceptanceProof() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject resultPayload = new JSONObject();
+        SelfRun3Engine.put(resultPayload, "text", continueResult(claimed).toString());
+        SelfRun3Engine.put(resultPayload, "atElapsed", 700L);
+        SelfRun3Engine.put(resultPayload, "atWall", 1_700L);
+        SelfRun3Engine.put(resultPayload, "bootCount", 7);
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result", SelfRun3Engine.Kind.RESULT, resultPayload);
+        assertEquals(SelfRun3Engine.Stage.RECONCILING, withResult.stage());
+        assertTrue(withResult.flag("accepted"));
+        assertEquals("committed_result", withResult.text("acceptanceProof"));
+        assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(withResult));
+    }
+
+    @Test public void receiptDeadlineIsFiniteAcrossSameBootAndWallFallback() {
+        SelfRun3Engine.State claimed = claimedState();
+        long deadlineElapsed = 100L + SelfRun3Engine.SUBMISSION_RECEIPT_TIMEOUT_MS;
+        long deadlineWall = 1_000L + SelfRun3Engine.SUBMISSION_RECEIPT_TIMEOUT_MS;
+        assertEquals(1L, SelfRun3Engine.receiptDelayMs(claimed, deadlineElapsed - 1L, deadlineWall - 1L, 7));
+        assertEquals(0L, SelfRun3Engine.receiptDelayMs(claimed, deadlineElapsed, deadlineWall, 7));
+        assertEquals(0L, SelfRun3Engine.receiptDelayMs(claimed, 0L, deadlineWall, 8));
+    }
+
+    @Test public void legacyGhostWaitingStateNormalizesToUncertainDispatchWithoutIdentityLoss() {
+        JSONObject config = new JSONObject();
+        SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.put(config, "reasoning", "medium");
+        JSONObject raw = new JSONObject();
+        SelfRun3Engine.put(raw, "schema", SelfRun3Engine.STATE_SCHEMA);
+        SelfRun3Engine.put(raw, "taskId", "task");
+        SelfRun3Engine.put(raw, "turnId", "task:turn:1");
+        SelfRun3Engine.put(raw, "requestId", "task:turn:1-request");
+        SelfRun3Engine.put(raw, "turn", 1);
+        SelfRun3Engine.put(raw, "stage", "WAITING");
+        SelfRun3Engine.put(raw, "phase", "WORK");
+        SelfRun3Engine.put(raw, "config", config);
+        JSONObject resources = new JSONObject(); SelfRun3Engine.put(resources, "resultDocumentId", "resultdoc");
+        SelfRun3Engine.put(raw, "resources", resources);
+        SelfRun3Engine.put(raw, "sendClaimed", true);
+        SelfRun3Engine.put(raw, "dispatchObserved", true);
+        SelfRun3Engine.put(raw, "accepted", true);
+        SelfRun3Engine.put(raw, "inputRevision", 9L);
+        SelfRun3Engine.put(raw, "lastConsumedInputRevision", 4L);
+        SelfRun3Engine.put(raw, "submittedAt", 1_000L);
+        SelfRun3Engine.put(raw, "canonicalPostConfirmedElapsed", 100L);
+        SelfRun3Engine.put(raw, "canonicalPostConfirmedAtWall", 1_000L);
+        SelfRun3Engine.put(raw, "canonicalPostBootCount", 7);
+        SelfRun3Engine.State normalized = new SelfRun3Engine.State(raw);
+        assertEquals(SelfRun3Engine.Stage.DISPATCHING, normalized.stage());
+        assertEquals("task:turn:1-request", normalized.requestId());
+        assertEquals(9L, normalized.time("inputRevision"));
+        assertEquals(4L, normalized.time("lastConsumedInputRevision"));
+        assertTrue(normalized.flag("legacyGhostNormalized"));
+        assertTrue(normalized.flag("canonicalPostStarted"));
+        assertFalse(normalized.flag("accepted"));
+        assertFalse(normalized.flag("dispatchObserved"));
+        assertEquals(SelfRun3Engine.Action.CHECK_RECEIPT, SelfRun3Engine.nextAction(normalized));
     }
 
     @Test public void staleRequestCallbackCannotAdvanceCurrentTurn() {
@@ -39,9 +125,8 @@ public final class SelfRun3EngineTest {
         reduce(claimed, "bad-unsent", SelfRun3Engine.Kind.UNSENT, p);
     }
 
-    @Test public void pauseDuringRunningResponseResumesWaitingWithoutFreshSend() {
-        SelfRun3Engine.State claimed = claimedState();
-        SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
+    @Test public void pauseDuringAcceptedResponseResumesWaitingWithoutFreshSend() {
+        SelfRun3Engine.State waiting = acceptedState();
         assertEquals(SelfRun3Engine.Stage.WAITING, waiting.stage());
         JSONObject pause = new JSONObject(); SelfRun3Engine.put(pause, "reason", "USER_PAUSE");
         SelfRun3Engine.State paused = reduce(waiting, "pause", SelfRun3Engine.Kind.PAUSE, pause);
@@ -51,9 +136,8 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
-    @Test public void stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim() {
-        SelfRun3Engine.State claimed = claimedState();
-        SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
+    @Test public void stoppedTaskRequiresExplicitRecoveryAndPreservesAcceptedSendClaim() {
+        SelfRun3Engine.State waiting = acceptedState();
         SelfRun3Engine.State stopped = reduce(waiting, "stop", SelfRun3Engine.Kind.STOP, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.STOPPED, stopped.stage());
         assertTrue(stopped.flag("taskStopped"));
@@ -196,8 +280,42 @@ public final class SelfRun3EngineTest {
 
     private static SelfRun3Engine.State claimedState() {
         SelfRun3Engine.State s = readyState();
-        JSONObject p = new JSONObject(); SelfRun3Engine.put(p, "at", 100L);
-        return reduce(s, "claim", SelfRun3Engine.Kind.CLAIM_SEND, p);
+        return reduce(s, "claim", SelfRun3Engine.Kind.CLAIM_SEND, claimPayload());
+    }
+
+    private static SelfRun3Engine.State startedState() {
+        SelfRun3Engine.State claimed = claimedState();
+        return reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, startedPayload(claimed));
+    }
+
+    private static SelfRun3Engine.State acceptedState() {
+        SelfRun3Engine.State started = startedState();
+        SelfRun3Engine.State bound = resource(started, "conversationUrl", "https://chatgpt.com/c/accepted-conversation");
+        JSONObject proof = request(bound);
+        SelfRun3Engine.put(proof, "proof", "conversation_url");
+        SelfRun3Engine.put(proof, "atElapsed", 500L);
+        SelfRun3Engine.put(proof, "atWall", 1_500L);
+        SelfRun3Engine.put(proof, "bootCount", 7);
+        return reduce(bound, "accepted", SelfRun3Engine.Kind.ACCEPTED, proof);
+    }
+
+    private static JSONObject claimPayload() {
+        JSONObject p = new JSONObject();
+        SelfRun3Engine.put(p, "at", 1_000L);
+        SelfRun3Engine.put(p, "atElapsed", 100L);
+        SelfRun3Engine.put(p, "atWall", 1_000L);
+        SelfRun3Engine.put(p, "bootCount", 7);
+        return p;
+    }
+
+    private static JSONObject startedPayload(SelfRun3Engine.State s) {
+        JSONObject p = request(s);
+        SelfRun3Engine.put(p, "source", "canonical_post");
+        SelfRun3Engine.put(p, "protocolStage", "turn_request");
+        SelfRun3Engine.put(p, "atElapsed", 200L);
+        SelfRun3Engine.put(p, "atWall", 1_100L);
+        SelfRun3Engine.put(p, "bootCount", 7);
+        return p;
     }
 
     private static SelfRun3Engine.State verifyCompletedState() {
