@@ -55,10 +55,13 @@ public final class SelfRun3PreparationRecoveryWiringTest {
         assertTrue(web.contains("status=recovered"));
     }
 
-    @Test public void replacementWebViewRejectsLateCallbacksFromDestroyedHost() throws Exception {
+    @Test public void replacementWebViewRejectsLateCallbacksAndKeepsTransientTlsInsideStage() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(web.contains("if (view != web || closed) return;\n                generation++;"));
-        assertTrue(web.contains("response.cancel();\n                if (view == web && !closed) fail(\"TLS_REJECTED\");"));
+        assertTrue(web.contains("response.cancel();"));
+        assertTrue(web.contains("status=tls-rejected"));
+        assertTrue(web.contains("scope=conversation-create"));
+        assertFalse(web.contains("if (view == web && !closed) fail(\"TLS_REJECTED\")"));
     }
 
     @Test public void unboundDispatchReentersConversationCreationInsteadOfDrivePolling() throws Exception {

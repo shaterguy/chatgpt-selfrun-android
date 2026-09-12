@@ -7,14 +7,21 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
-/** 3.1 observes only the accepted outgoing request; Drive owns all later completion state. */
+/** 3.1 observes the accepted outgoing request but binds the canonical conversation before Drive wait. */
 public final class SelfRun3EarlyObservationTest {
-    @Test public void browserAdapterStopsAtCanonicalDispatch() throws Exception {
+    @Test public void browserAdapterStopsOnlyAfterCanonicalConversationIsBound() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(web.contains("turn_request"));
         assertTrue(web.contains("canonical_post"));
-        assertTrue(web.contains("a.quiesce()"));
-        assertTrue(web.contains("listener.onStarted"));
+        String protocol = web.substring(web.indexOf("static boolean protocolEvent"), web.indexOf("void prepare("));
+        assertFalse(protocol.contains("quiesce()"));
+        assertFalse(protocol.contains("listener.onStarted"));
+        String capture = web.substring(web.indexOf("private void captureConversation()"),
+                web.indexOf("private boolean allowedPreparationRoute"));
+        assertTrue(capture.contains("listener.onConversation"));
+        assertTrue(capture.contains("listener.onStarted"));
+        assertTrue(capture.contains("quiesce();"));
+        assertTrue(capture.indexOf("listener.onConversation") < capture.indexOf("listener.onStarted"));
         assertFalse(web.contains("onEnded"));
         assertFalse(web.contains("observedEnd"));
         assertFalse(web.contains("completion_dispatch"));
