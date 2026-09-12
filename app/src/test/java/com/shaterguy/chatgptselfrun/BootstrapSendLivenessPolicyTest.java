@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
-/** V3 submission liveness: bounded active preparation, passive normal wait, bounded reconciliation. */
+/** V3 submission liveness: one bounded conversation-creation stage, passive normal wait, bounded reconciliation. */
 public final class BootstrapSendLivenessPolicyTest {
     @Test public void callbacksStayFixedWhileOperatorTimingsKeepLegacyDefaults() throws Exception {
         assertEquals(5_000L, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
@@ -17,6 +17,7 @@ public final class BootstrapSendLivenessPolicyTest {
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(web.contains("prepareTimeoutMs = runtimeSettings.webPreparationMs()"));
         assertTrue(web.contains("SystemClock.elapsedRealtime() - prepareStarted >= prepareTimeoutMs"));
+        assertTrue(web.contains("scope=conversation-create"));
         assertTrue(coordinator.contains("runtimeSettings.resultPollMs()"));
         assertFalse(coordinator.contains("SelfRun3PowerPolicy.NORMAL_WAIT_POLL_MS"));
         assertFalse(web.contains("SelfRun3PowerPolicy.WEB_PREPARATION_MAX_MS"));
@@ -39,12 +40,14 @@ public final class BootstrapSendLivenessPolicyTest {
         assertTrue(wait.contains("scheduleNext("));
     }
 
-    @Test public void unknownSubmissionOutcomeNeverReopensSend() throws Exception {
+    @Test public void ambiguousSubmissionCallbackCannotEndConversationCreationBeforeConfiguredTimeout() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(web.contains("SUBMISSION_OUTCOME_UNKNOWN"));
-        assertTrue(coordinator.contains("SelfRun3Engine.waitingExecutions(state)"));
-        assertFalse(coordinator.contains("SUBMISSION_OUTCOME_UNKNOWN\")" + ", web.submit"));
+        String submit = between(web, "void submit(SelfRun3Engine.State claimed)", "private static String profileScript");
+        assertTrue(submit.contains("SUBMISSION_OUTCOME_UNKNOWN"));
+        assertTrue(submit.contains("scope=conversation-create"));
+        assertFalse(submit.contains("fail(\"SUBMISSION_OUTCOME_UNKNOWN\")"));
+        assertTrue(submit.contains("preparing = true;"));
+        assertTrue(web.contains("expireConversationCreation(attempt)"));
     }
 
     private static String between(String source, String start, String end) {

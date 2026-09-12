@@ -31,6 +31,7 @@ SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
 TURN_STALL_UNIT=$UNIT/SelfRun3TurnStallPolicyTest.java
 STOPPED_RESUME_UNIT=$UNIT/SelfRunStoppedResumePolicyTest.java
 PREPARATION_RECOVERY_UNIT=$UNIT/SelfRun3PreparationRecoveryWiringTest.java
+CONVERSATION_GATE_UNIT=$UNIT/SelfRun3ConversationCreationGateTest.java
 UNBOUNDED_ANDROID=$ANDROID/SelfRun3UnboundedLimitsAndroidTest.java
 SETTINGS_ANDROID=$ANDROID/SelfRun3RuntimeSettingsAndroidTest.java
 SETTINGS_PROCESS=$ANDROID/SelfRun3RuntimeSettingsProcessAndroidTest.java
@@ -39,12 +40,12 @@ STOPPED_RESUME_ANDROID=$ANDROID/SelfRunStoppedResumeAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
   "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
-  "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
+  "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$CONVERSATION_GATE_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3021001" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.1-dev1'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3022002" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.2-dev2'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -90,16 +91,27 @@ grep -Fq 'assertEquals(10L, settings.resultRepairMinutes())' "$SETTINGS_ANDROID"
 grep -Fq 'assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 10L"));' "$TURN_STALL_UNIT"
 ! grep -Fq 'assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 120L"));' "$TURN_STALL_UNIT"
 
-# Web preparation has an independent deadline and same-request physical reset without changing logical identity.
+# The existing screen-preparation limit covers the whole conversation-creation stage through canonical /c binding.
+grep -Fq 'scope=conversation-create' "$WEB"
+grep -Fq 'expireConversationCreation(attempt)' "$WEB"
 grep -Fq 'WEB_PREPARATION_WATCHDOG' "$WEB"
 grep -Fq 'status=expired;attempt=' "$WEB"
 grep -Fq 'WEB_PREPARATION_RECOVERY' "$WEB"
 grep -Fq 'strategy=recreate-webview' "$WEB"
+grep -Fq 'submitIssued = false' "$WEB"
+grep -Fq 'conversationCaptured = false' "$WEB"
+grep -Fq 'conversationCaptured = true' "$WEB"
+grep -Fq 'listener.onConversation' "$WEB"
+grep -Fq 'listener.onStarted' "$WEB"
 grep -Fq 'web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));' "$WEB"
-grep -Fq 'state.stage() == SelfRun3Engine.Stage.READY && !state.flag("sendClaimed")' "$COORD"
+grep -Fq 'case DISPATCHING -> s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;' "$ENGINE"
+grep -Fq 'x.stage()==Stage.DISPATCHING && !x.resource("conversationUrl").isEmpty()' "$ENGINE"
 grep -Fq 'request + ":claim:" + UUID.randomUUID()' "$COORD"
-grep -Fq 'provenUnsentRetryKeepsLogicalIdentityAndCanClaimAgain' "$PREPARATION_RECOVERY_UNIT"
-grep -Fq 'automaticRetryIsLimitedToReadyUnsentPreparationState' "$PREPARATION_RECOVERY_UNIT"
+grep -Fq 'canonicalConversationIsTheOnlySuccessfulCreationGate' "$PREPARATION_RECOVERY_UNIT"
+grep -Fq 'unboundDispatchReentersConversationCreationInsteadOfDrivePolling' "$PREPARATION_RECOVERY_UNIT"
+grep -Fq 'dispatchedTurnWithoutCanonicalConversationReentersWebCreationAndCannotPollDrive' "$CONVERSATION_GATE_UNIT"
+grep -Fq 'canonicalConversationMakesDispatchEligibleForNormalWaitAndDriveResultObservation' "$CONVERSATION_GATE_UNIT"
+! grep -Fq 'fail("SUBMISSION_OUTCOME_UNKNOWN")' "$WEB"
 
 # Result repair is anchored to the latest actual incomplete body mutation, not the first canonical POST.
 grep -Fq 'resultBodyMutationObservedElapsed' "$ENGINE"
@@ -151,12 +163,12 @@ grep -Fq 'runtime result repair override preserved' "$UPGRADE_ANDROID"
 grep -Fq 'reads persisted runtime override instead of new default' "$UPGRADE_ANDROID"
 
 # Candidate upgrade fixture must use the latest delivered TEST and latest formal baselines.
-grep -Fq 'SelfRun-Drive-TEST-3.2.0-dev1.apk' "$EMULATOR"
-grep -Fq '4a2c4bb918bc2fa93a784ef453a75e20192b6b719c601441fa7db70d5cfefd9c' "$EMULATOR"
-grep -Fq '0dad1a3285af7362f81ab667fc260506baaf1554/deliverables/SelfRun-Drive-TEST-3.2.0-dev1.apk' "$EMULATOR"
-grep -Fq "versionCode='3020001'" "$EMULATOR"
-grep -Fq "versionName='3.2.0-dev1'" "$EMULATOR"
-grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.0.apk' "$EMULATOR"
+grep -Fq 'SelfRun-Drive-TEST-3.2.1-dev1.apk' "$EMULATOR"
+grep -Fq 'c10759c188976eaa4746efe5b29863cb828d4a0a3e5135081012486970bbdde9' "$EMULATOR"
+grep -Fq '825eec3319ace7d188f2fe027c0f2d9788610da0/deliverables/SelfRun-Drive-TEST-3.2.1-dev1.apk' "$EMULATOR"
+grep -Fq "versionCode='3021001'" "$EMULATOR"
+grep -Fq "versionName='3.2.1-dev1'" "$EMULATOR"
+grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.1.apk' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
@@ -166,4 +178,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.1-dev1 preparation-recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.2-dev2 conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'

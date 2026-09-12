@@ -263,14 +263,17 @@ final class SelfRun3Engine {
             case SETUP -> Action.SETUP;
             case PREPARING -> Action.PREPARE_TURN;
             case READY -> Action.PREPARE_WEB;
-            case DISPATCHING, WAITING, WAITING_USER_INTERVENTION -> Action.WAIT;
+            case DISPATCHING -> s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;
+            case WAITING, WAITING_USER_INTERVENTION -> Action.WAIT;
             case RECONCILING -> s.hasResult() ? Action.COMMIT : Action.READ_RESULT;
             default -> Action.NONE;
         };
     }
     static List<State> waitingExecutions(State s) {
         ArrayList<State> out=new ArrayList<>();
-        for(State x:s.executions()) if(Set.of(Stage.DISPATCHING,Stage.WAITING,Stage.WAITING_USER_INTERVENTION).contains(x.stage()) || (x.stage()==Stage.RECONCILING && !x.hasResult())) out.add(x);
+        for(State x:s.executions()) if((x.stage()==Stage.DISPATCHING && !x.resource("conversationUrl").isEmpty())
+                || Set.of(Stage.WAITING,Stage.WAITING_USER_INTERVENTION).contains(x.stage())
+                || (x.stage()==Stage.RECONCILING && !x.hasResult())) out.add(x);
         return out;
     }
     static int activeCount(State s) {

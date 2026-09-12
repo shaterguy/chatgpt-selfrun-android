@@ -13,21 +13,42 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class SelfRun3PreparationRecoveryWiringTest {
-    @Test public void preparationTimeoutHasIndependentDeadlineEvenWhilePageIsLoading() throws Exception {
+    @Test public void conversationCreationTimeoutUsesExistingScreenPreparationSettingUntilCanonicalConversation() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        assertTrue(web.contains("handler.postDelayed(() -> {"));
-        assertTrue(web.contains("WEB_PREPARATION_WATCHDOG"));
-        assertTrue(web.contains("fail(\"WEB_PREPARATION_TIMEOUT\")"));
-        assertTrue(web.contains("if (loading) return;"));
-        assertTrue(web.indexOf("SystemClock.elapsedRealtime() - prepareStarted >= prepareTimeoutMs")
-                < web.indexOf("if (loading) return;"));
+        assertTrue(web.contains("prepareTimeoutMs = runtimeSettings.webPreparationMs()"));
+        assertTrue(web.contains("scope=conversation-create"));
+        assertTrue(web.contains("expireConversationCreation(attempt)"));
+        assertTrue(web.contains("disposeHost();"));
+        assertTrue(web.contains("\"WEB_PREPARATION_TIMEOUT\""));
+        assertTrue(web.contains("if (submitIssued) {\n            captureConversation();\n            return;\n        }"));
+        assertTrue(web.contains("preparing = true;\n        submitIssued = true;"));
+        assertFalse(web.contains("state = claimed;\n        preparing = false;"));
+    }
+
+    @Test public void canonicalConversationIsTheOnlySuccessfulCreationGate() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        String protocol = between(web, "static boolean protocolEvent", "void prepare(");
+        assertTrue(protocol.contains("a.dispatchConfirmed = true;"));
+        assertTrue(protocol.contains("a.captureConversation();"));
+        assertFalse(protocol.contains("listener.onStarted"));
+        assertFalse(protocol.contains("a.quiesce()"));
+
+        String capture = between(web, "private void captureConversation()", "private boolean allowedPreparationRoute");
+        assertTrue(capture.contains("conversationCaptured = true;"));
+        assertTrue(capture.contains("listener.onConversation"));
+        assertTrue(capture.contains("listener.onStarted"));
+        assertTrue(capture.indexOf("listener.onConversation") < capture.indexOf("listener.onStarted"));
+        assertTrue(capture.indexOf("listener.onStarted") < capture.indexOf("quiesce()"));
     }
 
     @Test public void sameRequestPreparationRetryRecreatesPhysicalWebViewAndReentersCanonicalRoute() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         assertTrue(web.contains("boolean newRequest = state == null || !state.requestId().equals(s.requestId());"));
-        assertTrue(web.contains("} else if (restartPreparation) {"));
+        assertTrue(web.contains("if (restartPreparation) {"));
         assertTrue(web.contains("strategy=recreate-webview"));
+        assertTrue(web.contains("dispatchConfirmed = false;"));
+        assertTrue(web.contains("submitIssued = false;"));
+        assertTrue(web.contains("conversationCaptured = false;"));
         assertTrue(web.contains("disposeHost();"));
         assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
         assertTrue(web.contains("status=reentry"));
@@ -40,12 +61,10 @@ public final class SelfRun3PreparationRecoveryWiringTest {
         assertTrue(web.contains("response.cancel();\n                if (view == web && !closed) fail(\"TLS_REJECTED\");"));
     }
 
-    @Test public void automaticRetryIsLimitedToReadyUnsentPreparationState() throws Exception {
-        String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(coordinator.contains("state.stage() == SelfRun3Engine.Stage.READY && !state.flag(\"sendClaimed\")"));
-        assertTrue(coordinator.contains("V3_WEB_PREPARATION_RETRY"));
-        String web = source("SelfRun3WebAdapter.java");
-        assertTrue(web.contains("state = claimed;\n        preparing = false;"));
+    @Test public void unboundDispatchReentersConversationCreationInsteadOfDrivePolling() throws Exception {
+        String engine = source("SelfRun3Engine.java");
+        assertTrue(engine.contains("case DISPATCHING -> s.resource(\"conversationUrl\").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;"));
+        assertTrue(engine.contains("x.stage()==Stage.DISPATCHING && !x.resource(\"conversationUrl\").isEmpty()"));
     }
 
     @Test public void provenUnsentRetryKeepsLogicalIdentityAndCanClaimAgain() {
@@ -113,6 +132,11 @@ public final class SelfRun3PreparationRecoveryWiringTest {
                                                 SelfRun3Engine.Kind kind, JSONObject payload) {
         return SelfRun3Engine.reduce(state,
                 new SelfRun3Engine.Event(id, kind, state.taskId(), state.turnId(), payload));
+    }
+
+    private static String between(String source, String start, String end) {
+        int a = source.indexOf(start), b = source.indexOf(end, Math.max(0, a));
+        return a >= 0 && b > a ? source.substring(a, b) : "";
     }
 
     private static String source(String name) throws Exception {

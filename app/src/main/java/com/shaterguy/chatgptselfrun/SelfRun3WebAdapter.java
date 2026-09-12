@@ -51,10 +51,10 @@ final class SelfRun3WebAdapter {
     private HeadlessWebViewHost host;
     private WebView web;
     private SelfRun3Engine.State state;
-    private boolean preparing, loading, closed, dispatchConfirmed, projectRouteReadyLogged;
-    private int step, evaluation, generation, preparationAttempt, projectCandidateIndex;
+    private boolean preparing, loading, closed, dispatchConfirmed, submitIssued, conversationCaptured, projectRouteReadyLogged;
+    private int step, evaluation, generation, projectCandidateIndex;
     private int projectProbeRetries, projectClickAttempts, projectDirectoryRecoveries;
-    private long prepareStarted, prepareTimeoutMs, projectDirectoryReadyAt;
+    private long preparationAttempt, prepareStarted, prepareTimeoutMs, projectDirectoryReadyAt;
     private String projectDisplayName = "";
 
     SelfRun3WebAdapter(Context context, Listener listener) {
@@ -81,8 +81,6 @@ final class SelfRun3WebAdapter {
                 || a.dispatchConfirmed || !s.flag("sendClaimed")) return false;
         a.dispatchConfirmed = true;
         a.captureConversation();
-        a.listener.onStarted(s.taskId(), s.turnId(), s.requestId());
-        a.quiesce();
         return true;
     }
 
@@ -92,19 +90,19 @@ final class SelfRun3WebAdapter {
         boolean restartPreparation = newRequest || !preparing;
         state = s;
         closed = false;
-        if (newRequest) {
+        if (newRequest) preparationAttempt = 0L;
+        if (restartPreparation) {
+            if (!newRequest) {
+                trace("WEB_PREPARATION_RECOVERY", "status=start;attempt=" + (preparationAttempt + 1)
+                        + ";strategy=recreate-webview;scope=conversation-create");
+            }
             quiesce();
             dispatchConfirmed = false;
-            preparationAttempt = 0;
+            submitIssued = false;
+            conversationCaptured = false;
             step = 0;
             resetProjectNavigationState();
-        } else if (restartPreparation) {
-            trace("WEB_PREPARATION_RECOVERY", "status=start;attempt=" + (preparationAttempt + 1)
-                    + ";strategy=recreate-webview");
-            quiesce();
-            step = 0;
-            resetProjectNavigationState();
-            disposeHost();
+            if (!newRequest) disposeHost();
         }
         if (restartPreparation) startPreparationTimer();
         preparing = true;
@@ -117,7 +115,7 @@ final class SelfRun3WebAdapter {
             ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
             projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
             trace("WEBVIEW_LAUNCH", "route=" + (ref == null ? "general" : "projects")
-                    + ";attempt=" + preparationAttempt);
+                    + ";attempt=" + preparationAttempt + ";scope=conversation-create");
             generation++;
             evaluation++;
             loading = true;
@@ -125,7 +123,8 @@ final class SelfRun3WebAdapter {
             web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
             if (!newRequest) {
                 trace("WEB_PREPARATION_RECOVERY", "status=reentry;attempt=" + preparationAttempt
-                        + ";route=" + (ref == null ? "general" : "projects"));
+                        + ";route=" + (ref == null ? "general" : "projects")
+                        + ";scope=conversation-create");
             }
             return;
         }
@@ -135,19 +134,32 @@ final class SelfRun3WebAdapter {
     private void startPreparationTimer() {
         prepareStarted = SystemClock.elapsedRealtime();
         prepareTimeoutMs = runtimeSettings.webPreparationMs();
-        int attempt = ++preparationAttempt;
+        long attempt = ++preparationAttempt;
         String request = state == null ? "" : state.requestId();
         trace("WEB_PREPARATION_WATCHDOG", "status=armed;attempt=" + attempt
-                + ";timeoutMs=" + prepareTimeoutMs);
+                + ";timeoutMs=" + prepareTimeoutMs + ";scope=conversation-create");
         handler.postDelayed(() -> {
             if (closed || !preparing || state == null || attempt != preparationAttempt
                     || !request.equals(state.requestId())) return;
-            long elapsed = Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted);
-            trace("WEB_PREPARATION_WATCHDOG", "status=expired;attempt=" + attempt
-                    + ";elapsedMs=" + elapsed + ";timeoutMs=" + prepareTimeoutMs
-                    + ";loading=" + loading + ";route=" + routeClass(web == null ? "" : web.getUrl()));
-            fail("WEB_PREPARATION_TIMEOUT");
+            expireConversationCreation(attempt);
         }, Math.max(1L, prepareTimeoutMs));
+    }
+
+    private void expireConversationCreation(long attempt) {
+        SelfRun3Engine.State timedOut = state;
+        long elapsed = Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted);
+        trace("WEB_PREPARATION_WATCHDOG", "status=expired;attempt=" + attempt
+                + ";elapsedMs=" + elapsed + ";timeoutMs=" + prepareTimeoutMs
+                + ";loading=" + loading + ";route=" + routeClass(web == null ? "" : web.getUrl())
+                + ";scope=conversation-create");
+        trace("WEB_PREPARATION_RECOVERY", "status=timeout;attempt=" + attempt
+                + ";strategy=recreate-webview;scope=conversation-create");
+        quiesce();
+        disposeHost();
+        if (timedOut != null) {
+            listener.onFailure(timedOut.taskId(), timedOut.turnId(), timedOut.requestId(),
+                    "WEB_PREPARATION_TIMEOUT");
+        }
     }
 
     private void resetProjectNavigationState() {
@@ -239,7 +251,11 @@ final class SelfRun3WebAdapter {
     private void advance() {
         if (!preparing || closed || web == null || state == null) return;
         if (SystemClock.elapsedRealtime() - prepareStarted >= prepareTimeoutMs) {
-            fail("WEB_PREPARATION_TIMEOUT");
+            expireConversationCreation(preparationAttempt);
+            return;
+        }
+        if (submitIssued) {
+            captureConversation();
             return;
         }
         if (loading) return;
@@ -269,12 +285,15 @@ final class SelfRun3WebAdapter {
                 return;
             }
             if (SelfRun3BootstrapTransport.READY_TO_SUBMIT.equals(status)) {
-                if (preparationAttempt > 1) {
-                    trace("WEB_PREPARATION_RECOVERY", "status=recovered;attempt=" + preparationAttempt
-                            + ";route=" + routeClass(web == null ? "" : web.getUrl()));
+                if (submitIssued) return;
+                submitIssued = true;
+                if (state.flag("sendClaimed")) {
+                    trace("WEB_PREPARATION_RECOVERY", "status=redispatch;attempt=" + preparationAttempt
+                            + ";scope=conversation-create");
+                    submit(state);
+                } else {
+                    listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
                 }
-                preparing = false;
-                listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
                 return;
             }
             if (SelfRun3BootstrapTransport.AUTH_REQUIRED.equals(status)
@@ -401,24 +420,36 @@ final class SelfRun3WebAdapter {
             return;
         }
         state = claimed;
-        preparing = false;
+        preparing = true;
+        submitIssued = true;
         String action = SelfRun3BootstrapTransport.submit(
                 claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed));
         String arm = SelfRun3DispatchScript.arm(claimed.taskId(), claimed.turnId(), claimed.requestId());
         String wrapped = "(()=>{if(!(" + arm + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});return (" + action + ");})()";
         evaluate(wrapped, result -> {
             String status = result.optString("status");
+            if (SelfRun3BootstrapTransport.AUTH_REQUIRED.equals(status)
+                    || SelfRun3BootstrapTransport.TARGET_ERROR.equals(status)
+                    || "TURN_PROTOCOL_UNAVAILABLE".equals(status)) {
+                fail(status);
+                return;
+            }
             if (DEFINITE_UNSENT.contains(status)) {
-                listener.onUnsent(claimed.taskId(), claimed.turnId(), claimed.requestId(), status);
+                trace("SUBMISSION_PENDING", "status=" + safeStatus(status)
+                        + ";attempt=" + preparationAttempt + ";scope=conversation-create");
                 return;
             }
             if ("CALLBACK_AMBIGUOUS".equals(status) || "SCRIPT_ERROR".equals(status)) {
-                fail("SUBMISSION_OUTCOME_UNKNOWN");
+                trace("SUBMISSION_OUTCOME_UNKNOWN", "status=" + safeStatus(status)
+                        + ";attempt=" + preparationAttempt + ";scope=conversation-create");
                 return;
             }
             listener.onDispatched(claimed.taskId(), claimed.turnId(), claimed.requestId());
             later(() -> {
-                if (!dispatchConfirmed) fail("SUBMISSION_OUTCOME_UNKNOWN");
+                if (!dispatchConfirmed) {
+                    trace("SUBMISSION_OUTCOME_UNKNOWN", "status=protocol-callback-pending;attempt="
+                            + preparationAttempt + ";scope=conversation-create");
+                }
             }, SelfRun3PowerPolicy.CALLBACK_TIMEOUT_MS);
             captureConversation();
         });
@@ -469,12 +500,21 @@ final class SelfRun3WebAdapter {
     }
 
     private void captureConversation() {
-        if (web == null || state == null || !dispatchConfirmed) return;
+        if (web == null || state == null || !dispatchConfirmed || conversationCaptured) return;
         String url = web.getUrl();
         String conversationId = SelfRunScript.conversationId(url);
         if (allowedRoute(url) && !conversationId.isEmpty()) {
-            listener.onConversation(state.taskId(), state.turnId(),
-                    "https://chatgpt.com/c/" + conversationId);
+            conversationCaptured = true;
+            String canonical = "https://chatgpt.com/c/" + conversationId;
+            trace("CONVERSATION_CREATE", "status=confirmed;attempt=" + preparationAttempt
+                    + ";scope=conversation-create");
+            if (preparationAttempt > 1L) {
+                trace("WEB_PREPARATION_RECOVERY", "status=recovered;attempt=" + preparationAttempt
+                        + ";route=" + routeClass(url) + ";scope=conversation-create");
+            }
+            listener.onConversation(state.taskId(), state.turnId(), canonical);
+            listener.onStarted(state.taskId(), state.turnId(), state.requestId());
+            quiesce();
         }
     }
 
