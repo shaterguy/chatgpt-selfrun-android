@@ -50,6 +50,16 @@ public final class BootstrapSendLivenessPolicyTest {
         assertTrue(web.contains("expireConversationCreation(attempt)"));
     }
 
+    @Test public void intermediateDomFailuresStayInsideOneConversationCreationAttempt() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        String advance = between(web, "private void advance()", "private boolean prepareProjectEntryIfNeeded");
+        assertTrue(advance.contains("status.endsWith(\"_FAILED\")"));
+        assertTrue(advance.contains("status.endsWith(\"_UNAVAILABLE\")"));
+        assertTrue(advance.contains("CONVERSATION_CREATE_PENDING"));
+        assertTrue(advance.contains("later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS)"));
+        assertFalse(advance.contains("status.endsWith(\"_FAILED\") || status.endsWith(\"_UNAVAILABLE\")\n                    || \"PROFILE_ERROR\".equals(status)) {\n                fail(status)"));
+    }
+
     private static String between(String source, String start, String end) {
         int a = source.indexOf(start), b = source.indexOf(end, Math.max(0, a));
         return a >= 0 && b > a ? source.substring(a, b) : "";

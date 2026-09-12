@@ -222,7 +222,8 @@ final class SelfRun3WebAdapter {
                 if (!request.isForMainFrame()) return false;
                 Uri u = request.getUrl();
                 if (!allowedPreparationRoute(String.valueOf(u))) {
-                    fail("ROUTE_MISMATCH");
+                    trace("CONVERSATION_CREATE_PENDING", "status=route-mismatch;attempt=" + preparationAttempt
+                            + ";scope=conversation-create");
                     return true;
                 }
                 return false;
@@ -230,11 +231,17 @@ final class SelfRun3WebAdapter {
 
             @Override public void onReceivedSslError(WebView view, SslErrorHandler response, SslError error) {
                 response.cancel();
-                if (view == web && !closed) fail("TLS_REJECTED");
+                if (view == web && !closed) {
+                    trace("CONVERSATION_CREATE_PENDING", "status=tls-rejected;attempt=" + preparationAttempt
+                            + ";scope=conversation-create");
+                }
             }
 
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (view == web && request.isForMainFrame()) fail("WEB_CONNECTION_FAILED");
+                if (view == web && request.isForMainFrame() && !closed) {
+                    trace("CONVERSATION_CREATE_PENDING", "status=web-connection-error;attempt=" + preparationAttempt
+                            + ";scope=conversation-create");
+                }
             }
 
             @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
@@ -297,10 +304,15 @@ final class SelfRun3WebAdapter {
                 return;
             }
             if (SelfRun3BootstrapTransport.AUTH_REQUIRED.equals(status)
-                    || status.endsWith("_FAILED") || status.endsWith("_UNAVAILABLE")
-                    || "PROFILE_ERROR".equals(status)
                     || SelfRun3BootstrapTransport.TARGET_ERROR.equals(status)) {
                 fail(status);
+                return;
+            }
+            if (status.endsWith("_FAILED") || status.endsWith("_UNAVAILABLE")
+                    || "PROFILE_ERROR".equals(status)) {
+                trace("CONVERSATION_CREATE_PENDING", "status=" + safeStatus(status)
+                        + ";attempt=" + preparationAttempt + ";scope=conversation-create");
+                later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
                 return;
             }
             later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
@@ -369,12 +381,18 @@ final class SelfRun3WebAdapter {
                     loadProjectDirectory("script-requested-directory");
                     break;
                 case "AUTH_REQUIRED":
-                case "PROJECT_NOT_FOUND":
-                case "TARGET_CONTEXT_MISMATCH":
                     fail(status);
                     break;
+                case "PROJECT_NOT_FOUND":
+                case "TARGET_CONTEXT_MISMATCH":
+                    trace("CONVERSATION_CREATE_PENDING", "status=" + safeStatus(status)
+                            + ";attempt=" + preparationAttempt + ";scope=conversation-create");
+                    later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
+                    break;
                 default:
-                    fail("PROJECT_DIRECTORY_FAILED");
+                    trace("CONVERSATION_CREATE_PENDING", "status=project-directory-pending;attempt="
+                            + preparationAttempt + ";scope=conversation-create");
+                    later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
                     break;
             }
         });
@@ -429,8 +447,7 @@ final class SelfRun3WebAdapter {
         evaluate(wrapped, result -> {
             String status = result.optString("status");
             if (SelfRun3BootstrapTransport.AUTH_REQUIRED.equals(status)
-                    || SelfRun3BootstrapTransport.TARGET_ERROR.equals(status)
-                    || "TURN_PROTOCOL_UNAVAILABLE".equals(status)) {
+                    || SelfRun3BootstrapTransport.TARGET_ERROR.equals(status)) {
                 fail(status);
                 return;
             }
