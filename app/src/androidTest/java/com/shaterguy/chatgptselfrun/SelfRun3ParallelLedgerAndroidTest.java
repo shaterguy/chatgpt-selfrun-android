@@ -32,7 +32,12 @@ public final class SelfRun3ParallelLedgerAndroidTest {
         ledger.close(); ledger=new SelfRun3Ledger(context);
         root=ledger.load("task"); assertEquals("B",root.text("branchId"));
         String a=branch(root,"A").turnId(), b=branch(root,"B").turnId();
-        assertTrue(ledger.loadExecution("task",a).flag("dispatchObserved"));
+        SelfRun3Engine.State uncertainA=ledger.loadExecution("task",a);
+        assertEquals(SelfRun3Engine.Stage.DISPATCHING,uncertainA.stage());
+        assertTrue(uncertainA.flag("sendClaimed"));
+        assertTrue(uncertainA.flag("canonicalPostStarted"));
+        assertFalse(uncertainA.flag("dispatchObserved"));
+        assertFalse(uncertainA.flag("accepted"));
         assertFalse(ledger.loadExecution("task",b).flag("sendClaimed"));
         root=dispatch(root); assertEquals(2,SelfRun3Engine.activeCount(root));
         root=completeBranch(root,a,"COMPLETE");
