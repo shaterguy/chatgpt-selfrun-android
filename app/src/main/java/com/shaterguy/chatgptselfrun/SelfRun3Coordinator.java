@@ -345,7 +345,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     driveInFlight = false;
                     releaseWakeLock();
                     if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
-                    if (step == DriveStep.READ_RESULT) {
+                    if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error)) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
                         repairResult(state, "READ_RESULT_FAILURE_" + safeCode(error.getClass().getSimpleName()));
@@ -448,6 +448,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     static void clearRecoveredDriveWarning(SelfRunStore store) {
         if (store != null && transientDriveWarning(store.lastErrorCode())) store.clearLastError();
+    }
+
+    static boolean readResultTransportFailure(Throwable error) {
+        return error instanceof DriveApiClient.ApiException || error instanceof IOException;
     }
 
     private void handleDriveFailure(SelfRun3Engine.State state, DriveStep step, Throwable error) {

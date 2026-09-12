@@ -9,7 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
-/** Result-read failures must roll forward through disposable repair turns instead of hard-pausing the task. */
+/** Result-content failures repair; transport failures stay on the same logical turn and use Drive recovery. */
 public final class SelfRun3AlwaysRepairPolicyTest {
     @Test public void repairReplacementCanBeRepairedAgain() {
         SelfRun3Engine.State first = initialWaiting();
@@ -30,10 +30,15 @@ public final class SelfRun3AlwaysRepairPolicyTest {
         assertTrue(third.execution(secondTurn).flag("superseded"));
     }
 
-    @Test public void readResultFailuresRouteToRepairAndRepairFailureRetries() throws Exception {
+    @Test public void readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair() throws Exception {
+        assertTrue(SelfRun3Coordinator.readResultTransportFailure(new DriveApiClient.ApiException(503, "temporary")));
+        assertTrue(SelfRun3Coordinator.readResultTransportFailure(new java.io.IOException("network")));
+        assertFalse(SelfRun3Coordinator.readResultTransportFailure(new IllegalStateException("result state")));
+
         String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(coordinator.contains("if (step == DriveStep.READ_RESULT)"));
+        assertTrue(coordinator.contains("if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))"));
         assertTrue(coordinator.contains("repairResult(state, \"READ_RESULT_FAILURE_\""));
+        assertTrue(coordinator.contains("handleDriveFailure(state, step, error);"));
         assertTrue(coordinator.contains("V3_RESULT_REPAIR_RETRY"));
         assertTrue(coordinator.contains("scheduleResultRetry(original)"));
         assertFalse(coordinator.contains("V3_RESULT_REPAIR_EXHAUSTED"));

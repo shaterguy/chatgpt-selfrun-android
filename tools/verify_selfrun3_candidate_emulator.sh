@@ -5,9 +5,9 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_TEST=previous/SelfRun-Drive-TEST-3.2.2-dev2.apk
-PREVIOUS_TEST_SHA256=bf7a325c08f3be363d28bf757ee9792235b0b8dede6205bdda4ff147fca5b258
-PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/eb6908a15b6dadb5de108b97446875f4312e6257/deliverables/SelfRun-Drive-TEST-3.2.2-dev2.apk
+PREVIOUS_TEST=previous/SelfRun-Drive-TEST-3.2.3-dev1.apk
+PREVIOUS_TEST_SHA256=662424cc10f38bf42feb8b156c6cf5ea1840fe4f52692dab09da72816ab86277
+PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/0e07dfabeef0ff6300add826e01afc6689f2e49d/deliverables/SelfRun-Drive-TEST-3.2.3-dev1.apk
 
 mkdir -p previous
 curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
@@ -15,10 +15,10 @@ echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
 BT="$ANDROID_HOME/build-tools/36.0.0"
 "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_TEST" > selfrun-v3-previous-test-cert.txt
 grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-previous-test-cert.txt
-"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.2.2-dev2'"
-"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionCode='3022002'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.2.3-dev1'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionCode='3023001'"
 
-adb install -r stable/chatgpt-selfrun-drive-v3.2.2.apk >/dev/null
+adb install -r stable/chatgpt-selfrun-drive-v3.2.3.apk >/dev/null
 adb install -r "$PREVIOUS_TEST" >/dev/null
 adb install -r current/androidTest.apk >/dev/null
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\([^ ]*\) (target=$TEST)#\1#p" | head -1)"
@@ -35,7 +35,7 @@ adb shell am instrument -w -r \
 grep -Fq 'OK (' selfrun-v3-upgrade-verify.txt
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$FORMAL"
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$TEST"
-[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.2.2' ]]
+[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.2.3' ]]
 [[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == "$VERSION_NAME" ]]
 
 FORMAL_UID="$(adb shell pm list packages -U "$FORMAL" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"
