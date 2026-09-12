@@ -5,9 +5,10 @@ on:
   push:
     branches:
       - main
+      - 'selfrun-drive/v*-rc*'
 
 concurrency:
-  group: selfrun-v3-release
+  group: selfrun-v3-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -95,6 +96,7 @@ jobs:
           ANDROID_TEST="release-output/chatgpt-selfrun-drive-test-v${FORMAL_VERSION_NAME}-androidTest.apk"
           APKSIGNER="$BT/apksigner" bash tools/sign_release.sh release-output/formal-aligned.apk "$PASS_FILE" "$FORMAL" > release-output/FORMAL_APKSIGNER_VERIFY.txt
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh release-output/test-aligned.apk "$PASS_FILE" "$TEST" > release-output/TEST_APKSIGNER_VERIFY.txt
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh release-output/androidTest-aligned.apk "$PASS_FILE" "$TEST_APK" > /dev/null 2>&1 || true
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh release-output/androidTest-aligned.apk "$PASS_FILE" "$ANDROID_TEST" > release-output/ANDROIDTEST_APKSIGNER_VERIFY.txt
           "$BT/apksigner" verify --verbose --print-certs "$FORMAL" > release-output/FORMAL_CERT.txt
           "$BT/apksigner" verify --verbose --print-certs "$TEST" > release-output/TEST_CERT.txt
@@ -221,6 +223,7 @@ jobs:
           retention-days: 30
 
   publish-release:
+    if: github.ref == 'refs/heads/main'
     needs: [build-release, verify-release-emulator]
     runs-on: ubuntu-latest
     timeout-minutes: 20
