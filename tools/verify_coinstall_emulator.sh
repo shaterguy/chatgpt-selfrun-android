@@ -227,20 +227,29 @@ drive_data_dir="$(run_as "$DRIVE_PACKAGE" pwd | tr -d '\r')"
 [[ "$legacy_data_dir" != "$drive_data_dir" ]] || fail "packages share one data directory"
 write_sentinel "$DRIVE_PACKAGE" "drive-private-data"
 
-"$ADB" shell pm grant "$LEGACY_PACKAGE" android.permission.POST_NOTIFICATIONS || true
-"$ADB" shell pm grant "$DRIVE_PACKAGE" android.permission.POST_NOTIFICATIONS || true
-"$ADB" shell am force-stop "$LEGACY_PACKAGE"
-"$ADB" shell am force-stop "$DRIVE_PACKAGE"
-write_paused_state "$LEGACY_PACKAGE" selfrun CI-LEGACY-PAUSED "SelfRun co-install check"
-write_paused_state "$DRIVE_PACKAGE" selfrun_drive CI-DRIVE-PAUSED "SelfRun Drive co-install check"
-start_own_component "$LEGACY_MAIN"
-start_own_component "$DRIVE_MAIN"
-sleep 3
-assert_service_running "$LEGACY_PACKAGE"
-assert_service_running "$DRIVE_PACKAGE"
-notifications="$("$ADB" shell dumpsys notification --noredact | tr -d '\r')"
-grep -Fq "$LEGACY_PACKAGE" <<<"$notifications" || fail "legacy notification missing"
-grep -Fq "$DRIVE_PACKAGE" <<<"$notifications" || fail "Drive notification missing"
+service_runtime_contract="not_applicable_v3"
+notification_runtime_contract="not_applicable_v3"
+if [[ "$DRIVE_EXPECTED_VERSION" == 2.* ]]; then
+  "$ADB" shell pm grant "$LEGACY_PACKAGE" android.permission.POST_NOTIFICATIONS || true
+  "$ADB" shell pm grant "$DRIVE_PACKAGE" android.permission.POST_NOTIFICATIONS || true
+  "$ADB" shell am force-stop "$LEGACY_PACKAGE"
+  "$ADB" shell am force-stop "$DRIVE_PACKAGE"
+  write_paused_state "$LEGACY_PACKAGE" selfrun CI-LEGACY-PAUSED "SelfRun co-install check"
+  write_paused_state "$DRIVE_PACKAGE" selfrun_drive CI-DRIVE-PAUSED "SelfRun Drive co-install check"
+  start_own_component "$LEGACY_MAIN"
+  start_own_component "$DRIVE_MAIN"
+  sleep 3
+  assert_service_running "$LEGACY_PACKAGE"
+  assert_service_running "$DRIVE_PACKAGE"
+  notifications="$("$ADB" shell dumpsys notification --noredact | tr -d '\r')"
+  grep -Fq "$LEGACY_PACKAGE" <<<"$notifications" || fail "legacy notification missing"
+  grep -Fq "$DRIVE_PACKAGE" <<<"$notifications" || fail "Drive notification missing"
+  service_runtime_contract="true"
+  notification_runtime_contract="true"
+else
+  echo "SelfRun 3 foreground runtime requires its durable RunMarker and ledger; canonical release instrumentation verifies that runtime separately."
+fi
+
 assert_cross_start_blocked "$LEGACY_PACKAGE" "$DRIVE_SERVICE" "$LEGACY_PACKAGE.PAUSE"
 assert_cross_start_blocked "$DRIVE_PACKAGE" "$LEGACY_SERVICE" "$DRIVE_PACKAGE.PAUSE"
 
@@ -274,8 +283,8 @@ drive_version=$DRIVE_EXPECTED_VERSION
 drive_uid=$drive_uid
 drive_data_dir=$drive_data_dir
 legacy_webview_hash_preserved=$legacy_webview_hash_after
-simultaneous_services=true
-simultaneous_notifications=true
+simultaneous_services=$service_runtime_contract
+simultaneous_notifications=$notification_runtime_contract
 cross_package_service_start_blocked=true
 clear_uninstall_isolation=true
 EOF
