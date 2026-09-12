@@ -243,7 +243,7 @@ final class SelfRun3Engine {
                 require(p.optBoolean("safeToRepair"),"explicit evidence original automatic work is inactive required");
                 put(v,"stage","BRANCH_COMPLETE"); put(v,"committed",true); put(v,"superseded",true); State saved=persist(v,false);
                 v=fresh(saved,s.text("phase"),executionProfile(s),"REPAIR","REPAIR",s.text("previousResultDocumentId"));
-                put(v,"repairTargetDocumentId",s.resource("resultDocumentId")); put(v,"repairAttempt",1);
+                put(v,"repairTargetDocumentId",s.resource("resultDocumentId"));
                 if(s.flag("interventionRequested")) put(v,"interventionRequested",true);
                 if(isBranch(s)) {
                     put(v,"repairBranch",true);

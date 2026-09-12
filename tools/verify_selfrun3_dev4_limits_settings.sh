@@ -27,6 +27,7 @@ NOTIFIER=$SRC/SelfRun3TurnStallNotifier.java
 WEB=$SRC/SelfRun3WebAdapter.java
 UNBOUNDED=$UNIT/SelfRun3UnboundedPayloadPolicyTest.java
 WATCHDOG_UNIT=$UNIT/SelfRun3ResultWatchdogTest.java
+ALWAYS_REPAIR_UNIT=$UNIT/SelfRun3AlwaysRepairPolicyTest.java
 SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
 TURN_STALL_UNIT=$UNIT/SelfRun3TurnStallPolicyTest.java
 STOPPED_RESUME_UNIT=$UNIT/SelfRunStoppedResumePolicyTest.java
@@ -39,13 +40,13 @@ UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
 STOPPED_RESUME_ANDROID=$ANDROID/SelfRunStoppedResumeAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
-  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
+  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$ALWAYS_REPAIR_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
   "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$CONVERSATION_GATE_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3022002" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.2-dev2'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3024000" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.3'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -128,6 +129,15 @@ grep -Fq 'returningToSeedClearsWaitAndLaterMutationStartsFresh' "$WATCHDOG_UNIT"
 grep -Fq 'processRestartPreservesClockAndRebootRequiresOneRebaseline' "$WATCHDOG_UNIT"
 grep -Fq 'driveAdapterFreshReadsAgainBeforeRepairingStaleSnapshot' "$WATCHDOG_UNIT"
 
+# Any actual READ_RESULT failure rolls forward into a fresh repair turn, and repairs can repeat.
+grep -Fq 'repairResult(state, "READ_RESULT_FAILURE_"' "$COORD"
+grep -Fq 'V3_RESULT_REPAIR_RETRY' "$COORD"
+! grep -Fq 'V3_RESULT_REPAIR_EXHAUSTED' "$COORD"
+! grep -Fq 'hardPause("V3_RESULT_REPAIR_FAILED"' "$COORD"
+! grep -Fq 'put(v,"repairAttempt",1)' "$ENGINE"
+grep -Fq 'repairReplacementCanBeRepairedAgain' "$ALWAYS_REPAIR_UNIT"
+grep -Fq 'readResultFailuresRouteToRepairAndRepairFailureRetries' "$ALWAYS_REPAIR_UNIT"
+
 # Every normal/branch/merge/repair prompt carries one strict Result-document contract.
 grep -Fq 'RESULT_DOCUMENT_RULES' "$PROTOCOL"
 grep -Fq '[RESULT_DOCUMENT_CONTRACT]' "$PROTOCOL"
@@ -163,12 +173,12 @@ grep -Fq 'runtime result repair override preserved' "$UPGRADE_ANDROID"
 grep -Fq 'reads persisted runtime override instead of new default' "$UPGRADE_ANDROID"
 
 # Candidate upgrade fixture must use the latest delivered TEST and latest formal baselines.
-grep -Fq 'SelfRun-Drive-TEST-3.2.1-dev1.apk' "$EMULATOR"
-grep -Fq 'c10759c188976eaa4746efe5b29863cb828d4a0a3e5135081012486970bbdde9' "$EMULATOR"
-grep -Fq '825eec3319ace7d188f2fe027c0f2d9788610da0/deliverables/SelfRun-Drive-TEST-3.2.1-dev1.apk' "$EMULATOR"
-grep -Fq "versionCode='3021001'" "$EMULATOR"
-grep -Fq "versionName='3.2.1-dev1'" "$EMULATOR"
-grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.1.apk' "$EMULATOR"
+grep -Fq 'SelfRun-Drive-TEST-3.2.2-dev2.apk' "$EMULATOR"
+grep -Fq 'bf7a325c08f3be363d28bf757ee9792235b0b8dede6205bdda4ff147fca5b258' "$EMULATOR"
+grep -Fq 'eb6908a15b6dadb5de108b97446875f4312e6257/deliverables/SelfRun-Drive-TEST-3.2.2-dev2.apk' "$EMULATOR"
+grep -Fq "versionCode='3022002'" "$EMULATOR"
+grep -Fq "versionName='3.2.2-dev2'" "$EMULATOR"
+grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.2.apk' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
@@ -178,4 +188,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.2-dev2 conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.3 always-repair, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
