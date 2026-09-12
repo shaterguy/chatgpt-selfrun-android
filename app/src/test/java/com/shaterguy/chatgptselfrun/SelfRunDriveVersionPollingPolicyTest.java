@@ -24,6 +24,7 @@ public final class SelfRunDriveVersionPollingPolicyTest {
         assertEquals(SelfRun3Engine.Stage.WAITING, waiting.stage());
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(waiting));
         assertEquals(waiting.turnId(), SelfRun3Engine.waitingExecutions(waiting).get(0).turnId());
+        assertEquals("conversation_url", waiting.text("acceptanceProof"));
     }
 
     @Test public void responseCompletionCannotChangeExecutionState() {
@@ -53,9 +54,24 @@ public final class SelfRunDriveVersionPollingPolicyTest {
         JSONObject claim = new JSONObject(); SelfRun3Engine.put(claim, "at", 1L);
         s = SelfRun3Engine.reduce(s, new SelfRun3Engine.Event("claim", SelfRun3Engine.Kind.CLAIM_SEND,
                 s.taskId(), s.turnId(), claim));
-        JSONObject started = new JSONObject(); SelfRun3Engine.put(started, "requestId", s.requestId());
-        return SelfRun3Engine.reduce(s, new SelfRun3Engine.Event("started", SelfRun3Engine.Kind.STARTED,
+        JSONObject started = new JSONObject();
+        SelfRun3Engine.put(started, "requestId", s.requestId());
+        SelfRun3Engine.put(started, "source", "canonical_post");
+        SelfRun3Engine.put(started, "protocolStage", "turn_request");
+        SelfRun3Engine.put(started, "atElapsed", 10L);
+        SelfRun3Engine.put(started, "atWall", 10L);
+        SelfRun3Engine.put(started, "bootCount", 1);
+        s = SelfRun3Engine.reduce(s, new SelfRun3Engine.Event("started", SelfRun3Engine.Kind.STARTED,
                 s.taskId(), s.turnId(), started));
+        s = resource(s, "conversationUrl", "https://chatgpt.com/c/result-polling");
+        JSONObject accepted = new JSONObject();
+        SelfRun3Engine.put(accepted, "requestId", s.requestId());
+        SelfRun3Engine.put(accepted, "proof", "conversation_url");
+        SelfRun3Engine.put(accepted, "atElapsed", 20L);
+        SelfRun3Engine.put(accepted, "atWall", 20L);
+        SelfRun3Engine.put(accepted, "bootCount", 1);
+        return SelfRun3Engine.reduce(s, new SelfRun3Engine.Event("accepted", SelfRun3Engine.Kind.ACCEPTED,
+                s.taskId(), s.turnId(), accepted));
     }
 
     private static SelfRun3Engine.State resource(SelfRun3Engine.State s, String key, String value) {
