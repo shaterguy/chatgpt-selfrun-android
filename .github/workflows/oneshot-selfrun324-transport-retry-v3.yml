@@ -101,6 +101,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name "SelfRun CI"
+          git config user.email "selfrun-ci@users.noreply.github.com"
           git rm .github/workflows/oneshot-selfrun324-transport-retry-v3.yml
           git add app/build.gradle \
             app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java \
