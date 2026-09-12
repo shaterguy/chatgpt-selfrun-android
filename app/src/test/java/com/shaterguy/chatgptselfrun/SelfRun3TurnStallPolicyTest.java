@@ -122,7 +122,12 @@ public final class SelfRun3TurnStallPolicyTest {
         put(started, "requestId", state.requestId()); put(started, "source", "canonical_post");
         put(started, "protocolStage", "turn_request"); put(started, "atElapsed", elapsed);
         put(started, "atWall", wall); put(started, "bootCount", bootCount);
-        return event(state, state.turnId(), state.turnId() + ":started", SelfRun3Engine.Kind.STARTED, started);
+        state = event(state, state.turnId(), state.turnId() + ":started", SelfRun3Engine.Kind.STARTED, started);
+        state = resource(state, "conversationUrl", "https://chatgpt.com/c/stall-confirmed");
+        JSONObject accepted = new JSONObject();
+        put(accepted, "requestId", state.requestId()); put(accepted, "proof", "conversation_url");
+        put(accepted, "atElapsed", elapsed); put(accepted, "atWall", wall); put(accepted, "bootCount", bootCount);
+        return event(state, state.turnId(), state.turnId() + ":accepted", SelfRun3Engine.Kind.ACCEPTED, accepted);
     }
 
     private static SelfRun3Engine.State resource(SelfRun3Engine.State state, String key, String value) {
