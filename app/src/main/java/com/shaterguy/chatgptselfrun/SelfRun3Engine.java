@@ -13,6 +13,7 @@ import java.util.Set;
 final class SelfRun3Engine {
     static final String STATE_SCHEMA = "selfrun-task-state-v3";
     static final String RESULT_SCHEMA = "selfrun-turn-result-v3";
+    static final long SUBMISSION_RECEIPT_TIMEOUT_MS = 120_000L;
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
     enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
@@ -31,6 +32,7 @@ final class SelfRun3Engine {
                 put(this.value,"taskPaused",true);
                 put(this.value,"stage",this.value.optString("resumeStage","WAITING"));
             }
+            normalizeLegacyGhost(this.value);
             require(STATE_SCHEMA.equals(text("schema")) && validId(taskId()) && validId(turnId()) && validId(requestId()), "invalid task identity");
             Stage.valueOf(text("stage")); require(turn() > 0, "invalid turn ordinal");
         }
@@ -141,27 +143,52 @@ final class SelfRun3Engine {
                 if(stage!=Stage.READY || s.flag("sendClaimed") || original.flag("taskPaused")) return original;
                 require(activeCount(original)<2,"maximum two automatic conversations");
                 for(State other:original.executions()) require(other.turnId().equals(s.turnId()) || other.stage()!=Stage.DISPATCHING,"dispatch is sequential");
-                put(v,"sendClaimed",true); put(v,"stage","DISPATCHING"); put(v,"submittedAt",p.optLong("at"));
+                long atWall=p.optLong("atWall",p.optLong("at"));
+                put(v,"sendClaimed",true); put(v,"stage","DISPATCHING"); put(v,"submittedAt",atWall);
+                if(p.has("atElapsed") && p.has("bootCount") && p.optLong("atElapsed",-1L)>=0L
+                        && p.optInt("bootCount",-1)>=0 && atWall>0L) {
+                    long atElapsed=p.optLong("atElapsed");
+                    put(v,"submissionClaimElapsed",atElapsed); put(v,"submissionClaimAtWall",atWall);
+                    put(v,"submissionClaimBootCount",p.optInt("bootCount"));
+                    put(v,"receiptDeadlineElapsed",safeAdd(atElapsed,SUBMISSION_RECEIPT_TIMEOUT_MS));
+                    put(v,"receiptDeadlineAtWall",safeAdd(atWall,SUBMISSION_RECEIPT_TIMEOUT_MS));
+                    put(v,"receiptDeadlineBootCount",p.optInt("bootCount"));
+                }
             }
-            case STARTED, ACCEPTED -> {
-                if(!s.flag("sendClaimed")) return original;
-                if(e.kind==Kind.STARTED && !v.has("canonicalPostConfirmedElapsed")
+            case STARTED -> {
+                if(!s.flag("sendClaimed") || stage!=Stage.DISPATCHING || s.flag("accepted")) return original;
+                put(v,"canonicalPostStarted",true);
+                if(!v.has("canonicalPostStartedElapsed")
                         && "canonical_post".equals(p.optString("source"))
                         && "turn_request".equals(p.optString("protocolStage"))
                         && p.has("atElapsed") && p.has("atWall") && p.has("bootCount")
+                        && p.optLong("atElapsed",-1L)>=0L && p.optLong("atWall",-1L)>0L
+                        && p.optInt("bootCount",-1)>=0) {
+                    put(v,"canonicalPostStartedElapsed",p.optLong("atElapsed"));
+                    put(v,"canonicalPostStartedAtWall",p.optLong("atWall"));
+                    put(v,"canonicalPostStartedBootCount",p.optInt("bootCount"));
+                }
+                put(v,"dispatchObserved",false); put(v,"accepted",false); put(v,"stage","DISPATCHING");
+            }
+            case ACCEPTED -> {
+                if(!s.flag("sendClaimed") || stage!=Stage.DISPATCHING || s.flag("accepted")) return original;
+                require("conversation_url".equals(p.optString("proof")) && !s.resource("conversationUrl").isEmpty(),
+                        "positive acceptance proof required");
+                put(v,"dispatchObserved",true); put(v,"accepted",true); put(v,"acceptanceProof","conversation_url");
+                if(p.has("atElapsed") && p.has("atWall") && p.has("bootCount")
                         && p.optLong("atElapsed",-1L)>=0L && p.optLong("atWall",-1L)>0L
                         && p.optInt("bootCount",-1)>=0) {
                     put(v,"canonicalPostConfirmedElapsed",p.optLong("atElapsed"));
                     put(v,"canonicalPostConfirmedAtWall",p.optLong("atWall"));
                     put(v,"canonicalPostBootCount",p.optInt("bootCount"));
                 }
-                put(v,"dispatchObserved",true); put(v,"accepted",true);
                 if(!s.flag("committed")) put(v,"stage",s.hasResult()?"RECONCILING":"WAITING");
             }
             case UNSENT -> {
-                if(stage!=Stage.DISPATCHING || s.flag("dispatchObserved") || s.flag("accepted")) return original;
+                if(stage!=Stage.DISPATCHING || s.flag("dispatchObserved") || s.flag("accepted") || s.flag("canonicalPostStarted")) return original;
                 require(NO_SEND_PROOFS.contains(p.optString("status")),"positive no-dispatch proof required");
                 put(v,"sendClaimed",false); put(v,"stage","READY"); v.remove("submittedAt");
+                clearReceipt(v);
             }
             case ENDED -> { return original; }
             case RESULT_MUTATED -> {
@@ -202,6 +229,14 @@ final class SelfRun3Engine {
                     JSONObject old=object(s.text("result"));
                     boolean resolved="USER_ACTION_REQUIRED".equals(old.optString("status")) && "USER_ACTION_RESOLVED".equals(r.optString("status"));
                     if(!resolved) { require(equivalent(old,r),"committed result changed"); return original; }
+                }
+                put(v,"dispatchObserved",true); put(v,"accepted",true); put(v,"acceptanceProof","committed_result");
+                if(p.has("atElapsed") && p.has("atWall") && p.has("bootCount")
+                        && p.optLong("atElapsed",-1L)>=0L && p.optLong("atWall",-1L)>0L
+                        && p.optInt("bootCount",-1)>=0) {
+                    put(v,"canonicalPostConfirmedElapsed",p.optLong("atElapsed"));
+                    put(v,"canonicalPostConfirmedAtWall",p.optLong("atWall"));
+                    put(v,"canonicalPostBootCount",p.optInt("bootCount"));
                 }
                 put(v,"result",r.toString()); put(v,"committed",false); put(v,"stage","RECONCILING");
             }
@@ -263,7 +298,8 @@ final class SelfRun3Engine {
             case SETUP -> Action.SETUP;
             case PREPARING -> Action.PREPARE_TURN;
             case READY -> Action.PREPARE_WEB;
-            case DISPATCHING, WAITING, WAITING_USER_INTERVENTION -> Action.WAIT;
+            case DISPATCHING -> Action.CHECK_RECEIPT;
+            case WAITING, WAITING_USER_INTERVENTION -> Action.WAIT;
             case RECONCILING -> s.hasResult() ? Action.COMMIT : Action.READ_RESULT;
             default -> Action.NONE;
         };
@@ -276,6 +312,26 @@ final class SelfRun3Engine {
     static int activeCount(State s) {
         int count=0; for(State x:s.executions()) if(x.flag("sendClaimed") && !x.flag("committed") && !"BRANCH_COMPLETE".equals(x.text("stage"))) count++;
         return count;
+    }
+    static boolean receiptExpired(State s,long nowElapsed,long nowWall,int currentBootCount) {
+        return receiptDelayMs(s,nowElapsed,nowWall,currentBootCount)==0L;
+    }
+    static long receiptDelayMs(State s,long nowElapsed,long nowWall,int currentBootCount) {
+        if(s==null || s.stage()!=Stage.DISPATCHING || !"DISPATCHING".equals(s.text("stage"))
+                || !s.flag("sendClaimed") || s.flag("accepted") || s.hasResult()
+                || !s.resource("conversationUrl").isEmpty()) return -1L;
+        JSONObject snapshot=s.json();
+        if(snapshot.has("receiptDeadlineElapsed") && snapshot.has("receiptDeadlineBootCount")
+                && currentBootCount>=0 && s.number("receiptDeadlineBootCount")==currentBootCount
+                && nowElapsed>=0L) {
+            long deadline=s.time("receiptDeadlineElapsed");
+            return nowElapsed>=deadline?0L:deadline-nowElapsed;
+        }
+        if(snapshot.has("receiptDeadlineAtWall") && nowWall>0L) {
+            long deadline=s.time("receiptDeadlineAtWall");
+            return nowWall>=deadline?0L:deadline-nowWall;
+        }
+        return -1L;
     }
     private static State maybeMerge(State s) {
         if(s.flag("taskPaused") || s.flag("taskStopped")) return s;
@@ -317,7 +373,9 @@ final class SelfRun3Engine {
         JSONObject config=s.config(); applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
-                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
+                "canonicalPostStarted","canonicalPostStartedElapsed","canonicalPostStartedAtWall","canonicalPostStartedBootCount","canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","acceptanceProof","legacyGhostNormalized",
+                "submissionClaimElapsed","submissionClaimAtWall","submissionClaimBootCount","receiptDeadlineElapsed","receiptDeadlineAtWall","receiptDeadlineBootCount",
+                "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);
@@ -334,12 +392,12 @@ final class SelfRun3Engine {
         rows.sort((a,b)->Integer.compare(a.optInt("turn"),b.optInt("turn")));
         for(JSONObject x:rows) {
             JSONObject h=new JSONObject(), c=copy(x.optJSONObject("config")), r=copy(x.optJSONObject("resources"));
-            for(String k:new String[]{"turn","turnId","requestId","phase","executionKind","signalType","parallelGroupId","branchId","submittedAt","canonicalPostConfirmedAtWall"}) put(h,k,x.opt(k));
+            for(String k:new String[]{"turn","turnId","requestId","phase","executionKind","signalType","parallelGroupId","branchId","submittedAt","canonicalPostStartedAtWall","canonicalPostConfirmedAtWall","receiptDeadlineAtWall","acceptanceProof","legacyGhostNormalized"}) put(h,k,x.opt(k));
             put(h,"mode",c.optString("mode")); put(h,"model",c.optString("model")); put(h,"reasoning",c.optString("reasoning",c.optString("chatBootstrap")));
             put(h,"conversationUrl",r.optString("conversationUrl")); put(h,"resultDocumentId",r.optString("resultDocumentId"));
             put(h,"previousResultDocumentId",x.optString("previousResultDocumentId")); put(h,"superseded",x.optBoolean("superseded"));
             put(h,"resultBodyMutationObserved",x.optBoolean("resultBodyMutationObserved"));
-            put(h,"dispatchStatus",x.optBoolean("dispatchObserved")?"CONFIRMED":x.optBoolean("sendClaimed")?"UNCERTAIN":"PENDING");
+            put(h,"dispatchStatus",x.optBoolean("accepted")?"CONFIRMED":x.optBoolean("sendClaimed")?"UNCERTAIN":"PENDING");
             JSONObject result=x.optString("result").isEmpty()?new JSONObject():object(x.optString("result"));
             put(h,"resultStatus",result.optString("status",x.optBoolean("committed")?"COMMITTED":"PENDING")); history.put(h);
         }
@@ -454,6 +512,39 @@ final class SelfRun3Engine {
     static JSONObject copy(JSONObject v) { return v==null?new JSONObject():object(v.toString()); }
     static JSONArray array(JSONArray a) { try { return a==null?new JSONArray():new JSONArray(a.toString()); } catch(Exception e) { throw new IllegalArgumentException(e); } }
     static void put(JSONObject v,String key,Object val) { try { v.put(key,val); } catch(Exception e) { throw new IllegalArgumentException("JSON value rejected",e); } }
+    private static long safeAdd(long value,long delta) {
+        if(value<0L || delta<0L || value>Long.MAX_VALUE-delta) return Long.MAX_VALUE;
+        return value+delta;
+    }
+    private static void clearReceipt(JSONObject v) {
+        for(String k:new String[]{"submissionClaimElapsed","submissionClaimAtWall","submissionClaimBootCount","receiptDeadlineElapsed","receiptDeadlineAtWall","receiptDeadlineBootCount",
+                "canonicalPostStarted","canonicalPostStartedElapsed","canonicalPostStartedAtWall","canonicalPostStartedBootCount"}) v.remove(k);
+    }
+    private static void normalizeLegacyGhost(JSONObject v) {
+        if(!"WAITING".equals(v.optString("stage")) || !v.optBoolean("sendClaimed",false)
+                || !v.optBoolean("accepted",false) || v.optBoolean("committed",false)
+                || !v.optString("result","").isEmpty()) return;
+        JSONObject resources=copy(v.optJSONObject("resources"));
+        if(!resources.optString("conversationUrl","").isEmpty()) return;
+        put(v,"stage","DISPATCHING"); put(v,"accepted",false); put(v,"dispatchObserved",false);
+        put(v,"legacyGhostNormalized",true); put(v,"acceptanceProof","");
+        if(v.has("canonicalPostConfirmedElapsed")) {
+            long elapsed=v.optLong("canonicalPostConfirmedElapsed",-1L);
+            if(elapsed>=0L) {
+                put(v,"canonicalPostStarted",true); put(v,"canonicalPostStartedElapsed",elapsed);
+                if(v.has("canonicalPostBootCount")) put(v,"canonicalPostStartedBootCount",v.optInt("canonicalPostBootCount"));
+                if(!v.has("receiptDeadlineElapsed")) put(v,"receiptDeadlineElapsed",safeAdd(elapsed,SUBMISSION_RECEIPT_TIMEOUT_MS));
+                if(v.has("canonicalPostBootCount") && !v.has("receiptDeadlineBootCount")) put(v,"receiptDeadlineBootCount",v.optInt("canonicalPostBootCount"));
+            }
+        }
+        long wall=v.optLong("canonicalPostConfirmedAtWall",v.optLong("submittedAt",0L));
+        if(wall>0L) {
+            put(v,"canonicalPostStarted",true);
+            if(!v.has("canonicalPostStartedAtWall")) put(v,"canonicalPostStartedAtWall",wall);
+            if(!v.has("submissionClaimAtWall")) put(v,"submissionClaimAtWall",v.optLong("submittedAt",wall));
+            if(!v.has("receiptDeadlineAtWall")) put(v,"receiptDeadlineAtWall",safeAdd(wall,SUBMISSION_RECEIPT_TIMEOUT_MS));
+        }
+    }
     private static boolean equivalent(Object a,Object b) {
         if(a instanceof JSONObject x && b instanceof JSONObject y) {
             if(x.length()!=y.length()) return false; Iterator<String> keys=x.keys();
