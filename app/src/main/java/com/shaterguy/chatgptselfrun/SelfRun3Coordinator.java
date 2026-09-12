@@ -327,7 +327,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
-                        repairResult(state);
+                        repairResult(state, "INVALID_COMMITTED_RESULT");
                     }
                 });
             } catch (ResultPendingException pending) {
@@ -344,7 +344,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (validEpoch(expectedEpoch)) handleDriveFailure(state, step, error);
+                    if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
+                    if (step == DriveStep.READ_RESULT) {
+                        clearRecoveredDriveWarning(store);
+                        networkAttempt = 0;
+                        repairResult(state, "READ_RESULT_FAILURE_" + safeCode(error.getClass().getSimpleName()));
+                    } else {
+                        handleDriveFailure(state, step, error);
+                    }
                 });
             }
         });
@@ -355,21 +362,20 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         scheduleNext(0L);
     }
 
-    private void repairResult(SelfRun3Engine.State original) {
+    private void repairResult(SelfRun3Engine.State original, String reason) {
         int expectedEpoch = epoch;
         io.execute(() -> {
             try {
                 SelfRun3Engine.State current = ledger.loadExecution(original.taskId(), original.turnId());
                 if (current == null || current.flag("superseded")) return;
-                if (current.number("repairAttempt") != 0) {
-                    main.post(() -> pause("V3_RESULT_REPAIR_EXHAUSTED"));
-                    return;
-                }
                 JSONObject payload = new JSONObject();
                 SelfRun3Engine.put(payload, "safeToRepair", true);
-                SelfRun3Engine.put(payload, "reason", "EXACT_IDENTITY_INVALID_COMMITTED_RESULT");
-                SelfRun3Engine.State after = ledger.apply(event(current, current.turnId() + ":repair-invalid-commit",
+                SelfRun3Engine.put(payload, "reason", reason);
+                SelfRun3Engine.State after = ledger.apply(event(current,
+                        current.turnId() + ":repair-result:" + UUID.randomUUID(),
                         SelfRun3Engine.Kind.REPAIR, payload));
+                log.record(store, "V3_RESULT_REPAIR",
+                        "turn=" + current.turn() + ";reason=" + safeCode(reason));
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
                     nextResultPoll.remove(original.turnId());
@@ -377,7 +383,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     scheduleNext(0L);
                 });
             } catch (Throwable error) {
-                main.post(() -> hardPause("V3_RESULT_REPAIR_FAILED", error));
+                main.post(() -> {
+                    if (!validEpoch(expectedEpoch) || !original.taskId().equals(store.runId())) return;
+                    log.record(store, "V3_RESULT_REPAIR_RETRY",
+                            "turn=" + original.turn() + ";error=" + error.getClass().getSimpleName());
+                    nextResultPoll.remove(original.turnId());
+                    scheduleResultRetry(original);
+                });
             }
         });
     }
@@ -533,7 +545,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             try {
                 SelfRun3Engine.State state = ledger.loadExecution(task, turn);
                 if (!callbackMatches(state, task, turn, request)) return;
-                JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "code", safeCode(code));
+                JSONObject payload = requestPayload(request); SelfRun3Engine.put(payload, "code", safeCode(code));
                 SelfRun3Engine.State after = ledger.apply(event(state, request + ":error:" + safeCode(code),
                         SelfRun3Engine.Kind.ERROR, payload));
                 boolean retryingPreparation = state.stage() == SelfRun3Engine.Stage.READY && !state.flag("sendClaimed");
