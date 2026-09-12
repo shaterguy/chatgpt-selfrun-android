@@ -165,22 +165,21 @@ require_file "$LEGACY_APK"
 require_file "$DRIVE_APK"
 "$ADB" wait-for-device
 
-echo "Configuring software IME for instrumentation"
-IME_ID="$("$ADB" shell ime list -s | tr -d '\r' | head -1)"
-[[ -n "$IME_ID" ]] || fail "no software IME is installed on the emulator"
-"$ADB" shell ime enable "$IME_ID" >/dev/null || true
-"$ADB" shell ime set "$IME_ID" >/dev/null || fail "unable to select emulator IME: $IME_ID"
-"$ADB" shell settings put secure show_ime_with_hard_keyboard 1
-sleep 1
-
-echo "Running long-command IME instrumentation regression"
 if [[ "$DRIVE_EXPECTED_VERSION" == 2.* ]]; then
+  echo "Configuring software IME for retained SelfRun 2 instrumentation"
+  IME_ID="$("$ADB" shell ime list -s | tr -d '\r' | head -1)"
+  [[ -n "$IME_ID" ]] || fail "no software IME is installed on the emulator"
+  "$ADB" shell ime enable "$IME_ID" >/dev/null || true
+  "$ADB" shell ime set "$IME_ID" >/dev/null || fail "unable to select emulator IME: $IME_ID"
+  "$ADB" shell settings put secure show_ime_with_hard_keyboard 1
+  sleep 1
+
+  echo "Running retained SelfRun 2 long-command IME instrumentation regression"
   COINSTALL_INSTRUMENTATION_CLASS="${COINSTALL_INSTRUMENTATION_CLASS:-com.shaterguy.chatgptselfrun.RichComposerBootstrapWebViewTest}"
-  echo "Using v2 request-profile instrumentation: $COINSTALL_INSTRUMENTATION_CLASS"
   gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest \
     -Pandroid.testInstrumentationRunnerArguments.class="$COINSTALL_INSTRUMENTATION_CLASS"
 else
-  gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest
+  echo "SelfRun 3 instrumentation is owned by the canonical release workflow; co-install check remains isolation-only."
 fi
 
 echo "Installing legacy APK first"
