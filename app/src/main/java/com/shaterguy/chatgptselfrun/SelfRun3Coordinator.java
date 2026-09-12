@@ -172,15 +172,32 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             return;
         }
         long now = SystemClock.elapsedRealtime();
+        long nowWall = System.currentTimeMillis();
+        int bootCount = currentBootCount();
         long nextDelay = resultPollMs;
         for (SelfRun3Engine.State execution : SelfRun3Engine.waitingExecutions(state)) {
-            if (execution.resource("resultDocumentId").isEmpty()) continue;
-            long due = nextResultPoll.getOrDefault(execution.turnId(), 0L);
-            if (due <= now) {
-                runDriveStep(execution, DriveStep.READ_RESULT);
+            if (pinnedConversationProof(execution)) {
+                acceptPinnedConversation(execution);
                 return;
             }
-            nextDelay = Math.min(nextDelay, due - now);
+            long receiptDelay = SelfRun3Engine.receiptDelayMs(execution, now, nowWall, bootCount);
+            if (receiptDelay == 0L) {
+                if (!execution.resource("resultDocumentId").isEmpty()) {
+                    runDriveStep(execution, DriveStep.RECEIPT_FINAL_RESULT);
+                } else {
+                    pause("V3_SUBMISSION_OUTCOME_UNCERTAIN");
+                }
+                return;
+            }
+            if (receiptDelay > 0L) nextDelay = Math.min(nextDelay, receiptDelay);
+            if (!execution.resource("resultDocumentId").isEmpty()) {
+                long due = nextResultPoll.getOrDefault(execution.turnId(), 0L);
+                if (due <= now) {
+                    runDriveStep(execution, DriveStep.READ_RESULT);
+                    return;
+                }
+                nextDelay = Math.min(nextDelay, due - now);
+            }
         }
         switch (SelfRun3Engine.nextAction(state)) {
             case SETUP -> runDriveStep(state, DriveStep.SETUP);
@@ -203,7 +220,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         }
     }
 
-    private enum DriveStep { SETUP, PREPARE_TURN, READ_RESULT }
+    private enum DriveStep { SETUP, PREPARE_TURN, READ_RESULT, RECEIPT_FINAL_RESULT }
 
     private void runDriveStep(SelfRun3Engine.State state, DriveStep step) {
         requireMain();
@@ -220,7 +237,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 if (!validEpoch(expectedEpoch) || !canRun()) return;
                 accessToken = DriveAuthorization.accessToken(result);
                 if (accessToken.isEmpty()) {
-                    scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
+                    if (step == DriveStep.RECEIPT_FINAL_RESULT) pause("V3_SUBMISSION_OUTCOME_UNCERTAIN");
+                    else scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
                     return;
                 }
                 executeDriveStep(state, step, accessToken);
@@ -231,7 +249,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             }
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
-                if (validEpoch(expectedEpoch)) scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
+                if (!validEpoch(expectedEpoch)) return;
+                if (step == DriveStep.RECEIPT_FINAL_RESULT) pause("V3_SUBMISSION_OUTCOME_UNCERTAIN");
+                else scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
             }
         });
     }
@@ -240,7 +260,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (driveInFlight || !canRun()) return;
         driveInFlight = true;
-        if (step != DriveStep.READ_RESULT) acquireWakeLock();
+        if (step != DriveStep.READ_RESULT && step != DriveStep.RECEIPT_FINAL_RESULT) acquireWakeLock();
         int expectedEpoch = epoch;
         String expectedTask = state.taskId();
         String expectedTurn = state.turnId();
@@ -289,6 +309,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (parsed != null) {
                         JSONObject payload = new JSONObject();
                         SelfRun3Engine.put(payload, "text", observation.candidateBody);
+                        SelfRun3Engine.put(payload, "atElapsed", SystemClock.elapsedRealtime());
+                        SelfRun3Engine.put(payload, "atWall", System.currentTimeMillis());
+                        SelfRun3Engine.put(payload, "bootCount", currentBootCount());
                         after = ledger.apply(event(current, current.turnId() + ":result:" + observation.version,
                                 SelfRun3Engine.Kind.RESULT, payload));
                     } else if (SelfRun3ResultWatchdog.shouldRepair(current,
@@ -312,7 +335,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                             || !expectedTask.equals(store.runId())) return;
                     clearRecoveredDriveWarning(store);
                     networkAttempt = 0;
-                    if (step == DriveStep.READ_RESULT) {
+                    if (step == DriveStep.READ_RESULT || step == DriveStep.RECEIPT_FINAL_RESULT) {
                         nextResultPoll.remove(expectedTurn);
                         if (completed.turnId().equals(expectedTurn)) nextResultPoll.put(expectedTurn,
                                 SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
@@ -324,9 +347,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
-                        clearRecoveredDriveWarning(store);
-                        networkAttempt = 0;
+                    if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
+                    clearRecoveredDriveWarning(store);
+                    networkAttempt = 0;
+                    if (step == DriveStep.RECEIPT_FINAL_RESULT) {
+                        pause("V3_SUBMISSION_OUTCOME_UNCERTAIN");
+                    } else if (state.stage() == SelfRun3Engine.Stage.DISPATCHING && !state.flag("accepted")) {
+                        scheduleResultRetry(state);
+                    } else {
                         repairResult(state);
                     }
                 });
@@ -334,17 +362,19 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
-                        clearRecoveredDriveWarning(store);
-                        networkAttempt = 0;
-                        scheduleResultRetry(state);
-                    }
+                    if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
+                    clearRecoveredDriveWarning(store);
+                    networkAttempt = 0;
+                    if (step == DriveStep.RECEIPT_FINAL_RESULT) pause("V3_SUBMISSION_OUTCOME_UNCERTAIN");
+                    else scheduleResultRetry(state);
                 });
             } catch (Throwable error) {
                 main.post(() -> {
                     driveInFlight = false;
                     releaseWakeLock();
-                    if (validEpoch(expectedEpoch)) handleDriveFailure(state, step, error);
+                    if (!validEpoch(expectedEpoch)) return;
+                    if (step == DriveStep.RECEIPT_FINAL_RESULT) pause("V3_SUBMISSION_OUTCOME_UNCERTAIN");
+                    else handleDriveFailure(state, step, error);
                 });
             }
         });
@@ -461,7 +491,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             try {
                 SelfRun3Engine.State before = ledger.loadExecution(task, turn);
                 if (!callbackMatches(before, task, turn, request) || before.stage() != SelfRun3Engine.Stage.READY) return;
-                JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
+                JSONObject payload = new JSONObject();
+                SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
+                SelfRun3Engine.put(payload, "atElapsed", SystemClock.elapsedRealtime());
+                SelfRun3Engine.put(payload, "atWall", System.currentTimeMillis());
+                SelfRun3Engine.put(payload, "bootCount", currentBootCount());
                 SelfRun3Engine.State claimed = ledger.apply(event(before,
                         request + ":claim:" + UUID.randomUUID(), SelfRun3Engine.Kind.CLAIM_SEND, payload));
                 main.post(() -> {
@@ -476,7 +510,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     @Override public void onDispatched(String task, String turn, String request) {
-        // A click is not proof of acceptance. The persisted send claim already enables Drive readback.
+        // A click or canonical POST start is not proof that ChatGPT accepted a new conversation.
         log.record(store, "V3_DISPATCH", "turn=" + turn + ";request=" + request);
     }
 
@@ -491,8 +525,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     @Override public void onAccepted(String task, String turn, String request) {
-        recordCallback(task, turn, request, request + ":accepted", SelfRun3Engine.Kind.ACCEPTED,
-                requestPayload(request));
+        // No generic callback is a positive acceptance proof. URL/result reconciliation owns ACCEPTED.
+        log.record(store, "V3_ACCEPTED_CALLBACK_IGNORED", "turn=" + turn + ";request=" + request);
     }
 
     @Override public void onConversation(String task, String turn, String url) {
@@ -501,16 +535,22 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         io.execute(() -> {
             try {
                 SelfRun3Engine.State state = ledger.loadExecution(task, turn);
-                if (state == null || !state.turnId().equals(turn)) return;
-                JSONObject payload = new JSONObject();
-                SelfRun3Engine.put(payload, "key", "conversationUrl");
-                SelfRun3Engine.put(payload, "value", url);
+                if (!conversationCandidate(state, task, turn)) return;
+                JSONObject resource = new JSONObject();
+                SelfRun3Engine.put(resource, "key", "conversationUrl");
+                SelfRun3Engine.put(resource, "value", url);
                 SelfRun3Engine.State after = ledger.apply(event(state,
                         turn + ":conversation:" + SelfRunScript.conversationId(url),
-                        SelfRun3Engine.Kind.RESOURCE, payload));
+                        SelfRun3Engine.Kind.RESOURCE, resource));
+                SelfRun3Engine.State bound = after.execution(turn);
+                if (bound != null && !bound.flag("taskPaused") && pinnedConversationProof(bound)) {
+                    after = acceptConversationProof(bound, SelfRunScript.conversationId(url));
+                }
+                SelfRun3Engine.State completed = after;
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
-                    syncProjection(after);
+                    syncProjection(completed);
+                    scheduleNext(0L);
                 });
             } catch (Throwable error) {
                 main.post(() -> hardPause("V3_CONVERSATION_BIND_FAILED", error));
@@ -585,6 +625,51 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         });
     }
 
+    private void acceptPinnedConversation(SelfRun3Engine.State stale) {
+        int expectedEpoch = epoch;
+        io.execute(() -> {
+            try {
+                SelfRun3Engine.State current = ledger.loadExecution(stale.taskId(), stale.turnId());
+                if (!pinnedConversationProof(current) || current.flag("taskPaused") || current.flag("taskStopped")) return;
+                String conversationId = SelfRunScript.conversationId(current.resource("conversationUrl"));
+                SelfRun3Engine.State after = acceptConversationProof(current, conversationId);
+                main.post(() -> {
+                    if (!validEpoch(expectedEpoch)) return;
+                    syncProjection(after);
+                    scheduleNext(0L);
+                });
+            } catch (Throwable error) {
+                main.post(() -> hardPause("V3_CONVERSATION_ACCEPT_FAILED", error));
+            }
+        });
+    }
+
+    private SelfRun3Engine.State acceptConversationProof(SelfRun3Engine.State current, String conversationId) {
+        JSONObject proof = requestPayload(current.requestId());
+        SelfRun3Engine.put(proof, "proof", "conversation_url");
+        SelfRun3Engine.put(proof, "atElapsed", SystemClock.elapsedRealtime());
+        SelfRun3Engine.put(proof, "atWall", System.currentTimeMillis());
+        SelfRun3Engine.put(proof, "bootCount", currentBootCount());
+        String suffix = conversationId == null || conversationId.isEmpty() ? "bound" : conversationId;
+        return ledger.apply(event(current, current.requestId() + ":accepted:" + suffix,
+                SelfRun3Engine.Kind.ACCEPTED, proof));
+    }
+
+    private static boolean conversationCandidate(SelfRun3Engine.State state, String task, String turn) {
+        return state != null && task.equals(state.taskId()) && turn.equals(state.turnId())
+                && "DISPATCHING".equals(state.text("stage")) && state.flag("sendClaimed")
+                && state.flag("canonicalPostStarted") && !state.flag("accepted")
+                && !state.flag("committed") && !state.hasResult() && !state.flag("superseded")
+                && !state.flag("taskStopped");
+    }
+
+    private static boolean pinnedConversationProof(SelfRun3Engine.State state) {
+        return state != null && "DISPATCHING".equals(state.text("stage")) && state.flag("sendClaimed")
+                && state.flag("canonicalPostStarted") && !state.flag("accepted")
+                && !state.flag("committed") && !state.hasResult() && !state.flag("superseded")
+                && !state.resource("conversationUrl").isEmpty();
+    }
+
     private void pause(String reason) {
         requireMain();
         if (store.runId().isEmpty() || destroyed || !ownsCurrentRun()) return;
@@ -636,6 +721,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 SelfRun3Engine.State resumed = state;
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
+                    for (SelfRun3Engine.State execution : SelfRun3Engine.waitingExecutions(resumed)) {
+                        nextResultPoll.remove(execution.turnId());
+                    }
                     syncProjection(resumed);
                     scheduleNext(0L);
                 });
@@ -708,7 +796,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             case SETUP -> "SelfRun 3 원장 · Drive 준비";
             case PREPARING -> "SelfRun 3 다음 논리 턴 준비";
             case READY -> "SelfRun 3 ChatGPT 요청 준비";
-            case DISPATCHING -> "SelfRun 3 전송 결과 확인";
+            case DISPATCHING -> "SelfRun 3 전송 승인 증거 확인";
             case WAITING -> "SelfRun 3 Drive 결과 대기";
             case WAITING_USER_INTERVENTION -> "사용자 조치 완료 checkpoint 대기";
             case BRANCH_COMPLETE -> "다른 병렬 결과 대기";
@@ -762,7 +850,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private static boolean callbackMatches(SelfRun3Engine.State state, String task, String turn, String request) {
         return state != null && task.equals(state.taskId()) && turn.equals(state.turnId())
-                && request.equals(state.requestId()) && !state.terminal() && !state.flag("superseded");
+                && request.equals(state.requestId()) && !state.terminal() && !state.flag("superseded")
+                && !state.flag("taskPaused") && !state.flag("taskStopped");
     }
 
     private static SelfRun3Engine.Event event(SelfRun3Engine.State state, String id,
