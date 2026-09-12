@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3022000
-def selfRunDriveVersionName = '3.2.1'
+def selfRunDriveVersionCode = 3023000
+def selfRunDriveVersionName = '3.2.2'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -187,7 +187,10 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !notifier.contains('runtimeSettings.stallAlertMs()')
                 || !notifier.contains('settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)')
                 || !web.contains('prepareTimeoutMs = runtimeSettings.webPreparationMs()')
-                || !stall.contains('long alertAfterMs')) throw new GradleException('V3 runtime must consume all four operator timing settings')
+                || !web.contains('scope=conversation-create')
+                || !web.contains('conversationCaptured')
+                || !engine.contains('s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT')
+                || !stall.contains('long alertAfterMs')) throw new GradleException('V3 runtime must consume operator timings and gate result wait on canonical conversation creation')
         if (power.contains('NORMAL_WAIT_POLL_MS') || power.contains('WEB_PREPARATION_MAX_MS')) throw new GradleException('operator-configurable timings must not remain fixed in power policy')
         if (engine.contains('MAX_RESULT_BYTES') || drive.contains('MAX_RESULT_BYTES')
                 || userNext.contains('MAX_USER_UTF8_BYTES') || userNext.contains('MAX_COMBINED_UTF8_BYTES')

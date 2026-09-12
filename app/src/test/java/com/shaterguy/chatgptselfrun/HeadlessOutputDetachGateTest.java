@@ -72,10 +72,14 @@ public final class HeadlessOutputDetachGateTest {
         assertFalse(transport.contains("setTimeout("));
     }
 
-    @Test public void active31WaitDetachesWithoutBrowserCompletionInspection() throws Exception {
+    @Test public void active31KeepsBrowserUntilCanonicalConversationThenDriveWaitDetaches() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(web.contains("a.quiesce();"));
+        String capture = web.substring(web.indexOf("private void captureConversation()"),
+                web.indexOf("private boolean allowedPreparationRoute"));
+        assertTrue(capture.contains("listener.onConversation"));
+        assertTrue(capture.contains("listener.onStarted"));
+        assertTrue(capture.contains("quiesce();"));
         assertTrue(web.contains("void detach() { requireMain(); if (host != null) host.detachOutput(); }"));
         assertTrue(coordinator.contains("case WAIT, READ_RESULT, CHECK_RECEIPT"));
         assertTrue(coordinator.contains("web.detach();"));
@@ -99,8 +103,10 @@ public final class HeadlessOutputDetachGateTest {
                 web.indexOf("private void ensureWeb"));
 
         assertTrue(prepare.contains("boolean restartPreparation = newRequest || !preparing"));
-        assertTrue(prepare.contains("else if (restartPreparation)"));
+        assertTrue(prepare.contains("if (restartPreparation)"));
+        assertTrue(prepare.contains("startPreparationTimer()"));
         assertTrue(prepare.contains("prepareStarted = SystemClock.elapsedRealtime()"));
+        assertTrue(prepare.contains("preparationAttempt = 0L"));
         assertFalse(prepare.contains("state = null"));
     }
 
