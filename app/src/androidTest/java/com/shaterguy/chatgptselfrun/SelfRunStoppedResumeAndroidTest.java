@@ -22,7 +22,7 @@ public final class SelfRunStoppedResumeAndroidTest {
         context.getSharedPreferences("selfrun3_stopped_resume", Context.MODE_PRIVATE).edit().clear().commit();
     }
 
-    @Test public void stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent() throws Exception {
+    @Test public void stoppedUncertainDispatchSurvivesProjectionRestartAndResumeEventIsIdempotent() throws Exception {
         String taskId = "resume-test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         String turnId = taskId + ":turn:1";
         String resultId = "result-" + taskId;
@@ -41,6 +41,7 @@ public final class SelfRunStoppedResumeAndroidTest {
         SelfRun3Engine.put(config, "reasoning", "medium");
 
         SelfRun3Engine.State initial = SelfRun3Engine.create(taskId, turnId, config);
+        long expectedDeadline = 100L + SelfRun3Engine.SUBMISSION_RECEIPT_TIMEOUT_MS;
         try (SelfRun3Ledger ledger = new SelfRun3Ledger(context)) {
             SelfRun3Engine.State state = ledger.ensure(initial);
             state = applyResource(ledger, state, "folderId", "jobfolder");
@@ -52,13 +53,26 @@ public final class SelfRunStoppedResumeAndroidTest {
             SelfRun3Engine.put(ready, "inputText", "");
             SelfRun3Engine.put(ready, "inputRevision", 0L);
             state = ledger.apply(event(state, "ready", SelfRun3Engine.Kind.TURN_READY, ready));
-            JSONObject claim = new JSONObject(); SelfRun3Engine.put(claim, "at", 100L);
+            JSONObject claim = new JSONObject();
+            SelfRun3Engine.put(claim, "at", 1_000L);
+            SelfRun3Engine.put(claim, "atElapsed", 100L);
+            SelfRun3Engine.put(claim, "atWall", 1_000L);
+            SelfRun3Engine.put(claim, "bootCount", 7);
             state = ledger.apply(event(state, "claim", SelfRun3Engine.Kind.CLAIM_SEND, claim));
-            JSONObject started = new JSONObject(); SelfRun3Engine.put(started, "requestId", state.requestId());
+            JSONObject started = new JSONObject();
+            SelfRun3Engine.put(started, "requestId", state.requestId());
+            SelfRun3Engine.put(started, "source", "canonical_post");
+            SelfRun3Engine.put(started, "protocolStage", "turn_request");
+            SelfRun3Engine.put(started, "atElapsed", 200L);
+            SelfRun3Engine.put(started, "atWall", 1_100L);
+            SelfRun3Engine.put(started, "bootCount", 7);
             state = ledger.apply(event(state, "started", SelfRun3Engine.Kind.STARTED, started));
+            assertEquals(SelfRun3Engine.Stage.DISPATCHING, state.stage());
+            assertFalse(state.flag("accepted"));
             state = ledger.apply(event(state, "stop", SelfRun3Engine.Kind.STOP, new JSONObject()));
             assertEquals(SelfRun3Engine.Stage.STOPPED, state.stage());
             assertEquals(resultId, state.resource("resultDocumentId"));
+            assertEquals(expectedDeadline, state.time("receiptDeadlineElapsed"));
         }
         firstStore.setTurn(1);
         firstStore.stopByUser();
@@ -84,13 +98,17 @@ public final class SelfRunStoppedResumeAndroidTest {
 
             assertEquals(before + 1, afterFirst);
             assertEquals(afterFirst, afterSecond);
-            assertEquals(SelfRun3Engine.Stage.WAITING, duplicate.stage());
+            assertEquals(SelfRun3Engine.Stage.DISPATCHING, duplicate.stage());
             assertFalse(duplicate.flag("taskStopped"));
             assertTrue(duplicate.flag("sendClaimed"));
+            assertTrue(duplicate.flag("canonicalPostStarted"));
+            assertFalse(duplicate.flag("accepted"));
+            assertEquals(expectedDeadline, duplicate.time("receiptDeadlineElapsed"));
             assertEquals(taskId, duplicate.taskId());
             assertEquals(turnId, duplicate.turnId());
+            assertEquals(taskId + ":turn:1-request", duplicate.requestId());
             assertEquals(resultId, duplicate.resource("resultDocumentId"));
-            assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(duplicate));
+            assertEquals(SelfRun3Engine.Action.CHECK_RECEIPT, SelfRun3Engine.nextAction(duplicate));
 
             restartedStore.start(taskId, SelfRunStore.MODE_CHAT, SelfRunScript.GENERAL_CHAT_URL,
                     "resume requirement", new ArrayList<>(), SelfRunStore.MODE_CHAT);
