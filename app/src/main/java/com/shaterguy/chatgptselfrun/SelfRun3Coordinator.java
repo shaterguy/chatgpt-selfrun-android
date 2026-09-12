@@ -658,9 +658,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private static boolean conversationCandidate(SelfRun3Engine.State state, String task, String turn) {
         return state != null && task.equals(state.taskId()) && turn.equals(state.turnId())
                 && "DISPATCHING".equals(state.text("stage")) && state.flag("sendClaimed")
-                && state.flag("canonicalPostStarted") && !state.flag("accepted")
-                && !state.flag("committed") && !state.hasResult() && !state.flag("superseded")
-                && !state.flag("taskStopped");
+                && !state.flag("accepted") && !state.flag("committed") && !state.hasResult()
+                && !state.flag("superseded") && !state.flag("taskStopped");
     }
 
     private static boolean pinnedConversationProof(SelfRun3Engine.State state) {
