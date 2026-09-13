@@ -6,7 +6,7 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-BASE_APK=stable/chatgpt-selfrun-drive-v3.2.2.apk
+BASE_APK=stable/chatgpt-selfrun-drive-v3.2.3.apk
 FORMAL_APK=current/formal.apk
 TEST_APK=current/test.apk
 ANDROID_TEST_APK=current/androidTest.apk
@@ -25,7 +25,7 @@ adb uninstall "$FORMAL" >/dev/null 2>&1 || true
 adb uninstall "$TEST" >/dev/null 2>&1 || true
 
 adb install --no-incremental "$BASE_APK" >/dev/null
-[[ "$(package_version "$FORMAL")" == '3.2.2' ]]
+[[ "$(package_version "$FORMAL")" == '3.2.3' ]]
 BASE_UID="$(package_uid "$FORMAL")"
 test -n "$BASE_UID"
 
