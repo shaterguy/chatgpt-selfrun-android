@@ -274,17 +274,6 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, current);
                     current = ledger.loadExecution(expectedTask, expectedTurn);
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
-                    String bodyFingerprint = SelfRun3ResultWatchdog.fingerprint(observation.rawBody);
-                    if (!current.text("resultSeedFingerprint").isEmpty()
-                            && !bodyFingerprint.equals(current.text("resultSeedFingerprint"))
-                            && !current.flag("resultBodyMutationObserved")) {
-                        JSONObject mutation = new JSONObject();
-                        SelfRun3Engine.put(mutation, "documentId", current.resource("resultDocumentId"));
-                        SelfRun3Engine.put(mutation, "fingerprint", bodyFingerprint);
-                        SelfRun3Engine.put(mutation, "atWall", System.currentTimeMillis());
-                        current = ledger.apply(event(current, current.turnId() + ":result-body-mutated",
-                                SelfRun3Engine.Kind.RESULT_MUTATED, mutation)).execution(current.turnId());
-                    }
                     JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);
                     if (parsed != null) {
                         JSONObject payload = new JSONObject();
@@ -338,7 +327,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error)) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
-                        repairResult(state, "READ_RESULT_FAILURE_" + safeCode(error.getClass().getSimpleName()));
+                        hardPause("V3_READ_RESULT_FAILED", error);
                     } else {
                         handleDriveFailure(state, step, error);
                     }
@@ -350,38 +339,6 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void scheduleResultRetry(SelfRun3Engine.State state) {
         nextResultPoll.put(state.turnId(), SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
         scheduleNext(0L);
-    }
-
-    private void repairResult(SelfRun3Engine.State original, String reason) {
-        int expectedEpoch = epoch;
-        io.execute(() -> {
-            try {
-                SelfRun3Engine.State current = ledger.loadExecution(original.taskId(), original.turnId());
-                if (current == null || current.flag("superseded")) return;
-                JSONObject payload = new JSONObject();
-                SelfRun3Engine.put(payload, "safeToRepair", true);
-                SelfRun3Engine.put(payload, "reason", reason);
-                SelfRun3Engine.State after = ledger.apply(event(current,
-                        current.turnId() + ":repair-result:" + UUID.randomUUID(),
-                        SelfRun3Engine.Kind.REPAIR, payload));
-                log.record(store, "V3_RESULT_REPAIR",
-                        "turn=" + current.turn() + ";reason=" + safeCode(reason));
-                main.post(() -> {
-                    if (!validEpoch(expectedEpoch)) return;
-                    nextResultPoll.remove(original.turnId());
-                    syncProjection(after);
-                    scheduleNext(0L);
-                });
-            } catch (Throwable error) {
-                main.post(() -> {
-                    if (!validEpoch(expectedEpoch) || !original.taskId().equals(store.runId())) return;
-                    log.record(store, "V3_RESULT_REPAIR_RETRY",
-                            "turn=" + original.turn() + ";error=" + error.getClass().getSimpleName());
-                    nextResultPoll.remove(original.turnId());
-                    scheduleResultRetry(original);
-                });
-            }
-        });
     }
 
     private void commitTurn(SelfRun3Engine.State stale) {
