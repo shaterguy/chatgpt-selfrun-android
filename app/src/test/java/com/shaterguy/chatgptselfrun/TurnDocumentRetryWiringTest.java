@@ -23,13 +23,15 @@ public final class TurnDocumentRetryWiringTest {
 
     @Test public void retrySchedulerFreshReadsBeforeWatchdogRepair() throws Exception {
         String coordinator = src("SelfRun3Coordinator.java");
-        String pending = between(coordinator, "private void scheduleResultRetry", "private void repairResult");
+        String pending = between(coordinator, "private void scheduleResultRetry", "private void commitTurn");
         assertTrue(pending.contains("runtimeSettings.resultPollMs()"));
         assertFalse(pending.contains("repairResult("));
         int current = coordinator.indexOf("SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);");
         int observe = coordinator.indexOf("drive.observeResult(token, current)", current);
+        int parsed = coordinator.indexOf("SelfRun3Engine.parseResult(observation.candidateBody, current)", observe);
         int watchdog = coordinator.indexOf("SelfRun3ResultWatchdog.shouldRepair(current,", observe);
-        assertTrue(current >= 0 && observe > current && watchdog > observe);
+        assertTrue(current >= 0 && observe > current && parsed > observe && watchdog > parsed);
+        assertTrue(coordinator.indexOf("SelfRun3ResultWatchdog.fingerprint(observation.rawBody)", observe) < 0);
         assertTrue(coordinator.contains("runtimeSettings.resultRepairMs()"));
         assertFalse(coordinator.contains("drive.resultVersion(token, state)"));
         assertFalse(coordinator.contains("resultVersions"));
@@ -48,9 +50,12 @@ public final class TurnDocumentRetryWiringTest {
         assertFalse(drive.contains("DriveSignalParser"));
     }
 
-    @Test public void repairDoesNotConsumeLateUserInputReservation() throws Exception {
+    @Test public void watchdogRepairDoesNotConsumeLateUserInputReservation() throws Exception {
         String coordinator = src("SelfRun3Coordinator.java");
-        String repair = between(coordinator, "private void repairResult", "private void commitTurn");
+        int watchdog = coordinator.indexOf("SelfRun3ResultWatchdog.shouldRepair(current,");
+        int completed = coordinator.indexOf("SelfRun3Engine.State completed = after;", watchdog);
+        String repair = watchdog >= 0 && completed > watchdog ? coordinator.substring(watchdog, completed) : "";
+        assertTrue(repair.contains("STALE_RESULT_WATCHDOG"));
         assertFalse(repair.contains("SelfRun3UserInput.consumeIfRevision"));
         assertFalse(repair.contains("SelfRun3UserInput.snapshot"));
         String commit = src("SelfRun3UserInput.java");
