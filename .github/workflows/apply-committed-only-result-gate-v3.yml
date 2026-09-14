@@ -45,7 +45,7 @@ jobs:
       - name: Verify variant policy
         run: tools/verify_drive_variant.sh
       - name: Focused regression tests
-        run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest --tests 'com.shaterguy.chatgptselfrun.SelfRun3CommittedOnlyResultGateTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultWatchdogTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultReadPowerPolicyTest' --tests 'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3AlwaysRepairPolicyTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3DisposableExecutionTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3UnboundedPayloadPolicyTest'
+        run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest --tests 'com.shaterguy.chatgptselfrun.SelfRun3CommittedOnlyResultGateTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultWatchdogTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultReadPowerPolicyTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3TrailingBraceRecoveryTest' --tests 'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3AlwaysRepairPolicyTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3DisposableExecutionTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3UnboundedPayloadPolicyTest'
       - name: Full JVM regression suite
         run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
       - name: Commit implementation
