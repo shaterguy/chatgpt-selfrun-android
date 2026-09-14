@@ -28,6 +28,7 @@ WEB=$SRC/SelfRun3WebAdapter.java
 UNBOUNDED=$UNIT/SelfRun3UnboundedPayloadPolicyTest.java
 WATCHDOG_UNIT=$UNIT/SelfRun3ResultWatchdogTest.java
 ALWAYS_REPAIR_UNIT=$UNIT/SelfRun3AlwaysRepairPolicyTest.java
+COMMITTED_PRIORITY_UNIT=$UNIT/SelfRun3CommittedResultPriorityTest.java
 SETTINGS_UNIT=$UNIT/SelfRun3RuntimeSettingsTest.java
 TURN_STALL_UNIT=$UNIT/SelfRun3TurnStallPolicyTest.java
 STOPPED_RESUME_UNIT=$UNIT/SelfRunStoppedResumePolicyTest.java
@@ -40,13 +41,13 @@ UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
 STOPPED_RESUME_ANDROID=$ANDROID/SelfRunStoppedResumeAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
-  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$ALWAYS_REPAIR_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
+  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$ALWAYS_REPAIR_UNIT" "$COMMITTED_PRIORITY_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
   "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$CONVERSATION_GATE_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3025001" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.5-dev1'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3025002" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.5-dev2'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -130,17 +131,20 @@ grep -Fq 'returningToSeedClearsWaitAndLaterMutationStartsFresh' "$WATCHDOG_UNIT"
 grep -Fq 'processRestartPreservesClockAndRebootRequiresOneRebaseline' "$WATCHDOG_UNIT"
 grep -Fq 'driveAdapterFreshReadsAgainBeforeRepairingStaleSnapshot' "$WATCHDOG_UNIT"
 
-# READ_RESULT transport failures stay on the same logical turn; content/state failures can still repair.
+# READ_RESULT committed candidates win before mutation/watchdog fallback. Transport failures retry; internal state failures hard-pause.
 grep -Fq 'if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))' "$COORD"
 grep -Fq 'error instanceof DriveApiClient.ApiException || error instanceof IOException' "$COORD"
 grep -Fq 'handleDriveFailure(state, step, error);' "$COORD"
-grep -Fq 'repairResult(state, "READ_RESULT_FAILURE_"' "$COORD"
-grep -Fq 'V3_RESULT_REPAIR_RETRY' "$COORD"
+grep -Fq 'hardPause("V3_READ_RESULT_FAILED", error);' "$COORD"
+! grep -Fq 'repairResult(state, "READ_RESULT_FAILURE_"' "$COORD"
+! grep -Fq 'V3_RESULT_REPAIR_RETRY' "$COORD"
 ! grep -Fq 'V3_RESULT_REPAIR_EXHAUSTED' "$COORD"
-! grep -Fq 'hardPause("V3_RESULT_REPAIR_FAILED"' "$COORD"
 ! grep -Fq 'put(v,"repairAttempt",1)' "$ENGINE"
 grep -Fq 'repairReplacementCanBeRepairedAgain' "$ALWAYS_REPAIR_UNIT"
-grep -Fq 'readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair' "$ALWAYS_REPAIR_UNIT"
+grep -Fq 'readResultTransportFailuresUseDrivePolicyWhileInternalFailuresHardPause' "$ALWAYS_REPAIR_UNIT"
+grep -Fq 'legacyFallbackWithoutClockReproducesObservedIllegalStateAfterRecoveredCandidate' "$COMMITTED_PRIORITY_UNIT"
+grep -Fq 'coordinatorChecksCommittedCandidateBeforeMutationOrRepairFallback' "$COMMITTED_PRIORITY_UNIT"
+grep -Fq 'recoveredCommittedCandidateTransitionsExactlyOnceToCommitAndNextTurn' "$COMMITTED_PRIORITY_UNIT"
 
 # Every normal/branch/merge/repair prompt carries one strict Result-document contract.
 grep -Fq 'RESULT_DOCUMENT_RULES' "$PROTOCOL"
