@@ -123,7 +123,7 @@ public final class SelfRun3CommittedResultPriorityTest {
     private static String source(String file) throws Exception {
         Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + file);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
     private static void put(JSONObject object, String key, Object value) {
