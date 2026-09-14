@@ -17,7 +17,7 @@ public final class SelfRun3CommittedOnlyResultGateTest {
         put(body, "turn", 999);
         put(body, "document_id", "other-document");
         put(body, "event_id", "other-event");
-        put(body, "status", new JSONObject().put("unexpected", true));
+        put(body, "status", 123);
         put(body, "phase_completed", 17);
         put(body, "next_phase", JSONObject.NULL);
         put(body, "handoff", "not-a-handoff");
