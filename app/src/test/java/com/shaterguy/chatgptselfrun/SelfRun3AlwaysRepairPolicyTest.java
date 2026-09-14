@@ -9,7 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
-/** Result-content failures repair; transport failures stay on the same logical turn and use Drive recovery. */
+/** Transport failures stay on the same logical turn; internal result-state failures fail closed instead of synthesizing repair. */
 public final class SelfRun3AlwaysRepairPolicyTest {
     @Test public void repairReplacementCanBeRepairedAgain() {
         SelfRun3Engine.State first = initialWaiting();
@@ -30,19 +30,18 @@ public final class SelfRun3AlwaysRepairPolicyTest {
         assertTrue(third.execution(secondTurn).flag("superseded"));
     }
 
-    @Test public void readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair() throws Exception {
+    @Test public void readResultTransportFailuresUseDrivePolicyWhileInternalFailuresHardPause() throws Exception {
         assertTrue(SelfRun3Coordinator.readResultTransportFailure(new DriveApiClient.ApiException(503, "temporary")));
         assertTrue(SelfRun3Coordinator.readResultTransportFailure(new java.io.IOException("network")));
         assertFalse(SelfRun3Coordinator.readResultTransportFailure(new IllegalStateException("result state")));
 
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(coordinator.contains("if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))"));
-        assertTrue(coordinator.contains("repairResult(state, \"READ_RESULT_FAILURE_\""));
+        assertTrue(coordinator.contains("hardPause(\"V3_READ_RESULT_FAILED\", error);"));
         assertTrue(coordinator.contains("handleDriveFailure(state, step, error);"));
-        assertTrue(coordinator.contains("V3_RESULT_REPAIR_RETRY"));
-        assertTrue(coordinator.contains("scheduleResultRetry(original)"));
+        assertFalse(coordinator.contains("repairResult(state, \"READ_RESULT_FAILURE_\""));
+        assertFalse(coordinator.contains("V3_RESULT_REPAIR_RETRY"));
         assertFalse(coordinator.contains("V3_RESULT_REPAIR_EXHAUSTED"));
-        assertFalse(coordinator.contains("hardPause(\"V3_RESULT_REPAIR_FAILED\""));
 
         String engine = source("SelfRun3Engine.java");
         assertFalse(engine.contains("put(v,\"repairAttempt\",1)"));
