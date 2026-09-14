@@ -1,0 +1,102 @@
+name: Refresh Candidate Guard V325
+
+on:
+  push:
+    branches:
+      - selfrun-v3/v3.2.5-dev1-committed-only-result-gate
+    paths:
+      - .github/workflows/refresh-candidate-guard-v325.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Refresh candidate contract and baselines
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def load(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def save(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          guard_path = 'tools/verify_selfrun3_dev4_limits_settings.sh'
+          guard = load(guard_path)
+          replacements = {
+              'selfRunDriveVersionCode = 3024001': 'selfRunDriveVersionCode = 3025001',
+              "selfRunDriveVersionName = '3.2.4-dev1'": "selfRunDriveVersionName = '3.2.5-dev1'",
+              "grep -Fq 'result document mismatch' \"$ENGINE\"": "grep -Fq 'Boolean.TRUE.equals(r.opt(\"committed\"))' \"$ENGINE\"",
+              "grep -Fq 'boolean commit required' \"$ENGINE\"": "! grep -Fq 'result document mismatch' \"$ENGINE\"\n! grep -Fq 'boolean commit required' \"$ENGINE\"",
+              'committedResultBeyondFormer512KiBGateKeepsStrictIdentityChecks': 'committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate',
+              'SelfRun-Drive-TEST-3.2.3-dev1.apk': 'SelfRun-Drive-TEST-3.2.4-dev1.apk',
+              '662424cc10f38bf42feb8b156c6cf5ea1840fe4f52692dab09da72816ab86277': '5be97fd0bf010ecfa215bed2b32488761f819c9ead38182f52e4eca36a94a27a',
+              '0e07dfabeef0ff6300add826e01afc6689f2e49d/deliverables/SelfRun-Drive-TEST-3.2.4-dev1.apk': '72f95b2b5ff93aa7dffed3991e5c64f214969d46/deliverables/SelfRun-Drive-TEST-3.2.4-dev1.apk',
+              "versionCode='3023001'": "versionCode='3024001'",
+              "versionName='3.2.3-dev1'": "versionName='3.2.4-dev1'",
+              'stable/chatgpt-selfrun-drive-v3.2.3.apk': 'stable/chatgpt-selfrun-drive-v3.2.4.apk',
+              'SelfRun 3.2.4 transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.': 'SelfRun 3.2.5 committed-only result gate, transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+          }
+          for old, new in replacements.items():
+              if old not in guard:
+                  raise SystemExit(f'guard missing expected token: {old}')
+              guard = guard.replace(old, new)
+          save(guard_path, guard)
+
+          emulator_path = 'tools/verify_selfrun3_candidate_emulator.sh'
+          emulator = load(emulator_path)
+          replacements = {
+              'SelfRun-Drive-TEST-3.2.3-dev1.apk': 'SelfRun-Drive-TEST-3.2.4-dev1.apk',
+              '662424cc10f38bf42feb8b156c6cf5ea1840fe4f52692dab09da72816ab86277': '5be97fd0bf010ecfa215bed2b32488761f819c9ead38182f52e4eca36a94a27a',
+              '0e07dfabeef0ff6300add826e01afc6689f2e49d/deliverables/SelfRun-Drive-TEST-3.2.4-dev1.apk': '72f95b2b5ff93aa7dffed3991e5c64f214969d46/deliverables/SelfRun-Drive-TEST-3.2.4-dev1.apk',
+              "versionName='3.2.3-dev1'": "versionName='3.2.4-dev1'",
+              "versionCode='3023001'": "versionCode='3024001'",
+              'drive-v3.2.3': 'drive-v3.2.4',
+              'chatgpt-selfrun-drive-v3.2.3.apk': 'chatgpt-selfrun-drive-v3.2.4.apk',
+              '270539a5eccfaeae6860cd42fcc6747e04948b7005260a88e6b74bfec79bcabb': '8b7261a0e7f89c23a489a1934d86d095cf6d4db47877b96c351fc6fb051ac046',
+              "== '3.2.3'": "== '3.2.4'"
+          }
+          for old, new in replacements.items():
+              if old not in emulator:
+                  raise SystemExit(f'emulator missing expected token: {old}')
+              emulator = emulator.replace(old, new)
+          save(emulator_path, emulator)
+
+          workflow_path = '.github/workflows/build-selfrun-v3-candidate.yml'
+          workflow = load(workflow_path)
+          replacements = {
+              'drive-v3.2.3': 'drive-v3.2.4',
+              'chatgpt-selfrun-drive-v3.2.3.apk': 'chatgpt-selfrun-drive-v3.2.4.apk',
+              '270539a5eccfaeae6860cd42fcc6747e04948b7005260a88e6b74bfec79bcabb': '8b7261a0e7f89c23a489a1934d86d095cf6d4db47877b96c351fc6fb051ac046'
+          }
+          for old, new in replacements.items():
+              if old not in workflow:
+                  raise SystemExit(f'workflow missing expected token: {old}')
+              workflow = workflow.replace(old, new)
+          save(workflow_path, workflow)
+          PY
+      - name: Verify refreshed guards
+        run: |
+          git diff --check
+          tools/verify_drive_variant.sh
+          bash tools/verify_selfrun3_dev4_limits_settings.sh
+          grep -Fq 'drive-v3.2.4' .github/workflows/build-selfrun-v3-candidate.yml
+          grep -Fq 'SelfRun-Drive-TEST-3.2.4-dev1.apk' tools/verify_selfrun3_candidate_emulator.sh
+          grep -Fq '8b7261a0e7f89c23a489a1934d86d095cf6d4db47877b96c351fc6fb051ac046' .github/workflows/build-selfrun-v3-candidate.yml
+      - name: Commit refreshed candidate guard
+        run: |
+          rm -f .github/workflows/refresh-candidate-guard-v325.yml
+          git diff --check
+          git config user.name 'SelfRun Release Operations'
+          git config user.email '108107617+shaterguy@users.noreply.github.com'
+          git add -A
+          git commit -m 'ci: refresh 3.2.5 candidate guard baselines'
+          git push origin HEAD:${GITHUB_REF_NAME}
