@@ -93,11 +93,13 @@ final class SelfRun3DriveAdapter {
         acquireResultReadWakeLock();
         try {
             ResultObservation observation = readObservation(token, s);
+            if (SelfRun3Engine.parseResult(observation.candidateBody, s) != null) return observation;
             SelfRun3Engine.State current = recordResultBodyObservation(s, observation);
             if (SelfRun3ResultWatchdog.shouldRepair(current, SystemClock.elapsedRealtime(), currentBootCountForRepair(),
                     runtimeSettings.resultRepairMs())) {
                 diagnosticLog.record(projection, "V3_RESULT_READ", "stage=STALE_CONFIRM;turn=" + current.turn());
                 ResultObservation finalObservation = readObservation(token, current);
+                if (SelfRun3Engine.parseResult(finalObservation.candidateBody, current) != null) return finalObservation;
                 recordResultBodyObservation(current, finalObservation);
                 return finalObservation;
             }
@@ -129,9 +131,6 @@ final class SelfRun3DriveAdapter {
                         diagnosticLog.record(projection, "V3_RESULT_READ",
                                 "stage=COMMITTED_RECOVERED_TRAILING_BRACE;turn=" + s.turn());
                         candidate = recovered;
-                    } else if (isInvalidCommittedResult(raw, s)) {
-                        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=INVALID_COMMITTED;turn=" + s.turn());
-                        throw new InvalidCommittedResultException();
                     } else {
                         diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
                         candidate = SelfRun3Engine.emptyResult(s).toString();
@@ -231,21 +230,6 @@ final class SelfRun3DriveAdapter {
             return "";
         }
     }
-    static boolean isInvalidCommittedResult(String raw, SelfRun3Engine.State s) {
-        if (raw == null) return false;
-        try {
-            JSONObject body = SelfRun3StrictJson.parseObject(raw);
-            if (!SelfRun3Engine.RESULT_SCHEMA.equals(body.opt("schema"))
-                    || !s.taskId().equals(body.opt("task_id"))
-                    || !s.turnId().equals(body.opt("turn_id"))
-                    || !s.resource("resultDocumentId").equals(body.opt("document_id"))
-                    || !Boolean.TRUE.equals(body.opt("committed"))) return false;
-            try { SelfRun3Engine.parseResult(raw, s); return false; }
-            catch (RuntimeException invalidPayload) { return true; }
-        } catch (RuntimeException ambiguousIdentity) { return false; }
-    }
-    static final class InvalidCommittedResultException extends Exception { }
-
     private SelfRun3Engine.State ensureDocument(String token, SelfRun3Engine.State original, String key, String intentKey, String name) throws Exception {
         SelfRun3Engine.State s = ledger.loadExecution(original.taskId(), original.turnId());
         require(s != null, "STALE_TURN");

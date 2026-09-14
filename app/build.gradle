@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3025000
-def selfRunDriveVersionName = '3.2.4'
+def selfRunDriveVersionCode = 3025001
+def selfRunDriveVersionName = '3.2.5-dev1'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 android {
@@ -164,7 +164,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def activity = new File(src, 'SelfRunNewActivity.java').getText('UTF-8')
         def stoppedResume = new File(src, 'SelfRunStoppedResume.java').getText('UTF-8')
         if (!engine.contains('taskId') || !engine.contains('turnId') || !engine.contains('requestId')
-                || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict result identity contract are required')
+                || !engine.contains('lastConsumedInputRevision') || !engine.contains('SelfRun3StrictJson.parseObject')) throw new GradleException('V3 task/turn/request, input ledger and strict JSON result parsing are required')
         if (!engine.contains('case REPAIR') || !engine.contains('repairTargetDocumentId')
                 || !engine.contains('activeCount(original)<2') || !engine.contains('maybeMerge')
                 || !engine.contains('routingPhase') || !engine.contains('usableParallelPlan')) throw new GradleException('V3 fresh repair, bounded parallelism, merge and resilient result routing are required')

@@ -37,14 +37,14 @@ public final class SelfRun3ResultReadPowerPolicyTest {
         int read = drive.indexOf("String readResult(");
         int acquire = drive.indexOf("private void acquireResultReadWakeLock()");
         int release = drive.indexOf("private void releaseResultReadWakeLock()");
-        int invalid = drive.indexOf("static boolean isInvalidCommittedResult");
+        int end = drive.indexOf("    private SelfRun3Engine.State ensureDocument", release);
         assertTrue(constructor >= 0 && setup > constructor);
-        assertTrue(observe >= 0 && read > observe && acquire > read && release > acquire && invalid > release);
+        assertTrue(observe >= 0 && read > observe && acquire > read && release > acquire && end > release);
         String constructorBlock = drive.substring(constructor, setup);
         String observeBlock = drive.substring(observe, read);
         String readBlock = drive.substring(read, acquire);
         String acquireBlock = drive.substring(acquire, release);
-        String releaseBlock = drive.substring(release, invalid);
+        String releaseBlock = drive.substring(release, end);
         assertTrue(constructorBlock.contains("PowerManager.PARTIAL_WAKE_LOCK"));
         assertTrue(constructorBlock.contains(":selfrun3-result-read"));
         assertTrue(observeBlock.contains("acquireResultReadWakeLock();"));

@@ -320,16 +320,6 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     syncProjection(completed);
                     scheduleNext(0L);
                 });
-            } catch (SelfRun3DriveAdapter.InvalidCommittedResultException invalid) {
-                main.post(() -> {
-                    driveInFlight = false;
-                    releaseWakeLock();
-                    if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
-                        clearRecoveredDriveWarning(store);
-                        networkAttempt = 0;
-                        repairResult(state, "INVALID_COMMITTED_RESULT");
-                    }
-                });
             } catch (ResultPendingException pending) {
                 main.post(() -> {
                     driveInFlight = false;

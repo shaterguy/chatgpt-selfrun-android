@@ -383,15 +383,7 @@ final class SelfRun3Engine {
         if(raw==null || raw.trim().isEmpty()) return null;
         require(raw.indexOf('\0')<0,"result NUL");
         JSONObject r=SelfRun3StrictJson.parseObject(raw.trim());
-        require(RESULT_SCHEMA.equals(r.optString("schema")),"result schema mismatch");
-        require(s.taskId().equals(r.optString("task_id")) && s.turnId().equals(r.optString("turn_id")),"result identity mismatch");
-        require(s.resource("resultDocumentId").equals(r.optString("document_id")) && !s.resource("resultDocumentId").isEmpty(),"result document mismatch");
-        require((s.turnId()+":result").equals(r.optString("event_id")),"event identity mismatch");
-        Object ordinal=r.opt("turn");
-        require((ordinal instanceof Integer || ordinal instanceof Long) && ((Number)ordinal).longValue()==s.turn(),"turn ordinal mismatch");
-        if(Boolean.FALSE.equals(r.opt("committed"))) return null;
-        require(Boolean.TRUE.equals(r.opt("committed")),"boolean commit required");
-        return r;
+        return Boolean.TRUE.equals(r.opt("committed")) ? r : null;
     }
     private static String routingPhase(JSONObject r,State s) {
         String requested=r.optString("next_phase"), current=s.text("phase");

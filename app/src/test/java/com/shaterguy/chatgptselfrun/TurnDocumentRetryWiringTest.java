@@ -12,26 +12,13 @@ import static org.junit.Assert.*;
 
 /** V3 result recovery is pinned-document reconciliation, with stale-result repair only after guarded fresh observation. */
 public final class TurnDocumentRetryWiringTest {
-    @Test public void onlyMachineIntegrityFailureOfCurrentCommittedPayloadAllowsImmediateRepairClassification() {
-        JSONObject config = new JSONObject(); SelfRun3Engine.put(config, "mode", "CHAT");
-        SelfRun3Engine.put(config, "reasoning", "medium");
-        SelfRun3Engine.State state = SelfRun3Engine.create("task", "task:turn:1", config);
-        JSONObject payload = new JSONObject();
-        SelfRun3Engine.put(payload, "key", "resultDocumentId"); SelfRun3Engine.put(payload, "value", "result");
-        state = SelfRun3Engine.reduce(state, new SelfRun3Engine.Event("pin", SelfRun3Engine.Kind.RESOURCE,
-                state.taskId(), state.turnId(), payload));
-        JSONObject body = SelfRun3Engine.emptyResult(state);
-        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
-        SelfRun3Engine.put(body, "committed", "true");
-        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
-        SelfRun3Engine.put(body, "committed", true);
-        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
-        SelfRun3Engine.put(body, "turn", 2);
-        assertTrue(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
-        SelfRun3Engine.put(body, "turn", 1);
-        SelfRun3Engine.put(body, "turn_id", "other");
-        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult(body.toString(), state));
-        assertFalse(SelfRun3DriveAdapter.isInvalidCommittedResult("{\"committed\":true", state));
+    @Test public void resultContentCannotCreateImmediateRepairClassification() throws Exception {
+        String drive = src("SelfRun3DriveAdapter.java");
+        String coordinator = src("SelfRun3Coordinator.java");
+        assertFalse(drive.contains("isInvalidCommittedResult"));
+        assertFalse(drive.contains("InvalidCommittedResultException"));
+        assertFalse(drive.contains("stage=INVALID_COMMITTED"));
+        assertFalse(coordinator.contains("INVALID_COMMITTED_RESULT"));
     }
 
     @Test public void retrySchedulerFreshReadsBeforeWatchdogRepair() throws Exception {
@@ -46,7 +33,7 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(coordinator.contains("runtimeSettings.resultRepairMs()"));
         assertFalse(coordinator.contains("drive.resultVersion(token, state)"));
         assertFalse(coordinator.contains("resultVersions"));
-        assertTrue(coordinator.contains("InvalidCommittedResultException"));
+        assertFalse(coordinator.contains("InvalidCommittedResultException"));
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.REPAIR"));
     }
 

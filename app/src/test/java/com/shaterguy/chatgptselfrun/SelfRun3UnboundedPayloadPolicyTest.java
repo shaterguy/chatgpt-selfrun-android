@@ -25,7 +25,7 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
         assertEquals(prompt.length(), after.text("prompt").length());
     }
 
-    @Test public void committedResultBeyondFormer512KiBGateKeepsStrictIdentityChecks() {
+    @Test public void committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate() {
         SelfRun3Engine.State state = preparingState();
         JSONObject result = SelfRun3Engine.emptyResult(state);
         SelfRun3Engine.put(result, "committed", true);
@@ -38,7 +38,7 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
         assertEquals(state.taskId(), parsed.optString("task_id"));
 
         SelfRun3Engine.put(result, "document_id", "other-result");
-        assertThrows(IllegalStateException.class, () -> SelfRun3Engine.parseResult(result.toString(), state));
+        assertNotNull(SelfRun3Engine.parseResult(result.toString(), state));
         assertThrows(IllegalStateException.class, () -> SelfRun3Engine.parseResult(raw + "\0", state));
     }
 

@@ -103,11 +103,11 @@ public final class SelfRun3DisposableExecutionTest {
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","sol","high"),"CHAT"));
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","invented","high"),"HYBRID"));
     }
-    @Test public void appRejectsWrongResultIdentityButNotAiCheckpointShapeDrift() {
+    @Test public void committedResultIgnoresMachineIdentityAndAiCheckpointShapeDrift() {
         SelfRun3Engine.State root=dispatch(dispatch(wave())), a=branch(root,"A");
         JSONObject r=branchResult(a,"COMPLETE"); put(r,"document_id","other");
         final JSONObject wrongIdentity=r;
-        assertThrows(IllegalStateException.class,()->SelfRun3Engine.parseResult(wrongIdentity.toString(),a));
+        assertNotNull(SelfRun3Engine.parseResult(wrongIdentity.toString(),a));
 
         r=branchResult(a,"COMPLETE"); put(r.optJSONObject("branch_result"),"status","USER_ACTION_REQUIRED");
         final JSONObject semanticMismatch=r;
