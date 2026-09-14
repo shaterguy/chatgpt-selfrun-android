@@ -1,0 +1,244 @@
+name: Apply Committed-Only Result Gate
+
+on:
+  push:
+    branches:
+      - 'selfrun-v3/v3.2.5-dev1-committed-only-result-gate'
+    paths:
+      - '.github/workflows/apply-committed-only-result-gate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Apply committed-only gate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          engine_path = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java'
+          engine = read(engine_path)
+          pattern = re.compile(r'    static JSONObject parseResult\(String raw,State s\) \{.*?^    \}\n    private static String routingPhase', re.S | re.M)
+          replacement = '''    static JSONObject parseResult(String raw,State s) {
+              if(raw==null || raw.trim().isEmpty()) return null;
+              require(raw.indexOf('\\0')<0,"result NUL");
+              JSONObject r=SelfRun3StrictJson.parseObject(raw.trim());
+              return Boolean.TRUE.equals(r.opt("committed")) ? r : null;
+          }
+          private static String routingPhase'''
+          engine, count = pattern.subn(replacement, engine)
+          if count != 1:
+              raise SystemExit(f'parseResult replacement count={count}')
+          write(engine_path, engine)
+
+          drive_path = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3DriveAdapter.java'
+          drive = read(drive_path)
+          observe_pattern = re.compile(r'    ResultObservation observeResult\(String token, SelfRun3Engine\.State s\) throws Exception \{.*?^    \}\n    private ResultObservation readObservation', re.S | re.M)
+          observe_replacement = '''    ResultObservation observeResult(String token, SelfRun3Engine.State s) throws Exception {
+              acquireResultReadWakeLock();
+              try {
+                  ResultObservation observation = readObservation(token, s);
+                  if (SelfRun3Engine.parseResult(observation.candidateBody, s) != null) return observation;
+                  SelfRun3Engine.State current = recordResultBodyObservation(s, observation);
+                  if (SelfRun3ResultWatchdog.shouldRepair(current, SystemClock.elapsedRealtime(), currentBootCountForRepair(),
+                          runtimeSettings.resultRepairMs())) {
+                      diagnosticLog.record(projection, "V3_RESULT_READ", "stage=STALE_CONFIRM;turn=" + current.turn());
+                      ResultObservation finalObservation = readObservation(token, current);
+                      if (SelfRun3Engine.parseResult(finalObservation.candidateBody, current) != null) return finalObservation;
+                      recordResultBodyObservation(current, finalObservation);
+                      return finalObservation;
+                  }
+                  return observation;
+              } finally {
+                  releaseResultReadWakeLock();
+              }
+          }
+          private ResultObservation readObservation'''
+          drive, count = observe_pattern.subn(observe_replacement, drive)
+          if count != 1:
+              raise SystemExit(f'observeResult replacement count={count}')
+          old_invalid_branch = '''                    } else if (isInvalidCommittedResult(raw, s)) {
+                          diagnosticLog.record(projection, "V3_RESULT_READ", "stage=INVALID_COMMITTED;turn=" + s.turn());
+                          throw new InvalidCommittedResultException();
+                      } else {
+                          diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
+                          candidate = SelfRun3Engine.emptyResult(s).toString();
+                      }'''
+          new_invalid_branch = '''                    } else {
+                          diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
+                          candidate = SelfRun3Engine.emptyResult(s).toString();
+                      }'''
+          drive = replace_once(drive, old_invalid_branch, new_invalid_branch, 'invalid committed branch')
+          invalid_pattern = re.compile(r'    static boolean isInvalidCommittedResult\(String raw, SelfRun3Engine\.State s\) \{.*?^    static final class InvalidCommittedResultException extends Exception \{ \}\n\n', re.S | re.M)
+          drive, count = invalid_pattern.subn('', drive)
+          if count != 1:
+              raise SystemExit(f'invalid committed helper removal count={count}')
+          write(drive_path, drive)
+
+          coordinator_path = 'app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java'
+          coordinator = read(coordinator_path)
+          catch_pattern = re.compile(r'            \} catch \(SelfRun3DriveAdapter\.InvalidCommittedResultException invalid\) \{.*?^            \} catch \(ResultPendingException pending\) \{', re.S | re.M)
+          coordinator, count = catch_pattern.subn('            } catch (ResultPendingException pending) {', coordinator)
+          if count != 1:
+              raise SystemExit(f'coordinator invalid committed catch removal count={count}')
+          write(coordinator_path, coordinator)
+
+          turn_path = 'app/src/test/java/com/shaterguy/chatgptselfrun/TurnDocumentRetryWiringTest.java'
+          turn = read(turn_path)
+          first_test = re.compile(r'    @Test public void onlyMachineIntegrityFailureOfCurrentCommittedPayloadAllowsImmediateRepairClassification\(\) \{.*?^    \}\n\n', re.S | re.M)
+          first_replacement = '''    @Test public void resultContentCannotCreateImmediateRepairClassification() throws Exception {
+              String drive = src("SelfRun3DriveAdapter.java");
+              String coordinator = src("SelfRun3Coordinator.java");
+              assertFalse(drive.contains("isInvalidCommittedResult"));
+              assertFalse(drive.contains("InvalidCommittedResultException"));
+              assertFalse(drive.contains("stage=INVALID_COMMITTED"));
+              assertFalse(coordinator.contains("INVALID_COMMITTED_RESULT"));
+          }
+
+          '''
+          turn, count = first_test.subn(first_replacement, turn)
+          if count != 1:
+              raise SystemExit(f'turn immediate-repair test replacement count={count}')
+          turn = replace_once(turn,
+              '        assertTrue(coordinator.contains("InvalidCommittedResultException"));',
+              '        assertFalse(coordinator.contains("InvalidCommittedResultException"));',
+              'turn coordinator invalid exception assertion')
+          write(turn_path, turn)
+
+          disposable_path = 'app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3DisposableExecutionTest.java'
+          disposable = read(disposable_path)
+          disposable = replace_once(disposable,
+              '    @Test public void appRejectsWrongResultIdentityButNotAiCheckpointShapeDrift() {',
+              '    @Test public void committedResultIgnoresMachineIdentityAndAiCheckpointShapeDrift() {',
+              'disposable test name')
+          disposable = replace_once(disposable,
+              '        assertThrows(IllegalStateException.class,()->SelfRun3Engine.parseResult(wrongIdentity.toString(),a));',
+              '        assertNotNull(SelfRun3Engine.parseResult(wrongIdentity.toString(),a));',
+              'disposable wrong identity assertion')
+          write(disposable_path, disposable)
+
+          unbounded_path = 'app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3UnboundedPayloadPolicyTest.java'
+          unbounded = read(unbounded_path)
+          unbounded = replace_once(unbounded,
+              '    @Test public void committedResultBeyondFormer512KiBGateKeepsStrictIdentityChecks() {',
+              '    @Test public void committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate() {',
+              'unbounded test name')
+          unbounded = replace_once(unbounded,
+              '        assertThrows(IllegalStateException.class, () -> SelfRun3Engine.parseResult(result.toString(), state));',
+              '        assertNotNull(SelfRun3Engine.parseResult(result.toString(), state));',
+              'unbounded wrong identity assertion')
+          write(unbounded_path, unbounded)
+
+          gate_path = 'app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3CommittedOnlyResultGateTest.java'
+          gate = read(gate_path)
+          gate = replace_once(gate,
+              'import org.junit.Test;\n\nimport static org.junit.Assert.*;',
+              'import org.junit.Test;\n\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\nimport static org.junit.Assert.*;',
+              'gate imports')
+          marker = '''    @Test public void invalidJsonNeverPretendsToBeCommitted() {
+              SelfRun3Engine.State state = state();
+              assertThrows(RuntimeException.class,
+                      () -> SelfRun3Engine.parseResult("{\\\"committed\\\":true", state));
+          }
+
+          '''
+          addition = marker + '''    @Test public void committedObservationBypassesRepairCountdownAndTimeoutFreshReadCanCancelRepair() throws Exception {
+              String drive = source("SelfRun3DriveAdapter.java");
+              int firstGate = drive.indexOf("SelfRun3Engine.parseResult(observation.candidateBody, s)");
+              int firstMutation = drive.indexOf("recordResultBodyObservation(s, observation)", firstGate);
+              int watchdog = drive.indexOf("SelfRun3ResultWatchdog.shouldRepair(current", firstMutation);
+              assertTrue(firstGate >= 0 && firstMutation > firstGate && watchdog > firstMutation);
+              assertTrue(drive.substring(firstGate, firstMutation).contains("return observation;"));
+
+              int finalRead = drive.indexOf("ResultObservation finalObservation = readObservation(token, current)", watchdog);
+              int finalGate = drive.indexOf("SelfRun3Engine.parseResult(finalObservation.candidateBody, current)", finalRead);
+              int finalMutation = drive.indexOf("recordResultBodyObservation(current, finalObservation)", finalGate);
+              assertTrue(finalRead > watchdog && finalGate > finalRead && finalMutation > finalGate);
+              assertTrue(drive.substring(finalGate, finalMutation).contains("return finalObservation;"));
+          }
+
+          '''
+          gate = replace_once(gate, marker, addition, 'gate source-order test insertion')
+          helper_marker = '''    private static SelfRun3Engine.State state() {
+          '''
+          helper = '''    private static String source(String name) throws Exception {
+              Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+              if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+              return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+          }
+
+              private static SelfRun3Engine.State state() {
+          '''
+          gate = replace_once(gate, helper_marker, helper, 'gate source helper insertion')
+          write(gate_path, gate)
+
+          gradle_path = 'app/build.gradle'
+          gradle = read(gradle_path)
+          gradle = replace_once(gradle, "def selfRunDriveVersionCode = 3025000", "def selfRunDriveVersionCode = 3025001", 'version code')
+          gradle = replace_once(gradle, "def selfRunDriveVersionName = '3.2.4'", "def selfRunDriveVersionName = '3.2.5-dev1'", 'version name')
+          gradle = replace_once(gradle,
+              "throw new GradleException('V3 task/turn/request, input ledger and strict result identity contract are required')",
+              "throw new GradleException('V3 task/turn/request, input ledger and strict JSON result parsing are required')",
+              'preflight message')
+          write(gradle_path, gradle)
+
+          verify_path = 'tools/verify_drive_variant.sh'
+          verify = read(verify_path)
+          verify = replace_once(verify, "grep -Fq 'InvalidCommittedResultException' \"$DRIVE\"\n", '', 'obsolete invalid-commit grep')
+          write(verify_path, verify)
+          PY
+      - name: Check diff
+        run: |
+          git diff --check
+          ! grep -R -F 'InvalidCommittedResultException' app/src/main app/src/test tools/verify_drive_variant.sh
+          ! grep -R -F 'isInvalidCommittedResult' app/src/main app/src/test tools/verify_drive_variant.sh
+      - name: Verify variant policy
+        run: tools/verify_drive_variant.sh
+      - name: Focused committed-only regressions
+        run: |
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest --tests 'com.shaterguy.chatgptselfrun.SelfRun3CommittedOnlyResultGateTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultWatchdogTest' --tests 'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3AlwaysRepairPolicyTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3DisposableExecutionTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3UnboundedPayloadPolicyTest'
+      - name: Full JVM regression suite
+        run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
+      - name: Commit implementation
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-committed-only-result-gate.yml .github/workflows/test-committed-only-result-gate.yml
+          git diff --check
+          git config user.name 'SelfRun Builder'
+          git config user.email '108107617+shaterguy@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: gate result completion on committed only'
+          git push origin HEAD:${GITHUB_REF_NAME}
