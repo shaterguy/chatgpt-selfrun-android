@@ -45,8 +45,8 @@ for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMED
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3024001" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.4-dev1'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3025001" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.5-dev1'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -66,8 +66,9 @@ grep -Fq "selfRunDriveVersionName = '3.2.4-dev1'" "$BUILD"
 # Result strictness and attachment streaming safety remain intact.
 grep -Fq "raw.indexOf('\\0')<0" "$ENGINE"
 grep -Fq 'SelfRun3StrictJson.parseObject' "$ENGINE"
-grep -Fq 'result document mismatch' "$ENGINE"
-grep -Fq 'boolean commit required' "$ENGINE"
+grep -Fq 'Boolean.TRUE.equals(r.opt("committed"))' "$ENGINE"
+! grep -Fq 'result document mismatch' "$ENGINE"
+! grep -Fq 'boolean commit required' "$ENGINE"
 grep -Fq 'SelfRun3AttachmentSizeProbe.count(in, permitted)' "$DRIVE"
 grep -Fq 'BUFFER_BYTES = 64 * 1024' "$PROBE"
 grep -Fq 'size > Long.MAX_VALUE - n' "$PROBE"
@@ -162,7 +163,7 @@ grep -Fq 'stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent' "$ST
 
 # Regression fixtures execute the former boundaries rather than only scanning source text.
 grep -Fq 'turnReadyAcceptsPromptBeyondFormerOneMiBGate' "$UNBOUNDED"
-grep -Fq 'committedResultBeyondFormer512KiBGateKeepsStrictIdentityChecks' "$UNBOUNDED"
+grep -Fq 'committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate' "$UNBOUNDED"
 grep -Fq 'additionalInputMergeExceedsFormer64KiBWithoutTruncation' "$UNBOUNDED"
 grep -Fq 'unknownAttachmentSizeProbeStreamsBeyondFormer100MiBCeiling' "$UNBOUNDED"
 grep -Fq 'attachmentDraftStateAcceptsMoreThanTenAndKnownFileOver100MiB' "$UNBOUNDED_ANDROID"
@@ -176,12 +177,12 @@ grep -Fq 'runtime result repair override preserved' "$UPGRADE_ANDROID"
 grep -Fq 'reads persisted runtime override instead of new default' "$UPGRADE_ANDROID"
 
 # Candidate upgrade fixture must use the latest delivered TEST and latest formal baselines.
-grep -Fq 'SelfRun-Drive-TEST-3.2.3-dev1.apk' "$EMULATOR"
-grep -Fq '662424cc10f38bf42feb8b156c6cf5ea1840fe4f52692dab09da72816ab86277' "$EMULATOR"
-grep -Fq '0e07dfabeef0ff6300add826e01afc6689f2e49d/deliverables/SelfRun-Drive-TEST-3.2.3-dev1.apk' "$EMULATOR"
-grep -Fq "versionCode='3023001'" "$EMULATOR"
-grep -Fq "versionName='3.2.3-dev1'" "$EMULATOR"
-grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.3.apk' "$EMULATOR"
+grep -Fq 'SelfRun-Drive-TEST-3.2.4-dev1.apk' "$EMULATOR"
+grep -Fq '5be97fd0bf010ecfa215bed2b32488761f819c9ead38182f52e4eca36a94a27a' "$EMULATOR"
+grep -Fq '72f95b2b5ff93aa7dffed3991e5c64f214969d46/deliverables/SelfRun-Drive-TEST-3.2.4-dev1.apk' "$EMULATOR"
+grep -Fq "versionCode='3024001'" "$EMULATOR"
+grep -Fq "versionName='3.2.4-dev1'" "$EMULATOR"
+grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.4.apk' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
@@ -191,4 +192,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.4 transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.5 committed-only result gate, transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
