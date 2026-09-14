@@ -60,7 +60,6 @@ jobs:
               "versionName='3.2.3-dev1'": "versionName='3.2.4-dev1'",
               "versionCode='3023001'": "versionCode='3024001'",
               'drive-v3.2.3': 'drive-v3.2.4',
-              'chatgpt-selfrun-drive-v3.2.3.apk': 'chatgpt-selfrun-drive-v3.2.4.apk',
               '270539a5eccfaeae6860cd42fcc6747e04948b7005260a88e6b74bfec79bcabb': '8b7261a0e7f89c23a489a1934d86d095cf6d4db47877b96c351fc6fb051ac046',
               "== '3.2.3'": "== '3.2.4'"
           }
@@ -74,7 +73,6 @@ jobs:
           workflow = load(workflow_path)
           replacements = {
               'drive-v3.2.3': 'drive-v3.2.4',
-              'chatgpt-selfrun-drive-v3.2.3.apk': 'chatgpt-selfrun-drive-v3.2.4.apk',
               '270539a5eccfaeae6860cd42fcc6747e04948b7005260a88e6b74bfec79bcabb': '8b7261a0e7f89c23a489a1934d86d095cf6d4db47877b96c351fc6fb051ac046'
           }
           for old, new in replacements.items():
