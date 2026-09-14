@@ -7,7 +7,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class SelfRun3TrailingBraceRecoveryTest {
-    @Test public void oneRedundantTrailingBraceIsRecoveredAfterMachineIdentityValidation() {
+    @Test public void oneRedundantTrailingBraceIsRecoveredAfterCommittedValidation() {
         SelfRun3Engine.State state = claimedState();
         String valid = continueResult(state).toString();
         String recovered = SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}\n", state);
@@ -30,11 +30,13 @@ public final class SelfRun3TrailingBraceRecoveryTest {
         assertEquals(valid, SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state));
     }
 
-    @Test public void wrongMachineIdentityIsNotRecovered() {
+    @Test public void machineIdentityDriftDoesNotBlockCommittedTrailingBraceRecovery() {
         SelfRun3Engine.State state = claimedState();
-        JSONObject invalid = continueResult(state);
-        SelfRun3Engine.put(invalid, "document_id", "other");
-        assertEquals("", SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(invalid.toString() + "}", state));
+        JSONObject drifted = continueResult(state);
+        SelfRun3Engine.put(drifted, "document_id", "other");
+        String valid = drifted.toString();
+        assertEquals(valid, SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state));
+        assertNotNull(SelfRun3Engine.parseResult(valid, state));
     }
 
     private static SelfRun3Engine.State claimedState() {
