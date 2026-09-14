@@ -9,7 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
-/** Completion and RESULT_REPAIR eligibility are gated only by JSON boolean committed=true. */
+/** SelfRun 3.2.5: completion and RESULT_REPAIR eligibility are gated only by JSON boolean committed=true. */
 public final class SelfRun3CommittedOnlyResultGateTest {
     @Test public void committedTrueIgnoresMachineIdentityAndSemanticFields() {
         SelfRun3Engine.State state = state();
