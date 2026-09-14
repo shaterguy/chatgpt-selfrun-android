@@ -3,6 +3,10 @@ package com.shaterguy.chatgptselfrun;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.Assert.*;
 
 /** Completion and RESULT_REPAIR eligibility are gated only by JSON boolean committed=true. */
@@ -50,6 +54,27 @@ public final class SelfRun3CommittedOnlyResultGateTest {
         SelfRun3Engine.State state = state();
         assertThrows(RuntimeException.class,
                 () -> SelfRun3Engine.parseResult("{\"committed\":true", state));
+    }
+
+    @Test public void committedObservationBypassesRepairCountdownAndTimeoutFreshReadCanCancelRepair() throws Exception {
+        String drive = source("SelfRun3DriveAdapter.java");
+        int firstGate = drive.indexOf("SelfRun3Engine.parseResult(observation.candidateBody, s)");
+        int firstMutation = drive.indexOf("recordResultBodyObservation(s, observation)", firstGate);
+        int watchdog = drive.indexOf("SelfRun3ResultWatchdog.shouldRepair(current", firstMutation);
+        assertTrue(firstGate >= 0 && firstMutation > firstGate && watchdog > firstMutation);
+        assertTrue(drive.substring(firstGate, firstMutation).contains("return observation;"));
+
+        int finalRead = drive.indexOf("ResultObservation finalObservation = readObservation(token, current)", watchdog);
+        int finalGate = drive.indexOf("SelfRun3Engine.parseResult(finalObservation.candidateBody, current)", finalRead);
+        int finalMutation = drive.indexOf("recordResultBodyObservation(current, finalObservation)", finalGate);
+        assertTrue(finalRead > watchdog && finalGate > finalRead && finalMutation > finalGate);
+        assertTrue(drive.substring(finalGate, finalMutation).contains("return finalObservation;"));
+    }
+
+    private static String source(String name) throws Exception {
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
     private static SelfRun3Engine.State state() {
