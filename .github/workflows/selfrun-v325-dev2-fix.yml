@@ -1,0 +1,271 @@
+name: SelfRun 3.2.5 DEV2 Fix Builder
+
+on:
+  push:
+    branches:
+      - 'automation/selfrun-v325-dev2-fix'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+      - name: Start exact DEV2 candidate from DEV1
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin v3.2.5-dev1
+          git cat-file -e f64b0b82ae674ed89399bf94e898f590ae9ea9fb^{commit}
+          git checkout -B v3.2.5-dev2 f64b0b82ae674ed89399bf94e898f590ae9ea9fb
+      - name: Add regression fixture first and prove baseline failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3CommittedCandidatePriorityTest.java <<'EOF'
+          package com.shaterguy.chatgptselfrun;
+
+          import org.json.JSONObject;
+          import org.junit.Test;
+
+          import java.nio.charset.StandardCharsets;
+          import java.nio.file.Files;
+          import java.nio.file.Path;
+
+          import static org.junit.Assert.*;
+
+          /** Regression for SR-20260914-184841-ZY2OLQ: committed candidates must preempt mutation bookkeeping. */
+          public final class SelfRun3CommittedCandidatePriorityTest {
+              @Test public void recoveredTrailingBraceCommittedCandidatePreemptsCoordinatorMutationBookkeeping() throws Exception {
+                  SelfRun3Engine.State state = waitingState();
+                  String valid = committedResult(state).toString();
+                  String recovered = SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state);
+                  assertEquals(valid, recovered);
+                  assertNotNull(SelfRun3Engine.parseResult(recovered, state));
+                  assertCoordinatorCommittedFirstInvariant();
+              }
+
+              @Test public void strictCommittedCandidateUsesTheSameCommittedFirstPath() throws Exception {
+                  SelfRun3Engine.State state = waitingState();
+                  String valid = committedResult(state).toString();
+                  assertNotNull(SelfRun3Engine.parseResult(valid, state));
+                  assertCoordinatorCommittedFirstInvariant();
+              }
+
+              private static void assertCoordinatorCommittedFirstInvariant() throws Exception {
+                  String coordinator = source("SelfRun3Coordinator.java");
+                  int observe = coordinator.indexOf("SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, current);");
+                  int parse = coordinator.indexOf("JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);", observe);
+                  int watchdog = coordinator.indexOf("SelfRun3ResultWatchdog.shouldRepair(current", parse);
+                  assertTrue("candidate parse must follow Drive observation", observe >= 0 && parse > observe);
+                  assertTrue("watchdog must only run after candidate committed check", watchdog > parse);
+                  assertFalse("Coordinator must not synthesize duplicate RESULT_MUTATED bookkeeping",
+                          coordinator.substring(observe, watchdog).contains("SelfRun3Engine.Kind.RESULT_MUTATED"));
+                  assertFalse("internal READ_RESULT exceptions must not synthesize RESULT_REPAIR",
+                          coordinator.contains("repairResult(state, \"READ_RESULT_FAILURE_\""));
+              }
+
+              private static SelfRun3Engine.State waitingState() {
+                  JSONObject config = new JSONObject();
+                  put(config, "mode", "CHAT"); put(config, "taskMode", "CHAT"); put(config, "reasoning", "xhigh");
+                  SelfRun3Engine.State s = SelfRun3Engine.create("fixture-task", "fixture-task:turn:1", config);
+                  s = resource(s, "folderId", "folder");
+                  s = resource(s, "requirementDocumentId", "requirements");
+                  s = event(s, "setup", SelfRun3Engine.Kind.SETUP_DONE, new JSONObject());
+                  s = resource(s, "resultDocumentId", "result-doc");
+                  JSONObject baseline = new JSONObject();
+                  put(baseline, "documentId", "result-doc");
+                  put(baseline, "fingerprint", SelfRun3ResultWatchdog.fingerprint(SelfRun3Engine.emptyResult(s).toString()));
+                  s = event(s, "baseline", SelfRun3Engine.Kind.RESULT_BASELINE, baseline);
+                  JSONObject ready = new JSONObject(); put(ready, "prompt", "fixture"); put(ready, "inputRevision", 0L);
+                  s = event(s, "ready", SelfRun3Engine.Kind.TURN_READY, ready);
+                  JSONObject claim = new JSONObject(); put(claim, "at", 1L);
+                  return event(s, "claim", SelfRun3Engine.Kind.CLAIM_SEND, claim);
+              }
+
+              private static JSONObject committedResult(SelfRun3Engine.State s) {
+                  JSONObject r = SelfRun3Engine.emptyResult(s);
+                  put(r, "committed", true); put(r, "status", "CONTINUE");
+                  put(r, "phase_completed", "WORK_PARTIAL"); put(r, "next_phase", "WORK");
+                  return r;
+              }
+
+              private static SelfRun3Engine.State resource(SelfRun3Engine.State s, String key, String value) {
+                  JSONObject p = new JSONObject(); put(p, "key", key); put(p, "value", value);
+                  return SelfRun3Engine.reduce(s, new SelfRun3Engine.Event(s.turnId() + ":resource:" + key,
+                          SelfRun3Engine.Kind.RESOURCE, s.taskId(), s.turnId(), p));
+              }
+
+              private static SelfRun3Engine.State event(SelfRun3Engine.State s, String id,
+                                                         SelfRun3Engine.Kind kind, JSONObject payload) {
+                  return SelfRun3Engine.reduce(s, new SelfRun3Engine.Event(s.turnId() + ":" + id,
+                          kind, s.taskId(), s.turnId(), payload));
+              }
+
+              private static String source(String file) throws Exception {
+                  Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
+                  if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + file);
+                  return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+              }
+
+              private static void put(JSONObject object, String key, Object value) { SelfRun3Engine.put(object, key, value); }
+          }
+          EOF
+          set +e
+          gradle --build-cache --no-daemon --console=plain :app:testQaAppUnitTest --tests com.shaterguy.chatgptselfrun.SelfRun3CommittedCandidatePriorityTest
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          echo 'BASELINE_FAILURE_CONFIRMED=committed candidate was not prioritized before Coordinator mutation bookkeeping'
+      - name: Apply minimal committed-first fix and policy updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          coord = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java')
+          text = coord.read_text()
+          start = text.index('                    String bodyFingerprint = SelfRun3ResultWatchdog.fingerprint(observation.rawBody);')
+          end = text.index('                    JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);', start)
+          text = text[:start] + text[end:]
+          old_catch = '''                    if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error)) {
+                        clearRecoveredDriveWarning(store);
+                        networkAttempt = 0;
+                        repairResult(state, "READ_RESULT_FAILURE_" + safeCode(error.getClass().getSimpleName()));
+                    } else {
+                        handleDriveFailure(state, step, error);
+                    }
+          '''
+          if old_catch not in text:
+              raise SystemExit('expected READ_RESULT catch policy not found')
+          text = text.replace(old_catch, '                    handleDriveFailure(state, step, error);\n', 1)
+          method_start = text.index('    private void repairResult(SelfRun3Engine.State original, String reason) {')
+          method_end = text.index('    private void commitTurn(SelfRun3Engine.State stale) {', method_start)
+          text = text[:method_start] + text[method_end:]
+          coord.write_text(text)
+
+          policy = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3AlwaysRepairPolicyTest.java')
+          p = policy.read_text()
+          old_method_start = p.index('    @Test public void readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair() throws Exception {')
+          old_method_end = p.index('    private static SelfRun3Engine.State initialWaiting()', old_method_start)
+          new_method = '''    @Test public void readResultTransportFailuresRetryWhileInternalFailuresDoNotRepair() throws Exception {
+              assertTrue(SelfRun3Coordinator.readResultTransportFailure(new DriveApiClient.ApiException(503, "temporary")));
+              assertTrue(SelfRun3Coordinator.readResultTransportFailure(new java.io.IOException("network")));
+              assertFalse(SelfRun3Coordinator.readResultTransportFailure(new IllegalStateException("result state")));
+
+              String coordinator = source("SelfRun3Coordinator.java");
+              assertFalse(coordinator.contains("repairResult(state, \\\"READ_RESULT_FAILURE_\\\""));
+              assertFalse(coordinator.contains("private void repairResult("));
+              assertTrue(coordinator.contains("handleDriveFailure(state, step, error);"));
+              assertFalse(coordinator.contains("V3_RESULT_REPAIR_RETRY"));
+              assertFalse(coordinator.contains("V3_RESULT_REPAIR_EXHAUSTED"));
+              assertFalse(coordinator.contains("hardPause(\\\"V3_RESULT_REPAIR_FAILED\\\""));
+
+              String engine = source("SelfRun3Engine.java");
+              assertFalse(engine.contains("put(v,\\\"repairAttempt\\\",1)"));
+          }
+
+          '''
+          p = p[:old_method_start] + new_method + p[old_method_end:]
+          policy.write_text(p)
+
+          build = Path('app/build.gradle')
+          b = build.read_text().replace('selfRunDriveVersionCode = 3025001', 'selfRunDriveVersionCode = 3025002', 1)
+          b = b.replace("selfRunDriveVersionName = '3.2.5-dev1'", "selfRunDriveVersionName = '3.2.5-dev2'", 1)
+          build.write_text(b)
+
+          verify = Path('tools/verify_selfrun3_dev4_limits_settings.sh')
+          v = verify.read_text()
+          v = v.replace('selfRunDriveVersionCode = 3025001', 'selfRunDriveVersionCode = 3025002', 1)
+          v = v.replace("selfRunDriveVersionName = '3.2.5-dev1'", "selfRunDriveVersionName = '3.2.5-dev2'", 1)
+          old_policy = '''# READ_RESULT transport failures stay on the same logical turn; content/state failures can still repair.
+          grep -Fq 'if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error))' "$COORD"
+          grep -Fq 'error instanceof DriveApiClient.ApiException || error instanceof IOException' "$COORD"
+          grep -Fq 'handleDriveFailure(state, step, error);' "$COORD"
+          grep -Fq 'repairResult(state, "READ_RESULT_FAILURE_"' "$COORD"
+          grep -Fq 'V3_RESULT_REPAIR_RETRY' "$COORD"
+          ! grep -Fq 'V3_RESULT_REPAIR_EXHAUSTED' "$COORD"
+          ! grep -Fq 'hardPause("V3_RESULT_REPAIR_FAILED"' "$COORD"
+          ! grep -Fq 'put(v,"repairAttempt",1)' "$ENGINE"
+          grep -Fq 'repairReplacementCanBeRepairedAgain' "$ALWAYS_REPAIR_UNIT"
+          grep -Fq 'readResultTransportFailuresUseDrivePolicyWhileOtherFailuresRepair' "$ALWAYS_REPAIR_UNIT"
+          '''
+          new_policy = '''# Committed candidates win before any watchdog decision; only stale incomplete mutations may repair.
+          grep -Fq 'JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);' "$COORD"
+          ! grep -Fq 'String bodyFingerprint = SelfRun3ResultWatchdog.fingerprint(observation.rawBody);' "$COORD"
+          ! grep -Fq 'repairResult(state, "READ_RESULT_FAILURE_"' "$COORD"
+          ! grep -Fq 'private void repairResult(' "$COORD"
+          grep -Fq 'error instanceof DriveApiClient.ApiException || error instanceof IOException' "$COORD"
+          grep -Fq 'handleDriveFailure(state, step, error);' "$COORD"
+          grep -Fq 'reason", "STALE_RESULT_WATCHDOG"' "$COORD"
+          ! grep -Fq 'put(v,"repairAttempt",1)' "$ENGINE"
+          grep -Fq 'repairReplacementCanBeRepairedAgain' "$ALWAYS_REPAIR_UNIT"
+          grep -Fq 'readResultTransportFailuresRetryWhileInternalFailuresDoNotRepair' "$ALWAYS_REPAIR_UNIT"
+          grep -Fq 'recoveredTrailingBraceCommittedCandidatePreemptsCoordinatorMutationBookkeeping' "$UNIT/SelfRun3CommittedCandidatePriorityTest.java"
+          '''
+          if old_policy not in v:
+              raise SystemExit('expected static repair policy block not found')
+          v = v.replace(old_policy, new_policy, 1)
+          verify.write_text(v)
+          PY
+      - name: Verify targeted regression and complete JVM suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/verify_drive_variant.sh
+          bash tools/verify_selfrun3_dev4_limits_settings.sh
+          gradle --build-cache --no-daemon --console=plain --stacktrace \
+            :app:verifyDriveVariantIdentity \
+            :app:compileQaAppJavaWithJavac \
+            :app:compileQaAppUnitTestJavaWithJavac \
+            :app:compileQaAppAndroidTestJavaWithJavac
+          gradle --build-cache --no-daemon --console=plain --stacktrace \
+            :app:testQaAppUnitTest --tests com.shaterguy.chatgptselfrun.SelfRun3CommittedCandidatePriorityTest \
+            --tests com.shaterguy.chatgptselfrun.SelfRun3AlwaysRepairPolicyTest \
+            --tests com.shaterguy.chatgptselfrun.SelfRun3ResultWatchdogTest \
+            --tests com.shaterguy.chatgptselfrun.SelfRun3TrailingBraceRecoveryTest
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
+      - name: Commit and push final DEV2 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff --check
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java \
+            app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3CommittedCandidatePriorityTest.java \
+            app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3AlwaysRepairPolicyTest.java \
+            app/build.gradle tools/verify_selfrun3_dev4_limits_settings.sh
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 5
+          git commit -m 'fix: prioritize committed SelfRun results before repair bookkeeping'
+          git push origin HEAD:refs/heads/v3.2.5-dev2
+          echo "DEV2_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Read back pushed branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin v3.2.5-dev2
+          test "$(git rev-parse origin/v3.2.5-dev2)" = "$DEV2_SHA"
+          echo "PUSHED_DEV2_SHA=$DEV2_SHA"
