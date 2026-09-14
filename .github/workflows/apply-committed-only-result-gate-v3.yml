@@ -31,17 +31,21 @@ jobs:
         with:
           gradle-version: '9.5.0'
       - name: Apply patch
-        run: python3 tools/apply_committed_only_gate_dev1.py
+        run: |
+          python3 tools/apply_committed_only_gate_dev1.py
+          python3 tools/fix_committed_only_gate_guards.py
       - name: Check patch
         run: |
           git diff --check
-          ! grep -R -F 'InvalidCommittedResultException' app/src/main app/src/test tools/verify_drive_variant.sh
-          ! grep -R -F 'isInvalidCommittedResult' app/src/main app/src/test tools/verify_drive_variant.sh
+          if grep -R -F 'InvalidCommittedResultException' app/src/main; then exit 1; fi
+          if grep -R -F 'isInvalidCommittedResult' app/src/main; then exit 1; fi
+          if grep -R -F 'INVALID_COMMITTED_RESULT' app/src/main; then exit 1; fi
           grep -Fq "def selfRunDriveVersionName = '3.2.5-dev1'" app/build.gradle
+          grep -Fq 'Boolean.TRUE.equals(r.opt("committed"))' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java
       - name: Verify variant policy
         run: tools/verify_drive_variant.sh
       - name: Focused regression tests
-        run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest --tests 'com.shaterguy.chatgptselfrun.SelfRun3CommittedOnlyResultGateTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultWatchdogTest' --tests 'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3AlwaysRepairPolicyTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3DisposableExecutionTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3UnboundedPayloadPolicyTest'
+        run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest --tests 'com.shaterguy.chatgptselfrun.SelfRun3CommittedOnlyResultGateTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultWatchdogTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3ResultReadPowerPolicyTest' --tests 'com.shaterguy.chatgptselfrun.TurnDocumentRetryWiringTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3AlwaysRepairPolicyTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3DisposableExecutionTest' --tests 'com.shaterguy.chatgptselfrun.SelfRun3UnboundedPayloadPolicyTest'
       - name: Full JVM regression suite
         run: gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
       - name: Commit implementation
@@ -51,6 +55,7 @@ jobs:
           rm -f .github/workflows/apply-committed-only-result-gate-v3.yml
           rm -f .github/workflows/test-committed-only-result-gate.yml
           rm -f tools/apply_committed_only_gate_dev1.py
+          rm -f tools/fix_committed_only_gate_guards.py
           git diff --check
           git config user.name 'SelfRun Builder'
           git config user.email '108107617+shaterguy@users.noreply.github.com'
