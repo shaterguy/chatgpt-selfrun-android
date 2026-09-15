@@ -57,13 +57,41 @@ CHAT과 WORK 두 모드를 지원합니다. 앱은 사용자 선택 profile을 �
 
 정상 대기 중에는 짧은 주기 DOM polling을 사용하지 않습니다. UI 조작은 제출·프로필 적용·필요한 복구 구간으로 제한하고, 대기 상태는 protocol callback과 제한된 reconciliation으로 진행합니다.
 
+## Result 대기 작업 방식
+
+설정의 `작업 방식`은 `SERVER`와 `ON_DEVICE`를 선택합니다. 저장값이 없거나 손상된 경우 기본값은 `SERVER`입니다.
+
+- `SERVER`: Result document를 기다리는 정상 경로에서 짧은 주기 Drive polling을 예약하지 않습니다. 앱이 자기 Drive OAuth 권한으로 `files.watch`를 등록하고, Vercel Push Gateway가 Drive 변경 webhook을 받은 뒤 FCM high-priority data message로 해당 설치 인스턴스를 깨웁니다. 앱은 정확한 task/turn/result-document identity를 검증한 뒤 Result를 1회 읽습니다. 15분 WorkManager recovery watchdog은 정상 감지 수단이 아니라 push 유실에 대한 safety net입니다.
+- `ON_DEVICE`: 기존 `resultPollMs()` 기반 Result polling을 그대로 사용합니다.
+- SERVER에서 Firebase, Gateway 또는 Drive watch 등록이 불가능하면 해당 waiting turn만 ON_DEVICE-compatible polling으로 fallback하고 `V3_SERVER_PUSH_FALLBACK` 로그를 남깁니다. 구성 미완료만으로 run을 hard-pause하지 않습니다.
+
+Android 빌드에 필요한 Firebase public configuration과 Gateway endpoint는 환경변수 또는 Gradle property로 주입합니다. 아래 값은 secret으로 취급되는 server private key가 아니지만 저장소에 환경별 실값을 고정하지 않습니다.
+
+```text
+SELFRUN_FIREBASE_API_KEY
+SELFRUN_FIREBASE_APPLICATION_ID
+SELFRUN_FIREBASE_PROJECT_ID
+SELFRUN_FIREBASE_SENDER_ID
+SELFRUN_PUSH_GATEWAY_URL
+```
+
+Vercel `selfrun-command-bridge`는 다음 server-side 환경변수를 사용합니다. `FIREBASE_PRIVATE_KEY` 등 service-account 자격증명은 Git이나 APK에 포함하지 않습니다.
+
+```text
+FIREBASE_PROJECT_ID
+FIREBASE_CLIENT_EMAIL
+FIREBASE_PRIVATE_KEY
+```
+
+Gateway는 Drive OAuth token, Result body, Requirement body를 받지 않습니다. Google Drive webhook과 Android 단말이 호출할 수 있도록 실제 배포 endpoint는 인증 없는 HTTPS ingress 또는 별도의 안전한 machine-to-machine 접근 경로를 제공해야 합니다. Vercel Deployment Protection으로 외부 webhook이 차단된 상태는 SERVER push의 운영 준비 완료 상태가 아닙니다.
+
 ## 앱 화면
 
 하단 메뉴는 실행 · 기록 · 설정으로 구성됩니다.
 
 - 실행: 현재 Task, mode/profile, V3 phase, 추가 지시, 일시정지/재개/중지, 로그를 표시합니다.
 - 기록: 완료·중단된 작업의 V3 projection과 health 진단을 표시합니다.
-- 설정: Drive base folder, profile registry, Web UI calibration 등 실행 인프라를 관리합니다.
+- 설정: Drive base folder, profile registry, Web UI calibration, Result 대기 작업 방식을 관리합니다.
 
 추가 지시는 `runId + text + revision`으로 저장하고 V3가 실제로 소비한 revision만 지웁니다. 구형 continuation lock/retry 상태는 사용하지 않습니다.
 
@@ -71,11 +99,12 @@ CHAT과 WORK 두 모드를 지원합니다. 앱은 사용자 선택 profile을 �
 
 Candidate 검증은 `.github/workflows/build-selfrun-v3-candidate.yml`에서 수행합니다.
 
-1. V3-only static policy와 전체 test-source compile
-2. JVM regression suite
-3. TEST target + instrumentation APK build
-4. 고정 TEST 인증서 서명 검증
-5. 정식 3.0.0과 TEST 후보 동시 설치/업데이트 검증
-6. V3 runtime instrumentation
+1. `command-bridge` Node dependency 설치, test, TypeScript typecheck
+2. V3-only static policy와 전체 test-source compile
+3. JVM regression suite
+4. TEST target + instrumentation APK build
+5. 고정 TEST 인증서 서명 검증
+6. 정식 3.0.0과 TEST 후보 동시 설치/업데이트 검증
+7. V3 runtime instrumentation
 
 개발 TEST application ID는 `com.shaterguy.chatgptselfrun.drive.test`, 정식 application ID는 `com.shaterguy.chatgptselfrun.drive`입니다. TEST와 정식판은 별도 UID로 동시 설치됩니다.
