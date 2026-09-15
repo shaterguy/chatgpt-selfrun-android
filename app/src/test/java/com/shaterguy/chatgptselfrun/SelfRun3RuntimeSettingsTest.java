@@ -52,9 +52,8 @@ public final class SelfRun3RuntimeSettingsTest {
         assertTrue(ui.contains("runtimeSettings::saveStallAlertMinutes"));
         assertTrue(ui.contains("runtimeSettings::saveResultPollSeconds"));
         assertTrue(ui.contains("runtimeSettings::saveWebPreparationSeconds"));
-        assertTrue(ui.contains("\"작업 모드\""));
-        assertTrue(ui.contains("\"서버를 통해 실행\""));
-        assertTrue(ui.contains("\"온디바이스\""));
+        assertTrue(ui.contains("\"작업 방식\""));
+        assertTrue(ui.contains("String[] labels = {\"서버\", \"온디바이스\"}"));
         assertTrue(ui.contains("runtimeSettings.saveWorkMode"));
     }
 
