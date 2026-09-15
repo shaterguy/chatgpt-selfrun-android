@@ -1,5 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -82,14 +83,18 @@ final class SelfRunPushGatewayClient {
 
     static JSONObject registrationBody(String installationId, String applicationId, String taskId,
                                        String turnId, String resultDocumentId, String fcmToken) {
-        return new JSONObject()
-                .put("schema", "selfrun-watch-register-v1")
-                .put("installationId", requireLocal(installationId, 128))
-                .put("applicationId", requireLocal(applicationId, 160))
-                .put("taskId", requireLocal(taskId, 160))
-                .put("turnId", requireLocal(turnId, 200))
-                .put("resultDocumentId", requireLocal(resultDocumentId, 200))
-                .put("fcmToken", requireLocal(fcmToken, 4096));
+        try {
+            return new JSONObject()
+                    .put("schema", "selfrun-watch-register-v1")
+                    .put("installationId", requireLocal(installationId, 128))
+                    .put("applicationId", requireLocal(applicationId, 160))
+                    .put("taskId", requireLocal(taskId, 160))
+                    .put("turnId", requireLocal(turnId, 200))
+                    .put("resultDocumentId", requireLocal(resultDocumentId, 200))
+                    .put("fcmToken", requireLocal(fcmToken, 4096));
+        } catch (JSONException impossible) {
+            throw new IllegalStateException("failed to encode gateway registration", impossible);
+        }
     }
 
     private JSONObject post(String path, JSONObject body) throws Exception {
