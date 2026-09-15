@@ -14,6 +14,7 @@ public final class SelfRun3RuntimeSettingsTest {
         assertEquals(125L, SelfRun3RuntimeSettings.DEFAULT_STALL_ALERT_MINUTES);
         assertEquals(30L, SelfRun3RuntimeSettings.DEFAULT_RESULT_POLL_SECONDS);
         assertEquals(90L, SelfRun3RuntimeSettings.DEFAULT_WEB_PREPARATION_SECONDS);
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, SelfRun3RuntimeSettings.DEFAULT_WORK_MODE);
     }
 
     @Test public void positiveIntegerParserRejectsBlankZeroNegativeTextAndOverflow() {
@@ -51,6 +52,10 @@ public final class SelfRun3RuntimeSettingsTest {
         assertTrue(ui.contains("runtimeSettings::saveStallAlertMinutes"));
         assertTrue(ui.contains("runtimeSettings::saveResultPollSeconds"));
         assertTrue(ui.contains("runtimeSettings::saveWebPreparationSeconds"));
+        assertTrue(ui.contains("\"작업 모드\""));
+        assertTrue(ui.contains("\"서버를 통해 실행\""));
+        assertTrue(ui.contains("\"온디바이스\""));
+        assertTrue(ui.contains("runtimeSettings.saveWorkMode"));
     }
 
     @Test public void removedTimingsNoLongerHideInPowerPolicy() throws Exception {
