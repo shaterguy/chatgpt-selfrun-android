@@ -34,10 +34,12 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertEquals(125L, settings.stallAlertMinutes());
         assertEquals(30L, settings.resultPollSeconds());
         assertEquals(90L, settings.webPreparationSeconds());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, settings.workMode());
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_RESULT_REPAIR_MINUTES));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_STALL_ALERT_MINUTES));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_RESULT_POLL_SECONDS));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_WEB_PREPARATION_SECONDS));
+        assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_WORK_MODE));
     }
 
     @Test public void committedSettingsSurviveNewSettingsInstanceAndUseRequestedUnits() {
@@ -46,12 +48,14 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertTrue(first.saveStallAlertMinutes("126"));
         assertTrue(first.saveResultPollSeconds("31"));
         assertTrue(first.saveWebPreparationSeconds("91"));
+        assertTrue(first.saveWorkMode(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE));
 
         SelfRun3RuntimeSettings reopened = new SelfRun3RuntimeSettings(context);
         assertEquals(121L, reopened.resultRepairMinutes());
         assertEquals(126L, reopened.stallAlertMinutes());
         assertEquals(31L, reopened.resultPollSeconds());
         assertEquals(91L, reopened.webPreparationSeconds());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, reopened.workMode());
         assertEquals(121L * 60_000L, reopened.resultRepairMs());
         assertEquals(126L * 60_000L, reopened.stallAlertMs());
         assertEquals(31_000L, reopened.resultPollMs());
@@ -69,12 +73,21 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertEquals(30L, new SelfRun3RuntimeSettings(context).resultPollSeconds());
     }
 
+    @Test public void corruptWorkModeFallsBackToServer() {
+        assertTrue(prefs.edit().putString(SelfRun3RuntimeSettings.KEY_WORK_MODE, "CORRUPT").commit());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER,
+                new SelfRun3RuntimeSettings(context).workMode());
+    }
+
     @Test public void perRunProjectionClearDoesNotClearRuntimeSettings() {
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
         assertTrue(settings.saveWebPreparationSeconds("123"));
+        assertTrue(settings.saveWorkMode(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE));
         Context app = context.getApplicationContext();
         assertTrue(app.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE).edit()
                 .putString("temporary", "value").clear().commit());
         assertEquals(123L, new SelfRun3RuntimeSettings(context).webPreparationSeconds());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                new SelfRun3RuntimeSettings(context).workMode());
     }
 }
