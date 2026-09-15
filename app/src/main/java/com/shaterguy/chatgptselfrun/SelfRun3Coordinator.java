@@ -2,6 +2,8 @@ package com.shaterguy.chatgptselfrun;
 
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -13,9 +15,13 @@ import com.google.android.gms.auth.api.identity.AuthorizationResult;
 import org.json.JSONObject;
 
 import java.io.IOException;
-import java.util.UUID;
+import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -37,16 +43,25 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final SelfRun3DriveAdapter drive;
     private final SelfRun3WebAdapter web;
     private final SelfRun3RuntimeSettings runtimeSettings;
+    private final SelfRunServerWatch serverWatch;
+    private final SharedPreferences runtimePrefs;
+    private final SharedPreferences.OnSharedPreferenceChangeListener runtimeListener;
     private final PowerManager.WakeLock wakeLock;
     private final Map<String, Long> nextResultPoll = new HashMap<>();
+    private final Set<String> serverRegisteredTurns = new HashSet<>();
+    private final Set<String> serverFallbackTurns = new HashSet<>();
+    private final ArrayDeque<SelfRun3Engine.State> recoveryQueue = new ArrayDeque<>();
     private Runnable scheduledNext;
     private String preparingRequest = "";
     private String completedTaskNotification = "";
 
     private volatile boolean destroyed;
     private volatile int epoch;
+    private int serverGeneration;
     private boolean authorizationInFlight;
     private boolean driveInFlight;
+    private boolean serverRegistrationInFlight;
+    private boolean recoveryCycleInFlight;
     private String accessToken = "";
     private int networkAttempt;
 
@@ -58,6 +73,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         drive = new SelfRun3DriveAdapter(service, store, ledger, this::operationPermitted);
         web = new SelfRun3WebAdapter(service, this);
         runtimeSettings = new SelfRun3RuntimeSettings(service);
+        serverWatch = new SelfRunServerWatch(service);
+        runtimePrefs = service.getSharedPreferences(SelfRun3RuntimeSettings.PREFS, Context.MODE_PRIVATE);
+        runtimeListener = (prefs, key) -> {
+            if (SelfRun3RuntimeSettings.KEY_WORK_MODE.equals(key)) main.post(this::onWorkModeChanged);
+        };
+        runtimePrefs.registerOnSharedPreferenceChangeListener(runtimeListener);
         PowerManager power = service.getSystemService(PowerManager.class);
         wakeLock = power == null ? null : power.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, BuildConfig.APPLICATION_ID + ":selfrun3-active");
@@ -86,11 +107,88 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         return store.active() ? Service.START_STICKY : Service.START_NOT_STICKY;
     }
 
+    void onPushResult(SelfRunPushEvent push) {
+        requireMain();
+        if (push == null) return;
+        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+            acknowledgeProcessed(push);
+            return;
+        }
+        int expectedEpoch = epoch;
+        String installationId;
+        try {
+            installationId = SelfRunInstallationIdentity.id(service);
+        } catch (Throwable unavailable) {
+            return;
+        }
+        io.execute(() -> {
+            SelfRun3Engine.State current = null;
+            try {
+                current = ledger.loadExecution(push.taskId, push.turnId);
+            } catch (Throwable ignored) { }
+            SelfRun3Engine.State exact = current;
+            main.post(() -> {
+                if (!validEpoch(expectedEpoch)) return;
+                if (exact == null || exact.terminal() || exact.flag("superseded")
+                        || !waitEligible(exact)
+                        || !push.matches(installationId, exact.taskId(), exact.turnId(),
+                        exact.resource("resultDocumentId"))) {
+                    acknowledgeProcessed(push);
+                    return;
+                }
+                if (serverFallbackTurns.contains(exact.turnId())) {
+                    acknowledgeProcessed(push);
+                    return;
+                }
+                if (driveInFlight || authorizationInFlight) return;
+                serverRegisteredTurns.remove(exact.turnId());
+                nextResultPoll.remove(exact.turnId());
+                runDriveStep(exact, DriveStep.READ_RESULT, ReadTrigger.PUSH, push);
+            });
+        });
+    }
+
+    void onServerRecovery() {
+        requireMain();
+        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+            SelfRunServerRecoveryWorker.cancel(service);
+            return;
+        }
+        if (recoveryCycleInFlight || driveInFlight || authorizationInFlight || serverRegistrationInFlight) return;
+        int expectedEpoch = epoch;
+        String task = store.runId();
+        io.execute(() -> {
+            ArrayDeque<SelfRun3Engine.State> waiting = new ArrayDeque<>();
+            try {
+                SelfRun3Engine.State root = ledger.load(task);
+                if (root != null) {
+                    for (SelfRun3Engine.State execution : SelfRun3Engine.waitingExecutions(root)) {
+                        if (!serverFallbackTurns.contains(execution.turnId())) waiting.add(execution);
+                    }
+                }
+            } catch (Throwable ignored) { }
+            main.post(() -> {
+                if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+                recoveryQueue.clear();
+                recoveryQueue.addAll(waiting);
+                if (recoveryQueue.isEmpty()) {
+                    SelfRunServerRecoveryWorker.cancel(service);
+                    return;
+                }
+                recoveryCycleInFlight = true;
+                runNextRecoveryRead();
+            });
+        });
+    }
+
     void destroy() {
         requireMain();
         destroyed = true;
         epoch++;
+        serverGeneration++;
+        runtimePrefs.unregisterOnSharedPreferenceChangeListener(runtimeListener);
         main.removeCallbacksAndMessages(null);
+        recoveryQueue.clear();
         web.close();
         releaseWakeLock();
         io.shutdownNow();
@@ -163,18 +261,45 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void handleState(SelfRun3Engine.State state) {
         requireMain();
-        if (!canRun() || state.terminal() || state.stage() == SelfRun3Engine.Stage.PAUSED) return;
-        if (driveInFlight || authorizationInFlight) return;
+        if (!canRun()) return;
+        if (state.terminal() || state.stage() == SelfRun3Engine.Stage.PAUSED) {
+            SelfRunServerRecoveryWorker.cancel(service);
+            return;
+        }
+        if (driveInFlight || authorizationInFlight || serverRegistrationInFlight || recoveryCycleInFlight) return;
         long resultPollMs = runtimeSettings.resultPollMs();
         // A single WebView dispatches branches sequentially. Result timers never inspect its UI.
         if (!preparingRequest.isEmpty()) {
             scheduleNext(resultPollMs);
             return;
         }
+
+        List<SelfRun3Engine.State> waiting = SelfRun3Engine.waitingExecutions(state);
+        Set<String> waitingIds = new HashSet<>();
+        for (SelfRun3Engine.State execution : waiting) waitingIds.add(execution.turnId());
+        serverRegisteredTurns.retainAll(waitingIds);
+        serverFallbackTurns.retainAll(waitingIds);
+
+        SelfRun3RuntimeSettings.WorkMode workMode = runtimeSettings.workMode();
         long now = SystemClock.elapsedRealtime();
         long nextDelay = resultPollMs;
-        for (SelfRun3Engine.State execution : SelfRun3Engine.waitingExecutions(state)) {
+        boolean localPollingWaiting = false;
+        boolean serverWaiting = false;
+
+        for (SelfRun3Engine.State execution : waiting) {
             if (execution.resource("resultDocumentId").isEmpty()) continue;
+            boolean useServer = SelfRunServerWaitPolicy.useServerPush(
+                    workMode, serverFallbackTurns.contains(execution.turnId()));
+            if (useServer && !serverRegisteredTurns.contains(execution.turnId())) {
+                if (startServerWatchRegistration(execution)) return;
+                useServer = SelfRunServerWaitPolicy.useServerPush(
+                        workMode, serverFallbackTurns.contains(execution.turnId()));
+            }
+            if (useServer) {
+                serverWaiting = true;
+                continue;
+            }
+            localPollingWaiting = true;
             long due = nextResultPoll.getOrDefault(execution.turnId(), 0L);
             if (due <= now) {
                 runDriveStep(execution, DriveStep.READ_RESULT);
@@ -182,6 +307,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             }
             nextDelay = Math.min(nextDelay, due - now);
         }
+
+        if (serverWaiting) SelfRunServerRecoveryWorker.schedule(service);
+        else SelfRunServerRecoveryWorker.cancel(service);
+
         switch (SelfRun3Engine.nextAction(state)) {
             case SETUP -> runDriveStep(state, DriveStep.SETUP);
             case PREPARE_TURN -> runDriveStep(state, DriveStep.PREPARE_TURN);
@@ -193,23 +322,161 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             case WAIT, READ_RESULT, CHECK_RECEIPT -> {
                 web.detach();
                 releaseWakeLock();
-                scheduleNext(nextDelay);
+                if (localPollingWaiting) scheduleNext(nextDelay);
             }
             case COMMIT -> commitTurn(state);
             case NONE -> {
                 releaseWakeLock();
-                if (!SelfRun3Engine.waitingExecutions(state).isEmpty()) scheduleNext(nextDelay);
+                if (localPollingWaiting) scheduleNext(nextDelay);
             }
         }
     }
 
+    private boolean startServerWatchRegistration(SelfRun3Engine.State execution) {
+        requireMain();
+        if (serverRegisteredTurns.contains(execution.turnId())
+                || serverFallbackTurns.contains(execution.turnId())) return false;
+        if (serverRegistrationInFlight) return true;
+        if (!SelfRunFirebase.configured()) {
+            activateServerFallback(execution, "FIREBASE_NOT_CONFIGURED");
+            return false;
+        }
+        serverRegistrationInFlight = true;
+        int expectedEpoch = epoch;
+        int expectedGeneration = serverGeneration;
+        if (!accessToken.isEmpty()) {
+            requestFcmAndRegister(execution, accessToken, expectedEpoch, expectedGeneration);
+            return true;
+        }
+        authorizationInFlight = true;
+        DriveAuthorization.requestSilently(service, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) {
+                authorizationInFlight = false;
+                if (!validServerRegistration(expectedEpoch, expectedGeneration)) return;
+                accessToken = DriveAuthorization.accessToken(result);
+                if (accessToken.isEmpty()) {
+                    finishServerRegistrationFallback(execution, "DRIVE_TOKEN_EMPTY", expectedEpoch, expectedGeneration);
+                    return;
+                }
+                requestFcmAndRegister(execution, accessToken, expectedEpoch, expectedGeneration);
+            }
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                authorizationInFlight = false;
+                serverRegistrationInFlight = false;
+                if (validServerRegistration(expectedEpoch, expectedGeneration)) pause("V3_DRIVE_AUTH_REQUIRED");
+            }
+            @Override public void onFailure(Throwable error) {
+                authorizationInFlight = false;
+                finishServerRegistrationFallback(execution, "DRIVE_AUTH_FAILED", expectedEpoch, expectedGeneration);
+            }
+        });
+        return true;
+    }
+
+    private void requestFcmAndRegister(SelfRun3Engine.State execution, String driveToken,
+                                       int expectedEpoch, int expectedGeneration) {
+        SelfRunFirebase.requestToken(service, new SelfRunFirebase.TokenCallback() {
+            @Override public void onToken(String fcmToken) {
+                main.post(() -> {
+                    if (!validServerRegistration(expectedEpoch, expectedGeneration)) return;
+                    io.execute(() -> {
+                        SelfRun3Engine.State current = null;
+                        SelfRunServerWatch.Result result = null;
+                        try {
+                            current = ledger.loadExecution(execution.taskId(), execution.turnId());
+                            if (current != null && waitEligible(current)) {
+                                result = serverWatch.register(driveToken, current, fcmToken);
+                            }
+                        } catch (Throwable error) {
+                            result = SelfRunServerWatch.Result.fallback(error.getClass().getSimpleName());
+                        }
+                        SelfRun3Engine.State registeredState = current;
+                        SelfRunServerWatch.Result registration = result;
+                        main.post(() -> finishServerRegistration(
+                                registeredState, registration, expectedEpoch, expectedGeneration));
+                    });
+                });
+            }
+            @Override public void onUnavailable(Throwable error) {
+                String reason = error == null ? "FCM_UNAVAILABLE" : error.getClass().getSimpleName();
+                main.post(() -> finishServerRegistrationFallback(
+                        execution, reason, expectedEpoch, expectedGeneration));
+            }
+        });
+    }
+
+    private void finishServerRegistration(SelfRun3Engine.State state, SelfRunServerWatch.Result result,
+                                          int expectedEpoch, int expectedGeneration) {
+        requireMain();
+        if (!validServerRegistration(expectedEpoch, expectedGeneration)) return;
+        serverRegistrationInFlight = false;
+        if (state == null || !waitEligible(state)) {
+            scheduleNext(0L);
+            return;
+        }
+        if (result != null && result.registered) {
+            serverFallbackTurns.remove(state.turnId());
+            serverRegisteredTurns.add(state.turnId());
+            nextResultPoll.remove(state.turnId());
+            log.record(store, "V3_SERVER_PUSH_REGISTERED", "turn=" + state.turn());
+            SelfRunServerRecoveryWorker.schedule(service);
+            scheduleNext(0L);
+            return;
+        }
+        activateServerFallback(state, result == null ? "WATCH_REGISTRATION_FAILED" : result.reason);
+        scheduleNext(0L);
+    }
+
+    private void finishServerRegistrationFallback(SelfRun3Engine.State state, String reason,
+                                                  int expectedEpoch, int expectedGeneration) {
+        requireMain();
+        if (!validServerRegistration(expectedEpoch, expectedGeneration)) return;
+        serverRegistrationInFlight = false;
+        activateServerFallback(state, reason);
+        scheduleNext(0L);
+    }
+
+    private boolean validServerRegistration(int expectedEpoch, int expectedGeneration) {
+        return validEpoch(expectedEpoch) && expectedGeneration == serverGeneration && canRun()
+                && runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.SERVER;
+    }
+
+    private void activateServerFallback(SelfRun3Engine.State state, String reason) {
+        if (state == null) return;
+        serverRegisteredTurns.remove(state.turnId());
+        serverFallbackTurns.add(state.turnId());
+        nextResultPoll.put(state.turnId(), 0L);
+        log.record(store, "V3_SERVER_PUSH_FALLBACK",
+                "turn=" + state.turn() + ";reason=" + safeCode(reason));
+    }
+
+    private void onWorkModeChanged() {
+        requireMain();
+        if (destroyed) return;
+        serverGeneration++;
+        serverRegistrationInFlight = false;
+        serverRegisteredTurns.clear();
+        serverFallbackTurns.clear();
+        recoveryQueue.clear();
+        recoveryCycleInFlight = false;
+        nextResultPoll.clear();
+        SelfRunServerRecoveryWorker.cancel(service);
+        if (canRun()) scheduleNext(0L);
+    }
+
     private enum DriveStep { SETUP, PREPARE_TURN, READ_RESULT }
+    private enum ReadTrigger { NORMAL, PUSH, RECOVERY }
 
     private void runDriveStep(SelfRun3Engine.State state, DriveStep step) {
+        runDriveStep(state, step, ReadTrigger.NORMAL, null);
+    }
+
+    private void runDriveStep(SelfRun3Engine.State state, DriveStep step,
+                              ReadTrigger trigger, SelfRunPushEvent push) {
         requireMain();
         if (driveInFlight || authorizationInFlight || !canRun()) return;
         if (!accessToken.isEmpty()) {
-            executeDriveStep(state, step, accessToken);
+            executeDriveStep(state, step, accessToken, trigger, push);
             return;
         }
         int expectedEpoch = epoch;
@@ -220,10 +487,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 if (!validEpoch(expectedEpoch) || !canRun()) return;
                 accessToken = DriveAuthorization.accessToken(result);
                 if (accessToken.isEmpty()) {
+                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
                     scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
                     return;
                 }
-                executeDriveStep(state, step, accessToken);
+                executeDriveStep(state, step, accessToken, trigger, push);
             }
             @Override public void onResolutionRequired(PendingIntent pendingIntent) {
                 authorizationInFlight = false;
@@ -231,12 +499,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             }
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
+                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
                 if (validEpoch(expectedEpoch)) scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
             }
         });
     }
 
-    private void executeDriveStep(SelfRun3Engine.State state, DriveStep step, String token) {
+    private void executeDriveStep(SelfRun3Engine.State state, DriveStep step, String token,
+                                  ReadTrigger trigger, SelfRunPushEvent push) {
         requireMain();
         if (driveInFlight || !canRun()) return;
         driveInFlight = true;
@@ -302,12 +572,19 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     clearRecoveredDriveWarning(store);
                     networkAttempt = 0;
                     if (step == DriveStep.READ_RESULT) {
+                        serverRegisteredTurns.remove(expectedTurn);
                         nextResultPoll.remove(expectedTurn);
-                        if (completed.turnId().equals(expectedTurn)) nextResultPoll.put(expectedTurn,
-                                SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
+                        if (!SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+                                serverFallbackTurns.contains(expectedTurn))
+                                && completed.turnId().equals(expectedTurn)) {
+                            nextResultPoll.put(expectedTurn,
+                                    SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
+                        }
+                        if (push != null) acknowledgeProcessed(push);
                     }
                     syncProjection(completed);
-                    scheduleNext(0L);
+                    if (trigger == ReadTrigger.RECOVERY) finishRecoveryRead();
+                    else scheduleNext(0L);
                 });
             } catch (ResultPendingException pending) {
                 main.post(() -> {
@@ -316,7 +593,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
-                        scheduleResultRetry(state);
+                        if (push != null) acknowledgeProcessed(push);
+                        serverRegisteredTurns.remove(expectedTurn);
+                        if (trigger == ReadTrigger.RECOVERY) {
+                            nextResultPoll.remove(expectedTurn);
+                            finishRecoveryRead();
+                        } else {
+                            scheduleResultRetry(state);
+                        }
                     }
                 });
             } catch (Throwable error) {
@@ -324,6 +608,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     driveInFlight = false;
                     releaseWakeLock();
                     if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
+                    if (push != null && step == DriveStep.READ_RESULT) acknowledgeProcessed(push);
+                    if (step == DriveStep.READ_RESULT) serverRegisteredTurns.remove(expectedTurn);
+                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
                     if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error)) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
@@ -337,8 +624,61 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void scheduleResultRetry(SelfRun3Engine.State state) {
+        if (SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+                serverFallbackTurns.contains(state.turnId()))) {
+            serverRegisteredTurns.remove(state.turnId());
+            nextResultPoll.remove(state.turnId());
+            scheduleNext(0L);
+            return;
+        }
         nextResultPoll.put(state.turnId(), SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
         scheduleNext(0L);
+    }
+
+    private void runNextRecoveryRead() {
+        requireMain();
+        if (!recoveryCycleInFlight || !canRun()) {
+            abortRecoveryCycle();
+            return;
+        }
+        SelfRun3Engine.State next = recoveryQueue.pollFirst();
+        if (next == null) {
+            recoveryCycleInFlight = false;
+            scheduleNext(0L);
+            return;
+        }
+        serverRegisteredTurns.remove(next.turnId());
+        nextResultPoll.remove(next.turnId());
+        runDriveStep(next, DriveStep.READ_RESULT, ReadTrigger.RECOVERY, null);
+    }
+
+    private void finishRecoveryRead() {
+        requireMain();
+        runNextRecoveryRead();
+    }
+
+    private void abortRecoveryCycle() {
+        recoveryQueue.clear();
+        recoveryCycleInFlight = false;
+    }
+
+    private void acknowledgeProcessed(SelfRunPushEvent push) {
+        if (push == null) return;
+        try {
+            SelfRunPushAckOutbox.enqueue(service, push, SelfRunPushAckOutbox.AckState.PROCESSED);
+        } catch (Throwable error) {
+            log.record(store, "V3_PUSH_ACK_PERSIST_FAILED",
+                    "event=" + safeCode(push.eventId) + ";error=" + error.getClass().getSimpleName());
+        }
+    }
+
+    private static boolean waitEligible(SelfRun3Engine.State state) {
+        if (state == null || state.terminal() || state.flag("superseded")) return false;
+        return (state.stage() == SelfRun3Engine.Stage.DISPATCHING
+                && !state.resource("conversationUrl").isEmpty())
+                || state.stage() == SelfRun3Engine.Stage.WAITING
+                || state.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION
+                || (state.stage() == SelfRun3Engine.Stage.RECONCILING && !state.hasResult());
     }
 
     private void commitTurn(SelfRun3Engine.State stale) {
@@ -351,6 +691,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch) || !current.taskId().equals(store.runId())) return;
                     nextResultPoll.remove(current.turnId());
+                    serverRegisteredTurns.remove(current.turnId());
+                    serverFallbackTurns.remove(current.turnId());
                     syncProjection(after);
                     if (after.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION) {
                         notifyUserActionRequired();
@@ -359,6 +701,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     }
                     if (after.stage() == SelfRun3Engine.Stage.DONE) {
                         epoch++;
+                        cancelServerWaitState();
                         main.removeCallbacksAndMessages(null);
                         preparingRequest = "";
                         nextResultPoll.clear();
@@ -552,6 +895,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (store.runId().isEmpty() || destroyed || !ownsCurrentRun()) return;
         epoch++;
+        cancelServerWaitState();
         if (scheduledNext != null) main.removeCallbacks(scheduledNext);
         preparingRequest = "";
         web.quiesce();
@@ -612,6 +956,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (store.runId().isEmpty() || !ownsCurrentRun()) return;
         epoch++;
+        cancelServerWaitState();
         main.removeCallbacksAndMessages(null);
         web.close();
         releaseWakeLock();
@@ -633,6 +978,16 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 service.stopSelf();
             });
         });
+    }
+
+    private void cancelServerWaitState() {
+        serverGeneration++;
+        serverRegistrationInFlight = false;
+        serverRegisteredTurns.clear();
+        serverFallbackTurns.clear();
+        recoveryQueue.clear();
+        recoveryCycleInFlight = false;
+        SelfRunServerRecoveryWorker.cancel(service);
     }
 
     private void syncProjection(SelfRun3Engine.State state) {
@@ -658,10 +1013,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 executionConfig.optString("model"), executionConfig.optString("reasoning"),
                 state.resource("conversationUrl"));
         if (state.stage() == SelfRun3Engine.Stage.DONE) {
+            SelfRunServerRecoveryWorker.cancel(service);
             store.setActive(false);
             store.releaseCommittedAttachmentPermissions();
             store.setStatus("작업 완료");
         } else if (state.stage() == SelfRun3Engine.Stage.STOPPED) {
+            SelfRunServerRecoveryWorker.cancel(service);
             store.setStatus("사용자 중지");
         } else store.setStatus(statusFor(state));
     }
@@ -685,6 +1042,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void hardPause(String code, Throwable error) {
         requireMain();
         epoch++;
+        cancelServerWaitState();
         if (scheduledNext != null) main.removeCallbacks(scheduledNext);
         preparingRequest = "";
         web.quiesce();
