@@ -26,8 +26,8 @@ public final class SelfRunServerCandidatePolicyTest {
 
     @Test public void settingsCopyMatchesTheApprovedTwoModeDesign() throws Exception {
         String source = source("SelfRunLogMenuActivity.java");
-        assertTrue(source.contains("\"작업 방식\""));
-        assertTrue(source.contains("String[] labels = {\"서버\", \"온디바이스\"}"));
+        assertTrue(source.contains("\"작업 모드\""));
+        assertTrue(source.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
         assertTrue(source.contains("Drive 변경을 빠르게 감지"));
         assertTrue(source.contains("휴대폰이 일정 간격으로 확인"));
     }
