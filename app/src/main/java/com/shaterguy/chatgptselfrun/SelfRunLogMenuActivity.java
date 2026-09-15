@@ -58,7 +58,7 @@ public final class SelfRunLogMenuActivity extends Activity {
         page.addView(Ui.setting(this, R.drawable.ic_settings, "배터리 최적화",
                 batteryReady() ? "제외됨" : "사용 중", v -> requestBatteryExemption()));
         page.addView(Ui.divider(this));
-        page.addView(Ui.setting(this, R.drawable.ic_settings, "작업 방식",
+        page.addView(Ui.setting(this, R.drawable.ic_settings, "작업 모드",
                 workModeLabel(runtimeSettings.workMode()), v -> editWorkMode()));
         page.addView(Ui.muted(this,
                 "서버: Drive 변경을 빠르게 감지합니다. 온디바이스: 휴대폰이 일정 간격으로 확인합니다."));
@@ -91,16 +91,16 @@ public final class SelfRunLogMenuActivity extends Activity {
     }
 
     private void editWorkMode() {
-        String[] labels = {"서버", "온디바이스"};
+        String[] labels = {"서버를 통해 실행", "온디바이스"};
         int selected = runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.SERVER ? 0 : 1;
         new AlertDialog.Builder(this)
-                .setTitle("작업 방식")
+                .setTitle("작업 모드")
                 .setSingleChoiceItems(labels, selected, (dialog, which) -> {
                     SelfRun3RuntimeSettings.WorkMode mode = which == 0
                             ? SelfRun3RuntimeSettings.WorkMode.SERVER
                             : SelfRun3RuntimeSettings.WorkMode.ON_DEVICE;
                     if (!runtimeSettings.saveWorkMode(mode)) {
-                        Toast.makeText(this, "작업 방식을 저장하지 못했습니다.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "작업 모드를 저장하지 못했습니다.", Toast.LENGTH_SHORT).show();
                         return;
                     }
                     dialog.dismiss();
@@ -111,7 +111,7 @@ public final class SelfRunLogMenuActivity extends Activity {
     }
 
     private static String workModeLabel(SelfRun3RuntimeSettings.WorkMode mode) {
-        return mode == SelfRun3RuntimeSettings.WorkMode.ON_DEVICE ? "온디바이스" : "서버";
+        return mode == SelfRun3RuntimeSettings.WorkMode.ON_DEVICE ? "온디바이스" : "서버를 통해 실행";
     }
 
     private void editPositiveSetting(String title, String unit, long currentValue, RuntimeSettingSaver saver) {
