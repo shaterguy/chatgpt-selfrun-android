@@ -20,7 +20,8 @@ final class SelfRunServerWatch {
     private final SelfRunDriveWatchClient driveWatch;
 
     SelfRunServerWatch(Context context) {
-        this(context, new SelfRunPushGatewayClient(), new SelfRunDriveWatchClient());
+        this(context, new SelfRunPushGatewayClient(BuildConfig.SELFRUN_PUSH_GATEWAY_URL),
+                new SelfRunDriveWatchClient());
     }
 
     SelfRunServerWatch(Context context, SelfRunPushGatewayClient gateway, SelfRunDriveWatchClient driveWatch) {
