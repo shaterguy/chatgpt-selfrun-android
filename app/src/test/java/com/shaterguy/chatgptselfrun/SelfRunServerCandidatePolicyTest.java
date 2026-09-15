@@ -9,11 +9,12 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRunServerCandidatePolicyTest {
-    @Test public void dev3IdentityAndPreviewGatewayArePinnedForTheTestCandidate() throws Exception {
+    @Test public void dev3IdentityAndStableGatewayArePinnedForTheTestCandidate() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
         assertTrue(gradle.contains("selfRunDriveVersionCode = 3025003"));
         assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.5-dev3'"));
-        assertTrue(gradle.contains("https://selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app"));
+        assertTrue(gradle.contains("https://selfrun-command-bridge-shaterguy.vercel.app"));
+        assertFalse(gradle.contains("selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app"));
     }
 
     @Test public void everyAndroidGatewayCallerUsesTheBuildConfiguredEndpoint() throws Exception {
@@ -35,6 +36,34 @@ public final class SelfRunServerCandidatePolicyTest {
         String source = source("SelfRun3Coordinator.java");
         assertTrue(source.contains("fallbackSnapshot = new HashSet<>(serverFallbackTurns)"));
         assertTrue(source.contains("fallbackSnapshot.contains(execution.turnId())"));
+    }
+
+    @Test public void candidateCiRunsGatewayTestsAndTypecheckBeforeAndroidCompile() throws Exception {
+        String workflow = text(resolve(
+                ".github/workflows/build-selfrun-v3-candidate.yml",
+                "../.github/workflows/build-selfrun-v3-candidate.yml"));
+        int node = workflow.indexOf("GATEWAY_TEST - command-bridge tests and typecheck");
+        int android = workflow.indexOf("STATIC_PREFLIGHT - V3 policy and all test-source compile");
+        assertTrue(node >= 0);
+        assertTrue(workflow.contains("working-directory: command-bridge"));
+        assertTrue(workflow.contains("npm ci"));
+        assertTrue(workflow.contains("npm test"));
+        assertTrue(workflow.contains("npm run typecheck"));
+        assertTrue(android > node);
+    }
+
+    @Test public void readmeDocumentsServerFallbackAndAllFirebaseInputs() throws Exception {
+        String readme = text(resolve("README.md", "../README.md"));
+        assertTrue(readme.contains("SERVER"));
+        assertTrue(readme.contains("ON_DEVICE"));
+        assertTrue(readme.contains("SELFRUN_FIREBASE_API_KEY"));
+        assertTrue(readme.contains("SELFRUN_FIREBASE_APPLICATION_ID"));
+        assertTrue(readme.contains("SELFRUN_FIREBASE_PROJECT_ID"));
+        assertTrue(readme.contains("SELFRUN_FIREBASE_SENDER_ID"));
+        assertTrue(readme.contains("SELFRUN_PUSH_GATEWAY_URL"));
+        assertTrue(readme.contains("FIREBASE_CLIENT_EMAIL"));
+        assertTrue(readme.contains("FIREBASE_PRIVATE_KEY"));
+        assertTrue(readme.contains("fallback"));
     }
 
     private static String source(String name) throws Exception {
