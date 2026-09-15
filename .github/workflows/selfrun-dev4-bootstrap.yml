@@ -55,10 +55,11 @@ jobs:
             :app:compileQaAppUnitTestJavaWithJavac \
             :app:compileQaAppAndroidTestJavaWithJavac \
             :app:testQaAppUnitTest
-      - name: Commit tested dev4 patch
+      - name: Commit tested Android dev4 patch
         shell: bash
         run: |
           set -euo pipefail
+          git restore .github/workflows/build-selfrun-v3-candidate.yml
           git status --short
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
