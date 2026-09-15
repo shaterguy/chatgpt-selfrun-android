@@ -9,16 +9,16 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRunFirebaseBuildConfigPolicyTest {
-    @Test public void candidateCiInjectsAndRequiresAllFourPublicFirebaseValues() throws Exception {
-        String workflow = text(resolve(".github/workflows/build-selfrun-v3-candidate.yml",
-                "../.github/workflows/build-selfrun-v3-candidate.yml"));
+    @Test public void firebaseCandidateConfigGateRequiresAllFourPublicValuesWithoutPrintingSecrets() throws Exception {
+        String gate = text(resolve("tools/verify_selfrun_firebase_config_env.sh",
+                "../tools/verify_selfrun_firebase_config_env.sh"));
         for (String name : new String[]{"SELFRUN_FIREBASE_API_KEY", "SELFRUN_FIREBASE_APPLICATION_ID",
                 "SELFRUN_FIREBASE_PROJECT_ID", "SELFRUN_FIREBASE_SENDER_ID"}) {
-            assertTrue(workflow.contains(name + ": ${{ secrets." + name + " }}"));
+            assertTrue(gate.contains(name));
         }
-        assertTrue(workflow.contains("FIREBASE_CONFIG_GATE - Android public config is injected"));
-        assertTrue(workflow.contains("${!name:-}"));
-        assertFalse(workflow.contains("echo \"$SELFRUN_FIREBASE_API_KEY\""));
+        assertTrue(gate.contains("${!name:-}"));
+        assertTrue(gate.contains("Firebase candidate configuration missing"));
+        assertFalse(gate.contains("echo \"$SELFRUN_FIREBASE_API_KEY\""));
     }
 
     @Test public void appReadsPublicConfigFromEnvironmentWithoutPrivateFirebaseCredential() throws Exception {
