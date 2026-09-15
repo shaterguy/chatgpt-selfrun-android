@@ -3,18 +3,22 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Persisted SelfRun 3 operator-tunable timing policy. */
+/** Persisted SelfRun 3 operator-tunable runtime policy. */
 final class SelfRun3RuntimeSettings {
+    enum WorkMode { SERVER, ON_DEVICE }
+
     static final String PREFS = "selfrun3_runtime_settings";
     static final String KEY_RESULT_REPAIR_MINUTES = "selfrun3ResultRepairMinutes";
     static final String KEY_STALL_ALERT_MINUTES = "selfrun3StallAlertMinutes";
     static final String KEY_RESULT_POLL_SECONDS = "selfrun3ResultPollSeconds";
     static final String KEY_WEB_PREPARATION_SECONDS = "selfrun3WebPreparationSeconds";
+    static final String KEY_WORK_MODE = "selfrun3WorkMode";
 
     static final long DEFAULT_RESULT_REPAIR_MINUTES = 10L;
     static final long DEFAULT_STALL_ALERT_MINUTES = 125L;
     static final long DEFAULT_RESULT_POLL_SECONDS = 30L;
     static final long DEFAULT_WEB_PREPARATION_SECONDS = 90L;
+    static final WorkMode DEFAULT_WORK_MODE = WorkMode.SERVER;
 
     private static final long MINUTE_MS = 60_000L;
     private static final long SECOND_MS = 1_000L;
@@ -41,6 +45,21 @@ final class SelfRun3RuntimeSettings {
         return readPositiveUnits(KEY_WEB_PREPARATION_SECONDS, DEFAULT_WEB_PREPARATION_SECONDS, SECOND_MS);
     }
 
+    WorkMode workMode() {
+        Object stored;
+        try {
+            stored = prefs.getAll().get(KEY_WORK_MODE);
+        } catch (Throwable unreadable) {
+            return DEFAULT_WORK_MODE;
+        }
+        if (!(stored instanceof String)) return DEFAULT_WORK_MODE;
+        try {
+            return WorkMode.valueOf((String) stored);
+        } catch (IllegalArgumentException invalid) {
+            return DEFAULT_WORK_MODE;
+        }
+    }
+
     long resultRepairMs() { return toMillis(resultRepairMinutes(), MINUTE_MS); }
     long stallAlertMs() { return toMillis(stallAlertMinutes(), MINUTE_MS); }
     long resultPollMs() { return toMillis(resultPollSeconds(), SECOND_MS); }
@@ -60,6 +79,11 @@ final class SelfRun3RuntimeSettings {
 
     boolean saveWebPreparationSeconds(String raw) {
         return savePositiveUnits(KEY_WEB_PREPARATION_SECONDS, raw, SECOND_MS);
+    }
+
+    boolean saveWorkMode(WorkMode mode) {
+        if (mode == null) return false;
+        return prefs.edit().putString(KEY_WORK_MODE, mode.name()).commit();
     }
 
     private long readPositiveUnits(String key, long fallback, long multiplier) {
