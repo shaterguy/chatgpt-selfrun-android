@@ -10,8 +10,8 @@ import static org.junit.Assert.*;
 
 public final class SelfRunPushAckPolicyTest {
     @Test public void manifestAndBuildWireFcmAndWorkManager() throws Exception {
-        String manifest = Files.readString(Path.of("app/src/main/AndroidManifest.xml"), StandardCharsets.UTF_8);
-        String gradle = Files.readString(Path.of("app/build.gradle"), StandardCharsets.UTF_8);
+        String manifest = text(Path.of("app/src/main/AndroidManifest.xml"));
+        String gradle = text(Path.of("app/build.gradle"));
         assertTrue(manifest.contains("SelfRunFirebaseMessagingService"));
         assertTrue(manifest.contains("com.google.firebase.MESSAGING_EVENT"));
         assertTrue(gradle.contains("firebase-messaging"));
@@ -37,6 +37,10 @@ public final class SelfRunPushAckPolicyTest {
     private static String source(String name) throws Exception {
         Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        return text(path);
+    }
+
+    private static String text(Path path) throws Exception {
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
