@@ -10,8 +10,8 @@ import static org.junit.Assert.*;
 
 public final class SelfRunPushAckPolicyTest {
     @Test public void manifestAndBuildWireFcmAndWorkManager() throws Exception {
-        String manifest = text(Path.of("app/src/main/AndroidManifest.xml"));
-        String gradle = text(Path.of("app/build.gradle"));
+        String manifest = text(resolve("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml"));
+        String gradle = text(resolve("app/build.gradle", "build.gradle"));
         assertTrue(manifest.contains("SelfRunFirebaseMessagingService"));
         assertTrue(manifest.contains("com.google.firebase.MESSAGING_EVENT"));
         assertTrue(gradle.contains("firebase-messaging"));
@@ -35,9 +35,14 @@ public final class SelfRunPushAckPolicyTest {
     }
 
     private static String source(String name) throws Exception {
-        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        return text(path);
+        return text(resolve(
+                "app/src/main/java/com/shaterguy/chatgptselfrun/" + name,
+                "src/main/java/com/shaterguy/chatgptselfrun/" + name));
+    }
+
+    private static Path resolve(String repositoryPath, String appPath) {
+        Path path = Path.of(repositoryPath);
+        return Files.exists(path) ? path : Path.of(appPath);
     }
 
     private static String text(Path path) throws Exception {
