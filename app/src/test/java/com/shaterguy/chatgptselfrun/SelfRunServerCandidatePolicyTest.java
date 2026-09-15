@@ -16,9 +16,11 @@ public final class SelfRunServerCandidatePolicyTest {
         assertTrue(gradle.contains("https://selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app"));
     }
 
-    @Test public void serverWatchUsesTheBuildConfiguredGatewayRatherThanAHardcodedDefault() throws Exception {
-        String source = source("SelfRunServerWatch.java");
-        assertTrue(source.contains("new SelfRunPushGatewayClient(BuildConfig.SELFRUN_PUSH_GATEWAY_URL)"));
+    @Test public void everyAndroidGatewayCallerUsesTheBuildConfiguredEndpoint() throws Exception {
+        String serverWatch = source("SelfRunServerWatch.java");
+        String ackWorker = source("SelfRunPushAckWorker.java");
+        assertTrue(serverWatch.contains("new SelfRunPushGatewayClient(BuildConfig.SELFRUN_PUSH_GATEWAY_URL)"));
+        assertTrue(ackWorker.contains("new SelfRunPushGatewayClient(BuildConfig.SELFRUN_PUSH_GATEWAY_URL)"));
     }
 
     @Test public void settingsCopyMatchesTheApprovedTwoModeDesign() throws Exception {
