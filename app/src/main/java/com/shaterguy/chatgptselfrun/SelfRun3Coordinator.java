@@ -157,13 +157,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         if (recoveryCycleInFlight || driveInFlight || authorizationInFlight || serverRegistrationInFlight) return;
         int expectedEpoch = epoch;
         String task = store.runId();
+        Set<String> fallbackSnapshot = new HashSet<>(serverFallbackTurns);
         io.execute(() -> {
             ArrayDeque<SelfRun3Engine.State> waiting = new ArrayDeque<>();
             try {
                 SelfRun3Engine.State root = ledger.load(task);
                 if (root != null) {
                     for (SelfRun3Engine.State execution : SelfRun3Engine.waitingExecutions(root)) {
-                        if (!serverFallbackTurns.contains(execution.turnId())) waiting.add(execution);
+                        if (!fallbackSnapshot.contains(execution.turnId())) waiting.add(execution);
                     }
                 }
             } catch (Throwable ignored) { }
