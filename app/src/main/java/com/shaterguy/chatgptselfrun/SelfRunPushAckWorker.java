@@ -33,7 +33,7 @@ public final class SelfRunPushAckWorker extends Worker {
     }
 
     @NonNull @Override public Result doWork() {
-        SelfRunPushGatewayClient gateway = new SelfRunPushGatewayClient();
+        SelfRunPushGatewayClient gateway = new SelfRunPushGatewayClient(BuildConfig.SELFRUN_PUSH_GATEWAY_URL);
         boolean retry = false;
         for (SelfRunPushAckOutbox.Entry entry : SelfRunPushAckOutbox.pending(getApplicationContext())) {
             try {
