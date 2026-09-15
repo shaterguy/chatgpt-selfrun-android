@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 /** Foreground shell for the single active ledger-driven SelfRun 3 coordinator. */
 public final class SelfRunService extends Service {
@@ -89,11 +90,8 @@ public final class SelfRunService extends Service {
             long actualAt = System.currentTimeMillis();
             long scheduledAt = intent.getLongExtra(
                     SelfRunFallbackWakeScheduler.EXTRA_SCHEDULED_AT_WALL_MS, actualAt);
-            runLog.record(store, "V3_RESULT_POLL_WAKE",
-                    "scheduledAt=" + scheduledAt
-                            + ";actualAt=" + actualAt
-                            + ";delayMs=" + SelfRunFallbackWakePolicy.delayMs(scheduledAt, actualAt)
-                            + ";reason=ALARM_MANAGER");
+            SelfRunFallbackWakeScheduler.onAlarmFired();
+            recordResultPollTiming(scheduledAt, actualAt, "ALARM_MANAGER");
             startForegroundCompat();
             turnStallNotifier.start();
             return coordinator.onStart(ACTION_RUN);
@@ -126,6 +124,22 @@ public final class SelfRunService extends Service {
         startForegroundCompat();
         turnStallNotifier.start();
         return coordinator.onStart(action);
+    }
+
+    void recordResultPollTiming(long scheduledAt, long actualAt, String wakeReason) {
+        if (runLog == null || store == null) return;
+        PowerManager power = getSystemService(PowerManager.class);
+        boolean interactive = power != null && power.isInteractive();
+        boolean deviceIdle = power != null && power.isDeviceIdleMode();
+        boolean powerSave = power != null && power.isPowerSaveMode();
+        runLog.record(store, "V3_RESULT_POLL_WAKE",
+                "scheduledAt=" + scheduledAt
+                        + ";actualAt=" + actualAt
+                        + ";delayMs=" + SelfRunFallbackWakePolicy.delayMs(scheduledAt, actualAt)
+                        + ";wakeReason=" + wakeReason
+                        + ";interactive=" + interactive
+                        + ";deviceIdle=" + deviceIdle
+                        + ";powerSave=" + powerSave);
     }
 
     private void startForegroundCompat() {

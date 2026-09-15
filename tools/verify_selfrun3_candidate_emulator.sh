@@ -5,9 +5,9 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_TEST=previous/SelfRun-Drive-TEST-3.2.4-dev1.apk
-PREVIOUS_TEST_SHA256=5be97fd0bf010ecfa215bed2b32488761f819c9ead38182f52e4eca36a94a27a
-PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/72f95b2b5ff93aa7dffed3991e5c64f214969d46/deliverables/SelfRun-Drive-TEST-3.2.4-dev1.apk
+PREVIOUS_TEST=previous/SelfRun-Drive-TEST-3.2.5-dev3.apk
+PREVIOUS_TEST_SHA256=d6c9176b480909ba6ca6ba588e3b37b41746018c1e354b557f6b12a9e0f16dcb
+PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/d4358e7670cfb876f0e95c20bfc4362cbbabb891/deliverables/SelfRun-Drive-TEST-3.2.5-dev3.apk
 
 mkdir -p previous
 curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
@@ -15,8 +15,8 @@ echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
 BT="$ANDROID_HOME/build-tools/36.0.0"
 "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_TEST" > selfrun-v3-previous-test-cert.txt
 grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' selfrun-v3-previous-test-cert.txt
-"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.2.4-dev1'"
-"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionCode='3024001'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionName='3.2.5-dev3'"
+"$BT/aapt" dump badging "$PREVIOUS_TEST" | grep -F "versionCode='3025003'"
 
 adb install -r stable/chatgpt-selfrun-drive-v3.2.4.apk >/dev/null
 adb install -r "$PREVIOUS_TEST" >/dev/null
@@ -53,6 +53,7 @@ INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^i
 test -n "$INSTRUMENTATION"
 RECOVERY_CLASS=com.shaterguy.chatgptselfrun.SelfRun3PreparationRecoveryAndroidTest
 CURRENT_31_REQUIRED=(
+  com.shaterguy.chatgptselfrun.SelfRunFirebaseConfiguredAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun31FirstConversationAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest

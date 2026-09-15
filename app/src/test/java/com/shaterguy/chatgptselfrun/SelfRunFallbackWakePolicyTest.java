@@ -32,14 +32,21 @@ public final class SelfRunFallbackWakePolicyTest {
         assertFalse(scheduler.contains("setRepeating"));
         assertFalse(scheduler.contains("setExactAndAllowWhileIdle"));
         assertFalse(scheduler.contains("PowerManager"));
+        assertTrue(scheduler.contains("localDueAtWallMs"));
+        assertTrue(scheduler.contains("recordResultPollTiming(dueAt, actualAt, \"LOCAL_DELAY_DUE\")"));
+        assertTrue(scheduler.contains("onAlarmFired()"));
         assertTrue(coordinator.contains("SelfRunFallbackWakeScheduler.schedule(service, safeDelay)"));
         assertTrue(coordinator.contains("SelfRunFallbackWakeScheduler.cancel(service)"));
         assertTrue(coordinator.contains("releaseWakeLock();"));
         assertTrue(service.contains("ACTION_RESULT_POLL_WAKE"));
+        assertTrue(service.contains("recordResultPollTiming(scheduledAt, actualAt, \"ALARM_MANAGER\")"));
         assertTrue(service.contains("scheduledAt="));
         assertTrue(service.contains("actualAt="));
         assertTrue(service.contains("delayMs="));
-        assertTrue(service.contains("reason=ALARM_MANAGER"));
+        assertTrue(service.contains("wakeReason="));
+        assertTrue(service.contains("interactive="));
+        assertTrue(service.contains("deviceIdle="));
+        assertTrue(service.contains("powerSave="));
     }
 
     private static String source(String name) throws Exception {
