@@ -1,5 +1,9 @@
 package com.shaterguy.chatgptselfrun;
 
+import android.content.Context;
+import android.content.Intent;
+
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -7,6 +11,12 @@ import java.util.Objects;
 final class SelfRunPushEvent {
     static final String SCHEMA = "selfrun-push-v1";
     static final String TYPE_RESULT_CHANGED = "RESULT_CHANGED";
+    static final String EXTRA_EVENT_ID = "selfrun_push_event_id";
+    static final String EXTRA_INSTALLATION_ID = "selfrun_push_installation_id";
+    static final String EXTRA_APPLICATION_ID = "selfrun_push_application_id";
+    static final String EXTRA_TASK_ID = "selfrun_push_task_id";
+    static final String EXTRA_TURN_ID = "selfrun_push_turn_id";
+    static final String EXTRA_RESULT_DOCUMENT_ID = "selfrun_push_result_document_id";
     private static final int MAX_FIELD = 256;
 
     final String eventId;
@@ -32,18 +42,38 @@ final class SelfRunPushEvent {
         String type = required(data, "type");
         if (!SCHEMA.equals(schema)) throw new IllegalArgumentException("push schema mismatch");
         if (!TYPE_RESULT_CHANGED.equals(type)) throw new IllegalArgumentException("push type mismatch");
-
         String applicationId = required(data, "applicationId");
         if (expectedApplicationId == null || !applicationId.equals(expectedApplicationId)) {
             throw new IllegalArgumentException("application identity mismatch");
         }
-        String eventId = required(data, "eventId");
-        String installationId = required(data, "installationId");
-        String taskId = required(data, "taskId");
-        String turnId = required(data, "turnId");
-        String resultDocumentId = required(data, "resultDocumentId");
-        return new SelfRunPushEvent(eventId, installationId, applicationId,
-                taskId, turnId, resultDocumentId);
+        return new SelfRunPushEvent(
+                required(data, "eventId"), required(data, "installationId"), applicationId,
+                required(data, "taskId"), required(data, "turnId"), required(data, "resultDocumentId"));
+    }
+
+    static SelfRunPushEvent fromIntent(Intent intent, String expectedApplicationId) {
+        if (intent == null) throw new IllegalArgumentException("push intent required");
+        Map<String, String> data = new HashMap<>();
+        data.put("schema", SCHEMA);
+        data.put("type", TYPE_RESULT_CHANGED);
+        data.put("eventId", intent.getStringExtra(EXTRA_EVENT_ID));
+        data.put("installationId", intent.getStringExtra(EXTRA_INSTALLATION_ID));
+        data.put("applicationId", intent.getStringExtra(EXTRA_APPLICATION_ID));
+        data.put("taskId", intent.getStringExtra(EXTRA_TASK_ID));
+        data.put("turnId", intent.getStringExtra(EXTRA_TURN_ID));
+        data.put("resultDocumentId", intent.getStringExtra(EXTRA_RESULT_DOCUMENT_ID));
+        return parse(data, expectedApplicationId);
+    }
+
+    Intent serviceIntent(Context context) {
+        return new Intent(context, SelfRunService.class)
+                .setAction(BuildConfig.APPLICATION_ID + ".PUSH_RESULT")
+                .putExtra(EXTRA_EVENT_ID, eventId)
+                .putExtra(EXTRA_INSTALLATION_ID, installationId)
+                .putExtra(EXTRA_APPLICATION_ID, applicationId)
+                .putExtra(EXTRA_TASK_ID, taskId)
+                .putExtra(EXTRA_TURN_ID, turnId)
+                .putExtra(EXTRA_RESULT_DOCUMENT_ID, resultDocumentId);
     }
 
     boolean matches(String expectedInstallationId, String expectedTaskId,

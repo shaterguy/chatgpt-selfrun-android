@@ -6,6 +6,15 @@ def selfRunDriveVersionCode = 3025002
 def selfRunDriveVersionName = '3.2.5-dev2'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
+def configValue = { String name, String fallback ->
+    def value = System.getenv(name)
+    if (value == null || value.isEmpty()) value = project.findProperty(name)?.toString()
+    return (value == null || value.isEmpty()) ? fallback : value
+}
+def buildConfigString = { String value ->
+    '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
 android {
     namespace 'com.shaterguy.chatgptselfrun'
     compileSdk 36
@@ -19,6 +28,11 @@ android {
         versionName selfRunDriveVersionName
         testInstrumentationRunner 'com.shaterguy.chatgptselfrun.SelfRunAndroidTestRunner'
         manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive']
+        buildConfigField 'String', 'SELFRUN_FIREBASE_API_KEY', buildConfigString(configValue('SELFRUN_FIREBASE_API_KEY', ''))
+        buildConfigField 'String', 'SELFRUN_FIREBASE_APPLICATION_ID', buildConfigString(configValue('SELFRUN_FIREBASE_APPLICATION_ID', ''))
+        buildConfigField 'String', 'SELFRUN_FIREBASE_PROJECT_ID', buildConfigString(configValue('SELFRUN_FIREBASE_PROJECT_ID', ''))
+        buildConfigField 'String', 'SELFRUN_FIREBASE_SENDER_ID', buildConfigString(configValue('SELFRUN_FIREBASE_SENDER_ID', ''))
+        buildConfigField 'String', 'SELFRUN_PUSH_GATEWAY_URL', buildConfigString(configValue('SELFRUN_PUSH_GATEWAY_URL', 'https://selfrun-command-bridge-shaterguy.vercel.app'))
     }
 
     buildTypes {
@@ -45,6 +59,8 @@ android {
 
 dependencies {
     implementation 'com.google.android.gms:play-services-auth:21.6.0'
+    implementation 'com.google.firebase:firebase-messaging:25.1.3'
+    implementation 'androidx.work:work-runtime:2.11.2'
     implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.webkit:webkit:1.17.0'
     testImplementation 'junit:junit:4.13.2'
