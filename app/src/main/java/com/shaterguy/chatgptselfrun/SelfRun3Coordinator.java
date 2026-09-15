@@ -190,6 +190,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         runtimePrefs.unregisterOnSharedPreferenceChangeListener(runtimeListener);
         main.removeCallbacksAndMessages(null);
         recoveryQueue.clear();
+        SelfRunFallbackWakeScheduler.cancel(service);
         web.close();
         releaseWakeLock();
         io.shutdownNow();
@@ -239,10 +240,17 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void scheduleNext(long delay) {
         requireMain();
-        if (!canRun()) return;
+        if (!canRun()) {
+            SelfRunFallbackWakeScheduler.cancel(service);
+            return;
+        }
+        long safeDelay = Math.max(0L, delay);
         int expectedEpoch = epoch;
         if (scheduledNext != null) main.removeCallbacks(scheduledNext);
+        if (safeDelay > 0L) SelfRunFallbackWakeScheduler.schedule(service, safeDelay);
+        else SelfRunFallbackWakeScheduler.cancel(service);
         scheduledNext = () -> {
+            SelfRunFallbackWakeScheduler.cancel(service);
             if (!validEpoch(expectedEpoch) || !canRun()) return;
             io.execute(() -> {
                 try {
@@ -257,13 +265,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 }
             });
         };
-        main.postDelayed(scheduledNext, Math.max(0L, delay));
+        main.postDelayed(scheduledNext, safeDelay);
     }
 
     private void handleState(SelfRun3Engine.State state) {
         requireMain();
         if (!canRun()) return;
         if (state.terminal() || state.stage() == SelfRun3Engine.Stage.PAUSED) {
+            SelfRunFallbackWakeScheduler.cancel(service);
             SelfRunServerRecoveryWorker.cancel(service);
             return;
         }
@@ -982,6 +991,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void cancelServerWaitState() {
+        SelfRunFallbackWakeScheduler.cancel(service);
         serverGeneration++;
         serverRegistrationInFlight = false;
         serverRegisteredTurns.clear();
