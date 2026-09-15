@@ -27,9 +27,8 @@ public final class SelfRunServerWatchPolicyTest {
         assertFalse(body.has("requirementBody"));
     }
 
-    @Test public void driveClientRegistersAWebHookChannelAgainstPinnedFile() throws Exception {
-        String source = source("DriveApiClient.java");
-        assertTrue(source.contains("void watchFile("));
+    @Test public void dedicatedDriveWatchClientRegistersAWebHookChannelAgainstPinnedFile() throws Exception {
+        String source = source("SelfRunDriveWatchClient.java");
         assertTrue(source.contains("/watch?supportsAllDrives=true"));
         assertTrue(source.contains("put(\"type\", \"web_hook\")"));
         assertTrue(source.contains("put(\"address\", address)"));
