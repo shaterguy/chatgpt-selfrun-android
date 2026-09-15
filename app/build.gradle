@@ -32,7 +32,7 @@ android {
         buildConfigField 'String', 'SELFRUN_FIREBASE_APPLICATION_ID', buildConfigString(configValue('SELFRUN_FIREBASE_APPLICATION_ID', ''))
         buildConfigField 'String', 'SELFRUN_FIREBASE_PROJECT_ID', buildConfigString(configValue('SELFRUN_FIREBASE_PROJECT_ID', ''))
         buildConfigField 'String', 'SELFRUN_FIREBASE_SENDER_ID', buildConfigString(configValue('SELFRUN_FIREBASE_SENDER_ID', ''))
-        buildConfigField 'String', 'SELFRUN_PUSH_GATEWAY_URL', buildConfigString(configValue('SELFRUN_PUSH_GATEWAY_URL', 'https://selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app'))
+        buildConfigField 'String', 'SELFRUN_PUSH_GATEWAY_URL', buildConfigString(configValue('SELFRUN_PUSH_GATEWAY_URL', 'https://selfrun-command-bridge-shaterguy.vercel.app'))
     }
 
     buildTypes {
