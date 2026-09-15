@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3025002
-def selfRunDriveVersionName = '3.2.5-dev2'
+def selfRunDriveVersionCode = 3025003
+def selfRunDriveVersionName = '3.2.5-dev3'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 def configValue = { String name, String fallback ->
@@ -32,7 +32,7 @@ android {
         buildConfigField 'String', 'SELFRUN_FIREBASE_APPLICATION_ID', buildConfigString(configValue('SELFRUN_FIREBASE_APPLICATION_ID', ''))
         buildConfigField 'String', 'SELFRUN_FIREBASE_PROJECT_ID', buildConfigString(configValue('SELFRUN_FIREBASE_PROJECT_ID', ''))
         buildConfigField 'String', 'SELFRUN_FIREBASE_SENDER_ID', buildConfigString(configValue('SELFRUN_FIREBASE_SENDER_ID', ''))
-        buildConfigField 'String', 'SELFRUN_PUSH_GATEWAY_URL', buildConfigString(configValue('SELFRUN_PUSH_GATEWAY_URL', 'https://selfrun-command-bridge-shaterguy.vercel.app'))
+        buildConfigField 'String', 'SELFRUN_PUSH_GATEWAY_URL', buildConfigString(configValue('SELFRUN_PUSH_GATEWAY_URL', 'https://selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app'))
     }
 
     buildTypes {
