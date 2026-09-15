@@ -57,9 +57,9 @@ CHAT과 WORK 두 모드를 지원합니다. 앱은 사용자 선택 profile을 �
 
 정상 대기 중에는 짧은 주기 DOM polling을 사용하지 않습니다. UI 조작은 제출·프로필 적용·필요한 복구 구간으로 제한하고, 대기 상태는 protocol callback과 제한된 reconciliation으로 진행합니다.
 
-## Result 대기 작업 방식
+## Result 대기 작업 모드
 
-설정의 `작업 방식`은 `SERVER`와 `ON_DEVICE`를 선택합니다. 저장값이 없거나 손상된 경우 기본값은 `SERVER`입니다.
+설정의 `작업 모드`는 `SERVER`와 `ON_DEVICE`를 선택합니다. 저장값이 없거나 손상된 경우 기본값은 `SERVER`입니다.
 
 - `SERVER`: Result document를 기다리는 정상 경로에서 짧은 주기 Drive polling을 예약하지 않습니다. 앱이 자기 Drive OAuth 권한으로 `files.watch`를 등록하고, Vercel Push Gateway가 Drive 변경 webhook을 받은 뒤 FCM high-priority data message로 해당 설치 인스턴스를 깨웁니다. 앱은 정확한 task/turn/result-document identity를 검증한 뒤 Result를 1회 읽습니다. 15분 WorkManager recovery watchdog은 정상 감지 수단이 아니라 push 유실에 대한 safety net입니다.
 - `ON_DEVICE`: 기존 `resultPollMs()` 기반 Result polling을 그대로 사용합니다.
@@ -91,7 +91,7 @@ Gateway는 Drive OAuth token, Result body, Requirement body를 받지 않습니�
 
 - 실행: 현재 Task, mode/profile, V3 phase, 추가 지시, 일시정지/재개/중지, 로그를 표시합니다.
 - 기록: 완료·중단된 작업의 V3 projection과 health 진단을 표시합니다.
-- 설정: Drive base folder, profile registry, Web UI calibration, Result 대기 작업 방식을 관리합니다.
+- 설정: Drive base folder, profile registry, Web UI calibration, Result 대기 작업 모드를 관리합니다.
 
 추가 지시는 `runId + text + revision`으로 저장하고 V3가 실제로 소비한 revision만 지웁니다. 구형 continuation lock/retry 상태는 사용하지 않습니다.
 

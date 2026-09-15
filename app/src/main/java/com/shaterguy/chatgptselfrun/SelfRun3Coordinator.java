@@ -669,7 +669,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             SelfRunPushAckOutbox.enqueue(service, push, SelfRunPushAckOutbox.AckState.PROCESSED);
         } catch (Throwable error) {
             log.record(store, "V3_PUSH_ACK_PERSIST_FAILED",
-                    "event=" + safeCode(push.eventId) + ";error=" + error.getClass().getSimpleName());
+                    "error=" + error.getClass().getSimpleName());
         }
     }
 
