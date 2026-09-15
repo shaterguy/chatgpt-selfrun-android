@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -28,15 +29,20 @@ final class SelfRunPushAckOutbox {
     static String enqueue(Context context, SelfRunPushEvent event, AckState state) {
         if (context == null || event == null || state == null) throw new IllegalArgumentException("ACK identity required");
         String key = PREFIX + event.eventId + ":" + state.name();
-        JSONObject body = new JSONObject()
-                .put("schema", "selfrun-push-ack-v1")
-                .put("eventId", event.eventId)
-                .put("installationId", event.installationId)
-                .put("applicationId", event.applicationId)
-                .put("taskId", event.taskId)
-                .put("turnId", event.turnId)
-                .put("resultDocumentId", event.resultDocumentId)
-                .put("state", state.name());
+        JSONObject body;
+        try {
+            body = new JSONObject()
+                    .put("schema", "selfrun-push-ack-v1")
+                    .put("eventId", event.eventId)
+                    .put("installationId", event.installationId)
+                    .put("applicationId", event.applicationId)
+                    .put("taskId", event.taskId)
+                    .put("turnId", event.turnId)
+                    .put("resultDocumentId", event.resultDocumentId)
+                    .put("state", state.name());
+        } catch (JSONException impossible) {
+            throw new IllegalStateException("failed to encode ACK outbox entry", impossible);
+        }
         SharedPreferences prefs = prefs(context);
         String existing = prefs.getString(key, "");
         if (!body.toString().equals(existing)) {
