@@ -49,6 +49,15 @@ jobs:
           test -n "$VERSION_NAME"; test -n "$VERSION_CODE"
           [[ "$VERSION_NAME" =~ ^3\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+$ ]]
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
+      - name: GATEWAY_TEST - command-bridge tests and typecheck
+        working-directory: command-bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(node -p "process.versions.node.split('.')[0]")" == "24" ]]
+          npm ci
+          npm test
+          npm run typecheck
       - name: STATIC_PREFLIGHT - V3 policy and all test-source compile
         shell: bash
         run: |
