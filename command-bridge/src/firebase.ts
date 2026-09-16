@@ -1,5 +1,6 @@
 import { GoogleAuth } from "google-auth-library";
 import type { PushEnvelope } from "./contracts.js";
+import { buildPushTelemetry } from "./telemetry.js";
 
 const FIREBASE_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 
@@ -111,6 +112,7 @@ export async function sendFcmStep(fcmToken: string, push: PushEnvelope): Promise
   if (!response.ok) {
     throw new Error(`FCM send failed (${response.status}): ${text.slice(0, 300)}`);
   }
+  console.info("SELF_RUN_PUSH", JSON.stringify(buildPushTelemetry(push.eventId, "FCM_SENT")));
   let messageName = "";
   try {
     const parsed = JSON.parse(text) as { name?: unknown };
