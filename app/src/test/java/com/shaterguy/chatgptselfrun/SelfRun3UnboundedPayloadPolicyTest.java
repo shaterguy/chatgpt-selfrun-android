@@ -129,8 +129,8 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
     }
 
     private static String source(String name) throws Exception {
-        Path path = Path.of("src", "main", "java", "com", "shaterguy", "chatgptselfrun", name);
-        if (!Files.exists(path)) path = Path.of("app", "src", "main", "java", "com", "shaterguy", "chatgptselfrun", name);
-        return Files.readString(path, StandardCharsets.UTF_8);
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
