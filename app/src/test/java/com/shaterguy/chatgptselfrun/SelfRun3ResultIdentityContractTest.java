@@ -21,6 +21,12 @@ public final class SelfRun3ResultIdentityContractTest {
                 metadata, "result-doc-1234", "original-folder"));
     }
 
+    @Test public void movedDifferentResultDocumentIsStillRejected() {
+        DriveApiClient.Metadata metadata = metadata("different-result-doc", "moved-folder");
+        assertFalse(SelfRun3ResultDocumentPolicy.acceptReadableResult(
+                metadata, "result-doc-1234", "original-folder"));
+    }
+
     @Test public void wrongMechanicalIdentityFieldsAreRejected() {
         SelfRun3Engine.State state = preparingState();
         JSONObject valid = committed(state);
