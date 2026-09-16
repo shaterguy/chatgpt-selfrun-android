@@ -38,6 +38,7 @@ export async function watchWorkflow(input: WatchWorkflowInput): Promise<{ status
     const ackIterator = ackEvents[Symbol.asyncIterator]();
     let pendingAck = ackIterator.next();
     let sendBeforeWait = true;
+    let deliveryProcessed = false;
 
     for (let attempt = 0; attempt < 150; attempt += 1) {
       if (sendBeforeWait) await sendFcmStep(input.fcmToken, push);
@@ -65,13 +66,16 @@ export async function watchWorkflow(input: WatchWorkflowInput): Promise<{ status
         continue;
       }
       if (shouldTerminateDelivery(ack.state)) {
-        return { status: "PROCESSED", eventId };
+        deliveryProcessed = true;
+        break;
       }
       // RECEIVED proves device delivery, but not Result processing. Wait again and
       // only resend when the durable timeout expires.
       sendBeforeWait = false;
     }
-    return { status: "ACK_TIMEOUT", eventId };
+    if (!deliveryProcessed) {
+      return { status: "ACK_TIMEOUT", eventId };
+    }
   }
   return { status: "WATCH_CLOSED" };
 }
