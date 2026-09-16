@@ -1,9 +1,9 @@
 import { sleep } from "workflow";
 import type { WatchRegistration } from "../src/contracts.js";
-import { buildPushEnvelope, ackMatchesIdentity, normalizeDriveResourceState, shouldTerminateDelivery } from "../src/delivery-policy.js";
+import { buildPushEnvelope, ackMatchesIdentity, normalizeDriveResourceState } from "../src/delivery-policy.js";
 import { sendFcmStep } from "../src/firebase.js";
 import { ackHook, driveHook } from "../src/hooks.js";
-import { retryDelaySeconds } from "../src/retry.js";
+import { AckDeliveryRetryState, retryDelaySeconds } from "../src/retry.js";
 import { createCapability } from "../src/security.js";
 
 export interface WatchWorkflowInput extends WatchRegistration {
@@ -37,11 +37,10 @@ export async function watchWorkflow(input: WatchWorkflowInput): Promise<{ status
     const ackEvents = ackHook.create({ token: eventId });
     const ackIterator = ackEvents[Symbol.asyncIterator]();
     let pendingAck = ackIterator.next();
-    let sendBeforeWait = true;
-    let deliveryProcessed = false;
+    const retry = new AckDeliveryRetryState();
 
     for (let attempt = 0; attempt < 150; attempt += 1) {
-      if (sendBeforeWait) await sendFcmStep(input.fcmToken, push);
+      if (retry.shouldSendBeforeWait()) await sendFcmStep(input.fcmToken, push);
       const waitSeconds = retryDelaySeconds(attempt);
       const outcome = await Promise.race([
         pendingAck.then(value => ({ kind: "ack" as const, value })),
@@ -49,31 +48,28 @@ export async function watchWorkflow(input: WatchWorkflowInput): Promise<{ status
       ]);
 
       if (outcome.kind === "timeout") {
-        sendBeforeWait = true;
+        retry.onTimeout();
         continue;
       }
 
       if (outcome.value.done) {
         pendingAck = ackIterator.next();
-        sendBeforeWait = false;
+        retry.waitWithoutResend();
         continue;
       }
 
       const ack = outcome.value.value;
       pendingAck = ackIterator.next();
       if (!ackMatchesIdentity(ack, eventId, identity)) {
-        sendBeforeWait = false;
+        retry.waitWithoutResend();
         continue;
       }
-      if (shouldTerminateDelivery(ack.state)) {
-        deliveryProcessed = true;
-        break;
-      }
+      retry.onMatchingAck(ack.state);
+      if (retry.deliveryProcessed()) break;
       // RECEIVED proves device delivery, but not Result processing. Wait again and
       // only resend when the durable timeout expires.
-      sendBeforeWait = false;
     }
-    if (!deliveryProcessed) {
+    if (!retry.deliveryProcessed()) {
       return { status: "ACK_TIMEOUT", eventId };
     }
   }
