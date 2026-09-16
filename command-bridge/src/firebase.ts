@@ -25,8 +25,11 @@ function normalizeNewlines(value: string): string {
   return value.replace(/\\n/g, "\n").trim();
 }
 
-function looksLikePrivateKey(value: string): boolean {
-  return /-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(value);
+function extractPemBlock(value: string): string | null {
+  const match = value.match(
+    /-----BEGIN (?:RSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA )?PRIVATE KEY-----/,
+  );
+  return match?.[0]?.trim() ?? null;
 }
 
 export function normalizeFirebasePrivateKey(raw: string): string {
@@ -36,14 +39,16 @@ export function normalizeFirebasePrivateKey(raw: string): string {
   const jsonValue = extractJsonPrivateKey(value);
   if (jsonValue !== null) value = jsonValue;
   value = normalizeNewlines(value);
-  if (looksLikePrivateKey(value)) return value;
+  const pem = extractPemBlock(value);
+  if (pem !== null) return pem;
 
   try {
     const decoded = Buffer.from(value, "base64").toString("utf8").trim();
     if (decoded) {
       const decodedJsonValue = extractJsonPrivateKey(decoded);
       value = normalizeNewlines(decodedJsonValue ?? decoded);
-      if (looksLikePrivateKey(value)) return value;
+      const decodedPem = extractPemBlock(value);
+      if (decodedPem !== null) return decodedPem;
     }
   } catch {
     // Invalid base64 is left for Google Auth to reject without logging the secret.
