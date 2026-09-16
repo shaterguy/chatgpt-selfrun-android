@@ -102,7 +102,6 @@ export async function sendFcmStep(fcmToken: string, push: PushEnvelope): Promise
           android: {
             priority: "HIGH",
             ttl: "86400s",
-            collapse_key: "selfrun-result",
           },
         },
       }),
