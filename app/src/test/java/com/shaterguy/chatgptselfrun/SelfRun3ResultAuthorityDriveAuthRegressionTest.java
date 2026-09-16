@@ -82,6 +82,7 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
 
     @Test public void scenario09OldCachedTokenRequiresProactiveRefresh() {
         long ttl = SelfRun3DriveTokenPolicy.MAX_TOKEN_AGE_MS;
+        assertEquals(45L * 60_000L, ttl);
         assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("token", 1_000L, 1_000L + ttl));
         assertFalse(SelfRun3DriveTokenPolicy.needsRefresh("token", 1_000L, 1_000L + ttl - 1L));
         assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("token", -1L, 1_000L));
