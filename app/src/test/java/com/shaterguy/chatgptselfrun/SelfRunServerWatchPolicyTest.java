@@ -44,15 +44,26 @@ public final class SelfRunServerWatchPolicyTest {
         assertFalse(source.contains("driveAccessToken"));
     }
 
-    @Test public void serverRegistrationSurvivesPushReadsAndRecoveryReadsUntilTurnStopsWaiting() throws Exception {
-        String coordinator = source("SelfRun3Coordinator.java");
-        assertTrue(coordinator.contains("serverRegisteredTurns.retainAll(waitingIds)"));
-        assertFalse(coordinator.contains("serverRegisteredTurns.remove(exact.turnId());\n                nextResultPoll.remove(exact.turnId());"));
-        assertFalse(coordinator.contains("if (step == DriveStep.READ_RESULT) {\n                        serverRegisteredTurns.remove(expectedTurn);"));
-        assertFalse(coordinator.contains("if (push != null) acknowledgeProcessed(push);\n                        serverRegisteredTurns.remove(expectedTurn);"));
-        assertFalse(coordinator.contains("if (step == DriveStep.READ_RESULT) serverRegisteredTurns.remove(expectedTurn);"));
-        assertFalse(coordinator.contains("serverRegisteredTurns.remove(state.turnId());\n            nextResultPoll.remove(state.turnId());\n            scheduleNext(0L);"));
-        assertFalse(coordinator.contains("serverRegisteredTurns.remove(next.turnId());\n        nextResultPoll.remove(next.turnId());\n        runDriveStep(next, DriveStep.READ_RESULT, ReadTrigger.RECOVERY, null);"));
+    @Test public void sameLivePerTurnWatchIsReusableButNearExpiryOrDifferentIdentityIsNot() {
+        long now = 1_000_000L;
+        assertTrue(SelfRunServerWatch.reusableRegistration(
+                "same", "same", now + 10L * 60L * 1000L, now));
+        assertFalse(SelfRunServerWatch.reusableRegistration(
+                "next", "same", now + 10L * 60L * 1000L, now));
+        assertFalse(SelfRunServerWatch.reusableRegistration(
+                "same", "same", now + 5L * 60L * 1000L, now));
+        assertFalse(SelfRunServerWatch.reusableRegistration(
+                "same", "same", now - 1L, now));
+    }
+
+    @Test public void registrationChecksLiveCacheBeforeCreatingAnotherGatewayAndDriveWatch() throws Exception {
+        String source = source("SelfRunServerWatch.java");
+        int reuse = source.indexOf("reusableRegistration(registrationKey, activeRegistrationKey, activeExpirationMs, now)");
+        int gateway = source.indexOf("gateway.registerWatch(");
+        assertTrue(reuse >= 0);
+        assertTrue(gateway > reuse);
+        assertTrue(source.contains("activeRegistrationKey = registrationKey;"));
+        assertTrue(source.contains("activeExpirationMs = watch.expirationMs;"));
     }
 
     private static String source(String name) throws Exception {
