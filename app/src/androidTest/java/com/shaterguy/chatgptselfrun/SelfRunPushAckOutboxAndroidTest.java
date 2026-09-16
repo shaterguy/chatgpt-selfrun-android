@@ -11,6 +11,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.*;
@@ -41,6 +42,16 @@ public final class SelfRunPushAckOutboxAndroidTest {
         assertEquals(1, SelfRunPushAckOutbox.pendingCount(context));
         SelfRunPushAckOutbox.markDelivered(context, processed);
         assertEquals(0, SelfRunPushAckOutbox.pendingCount(context));
+    }
+
+    @Test public void receivedAckAlwaysFlushesBeforeProcessedForTheSameEvent() throws Exception {
+        SelfRunPushAckOutbox.enqueue(context, event, SelfRunPushAckOutbox.AckState.RECEIVED);
+        SelfRunPushAckOutbox.enqueue(context, event, SelfRunPushAckOutbox.AckState.PROCESSED);
+
+        List<SelfRunPushAckOutbox.Entry> pending = SelfRunPushAckOutbox.pending(context);
+        assertEquals(2, pending.size());
+        assertEquals("RECEIVED", pending.get(0).body.getString("state"));
+        assertEquals("PROCESSED", pending.get(1).body.getString("state"));
     }
 
     private static Map<String, String> valid() {
