@@ -1,0 +1,144 @@
+name: Align dev6 legacy Result authority tests
+
+on:
+  push:
+    branches:
+      - selfrun-v3/v3.2.5-dev6-result-identity-repair
+    paths:
+      - .github/workflows/dev6-legacy-test-contract-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Align old tests with exact mechanical identity authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3CommittedOnlyResultGateTest.java')
+          s = p.read_text()
+          old = '''/** SelfRun 3.2.5: completion and RESULT_REPAIR eligibility are gated only by JSON boolean committed=true. */
+          public final class SelfRun3CommittedOnlyResultGateTest {
+              @Test public void committedTrueIgnoresMachineIdentityAndSemanticFields() {
+                  SelfRun3Engine.State state = state();
+                  JSONObject body = new JSONObject();
+                  put(body, "committed", true);
+                  put(body, "schema", "nonstandard");
+                  put(body, "task_id", "other-task");
+                  put(body, "turn_id", "other-turn");
+                  put(body, "turn", 999);
+                  put(body, "document_id", "other-document");
+                  put(body, "event_id", "other-event");
+                  put(body, "status", 123);
+                  put(body, "phase_completed", 17);
+                  put(body, "next_phase", JSONObject.NULL);
+                  put(body, "handoff", "not-a-handoff");
+
+                  JSONObject parsed = SelfRun3Engine.parseResult(body.toString(), state);
+                  assertNotNull(parsed);
+                  assertTrue(parsed.optBoolean("committed"));
+              }
+          '''
+          new = '''/** SelfRun 3.2.5: committed=true also requires exact mechanical identity; semantic checkpoint fields remain AI-trusted. */
+          public final class SelfRun3CommittedOnlyResultGateTest {
+              @Test public void committedTrueRequiresMachineIdentityButIgnoresSemanticFields() {
+                  SelfRun3Engine.State state = state();
+                  JSONObject body = SelfRun3Engine.emptyResult(state);
+                  put(body, "committed", true);
+                  put(body, "status", 123);
+                  put(body, "phase_completed", 17);
+                  put(body, "next_phase", JSONObject.NULL);
+                  put(body, "handoff", "not-a-handoff");
+
+                  JSONObject parsed = SelfRun3Engine.parseResult(body.toString(), state);
+                  assertNotNull(parsed);
+                  assertTrue(parsed.optBoolean("committed"));
+
+                  put(body, "document_id", "other-document");
+                  assertNull(SelfRun3Engine.parseResult(body.toString(), state));
+              }
+          '''
+          if s.count(old) != 1:
+              raise SystemExit('committed-only test baseline mismatch')
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3DisposableExecutionTest.java')
+          s = p.read_text()
+          old = '''    @Test public void committedResultIgnoresMachineIdentityAndAiCheckpointShapeDrift() {
+                  SelfRun3Engine.State root=dispatch(dispatch(wave())), a=branch(root,"A");
+                  JSONObject r=branchResult(a,"COMPLETE"); put(r,"document_id","other");
+                  final JSONObject wrongIdentity=r;
+                  assertNotNull(SelfRun3Engine.parseResult(wrongIdentity.toString(),a));
+
+                  r=branchResult(a,"COMPLETE"); put(r.optJSONObject("branch_result"),"status","USER_ACTION_REQUIRED");
+                  final JSONObject semanticMismatch=r;
+                  assertNotNull(SelfRun3Engine.parseResult(semanticMismatch.toString(),a));
+
+                  r=branchResult(a,"COMPLETE"); put(r,"next_execution",plan());
+                  final JSONObject branchRoutingNoise=r;
+                  assertNotNull(SelfRun3Engine.parseResult(branchRoutingNoise.toString(),a));
+              }
+          '''
+          new = '''    @Test public void committedResultRequiresMachineIdentityButIgnoresAiCheckpointShapeDrift() {
+                  SelfRun3Engine.State root=dispatch(dispatch(wave())), a=branch(root,"A");
+                  JSONObject r=branchResult(a,"COMPLETE"); put(r,"document_id","other");
+                  final JSONObject wrongIdentity=r;
+                  assertNull(SelfRun3Engine.parseResult(wrongIdentity.toString(),a));
+
+                  r=branchResult(a,"COMPLETE"); put(r.optJSONObject("branch_result"),"status","USER_ACTION_REQUIRED");
+                  final JSONObject semanticMismatch=r;
+                  assertNotNull(SelfRun3Engine.parseResult(semanticMismatch.toString(),a));
+
+                  r=branchResult(a,"COMPLETE"); put(r,"next_execution",plan());
+                  final JSONObject branchRoutingNoise=r;
+                  assertNotNull(SelfRun3Engine.parseResult(branchRoutingNoise.toString(),a));
+              }
+          '''
+          if s.count(old) != 1:
+              raise SystemExit('disposable test baseline mismatch')
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path('app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3TrailingBraceRecoveryTest.java')
+          s = p.read_text()
+          old = '''    @Test public void machineIdentityDriftDoesNotBlockCommittedTrailingBraceRecovery() {
+                  SelfRun3Engine.State state = claimedState();
+                  JSONObject drifted = continueResult(state);
+                  SelfRun3Engine.put(drifted, "document_id", "other");
+                  String valid = drifted.toString();
+                  assertEquals(valid, SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state));
+                  assertNotNull(SelfRun3Engine.parseResult(valid, state));
+              }
+          '''
+          new = '''    @Test public void machineIdentityDriftBlocksCommittedTrailingBraceRecovery() {
+                  SelfRun3Engine.State state = claimedState();
+                  JSONObject drifted = continueResult(state);
+                  SelfRun3Engine.put(drifted, "document_id", "other");
+                  String invalid = drifted.toString();
+                  assertEquals("", SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(invalid + "}", state));
+                  assertNull(SelfRun3Engine.parseResult(invalid, state));
+              }
+          '''
+          if s.count(old) != 1:
+              raise SystemExit('trailing-brace test baseline mismatch')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Commit aligned tests and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/dev6-legacy-test-contract-patch.yml
+          git add app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3CommittedOnlyResultGateTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3DisposableExecutionTest.java \
+                  app/src/test/java/com/shaterguy/chatgptselfrun/SelfRun3TrailingBraceRecoveryTest.java
+          git commit -m 'test: align legacy Result tests with mechanical identity'
+          git push origin HEAD:selfrun-v3/v3.2.5-dev6-result-identity-repair
