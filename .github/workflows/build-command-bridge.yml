@@ -1,0 +1,48 @@
+name: Build SelfRun Command Bridge
+
+on:
+  push:
+    paths:
+      - 'command-bridge/**'
+      - '.github/workflows/build-command-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: command-bridge
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: command-bridge/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build Vercel output
+        run: npm run build
+      - name: Verify Workflow and API functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.vercel/output/functions
+          test -s "$ROOT/.well-known/workflow/v1/flow.func/index.js"
+          test -s "$ROOT/.well-known/workflow/v1/step.func/index.js"
+          test -s "$ROOT/.well-known/workflow/v1/webhook/[token].func/index.js"
+          test -s "$ROOT/api/health.func/index.cjs"
+          test -s "$ROOT/api/watch/register.func/index.cjs"
+          test -s "$ROOT/api/push/ack.func/index.cjs"
+          test -s "$ROOT/api/drive/webhook.func/index.cjs"
+          grep -Fq 'workflow//workflows/watch.ts//watchWorkflow' "$ROOT/.well-known/workflow/v1/manifest.json"

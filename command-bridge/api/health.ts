@@ -6,7 +6,7 @@ export default function handler(_request: IncomingMessage, response: ServerRespo
   json(response, 200, {
     service: "selfrun-command-bridge",
     status: "ok",
-    version: "3.2.5-dev4",
+    version: "3.2.5-dev4-wdk1",
     firebaseConfigured: firebaseConfigured(),
   });
 }

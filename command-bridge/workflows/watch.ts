@@ -1,10 +1,10 @@
 import { sleep } from "workflow";
-import type { WatchRegistration } from "../contracts.js";
-import { buildPushEnvelope, ackMatchesIdentity, normalizeDriveResourceState, shouldTerminateDelivery } from "../delivery-policy.js";
-import { sendFcmStep } from "../firebase.js";
-import { ackHook, driveHook } from "../hooks.js";
-import { retryDelaySeconds } from "../retry.js";
-import { createCapability } from "../security.js";
+import type { WatchRegistration } from "../src/contracts.js";
+import { buildPushEnvelope, ackMatchesIdentity, normalizeDriveResourceState, shouldTerminateDelivery } from "../src/delivery-policy.js";
+import { sendFcmStep } from "../src/firebase.js";
+import { ackHook, driveHook } from "../src/hooks.js";
+import { retryDelaySeconds } from "../src/retry.js";
+import { createCapability } from "../src/security.js";
 
 export interface WatchWorkflowInput extends WatchRegistration {
   watchKey: string;

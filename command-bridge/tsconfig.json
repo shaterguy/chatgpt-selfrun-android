@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["api/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
+  "include": ["api/**/*.ts", "src/**/*.ts", "workflows/**/*.ts", "test/**/*.ts"]
 }
