@@ -28,7 +28,7 @@ public final class SelfRunPushAckWorker extends Worker {
                     .setConstraints(constraints)
                     .build();
             WorkManager.getInstance(context.getApplicationContext())
-                    .enqueueUniqueWork(UNIQUE_WORK, ExistingWorkPolicy.KEEP, request);
+                    .enqueueUniqueWork(UNIQUE_WORK, ExistingWorkPolicy.REPLACE, request);
         } catch (Throwable ignored) { }
     }
 
