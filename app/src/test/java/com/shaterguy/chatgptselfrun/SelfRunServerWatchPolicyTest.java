@@ -44,6 +44,17 @@ public final class SelfRunServerWatchPolicyTest {
         assertFalse(source.contains("driveAccessToken"));
     }
 
+    @Test public void serverRegistrationSurvivesPushReadsAndRecoveryReadsUntilTurnStopsWaiting() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(coordinator.contains("serverRegisteredTurns.retainAll(waitingIds)"));
+        assertFalse(coordinator.contains("serverRegisteredTurns.remove(exact.turnId());\n                nextResultPoll.remove(exact.turnId());"));
+        assertFalse(coordinator.contains("if (step == DriveStep.READ_RESULT) {\n                        serverRegisteredTurns.remove(expectedTurn);"));
+        assertFalse(coordinator.contains("if (push != null) acknowledgeProcessed(push);\n                        serverRegisteredTurns.remove(expectedTurn);"));
+        assertFalse(coordinator.contains("if (step == DriveStep.READ_RESULT) serverRegisteredTurns.remove(expectedTurn);"));
+        assertFalse(coordinator.contains("serverRegisteredTurns.remove(state.turnId());\n            nextResultPoll.remove(state.turnId());\n            scheduleNext(0L);"));
+        assertFalse(coordinator.contains("serverRegisteredTurns.remove(next.turnId());\n        nextResultPoll.remove(next.turnId());\n        runDriveStep(next, DriveStep.READ_RESULT, ReadTrigger.RECOVERY, null);"));
+    }
+
     private static String source(String name) throws Exception {
         Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
