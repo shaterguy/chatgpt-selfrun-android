@@ -31,7 +31,7 @@ final class SelfRun3ResultDocumentPolicy {
     static Selection select(List<String> bodies, SelfRun3Engine.State state) {
         if (state == null) throw new IllegalArgumentException("state required");
         String pending = "";
-        JSONObject committedJson = null;
+        String committedJson = "";
         String committedRaw = "";
         String committedCandidate = "";
         boolean recovered = false;
@@ -42,23 +42,25 @@ final class SelfRun3ResultDocumentPolicy {
 
             Candidate candidate = committedCandidate(raw, state);
             if (candidate == null) continue;
-            if (committedJson == null) {
-                committedJson = candidate.parsed;
+            String normalized = candidate.parsed.toString();
+            if (committedJson.isEmpty()) {
+                committedJson = normalized;
                 committedRaw = raw;
                 committedCandidate = candidate.body;
                 recovered = candidate.recovered;
-            } else if (!committedJson.similar(candidate.parsed)) {
+            } else if (!committedJson.equals(normalized)) {
                 throw new IllegalStateException("RESULT_DOCUMENT_AMBIGUOUS");
             }
         }
-        if (committedJson != null) {
+        if (!committedJson.isEmpty()) {
             return new Selection(committedRaw, committedCandidate, true, recovered);
         }
 
         String seed = SelfRun3Engine.emptyResult(state).toString();
+        String seedFingerprint = SelfRun3ResultWatchdog.fingerprint(seed);
         if (bodies != null) for (String body : bodies) {
             String raw = body == null ? "" : body;
-            if (SelfRun3ResultWatchdog.fingerprint(seed).equals(SelfRun3ResultWatchdog.fingerprint(raw))) {
+            if (seedFingerprint.equals(SelfRun3ResultWatchdog.fingerprint(raw))) {
                 return new Selection(raw, raw, false, false);
             }
         }
