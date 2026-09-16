@@ -34,6 +34,14 @@ public final class SelfRunPushAckPolicyTest {
         assertTrue(outbox.contains("PREFS = \"selfrun_push_ack_outbox\""));
     }
 
+    @Test public void newDurableAckPreemptsAnyStaleAckWorkerBackoff() throws Exception {
+        String worker = source("SelfRunPushAckWorker.java");
+        assertTrue("new ACK must replace an unfinished retry/backoff worker so it flushes immediately",
+                worker.contains("ExistingWorkPolicy.REPLACE"));
+        assertFalse("KEEP can strand a fresh ACK behind stale retry backoff",
+                worker.contains("ExistingWorkPolicy.KEEP"));
+    }
+
     private static String source(String name) throws Exception {
         return text(resolve(
                 "app/src/main/java/com/shaterguy/chatgptselfrun/" + name,
