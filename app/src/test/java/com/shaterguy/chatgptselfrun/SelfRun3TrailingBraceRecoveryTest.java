@@ -30,13 +30,13 @@ public final class SelfRun3TrailingBraceRecoveryTest {
         assertEquals(valid, SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state));
     }
 
-    @Test public void machineIdentityDriftDoesNotBlockCommittedTrailingBraceRecovery() {
+    @Test public void machineIdentityDriftBlocksCommittedTrailingBraceRecovery() {
         SelfRun3Engine.State state = claimedState();
         JSONObject drifted = continueResult(state);
         SelfRun3Engine.put(drifted, "document_id", "other");
-        String valid = drifted.toString();
-        assertEquals(valid, SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(valid + "}", state));
-        assertNotNull(SelfRun3Engine.parseResult(valid, state));
+        String invalid = drifted.toString();
+        assertEquals("", SelfRun3DriveAdapter.recoverSingleRedundantTrailingBrace(invalid + "}", state));
+        assertNull(SelfRun3Engine.parseResult(invalid, state));
     }
 
     private static SelfRun3Engine.State claimedState() {

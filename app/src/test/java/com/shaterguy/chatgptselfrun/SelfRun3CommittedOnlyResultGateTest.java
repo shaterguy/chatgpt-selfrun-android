@@ -9,18 +9,12 @@ import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
-/** SelfRun 3.2.5: completion and RESULT_REPAIR eligibility are gated only by JSON boolean committed=true. */
+/** SelfRun 3.2.5: committed=true also requires exact mechanical identity; semantic checkpoint fields remain AI-trusted. */
 public final class SelfRun3CommittedOnlyResultGateTest {
-    @Test public void committedTrueIgnoresMachineIdentityAndSemanticFields() {
+    @Test public void committedTrueRequiresMachineIdentityButIgnoresSemanticFields() {
         SelfRun3Engine.State state = state();
-        JSONObject body = new JSONObject();
+        JSONObject body = SelfRun3Engine.emptyResult(state);
         put(body, "committed", true);
-        put(body, "schema", "nonstandard");
-        put(body, "task_id", "other-task");
-        put(body, "turn_id", "other-turn");
-        put(body, "turn", 999);
-        put(body, "document_id", "other-document");
-        put(body, "event_id", "other-event");
         put(body, "status", 123);
         put(body, "phase_completed", 17);
         put(body, "next_phase", JSONObject.NULL);
@@ -29,6 +23,9 @@ public final class SelfRun3CommittedOnlyResultGateTest {
         JSONObject parsed = SelfRun3Engine.parseResult(body.toString(), state);
         assertNotNull(parsed);
         assertTrue(parsed.optBoolean("committed"));
+
+        put(body, "document_id", "other-document");
+        assertNull(SelfRun3Engine.parseResult(body.toString(), state));
     }
 
     @Test public void onlyJsonBooleanTrueIsCommitted() {
