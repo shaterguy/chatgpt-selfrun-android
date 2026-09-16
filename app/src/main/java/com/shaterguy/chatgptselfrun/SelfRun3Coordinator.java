@@ -50,6 +50,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final Map<String, Long> nextResultPoll = new HashMap<>();
     private final Set<String> serverRegisteredTurns = new HashSet<>();
     private final Set<String> serverFallbackTurns = new HashSet<>();
+    private final Set<String> authoritativeReadCheckedTurns = new HashSet<>();
     private final ArrayDeque<SelfRun3Engine.State> recoveryQueue = new ArrayDeque<>();
     private Runnable scheduledNext;
     private String preparingRequest = "";
@@ -63,6 +64,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private boolean serverRegistrationInFlight;
     private boolean recoveryCycleInFlight;
     private String accessToken = "";
+    private long accessTokenIssuedElapsed = -1L;
     private int networkAttempt;
 
     SelfRun3Coordinator(Service service, SelfRunStore store, SelfRunRunLog log) {
@@ -190,6 +192,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         runtimePrefs.unregisterOnSharedPreferenceChangeListener(runtimeListener);
         main.removeCallbacksAndMessages(null);
         recoveryQueue.clear();
+        authoritativeReadCheckedTurns.clear();
         SelfRunFallbackWakeScheduler.cancel(service);
         web.close();
         releaseWakeLock();
@@ -321,6 +324,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         if (serverWaiting) SelfRunServerRecoveryWorker.schedule(service);
         else SelfRunServerRecoveryWorker.cancel(service);
 
+        if (shouldReadAuthoritativeResultBeforeDispatch(state)
+                && !authoritativeReadCheckedTurns.contains(state.turnId())) {
+            runDriveStep(state, DriveStep.READ_RESULT, ReadTrigger.AUTHORITY, null);
+            return;
+        }
+
         switch (SelfRun3Engine.nextAction(state)) {
             case SETUP -> runDriveStep(state, DriveStep.SETUP);
             case PREPARE_TURN -> runDriveStep(state, DriveStep.PREPARE_TURN);
@@ -354,7 +363,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         serverRegistrationInFlight = true;
         int expectedEpoch = epoch;
         int expectedGeneration = serverGeneration;
-        if (!accessToken.isEmpty()) {
+        if (!SelfRun3DriveTokenPolicy.needsRefresh(accessToken, accessTokenIssuedElapsed, SystemClock.elapsedRealtime())) {
             requestFcmAndRegister(execution, accessToken, expectedEpoch, expectedGeneration);
             return true;
         }
@@ -363,7 +372,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             @Override public void onAuthorized(AuthorizationResult result) {
                 authorizationInFlight = false;
                 if (!validServerRegistration(expectedEpoch, expectedGeneration)) return;
-                accessToken = DriveAuthorization.accessToken(result);
+                setAccessToken(DriveAuthorization.accessToken(result));
                 if (accessToken.isEmpty()) {
                     finishServerRegistrationFallback(execution, "DRIVE_TOKEN_EMPTY", expectedEpoch, expectedGeneration);
                     return;
@@ -475,7 +484,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private enum DriveStep { SETUP, PREPARE_TURN, READ_RESULT }
-    private enum ReadTrigger { NORMAL, PUSH, RECOVERY }
+    private enum ReadTrigger { NORMAL, PUSH, RECOVERY, AUTHORITY }
 
     private void runDriveStep(SelfRun3Engine.State state, DriveStep step) {
         runDriveStep(state, step, ReadTrigger.NORMAL, null);
@@ -485,26 +494,28 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                               ReadTrigger trigger, SelfRunPushEvent push) {
         requireMain();
         if (driveInFlight || authorizationInFlight || !canRun()) return;
-        if (!accessToken.isEmpty()) {
-            executeDriveStep(state, step, accessToken, trigger, push);
+        if (!SelfRun3DriveTokenPolicy.needsRefresh(accessToken, accessTokenIssuedElapsed, SystemClock.elapsedRealtime())) {
+            executeDriveStep(state, step, accessToken, trigger, push, 0);
             return;
         }
+        clearAccessToken();
         int expectedEpoch = epoch;
         authorizationInFlight = true;
         DriveAuthorization.requestSilently(service, new DriveAuthorization.Callback() {
             @Override public void onAuthorized(AuthorizationResult result) {
                 authorizationInFlight = false;
                 if (!validEpoch(expectedEpoch) || !canRun()) return;
-                accessToken = DriveAuthorization.accessToken(result);
+                setAccessToken(DriveAuthorization.accessToken(result));
                 if (accessToken.isEmpty()) {
                     if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
                     scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
                     return;
                 }
-                executeDriveStep(state, step, accessToken, trigger, push);
+                executeDriveStep(state, step, accessToken, trigger, push, 0);
             }
             @Override public void onResolutionRequired(PendingIntent pendingIntent) {
                 authorizationInFlight = false;
+                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
                 if (validEpoch(expectedEpoch)) pause("V3_DRIVE_AUTH_REQUIRED");
             }
             @Override public void onFailure(Throwable error) {
@@ -516,7 +527,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void executeDriveStep(SelfRun3Engine.State state, DriveStep step, String token,
-                                  ReadTrigger trigger, SelfRunPushEvent push) {
+                                  ReadTrigger trigger, SelfRunPushEvent push, int authRetryAttempt) {
         requireMain();
         if (driveInFlight || !canRun()) return;
         driveInFlight = true;
@@ -533,21 +544,23 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                             SelfRun3Engine.Kind.SETUP_DONE, new JSONObject()));
                 } else if (step == DriveStep.PREPARE_TURN) {
                     after = drive.prepareTurn(token, state);
-                    SelfRun3UserInput.Snapshot input = SelfRun3UserInput.snapshot(service, after.taskId());
-                    long consumed = after.time("lastConsumedInputRevision");
-                    boolean branch = SelfRun3Engine.isBranch(after);
-                    boolean repair = "REPAIR".equals(after.text("executionKind"));
-                    long inputRevision = branch ? after.time("branchInputRevision") : repair ? consumed : input.revision;
-                    String inputText = branch ? after.text("branchInputText") : repair ? "" : (input.revision > consumed ? input.text : "");
-                    if (input.revision <= consumed && !input.text.isEmpty()) {
-                        SelfRun3UserInput.consumeIfRevision(service, after.taskId(), input.revision);
+                    if (!after.hasResult()) {
+                        SelfRun3UserInput.Snapshot input = SelfRun3UserInput.snapshot(service, after.taskId());
+                        long consumed = after.time("lastConsumedInputRevision");
+                        boolean branch = SelfRun3Engine.isBranch(after);
+                        boolean repair = "REPAIR".equals(after.text("executionKind"));
+                        long inputRevision = branch ? after.time("branchInputRevision") : repair ? consumed : input.revision;
+                        String inputText = branch ? after.text("branchInputText") : repair ? "" : (input.revision > consumed ? input.text : "");
+                        if (input.revision <= consumed && !input.text.isEmpty()) {
+                            SelfRun3UserInput.consumeIfRevision(service, after.taskId(), input.revision);
+                        }
+                        JSONObject payload = new JSONObject();
+                        SelfRun3Engine.put(payload, "prompt", SelfRun3Protocol.prompt(after, inputText));
+                        SelfRun3Engine.put(payload, "inputText", inputText);
+                        SelfRun3Engine.put(payload, "inputRevision", inputRevision);
+                        after = ledger.apply(event(after, after.turnId() + ":turn-ready",
+                                SelfRun3Engine.Kind.TURN_READY, payload));
                     }
-                    JSONObject payload = new JSONObject();
-                    SelfRun3Engine.put(payload, "prompt", SelfRun3Protocol.prompt(after, inputText));
-                    SelfRun3Engine.put(payload, "inputText", inputText);
-                    SelfRun3Engine.put(payload, "inputRevision", inputRevision);
-                    after = ledger.apply(event(after, after.turnId() + ":turn-ready",
-                            SelfRun3Engine.Kind.TURN_READY, payload));
                 } else {
                     SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
@@ -581,6 +594,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                             || !expectedTask.equals(store.runId())) return;
                     clearRecoveredDriveWarning(store);
                     networkAttempt = 0;
+                    if (step == DriveStep.PREPARE_TURN && completed.stage() == SelfRun3Engine.Stage.READY) {
+                        authoritativeReadCheckedTurns.add(expectedTurn);
+                    }
                     if (step == DriveStep.READ_RESULT) {
                         serverRegisteredTurns.remove(expectedTurn);
                         nextResultPoll.remove(expectedTurn);
@@ -608,6 +624,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         if (trigger == ReadTrigger.RECOVERY) {
                             nextResultPoll.remove(expectedTurn);
                             finishRecoveryRead();
+                        } else if (trigger == ReadTrigger.AUTHORITY) {
+                            authoritativeReadCheckedTurns.add(expectedTurn);
+                            nextResultPoll.remove(expectedTurn);
+                            scheduleNext(0L);
                         } else {
                             scheduleResultRetry(state);
                         }
@@ -618,6 +638,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     driveInFlight = false;
                     releaseWakeLock();
                     if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
+                    if (error instanceof DriveApiClient.ApiException api && api.status == 401
+                            && SelfRun3DriveTokenPolicy.onUnauthorized(authRetryAttempt)
+                            == SelfRun3DriveTokenPolicy.UnauthorizedAction.REFRESH_AND_RETRY) {
+                        retryDriveStepAfterUnauthorized(state, step, trigger, push, authRetryAttempt);
+                        return;
+                    }
                     if (push != null && step == DriveStep.READ_RESULT) acknowledgeProcessed(push);
                     if (step == DriveStep.READ_RESULT) serverRegisteredTurns.remove(expectedTurn);
                     if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
@@ -703,6 +729,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     nextResultPoll.remove(current.turnId());
                     serverRegisteredTurns.remove(current.turnId());
                     serverFallbackTurns.remove(current.turnId());
+                    authoritativeReadCheckedTurns.remove(current.turnId());
                     syncProjection(after);
                     if (after.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION) {
                         notifyUserActionRequired();
@@ -756,7 +783,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void handleDriveFailure(SelfRun3Engine.State state, DriveStep step, Throwable error) {
         if (error instanceof DriveApiClient.ApiException api && api.status == 401) {
-            accessToken = "";
+            clearAccessToken();
             scheduleNetworkRetry("V3_DRIVE_TOKEN_EXPIRED");
             return;
         }
@@ -769,6 +796,58 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             return;
         }
         hardPause("V3_" + step.name() + "_FAILED", error);
+    }
+
+    private void retryDriveStepAfterUnauthorized(SelfRun3Engine.State state, DriveStep step,
+                                                  ReadTrigger trigger, SelfRunPushEvent push,
+                                                  int authRetryAttempt) {
+        requireMain();
+        clearAccessToken();
+        if (!canRun()) return;
+        int expectedEpoch = epoch;
+        authorizationInFlight = true;
+        log.record(store, "V3_DRIVE_TOKEN_REFRESH", "stage=START;step=" + step.name());
+        DriveAuthorization.requestSilently(service, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) {
+                authorizationInFlight = false;
+                if (!validEpoch(expectedEpoch) || !canRun()) return;
+                setAccessToken(DriveAuthorization.accessToken(result));
+                if (accessToken.isEmpty()) {
+                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                    scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
+                    return;
+                }
+                log.record(store, "V3_DRIVE_TOKEN_REFRESH", "stage=IMMEDIATE_RETRY;step=" + step.name());
+                executeDriveStep(state, step, accessToken, trigger, push, authRetryAttempt + 1);
+            }
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                authorizationInFlight = false;
+                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (validEpoch(expectedEpoch)) pause("V3_DRIVE_AUTH_REQUIRED");
+            }
+            @Override public void onFailure(Throwable error) {
+                authorizationInFlight = false;
+                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (validEpoch(expectedEpoch)) scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
+            }
+        });
+    }
+
+    private void setAccessToken(String token) {
+        accessToken = token == null ? "" : token;
+        accessTokenIssuedElapsed = accessToken.isEmpty() ? -1L : SystemClock.elapsedRealtime();
+    }
+
+    private void clearAccessToken() {
+        accessToken = "";
+        accessTokenIssuedElapsed = -1L;
+    }
+
+    private static boolean shouldReadAuthoritativeResultBeforeDispatch(SelfRun3Engine.State state) {
+        if (state == null || state.resource("resultDocumentId").isEmpty() || state.hasResult()) return false;
+        return state.stage() == SelfRun3Engine.Stage.READY
+                || (state.stage() == SelfRun3Engine.Stage.DISPATCHING
+                && state.resource("conversationUrl").isEmpty());
     }
 
     @Override public void onPrepared(String task, String turn, String request) {

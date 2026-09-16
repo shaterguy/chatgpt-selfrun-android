@@ -10,7 +10,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
-/** Narrow V3-only exact-name lookup for app-authorized Drive documents. */
+/** Narrow V3-only exact-name lookup for readable Drive documents. */
 final class SelfRun3DriveLookup {
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
 
@@ -45,11 +45,10 @@ final class SelfRun3DriveLookup {
             if (files == null) return found;
             for (int i = 0; i < files.length(); i++) {
                 JSONObject file = files.optJSONObject(i);
-                if (file == null || file.optBoolean("trashed") || file.optBoolean("shared")) continue;
+                if (file == null || file.optBoolean("trashed")) continue;
                 if (!name.equals(file.optString("name")) || !DriveApiClient.MIME_DOCUMENT.equals(file.optString("mimeType"))) continue;
                 JSONArray parents = file.optJSONArray("parents");
                 if (parents == null || parents.length() != 1 || !parentId.equals(parents.optString(0))) continue;
-                if (!file.optBoolean("isAppAuthorized", false)) continue;
                 String id = file.optString("id");
                 if (!DriveApiClient.validFileId(id)) continue;
                 if (!found.isEmpty() && !found.equals(id)) throw new IllegalStateException("multiple V3 documents match exact identity");

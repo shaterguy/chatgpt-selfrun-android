@@ -63,23 +63,40 @@ final class SelfRun3DriveAdapter {
     SelfRun3Engine.State prepareTurn(String token, SelfRun3Engine.State original) throws Exception {
         verifyAccount(token, original);
         SelfRun3Engine.State s = ensureDocument(token, original, "resultDocumentId", "resultCreateIntent", original.taskId() + "-" + original.turnId());
-        validateDocument(token, s, s.resource("resultDocumentId"));
-        DriveApiClient.DocumentSnapshot existing = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId"));
-        if (existing.text.trim().isEmpty()) {
-            checkpoint(); api.initializeDocument(token, s.resource("resultDocumentId"), SelfRun3Engine.emptyResult(s).toString(), existing.revisionId);
-            existing = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId"));
+        DriveApiClient.Metadata metadata = validateDocument(token, s, s.resource("resultDocumentId"));
+        SelfRun3ResultDocumentReader.Snapshot snapshot = SelfRun3ResultDocumentReader.read(token, s.resource("resultDocumentId"));
+        SelfRun3ResultDocumentPolicy.Selection selection = SelfRun3ResultDocumentPolicy.select(snapshot.bodies, s);
+        if (selection.committed) return reconcileCommittedBeforeDispatch(s, metadata, selection);
+
+        if (snapshot.bodies.size() == 1 && snapshot.bodies.get(0).trim().isEmpty()) {
+            DriveApiClient.DocumentSnapshot existing = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId"));
+            checkpoint();
+            api.initializeDocument(token, s.resource("resultDocumentId"), SelfRun3Engine.emptyResult(s).toString(), existing.revisionId);
+            metadata = validateDocument(token, s, s.resource("resultDocumentId"));
+            snapshot = SelfRun3ResultDocumentReader.read(token, s.resource("resultDocumentId"));
+            selection = SelfRun3ResultDocumentPolicy.select(snapshot.bodies, s);
+            if (selection.committed) return reconcileCommittedBeforeDispatch(s, metadata, selection);
         }
-        JSONObject parsed = SelfRun3Engine.parseResult(existing.text, s);
-        require(parsed == null, "RESULT_EXISTS_BEFORE_DISPATCH");
+
         String seed = SelfRun3Engine.emptyResult(s).toString();
-        if (SelfRun3ResultWatchdog.fingerprint(seed).equals(SelfRun3ResultWatchdog.fingerprint(existing.text))) {
+        if (SelfRun3ResultWatchdog.fingerprint(seed).equals(SelfRun3ResultWatchdog.fingerprint(selection.rawBody))) {
             JSONObject payload = new JSONObject();
             SelfRun3Engine.put(payload, "documentId", s.resource("resultDocumentId"));
-            SelfRun3Engine.put(payload, "fingerprint", SelfRun3ResultWatchdog.fingerprint(existing.text));
+            SelfRun3Engine.put(payload, "fingerprint", SelfRun3ResultWatchdog.fingerprint(selection.rawBody));
             s = ledger.apply(new SelfRun3Engine.Event(s.turnId() + ":result-baseline",
                     SelfRun3Engine.Kind.RESULT_BASELINE, s.taskId(), s.turnId(), payload)).execution(s.turnId());
         }
         return s;
+    }
+
+    private SelfRun3Engine.State reconcileCommittedBeforeDispatch(SelfRun3Engine.State state,
+                                                                   DriveApiClient.Metadata metadata,
+                                                                   SelfRun3ResultDocumentPolicy.Selection selection) {
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "text", selection.candidateBody);
+        String version = metadata.modifiedTime + ":" + metadata.version;
+        return ledger.apply(new SelfRun3Engine.Event(state.turnId() + ":result:" + version,
+                SelfRun3Engine.Kind.RESULT, state.taskId(), state.turnId(), payload)).execution(state.turnId());
     }
     static final class ResultObservation {
         final String version;
@@ -114,27 +131,26 @@ final class SelfRun3DriveAdapter {
             verifyAccount(token, s);
             DriveApiClient.Metadata metadata = validateDocument(token, s, s.resource("resultDocumentId"));
             checkpoint();
-            String raw = api.readTurnDocumentSnapshot(token, s.resource("resultDocumentId")).text;
-            if (raw == null) raw = "";
-            String candidate = raw;
-            if (raw.trim().isEmpty()) {
+            SelfRun3ResultDocumentReader.Snapshot snapshot = SelfRun3ResultDocumentReader.read(
+                    token, s.resource("resultDocumentId"));
+            SelfRun3ResultDocumentPolicy.Selection selection = SelfRun3ResultDocumentPolicy.select(snapshot.bodies, s);
+            String raw = selection.rawBody;
+            String candidate = selection.candidateBody;
+            if (selection.committed) {
+                diagnosticLog.record(projection, "V3_RESULT_READ",
+                        "stage=" + (selection.recovered ? "COMMITTED_RECOVERED_TRAILING_BRACE" : "COMMITTED")
+                                + ";turn=" + s.turn());
+            } else if (raw.trim().isEmpty()) {
                 diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_EMPTY;turn=" + s.turn());
                 candidate = SelfRun3Engine.emptyResult(s).toString();
             } else {
                 try {
-                    JSONObject parsed = SelfRun3Engine.parseResult(raw, s);
-                    if (parsed == null) diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_COMMIT;turn=" + s.turn());
-                    else diagnosticLog.record(projection, "V3_RESULT_READ", "stage=COMMITTED;turn=" + s.turn());
+                    SelfRun3Engine.parseResult(raw, s);
+                    diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_COMMIT;turn=" + s.turn());
+                    candidate = raw;
                 } catch (RuntimeException incompleteOrMalformed) {
-                    String recovered = recoverSingleRedundantTrailingBrace(raw, s);
-                    if (!recovered.isEmpty()) {
-                        diagnosticLog.record(projection, "V3_RESULT_READ",
-                                "stage=COMMITTED_RECOVERED_TRAILING_BRACE;turn=" + s.turn());
-                        candidate = recovered;
-                    } else {
-                        diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
-                        candidate = SelfRun3Engine.emptyResult(s).toString();
-                    }
+                    diagnosticLog.record(projection, "V3_RESULT_READ", "stage=PENDING_BODY;turn=" + s.turn());
+                    candidate = SelfRun3Engine.emptyResult(s).toString();
                 }
             }
             return new ResultObservation(metadata.modifiedTime + ":" + metadata.version, raw, candidate);
@@ -245,9 +261,15 @@ final class SelfRun3DriveAdapter {
         validateDocument(token, s, created.id); return s;
     }
     private DriveApiClient.Metadata validateDocument(String token, SelfRun3Engine.State s, String id) throws Exception {
-        checkpoint(); DriveApiClient.Metadata m = api.getMetadata(token, id);
-        require(id.equals(m.id) && s.resource("folderId").equals(m.parentId) && DriveApiClient.MIME_DOCUMENT.equals(m.mimeType)
-                && !m.trashed && !m.shared && m.isAppAuthorized, "DOCUMENT_BOUNDARY_MISMATCH");
+        checkpoint();
+        DriveApiClient.Metadata m = api.getMetadata(token, id);
+        boolean resultDocument = id.equals(s.resource("resultDocumentId"));
+        boolean valid = resultDocument
+                ? SelfRun3ResultDocumentPolicy.acceptReadableResult(m, id, s.resource("folderId"))
+                : id.equals(m.id) && s.resource("folderId").equals(m.parentId)
+                && DriveApiClient.MIME_DOCUMENT.equals(m.mimeType)
+                && !m.trashed && !m.shared && m.isAppAuthorized;
+        require(valid, "DOCUMENT_BOUNDARY_MISMATCH");
         return m;
     }
     private void verifyAccount(String token, SelfRun3Engine.State s) throws Exception {

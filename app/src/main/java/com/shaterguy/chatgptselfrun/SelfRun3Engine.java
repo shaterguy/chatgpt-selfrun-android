@@ -144,7 +144,7 @@ final class SelfRun3Engine {
                 put(v,"sendClaimed",true); put(v,"stage","DISPATCHING"); put(v,"submittedAt",p.optLong("at"));
             }
             case STARTED, ACCEPTED -> {
-                if(!s.flag("sendClaimed")) return original;
+                if (!s.flag("sendClaimed")) return original;
                 if(e.kind==Kind.STARTED && !v.has("canonicalPostConfirmedElapsed")
                         && "canonical_post".equals(p.optString("source"))
                         && "turn_request".equals(p.optString("protocolStage"))
@@ -196,7 +196,7 @@ final class SelfRun3Engine {
                 }
             }
             case RESULT -> {
-                if(!s.flag("sendClaimed")) return original;
+                if(!s.flag("sendClaimed") && stage!=Stage.PREPARING && stage!=Stage.READY) return original;
                 JSONObject r=parseResult(p.optString("text"),s); if(r==null) return original;
                 if(s.hasResult()) {
                     JSONObject old=object(s.text("result"));
