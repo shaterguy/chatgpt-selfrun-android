@@ -1,0 +1,47 @@
+name: Align dev6 static contract
+
+on:
+  push:
+    branches:
+      - selfrun-v3/v3.2.5-dev6-result-identity-repair
+    paths:
+      - .github/workflows/dev6-static-contract-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Update current candidate assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tools/verify_selfrun3_dev4_limits_settings.sh')
+          s = p.read_text()
+          changes = [
+              ('selfRunDriveVersionCode = 3025005', 'selfRunDriveVersionCode = 3025006'),
+              ("selfRunDriveVersionName = '3.2.5-dev5'", "selfRunDriveVersionName = '3.2.5-dev6'"),
+              ('committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate', 'committedResultBeyondFormer512KiBGateKeepsMechanicalIdentityGate'),
+          ]
+          for old, new in changes:
+              if s.count(old) != 1:
+                  raise SystemExit(f'expected exactly one static assertion: {old}')
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          git diff --check
+      - name: Commit static contract and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/dev6-static-contract-patch.yml
+          git add tools/verify_selfrun3_dev4_limits_settings.sh
+          git commit -m 'test: align static contract with dev6 authority rules'
+          git push origin HEAD:selfrun-v3/v3.2.5-dev6-result-identity-repair
