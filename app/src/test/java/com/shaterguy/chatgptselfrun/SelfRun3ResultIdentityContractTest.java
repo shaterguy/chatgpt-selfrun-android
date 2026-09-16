@@ -135,7 +135,7 @@ public final class SelfRun3ResultIdentityContractTest {
     }
 
     private static JSONObject copy(JSONObject value) {
-        return new JSONObject(value.toString());
+        return SelfRun3Engine.copy(value);
     }
 
     private static void put(JSONObject object, String key, Object value) {
