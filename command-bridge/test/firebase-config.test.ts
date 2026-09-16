@@ -41,6 +41,7 @@ describe("Firebase credential normalization", () => {
       "base64-service-account-json",
       Buffer.from(JSON.stringify({ private_key: privateKeyPem }), "utf8").toString("base64"),
     ],
+    ["env-assignment-wrapper", `FIREBASE_PRIVATE_KEY=${JSON.stringify(privateKeyPem)}`],
   ])("accepts %s private-key encoding", (_label, rawPrivateKey) => {
     configure(rawPrivateKey);
     expect(normalizeFirebasePrivateKey(rawPrivateKey)).toBe(privateKeyPem.trim());
