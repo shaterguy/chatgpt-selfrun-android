@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   ackMatchesIdentity,
@@ -40,5 +43,15 @@ describe("delivery policy", () => {
     expect(push).not.toHaveProperty("fcmToken");
     expect(push).not.toHaveProperty("watchKey");
     expect(push).not.toHaveProperty("driveAccessToken");
+  });
+
+  it("keeps the per-turn Drive hook alive after one delivery is PROCESSED", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(resolve(here, "../workflows/watch.ts"), "utf8");
+    expect(source).toContain("let deliveryProcessed = false;");
+    expect(source).toContain("deliveryProcessed = true;");
+    expect(source).toContain("if (!deliveryProcessed) {");
+    expect(source).not.toContain('return { status: "PROCESSED", eventId };');
+    expect(source).toContain("for await (const signal of driveEvents)");
   });
 });
