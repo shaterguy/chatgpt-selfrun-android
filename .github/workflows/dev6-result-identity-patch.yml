@@ -1,0 +1,99 @@
+name: Apply dev6 Result identity repair
+
+on:
+  push:
+    branches:
+      - selfrun-v3/v3.2.5-dev6-result-identity-repair
+    paths:
+      - .github/workflows/dev6-result-identity-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - name: Apply exact minimal repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          engine = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java')
+          text = engine.read_text()
+          old = '''    static JSONObject parseResult(String raw,State s) {
+              if(raw==null || raw.trim().isEmpty()) return null;
+              require(raw.indexOf('\\0')<0,"result NUL");
+              JSONObject r=SelfRun3StrictJson.parseObject(raw.trim());
+              return Boolean.TRUE.equals(r.opt("committed")) ? r : null;
+          }
+          '''
+          new = '''    static JSONObject parseResult(String raw,State s) {
+              if(raw==null || raw.trim().isEmpty()) return null;
+              require(raw.indexOf('\\0')<0,"result NUL");
+              JSONObject r=SelfRun3StrictJson.parseObject(raw.trim());
+              return Boolean.TRUE.equals(r.opt("committed")) && exactResultIdentity(r,s) ? r : null;
+          }
+          static boolean exactResultIdentity(JSONObject r,State s) {
+              if(r==null || s==null) return false;
+              Object turn=r.opt("turn");
+              boolean exactTurn=(turn instanceof Integer || turn instanceof Long)
+                      && ((Number)turn).longValue()==s.turn();
+              return RESULT_SCHEMA.equals(r.optString("schema"))
+                      && s.taskId().equals(r.optString("task_id"))
+                      && s.turnId().equals(r.optString("turn_id"))
+                      && exactTurn
+                      && s.resource("resultDocumentId").equals(r.optString("document_id"))
+                      && (s.turnId()+":result").equals(r.optString("event_id"));
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('parseResult baseline mismatch')
+          engine.write_text(text.replace(old, new, 1))
+
+          policy = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3ResultDocumentPolicy.java')
+          text = policy.read_text()
+          old = '''    static boolean acceptReadableResult(DriveApiClient.Metadata metadata, String expectedId, String expectedParentId) {
+              return metadata != null
+                      && expectedId != null && expectedId.equals(metadata.id)
+                      && expectedParentId != null && expectedParentId.equals(metadata.parentId)
+                      && DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
+                      && !metadata.trashed;
+          }
+          '''
+          new = '''    static boolean acceptReadableResult(DriveApiClient.Metadata metadata, String expectedId, String expectedParentId) {
+              return metadata != null
+                      && expectedId != null && expectedId.equals(metadata.id)
+                      && DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
+                      && !metadata.trashed;
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('readable-result baseline mismatch')
+          policy.write_text(text.replace(old, new, 1))
+
+          gradle = Path('app/build.gradle')
+          text = gradle.read_text()
+          if text.count('def selfRunDriveVersionCode = 3025005') != 1 or text.count("def selfRunDriveVersionName = '3.2.5-dev5'") != 1:
+              raise SystemExit('version baseline mismatch')
+          text = text.replace('def selfRunDriveVersionCode = 3025005', 'def selfRunDriveVersionCode = 3025006', 1)
+          text = text.replace("def selfRunDriveVersionName = '3.2.5-dev5'", "def selfRunDriveVersionName = '3.2.5-dev6'", 1)
+          gradle.write_text(text)
+          PY
+          git diff --check
+          git diff -- app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3ResultDocumentPolicy.java app/build.gradle
+      - name: Commit repair and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/dev6-result-identity-patch.yml
+          git add app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3ResultDocumentPolicy.java app/build.gradle
+          git commit -m 'fix: enforce Result identity and exact-file authority'
+          git push origin HEAD:selfrun-v3/v3.2.5-dev6-result-identity-repair
