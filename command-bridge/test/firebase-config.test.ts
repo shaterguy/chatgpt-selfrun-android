@@ -1,9 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  firebaseConfigurationStatus,
-  normalizeFirebasePrivateKey,
-} from "../src/firebase.js";
+import { firebaseConfigurationStatus } from "../src/firebase-config.js";
+import { normalizeFirebasePrivateKey } from "../src/firebase.js";
 
 const privateKeyPem = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .privateKey.export({ type: "pkcs8", format: "pem" })
