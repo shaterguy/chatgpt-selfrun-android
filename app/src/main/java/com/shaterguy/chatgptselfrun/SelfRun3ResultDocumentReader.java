@@ -24,7 +24,8 @@ final class SelfRun3ResultDocumentReader {
 
         Snapshot(String revisionId, List<String> bodies) {
             this.revisionId = revisionId == null ? "" : revisionId;
-            this.bodies = bodies == null ? Collections.emptyList() : List.copyOf(bodies);
+            this.bodies = bodies == null ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(bodies));
         }
     }
 
@@ -109,7 +110,7 @@ final class SelfRun3ResultDocumentReader {
                 if (total > MAX_RESPONSE_BYTES) throw new IllegalStateException("Docs response too large");
                 output.write(buffer, 0, read);
             }
-            return output.toString(StandardCharsets.UTF_8);
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
         }
     }
 
