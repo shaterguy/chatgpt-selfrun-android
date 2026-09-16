@@ -54,6 +54,7 @@ test -n "$INSTRUMENTATION"
 RECOVERY_CLASS=com.shaterguy.chatgptselfrun.SelfRun3PreparationRecoveryAndroidTest
 CURRENT_31_REQUIRED=(
   com.shaterguy.chatgptselfrun.SelfRunFirebaseConfiguredAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRunPushAckOutboxAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun31FirstConversationAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest
