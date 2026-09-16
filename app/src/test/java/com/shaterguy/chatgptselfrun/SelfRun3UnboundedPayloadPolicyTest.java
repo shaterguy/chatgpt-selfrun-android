@@ -25,7 +25,7 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
         assertEquals(prompt.length(), after.text("prompt").length());
     }
 
-    @Test public void committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate() {
+    @Test public void committedResultBeyondFormer512KiBGateKeepsMechanicalIdentityGate() {
         SelfRun3Engine.State state = preparingState();
         JSONObject result = SelfRun3Engine.emptyResult(state);
         SelfRun3Engine.put(result, "committed", true);
@@ -38,7 +38,7 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
         assertEquals(state.taskId(), parsed.optString("task_id"));
 
         SelfRun3Engine.put(result, "document_id", "other-result");
-        assertNotNull(SelfRun3Engine.parseResult(result.toString(), state));
+        assertNull(SelfRun3Engine.parseResult(result.toString(), state));
         assertThrows(IllegalStateException.class, () -> SelfRun3Engine.parseResult(raw + "\0", state));
     }
 
@@ -129,8 +129,8 @@ public final class SelfRun3UnboundedPayloadPolicyTest {
     }
 
     private static String source(String name) throws Exception {
-        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        Path path = Path.of("src", "main", "java", "com", "shaterguy", "chatgptselfrun", name);
+        if (!Files.exists(path)) path = Path.of("app", "src", "main", "java", "com", "shaterguy", "chatgptselfrun", name);
+        return Files.readString(path, StandardCharsets.UTF_8);
     }
 }
