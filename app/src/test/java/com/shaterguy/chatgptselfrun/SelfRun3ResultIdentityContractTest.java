@@ -8,7 +8,7 @@ import java.util.List;
 
 import static org.junit.Assert.*;
 
-/** Mechanical Result identity and exact-file authority contract. */
+/** Mechanical Result identity and exact-file authority contract, including parent-move tolerance. */
 public final class SelfRun3ResultIdentityContractTest {
     @Test public void exactCommittedResultIdentityIsAccepted() {
         SelfRun3Engine.State state = preparingState();
