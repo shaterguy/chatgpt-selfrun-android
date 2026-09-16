@@ -21,6 +21,12 @@ public final class SelfRunFallbackWakePolicyTest {
         assertEquals(750L, SelfRunFallbackWakePolicy.delayMs(1_000L, 1_750L));
     }
 
+    @Test public void scheduledWallClockUsesTheSameEffectiveBackstopAsTheAlarm() {
+        long scheduledAt = SelfRunFallbackWakePolicy.scheduledAt(1_000_000L, 30_000L);
+        assertEquals(1_120_000L, scheduledAt);
+        assertEquals(3_250L, SelfRunFallbackWakePolicy.delayMs(scheduledAt, 1_123_250L));
+    }
+
     @Test public void schedulerUsesOneShotIdleAwareWakeWithoutPersistentWakeLock() throws Exception {
         String scheduler = source("SelfRunFallbackWakeScheduler.java");
         String coordinator = source("SelfRun3Coordinator.java");
@@ -32,7 +38,7 @@ public final class SelfRunFallbackWakePolicyTest {
         assertFalse(scheduler.contains("setRepeating"));
         assertFalse(scheduler.contains("setExactAndAllowWhileIdle"));
         assertFalse(scheduler.contains("PowerManager"));
-        assertTrue(scheduler.contains("localDueAtWallMs"));
+        assertTrue(scheduler.contains("localDueAtWallMs = scheduledAtWall;"));
         assertTrue(scheduler.contains("recordResultPollTiming(dueAt, actualAt, \"LOCAL_DELAY_DUE\")"));
         assertTrue(scheduler.contains("onAlarmFired()"));
         assertTrue(coordinator.contains("SelfRunFallbackWakeScheduler.schedule(service, safeDelay)"));
