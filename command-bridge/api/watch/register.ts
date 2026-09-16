@@ -6,7 +6,7 @@ import { errorResponse, json, method, readJson } from "../../src/http.js";
 import { createCapability } from "../../src/security.js";
 
 const WATCH_LIFETIME_MS = 23 * 60 * 60 * 1000;
-const WATCH_WORKFLOW = { workflowId: "workflow//workflows/watch.ts//watchWorkflow" } as const;
+const WATCH_WORKFLOW = { workflowId: "workflow//./workflows/watch//watchWorkflow" } as const;
 
 export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {

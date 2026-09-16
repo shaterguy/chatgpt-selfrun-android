@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = join(root, ".vercel", "output");
-const workflowId = "workflow//workflows/watch.ts//watchWorkflow";
+const workflowId = "workflow//./workflows/watch//watchWorkflow";
 const manifestPath = join(output, "functions", ".well-known", "workflow", "v1", "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 if (!JSON.stringify(manifest).includes(workflowId)) {

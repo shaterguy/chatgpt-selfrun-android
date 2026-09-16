@@ -45,4 +45,4 @@ jobs:
           test -s "$ROOT/api/watch/register.func/index.cjs"
           test -s "$ROOT/api/push/ack.func/index.cjs"
           test -s "$ROOT/api/drive/webhook.func/index.cjs"
-          grep -Fq 'workflow//workflows/watch.ts//watchWorkflow' "$ROOT/.well-known/workflow/v1/manifest.json"
+          grep -Fq 'workflow//./workflows/watch//watchWorkflow' "$ROOT/.well-known/workflow/v1/manifest.json"

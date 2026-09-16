@@ -18,7 +18,7 @@ describe("Vercel Workflow build contract", () => {
     const register = await source("api/watch/register.ts");
     const workflow = await source("workflows/watch.ts");
     const builder = await source("scripts/build-vercel-api.mjs");
-    const id = "workflow//workflows/watch.ts//watchWorkflow";
+    const id = "workflow//./workflows/watch//watchWorkflow";
     expect(register).toContain(id);
     expect(builder).toContain(id);
     expect(workflow).toContain('"use workflow"');
