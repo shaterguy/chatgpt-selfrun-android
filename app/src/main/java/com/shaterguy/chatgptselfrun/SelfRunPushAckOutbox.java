@@ -63,7 +63,10 @@ final class SelfRunPushAckOutbox {
                 result.add(new Entry(raw.getKey(), body));
             } catch (Throwable ignored) { }
         }
-        result.sort(Comparator.comparing(entry -> entry.key));
+        result.sort(Comparator
+                .comparing((Entry entry) -> entry.body.optString("eventId", ""))
+                .thenComparingInt(entry -> "RECEIVED".equals(entry.body.optString("state", "")) ? 0 : 1)
+                .thenComparing(entry -> entry.key));
         return result;
     }
 
