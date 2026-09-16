@@ -46,8 +46,8 @@ for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMED
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3025005" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.5-dev5'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3025006" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.5-dev6'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -167,7 +167,7 @@ grep -Fq 'stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent' "$ST
 
 # Regression fixtures execute the former boundaries rather than only scanning source text.
 grep -Fq 'turnReadyAcceptsPromptBeyondFormerOneMiBGate' "$UNBOUNDED"
-grep -Fq 'committedResultBeyondFormer512KiBGateIgnoresFormerIdentityGate' "$UNBOUNDED"
+grep -Fq 'committedResultBeyondFormer512KiBGateKeepsMechanicalIdentityGate' "$UNBOUNDED"
 grep -Fq 'additionalInputMergeExceedsFormer64KiBWithoutTruncation' "$UNBOUNDED"
 grep -Fq 'unknownAttachmentSizeProbeStreamsBeyondFormer100MiBCeiling' "$UNBOUNDED"
 grep -Fq 'attachmentDraftStateAcceptsMoreThanTenAndKnownFileOver100MiB' "$UNBOUNDED_ANDROID"
