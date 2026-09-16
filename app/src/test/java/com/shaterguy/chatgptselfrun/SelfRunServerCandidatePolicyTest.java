@@ -9,10 +9,10 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRunServerCandidatePolicyTest {
-    @Test public void dev6IdentityAndStableGatewayArePinnedForTheTestCandidate() throws Exception {
+    @Test public void dev7IdentityAndStableGatewayArePinnedForTheTestCandidate() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 3025006"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.5-dev6'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 3025007"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.5-dev7'"));
         assertTrue(gradle.contains("https://selfrun-command-bridge-shaterguy.vercel.app"));
         assertFalse(gradle.contains("selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app"));
     }
