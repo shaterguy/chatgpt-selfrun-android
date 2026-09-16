@@ -383,9 +383,21 @@ final class SelfRun3Engine {
         if(raw==null || raw.trim().isEmpty()) return null;
         require(raw.indexOf('\0')<0,"result NUL");
         JSONObject r=SelfRun3StrictJson.parseObject(raw.trim());
-        return Boolean.TRUE.equals(r.opt("committed")) ? r : null;
+        return Boolean.TRUE.equals(r.opt("committed")) && exactResultIdentity(r,s) ? r : null;
     }
-    private static String routingPhase(JSONObject r,State s) {
+static boolean exactResultIdentity(JSONObject r,State s) {
+    if(r==null || s==null) return false;
+    Object turn=r.opt("turn");
+    boolean exactTurn=(turn instanceof Integer || turn instanceof Long)
+            && ((Number)turn).longValue()==s.turn();
+    return RESULT_SCHEMA.equals(r.optString("schema"))
+            && s.taskId().equals(r.optString("task_id"))
+            && s.turnId().equals(r.optString("turn_id"))
+            && exactTurn
+            && s.resource("resultDocumentId").equals(r.optString("document_id"))
+            && (s.turnId()+":result").equals(r.optString("event_id"));
+}
+private static String routingPhase(JSONObject r,State s) {
         String requested=r.optString("next_phase"), current=s.text("phase");
         if(Set.of("PLAN","WORK","VERIFY").contains(requested)) return requested;
         return Set.of("PLAN","WORK","VERIFY").contains(current) ? current : "PLAN";

@@ -23,7 +23,6 @@ final class SelfRun3ResultDocumentPolicy {
     static boolean acceptReadableResult(DriveApiClient.Metadata metadata, String expectedId, String expectedParentId) {
         return metadata != null
                 && expectedId != null && expectedId.equals(metadata.id)
-                && expectedParentId != null && expectedParentId.equals(metadata.parentId)
                 && DriveApiClient.MIME_DOCUMENT.equals(metadata.mimeType)
                 && !metadata.trashed;
     }
