@@ -48,9 +48,9 @@ describe("delivery policy", () => {
   it("keeps the per-turn Drive hook alive after one delivery is PROCESSED", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(resolve(here, "../workflows/watch.ts"), "utf8");
-    expect(source).toContain("let deliveryProcessed = false;");
-    expect(source).toContain("deliveryProcessed = true;");
-    expect(source).toContain("if (!deliveryProcessed) {");
+    expect(source).toContain("const retry = new AckDeliveryRetryState();");
+    expect(source).toContain("retry.onMatchingAck(ack.state);");
+    expect(source).toContain("if (!retry.deliveryProcessed()) {");
     expect(source).not.toContain('return { status: "PROCESSED", eventId };');
     expect(source).toContain("for await (const signal of driveEvents)");
   });
