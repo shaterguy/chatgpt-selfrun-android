@@ -1,3 +1,4 @@
+import type { AckState } from "./contracts.js";
 import { shouldTerminateDelivery } from "./delivery-policy.js";
 
 const ACK_RETRY_SECONDS = [15, 30, 60, 120, 300, 600] as const;
@@ -25,7 +26,7 @@ export class AckDeliveryRetryState {
     this.sendBeforeWait = false;
   }
 
-  onMatchingAck(state: string): void {
+  onMatchingAck(state: AckState): void {
     this.sendBeforeWait = false;
     if (shouldTerminateDelivery(state)) this.processed = true;
   }
