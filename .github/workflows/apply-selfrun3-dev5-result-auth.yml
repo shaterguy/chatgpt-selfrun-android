@@ -1,0 +1,42 @@
+name: Apply SelfRun 3 dev5 Result authority patch
+
+on:
+  push:
+    branches:
+      - 'selfrun-v3/v3.2.5-dev5-result-auth-recovery'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-once:
+    if: github.event.head_commit.message == 'chore: run dev5 result authority implementation patch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - name: Apply exact dev5 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_selfrun3_dev5_result_auth_patch.py
+          git diff --check
+          git diff -- app/build.gradle \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3DriveLookup.java \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3DriveAdapter.java \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java
+      - name: Commit implementation and remove one-shot patch machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm tools/apply_selfrun3_dev5_result_auth_patch.py
+          rm .github/workflows/apply-selfrun3-dev5-result-auth.yml
+          git config user.name 'SHatergUY'
+          git config user.email '108107617+shaterguy@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: make committed Result authoritative and recover Drive 401'
+          git push origin HEAD:selfrun-v3/v3.2.5-dev5-result-auth-recovery
