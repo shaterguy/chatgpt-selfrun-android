@@ -4,30 +4,23 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
 public final class SelfRunServerFallbackFlowTest {
-    @Test public void forcedServerFailureImmediatelyEnablesLocalReadAndCommittedResultAdvancesTurn() {
+    @Test public void forcedServerFailureImmediatelyRoutesToLocalReadAndCommittedResultAdvancesTurn() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
-        Set<String> registered = new HashSet<>();
-        Set<String> fallback = new HashSet<>();
-        Map<String, Long> nextPoll = new HashMap<>();
-        registered.add(claimed.turnId());
-        nextPoll.put(claimed.turnId(), Long.MAX_VALUE);
+        String coordinator = source("SelfRun3Coordinator.java");
 
-        SelfRunServerFallbackPolicy.activate(registered, fallback, nextPoll, claimed.turnId());
-
-        assertFalse(registered.contains(claimed.turnId()));
-        assertTrue(fallback.contains(claimed.turnId()));
+        assertTrue(coordinator.contains("serverFallbackTurns.add(state.turnId());"));
+        assertTrue(coordinator.contains("nextResultPoll.put(state.turnId(), 0L);"));
+        assertTrue(coordinator.contains("if (due <= now) {"));
+        assertTrue(coordinator.contains("runDriveStep(execution, DriveStep.READ_RESULT);"));
         assertFalse(SelfRunServerWaitPolicy.useServerPush(
-                SelfRun3RuntimeSettings.WorkMode.SERVER, fallback.contains(claimed.turnId())));
-        assertTrue(SelfRunServerFallbackPolicy.localReadDue(
-                SelfRun3RuntimeSettings.WorkMode.SERVER, fallback, nextPoll, claimed.turnId(), 1234L));
+                SelfRun3RuntimeSettings.WorkMode.SERVER, true));
 
         JSONObject resultPayload = new JSONObject();
         SelfRun3Engine.put(resultPayload, "text", continueResult(claimed).toString());
@@ -101,5 +94,11 @@ public final class SelfRunServerFallbackFlowTest {
                                                 SelfRun3Engine.Kind kind, JSONObject payload) {
         return SelfRun3Engine.reduce(state,
                 new SelfRun3Engine.Event(id, kind, state.taskId(), state.turnId(), payload));
+    }
+
+    private static String source(String name) throws Exception {
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
