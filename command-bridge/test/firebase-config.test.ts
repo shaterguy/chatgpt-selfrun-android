@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { firebaseConfigurationStatus } from "../src/firebase-config.js";
 import { normalizeFirebasePrivateKey } from "../src/firebase.js";
@@ -61,5 +62,10 @@ describe("Firebase credential normalization", () => {
     delete process.env.FIREBASE_CLIENT_EMAIL;
     delete process.env.FIREBASE_PRIVATE_KEY;
     expect(firebaseConfigurationStatus()).toEqual({ configured: false, reason: "missing_env" });
+  });
+
+  it("keeps exact Result events non-collapsible so retries cannot trigger collapse throttling", () => {
+    const source = readFileSync(new URL("../src/firebase.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("collapse_key");
   });
 });
