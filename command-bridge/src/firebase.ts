@@ -1,15 +1,7 @@
-import { createPrivateKey } from "node:crypto";
 import { GoogleAuth } from "google-auth-library";
 import type { PushEnvelope } from "./contracts.js";
 
 const FIREBASE_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
-
-type FirebaseConfigReason = "ok" | "missing_env" | "invalid_private_key";
-
-export interface FirebaseConfigurationStatus {
-  configured: boolean;
-  reason: FirebaseConfigReason;
-}
 
 function extractJsonPrivateKey(value: string): string | null {
   try {
@@ -54,31 +46,18 @@ export function normalizeFirebasePrivateKey(raw: string): string {
       if (looksLikePrivateKey(value)) return value;
     }
   } catch {
-    // Invalid base64 is handled by createPrivateKey() below.
+    // Invalid base64 is left for Google Auth to reject without logging the secret.
   }
 
   return value;
 }
 
-export function firebaseConfigurationStatus(): FirebaseConfigurationStatus {
-  const projectId = process.env.FIREBASE_PROJECT_ID?.trim() ?? "";
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim() ?? "";
-  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY ?? "";
-  if (!projectId || !clientEmail || !rawPrivateKey.trim()) {
-    return { configured: false, reason: "missing_env" };
-  }
-
-  const privateKey = normalizeFirebasePrivateKey(rawPrivateKey);
-  try {
-    createPrivateKey(privateKey);
-    return { configured: true, reason: "ok" };
-  } catch {
-    return { configured: false, reason: "invalid_private_key" };
-  }
-}
-
 export function firebaseConfigured(): boolean {
-  return firebaseConfigurationStatus().configured;
+  return [
+    process.env.FIREBASE_PROJECT_ID,
+    process.env.FIREBASE_CLIENT_EMAIL,
+    process.env.FIREBASE_PRIVATE_KEY,
+  ].every(value => typeof value === "string" && value.trim().length > 0);
 }
 
 export interface FcmSendResult {
@@ -89,8 +68,7 @@ export interface FcmSendResult {
 
 export async function sendFcmStep(fcmToken: string, push: PushEnvelope): Promise<FcmSendResult> {
   "use step";
-  const configuration = firebaseConfigurationStatus();
-  if (!configuration.configured) return { sent: false, status: 503 };
+  if (!firebaseConfigured()) return { sent: false, status: 503 };
 
   const projectId = process.env.FIREBASE_PROJECT_ID!.trim();
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL!.trim();
