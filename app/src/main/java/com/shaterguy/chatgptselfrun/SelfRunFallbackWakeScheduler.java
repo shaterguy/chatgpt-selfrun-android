@@ -20,12 +20,11 @@ final class SelfRunFallbackWakeScheduler {
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
         if (alarms == null) return;
         long nowWall = System.currentTimeMillis();
-        localDueAtWallMs = SelfRunFallbackWakePolicy.saturatingAdd(
-                Math.max(0L, nowWall), Math.max(0L, requestedDelayMs));
         long delayMs = SelfRunFallbackWakePolicy.effectiveDelayMs(requestedDelayMs);
         long triggerElapsed = SelfRunFallbackWakePolicy.saturatingAdd(
                 SystemClock.elapsedRealtime(), delayMs);
         long scheduledAtWall = SelfRunFallbackWakePolicy.scheduledAt(nowWall, requestedDelayMs);
+        localDueAtWallMs = scheduledAtWall;
         Intent intent = new Intent(context, SelfRunService.class)
                 .setAction(SelfRunService.ACTION_RESULT_POLL_WAKE)
                 .putExtra(EXTRA_SCHEDULED_AT_WALL_MS, scheduledAtWall);
