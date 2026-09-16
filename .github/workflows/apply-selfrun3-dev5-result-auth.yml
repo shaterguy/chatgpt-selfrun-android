@@ -20,6 +20,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Engine.java')
+          text = path.read_text(encoding='utf-8')
+          old = '            case STARTED, ACCEPTED -> {\n                if(!s.flag("sendClaimed")) return original;'
+          new = '            case STARTED, ACCEPTED -> {\n                if (!s.flag("sendClaimed")) return original;'
+          if text.count(old) != 1:
+              raise SystemExit(f'Engine STARTED/ACCEPTED guard count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           python3 tools/apply_selfrun3_dev5_result_auth_patch.py
           git diff --check
           git diff -- app/build.gradle \
