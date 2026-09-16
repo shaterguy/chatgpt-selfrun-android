@@ -248,7 +248,7 @@ public final class SelfRun3Drive401RecoveryBehaviorTest {
         if (!java.nio.file.Files.exists(path)) {
             path = java.nio.file.Path.of("src/main/java/com/shaterguy/chatgptselfrun/" + name);
         }
-        return java.nio.file.Files.readString(path, java.nio.charset.StandardCharsets.UTF_8);
+        return new String(java.nio.file.Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static void put(JSONObject object, String key, Object value) {
