@@ -6,16 +6,32 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Process restart must re-check a pinned Result before a recovered READY/DISPATCHING state can send. */
+/** Process restart and the first recoverable Drive 401 must preserve pinned Result authority. */
 public final class SelfRun3AuthorityRestartReadTest {
     @Test public void recoveredPreDispatchStateReadsPinnedResultBeforeWebDispatch() throws Exception {
-        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java");
-        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java");
-        String source = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        String source = coordinatorSource();
         assertTrue(source.contains("shouldReadAuthoritativeResultBeforeDispatch(state)"));
         assertTrue(source.contains("ReadTrigger.AUTHORITY"));
         assertTrue(source.contains("authoritativeReadCheckedTurns.add(expectedTurn)"));
+        assertFalse(source.contains("RESULT_EXISTS_BEFORE_DISPATCH"));
+    }
+
+    @Test public void firstUnauthorizedReadRefreshesBeforePushAckOrServerStateMutation() throws Exception {
+        String source = coordinatorSource();
+        int catchBlock = source.indexOf("error instanceof DriveApiClient.ApiException api && api.status == 401");
+        int refresh = source.indexOf("retryDriveStepAfterUnauthorized(state, step, trigger, push", catchBlock);
+        int ack = source.indexOf("acknowledgeProcessed(push)", catchBlock);
+        assertTrue(catchBlock >= 0);
+        assertTrue(refresh > catchBlock);
+        assertTrue(ack > refresh);
+    }
+
+    private static String coordinatorSource() throws Exception {
+        Path path = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java");
+        if (!Files.exists(path)) path = Path.of("src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Coordinator.java");
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 }
