@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { firebaseConfigurationStatus } from "../src/firebase.js";
+import { firebaseConfigurationStatus } from "../src/firebase-config.js";
 import { json } from "../src/http.js";
 
 export default function handler(_request: IncomingMessage, response: ServerResponse): void {
