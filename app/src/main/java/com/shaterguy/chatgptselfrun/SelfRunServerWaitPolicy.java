@@ -3,10 +3,22 @@ package com.shaterguy.chatgptselfrun;
 /** Pure policy boundary between event-driven server wait and local short polling. */
 final class SelfRunServerWaitPolicy {
     static final long RECOVERY_INTERVAL_MINUTES = 15L;
+    private static final long[] SERVER_RESULT_RECHECK_DELAYS_MS = {
+            10_000L, 30_000L, 60_000L, 60_000L, 60_000L
+    };
 
     private SelfRunServerWaitPolicy() { }
 
     static boolean useServerPush(SelfRun3RuntimeSettings.WorkMode mode, boolean localFallback) {
         return mode == SelfRun3RuntimeSettings.WorkMode.SERVER && !localFallback;
+    }
+
+    static long serverResultRecheckDelayMs(int attempt) {
+        if (attempt < 0 || attempt >= SERVER_RESULT_RECHECK_DELAYS_MS.length) return -1L;
+        return SERVER_RESULT_RECHECK_DELAYS_MS[attempt];
+    }
+
+    static int serverResultRecheckAttemptCount() {
+        return SERVER_RESULT_RECHECK_DELAYS_MS.length;
     }
 }
