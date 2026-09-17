@@ -31,6 +31,20 @@ public final class SelfRunFirebaseBuildConfigPolicyTest {
         assertFalse(gradle.contains("FIREBASE_CLIENT_EMAIL"));
     }
 
+    @Test public void firebaseApplicationIdIsBoundToTheInstalledFormalOrTestPackage() throws Exception {
+        String source = text(resolve(
+                "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunFirebase.java",
+                "src/main/java/com/shaterguy/chatgptselfrun/SelfRunFirebase.java"));
+        assertTrue(source.contains("FORMAL_PACKAGE = \"com.shaterguy.chatgptselfrun.drive\""));
+        assertTrue(source.contains("TEST_PACKAGE = \"com.shaterguy.chatgptselfrun.drive.test\""));
+        assertTrue(source.contains("FORMAL_FIREBASE_APPLICATION_ID = \"1:859485943787:android:feab87243808eb6ca30bae\""));
+        assertTrue(source.contains("TEST_FIREBASE_APPLICATION_ID = \"1:859485943787:android:c7eed0b22c51fa42a30bae\""));
+        assertTrue(source.contains("FORMAL_PACKAGE.equals(BuildConfig.APPLICATION_ID)"));
+        assertTrue(source.contains("TEST_PACKAGE.equals(BuildConfig.APPLICATION_ID)"));
+        assertTrue(source.contains("present(firebaseApplicationId())"));
+        assertTrue(source.contains(".setApplicationId(firebaseApplicationId())"));
+    }
+
     private static Path resolve(String repositoryPath, String appPath) {
         Path path = Path.of(repositoryPath);
         return Files.exists(path) ? path : Path.of(appPath);
