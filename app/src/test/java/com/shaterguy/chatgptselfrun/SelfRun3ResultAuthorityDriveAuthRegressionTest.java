@@ -83,8 +83,8 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
     @Test public void scenario09OldCachedTokenRequiresProactiveRefresh() {
         long ttl = SelfRun3DriveTokenPolicy.MAX_TOKEN_AGE_MS;
         assertEquals(45L * 60_000L, ttl);
-        assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("token", 1_000L, 1_000L + ttl));
         assertFalse(SelfRun3DriveTokenPolicy.needsRefresh("token", 1_000L, 1_000L + ttl - 1L));
+        assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("token", 1_000L, 1_000L + ttl));
         assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("token", -1L, 1_000L));
         assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("token", 2_000L, 1_000L));
         assertTrue(SelfRun3DriveTokenPolicy.needsRefresh("", 1_000L, 1_001L));
@@ -99,17 +99,19 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
 
     @Test public void scenario11UnauthorizedRecoveryDoesNotOnlyReregisterServerWatch() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        int method = coordinator.indexOf("retryDriveStepAfterUnauthorized");
-        int retry = coordinator.indexOf("executeDriveStep(state, step", method);
+        int method = coordinator.indexOf("private void retryDriveStepAfterUnauthorized");
+        int retry = coordinator.indexOf("executeDriveStep(", method);
         assertTrue(method >= 0 && retry > method);
-        String body = coordinator.substring(method, Math.min(coordinator.length(), retry + 260));
+        String body = coordinator.substring(method, Math.min(coordinator.length(), retry + 320));
         assertFalse(body.contains("startServerWatchRegistration"));
+        assertTrue(body.contains("serverRecheckAttempt"));
     }
 
     @Test public void scenario12ChangedResultBefore401IsRereadBeforeWait() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
-        assertTrue(coordinator.contains("retryDriveStepAfterUnauthorized(state, step, trigger, push"));
+        assertTrue(coordinator.contains("retryDriveStepAfterUnauthorized("));
+        assertTrue(coordinator.contains("state, step, trigger, push, authRetryAttempt, serverRecheckAttempt"));
     }
 
     @Test public void scenario13SuccessfulRetriedReadClearsTransientTokenWarning() throws Exception {
