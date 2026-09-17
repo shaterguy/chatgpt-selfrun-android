@@ -3,8 +3,12 @@ package com.shaterguy.chatgptselfrun;
 /** Pure policy boundary between event-driven server wait and local short polling. */
 final class SelfRunServerWaitPolicy {
     static final long RECOVERY_INTERVAL_MINUTES = 15L;
+    // Keep bounded one-minute follow-ups alive longer than command-bridge's current
+    // 10-minute durable resend gap, but still stop before the 15-minute recovery watchdog.
     private static final long[] SERVER_RESULT_RECHECK_DELAYS_MS = {
-            10_000L, 30_000L, 60_000L, 60_000L, 60_000L
+            10_000L, 30_000L,
+            60_000L, 60_000L, 60_000L, 60_000L, 60_000L, 60_000L,
+            60_000L, 60_000L, 60_000L, 60_000L, 60_000L, 60_000L
     };
 
     private SelfRunServerWaitPolicy() { }

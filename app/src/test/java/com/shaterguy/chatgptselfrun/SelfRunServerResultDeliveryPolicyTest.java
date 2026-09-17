@@ -9,16 +9,32 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRunServerResultDeliveryPolicyTest {
-    @Test public void boundedRecheckScheduleCoversACommitTwoMinutesAfterSignal() {
-        long[] expected = {10_000L, 30_000L, 60_000L, 60_000L, 60_000L};
+    @Test public void boundedRecheckScheduleBridgesDurableTenMinuteResendGap() {
+        long[] expected = {
+                10_000L, 30_000L,
+                60_000L, 60_000L, 60_000L, 60_000L, 60_000L, 60_000L,
+                60_000L, 60_000L, 60_000L, 60_000L, 60_000L, 60_000L
+        };
         long elapsed = 0L;
         assertEquals(expected.length, SelfRunServerWaitPolicy.serverResultRecheckAttemptCount());
         for (int attempt = 0; attempt < expected.length; attempt++) {
             assertEquals(expected[attempt], SelfRunServerWaitPolicy.serverResultRecheckDelayMs(attempt));
             elapsed += expected[attempt];
         }
-        assertTrue(elapsed > 120_000L);
+        assertTrue(elapsed > 10L * 60_000L);
+        assertTrue(elapsed < SelfRunServerWaitPolicy.RECOVERY_INTERVAL_MINUTES * 60_000L);
         assertEquals(-1L, SelfRunServerWaitPolicy.serverResultRecheckDelayMs(expected.length));
+    }
+
+    @Test public void boundedRecheckObservesACommitFiveMinutesAfterSignalWithinOneMinute() {
+        long commitAt = 5L * 60_000L;
+        long observationAt = 0L;
+        for (int attempt = 0; attempt < SelfRunServerWaitPolicy.serverResultRecheckAttemptCount(); attempt++) {
+            observationAt += SelfRunServerWaitPolicy.serverResultRecheckDelayMs(attempt);
+            if (observationAt >= commitAt) break;
+        }
+        assertTrue(observationAt >= commitAt);
+        assertTrue(observationAt - commitAt <= 60_000L);
     }
 
     @Test public void fifteenMinuteRecoveryRearmsAnExhaustedChainAndFindsACommitTwoMinutesLater() {
