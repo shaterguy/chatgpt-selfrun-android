@@ -46,8 +46,8 @@ for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMED
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3025007" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.5-dev7'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3026001" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.6-dev1'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -196,4 +196,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.5 committed-only result gate, transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.6 Firebase app identity regression, committed-only result gate, transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
