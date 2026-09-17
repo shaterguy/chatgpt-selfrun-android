@@ -1,0 +1,84 @@
+name: Verify SelfRun 3 Formal FCM PlayStore
+run-name: SelfRun 3 Formal FCM PlayStore (${{ github.ref_name }}) #${{ github.run_number }} attempt-${{ github.run_attempt }}
+
+on:
+  push:
+    branches:
+      - 'validation/formal-fcm-playstore-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: selfrun-v3-formal-fcm-playstore-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formal-fcm-playstore-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: selfrun-v3-formal-fcm-1
+          path: current
+          run-id: 35182011160
+          github-token: ${{ github.token }}
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools'
+      - name: Resolve exact signed formal smoke pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          FORMAL="$(find current -type f -name 'chatgpt-selfrun-drive-formal-fcm-v*.apk' ! -name '*androidTest*' -print -quit)"
+          ANDROID_TEST="$(find current -type f -name '*androidTest.apk' -print -quit)"
+          test -s "$FORMAL"; test -s "$ANDROID_TEST"
+          cp "$FORMAL" current/formal.apk
+          cp "$ANDROID_TEST" current/androidTest.apk
+          [[ "$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)" == '4079f2c97a3858e42645f7c60d4877e7b72f7e76' ]]
+          grep -F "$(sha256sum current/formal.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
+          grep -F "$(sha256sum current/androidTest.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
+      - name: Enable hardware acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Production FCM round-trip on Google Play system image
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis_playstore
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: >-
+            bash -o pipefail -c
+            'set -euo pipefail;
+            adb shell dumpsys package com.google.android.gms | grep -m1 "versionName=" | tee selfrun-v3-formal-fcm-playstore-evidence.txt;
+            adb install --no-incremental current/formal.apk >/dev/null;
+            adb install --no-incremental current/androidTest.apk >/dev/null;
+            FORMAL=com.shaterguy.chatgptselfrun.drive;
+            INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d "\r" | sed -n "s#^instrumentation:\([^ ]*\) (target=$FORMAL)#\1#p" | head -1)";
+            test -n "$INSTRUMENTATION";
+            adb shell am instrument -w -r -e smokeId "playstore-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" -e class com.shaterguy.chatgptselfrun.SelfRunFormalFcmSmokeAndroidTest "$INSTRUMENTATION" 2>&1 | tee -a selfrun-v3-formal-fcm-playstore-evidence.txt;
+            grep -Fq "OK (" selfrun-v3-formal-fcm-playstore-evidence.txt;
+            grep -Fq "selfrunFormalFcmEvent=" selfrun-v3-formal-fcm-playstore-evidence.txt;
+            grep -Fq "selfrunFormalFirebaseApp=formal" selfrun-v3-formal-fcm-playstore-evidence.txt'
+      - name: Upload PlayStore formal FCM evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-v3-formal-fcm-playstore-runtime-${{ github.run_attempt }}
+          path: selfrun-v3-formal-fcm-playstore-evidence.txt
+          if-no-files-found: warn
+          retention-days: 14
