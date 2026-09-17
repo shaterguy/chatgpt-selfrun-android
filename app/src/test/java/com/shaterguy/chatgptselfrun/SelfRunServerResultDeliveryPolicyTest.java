@@ -21,6 +21,32 @@ public final class SelfRunServerResultDeliveryPolicyTest {
         assertEquals(-1L, SelfRunServerWaitPolicy.serverResultRecheckDelayMs(expected.length));
     }
 
+    @Test public void fifteenMinuteRecoveryRearmsAnExhaustedChainAndFindsACommitTwoMinutesLater() {
+        long recoveryAt = SelfRunServerWaitPolicy.RECOVERY_INTERVAL_MINUTES * 60_000L;
+        long firstChainExhaustedAt = 0L;
+        for (int attempt = 0; attempt < SelfRunServerWaitPolicy.serverResultRecheckAttemptCount(); attempt++) {
+            firstChainExhaustedAt += SelfRunServerWaitPolicy.serverResultRecheckDelayMs(attempt);
+        }
+        assertTrue(firstChainExhaustedAt < recoveryAt);
+
+        int exhausted = SelfRunServerWaitPolicy.serverResultRecheckAttemptCount();
+        assertFalse(SelfRunServerWaitPolicy.mayStartServerResultRecheck(exhausted, false));
+        assertTrue(SelfRunServerWaitPolicy.mayStartServerResultRecheck(exhausted, true));
+        for (int active = 0; active < exhausted; active++) {
+            assertFalse(SelfRunServerWaitPolicy.mayStartServerResultRecheck(active, true));
+        }
+
+        long commitAt = recoveryAt + 120_000L;
+        long observationAt = recoveryAt;
+        for (int attempt = 0; attempt < exhausted; attempt++) {
+            observationAt += SelfRunServerWaitPolicy.serverResultRecheckDelayMs(attempt);
+            if (observationAt >= commitAt) break;
+        }
+        assertTrue(observationAt >= commitAt);
+        assertTrue(observationAt - commitAt <= 60_000L);
+        assertTrue(observationAt < recoveryAt + SelfRunServerWaitPolicy.RECOVERY_INTERVAL_MINUTES * 60_000L);
+    }
+
     @Test public void pendingResultNeverEmitsProcessedAck() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         String pendingCatch = between(coordinator,
@@ -28,6 +54,7 @@ public final class SelfRunServerResultDeliveryPolicyTest {
                 "catch (Throwable error)");
         assertFalse(pendingCatch.contains("acknowledgeProcessed(push)"));
         assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleInitial"));
+        assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleAfterRecovery"));
         assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleNext"));
     }
 
