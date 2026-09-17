@@ -1,5 +1,5 @@
-name: Prepare SelfRun 3.2.6 dev2
-run-name: Prepare SelfRun 3.2.6 dev2 #${{ github.run_number }}
+name: Prepare SelfRun 3.2.6 RC staging
+run-name: Prepare SelfRun 3.2.6 RC staging #${{ github.run_number }}
 
 on:
   push:
@@ -10,19 +10,19 @@ permissions:
   contents: write
 
 jobs:
-  prepare-dev2:
+  prepare-rc-staging:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Create clean dev2 branch from validated dev1 source
+      - name: Create stable RC staging branch from validated dev2
         shell: bash
         run: |
           set -euo pipefail
-          BASE=4079f2c97a3858e42645f7c60d4877e7b72f7e76
-          BRANCH=selfrun-v3/v3.2.6-dev2-public-gateway
+          BASE=e9278b37b51dd69769899f03f5fba238b24acb8a
+          BRANCH=staging/v326-rc1
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             echo "::error::target branch already exists"
             exit 1
@@ -38,34 +38,33 @@ jobs:
                   raise SystemExit(f'missing expected text in {path}: {old}')
               p.write_text(text.replace(old, new), encoding='utf-8')
 
-          protected = 'https://selfrun-command-bridge-shaterguy.vercel.app'
-          public = 'https://selfrun-command-bridge.vercel.app'
-
-          replace('app/build.gradle', "selfRunDriveVersionCode = 3026001", "selfRunDriveVersionCode = 3026002")
-          replace('app/build.gradle', "selfRunDriveVersionName = '3.2.6-dev1'", "selfRunDriveVersionName = '3.2.6-dev2'")
-          replace('app/build.gradle', protected, public)
-          replace('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java', protected, public)
+          replace('app/build.gradle', "selfRunDriveVersionCode = 3026002", "selfRunDriveVersionCode = 3027000")
+          replace('app/build.gradle', "selfRunDriveVersionName = '3.2.6-dev2'", "selfRunDriveVersionName = '3.2.6'")
 
           policy = 'app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java'
-          replace(policy, 'dev1IdentityAndStableGatewayArePinnedForTheTestCandidate', 'dev2IdentityAndPublicProductionGatewayArePinnedForTheTestCandidate')
-          replace(policy, '3026001', '3026002')
-          replace(policy, '3.2.6-dev1', '3.2.6-dev2')
-          replace(policy, protected, public)
+          replace(policy, 'dev2IdentityAndPublicProductionGatewayArePinnedForTheTestCandidate', 'stable326IdentityAndPublicProductionGatewayArePinned')
+          replace(policy, '3026002', '3027000')
+          replace(policy, '3.2.6-dev2', '3.2.6')
 
           verify = 'tools/verify_selfrun3_dev4_limits_settings.sh'
-          replace(verify, '3026001', '3026002')
-          replace(verify, '3.2.6-dev1', '3.2.6-dev2')
+          replace(verify, '3026002', '3027000')
+          replace(verify, '3.2.6-dev2', '3.2.6')
+
+          release_emulator = 'tools/verify_selfrun3_release_emulator.sh'
+          replace(release_emulator, 'stable/chatgpt-selfrun-drive-v3.2.4.apk', 'stable/chatgpt-selfrun-drive-v3.2.5.apk')
+          replace(release_emulator, "== '3.2.4'", "== '3.2.5'")
           PY
           git diff --check
-          grep -Fq "selfRunDriveVersionCode = 3026002" app/build.gradle
-          grep -Fq "selfRunDriveVersionName = '3.2.6-dev2'" app/build.gradle
+          grep -Fq "selfRunDriveVersionCode = 3027000" app/build.gradle
+          grep -Fq "selfRunDriveVersionName = '3.2.6'" app/build.gradle
           grep -Fq "https://selfrun-command-bridge.vercel.app" app/build.gradle
-          ! grep -R -Fq "https://selfrun-command-bridge-shaterguy.vercel.app" app/build.gradle app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java
+          grep -Fq "stable/chatgpt-selfrun-drive-v3.2.5.apk" tools/verify_selfrun3_release_emulator.sh
+          grep -Fq "== '3.2.5'" tools/verify_selfrun3_release_emulator.sh
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/build.gradle \
-            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java \
             app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java \
-            tools/verify_selfrun3_dev4_limits_settings.sh
-          git commit -m 'fix: use public production gateway in v3.2.6-dev2'
+            tools/verify_selfrun3_dev4_limits_settings.sh \
+            tools/verify_selfrun3_release_emulator.sh
+          git commit -m 'release: stage SelfRun Drive 3.2.6 identity'
           git push origin "HEAD:refs/heads/$BRANCH"
