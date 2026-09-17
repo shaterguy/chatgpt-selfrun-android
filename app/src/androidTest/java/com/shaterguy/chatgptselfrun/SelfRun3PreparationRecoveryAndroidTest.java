@@ -57,6 +57,9 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
             assertEquals(0, listener.started.get());
             assertEquals(0, listener.dispatched.get());
 
+            // Keep the second attempt live long enough to exercise stale-callback fencing even on a
+            // heavily scheduled hosted emulator; it still expires through the real watchdog below.
+            assertTrue(settings.saveWebPreparationSeconds("5"));
             Attempt second = startStalledAttempt(adapter, state);
             assertNotSame(first.web, second.web);
             assertSame(second.web, HeadlessWebViewHost.activeWebView());
@@ -71,7 +74,7 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
             assertSame(second.web, HeadlessWebViewHost.activeWebView());
             assertTrue(booleanField(adapter, "loading"));
 
-            awaitCount(listener.failures, 2, 4_000L, "second preparation timeout");
+            awaitCount(listener.failures, 2, 8_000L, "second preparation timeout");
             assertIdentity(listener.lastFailureTask.get(), listener.lastFailureTurn.get(),
                     listener.lastFailureRequest.get(), state);
             assertEquals("WEB_PREPARATION_TIMEOUT", listener.lastFailureCode.get());
