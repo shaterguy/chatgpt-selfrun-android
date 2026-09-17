@@ -8,6 +8,11 @@ import com.google.firebase.messaging.FirebaseMessaging;
 
 /** Programmatic Firebase initialization so no google-services.json or private material lives in source. */
 final class SelfRunFirebase {
+    private static final String FORMAL_PACKAGE = "com.shaterguy.chatgptselfrun.drive";
+    private static final String TEST_PACKAGE = "com.shaterguy.chatgptselfrun.drive.test";
+    private static final String FORMAL_FIREBASE_APPLICATION_ID = "1:859485943787:android:feab87243808eb6ca30bae";
+    private static final String TEST_FIREBASE_APPLICATION_ID = "1:859485943787:android:c7eed0b22c51fa42a30bae";
+
     interface TokenCallback {
         void onToken(String token);
         void onUnavailable(Throwable error);
@@ -17,7 +22,7 @@ final class SelfRunFirebase {
 
     static boolean configured() {
         return present(BuildConfig.SELFRUN_FIREBASE_API_KEY)
-                && present(BuildConfig.SELFRUN_FIREBASE_APPLICATION_ID)
+                && present(firebaseApplicationId())
                 && present(BuildConfig.SELFRUN_FIREBASE_PROJECT_ID)
                 && present(BuildConfig.SELFRUN_FIREBASE_SENDER_ID);
     }
@@ -31,7 +36,7 @@ final class SelfRunFirebase {
         } catch (IllegalStateException missing) {
             FirebaseOptions options = new FirebaseOptions.Builder()
                     .setApiKey(BuildConfig.SELFRUN_FIREBASE_API_KEY)
-                    .setApplicationId(BuildConfig.SELFRUN_FIREBASE_APPLICATION_ID)
+                    .setApplicationId(firebaseApplicationId())
                     .setProjectId(BuildConfig.SELFRUN_FIREBASE_PROJECT_ID)
                     .setGcmSenderId(BuildConfig.SELFRUN_FIREBASE_SENDER_ID)
                     .build();
@@ -59,6 +64,12 @@ final class SelfRunFirebase {
         } catch (Throwable error) {
             callback.onUnavailable(error);
         }
+    }
+
+    private static String firebaseApplicationId() {
+        if (FORMAL_PACKAGE.equals(BuildConfig.APPLICATION_ID)) return FORMAL_FIREBASE_APPLICATION_ID;
+        if (TEST_PACKAGE.equals(BuildConfig.APPLICATION_ID)) return TEST_FIREBASE_APPLICATION_ID;
+        return BuildConfig.SELFRUN_FIREBASE_APPLICATION_ID;
     }
 
     private static boolean present(String value) {
