@@ -21,4 +21,10 @@ final class SelfRunServerWaitPolicy {
     static int serverResultRecheckAttemptCount() {
         return SERVER_RESULT_RECHECK_DELAYS_MS.length;
     }
+
+    /** A fresh durable signal may re-arm only a fully exhausted bounded recheck chain. */
+    static boolean mayStartServerResultRecheck(int storedAttempt, boolean allowExhausted) {
+        if (storedAttempt < 0) return true;
+        return allowExhausted && storedAttempt >= serverResultRecheckAttemptCount();
+    }
 }
