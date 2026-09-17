@@ -46,8 +46,8 @@ for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMED
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3026002" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.6-dev2'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3027000" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.6'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
