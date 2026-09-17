@@ -23,6 +23,10 @@ jobs:
           set -euo pipefail
           BASE=4079f2c97a3858e42645f7c60d4877e7b72f7e76
           BRANCH=selfrun-v3/v3.2.6-dev2-public-gateway
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "::error::target branch already exists"
+            exit 1
+          fi
           git checkout -b "$BRANCH" "$BASE"
           python3 - <<'PY'
           from pathlib import Path
@@ -51,13 +55,6 @@ jobs:
           verify = 'tools/verify_selfrun3_dev4_limits_settings.sh'
           replace(verify, '3026001', '3026002')
           replace(verify, '3.2.6-dev1', '3.2.6-dev2')
-
-          smoke = '.github/workflows/verify-selfrun-v3-formal-fcm.yml'
-          replace(smoke, "      - 'validation/formal-fcm-v*'", "      - 'validation/formal-fcm-v*'\n      - 'selfrun-v3/v3.2.6-dev2*'")
-          replace(smoke, "[[ \"$VERSION_NAME\" == '3.2.6-dev1' ]]", "[[ \"$VERSION_NAME\" == '3.2.6-dev2' ]]")
-          replace(smoke, "[[ \"$VERSION_CODE\" == '3026001' ]]", "[[ \"$VERSION_CODE\" == '3026002' ]]")
-          replace(smoke, 'api-level: 36', 'api-level: 35')
-          replace(smoke, 'target: google_apis', 'target: google_apis_playstore')
           PY
           git diff --check
           grep -Fq "selfRunDriveVersionCode = 3026002" app/build.gradle
@@ -69,7 +66,6 @@ jobs:
           git add app/build.gradle \
             app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java \
             app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java \
-            tools/verify_selfrun3_dev4_limits_settings.sh \
-            .github/workflows/verify-selfrun-v3-formal-fcm.yml
+            tools/verify_selfrun3_dev4_limits_settings.sh
           git commit -m 'fix: use public production gateway in v3.2.6-dev2'
           git push origin "HEAD:refs/heads/$BRANCH"
