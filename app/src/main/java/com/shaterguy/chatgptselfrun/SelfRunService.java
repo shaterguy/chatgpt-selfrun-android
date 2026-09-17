@@ -16,7 +16,12 @@ public final class SelfRunService extends Service {
     static final String ACTION_STOP = BuildConfig.APPLICATION_ID + ".STOP";
     static final String ACTION_PUSH_RESULT = BuildConfig.APPLICATION_ID + ".PUSH_RESULT";
     static final String ACTION_SERVER_RECOVERY = BuildConfig.APPLICATION_ID + ".SERVER_RECOVERY";
+    static final String ACTION_SERVER_RESULT_RECHECK = BuildConfig.APPLICATION_ID + ".SERVER_RESULT_RECHECK";
     static final String ACTION_RESULT_POLL_WAKE = BuildConfig.APPLICATION_ID + ".RESULT_POLL_WAKE";
+    static final String EXTRA_SERVER_RESULT_RECHECK_TURN_ID =
+            BuildConfig.APPLICATION_ID + ".SERVER_RESULT_RECHECK_TURN_ID";
+    static final String EXTRA_SERVER_RESULT_RECHECK_ATTEMPT =
+            BuildConfig.APPLICATION_ID + ".SERVER_RESULT_RECHECK_ATTEMPT";
     private static final int NOTIFICATION_ID = 17021;
 
     private SelfRunStore store;
@@ -42,7 +47,8 @@ public final class SelfRunService extends Service {
         if (!ACTION_RUN.equals(action) && !ACTION_PAUSE.equals(action)
                 && !ACTION_RESUME.equals(action) && !ACTION_RESUME_STOPPED.equals(action)
                 && !ACTION_STOP.equals(action) && !ACTION_PUSH_RESULT.equals(action)
-                && !ACTION_SERVER_RECOVERY.equals(action) && !ACTION_RESULT_POLL_WAKE.equals(action)) {
+                && !ACTION_SERVER_RECOVERY.equals(action) && !ACTION_SERVER_RESULT_RECHECK.equals(action)
+                && !ACTION_RESULT_POLL_WAKE.equals(action)) {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
@@ -78,6 +84,24 @@ public final class SelfRunService extends Service {
             startForegroundCompat();
             turnStallNotifier.start();
             coordinator.onServerRecovery();
+            return START_STICKY;
+        }
+
+        if (ACTION_SERVER_RESULT_RECHECK.equals(action)) {
+            String turnId = intent == null ? ""
+                    : intent.getStringExtra(EXTRA_SERVER_RESULT_RECHECK_TURN_ID);
+            int attempt = intent == null ? -1
+                    : intent.getIntExtra(EXTRA_SERVER_RESULT_RECHECK_ATTEMPT, -1);
+            if (turnId == null) turnId = "";
+            if (turnId.isEmpty() || attempt < 0 || !store.active() || store.paused()
+                    || store.userStopped() || !coordinator.ownsCurrentRun()) {
+                SelfRunServerResultRecheckWorker.clear(this, turnId);
+                stopSelf(startId);
+                return START_NOT_STICKY;
+            }
+            startForegroundCompat();
+            turnStallNotifier.start();
+            coordinator.onServerResultRecheck(turnId, attempt);
             return START_STICKY;
         }
 
