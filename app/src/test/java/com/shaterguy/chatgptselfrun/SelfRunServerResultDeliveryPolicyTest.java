@@ -54,8 +54,14 @@ public final class SelfRunServerResultDeliveryPolicyTest {
                 "catch (Throwable error)");
         assertFalse(pendingCatch.contains("acknowledgeProcessed(push)"));
         assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleInitial"));
-        assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleAfterRecovery"));
         assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleNext"));
+    }
+
+    @Test public void exhaustedRecheckChainIsRearmedButActiveChainStaysDeduplicated() throws Exception {
+        String worker = source("SelfRunServerResultRecheckWorker.java");
+        assertTrue(worker.contains("mayStartServerResultRecheck(currentAttempt, true)"));
+        assertTrue(worker.contains("scheduleExpected(app, turnId, currentAttempt, 0)"));
+        assertTrue(worker.contains("ExistingWorkPolicy.KEEP"));
     }
 
     @Test public void readTransportFailureNeverTerminalAcksPush() throws Exception {
