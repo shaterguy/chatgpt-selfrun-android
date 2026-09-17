@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 
 /** HTTPS-only client for the opaque SelfRun push gateway. Never transports Drive credentials/content. */
 final class SelfRunPushGatewayClient {
-    static final String DEFAULT_BASE_URL = "https://selfrun-command-bridge-shaterguy.vercel.app";
+    static final String DEFAULT_BASE_URL = "https://selfrun-command-bridge.vercel.app";
     static final int MAX_RESPONSE_BYTES = 64 * 1024;
 
     static final class GatewayException extends Exception {
