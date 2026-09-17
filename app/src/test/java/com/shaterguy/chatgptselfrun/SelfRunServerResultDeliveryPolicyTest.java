@@ -86,6 +86,10 @@ public final class SelfRunServerResultDeliveryPolicyTest {
 
     private static String repositorySource(String repositoryPath) throws Exception {
         Path path = Path.of(repositoryPath);
+        if (!Files.exists(path)) {
+            Path parentPath = Path.of("..").resolve(repositoryPath).normalize();
+            if (Files.exists(parentPath)) path = parentPath;
+        }
         if (!Files.exists(path) && repositoryPath.startsWith("app/")) {
             path = Path.of(repositoryPath.substring("app/".length()));
         }
