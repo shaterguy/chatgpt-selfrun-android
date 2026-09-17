@@ -6,6 +6,10 @@ def selfRunDriveVersionCode = 3026000
 def selfRunDriveVersionName = '3.2.5'
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
+// Promotion provenance for the exact verified source candidate; the active formal identity is defined above.
+// verified source candidate: selfRunDriveVersionCode = 3025007
+// verified source candidate: selfRunDriveVersionName = '3.2.5-dev7'
+
 def configValue = { String name, String fallback ->
     def value = System.getenv(name)
     if (value == null || value.isEmpty()) value = project.findProperty(name)?.toString()
