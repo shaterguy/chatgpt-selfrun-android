@@ -1,0 +1,75 @@
+name: Prepare SelfRun 3.2.6 dev2
+run-name: Prepare SelfRun 3.2.6 dev2 #${{ github.run_number }}
+
+on:
+  push:
+    branches:
+      - 'automation/prepare-v326-dev2'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-dev2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Create clean dev2 branch from validated dev1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=4079f2c97a3858e42645f7c60d4877e7b72f7e76
+          BRANCH=selfrun-v3/v3.2.6-dev2-public-gateway
+          git checkout -b "$BRANCH" "$BASE"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'missing expected text in {path}: {old}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          protected = 'https://selfrun-command-bridge-shaterguy.vercel.app'
+          public = 'https://selfrun-command-bridge.vercel.app'
+
+          replace('app/build.gradle', "selfRunDriveVersionCode = 3026001", "selfRunDriveVersionCode = 3026002")
+          replace('app/build.gradle', "selfRunDriveVersionName = '3.2.6-dev1'", "selfRunDriveVersionName = '3.2.6-dev2'")
+          replace('app/build.gradle', protected, public)
+          replace('app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java', protected, public)
+
+          policy = 'app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java'
+          replace(policy, 'dev1IdentityAndStableGatewayArePinnedForTheTestCandidate', 'dev2IdentityAndPublicProductionGatewayArePinnedForTheTestCandidate')
+          replace(policy, '3026001', '3026002')
+          replace(policy, '3.2.6-dev1', '3.2.6-dev2')
+          replace(policy, protected, public)
+
+          verify = 'tools/verify_selfrun3_dev4_limits_settings.sh'
+          replace(verify, '3026001', '3026002')
+          replace(verify, '3.2.6-dev1', '3.2.6-dev2')
+
+          smoke = '.github/workflows/verify-selfrun-v3-formal-fcm.yml'
+          replace(smoke, "      - 'validation/formal-fcm-v*'", "      - 'validation/formal-fcm-v*'\n      - 'selfrun-v3/v3.2.6-dev2*'")
+          replace(smoke, "[[ \"$VERSION_NAME\" == '3.2.6-dev1' ]]", "[[ \"$VERSION_NAME\" == '3.2.6-dev2' ]]")
+          replace(smoke, "[[ \"$VERSION_CODE\" == '3026001' ]]", "[[ \"$VERSION_CODE\" == '3026002' ]]")
+          replace(smoke, 'api-level: 36', 'api-level: 35')
+          replace(smoke, 'target: google_apis', 'target: google_apis_playstore')
+          PY
+          git diff --check
+          grep -Fq "selfRunDriveVersionCode = 3026002" app/build.gradle
+          grep -Fq "selfRunDriveVersionName = '3.2.6-dev2'" app/build.gradle
+          grep -Fq "https://selfrun-command-bridge.vercel.app" app/build.gradle
+          ! grep -R -Fq "https://selfrun-command-bridge-shaterguy.vercel.app" app/build.gradle app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/build.gradle \
+            app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunPushGatewayClient.java \
+            app/src/test/java/com/shaterguy/chatgptselfrun/SelfRunServerCandidatePolicyTest.java \
+            tools/verify_selfrun3_dev4_limits_settings.sh \
+            .github/workflows/verify-selfrun-v3-formal-fcm.yml
+          git commit -m 'fix: use public production gateway in v3.2.6-dev2'
+          git push origin "HEAD:refs/heads/$BRANCH"
