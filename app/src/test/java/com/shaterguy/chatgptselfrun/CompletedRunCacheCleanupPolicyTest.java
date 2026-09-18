@@ -26,16 +26,25 @@ public class CompletedRunCacheCleanupPolicyTest {
         assertTrue(destroy.contains("webView.destroy()"));
         assertTrue(destroy.contains("presentation.dismiss()"));
         assertTrue(destroy.contains("virtualDisplay.release()"));
+        assertTrue(destroy.contains("imageReader.setOnImageAvailableListener(null, null)"));
+        assertTrue(destroy.contains("drainHandler.removeCallbacksAndMessages(null)"));
         assertTrue(destroy.contains("imageReader.close()"));
         assertTrue(destroy.contains("drainThread.quitSafely()"));
+        assertTrue(destroy.contains("if (destroyed) return"));
+        assertTrue(destroy.contains("destroyed = true"));
     }
 
-    @Test public void nonterminalWaitOnlyDetachesOutputWithoutDestroyingBrowser() throws Exception {
+    @Test public void confirmedDispatchDisposesHostAndWaitDoesNotRecreateBrowser() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
+        String web = source("SelfRun3WebAdapter.java");
+        String callback = between(coordinator, "private void recordCallback", "private void pause");
         String wait = between(coordinator, "case WAIT, READ_RESULT, CHECK_RECEIPT ->", "case COMMIT ->");
+        assertTrue(callback.contains("after.execution(turn)"));
+        assertTrue(callback.contains("web.disposeForConfirmedResultWait(persisted)"));
+        assertTrue(web.contains("disposeHost();"));
         assertTrue(wait.contains("web.detach()"));
-        assertFalse(wait.contains("web.close()"));
-        assertFalse(wait.contains("disposeHost"));
+        assertFalse(wait.contains("web.prepare("));
+        assertFalse(wait.contains("ensureWeb("));
     }
 
     private static String between(String source, String start, String end) {
