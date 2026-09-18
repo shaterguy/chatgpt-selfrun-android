@@ -2,6 +2,8 @@
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 현재 활성 개발 계보는 V3 하나뿐이며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
+정식 릴리즈 식별자는 SelfRun Drive 3.2.7 / versionCode 3028000입니다.
+
 ## 실행 구조
 
 - `SelfRun3Engine`: Task → logical Turn → physical Request의 상태 전이를 정의합니다.
