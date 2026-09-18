@@ -1,0 +1,5 @@
+SOURCE_SHA=9974f3cc792ec439b14f5314ab096cf479b5681b
+ARTIFACT_COMMIT_SHA=459e0d52bbd6de77aa3915e57342f10bb05c5fbe
+APK_FILE=SelfRun-Drive-TEST-3.2.9-dev1.apk
+APK_SHA256=a201b9309ef775683100badc314ae120b05d796c6a1762fddf8fa9970e89e199
+APK_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/459e0d52bbd6de77aa3915e57342f10bb05c5fbe/deliverables/SelfRun-Drive-TEST-3.2.9-dev1.apk
