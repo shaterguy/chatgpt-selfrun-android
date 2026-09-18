@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.json.JSONObject;
 import org.junit.Test;
@@ -33,7 +34,17 @@ public final class SelfRun3OnDeviceFormalUpgradeAndroidTest {
         return ApplicationProvider.getApplicationContext();
     }
 
-    @Test public void seedFormal326ServerStateAndWaitingLedger() {
+    @Test public void formalUpgradePhase() {
+        String phase = InstrumentationRegistry.getArguments().getString("formalUpgradePhase", "");
+        switch (phase) {
+            case "seed" -> seedFormal326ServerStateAndWaitingLedger();
+            case "verify" -> verifyFormal327MigrationAndCommittedContinuation();
+            case "restart" -> verifyFormal327AfterProcessRestart();
+            default -> fail("valid formalUpgradePhase required");
+        }
+    }
+
+    private void seedFormal326ServerStateAndWaitingLedger() {
         Context c = context();
         SharedPreferences runtime = c.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE);
         assertTrue(runtime.edit()
@@ -98,7 +109,7 @@ public final class SelfRun3OnDeviceFormalUpgradeAndroidTest {
         }
     }
 
-    @Test public void verifyFormal327MigrationAndCommittedContinuation() {
+    private void verifyFormal327MigrationAndCommittedContinuation() {
         Context c = context();
         SharedPreferences runtime = c.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE);
         SharedPreferences fixture = c.getSharedPreferences(FIXTURE_PREFS, Context.MODE_PRIVATE);
@@ -183,7 +194,7 @@ public final class SelfRun3OnDeviceFormalUpgradeAndroidTest {
         }
     }
 
-    @Test public void verifyFormal327AfterProcessRestart() {
+    private void verifyFormal327AfterProcessRestart() {
         Context c = context();
         SharedPreferences runtime = c.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE);
         SharedPreferences fixture = c.getSharedPreferences(FIXTURE_PREFS, Context.MODE_PRIVATE);

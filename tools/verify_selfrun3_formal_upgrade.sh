@@ -24,8 +24,10 @@ grep -Fq 'Success' formal-upgrade-instrumentation-install.txt
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\([^ ]*\) (target=$FORMAL_PACKAGE)#\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
 
-adb shell "am instrument -w -r -e class '$CLASS#seedFormal326ServerStateAndWaitingLedger' '$INSTRUMENTATION'" \
-  | tee formal-upgrade-seed.txt
+adb shell am instrument -w -r \
+  -e class "$CLASS" \
+  -e formalUpgradePhase seed \
+  "$INSTRUMENTATION" | tee formal-upgrade-seed.txt
 grep -Fxq 'INSTRUMENTATION_STATUS: numtests=1' formal-upgrade-seed.txt
 grep -Fq 'OK (' formal-upgrade-seed.txt
 
@@ -42,14 +44,18 @@ test -n "$UPDATED_UID"
 [[ "$(adb shell dumpsys package "$FORMAL_PACKAGE" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == "$EXPECTED_VERSION_NAME" ]]
 adb shell dumpsys package "$FORMAL_PACKAGE" | tr -d '\r' | grep -F "versionCode=$EXPECTED_VERSION_CODE" >/dev/null
 
-adb shell "am instrument -w -r -e class '$CLASS#verifyFormal327MigrationAndCommittedContinuation' '$INSTRUMENTATION'" \
-  | tee formal-upgrade-verify.txt
+adb shell am instrument -w -r \
+  -e class "$CLASS" \
+  -e formalUpgradePhase verify \
+  "$INSTRUMENTATION" | tee formal-upgrade-verify.txt
 grep -Fxq 'INSTRUMENTATION_STATUS: numtests=1' formal-upgrade-verify.txt
 grep -Fq 'OK (' formal-upgrade-verify.txt
 
 adb shell am force-stop "$FORMAL_PACKAGE"
-adb shell "am instrument -w -r -e class '$CLASS#verifyFormal327AfterProcessRestart' '$INSTRUMENTATION'" \
-  | tee formal-upgrade-restart-verify.txt
+adb shell am instrument -w -r \
+  -e class "$CLASS" \
+  -e formalUpgradePhase restart \
+  "$INSTRUMENTATION" | tee formal-upgrade-restart-verify.txt
 grep -Fxq 'INSTRUMENTATION_STATUS: numtests=1' formal-upgrade-restart-verify.txt
 grep -Fq 'OK (' formal-upgrade-restart-verify.txt
 
