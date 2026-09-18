@@ -25,12 +25,20 @@ jobs:
   static-test-build:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
+      SELFRUN_FIREBASE_APPLICATION_ID: ${{ secrets.SELFRUN_FIREBASE_APPLICATION_ID }}
+      SELFRUN_FIREBASE_PROJECT_ID: ${{ secrets.SELFRUN_FIREBASE_PROJECT_ID }}
+      SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '11076708'
@@ -49,6 +57,32 @@ jobs:
           test -n "$VERSION_NAME"; test -n "$VERSION_CODE"
           [[ "$VERSION_NAME" =~ ^3\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+$ ]]
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
+      - name: FIREBASE_CONFIG_PREFLIGHT - require Android public config without printing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in \
+            SELFRUN_FIREBASE_API_KEY \
+            SELFRUN_FIREBASE_APPLICATION_ID \
+            SELFRUN_FIREBASE_PROJECT_ID \
+            SELFRUN_FIREBASE_SENDER_ID; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "::error::${key} is not configured for the candidate build"
+              missing=1
+            fi
+          done
+          [[ "$missing" -eq 0 ]]
+          echo 'Firebase Android public configuration presence: PASS'
+      - name: GATEWAY_TEST - command-bridge tests and typecheck
+        working-directory: command-bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(node -p "process.versions.node.split('.')[0]")" == "24" ]]
+          npm ci
+          npm test
+          npm run typecheck
       - name: STATIC_PREFLIGHT - V3 policy and all test-source compile
         shell: bash
         run: |
@@ -60,33 +94,20 @@ jobs:
             :app:compileQaAppJavaWithJavac \
             :app:compileQaAppUnitTestJavaWithJavac \
             :app:compileQaAppAndroidTestJavaWithJavac
-      - name: FAST_TEST - ON_DEVICE core JVM regression suite
+      - name: FAST_TEST - complete JVM regression suite including SERVER
         shell: bash
         run: |
           set -euo pipefail
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
-          RESULTS=app/build/test-results/testQaAppUnitTest
-          test -d "$RESULTS"
-          COUNT="$(grep -Rh '<testcase ' "$RESULTS" | wc -l | tr -d ' ')"
-          test "$COUNT" -gt 0
-          echo "CORE_TEST_COUNT=$COUNT"
-          grep -Rh '<testcase ' "$RESULTS" | sed -n 's/.*classname="\([^"]*\)".*name="\([^"]*\)".*/\1#\2/p' | sort -u > core-test-inventory.txt
-          ! grep -Eq 'SelfRun(Server|Push|Firebase)' core-test-inventory.txt
-          cat core-test-inventory.txt
-      - name: ARTIFACT_BUILD - formal DEV, TEST target and instrumentation APKs
+          gradle --build-cache --no-daemon --console=plain --stacktrace -PselfRunServerChecks=true :app:testQaAppUnitTest
+      - name: ARTIFACT_BUILD - TEST target and TEST instrumentation APKs
         shell: bash
         run: |
           set -euo pipefail
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:assembleRelease :app:assembleQaApp :app:assembleQaAppAndroidTest
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:assembleQaApp :app:assembleQaAppAndroidTest
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          FORMAL_RAW=app/build/outputs/apk/release/app-release-unsigned.apk
           TARGET_RAW="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*.apk' -print -quit)"
           TEST_RAW="$(find app/build/outputs/apk/androidTest -type f -name '*.apk' -print -quit)"
-          test -s "$FORMAL_RAW"; test -s "$TARGET_RAW"; test -s "$TEST_RAW"
-          FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL_RAW")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionCode='$VERSION_CODE'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionName='$VERSION_NAME'" <<<"$FORMAL_BADGING"
+          test -s "$TARGET_RAW"; test -s "$TEST_RAW"
           TARGET_BADGING="$($BT/aapt dump badging "$TARGET_RAW")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TARGET_BADGING"
           grep -Fq "versionCode='$VERSION_CODE'" <<<"$TARGET_BADGING"
@@ -94,7 +115,6 @@ jobs:
           TEST_BADGING="$($BT/aapt dump badging "$TEST_RAW")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test.test'" <<<"$TEST_BADGING"
           mkdir -p app/build/outputs/selfrun-v3
-          "$BT/zipalign" -p -f 4 "$FORMAL_RAW" app/build/outputs/selfrun-v3/formal-aligned.apk
           "$BT/zipalign" -p -f 4 "$TARGET_RAW" app/build/outputs/selfrun-v3/target-aligned.apk
           "$BT/zipalign" -p -f 4 "$TEST_RAW" app/build/outputs/selfrun-v3/androidTest-aligned.apk
       - name: Install hash-locked signing dependencies
@@ -104,7 +124,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check \
             --require-hashes --only-binary=:all: \
             -r tools/signing-requirements-linux-x86_64-py312.txt
-      - name: Sign and verify formal DEV and canonical TEST pair
+      - name: Sign and verify canonical TEST pair
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
@@ -117,40 +137,29 @@ jobs:
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
           BT="$ANDROID_HOME/build-tools/36.0.0"
           DIR=app/build/outputs/selfrun-v3
-          FORMAL="$DIR/chatgpt-selfrun-drive-v${VERSION_NAME}.apk"
           TARGET="$DIR/chatgpt-selfrun-drive-test-v${VERSION_NAME}.apk"
           TEST_APK="$DIR/chatgpt-selfrun-drive-test-v${VERSION_NAME}-androidTest.apk"
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh "$DIR/formal-aligned.apk" "$PASS_FILE" "$FORMAL" > "$DIR/APKSIGNER_FORMAL_VERIFY.txt"
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$DIR/target-aligned.apk" "$PASS_FILE" "$TARGET" > "$DIR/APKSIGNER_TARGET_VERIFY.txt"
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$DIR/androidTest-aligned.apk" "$PASS_FILE" "$TEST_APK" > "$DIR/APKSIGNER_ANDROIDTEST_VERIFY.txt"
-          "$BT/apksigner" verify --verbose --print-certs "$FORMAL" > "$DIR/FORMAL_CERT.txt"
           "$BT/apksigner" verify --verbose --print-certs "$TARGET" > "$DIR/TARGET_CERT.txt"
           "$BT/apksigner" verify --verbose --print-certs "$TEST_APK" > "$DIR/ANDROIDTEST_CERT.txt"
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' "$DIR/FORMAL_CERT.txt"
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$DIR/TARGET_CERT.txt"
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$DIR/ANDROIDTEST_CERT.txt"
-          FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionCode='$VERSION_CODE'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionName='$VERSION_NAME'" <<<"$FORMAL_BADGING"
           BADGING="$($BT/aapt dump badging "$TARGET")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$BADGING"
           grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
           grep -Fq "versionName='$VERSION_NAME'" <<<"$BADGING"
           TEST_BADGING="$($BT/aapt dump badging "$TEST_APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test.test'" <<<"$TEST_BADGING"
-          sha256sum "$FORMAL" "$TARGET" "$TEST_APK" > "$DIR/SHA256SUMS.txt"
+          sha256sum "$TARGET" "$TEST_APK" > "$DIR/SHA256SUMS.txt"
           printf '%s\n' "$GITHUB_SHA" > "$DIR/SOURCE_COMMIT.txt"
       - name: Upload canonical candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: |
-            app/build/outputs/selfrun-v3/chatgpt-selfrun-drive-v*.apk
             app/build/outputs/selfrun-v3/chatgpt-selfrun-drive-test-v*.apk
             app/build/outputs/selfrun-v3/SHA256SUMS.txt
-            app/build/outputs/selfrun-v3/APKSIGNER_FORMAL_VERIFY.txt
-            app/build/outputs/selfrun-v3/FORMAL_CERT.txt
             app/build/outputs/selfrun-v3/APKSIGNER_TARGET_VERIFY.txt
             app/build/outputs/selfrun-v3/APKSIGNER_ANDROIDTEST_VERIFY.txt
             app/build/outputs/selfrun-v3/TARGET_CERT.txt
@@ -233,151 +242,6 @@ jobs:
             selfrun-v3-previous-test-cert.txt
             selfrun-v3-upgrade-seed.txt
             selfrun-v3-upgrade-verify.txt
-          if-no-files-found: warn
-          retention-days: 30
-
-  formal-upgrade-regression:
-    needs: static-test-build
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
-        with:
-          name: ${{ env.BUILD_ARTIFACT }}
-          path: current
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
-        with:
-          cmdline-tools-version: '11076708'
-          log-accepted-android-sdk-licenses: 'false'
-          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
-        with:
-          gradle-version: '9.5.0'
-          cache-read-only: true
-      - name: Resolve exact formal DEV and exact 3.2.6 baseline
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
-          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '3.2.7-dev1' ]]
-          [[ "$VERSION_CODE" == '3027001' ]]
-          printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
-          FORMAL="$(find current -type f -name "chatgpt-selfrun-drive-v${VERSION_NAME}.apk" -print -quit)"
-          test -s "$FORMAL"
-          cp "$FORMAL" current/formal.apk
-          [[ "$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)" == "$GITHUB_SHA" ]]
-          FORMAL_SHA="$(sha256sum current/formal.apk | awk '{print $1}')"
-          grep -F "$FORMAL_SHA" current/SHA256SUMS.txt >/dev/null
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/apksigner" verify --verbose --print-certs current/formal.apk > current/FORMAL_CERT_RUNTIME.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' current/FORMAL_CERT_RUNTIME.txt
-          FORMAL_BADGING="$($BT/aapt dump badging current/formal.apk)"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionName='$VERSION_NAME'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionCode='$VERSION_CODE'" <<<"$FORMAL_BADGING"
-          mkdir -p stable
-          curl --fail --location --retry 4 --retry-delay 2 \
-            --output stable/chatgpt-selfrun-drive-v3.2.6.apk \
-            'https://github.com/shaterguy/chatgpt-selfrun-android/releases/download/drive-v3.2.6/chatgpt-selfrun-drive-v3.2.6.apk'
-          echo '3107966104bb496348a84e8bf576eee333a0f323598f8242038b292748e02f66  stable/chatgpt-selfrun-drive-v3.2.6.apk' | sha256sum -c -
-          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.2.6.apk > stable/STABLE_CERT.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable/STABLE_CERT.txt
-          STABLE_BADGING="$($BT/aapt dump badging stable/chatgpt-selfrun-drive-v3.2.6.apk)"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$STABLE_BADGING"
-          grep -Fq "versionName='3.2.6'" <<<"$STABLE_BADGING"
-          grep -Fq "versionCode='3027000'" <<<"$STABLE_BADGING"
-      - name: Install hash-locked signing dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m pip install --disable-pip-version-check \
-            --require-hashes --only-binary=:all: \
-            -r tools/signing-requirements-linux-x86_64-py312.txt
-      - name: Build and sign formal-target instrumentation
-        shell: bash
-        env:
-          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          test -n "$SIGNING_PASSPHRASE"
-          sed -i "s/testBuildType 'qaApp'/testBuildType 'release'/" app/build.gradle
-          grep -Fq "testBuildType 'release'" app/build.gradle
-          FORMAL_TEST_SOURCE='app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRun3OnDeviceFormalUpgradeAndroidTest.java'
-          FORMAL_RUNNER_SOURCE='app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunAndroidTestRunner.java'
-          test -s "$FORMAL_TEST_SOURCE"
-          test -s "$FORMAL_RUNNER_SOURCE"
-          find app/src/androidTest/java -type f -name '*.java' ! -path "$FORMAL_TEST_SOURCE" ! -path "$FORMAL_RUNNER_SOURCE" -delete
-          test "$(find app/src/androidTest/java -type f -name '*.java' | wc -l | tr -d ' ')" = '2'
-          test "$(grep -c '@Test' "$FORMAL_TEST_SOURCE")" = '1'
-          grep -Fq 'SelfRun3OnDeviceFormalUpgradeAndroidTest' "$FORMAL_RUNNER_SOURCE"
-          gradle --build-cache --no-daemon --console=plain --stacktrace \
-            :app:compileReleaseAndroidTestJavaWithJavac :app:assembleReleaseAndroidTest
-          RAW="$(find app/build/outputs/apk/androidTest -type f -name '*.apk' -print -quit)"
-          test -s "$RAW"
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/zipalign" -p -f 4 "$RAW" current/formal-androidTest-aligned.apk
-          PASS_FILE="$RUNNER_TEMP/selfrun-v3-formal-upgrade-pass"
-          trap 'rm -f "$PASS_FILE"' EXIT
-          umask 077
-          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh \
-            current/formal-androidTest-aligned.apk "$PASS_FILE" current/formal-androidTest.apk \
-            > current/FORMAL_ANDROIDTEST_APKSIGNER_VERIFY.txt
-          "$BT/apksigner" verify --verbose --print-certs current/formal-androidTest.apk > current/FORMAL_ANDROIDTEST_CERT.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' current/FORMAL_ANDROIDTEST_CERT.txt
-          TEST_BADGING="$($BT/aapt dump badging current/formal-androidTest.apk)"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING"
-      - name: Enable hardware acceleration
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -c /dev/kvm
-          sudo chmod 0666 /dev/kvm
-      - name: EXPENSIVE_RUNTIME - exact formal in-place update and ON_DEVICE continuation
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
-        env:
-          BASELINE_APK: stable/chatgpt-selfrun-drive-v3.2.6.apk
-          CANDIDATE_APK: current/formal.apk
-          FORMAL_ANDROID_TEST_APK: current/formal-androidTest.apk
-          EXPECTED_VERSION_NAME: ${{ env.VERSION_NAME }}
-          EXPECTED_VERSION_CODE: ${{ env.VERSION_CODE }}
-        with:
-          api-level: 36
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          emulator-boot-timeout: 600
-          emulator-options: >-
-            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
-            -camera-back none -camera-front none -memory 2048
-          disable-animations: true
-          script: bash tools/verify_selfrun3_formal_upgrade.sh
-      - name: Upload formal upgrade evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: selfrun-v3-formal-upgrade-evidence-${{ github.run_attempt }}
-          path: |
-            formal-upgrade-baseline-install.txt
-            formal-upgrade-instrumentation-install.txt
-            formal-upgrade-seed.txt
-            formal-upgrade-candidate-install.txt
-            formal-upgrade-verify.txt
-            formal-upgrade-restart-verify.txt
-            formal-upgrade-summary.txt
-            current/FORMAL_CERT_RUNTIME.txt
-            current/FORMAL_ANDROIDTEST_APKSIGNER_VERIFY.txt
-            current/FORMAL_ANDROIDTEST_CERT.txt
-            stable/STABLE_CERT.txt
           if-no-files-found: warn
           retention-days: 30
 
@@ -523,142 +387,5 @@ jobs:
           path: |
             direct-apk.txt
             direct-apk-access.txt
-          if-no-files-found: error
-          retention-days: 30
-
-  publish-direct-formal-dev-apk:
-    needs: [static-test-build, emulator-regression, formal-upgrade-regression]
-    permissions:
-      contents: write
-      actions: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
-        with:
-          name: ${{ env.BUILD_ARTIFACT }}
-          path: current
-      - name: Prepare immutable direct formal DEV APK
-        id: prepare_formal_publish
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
-          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '3.2.7-dev1' ]]
-          [[ "$VERSION_CODE" == '3027001' ]]
-          printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
-          APK="current/chatgpt-selfrun-drive-v${VERSION_NAME}.apk"
-          NAMED_FILE="SelfRun-Drive-DEV-${VERSION_NAME}.apk"
-          NAMED_PATH="deliverables/${NAMED_FILE}"
-          SUM_FILE='current/SHA256SUMS.txt'
-          SOURCE_FILE='current/SOURCE_COMMIT.txt'
-          CERT_FILE='current/FORMAL_CERT.txt'
-          test -s "$APK"; test -s "$SUM_FILE"; test -s "$SOURCE_FILE"; test -s "$CERT_FILE"
-          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$GITHUB_SHA" ]]
-          APK_SHA256="$(sha256sum "$APK" | awk '{print $1}')"
-          grep -F "$APK_SHA256" "$SUM_FILE" >/dev/null
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' "$CERT_FILE"
-          ARTIFACT_BRANCH="artifacts/selfrun-v3-formal-v${VERSION_NAME}-sha256-${APK_SHA256}"
-          if git ls-remote --exit-code --heads origin "refs/heads/$ARTIFACT_BRANCH" >/dev/null 2>&1; then
-            git fetch --no-tags --depth=2 origin "refs/heads/$ARTIFACT_BRANCH:refs/remotes/origin/$ARTIFACT_BRANCH"
-            git show "refs/remotes/origin/$ARTIFACT_BRANCH:deliverables/direct-formal-apk.txt" > direct-formal-apk.txt
-            PUBLISHED_SOURCE_SHA="$(sed -n 's/^SOURCE_SHA=//p' direct-formal-apk.txt)"
-            ARTIFACT_COMMIT_SHA="$(sed -n 's/^ARTIFACT_COMMIT_SHA=//p' direct-formal-apk.txt)"
-            PUBLISHED_FILE="$(sed -n 's/^APK_FILE=//p' direct-formal-apk.txt)"
-            PUBLISHED_SHA="$(sed -n 's/^APK_SHA256=//p' direct-formal-apk.txt)"
-            PUBLISHED_URL="$(sed -n 's/^APK_URL=//p' direct-formal-apk.txt)"
-            [[ "$PUBLISHED_SOURCE_SHA" == "$GITHUB_SHA" ]]
-            [[ "$PUBLISHED_FILE" == "$NAMED_FILE" ]]
-            [[ "$PUBLISHED_URL" == "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$ARTIFACT_COMMIT_SHA/$NAMED_PATH" ]]
-            EXISTING_APK="$RUNNER_TEMP/$PUBLISHED_FILE"
-            curl --fail --location --retry 4 --retry-delay 2 --output "$EXISTING_APK" "$PUBLISHED_URL"
-            [[ "$(sha256sum "$EXISTING_APK" | awk '{print $1}')" == "$PUBLISHED_SHA" ]]
-            [[ "$APK_SHA256" == "$PUBLISHED_SHA" ]]
-            echo "publish_mode=reuse" >> "$GITHUB_OUTPUT"
-            echo "artifact_branch=$ARTIFACT_BRANCH" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          export GIT_INDEX_FILE="$RUNNER_TEMP/selfrun-v3-direct-formal-apk.index"
-          rm -f "$GIT_INDEX_FILE"
-          git read-tree --empty
-          APK_BLOB="$(git hash-object -w "$APK")"
-          git update-index --add --cacheinfo 100644,"$APK_BLOB","$NAMED_PATH"
-          APK_TREE="$(git write-tree)"
-          APK_COMMIT="$(printf '%s\n' "publish: SelfRun 3 ${VERSION_NAME} formal DEV APK" | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
-          RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/$NAMED_PATH"
-          {
-            echo "SOURCE_SHA=$GITHUB_SHA"
-            echo "ARTIFACT_COMMIT_SHA=$APK_COMMIT"
-            echo "APK_FILE=$NAMED_FILE"
-            echo "APK_SHA256=$APK_SHA256"
-            echo "APK_URL=$RAW_URL"
-          } > direct-formal-apk.txt
-          META_BLOB="$(git hash-object -w direct-formal-apk.txt)"
-          git update-index --add --cacheinfo 100644,"$META_BLOB",deliverables/direct-formal-apk.txt
-          META_TREE="$(git write-tree)"
-          META_COMMIT="$(printf '%s\n' 'docs: record immutable SelfRun 3 formal DEV APK identity' | git commit-tree "$META_TREE" -p "$APK_COMMIT")"
-          echo "publish_mode=create" >> "$GITHUB_OUTPUT"
-          echo "meta_commit=$META_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "artifact_branch=$ARTIFACT_BRANCH" >> "$GITHUB_OUTPUT"
-      - name: PUBLISH_DELIVER - publish immutable formal DEV artifact ref
-        if: ${{ steps.prepare_formal_publish.outputs.publish_mode == 'create' }}
-        shell: bash
-        env:
-          META_COMMIT: ${{ steps.prepare_formal_publish.outputs.meta_commit }}
-          ARTIFACT_BRANCH: ${{ steps.prepare_formal_publish.outputs.artifact_branch }}
-        run: |
-          set -euo pipefail
-          test -n "$META_COMMIT"; test -n "$ARTIFACT_BRANCH"
-          git push origin "$META_COMMIT:refs/heads/$ARTIFACT_BRANCH"
-      - name: Verify direct formal DEV APK accessibility and identity
-        shell: bash
-        env:
-          PUBLISH_MODE: ${{ steps.prepare_formal_publish.outputs.publish_mode }}
-        run: |
-          set -euo pipefail
-          PUBLISHED_SOURCE_SHA="$(sed -n 's/^SOURCE_SHA=//p' direct-formal-apk.txt)"
-          ARTIFACT_COMMIT_SHA="$(sed -n 's/^ARTIFACT_COMMIT_SHA=//p' direct-formal-apk.txt)"
-          RAW_URL="$(sed -n 's/^APK_URL=//p' direct-formal-apk.txt)"
-          EXPECTED_SHA="$(sed -n 's/^APK_SHA256=//p' direct-formal-apk.txt)"
-          EXPECTED_FILE="$(sed -n 's/^APK_FILE=//p' direct-formal-apk.txt)"
-          [[ "$PUBLISHED_SOURCE_SHA" == "$GITHUB_SHA" ]]
-          [[ "$EXPECTED_FILE" == "SelfRun-Drive-DEV-${VERSION_NAME}.apk" ]]
-          [[ "$RAW_URL" == "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$ARTIFACT_COMMIT_SHA/deliverables/$EXPECTED_FILE" ]]
-          CURRENT_APK="current/chatgpt-selfrun-drive-v${VERSION_NAME}.apk"
-          [[ "$(sha256sum "$CURRENT_APK" | awk '{print $1}')" == "$EXPECTED_SHA" ]]
-          curl --fail --location --retry 4 --retry-delay 2 --output "$EXPECTED_FILE" "$RAW_URL"
-          ACTUAL_SHA="$(sha256sum "$EXPECTED_FILE" | awk '{print $1}')"
-          [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
-          {
-            echo "RUN_SOURCE_SHA=$GITHUB_SHA"
-            echo "PUBLISHED_SOURCE_SHA=$PUBLISHED_SOURCE_SHA"
-            echo "ARTIFACT_COMMIT_SHA=$ARTIFACT_COMMIT_SHA"
-            echo "PUBLISH_MODE=$PUBLISH_MODE"
-            echo "APK_FILE=$EXPECTED_FILE"
-            echo "APK_URL=$RAW_URL"
-            echo "APK_SHA256=$ACTUAL_SHA"
-            echo "APK_SIZE_BYTES=$(stat -c%s "$EXPECTED_FILE")"
-            echo "PACKAGE=com.shaterguy.chatgptselfrun.drive"
-            echo "VERSION_NAME=$VERSION_NAME"
-            echo "VERSION_CODE=$VERSION_CODE"
-            echo "CERT_SHA256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe"
-            echo "DELIVERY_IDENTITY_STATUS=MATCHED"
-            echo "HTTP_DOWNLOAD=PASS"
-          } > direct-formal-apk-access.txt
-          cat direct-formal-apk-access.txt
-      - name: Upload direct formal DEV APK identity evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: selfrun-v3-direct-formal-apk-${{ github.run_attempt }}
-          path: |
-            direct-formal-apk.txt
-            direct-formal-apk-access.txt
           if-no-files-found: error
           retention-days: 30
