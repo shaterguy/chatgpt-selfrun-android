@@ -2,9 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3027001
-def selfRunDriveVersionName = '3.2.7-dev1'
+def selfRunDriveVersionCode = 3027002
+def selfRunDriveVersionName = '3.2.7-dev2'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
+def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 // Promotion provenance for the exact verified source candidate; the active formal identity is defined above.
@@ -32,8 +33,8 @@ android {
         versionCode selfRunDriveVersionCode
         versionName selfRunDriveVersionName
         testInstrumentationRunner 'com.shaterguy.chatgptselfrun.SelfRunAndroidTestRunner'
-        manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive', selfRunServerFeaturesEnabled: selfRunServerChecks ? 'true' : 'false']
-        buildConfigField 'boolean', 'SELFRUN_SERVER_FEATURES_ENABLED', selfRunServerChecks.toString()
+        manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive', selfRunServerFeaturesEnabled: selfRunServerFeaturesEnabled ? 'true' : 'false']
+        buildConfigField 'boolean', 'SELFRUN_SERVER_FEATURES_ENABLED', selfRunServerFeaturesEnabled.toString()
         buildConfigField 'String', 'SELFRUN_FIREBASE_API_KEY', buildConfigString(configValue('SELFRUN_FIREBASE_API_KEY', ''))
         buildConfigField 'String', 'SELFRUN_FIREBASE_APPLICATION_ID', buildConfigString(configValue('SELFRUN_FIREBASE_APPLICATION_ID', ''))
         buildConfigField 'String', 'SELFRUN_FIREBASE_PROJECT_ID', buildConfigString(configValue('SELFRUN_FIREBASE_PROJECT_ID', ''))
@@ -49,7 +50,7 @@ android {
         qaApp {
             initWith release
             applicationIdSuffix '.test'
-            manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive TEST', selfRunServerFeaturesEnabled: selfRunServerChecks ? 'true' : 'false']
+            manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive TEST', selfRunServerFeaturesEnabled: selfRunServerFeaturesEnabled ? 'true' : 'false']
         }
     }
 
