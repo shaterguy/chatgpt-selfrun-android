@@ -41,6 +41,10 @@ public final class SelfRunFormalFcmSmokeAndroidTest {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         assertEquals(FORMAL_PACKAGE, context.getPackageName());
         assertTrue("Firebase public config must be present", SelfRunFirebase.configured());
+        SelfRun3RuntimeSettings runtimeSettings = new SelfRun3RuntimeSettings(context);
+        assertTrue("formal FCM smoke must select SERVER mode",
+                runtimeSettings.saveWorkMode(SelfRun3RuntimeSettings.WorkMode.SERVER));
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, runtimeSettings.workMode());
         assertTrue("formal Firebase initialization failed", SelfRunFirebase.initialize(context));
         assertEquals(FORMAL_FIREBASE_APP_ID, FirebaseApp.getInstance().getOptions().getApplicationId());
 
