@@ -28,12 +28,12 @@ public final class SelfRun3OnDeviceCoordinatorAndroidTest {
         assertTrue(prefs.edit().clear().commit());
     }
 
-    @Test public void generalCandidateCannotActivateServerEvenIfModeIsManuallySeeded() {
-        assertFalse(BuildConfig.SELFRUN_SERVER_FEATURES_ENABLED);
+    @Test public void generalCandidateCanActivateServerWhenModeIsManuallySelected() {
+        assertTrue(BuildConfig.SELFRUN_SERVER_FEATURES_ENABLED);
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
         assertTrue(settings.saveWorkMode(SelfRun3RuntimeSettings.WorkMode.SERVER));
         assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, settings.workMode());
-        assertFalse(SelfRunServerFeaturePolicy.enabled(context));
+        assertTrue(SelfRunServerFeaturePolicy.enabled(context));
     }
 
     @Test public void normalOnDeviceModeUsesLocalPollingPolicy() {
