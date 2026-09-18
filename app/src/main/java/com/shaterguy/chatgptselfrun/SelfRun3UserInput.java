@@ -36,6 +36,15 @@ final class SelfRun3UserInput {
         }
     }
 
+    static boolean consumeDispatchedRevision(Context context, SelfRun3Engine.State state) {
+        if (state == null || SelfRun3Engine.isBranch(state)
+                || "REPAIR".equals(state.text("executionKind"))
+                || state.text("inputText").isEmpty()) return true;
+        long revision = state.time("inputRevision");
+        if (revision < 0L || revision <= state.time("lastConsumedInputRevision")) return true;
+        return consumeIfRevision(context, state.taskId(), revision);
+    }
+
     static SelfRun3Engine.State commit(Context context, SelfRunStore store,
                                        SelfRun3Ledger ledger, SelfRun3Engine.State current) {
         synchronized (SelfRunStore.RUN_STATE_LOCK) {
