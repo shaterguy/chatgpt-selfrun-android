@@ -13,21 +13,22 @@ public final class SelfRun3CoreCiBoundaryTest {
         assertTrue(gradle.contains("selfRunServerChecks"));
     }
 
-    @Test public void generalCandidateHasNoFirebaseOrGatewayPreflightDependency() throws Exception {
+    @Test public void serverCapableCandidateRunsGatewayFirebaseAndServerRegressionGates() throws Exception {
         String workflow = text(resolve(".github/workflows/build-selfrun-v3-candidate.yml",
                 "../.github/workflows/build-selfrun-v3-candidate.yml"));
-        assertFalse(workflow.contains("FIREBASE_CONFIG_PREFLIGHT"));
-        assertFalse(workflow.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
-        assertFalse(workflow.contains("actions/setup-node"));
+        assertTrue(workflow.contains("FIREBASE_CONFIG_PREFLIGHT"));
+        assertTrue(workflow.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
+        assertTrue(workflow.contains("actions/setup-node"));
         assertTrue(workflow.contains(":app:compileQaAppAndroidTestJavaWithJavac"));
-        assertTrue(workflow.contains(":app:testQaAppUnitTest"));
+        assertTrue(workflow.contains("-PselfRunServerChecks=true :app:testQaAppUnitTest"));
+        assertFalse(workflow.contains(":app:assembleRelease"));
     }
 
     @Test public void currentIdentityAndOnDeviceMigrationAreExplicitCoreContracts() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
         String settings = source("SelfRun3RuntimeSettings.java");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027001"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.7-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027002"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.7-dev2'"));
         assertTrue(settings.contains("DEFAULT_WORK_MODE = WorkMode.ON_DEVICE"));
         assertTrue(settings.contains("KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION"));
         assertTrue(settings.contains("putString(KEY_WORK_MODE, WorkMode.ON_DEVICE.name())"));
