@@ -1,12 +1,14 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.*;
 
+@Category(ServerOnly.class)
 public final class SelfRunPushEventTest {
     @Test public void validPayloadParsesAndMatchesExactLedgerIdentity() {
         Map<String, String> data = valid();
