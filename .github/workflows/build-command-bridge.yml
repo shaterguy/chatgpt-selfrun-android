@@ -1,10 +1,6 @@
 name: Build SelfRun Command Bridge
 
 on:
-  push:
-    paths:
-      - 'command-bridge/**'
-      - '.github/workflows/build-command-bridge.yml'
   workflow_dispatch:
 
 permissions:
