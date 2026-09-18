@@ -11,10 +11,10 @@ import static org.junit.Assert.*;
 
 @Category(ServerOnly.class)
 public final class SelfRunServerCandidatePolicyTest {
-    @Test public void dev327IdentityAndExplicitServerGateArePinned() throws Exception {
+    @Test public void dev328IdentityAndExplicitServerGateArePinned() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027003"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.7-dev3'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 3028001"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.8-dev1'"));
         assertTrue(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED"));
         assertTrue(gradle.contains("def selfRunServerFeaturesEnabled = true"));
         assertTrue(gradle.contains("selfRunServerChecks"));
