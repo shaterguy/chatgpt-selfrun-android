@@ -13,10 +13,12 @@ import static org.junit.Assert.*;
 public final class SelfRunServerCandidatePolicyTest {
     @Test public void dev327IdentityAndExplicitServerGateArePinned() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027001"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.7-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027002"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.7-dev2'"));
         assertTrue(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED"));
+        assertTrue(gradle.contains("def selfRunServerFeaturesEnabled = true"));
         assertTrue(gradle.contains("selfRunServerChecks"));
+        assertFalse(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED', selfRunServerChecks.toString()"));
     }
 
     @Test public void everyAndroidGatewayCallerUsesTheBuildConfiguredEndpoint() throws Exception {
@@ -29,9 +31,10 @@ public final class SelfRunServerCandidatePolicyTest {
     @Test public void settingsCopyMatchesTheApprovedTwoModeDesign() throws Exception {
         String source = source("SelfRunLogMenuActivity.java");
         assertTrue(source.contains("\"작업 모드\""));
-        assertFalse(source.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
+        assertTrue(source.contains("String[] labels = {\"온디바이스(기본·권장)\", \"서버를 통해 실행\"}"));
+        assertTrue(source.contains("runtimeSettings.saveWorkMode(mode)"));
         assertTrue(source.contains("온디바이스(기본·권장)"));
-        assertTrue(source.contains("SERVER 기능은 일반 빌드에서 비활성화"));
+        assertFalse(source.contains("일반 빌드는 온디바이스 모드로 고정되어 있습니다."));
     }
 
     @Test public void recoveryPlanningSnapshotsMainThreadFallbackStateBeforeIo() throws Exception {
@@ -40,14 +43,16 @@ public final class SelfRunServerCandidatePolicyTest {
         assertTrue(source.contains("fallbackSnapshot.contains(execution.turnId())"));
     }
 
-    @Test public void candidateCoreCiDoesNotRequireGatewayOrFirebaseBeforeAndroidCompile() throws Exception {
+    @Test public void candidateCiValidatesGatewayFirebaseAndServerPathBeforeTestDelivery() throws Exception {
         String workflow = text(resolve(
                 ".github/workflows/build-selfrun-v3-candidate.yml",
                 "../.github/workflows/build-selfrun-v3-candidate.yml"));
         assertTrue(workflow.contains("STATIC_PREFLIGHT - V3 policy and all test-source compile"));
-        assertFalse(workflow.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
-        assertFalse(workflow.contains("FIREBASE_CONFIG_PREFLIGHT"));
-        assertFalse(workflow.contains("actions/setup-node"));
+        assertTrue(workflow.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
+        assertTrue(workflow.contains("FIREBASE_CONFIG_PREFLIGHT"));
+        assertTrue(workflow.contains("actions/setup-node"));
+        assertTrue(workflow.contains("-PselfRunServerChecks=true"));
+        assertFalse(workflow.contains(":app:assembleRelease"));
     }
 
     @Test public void readmeDocumentsOnDeviceDefaultAndOptionalServerInputs() throws Exception {
