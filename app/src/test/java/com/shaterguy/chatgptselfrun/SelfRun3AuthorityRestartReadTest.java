@@ -23,7 +23,7 @@ public final class SelfRun3AuthorityRestartReadTest {
         String source = coordinatorSource();
         int catchBlock = source.indexOf("error instanceof DriveApiClient.ApiException api && api.status == 401");
         int refresh = source.indexOf("retryDriveStepAfterUnauthorized(", catchBlock);
-        int handlerEnd = source.indexOf("private void retryDriveStepAfterUnauthorized", catchBlock);
+        int handlerEnd = source.indexOf("if (step == DriveStep.READ_RESULT) serverRegisteredTurns.remove(expectedTurn);", refresh);
         assertTrue(catchBlock >= 0);
         assertTrue(refresh > catchBlock);
         assertTrue(handlerEnd > refresh);
