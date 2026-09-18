@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -8,13 +9,14 @@ import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
+@Category(ServerOnly.class)
 public final class SelfRunServerCandidatePolicyTest {
-    @Test public void stable326IdentityAndPublicProductionGatewayArePinned() throws Exception {
+    @Test public void dev327IdentityAndExplicitServerGateArePinned() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027000"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.6'"));
-        assertTrue(gradle.contains("https://selfrun-command-bridge.vercel.app"));
-        assertFalse(gradle.contains("selfrun-command-bridge-git-v325-dev3-shaterguy.vercel.app"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 3027001"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.2.7-dev1'"));
+        assertTrue(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED"));
+        assertTrue(gradle.contains("selfRunServerChecks"));
     }
 
     @Test public void everyAndroidGatewayCallerUsesTheBuildConfiguredEndpoint() throws Exception {
@@ -27,9 +29,9 @@ public final class SelfRunServerCandidatePolicyTest {
     @Test public void settingsCopyMatchesTheApprovedTwoModeDesign() throws Exception {
         String source = source("SelfRunLogMenuActivity.java");
         assertTrue(source.contains("\"작업 모드\""));
-        assertTrue(source.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
-        assertTrue(source.contains("Drive 변경을 빠르게 감지"));
-        assertTrue(source.contains("휴대폰이 일정 간격으로 확인"));
+        assertFalse(source.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
+        assertTrue(source.contains("온디바이스(기본·권장)"));
+        assertTrue(source.contains("SERVER 기능은 일반 빌드에서 비활성화"));
     }
 
     @Test public void recoveryPlanningSnapshotsMainThreadFallbackStateBeforeIo() throws Exception {
@@ -38,21 +40,17 @@ public final class SelfRunServerCandidatePolicyTest {
         assertTrue(source.contains("fallbackSnapshot.contains(execution.turnId())"));
     }
 
-    @Test public void candidateCiRunsGatewayTestsAndTypecheckBeforeAndroidCompile() throws Exception {
+    @Test public void candidateCoreCiDoesNotRequireGatewayOrFirebaseBeforeAndroidCompile() throws Exception {
         String workflow = text(resolve(
                 ".github/workflows/build-selfrun-v3-candidate.yml",
                 "../.github/workflows/build-selfrun-v3-candidate.yml"));
-        int node = workflow.indexOf("GATEWAY_TEST - command-bridge tests and typecheck");
-        int android = workflow.indexOf("STATIC_PREFLIGHT - V3 policy and all test-source compile");
-        assertTrue(node >= 0);
-        assertTrue(workflow.contains("working-directory: command-bridge"));
-        assertTrue(workflow.contains("npm ci"));
-        assertTrue(workflow.contains("npm test"));
-        assertTrue(workflow.contains("npm run typecheck"));
-        assertTrue(android > node);
+        assertTrue(workflow.contains("STATIC_PREFLIGHT - V3 policy and all test-source compile"));
+        assertFalse(workflow.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
+        assertFalse(workflow.contains("FIREBASE_CONFIG_PREFLIGHT"));
+        assertFalse(workflow.contains("actions/setup-node"));
     }
 
-    @Test public void readmeDocumentsServerFallbackAndAllFirebaseInputs() throws Exception {
+    @Test public void readmeDocumentsOnDeviceDefaultAndOptionalServerInputs() throws Exception {
         String readme = text(resolve("README.md", "../README.md"));
         assertTrue(readme.contains("SERVER"));
         assertTrue(readme.contains("ON_DEVICE"));
@@ -63,7 +61,7 @@ public final class SelfRunServerCandidatePolicyTest {
         assertTrue(readme.contains("SELFRUN_PUSH_GATEWAY_URL"));
         assertTrue(readme.contains("FIREBASE_CLIENT_EMAIL"));
         assertTrue(readme.contains("FIREBASE_PRIVATE_KEY"));
-        assertTrue(readme.contains("fallback"));
+        assertTrue(readme.contains("-PselfRunServerChecks=true"));
     }
 
     private static String source(String name) throws Exception {
