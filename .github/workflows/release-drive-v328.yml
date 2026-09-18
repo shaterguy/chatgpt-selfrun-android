@@ -9,11 +9,11 @@ on:
       - main
 
 concurrency:
-  group: selfrun-v327-release-${{ github.ref }}
+  group: selfrun-v328-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  RELEASE_ARTIFACT: selfrun-v327-release-candidate-${{ github.run_attempt }}
+  RELEASE_ARTIFACT: selfrun-v328-release-candidate-${{ github.run_attempt }}
 
 jobs:
   build-release:
@@ -123,7 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$SIGNING_PASSPHRASE"
-          PASS_FILE="$RUNNER_TEMP/selfrun-v327-release-pass"
+          PASS_FILE="$RUNNER_TEMP/selfrun-v328-release-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
@@ -251,7 +251,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-v327-release-runtime-${{ github.run_attempt }}
+          name: selfrun-v328-release-runtime-${{ github.run_attempt }}
           path: |
             selfrun-v3-release-runtime-evidence.txt
             stable/STABLE_CERT.txt
@@ -307,7 +307,7 @@ jobs:
           test -s "$RAW"
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/zipalign" -p -f 4 "$RAW" current/formal-androidTest-aligned.apk
-          PASS_FILE="$RUNNER_TEMP/selfrun-v327-formal-fcm-pass"
+          PASS_FILE="$RUNNER_TEMP/selfrun-v328-formal-fcm-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
@@ -347,17 +347,17 @@ jobs:
             FORMAL=com.shaterguy.chatgptselfrun.drive;
             INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d "\r" | sed -n "s#^instrumentation:\([^ ]*\) (target=$FORMAL)#\1#p" | head -1)";
             test -n "$INSTRUMENTATION";
-            adb shell am instrument -w -r -e smokeId "release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" -e class com.shaterguy.chatgptselfrun.SelfRunFormalFcmSmokeAndroidTest "$INSTRUMENTATION" 2>&1 | tee selfrun-v327-formal-fcm-evidence.txt;
-            grep -Fq "OK (" selfrun-v327-formal-fcm-evidence.txt;
-            grep -Fq "selfrunFormalFcmEvent=" selfrun-v327-formal-fcm-evidence.txt;
-            grep -Fq "selfrunFormalFirebaseApp=formal" selfrun-v327-formal-fcm-evidence.txt'
+            adb shell am instrument -w -r -e smokeId "release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" -e class com.shaterguy.chatgptselfrun.SelfRunFormalFcmSmokeAndroidTest "$INSTRUMENTATION" 2>&1 | tee selfrun-v328-formal-fcm-evidence.txt;
+            grep -Fq "OK (" selfrun-v328-formal-fcm-evidence.txt;
+            grep -Fq "selfrunFormalFcmEvent=" selfrun-v328-formal-fcm-evidence.txt;
+            grep -Fq "selfrunFormalFirebaseApp=formal" selfrun-v328-formal-fcm-evidence.txt'
       - name: Upload exact formal FCM evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-v327-formal-fcm-${{ github.run_attempt }}
+          name: selfrun-v328-formal-fcm-${{ github.run_attempt }}
           path: |
-            selfrun-v327-formal-fcm-evidence.txt
+            selfrun-v328-formal-fcm-evidence.txt
             current/FORMAL_ANDROIDTEST_CERT.txt
             current/FORMAL_ANDROIDTEST_APKSIGNER_VERIFY.txt
           if-no-files-found: warn
@@ -431,7 +431,7 @@ jobs:
       - name: Upload publish evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-v327-publish-evidence-${{ github.run_attempt }}
+          name: selfrun-v328-publish-evidence-${{ github.run_attempt }}
           path: |
             release-output/PUBLISH_CERT.txt
             release-output/SHA256SUMS.txt
