@@ -1,6 +1,6 @@
 import { sleep } from "workflow";
 import type { PushAck, WatchRegistration } from "../src/contracts.js";
-import { buildPushEnvelope, ackMatchesIdentity, normalizeDriveResourceState } from "../src/delivery-policy.js";
+import { buildPushEnvelope, ackMatchesIdentity, shouldDeliverDriveContentChange } from "../src/delivery-policy.js";
 import { sendFcmStep } from "../src/firebase.js";
 import { ackHook, driveHook } from "../src/hooks.js";
 import { AckDeliveryRetryState, retryDelaySeconds } from "../src/retry.js";
@@ -49,7 +49,7 @@ export async function watchWorkflow(input: WatchWorkflowInput): Promise<{ status
       pendingDrive = driveIterator.next();
       const signal = next.value;
       if (signal.channelId !== input.channelId) continue;
-      if (normalizeDriveResourceState(signal.resourceState) === "IGNORE") continue;
+      if (!shouldDeliverDriveContentChange(signal.resourceState, signal.changed)) continue;
       if (signal.messageNumber === lastMessageNumber) continue;
       lastMessageNumber = signal.messageNumber;
 
@@ -83,7 +83,7 @@ export async function watchWorkflow(input: WatchWorkflowInput): Promise<{ status
       pendingDrive = driveIterator.next();
       const signal = outcome.value.value;
       if (signal.channelId !== input.channelId) continue;
-      if (normalizeDriveResourceState(signal.resourceState) === "IGNORE") continue;
+      if (!shouldDeliverDriveContentChange(signal.resourceState, signal.changed)) continue;
       if (signal.messageNumber === lastMessageNumber) continue;
       lastMessageNumber = signal.messageNumber;
 
