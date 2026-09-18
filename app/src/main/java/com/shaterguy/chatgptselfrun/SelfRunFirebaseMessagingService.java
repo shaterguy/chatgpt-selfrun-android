@@ -9,6 +9,7 @@ import com.google.firebase.messaging.RemoteMessage;
 /** Data-message receiver. RECEIVED ACK is durably persisted before the foreground service is woken. */
 public final class SelfRunFirebaseMessagingService extends FirebaseMessagingService {
     @Override public void onMessageReceived(RemoteMessage message) {
+        if (!SelfRunServerFeaturePolicy.enabled(this)) return;
         try {
             SelfRunPushEvent event = SelfRunPushEvent.parse(message.getData(), BuildConfig.APPLICATION_ID);
             if (!event.installationId.equals(SelfRunInstallationIdentity.id(this))) return;
@@ -20,6 +21,7 @@ public final class SelfRunFirebaseMessagingService extends FirebaseMessagingServ
     }
 
     @Override public void onNewToken(String token) {
+        if (!SelfRunServerFeaturePolicy.enabled(this)) return;
         SelfRunPushAckWorker.schedule(this);
     }
 }

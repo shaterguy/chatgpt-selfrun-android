@@ -111,11 +111,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     void onPushResult(SelfRunPushEvent push) {
         requireMain();
-        if (push == null) return;
-        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
-            acknowledgeProcessed(push);
-            return;
-        }
+        if (push == null || !SelfRunServerFeaturePolicy.enabled(service)) return;
+        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) return;
         int expectedEpoch = epoch;
         String installationId;
         try {
@@ -152,7 +149,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     void onServerRecovery() {
         requireMain();
-        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+        if (!SelfRunServerFeaturePolicy.enabled(service)
+                || !canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
             SelfRunServerRecoveryWorker.cancel(service);
             return;
         }
@@ -301,11 +299,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
         for (SelfRun3Engine.State execution : waiting) {
             if (execution.resource("resultDocumentId").isEmpty()) continue;
-            boolean useServer = SelfRunServerWaitPolicy.useServerPush(
+            boolean useServer = SelfRunServerFeaturePolicy.buildEnabled()
+                    && SelfRunServerWaitPolicy.useServerPush(
                     workMode, serverFallbackTurns.contains(execution.turnId()));
             if (useServer && !serverRegisteredTurns.contains(execution.turnId())) {
                 if (startServerWatchRegistration(execution)) return;
-                useServer = SelfRunServerWaitPolicy.useServerPush(
+                useServer = SelfRunServerFeaturePolicy.buildEnabled()
+                        && SelfRunServerWaitPolicy.useServerPush(
                         workMode, serverFallbackTurns.contains(execution.turnId()));
             }
             if (useServer) {
@@ -321,8 +321,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             nextDelay = Math.min(nextDelay, due - now);
         }
 
-        if (serverWaiting) SelfRunServerRecoveryWorker.schedule(service);
-        else SelfRunServerRecoveryWorker.cancel(service);
+        if (serverWaiting && SelfRunServerFeaturePolicy.enabled(service)) {
+            SelfRunServerRecoveryWorker.schedule(service);
+        } else {
+            SelfRunServerRecoveryWorker.cancel(service);
+        }
 
         if (shouldReadAuthoritativeResultBeforeDispatch(state)
                 && !authoritativeReadCheckedTurns.contains(state.turnId())) {
@@ -353,6 +356,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private boolean startServerWatchRegistration(SelfRun3Engine.State execution) {
         requireMain();
+        if (!SelfRunServerFeaturePolicy.enabled(service)) return false;
         if (serverRegisteredTurns.contains(execution.turnId())
                 || serverFallbackTurns.contains(execution.turnId())) return false;
         if (serverRegistrationInFlight) return true;
@@ -457,6 +461,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private boolean validServerRegistration(int expectedEpoch, int expectedGeneration) {
         return validEpoch(expectedEpoch) && expectedGeneration == serverGeneration && canRun()
+                && SelfRunServerFeaturePolicy.enabled(service)
                 && runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.SERVER;
     }
 
@@ -600,8 +605,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (step == DriveStep.READ_RESULT) {
                         serverRegisteredTurns.remove(expectedTurn);
                         nextResultPoll.remove(expectedTurn);
-                        if (!SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
-                                serverFallbackTurns.contains(expectedTurn))
+                        if ((!SelfRunServerFeaturePolicy.buildEnabled()
+                                || !SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+                                serverFallbackTurns.contains(expectedTurn)))
                                 && completed.turnId().equals(expectedTurn)) {
                             nextResultPoll.put(expectedTurn,
                                     SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
@@ -660,7 +666,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void scheduleResultRetry(SelfRun3Engine.State state) {
-        if (SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+        if (SelfRunServerFeaturePolicy.buildEnabled()
+                && SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
                 serverFallbackTurns.contains(state.turnId()))) {
             serverRegisteredTurns.remove(state.turnId());
             nextResultPoll.remove(state.turnId());
@@ -699,7 +706,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void acknowledgeProcessed(SelfRunPushEvent push) {
-        if (push == null) return;
+        if (push == null || !SelfRunServerFeaturePolicy.enabled(service)) return;
         try {
             SelfRunPushAckOutbox.enqueue(service, push, SelfRunPushAckOutbox.AckState.PROCESSED);
         } catch (Throwable error) {

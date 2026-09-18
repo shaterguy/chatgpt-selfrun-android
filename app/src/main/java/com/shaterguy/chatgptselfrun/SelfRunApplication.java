@@ -16,7 +16,13 @@ public final class SelfRunApplication extends Application {
         UserNextInputStore.initialize(context);
         WorkProtocolNativeObserver.installProcess(context);
         SelfRunProcessExitDiagnostics.capture(context);
-        SelfRunFirebase.initialize(context);
-        if (SelfRunPushAckOutbox.pendingCount(context) > 0) SelfRunPushAckWorker.schedule(context);
+        new SelfRun3RuntimeSettings(context);
+        if (SelfRunServerFeaturePolicy.enabled(context)) {
+            SelfRunFirebase.initialize(context);
+            if (SelfRunPushAckOutbox.pendingCount(context) > 0) SelfRunPushAckWorker.schedule(context);
+        } else {
+            SelfRunPushAckWorker.cancel(context);
+            SelfRunServerRecoveryWorker.cancel(context);
+        }
     }
 }
