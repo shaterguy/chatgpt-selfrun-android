@@ -26,7 +26,7 @@ public final class SelfRun3ArchitectureTest {
         String protocol=source("SelfRun3Protocol.java");
         String engine=source("SelfRun3Engine.java");
         assertTrue(protocol.contains("Dynamic SelfRun 3 envelope"));
-        assertTrue(protocol.contains("compactProfileChoices"));
+        assertTrue(protocol.contains("compactWorkProfileChoices"));
         assertFalse(protocol.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));
         assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(protocol.contains("ProfileRegistry.export"));
