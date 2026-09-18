@@ -312,10 +312,13 @@ jobs:
           sed -i "s/testBuildType 'qaApp'/testBuildType 'release'/" app/build.gradle
           grep -Fq "testBuildType 'release'" app/build.gradle
           FORMAL_TEST_SOURCE='app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRun3OnDeviceFormalUpgradeAndroidTest.java'
+          FORMAL_RUNNER_SOURCE='app/src/androidTest/java/com/shaterguy/chatgptselfrun/SelfRunAndroidTestRunner.java'
           test -s "$FORMAL_TEST_SOURCE"
-          find app/src/androidTest/java -type f -name '*.java' ! -path "$FORMAL_TEST_SOURCE" -delete
-          test "$(find app/src/androidTest/java -type f -name '*.java' | wc -l | tr -d ' ')" = '1'
+          test -s "$FORMAL_RUNNER_SOURCE"
+          find app/src/androidTest/java -type f -name '*.java' ! -path "$FORMAL_TEST_SOURCE" ! -path "$FORMAL_RUNNER_SOURCE" -delete
+          test "$(find app/src/androidTest/java -type f -name '*.java' | wc -l | tr -d ' ')" = '2'
           test "$(grep -c '@Test' "$FORMAL_TEST_SOURCE")" = '1'
+          grep -Fq 'SelfRun3OnDeviceFormalUpgradeAndroidTest' "$FORMAL_RUNNER_SOURCE"
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:compileReleaseAndroidTestJavaWithJavac :app:assembleReleaseAndroidTest
           RAW="$(find app/build/outputs/apk/androidTest -type f -name '*.apk' -print -quit)"
