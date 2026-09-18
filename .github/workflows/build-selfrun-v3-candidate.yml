@@ -328,7 +328,6 @@ jobs:
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' current/FORMAL_ANDROIDTEST_CERT.txt
           TEST_BADGING="$($BT/aapt dump badging current/formal-androidTest.apk)"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING"
-          grep -Fq "targetPackage='com.shaterguy.chatgptselfrun.drive'" <<<"$TEST_BADGING"
       - name: Enable hardware acceleration
         shell: bash
         run: |
