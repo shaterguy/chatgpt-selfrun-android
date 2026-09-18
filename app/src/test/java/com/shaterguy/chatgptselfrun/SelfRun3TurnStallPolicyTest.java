@@ -63,7 +63,9 @@ public final class SelfRun3TurnStallPolicyTest {
 
         JSONObject result = SelfRun3Engine.emptyResult(state);
         put(result, "committed", true); put(result, "status", "CONTINUE"); put(result, "next_phase", "WORK");
-        put(result, "next_profile", new JSONObject().put("mode","CHAT").put("model","gpt-5-6-thinking").put("reasoning","medium"));
+        JSONObject nextProfile = new JSONObject();
+        put(nextProfile, "mode", "CHAT"); put(nextProfile, "model", "gpt-5-6-thinking"); put(nextProfile, "reasoning", "medium");
+        put(result, "next_profile", nextProfile);
         JSONObject payload = new JSONObject(); put(payload, "text", result.toString());
         SelfRun3Engine.State committed = event(state, state.turnId(), state.turnId() + ":result",
                 SelfRun3Engine.Kind.RESULT, payload);
