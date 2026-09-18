@@ -19,14 +19,16 @@ public final class SelfRun3AuthorityRestartReadTest {
         assertFalse(source.contains("RESULT_EXISTS_BEFORE_DISPATCH"));
     }
 
-    @Test public void firstUnauthorizedReadRefreshesBeforePushAckOrServerStateMutation() throws Exception {
+    @Test public void firstUnauthorizedReadRefreshesWithoutTerminalAck() throws Exception {
         String source = coordinatorSource();
         int catchBlock = source.indexOf("error instanceof DriveApiClient.ApiException api && api.status == 401");
-        int refresh = source.indexOf("retryDriveStepAfterUnauthorized(state, step, trigger, push", catchBlock);
-        int ack = source.indexOf("acknowledgeProcessed(push)", catchBlock);
+        int refresh = source.indexOf("retryDriveStepAfterUnauthorized(", catchBlock);
+        int handlerEnd = source.indexOf("private void retryDriveStepAfterUnauthorized", catchBlock);
         assertTrue(catchBlock >= 0);
         assertTrue(refresh > catchBlock);
-        assertTrue(ack > refresh);
+        assertTrue(handlerEnd > refresh);
+        String unauthorizedHandler = source.substring(catchBlock, handlerEnd);
+        assertFalse(unauthorizedHandler.contains("acknowledgeProcessed(push)"));
     }
 
     private static String coordinatorSource() throws Exception {
