@@ -104,7 +104,9 @@ public final class SelfRun3CommittedResultPriorityTest {
         put(r, "phase_completed", "WORK");
         put(r, "next_phase", "WORK");
         put(r, "next_input", "");
-        put(r, "next_profile", new JSONObject().put("mode","CHAT").put("model","gpt-5-6-thinking").put("reasoning","medium"));
+        JSONObject nextProfile = new JSONObject();
+        put(nextProfile, "mode", "CHAT"); put(nextProfile, "model", "gpt-5-6-thinking"); put(nextProfile, "reasoning", "medium");
+        put(r, "next_profile", nextProfile);
         return r;
     }
 
