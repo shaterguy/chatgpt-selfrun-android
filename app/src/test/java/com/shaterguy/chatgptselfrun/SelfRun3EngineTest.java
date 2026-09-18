@@ -177,7 +177,8 @@ public final class SelfRun3EngineTest {
         state = resource(state, "resultDocumentId", "hybrid-result");
         JSONObject ready = new JSONObject(); SelfRun3Engine.put(ready, "prompt", "hello"); SelfRun3Engine.put(ready, "inputRevision", 0L);
         state = reduce(state, "hybrid-ready", SelfRun3Engine.Kind.TURN_READY, ready);
-        state = reduce(state, "hybrid-claim", SelfRun3Engine.Kind.CLAIM_SEND, new JSONObject().put("at", 100L));
+        JSONObject claim = new JSONObject(); SelfRun3Engine.put(claim, "at", 100L);
+        state = reduce(state, "hybrid-claim", SelfRun3Engine.Kind.CLAIM_SEND, claim);
 
         JSONObject result = continueResult(state);
         SelfRun3Engine.put(result, "next_profile", chatProfile("gpt-5-6-thinking", "xhigh"));
@@ -287,7 +288,7 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.put(r, "phase_completed", "PLAN");
         SelfRun3Engine.put(r, "next_phase", "WORK");
         SelfRun3Engine.put(r, "next_input", "");
-        SelfRun3Engine.put(r, "next_profile", new JSONObject().put("mode","CHAT").put("model","gpt-5-6-thinking").put("reasoning","medium"));
+        SelfRun3Engine.put(r, "next_profile", chatProfile("gpt-5-6-thinking", "medium"));
         SelfRun3Engine.put(r, "handoff", handoff());
         return r;
     }
@@ -327,7 +328,11 @@ public final class SelfRun3EngineTest {
     }
 
     private static JSONObject chatProfile(String model, String reasoning) {
-        return new JSONObject().put("mode", "CHAT").put("model", model).put("reasoning", reasoning);
+        JSONObject profile = new JSONObject();
+        SelfRun3Engine.put(profile, "mode", "CHAT");
+        SelfRun3Engine.put(profile, "model", model);
+        SelfRun3Engine.put(profile, "reasoning", reasoning);
+        return profile;
     }
 
     private static JSONObject request(SelfRun3Engine.State s) {
