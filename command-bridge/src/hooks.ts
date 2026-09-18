@@ -4,6 +4,7 @@ import type { PushAck } from "./contracts.js";
 export interface DriveSignal {
   channelId: string;
   resourceState: string;
+  changed: string;
   messageNumber: string;
   resourceId: string;
 }
