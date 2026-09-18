@@ -30,7 +30,11 @@ public final class SelfRunServerResultRecheckWorker extends Worker {
     }
 
     static boolean scheduleInitial(Context context, String turnId) {
-        return scheduleStart(context, turnId);
+        return scheduleStart(context, turnId, true);
+    }
+
+    static boolean ensureActive(Context context, String turnId) {
+        return scheduleStart(context, turnId, false);
     }
 
     static boolean scheduleNext(Context context, String turnId, int completedAttempt) {
@@ -59,11 +63,12 @@ public final class SelfRunServerResultRecheckWorker extends Worker {
         prefs.edit().clear().apply();
     }
 
-    private static synchronized boolean scheduleStart(Context context, String turnId) {
+    private static synchronized boolean scheduleStart(Context context, String turnId,
+                                                      boolean allowExhausted) {
         if (turnId == null || turnId.isEmpty()) return false;
         Context app = context.getApplicationContext();
         int currentAttempt = prefs(app).getInt(turnId, -1);
-        if (!SelfRunServerWaitPolicy.mayStartServerResultRecheck(currentAttempt, true)) return false;
+        if (!SelfRunServerWaitPolicy.mayStartServerResultRecheck(currentAttempt, allowExhausted)) return false;
         return scheduleExpected(app, turnId, currentAttempt, 0);
     }
 

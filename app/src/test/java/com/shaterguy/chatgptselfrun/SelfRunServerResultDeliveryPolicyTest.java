@@ -23,7 +23,7 @@ public final class SelfRunServerResultDeliveryPolicyTest {
         assertEquals(-1L, SelfRunServerWaitPolicy.serverResultRecheckDelayMs(expected.length));
     }
 
-    @Test public void fifteenMinuteRecoveryRearmsAnExhaustedChainAndFindsACommitTwoMinutesLater() {
+    @Test public void fifteenMinuteOnDeviceBackupRearmsAnExhaustedChainAndFindsACommitTwoMinutesLater() {
         long recoveryAt = SelfRunServerWaitPolicy.RECOVERY_INTERVAL_MINUTES * 60_000L;
         long firstChainExhaustedAt = 0L;
         for (int attempt = 0; attempt < SelfRunServerWaitPolicy.serverResultRecheckAttemptCount(); attempt++) {
@@ -55,13 +55,16 @@ public final class SelfRunServerResultDeliveryPolicyTest {
                 "catch (ResultPendingException pending)",
                 "catch (Throwable error)");
         assertFalse(pendingCatch.contains("acknowledgeProcessed(push)"));
+        assertTrue(pendingCatch.contains("rememberPendingServerPush(expectedTurn, push, \"PENDING_RESULT\")"));
         assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleInitial"));
         assertTrue(pendingCatch.contains("SelfRunServerResultRecheckWorker.scheduleNext"));
     }
 
     @Test public void exhaustedRecheckChainIsRearmedButActiveChainStaysDeduplicated() throws Exception {
         String worker = source("SelfRunServerResultRecheckWorker.java");
-        assertTrue(worker.contains("mayStartServerResultRecheck(currentAttempt, true)"));
+        assertTrue(worker.contains("scheduleStart(context, turnId, true)"));
+        assertTrue(worker.contains("scheduleStart(context, turnId, false)"));
+        assertTrue(worker.contains("mayStartServerResultRecheck(currentAttempt, allowExhausted)"));
         assertTrue(worker.contains("scheduleExpected(app, turnId, currentAttempt, 0)"));
         assertTrue(worker.contains("ExistingWorkPolicy.KEEP"));
     }
@@ -78,7 +81,38 @@ public final class SelfRunServerResultDeliveryPolicyTest {
         assertTrue(pushHandler.contains("if (exact == null) return;"));
         assertTrue(pushHandler.contains("exact.terminal() || exact.flag(\"superseded\")"));
         assertFalse(pushHandler.contains("serverFallbackTurns.contains(exact.turnId())"));
-        assertTrue(coordinator.contains("if (push != null) acknowledgeProcessed(push);"));
+        assertTrue(coordinator.contains("acknowledgeCompletedServerPushes(expectedTurn, push);"));
+        assertTrue(coordinator.contains("SelfRunServerPendingPushStore.clearIfSame(service, push)"));
+    }
+
+    @Test public void duplicatePendingPushIsCoalescedWithoutReadOrExhaustedRearm() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        String pushHandler = between(coordinator, "void onPushResult", "void onServerRecovery");
+        assertTrue(pushHandler.contains("SelfRunServerPendingPushStore.isSamePending(service, push)"));
+        assertTrue(pushHandler.contains("SelfRunServerResultRecheckWorker.ensureActive(service, exact.turnId())"));
+        assertTrue(pushHandler.contains("V3_SERVER_PUSH_COALESCED"));
+        String pendingStore = source("SelfRunServerPendingPushStore.java");
+        assertTrue(pendingStore.contains("SharedPreferences"));
+        assertTrue(pendingStore.contains("sameLogicalEvent(event)"));
+    }
+
+    @Test public void retryableServerPushReadFailureRemainsNonTerminalAndDurable() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        String driveStep = between(coordinator, "private void executeDriveStep", "private void scheduleResultRetry");
+        int failureStart = driveStep.lastIndexOf("catch (Throwable error)");
+        assertTrue("missing READ_RESULT failure catch", failureStart >= 0);
+        String failure = driveStep.substring(failureStart);
+        assertTrue(failure.contains("rememberPendingServerPush(expectedTurn, push, \"RETRYABLE_DRIVE_FAILURE\")"));
+        assertFalse(failure.contains("acknowledgeProcessed(push)"));
+    }
+
+    @Test public void diagnosticsSeparateServerPushRecheckAndOnDeviceBackupWithoutRawEventId() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(coordinator.contains("ON_DEVICE_POLL, SERVER_PUSH, ON_DEVICE_BACKUP, AUTHORITY, SERVER_RECHECK"));
+        String trigger = between(coordinator, "private void recordResultReadTrigger", "private void rememberPendingServerPush");
+        assertTrue(trigger.contains("V3_RESULT_READ_TRIGGER"));
+        assertTrue(trigger.contains("push.safeFingerprint()"));
+        assertFalse(trigger.contains("push.eventId"));
     }
 
     @Test public void boundedRecheckIsDurableAcrossProcessRestartAndDeduplicatedByTurnAttempt() throws Exception {
