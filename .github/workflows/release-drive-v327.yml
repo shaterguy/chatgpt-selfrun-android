@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - selfrun-drive/v3.2.7-rc2
+      - selfrun-drive/v3.2.7-rc3
       - main
 
 concurrency:
@@ -19,7 +19,7 @@ jobs:
   build-release:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.ref == 'refs/heads/selfrun-drive/v3.2.7-rc2' ||
+      github.ref == 'refs/heads/selfrun-drive/v3.2.7-rc3' ||
       (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: SelfRun Drive 3.2.7'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
