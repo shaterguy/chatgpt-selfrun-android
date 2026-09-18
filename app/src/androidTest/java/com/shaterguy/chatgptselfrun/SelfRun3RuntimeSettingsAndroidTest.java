@@ -50,14 +50,14 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertTrue(first.saveStallAlertMinutes("126"));
         assertTrue(first.saveResultPollSeconds("31"));
         assertTrue(first.saveWebPreparationSeconds("91"));
-        assertTrue(first.saveWorkMode(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE));
+        assertTrue(first.saveWorkMode(SelfRun3RuntimeSettings.WorkMode.SERVER));
 
         SelfRun3RuntimeSettings reopened = new SelfRun3RuntimeSettings(context);
         assertEquals(121L, reopened.resultRepairMinutes());
         assertEquals(126L, reopened.stallAlertMinutes());
         assertEquals(31L, reopened.resultPollSeconds());
         assertEquals(91L, reopened.webPreparationSeconds());
-        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, reopened.workMode());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, reopened.workMode());
         assertEquals(121L * 60_000L, reopened.resultRepairMs());
         assertEquals(126L * 60_000L, reopened.stallAlertMs());
         assertEquals(31_000L, reopened.resultPollMs());
