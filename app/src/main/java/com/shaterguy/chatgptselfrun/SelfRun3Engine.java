@@ -226,7 +226,7 @@ final class SelfRun3Engine {
                         if(usableParallelPlan(plan,s) && !p.optBoolean("lateInput")) {
                             v=fanout(saved,r,plan);
                         } else {
-                            JSONObject profile=nextProfile(r,s);
+                            JSONObject profile=p.optBoolean("lateInput") ? executionProfile(s) : nextProfile(r,s);
                             String phase=p.optBoolean("lateInput") ? "PLAN" : routingPhase(r,s);
                             String signal="USER_ACTION_RESOLVED".equals(status) ? "USER_ACTION_RESUME" : p.optBoolean("lateInput") ? "USER_INPUT" : "AUTO_NEXT_TURN";
                             v=fresh(saved,phase,profile,"NORMAL",signal,s.resource("resultDocumentId"));
@@ -367,15 +367,19 @@ final class SelfRun3Engine {
     }
     static JSONObject nextProfile(JSONObject r,State s) {
         JSONObject plan=r.optJSONObject("next_execution"), p=plan==null?null:plan.optJSONObject("profile");
-        if(p==null) p=r.optJSONObject("next_profile"); if(p==null) p=r.optJSONObject("profile");
-        if(p==null || !validRoutingProfile(p,s)) return executionProfile(s);
+        if(p==null) p=r.optJSONObject("next_profile");
+        if(p==null && r.optString("status").isEmpty()) return executionProfile(s);
+        require(p!=null && validRoutingProfile(p,s),"explicit registered next profile required");
         return copy(p);
     }
     static void applyProfile(JSONObject config,JSONObject p,String policy) {
         require(p!=null,"execution profile required"); String mode=p.optString("mode",config.optString("mode"));
         require(Set.of("CHAT","WORK").contains(mode) && ("HYBRID".equals(policy)||policy.equals(mode)),"task mode boundary");
         String model=p.optString("model"), reasoning=p.optString("reasoning");
-        require("CHAT".equals(mode)? model.isEmpty() && ProfileRegistry.resolveChat(reasoning)!=null : ProfileRegistry.resolveWork(model,reasoning)!=null,"unregistered profile");
+        boolean registered="CHAT".equals(mode)
+                ? (model.isEmpty() ? ProfileRegistry.resolveChat(reasoning)!=null : ProfileRegistry.resolveChat(model,reasoning)!=null)
+                : ProfileRegistry.resolveWork(model,reasoning)!=null;
+        require(registered,"unregistered profile");
         put(config,"mode",mode); put(config,"model",model); put(config,"reasoning",reasoning); put(config,"chatBootstrap",reasoning); config.remove("chatContinuation");
     }
 
@@ -408,6 +412,7 @@ private static String routingPhase(JSONObject r,State s) {
     }
     private static boolean validRoutingProfile(JSONObject p,State s) {
         if(p==null) return false;
+        if("CHAT".equals(p.optString("mode")) && p.optString("model").isEmpty()) return false;
         try { JSONObject check=s.config(); applyProfile(check,p,s.taskMode()); return true; }
         catch(RuntimeException invalid) { return false; }
     }

@@ -73,20 +73,15 @@ final class SelfRun3Protocol {
     }
 
     private static void appendProfileChoices(StringBuilder out,String taskMode) {
-        if("CHAT".equals(taskMode) || "HYBRID".equals(taskMode))
-            out.append("\n[PROFILE_REGISTRY_CHAT]\n").append(compactProfileChoices(ProfileRegistry.Mode.CHAT)).append('\n');
         if("WORK".equals(taskMode) || "HYBRID".equals(taskMode))
-            out.append("\n[PROFILE_REGISTRY_WORK]\n").append(compactProfileChoices(ProfileRegistry.Mode.WORK)).append('\n');
+            out.append("\n[PROFILE_REGISTRY_WORK]\n").append(compactWorkProfileChoices()).append('\n');
     }
 
-    private static String compactProfileChoices(ProfileRegistry.Mode mode) {
+    private static String compactWorkProfileChoices() {
         JSONArray choices=new JSONArray();
-        for(ProfileRegistry.Profile profile : mode==ProfileRegistry.Mode.CHAT
-                ? ProfileRegistry.listChat() : ProfileRegistry.listWork()) {
-            if(mode==ProfileRegistry.Mode.CHAT && !"xhigh".equals(profile.signalReasoning)) continue;
+        for(ProfileRegistry.Profile profile : ProfileRegistry.listWork()) {
             JSONObject signal=new JSONObject();
-            if(mode==ProfileRegistry.Mode.WORK)
-                SelfRun3Engine.put(signal,"model",profile.signalModel);
+            SelfRun3Engine.put(signal,"model",profile.signalModel);
             SelfRun3Engine.put(signal,"reasoning",profile.signalReasoning);
             choices.put(signal);
         }

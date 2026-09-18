@@ -134,6 +134,61 @@ public final class SelfRun3EngineTest {
         assertEquals("PLAN", next.text("phase"));
     }
 
+    @Test public void nextExecutionProfileWinsAndTopLevelProfileCannotOverrideIt() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = continueResult(claimed);
+        JSONObject next = new JSONObject();
+        SelfRun3Engine.put(next, "type", "SERIAL");
+        SelfRun3Engine.put(next, "objective", "use exact result-selected profile");
+        SelfRun3Engine.put(next, "profile", chatProfile("gpt-5-6-thinking", "xhigh"));
+        SelfRun3Engine.put(result, "next_execution", next);
+        SelfRun3Engine.put(result, "next_profile", chatProfile("gpt-5-6-thinking", "high"));
+        SelfRun3Engine.put(result, "profile", chatProfile("gpt-5-6-thinking", "medium"));
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result-priority", SelfRun3Engine.Kind.RESULT, payload);
+        SelfRun3Engine.State advanced = reduce(withResult, "commit-priority", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals("CHAT", advanced.config().optString("mode"));
+        assertEquals("gpt-5-6-thinking", advanced.config().optString("model"));
+        assertEquals("xhigh", advanced.config().optString("reasoning"));
+    }
+
+    @Test public void normalContinuationCannotUseTopLevelOrCurrentProfileFallback() {
+        SelfRun3Engine.State claimed = claimedState();
+        JSONObject result = continueResult(claimed);
+        result.remove("next_profile");
+        SelfRun3Engine.put(result, "profile", chatProfile("gpt-5-6-thinking", "high"));
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result-no-next-profile", SelfRun3Engine.Kind.RESULT, payload);
+        assertThrows(IllegalStateException.class,
+                () -> reduce(withResult, "commit-no-next-profile", SelfRun3Engine.Kind.COMMIT, new JSONObject()));
+    }
+
+    @Test public void hybridWorkToChatUsesExactResultProfile() {
+        JSONObject config = new JSONObject();
+        SelfRun3Engine.put(config, "taskMode", "HYBRID");
+        SelfRun3Engine.put(config, "mode", "WORK");
+        SelfRun3Engine.put(config, "model", "sol");
+        SelfRun3Engine.put(config, "reasoning", "high");
+        SelfRun3Engine.put(config, "projectUrl", "https://chatgpt.com/");
+        SelfRun3Engine.State state = SelfRun3Engine.create("hybrid-task", "hybrid-task:turn:1", config);
+        state = resource(state, "folderId", "folder");
+        state = resource(state, "requirementDocumentId", "requirements");
+        state = reduce(state, "hybrid-setup", SelfRun3Engine.Kind.SETUP_DONE, new JSONObject());
+        state = resource(state, "resultDocumentId", "hybrid-result");
+        JSONObject ready = new JSONObject(); SelfRun3Engine.put(ready, "prompt", "hello"); SelfRun3Engine.put(ready, "inputRevision", 0L);
+        state = reduce(state, "hybrid-ready", SelfRun3Engine.Kind.TURN_READY, ready);
+        state = reduce(state, "hybrid-claim", SelfRun3Engine.Kind.CLAIM_SEND, new JSONObject().put("at", 100L));
+
+        JSONObject result = continueResult(state);
+        SelfRun3Engine.put(result, "next_profile", chatProfile("gpt-5-6-thinking", "xhigh"));
+        JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
+        state = reduce(state, "hybrid-result-event", SelfRun3Engine.Kind.RESULT, payload);
+        state = reduce(state, "hybrid-commit", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals("CHAT", state.config().optString("mode"));
+        assertEquals("gpt-5-6-thinking", state.config().optString("model"));
+        assertEquals("xhigh", state.config().optString("reasoning"));
+    }
+
     @Test public void doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject result = doneResult(claimed);
@@ -232,6 +287,7 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.put(r, "phase_completed", "PLAN");
         SelfRun3Engine.put(r, "next_phase", "WORK");
         SelfRun3Engine.put(r, "next_input", "");
+        SelfRun3Engine.put(r, "next_profile", new JSONObject().put("mode","CHAT").put("model","gpt-5-6-thinking").put("reasoning","medium"));
         SelfRun3Engine.put(r, "handoff", handoff());
         return r;
     }
@@ -268,6 +324,10 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.put(h, "next_action", "continue");
         for (String key : new String[]{"requirements","decisions","assumptions","materials","external_state","verification_state","do_not_repeat"}) SelfRun3Engine.put(h,key,new org.json.JSONArray());
         return h;
+    }
+
+    private static JSONObject chatProfile(String model, String reasoning) {
+        return new JSONObject().put("mode", "CHAT").put("model", model).put("reasoning", reasoning);
     }
 
     private static JSONObject request(SelfRun3Engine.State s) {

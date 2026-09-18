@@ -39,7 +39,7 @@ RECEIPT=[SELF_RUN_3_RESULT ...]
 EXECUTION_PROFILE={"mode":"...","model":"...","reasoning":"..."}
 ```
 
-고정 phase·checkpoint·Result commit·Branch/Merge/Repair/User Action 의미론은 `SELF_RUN_SKILL_DOCUMENT_ID`의 최신 전체 본문이 유일한 원본입니다. 최초 요구사항과 초기 Result identity는 각각 지정된 Drive 문서에서 읽으므로 프롬프트에 다시 넣지 않습니다. 다음 실행 선택이 가능한 실행에는 TASK_MODE에 맞는 `PROFILE_REGISTRY_CHAT` 또는 `PROFILE_REGISTRY_WORK`를 signal 키만 담은 compact 목록으로 추가하며, Branch/Merge/Repair context와 사용자 추가·개입 입력은 해당 실행에 존재할 때만 추가합니다.
+고정 phase·checkpoint·Result commit·Branch/Merge/Repair/User Action 의미론은 `SELF_RUN_SKILL_DOCUMENT_ID`의 최신 전체 본문이 유일한 원본입니다. 최초 요구사항과 초기 Result identity는 각각 지정된 Drive 문서에서 읽으므로 프롬프트에 다시 넣지 않습니다. CHAT 프롬프트에는 profile 후보목록을 삽입하지 않으며 다음 CHAT 실행은 직전 Result의 `next_execution.profile` 또는 `next_profile`에 기록된 model/reasoning을 원본으로 사용합니다. ProfileRegistry는 그 선택값을 실제 request profile로 검증·변환합니다. WORK/HYBRID 프롬프트의 WORK 후보는 `PROFILE_REGISTRY_WORK` compact 목록으로 유지합니다.
 
 ## Drive 계약
 

@@ -171,7 +171,9 @@ public final class SelfRun3DisposableExecutionTest {
     }
     private static JSONObject result(SelfRun3Engine.State s) {
         JSONObject r=SelfRun3Engine.emptyResult(s); put(r,"committed",true); put(r,"status","CONTINUE");
-        put(r,"phase_completed","PLAN"); put(r,"next_phase","WORK"); put(r,"handoff",handoff()); return r;
+        put(r,"phase_completed","PLAN"); put(r,"next_phase","WORK");
+        put(r,"next_profile",profile("CHAT","gpt-5-6-thinking","medium"));
+        put(r,"handoff",handoff()); return r;
     }
     private static JSONObject handoff() {
         JSONObject h=new JSONObject(); put(h,"objective","test"); put(h,"next_action","continue");
@@ -182,8 +184,8 @@ public final class SelfRun3DisposableExecutionTest {
         JSONObject p=new JSONObject(); put(p,"type","PARALLEL"); put(p,"parallel_group_id","wave1");
         JSONArray b=new JSONArray(); for(String id:new String[]{"A","B"}) {
             JSONObject x=new JSONObject(); put(x,"branch_id",id); put(x,"objective","independent read "+id);
-            put(x,"profile",profile("CHAT","","medium")); put(x,"mutation_boundary",new JSONArray()); b.put(x);
-        } put(p,"branches",b); return p;
+            put(x,"profile",profile("CHAT","gpt-5-6-thinking","medium")); put(x,"mutation_boundary",new JSONArray()); b.put(x);
+        } put(p,"branches",b); put(p,"profile",profile("CHAT","gpt-5-6-thinking","medium")); return p;
     }
     private static JSONObject profile(String mode,String model,String reason) {
         JSONObject p=new JSONObject(); put(p,"mode",mode); put(p,"model",model); put(p,"reasoning",reason); return p;

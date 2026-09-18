@@ -75,7 +75,7 @@ public final class SelfRun3TrailingBraceRecoveryTest {
         SelfRun3Engine.put(r, "handoff", handoff());
         JSONObject profile = new JSONObject();
         SelfRun3Engine.put(profile, "mode", "CHAT");
-        SelfRun3Engine.put(profile, "model", "");
+        SelfRun3Engine.put(profile, "model", "gpt-5-6");
         SelfRun3Engine.put(profile, "reasoning", "instant");
         SelfRun3Engine.put(r, "next_profile", profile);
         return r;

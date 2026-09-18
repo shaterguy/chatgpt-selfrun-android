@@ -31,9 +31,10 @@ public final class RequestProfileRecreationAndroidTest {
             evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
             JSONObject first = new JSONObject(read(scenario, web,
                     "(()=>{" + RequestProfileScript.beginTarget("chat", RUN_ID)
-                            + RequestProfileScript.setChatReasoning("medium")
+                            + RequestProfileScript.setChatProfile("gpt-5-6-thinking", "medium")
                             + "return JSON.stringify(window.__selfRunRequestProfileEngine.target());})()"));
             assertEquals("chat", first.getString("mode"));
+            assertEquals("gpt-5-6-thinking", first.getString("model"));
             assertEquals("medium", first.getString("reasoning"));
             assertEquals("medium", first.getString("bootstrapReasoning"));
             assertEquals("medium", first.getString("continuationReasoning"));
@@ -46,6 +47,7 @@ public final class RequestProfileRecreationAndroidTest {
             JSONObject diagnostics = new JSONObject(read(scenario, web,
                     "JSON.stringify(window.__selfRunRequestProfileEngine.diagnostics())"));
             assertEquals("chat", restored.getString("mode"));
+            assertEquals("gpt-5-6-thinking", restored.getString("model"));
             assertEquals("medium", restored.getString("reasoning"));
             assertEquals("medium", restored.getString("bootstrapReasoning"));
             assertEquals("medium", restored.getString("continuationReasoning"));

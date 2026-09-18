@@ -12,9 +12,9 @@ import static org.junit.Assert.*;
 /** Prevents producer/consumer registry engine drift. */
 public final class RequestProfileVersionContractTest {
     @Test public void producerOwnsOneCanonicalRegistryEngineVersion() throws Exception {
-        assertEquals("profile-registry-v5", RequestProfileScript.ENGINE_VERSION);
+        assertEquals("profile-registry-v6", RequestProfileScript.ENGINE_VERSION);
         String producer = source("RequestProfileScript.java");
-        assertEquals(1, occurrences(producer, "profile-registry-v5"));
+        assertEquals(1, occurrences(producer, "profile-registry-v6"));
         assertTrue(producer.contains("static final String ENGINE_VERSION"));
         assertTrue(producer.contains("__ENGINE_VERSION__"));
         assertTrue(producer.contains("ProfileRegistry.runtimeJson()"));
@@ -69,6 +69,8 @@ public final class RequestProfileVersionContractTest {
         assertTrue(script.contains("patchObject(parsed,targetSnapshot())"));
         assertTrue(script.contains("latestMessageText"));
         assertTrue(script.contains("setChatProfiles"));
+        assertTrue(script.contains("setChatProfile"));
+        assertTrue(script.contains("profileRequestModel"));
     }
 
     @Test public void registryIsTheOnlyControlPlaneAuthority() {

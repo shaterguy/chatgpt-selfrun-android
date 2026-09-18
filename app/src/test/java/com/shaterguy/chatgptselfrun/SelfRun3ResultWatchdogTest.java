@@ -211,6 +211,7 @@ public final class SelfRun3ResultWatchdogTest {
         JSONObject r = SelfRun3Engine.emptyResult(s);
         put(r, "committed", true); put(r, "status", "CONTINUE");
         put(r, "phase_completed", "PLAN"); put(r, "next_phase", "WORK");
+        put(r, "next_profile", new JSONObject().put("mode","CHAT").put("model","gpt-5-6-thinking").put("reasoning","medium"));
         JSONObject h = new JSONObject(); put(h, "objective", "continue"); put(h, "next_action", "work");
         for (String key : new String[]{"completed","remaining","evidence","constraints","requirements","decisions","assumptions","materials","external_state","verification_state","do_not_repeat"})
             put(h, key, new org.json.JSONArray());

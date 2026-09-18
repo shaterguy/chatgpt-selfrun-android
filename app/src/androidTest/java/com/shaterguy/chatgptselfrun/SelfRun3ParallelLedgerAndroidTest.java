@@ -86,8 +86,8 @@ public final class SelfRun3ParallelLedgerAndroidTest {
         JSONObject p=new JSONObject(); put(p,"type","PARALLEL"); put(p,"parallel_group_id","wave1");
         JSONArray b=new JSONArray(); for(String id:new String[]{"A","B"}) {
             JSONObject x=new JSONObject(); put(x,"branch_id",id); put(x,"objective","independent read "+id);
-            put(x,"profile",profile("CHAT","","medium")); put(x,"mutation_boundary",new JSONArray()); b.put(x);
-        } put(p,"branches",b); return p;
+            put(x,"profile",profile("CHAT","gpt-5-6-thinking","medium")); put(x,"mutation_boundary",new JSONArray()); b.put(x);
+        } put(p,"branches",b); put(p,"profile",profile("CHAT","gpt-5-6-thinking","medium")); return p;
     }
     private static JSONObject profile(String mode,String model,String reason) {
         JSONObject p=new JSONObject(); put(p,"mode",mode); put(p,"model",model); put(p,"reasoning",reason); return p;

@@ -140,8 +140,8 @@ grep -Fq 'SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo"' "$CO
 for field in TASK_ID TURN_ID REQUEST_ID TURN PHASE TASK_MODE MODE EXECUTION_KIND SIGNAL_TYPE RESULT_DOCUMENT_ID REQUIREMENT_DOCUMENT_ID PREVIOUS_RESULT_DOCUMENT_ID FOLDER_ID RECEIPT EXECUTION_PROFILE; do
   grep -Fq "$field" "$CONTRACT"
 done
-grep -Fq 'compactProfileChoices' "$CONTRACT"
-grep -Fq 'PROFILE_REGISTRY_CHAT' "$CONTRACT"
+grep -Fq 'compactWorkProfileChoices' "$CONTRACT"
+! grep -Fq 'PROFILE_REGISTRY_CHAT' "$CONTRACT"
 grep -Fq 'PROFILE_REGISTRY_WORK' "$CONTRACT"
 grep -Fq 'PARALLEL_MERGE' "$CONTRACT"
 grep -Fq 'REPAIR_TARGET_DOCUMENT_ID' "$CONTRACT"
@@ -209,6 +209,7 @@ grep -Fq 'SelfRun3BootstrapTransport.prepare' "$WEB"
 grep -Fq 'SelfRun3BootstrapTransport.submit' "$WEB"
 grep -Fq 'RequestProfileScript.beginTarget' "$WEB"
 grep -Fq 'RequestProfileScript.setChatReasoning' "$WEB"
+grep -Fq 'RequestProfileScript.setChatProfile' "$WEB"
 grep -Fq 'SelfRun3DispatchScript.arm' "$WEB"
 ! grep -Fq 'SelfRunContinuationDom.prepareBootstrap' "$WEB"
 ! grep -Fq 'SelfRun3ComposerTransport.prepareContinuation' "$WEB"

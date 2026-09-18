@@ -35,16 +35,9 @@ public final class SelfRun3PromptContractTest {
         assertFalse(prompt.contains("full checkpoint"));
     }
 
-    @Test public void hybridChoicesExposeOnlySignalKeysAndChatXhigh() throws Exception {
+    @Test public void hybridPromptOmitsChatRegistryAndKeepsCompactWorkChoices() throws Exception {
         String prompt=SelfRun3Protocol.prompt(state("HYBRID","CHAT","NORMAL"),"");
-        String chat=between(prompt,"[PROFILE_REGISTRY_CHAT]\n","\n[PROFILE_REGISTRY_WORK]");
-        JSONArray chatChoices=new JSONArray(chat);
-        assertTrue(chatChoices.length()>0);
-        for(int i=0;i<chatChoices.length();i++) {
-            JSONObject choice=chatChoices.getJSONObject(i);
-            assertEquals(1,choice.length());
-            assertEquals("xhigh",choice.getString("reasoning"));
-        }
+        assertFalse(prompt.contains("[PROFILE_REGISTRY_CHAT]"));
 
         JSONArray workChoices=new JSONArray(after(prompt,"[PROFILE_REGISTRY_WORK]\n").trim());
         assertTrue(workChoices.length()>0);
@@ -95,7 +88,8 @@ public final class SelfRun3PromptContractTest {
     @Test public void sourceCannotReintroduceStaticContractOrDriveOwnedPayloads() throws Exception {
         String source=src("SelfRun3Protocol.java");
         assertTrue(source.contains("REQUEST_ID"));
-        assertTrue(source.contains("compactProfileChoices"));
+        assertTrue(source.contains("compactWorkProfileChoices"));
+        assertFalse(source.contains("PROFILE_REGISTRY_CHAT"));
         assertTrue(source.contains("RESULT_DOCUMENT_RULES"));
         assertTrue(source.contains("[RESULT_DOCUMENT_CONTRACT]"));
         assertFalse(source.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));

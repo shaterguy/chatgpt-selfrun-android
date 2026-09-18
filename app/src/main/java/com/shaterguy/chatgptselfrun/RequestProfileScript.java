@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** Document-start request profile registry executor plus one-shot outgoing submission capture. */
 final class RequestProfileScript {
-    static final String ENGINE_VERSION = "profile-registry-v5";
+    static final String ENGINE_VERSION = "profile-registry-v6";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -37,6 +37,10 @@ final class RequestProfileScript {
 
     static String setChatReasoning(String reasoning) {
         return syncRegistry() + call("setChatReasoning", reasoning);
+    }
+
+    static String setChatProfile(String model, String reasoning) {
+        return syncRegistry() + call("setChatProfile", model, reasoning);
     }
 
     static String setChatProfiles(String bootstrapReasoning, String continuationReasoning) {
@@ -106,16 +110,18 @@ final class RequestProfileScript {
                     if(!model||model.op!=='SET'||!model.value)fail('registry_model_missing');
                     return{mode,signalModel,signalReasoning,operations:ordered,fingerprint:String(p.fingerprint||'')};
                   };
+                  const profileRequestModel=p=>{const op=p?.operations?.find(x=>x.path==='model'&&x.op==='SET');return norm(op?.value);};
                   const resolveProfile=(mode,model,reasoning)=>{
                     const m=norm(model),r=norm(reasoning);
-                    return state.registry.find(p=>p.mode===mode&&p.signalReasoning===r&&(mode==='chat'||p.signalModel===m))||null;
+                    return state.registry.find(p=>p.mode===mode&&p.signalReasoning===r
+                      &&(mode==='chat'?(m===''||profileRequestModel(p)===m):p.signalModel===m))||null;
                   };
                   const targetValid=t=>{
                     if(!t||typeof t!=='object'||Array.isArray(t)||typeof t.runId!=='string'||t.runId.length>128)return false;
                     if(t.mode==='chat'){
                       if(t.ready===false)return t.model===''&&t.reasoning===''&&norm(t.bootstrapReasoning)===''&&norm(t.continuationReasoning)==='';
-                      const b=norm(t.bootstrapReasoning||t.reasoning),c=norm(t.continuationReasoning||t.reasoning);
-                      return !!resolveProfile('chat','',b)&&!!resolveProfile('chat','',c)&&t.ready===true;
+                      const b=norm(t.bootstrapReasoning||t.reasoning),c=norm(t.continuationReasoning||t.reasoning),m=norm(t.model);
+                      return !!resolveProfile('chat',m,b)&&!!resolveProfile('chat',m,c)&&t.ready===true;
                     }
                     if(t.mode==='work'){
                       if(t.ready===false&&t.model===''&&t.reasoning==='')return true;
@@ -145,12 +151,13 @@ final class RequestProfileScript {
                   const requireTarget=mode=>{const t=state.target;if(!t||t.mode!==mode)fail('target_mode_not_initialized');return t;};
                   const setChatProfiles=(bootstrapReasoning,continuationReasoning)=>{refreshRegistry();const t=requireTarget('chat'),b=norm(bootstrapReasoning),c=norm(continuationReasoning);if(!resolveProfile('chat','',b))fail('unsupported_chat_bootstrap_reasoning');if(!resolveProfile('chat','',c))fail('unsupported_chat_continuation_reasoning');t.model='';t.reasoning=b;t.bootstrapReasoning=b;t.continuationReasoning=c;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'chat',reasoning:b,bootstrapReasoning:b,continuationReasoning:c};return true;};
                   const setChatReasoning=reasoning=>setChatProfiles(reasoning,reasoning);
+                  const setChatProfile=(model,reasoning)=>{refreshRegistry();const t=requireTarget('chat'),m=norm(model),r=norm(reasoning);if(!safeToken(m)||!resolveProfile('chat',m,r))fail('unsupported_chat_profile');t.model=m;t.reasoning=r;t.bootstrapReasoning=r;t.continuationReasoning=r;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'chat',model:m,reasoning:r};return true;};
                   const setWorkModel=model=>{refreshRegistry();const t=requireTarget('work'),m=norm(model);if(!safeToken(m)||!state.registry.some(p=>p.mode==='work'&&p.signalModel===m))fail('unsupported_work_model');t.model=m;t.reasoning='';t.ready=false;persistTarget();state.last={ok:true,reason:'work_model_set',mode:'work',model:m};return true;};
                   const setWorkReasoning=reasoning=>{refreshRegistry();const t=requireTarget('work'),r=norm(reasoning);if(!t.model)fail('work_model_missing');if(!resolveProfile('work',t.model,r))fail('unsupported_work_profile');t.reasoning=r;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'work',model:t.model,reasoning:r};return true;};
                   const latestMessageText=body=>{try{const list=Array.isArray(body?.messages)?body.messages:[];return list.length?JSON.stringify(list[list.length-1]):'';}catch(_){return'';}};
                   const chatReasoningForBody=(body,t)=>{const latest=latestMessageText(body);const bootstrap=latest.includes('SELF_RUN_BOOTSTRAP')&&(!t.runId||latest.includes(t.runId));return bootstrap?norm(t.bootstrapReasoning||t.reasoning):norm(t.continuationReasoning||t.reasoning);};
                   const targetSnapshot=()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning,runId:state.target.runId,ready:state.target.ready}:null;
-                  const profileForBody=(body,t)=>{refreshRegistry();if(!t||!t.ready)fail('target_not_ready');if(t.mode==='chat'){const reasoning=chatReasoningForBody(body,t),p=resolveProfile('chat','',reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:reasoning};}const p=resolveProfile('work',t.model,t.reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:t.reasoning};};
+                  const profileForBody=(body,t)=>{refreshRegistry();if(!t||!t.ready)fail('target_not_ready');if(t.mode==='chat'){const reasoning=chatReasoningForBody(body,t),p=resolveProfile('chat',t.model,reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:reasoning};}const p=resolveProfile('work',t.model,t.reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:t.reasoning};};
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
                   const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/\\/+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
                   const strip=obj=>{const copy={...obj};for(const key of CONTROL)delete copy[key];return copy;};
@@ -192,7 +199,7 @@ final class RequestProfileScript {
                   const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send,meta=new WeakMap();
                   XMLHttpRequest.prototype.open=function(method,url,...rest){meta.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
                   XMLHttpRequest.prototype.send=function(body){const m=meta.get(this)||{method:'',url:''};if(norm(m.method)!=='post'||!sameOrigin(m.url)||!conversationRoute(m.url))return nativeSend.call(this,body);let parsed=parseSubmission(body);if(state.capture.armed){captureBody(parsed);return nativeSend.call(this,body);}return nativeSend.call(this,JSON.stringify(patchObject(parsed,targetSnapshot())));};
-                  window.__selfRunRequestProfileEngine={version:__ENGINE_VERSION__,installRegistry,begin,setChatReasoning,setChatProfiles,setWorkModel,setWorkReasoning ,armCapture,cancelCapture,consumeCapture,diagnostics:()=>({...state.last}),target:targetSnapshot};
+                  window.__selfRunRequestProfileEngine={version:__ENGINE_VERSION__,installRegistry,begin,setChatReasoning,setChatProfile,setChatProfiles,setWorkModel,setWorkReasoning ,armCapture,cancelCapture,consumeCapture,diagnostics:()=>({...state.last}),target:targetSnapshot};
                 })();
                 """.replace("__ENGINE_VERSION__", SelfRunScript.quote(ENGINE_VERSION));
     }

@@ -231,6 +231,18 @@ final class ProfileRegistry {
         return null;
     }
 
+    static Profile resolveChat(String model, String reasoning) {
+        String requestModel = model == null ? "" : model.trim().toLowerCase(Locale.ROOT);
+        String signal = normalizeLookupToken(reasoning);
+        if (requestModel.isEmpty() || signal.isEmpty()) return null;
+        for (Profile profile : state.profiles) {
+            if (profile.mode == Mode.CHAT
+                    && profile.signalReasoning.equals(signal)
+                    && profile.requestValue("model").equalsIgnoreCase(requestModel)) return profile;
+        }
+        return null;
+    }
+
     static Profile resolveWork(String model, String reasoning) {
         String m = normalizeLookupToken(model), r = normalizeLookupToken(reasoning);
         if (m.isEmpty() || r.isEmpty()) return null;

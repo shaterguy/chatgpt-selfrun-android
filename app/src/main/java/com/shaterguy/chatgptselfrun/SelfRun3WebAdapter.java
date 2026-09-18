@@ -479,8 +479,10 @@ final class SelfRun3WebAdapter {
             calls += RequestProfileScript.setWorkModel(c.optString("model"))
                     + RequestProfileScript.setWorkReasoning(c.optString("reasoning"));
         } else {
-            calls += RequestProfileScript.setChatReasoning(
-                    c.optString("reasoning", c.optString("chatBootstrap", ChatReasoningPreferenceStore.KEEP)));
+            String reasoning = c.optString("reasoning", c.optString("chatBootstrap", ChatReasoningPreferenceStore.KEEP));
+            calls += c.optString("model").isEmpty()
+                    ? RequestProfileScript.setChatReasoning(reasoning)
+                    : RequestProfileScript.setChatProfile(c.optString("model"), reasoning);
         }
         return "(()=>{try{" + calls
                 + "return JSON.stringify({status:'READY'});}catch(_){return JSON.stringify({status:'PROFILE_ERROR'});}})()";

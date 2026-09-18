@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3029000
-def selfRunDriveVersionName = '3.2.8'
+def selfRunDriveVersionCode = 3029001
+def selfRunDriveVersionName = '3.2.9-dev1'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
@@ -247,7 +247,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !protocol.contains('EXECUTION_KIND') || !protocol.contains('SIGNAL_TYPE')
                 || !protocol.contains('RESULT_DOCUMENT_ID') || !protocol.contains('PREVIOUS_RESULT_DOCUMENT_ID')
                 || !protocol.contains('REQUIREMENT_DOCUMENT_ID') || !protocol.contains('EXECUTION_PROFILE')
-                || !protocol.contains('compactProfileChoices') || !protocol.contains('PROFILE_REGISTRY_CHAT')
+                || !protocol.contains('compactWorkProfileChoices') || protocol.contains('PROFILE_REGISTRY_CHAT')
                 || !protocol.contains('PROFILE_REGISTRY_WORK') || !protocol.contains('PARALLEL_MERGE')
                 || !protocol.contains('REPAIR_TARGET_DOCUMENT_ID') || !protocol.contains('사용자 추가 지시 원문')
                 || (protocol =~ /static\s+final\s+String\s+CONTRACT\s*=/).find() || protocol.contains('contract-version: 3.1.0')

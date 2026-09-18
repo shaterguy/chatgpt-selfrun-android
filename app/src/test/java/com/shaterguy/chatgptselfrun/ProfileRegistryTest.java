@@ -18,6 +18,9 @@ public final class ProfileRegistryTest {
         assertNotNull(ProfileRegistry.resolveChat("medium"));
         assertNotNull(ProfileRegistry.resolveChat("high"));
         assertNotNull(ProfileRegistry.resolveChat("xhigh"));
+        assertNotNull(ProfileRegistry.resolveChat("gpt-5-6-thinking", "xhigh"));
+        assertNull(ProfileRegistry.resolveChat("gpt-5-6", "xhigh"));
+        assertNull(ProfileRegistry.resolveChat("", "xhigh"));
         assertNull(ProfileRegistry.resolveChat("pro"));
         assertNull(ProfileRegistry.resolveChat("pro_standard"));
         assertNull(ProfileRegistry.resolveChat("pro_extended"));

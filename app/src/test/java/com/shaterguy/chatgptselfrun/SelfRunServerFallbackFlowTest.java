@@ -70,6 +70,7 @@ public final class SelfRunServerFallbackFlowTest {
         SelfRun3Engine.put(result, "phase_completed", "PLAN");
         SelfRun3Engine.put(result, "next_phase", "WORK");
         SelfRun3Engine.put(result, "next_input", "");
+        SelfRun3Engine.put(result, "next_profile", new JSONObject().put("mode","CHAT").put("model","gpt-5-6-thinking").put("reasoning","medium"));
         JSONObject handoff = new JSONObject();
         SelfRun3Engine.put(handoff, "objective", "fallback flow test");
         SelfRun3Engine.put(handoff, "completed", "result read");
