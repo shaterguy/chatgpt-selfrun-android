@@ -100,8 +100,8 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
 
     @Test public void scenario11UnauthorizedRecoveryDoesNotOnlyReregisterServerWatch() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        int method = coordinator.indexOf("retryDriveStepAfterUnauthorized");
-        int retry = coordinator.indexOf("executeDriveStep(state, step", method);
+        int method = coordinator.indexOf("private void retryDriveStepAfterUnauthorized");
+        int retry = coordinator.indexOf("authRetryAttempt + 1, serverRecheckAttempt);", method);
         assertTrue(method >= 0 && retry > method);
         String body = coordinator.substring(method, Math.min(coordinator.length(), retry + 260));
         assertFalse(body.contains("startServerWatchRegistration"));
@@ -110,7 +110,10 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
     @Test public void scenario12ChangedResultBefore401IsRereadBeforeWait() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
-        assertTrue(coordinator.contains("retryDriveStepAfterUnauthorized(state, step, trigger, push"));
+        int unauthorized = coordinator.indexOf("SelfRun3DriveTokenPolicy.onUnauthorized(authRetryAttempt)");
+        int retry = coordinator.indexOf("retryDriveStepAfterUnauthorized(", unauthorized);
+        int forwarded = coordinator.indexOf("authRetryAttempt, serverRecheckAttempt);", retry);
+        assertTrue(unauthorized >= 0 && retry > unauthorized && forwarded > retry);
     }
 
     @Test public void scenario13SuccessfulRetriedReadClearsTransientTokenWarning() throws Exception {
