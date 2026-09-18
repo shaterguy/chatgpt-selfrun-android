@@ -45,13 +45,16 @@ describe("delivery policy", () => {
     expect(push).not.toHaveProperty("driveAccessToken");
   });
 
-  it("keeps the per-turn Drive hook alive after one delivery is PROCESSED", () => {
+  it("keeps watching while newer Drive changes preempt an unresolved delivery", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(resolve(here, "../workflows/watch.ts"), "utf8");
-    expect(source).toContain("const retry = new AckDeliveryRetryState();");
-    expect(source).toContain("retry.onMatchingAck(ack.state);");
-    expect(source).toContain("if (!retry.deliveryProcessed()) {");
+    expect(source).toContain("const driveIterator = driveEvents[Symbol.asyncIterator]();");
+    expect(source).toContain('kind: "drive" as const');
+    expect(source).toContain("pendingDrive.then");
+    expect(source).toContain("active.pendingAck.then");
+    expect(source).toContain("active.retry.onMatchingAck(ack.state);");
+    expect(source).toContain("active = null;");
     expect(source).not.toContain('return { status: "PROCESSED", eventId };');
-    expect(source).toContain("for await (const signal of driveEvents)");
+    expect(source).not.toContain("for (let attempt = 0; attempt < 150; attempt += 1)");
   });
 });
