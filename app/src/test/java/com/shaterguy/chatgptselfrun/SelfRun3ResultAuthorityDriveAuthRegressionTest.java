@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -131,12 +132,19 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
         assertTrue(coordinator.contains("V3_DRIVE_TOKEN_EXPIRED"));
     }
 
-    @Test public void scenario16ServerPushFallbackAckAndRestartProtectionsRemainWired() throws Exception {
+    @Test public void scenario16RestartAuthorityStillLoadsExactExecution() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(coordinator.contains("ledger.loadExecution"));
+        assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
+    }
+
+    @Test @Category(ServerOnly.class)
+    public void scenario18DormantServerPushFallbackAndAckRemainWiredForOptionalChecks() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(coordinator.contains("SelfRunServerWaitPolicy.useServerPush"));
         assertTrue(coordinator.contains("activateServerFallback"));
         assertTrue(coordinator.contains("acknowledgeProcessed"));
-        assertTrue(coordinator.contains("ledger.loadExecution"));
+        assertTrue(coordinator.contains("SelfRunServerFeaturePolicy"));
     }
 
     @Test public void scenario17NoPersistentWakeLockRepeatingAlarmOrFastTokenRefreshLoop() throws Exception {
