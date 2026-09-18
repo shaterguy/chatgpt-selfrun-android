@@ -542,6 +542,48 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         runDriveStep(state, step, trigger, push, -1);
     }
 
+    private void runDriveStep(SelfRun3Engine.State state, DriveStep step,
+                              ReadTrigger trigger, SelfRunPushEvent push, int serverRecheckAttempt) {
+        requireMain();
+        if (driveInFlight || authorizationInFlight || !canRun()) return;
+        if (!SelfRun3DriveTokenPolicy.needsRefresh(accessToken, accessTokenIssuedElapsed, SystemClock.elapsedRealtime())) {
+            executeDriveStep(state, step, accessToken, trigger, push, 0, serverRecheckAttempt);
+            return;
+        }
+        clearAccessToken();
+        int expectedEpoch = epoch;
+        authorizationInFlight = true;
+        DriveAuthorization.requestSilently(service, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) {
+                authorizationInFlight = false;
+                if (!validEpoch(expectedEpoch) || !canRun()) return;
+                setAccessToken(DriveAuthorization.accessToken(result));
+                if (accessToken.isEmpty()) {
+                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                    if (trigger == ReadTrigger.SERVER_RECHECK) {
+                        SelfRunServerResultRecheckWorker.scheduleNext(service, state.turnId(), serverRecheckAttempt);
+                    }
+                    scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
+                    return;
+                }
+                executeDriveStep(state, step, accessToken, trigger, push, 0, serverRecheckAttempt);
+            }
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                authorizationInFlight = false;
+                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (validEpoch(expectedEpoch)) pause("V3_DRIVE_AUTH_REQUIRED");
+            }
+            @Override public void onFailure(Throwable error) {
+                authorizationInFlight = false;
+                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (trigger == ReadTrigger.SERVER_RECHECK) {
+                    SelfRunServerResultRecheckWorker.scheduleNext(service, state.turnId(), serverRecheckAttempt);
+                }
+                if (validEpoch(expectedEpoch)) scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
+            }
+        });
+    }
+
     private void executeDriveStep(SelfRun3Engine.State state, DriveStep step, String token,
                                   ReadTrigger trigger, SelfRunPushEvent push, int authRetryAttempt,
                                   int serverRecheckAttempt) {
