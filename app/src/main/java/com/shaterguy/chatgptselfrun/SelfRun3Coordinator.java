@@ -1103,6 +1103,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 SelfRun3Engine.State state = ledger.loadExecution(task, turn);
                 if (!callbackMatches(state, task, turn, request)) return;
                 SelfRun3Engine.State after = ledger.apply(event(state, eventId, kind, payload));
+                SelfRun3Engine.State persisted = after.execution(turn);
                 if (kind == SelfRun3Engine.Kind.STARTED) {
                     SelfRun3UserInput.consumeDispatchedRevision(service, after);
                 }
@@ -1112,7 +1113,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                             || kind == SelfRun3Engine.Kind.UNSENT) {
                         if (request.equals(preparingRequest)) {
                             preparingRequest = "";
-                            web.detach();
+                            boolean disposedForWait = kind == SelfRun3Engine.Kind.STARTED
+                                    && web.disposeForConfirmedResultWait(persisted);
+                            if (!disposedForWait) web.detach();
                             releaseWakeLock();
                         }
                     }

@@ -36,9 +36,11 @@ final class HeadlessWebViewHost {
     private final Surface surface;
     private final ImageReader imageReader;
     private final HandlerThread drainThread;
+    private final Handler drainHandler;
     private final DisplayDrainState drainState;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean outputAttached;
+    private boolean destroyed;
     private boolean completedRunResourceCacheCleared;
     private boolean detachProbePending;
     private long detachProbeStartedAt;
@@ -47,13 +49,14 @@ final class HeadlessWebViewHost {
     private HeadlessWebViewHost(WebView webView, Presentation presentation,
                                 VirtualDisplay virtualDisplay, Surface surface,
                                 ImageReader imageReader, HandlerThread drainThread,
-                                DisplayDrainState drainState) {
+                                Handler drainHandler, DisplayDrainState drainState) {
         this.webView = webView;
         this.presentation = presentation;
         this.virtualDisplay = virtualDisplay;
         this.surface = surface;
         this.imageReader = imageReader;
         this.drainThread = drainThread;
+        this.drainHandler = drainHandler;
         this.drainState = drainState;
         this.outputAttached = virtualDisplay != null && surface != null;
         activeWebView = webView;
@@ -62,6 +65,7 @@ final class HeadlessWebViewHost {
 
     static HeadlessWebViewHost create(Context context) {
         HandlerThread drainThread = null;
+        Handler drainHandler = null;
         ImageReader imageReader = null;
         Surface surface = null;
         VirtualDisplay display = null;
@@ -71,11 +75,12 @@ final class HeadlessWebViewHost {
         try {
             drainThread = new HandlerThread("SelfRunDisplayDrain");
             drainThread.start();
+            drainHandler = new Handler(drainThread.getLooper());
             imageReader = ImageReader.newInstance(
                     dimensions.width, dimensions.height, PixelFormat.RGBA_8888, 2);
             imageReader.setOnImageAvailableListener(
                     reader -> drainLatestImage(reader, drainState),
-                    new Handler(drainThread.getLooper()));
+                    drainHandler);
             surface = imageReader.getSurface();
             DisplayManager manager = context.getSystemService(DisplayManager.class);
             display = manager.createVirtualDisplay("SelfRunDriveMobile", dimensions.width, dimensions.height,
@@ -97,7 +102,7 @@ final class HeadlessWebViewHost {
             if (window != null) window.setLayout(dimensions.width, dimensions.height);
             webView.requestFocus();
             return new HeadlessWebViewHost(
-                    webView, presentation, display, surface, imageReader, drainThread, drainState);
+                    webView, presentation, display, surface, imageReader, drainThread, drainHandler, drainState);
         } catch (Throwable error) {
             if (presentation != null) try { presentation.dismiss(); } catch (Throwable ignored) {}
             if (display != null) try { display.release(); } catch (Throwable ignored) {}
@@ -108,7 +113,7 @@ final class HeadlessWebViewHost {
             fallback.setFocusable(true);
             fallback.setFocusableInTouchMode(true);
             fallback.requestFocus();
-            return new HeadlessWebViewHost(fallback, null, null, null, null, null, null);
+            return new HeadlessWebViewHost(fallback, null, null, null, null, null, null, null);
         }
     }
 
@@ -311,14 +316,20 @@ final class HeadlessWebViewHost {
     }
 
     void destroy() {
+        requireMainThread();
+        if (destroyed) return;
+        destroyed = true;
         cancelDetachProbe();
         if (activeWebView == webView) activeWebView = null;
         if (activeHost == this) activeHost = null;
+        if (imageReader != null) {
+            try { imageReader.setOnImageAvailableListener(null, null); } catch (Throwable ignored) {}
+        }
+        if (drainHandler != null) drainHandler.removeCallbacksAndMessages(null);
         try {
             webView.setWebViewClient(null);
             webView.setWebChromeClient(null);
             webView.stopLoading();
-            webView.loadUrl("about:blank");
             webView.clearHistory();
             webView.removeAllViews();
             webView.destroy();

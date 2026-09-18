@@ -72,7 +72,7 @@ public final class HeadlessOutputDetachGateTest {
         assertFalse(transport.contains("setTimeout("));
     }
 
-    @Test public void active31KeepsBrowserUntilCanonicalConversationThenDriveWaitDetaches() throws Exception {
+    @Test public void active31DisposesBrowserOnlyAfterCanonicalConversationAndPersistedStart() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
         String coordinator = source("SelfRun3Coordinator.java");
         String capture = web.substring(web.indexOf("private void captureConversation()"),
@@ -80,7 +80,12 @@ public final class HeadlessOutputDetachGateTest {
         assertTrue(capture.contains("listener.onConversation"));
         assertTrue(capture.contains("listener.onStarted"));
         assertTrue(capture.contains("quiesce();"));
-        assertTrue(web.contains("void detach() { requireMain(); if (host != null) host.detachOutput(); }"));
+        assertTrue(web.contains("boolean disposeForConfirmedResultWait(SelfRun3Engine.State persisted)"));
+        assertTrue(web.contains("persisted.resource(\"conversationUrl\")"));
+        assertTrue(web.contains("persisted.flag(\"dispatchObserved\")"));
+        assertTrue(web.contains("disposeHost();"));
+        assertTrue(coordinator.contains("SelfRun3Engine.State persisted = after.execution(turn)"));
+        assertTrue(coordinator.contains("web.disposeForConfirmedResultWait(persisted)"));
         assertTrue(coordinator.contains("case WAIT, READ_RESULT, CHECK_RECEIPT"));
         assertTrue(coordinator.contains("web.detach();"));
         assertTrue(coordinator.contains("releaseWakeLock();"));

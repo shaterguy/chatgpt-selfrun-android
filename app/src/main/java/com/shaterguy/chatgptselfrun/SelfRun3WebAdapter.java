@@ -571,6 +571,26 @@ final class SelfRun3WebAdapter {
         detach();
     }
 
+    boolean disposeForConfirmedResultWait(SelfRun3Engine.State persisted) {
+        requireMain();
+        if (persisted == null || state == null
+                || !state.taskId().equals(persisted.taskId())
+                || !state.turnId().equals(persisted.turnId())
+                || !state.requestId().equals(persisted.requestId())
+                || !dispatchConfirmed || !conversationCaptured
+                || !persisted.flag("sendClaimed")
+                || !persisted.flag("dispatchObserved")
+                || !persisted.flag("accepted")) return false;
+        String conversation = persisted.resource("conversationUrl");
+        if (!trusted(conversation) || SelfRunScript.conversationId(conversation).isEmpty()) return false;
+        if (persisted.stage() != SelfRun3Engine.Stage.WAITING
+                && persisted.stage() != SelfRun3Engine.Stage.RECONCILING) return false;
+        quiesce();
+        disposeHost();
+        trace("WEBVIEW_WAIT_DISPOSE", "turn=" + persisted.turnId() + ";request=" + persisted.requestId());
+        return host == null && web == null;
+    }
+
     void close() {
         requireMain();
         closed = true;
