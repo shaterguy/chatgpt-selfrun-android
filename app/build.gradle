@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3027003
-def selfRunDriveVersionName = '3.2.7-dev3'
+def selfRunDriveVersionCode = 3028001
+def selfRunDriveVersionName = '3.2.8-dev1'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/

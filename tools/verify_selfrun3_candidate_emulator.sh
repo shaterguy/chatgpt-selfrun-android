@@ -73,6 +73,7 @@ CURRENT_31_REQUIRED=(
   com.shaterguy.chatgptselfrun.SelfRun3InputCommitAndroidTest
   com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest
   com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3WebViewDisposalAndroidTest
 )
 DIRECT_CLASSES="$RECOVERY_CLASS"
 for required in "${CURRENT_31_REQUIRED[@]}"; do
