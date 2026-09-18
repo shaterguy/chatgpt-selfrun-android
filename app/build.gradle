@@ -128,6 +128,11 @@ def selfRun3RetiredAssertions = [
 ]
 
 tasks.withType(org.gradle.api.tasks.testing.Test).configureEach {
+    useJUnit {
+        if (!selfRunServerChecks) {
+            excludeCategories 'com.shaterguy.chatgptselfrun.ServerOnly'
+        }
+    }
     if (selfRunDriveVersionName ==~ selfRun3VersionPattern) {
         filter {
             selfRun3RetiredAssertions.each { retiredTest -> excludeTestsMatching(retiredTest) }
@@ -165,7 +170,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
          'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java', 'SelfRun3ResultDocumentPolicy.java',
          'SelfRun3ResultDocumentReader.java', 'SelfRun3DriveTokenPolicy.java', 'SelfRun3RuntimeSettings.java',
-         'SelfRun3TurnStallPolicy.java', 'SelfRun3TurnStallNotifier.java', 'SelfRunStoppedResume.java'].each { name ->
+         'SelfRunServerFeaturePolicy.java', 'SelfRun3TurnStallPolicy.java', 'SelfRun3TurnStallNotifier.java', 'SelfRunStoppedResume.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
@@ -203,7 +208,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !settings.contains('DEFAULT_STALL_ALERT_MINUTES = 125L')
                 || !settings.contains('DEFAULT_RESULT_POLL_SECONDS = 30L')
                 || !settings.contains('DEFAULT_WEB_PREPARATION_SECONDS = 90L')
-                || !settings.contains('value <= Long.MAX_VALUE / multiplier')) throw new GradleException('V3 configurable timing defaults and overflow-safe persistence are required')
+                || !settings.contains('DEFAULT_WORK_MODE = WorkMode.ON_DEVICE')
+                || !settings.contains('KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION')
+                || !settings.contains('value <= Long.MAX_VALUE / multiplier')) throw new GradleException('V3 ON_DEVICE default, one-time migration, configurable timings and overflow-safe persistence are required')
         if (!coordinator.contains('runtimeSettings.resultRepairMs()')
                 || !coordinator.contains('runtimeSettings.resultPollMs()')
                 || !notifier.contains('runtimeSettings.stallAlertMs()')
