@@ -111,11 +111,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     void onPushResult(SelfRunPushEvent push) {
         requireMain();
-        if (push == null) return;
-        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
-            acknowledgeProcessed(push);
-            return;
-        }
+        if (push == null || !SelfRunServerFeaturePolicy.enabled(service)) return;
+        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) return;
         int expectedEpoch = epoch;
         String installationId;
         try {
@@ -131,28 +128,34 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             SelfRun3Engine.State exact = current;
             main.post(() -> {
                 if (!validEpoch(expectedEpoch)) return;
-                if (exact == null || exact.terminal() || exact.flag("superseded")
+                if (exact == null) return;
+                if (exact.terminal() || exact.flag("superseded")
                         || !waitEligible(exact)
                         || !push.matches(installationId, exact.taskId(), exact.turnId(),
                         exact.resource("resultDocumentId"))) {
-                    acknowledgeProcessed(push);
+                    if (acknowledgeProcessed(push)) {
+                        SelfRunServerPendingPushStore.clearIfSame(service, push);
+                    }
                     return;
                 }
-                if (serverFallbackTurns.contains(exact.turnId())) {
-                    acknowledgeProcessed(push);
+                if (SelfRunServerPendingPushStore.isSamePending(service, push)) {
+                    SelfRunServerResultRecheckWorker.ensureActive(service, exact.turnId());
+                    log.record(store, "V3_SERVER_PUSH_COALESCED",
+                            "turn=" + exact.turn() + ";event=" + push.safeFingerprint());
                     return;
                 }
                 if (driveInFlight || authorizationInFlight) return;
                 serverRegisteredTurns.remove(exact.turnId());
                 nextResultPoll.remove(exact.turnId());
-                runDriveStep(exact, DriveStep.READ_RESULT, ReadTrigger.PUSH, push);
+                runDriveStep(exact, DriveStep.READ_RESULT, ReadTrigger.SERVER_PUSH, push);
             });
         });
     }
 
     void onServerRecovery() {
         requireMain();
-        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+        if (!SelfRunServerFeaturePolicy.enabled(service)
+                || !canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
             SelfRunServerRecoveryWorker.cancel(service);
             return;
         }
@@ -180,6 +183,49 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 }
                 recoveryCycleInFlight = true;
                 runNextRecoveryRead();
+            });
+        });
+    }
+
+    void onServerResultRecheck(String turnId, int attempt) {
+        requireMain();
+        if (turnId == null || turnId.isEmpty() || attempt < 0) return;
+        if (!SelfRunServerFeaturePolicy.enabled(service)
+                || !canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+            SelfRunServerResultRecheckWorker.clear(service, turnId);
+            return;
+        }
+        if (!SelfRunServerResultRecheckWorker.isCurrent(service, turnId, attempt)) return;
+        if (driveInFlight || authorizationInFlight || serverRegistrationInFlight || recoveryCycleInFlight) {
+            SelfRunServerResultRecheckWorker.scheduleNext(service, turnId, attempt);
+            return;
+        }
+        int expectedEpoch = epoch;
+        String task = store.runId();
+        io.execute(() -> {
+            SelfRun3Engine.State current = null;
+            try {
+                current = ledger.loadExecution(task, turnId);
+            } catch (Throwable ignored) { }
+            SelfRun3Engine.State exact = current;
+            main.post(() -> {
+                if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+                if (exact == null || exact.terminal() || exact.flag("superseded") || !waitEligible(exact)) {
+                    SelfRunServerResultRecheckWorker.clear(service, turnId);
+                    return;
+                }
+                if (serverFallbackTurns.contains(turnId)) {
+                    SelfRunServerResultRecheckWorker.clear(service, turnId);
+                    scheduleNext(0L);
+                    return;
+                }
+                if (driveInFlight || authorizationInFlight || serverRegistrationInFlight || recoveryCycleInFlight) {
+                    SelfRunServerResultRecheckWorker.scheduleNext(service, turnId, attempt);
+                    return;
+                }
+                serverRegisteredTurns.remove(turnId);
+                nextResultPoll.remove(turnId);
+                runDriveStep(exact, DriveStep.READ_RESULT, ReadTrigger.SERVER_RECHECK, null, attempt);
             });
         });
     }
@@ -301,11 +347,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
         for (SelfRun3Engine.State execution : waiting) {
             if (execution.resource("resultDocumentId").isEmpty()) continue;
-            boolean useServer = SelfRunServerWaitPolicy.useServerPush(
+            boolean useServer = SelfRunServerFeaturePolicy.buildEnabled()
+                    && SelfRunServerWaitPolicy.useServerPush(
                     workMode, serverFallbackTurns.contains(execution.turnId()));
             if (useServer && !serverRegisteredTurns.contains(execution.turnId())) {
                 if (startServerWatchRegistration(execution)) return;
-                useServer = SelfRunServerWaitPolicy.useServerPush(
+                useServer = SelfRunServerFeaturePolicy.buildEnabled()
+                        && SelfRunServerWaitPolicy.useServerPush(
                         workMode, serverFallbackTurns.contains(execution.turnId()));
             }
             if (useServer) {
@@ -321,8 +369,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             nextDelay = Math.min(nextDelay, due - now);
         }
 
-        if (serverWaiting) SelfRunServerRecoveryWorker.schedule(service);
-        else SelfRunServerRecoveryWorker.cancel(service);
+        if (serverWaiting && SelfRunServerFeaturePolicy.enabled(service)) {
+            SelfRunServerRecoveryWorker.schedule(service);
+        } else {
+            SelfRunServerRecoveryWorker.cancel(service);
+        }
 
         if (shouldReadAuthoritativeResultBeforeDispatch(state)
                 && !authoritativeReadCheckedTurns.contains(state.turnId())) {
@@ -353,6 +404,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private boolean startServerWatchRegistration(SelfRun3Engine.State execution) {
         requireMain();
+        if (!SelfRunServerFeaturePolicy.enabled(service)) return false;
         if (serverRegisteredTurns.contains(execution.turnId())
                 || serverFallbackTurns.contains(execution.turnId())) return false;
         if (serverRegistrationInFlight) return true;
@@ -457,6 +509,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private boolean validServerRegistration(int expectedEpoch, int expectedGeneration) {
         return validEpoch(expectedEpoch) && expectedGeneration == serverGeneration && canRun()
+                && SelfRunServerFeaturePolicy.enabled(service)
                 && runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.SERVER;
     }
 
@@ -464,6 +517,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         if (state == null) return;
         serverRegisteredTurns.remove(state.turnId());
         serverFallbackTurns.add(state.turnId());
+        SelfRunServerResultRecheckWorker.clear(service, state.turnId());
         nextResultPoll.put(state.turnId(), 0L);
         log.record(store, "V3_SERVER_PUSH_FALLBACK",
                 "turn=" + state.turn() + ";reason=" + safeCode(reason));
@@ -479,23 +533,32 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         recoveryQueue.clear();
         recoveryCycleInFlight = false;
         nextResultPoll.clear();
+        SelfRunServerResultRecheckWorker.clearAll(service);
         SelfRunServerRecoveryWorker.cancel(service);
         if (canRun()) scheduleNext(0L);
     }
 
     private enum DriveStep { SETUP, PREPARE_TURN, READ_RESULT }
-    private enum ReadTrigger { NORMAL, PUSH, RECOVERY, AUTHORITY }
+    private enum ReadTrigger { ON_DEVICE_POLL, SERVER_PUSH, ON_DEVICE_BACKUP, AUTHORITY, SERVER_RECHECK }
 
     private void runDriveStep(SelfRun3Engine.State state, DriveStep step) {
-        runDriveStep(state, step, ReadTrigger.NORMAL, null);
+        runDriveStep(state, step, ReadTrigger.ON_DEVICE_POLL, null, -1);
     }
 
     private void runDriveStep(SelfRun3Engine.State state, DriveStep step,
                               ReadTrigger trigger, SelfRunPushEvent push) {
+        runDriveStep(state, step, trigger, push, -1);
+    }
+
+    private void runDriveStep(SelfRun3Engine.State state, DriveStep step,
+                              ReadTrigger trigger, SelfRunPushEvent push, int serverRecheckAttempt) {
         requireMain();
         if (driveInFlight || authorizationInFlight || !canRun()) return;
+        if (step == DriveStep.READ_RESULT) {
+            recordResultReadTrigger(state, trigger, push, serverRecheckAttempt);
+        }
         if (!SelfRun3DriveTokenPolicy.needsRefresh(accessToken, accessTokenIssuedElapsed, SystemClock.elapsedRealtime())) {
-            executeDriveStep(state, step, accessToken, trigger, push, 0);
+            executeDriveStep(state, step, accessToken, trigger, push, 0, serverRecheckAttempt);
             return;
         }
         clearAccessToken();
@@ -507,27 +570,34 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 if (!validEpoch(expectedEpoch) || !canRun()) return;
                 setAccessToken(DriveAuthorization.accessToken(result));
                 if (accessToken.isEmpty()) {
-                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                    if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
+                    if (trigger == ReadTrigger.SERVER_RECHECK) {
+                        SelfRunServerResultRecheckWorker.scheduleNext(service, state.turnId(), serverRecheckAttempt);
+                    }
                     scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
                     return;
                 }
-                executeDriveStep(state, step, accessToken, trigger, push, 0);
+                executeDriveStep(state, step, accessToken, trigger, push, 0, serverRecheckAttempt);
             }
             @Override public void onResolutionRequired(PendingIntent pendingIntent) {
                 authorizationInFlight = false;
-                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
                 if (validEpoch(expectedEpoch)) pause("V3_DRIVE_AUTH_REQUIRED");
             }
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
-                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
+                if (trigger == ReadTrigger.SERVER_RECHECK) {
+                    SelfRunServerResultRecheckWorker.scheduleNext(service, state.turnId(), serverRecheckAttempt);
+                }
                 if (validEpoch(expectedEpoch)) scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
             }
         });
     }
 
     private void executeDriveStep(SelfRun3Engine.State state, DriveStep step, String token,
-                                  ReadTrigger trigger, SelfRunPushEvent push, int authRetryAttempt) {
+                                  ReadTrigger trigger, SelfRunPushEvent push, int authRetryAttempt,
+                                  int serverRecheckAttempt) {
         requireMain();
         if (driveInFlight || !canRun()) return;
         driveInFlight = true;
@@ -598,18 +668,20 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         authoritativeReadCheckedTurns.add(expectedTurn);
                     }
                     if (step == DriveStep.READ_RESULT) {
+                        SelfRunServerResultRecheckWorker.clear(service, expectedTurn);
                         serverRegisteredTurns.remove(expectedTurn);
                         nextResultPoll.remove(expectedTurn);
-                        if (!SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
-                                serverFallbackTurns.contains(expectedTurn))
+                        if ((!SelfRunServerFeaturePolicy.buildEnabled()
+                                || !SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+                                serverFallbackTurns.contains(expectedTurn)))
                                 && completed.turnId().equals(expectedTurn)) {
                             nextResultPoll.put(expectedTurn,
                                     SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
                         }
-                        if (push != null) acknowledgeProcessed(push);
+                        acknowledgeCompletedServerPushes(expectedTurn, push);
                     }
                     syncProjection(completed);
-                    if (trigger == ReadTrigger.RECOVERY) finishRecoveryRead();
+                    if (trigger == ReadTrigger.ON_DEVICE_BACKUP) finishRecoveryRead();
                     else scheduleNext(0L);
                 });
             } catch (ResultPendingException pending) {
@@ -619,13 +691,30 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (validEpoch(expectedEpoch) && expectedTask.equals(store.runId())) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
-                        if (push != null) acknowledgeProcessed(push);
                         serverRegisteredTurns.remove(expectedTurn);
-                        if (trigger == ReadTrigger.RECOVERY) {
+                        if (trigger == ReadTrigger.ON_DEVICE_BACKUP) {
+                            if (SelfRunServerFeaturePolicy.enabled(service)
+                                    && SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+                                    serverFallbackTurns.contains(expectedTurn))) {
+                                SelfRunServerResultRecheckWorker.scheduleInitial(service, expectedTurn);
+                            }
                             nextResultPoll.remove(expectedTurn);
                             finishRecoveryRead();
                         } else if (trigger == ReadTrigger.AUTHORITY) {
                             authoritativeReadCheckedTurns.add(expectedTurn);
+                            nextResultPoll.remove(expectedTurn);
+                            scheduleNext(0L);
+                        } else if (trigger == ReadTrigger.SERVER_RECHECK) {
+                            SelfRunServerResultRecheckWorker.scheduleNext(
+                                    service, expectedTurn, serverRecheckAttempt);
+                            nextResultPoll.remove(expectedTurn);
+                            scheduleNext(0L);
+                        } else if (trigger == ReadTrigger.SERVER_PUSH
+                                && SelfRunServerFeaturePolicy.enabled(service)
+                                && SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+                                serverFallbackTurns.contains(expectedTurn))) {
+                            rememberPendingServerPush(expectedTurn, push, "PENDING_RESULT");
+                            SelfRunServerResultRecheckWorker.scheduleInitial(service, expectedTurn);
                             nextResultPoll.remove(expectedTurn);
                             scheduleNext(0L);
                         } else {
@@ -638,15 +727,24 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     driveInFlight = false;
                     releaseWakeLock();
                     if (!validEpoch(expectedEpoch) || !expectedTask.equals(store.runId())) return;
+                    if (step == DriveStep.READ_RESULT && trigger == ReadTrigger.SERVER_PUSH
+                            && readResultTransportFailure(error)) {
+                        rememberPendingServerPush(expectedTurn, push, "RETRYABLE_DRIVE_FAILURE");
+                        SelfRunServerResultRecheckWorker.scheduleInitial(service, expectedTurn);
+                    }
                     if (error instanceof DriveApiClient.ApiException api && api.status == 401
                             && SelfRun3DriveTokenPolicy.onUnauthorized(authRetryAttempt)
                             == SelfRun3DriveTokenPolicy.UnauthorizedAction.REFRESH_AND_RETRY) {
-                        retryDriveStepAfterUnauthorized(state, step, trigger, push, authRetryAttempt);
+                        retryDriveStepAfterUnauthorized(
+                                state, step, trigger, push, authRetryAttempt, serverRecheckAttempt);
                         return;
                     }
-                    if (push != null && step == DriveStep.READ_RESULT) acknowledgeProcessed(push);
                     if (step == DriveStep.READ_RESULT) serverRegisteredTurns.remove(expectedTurn);
-                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                    if (trigger == ReadTrigger.SERVER_RECHECK) {
+                        SelfRunServerResultRecheckWorker.scheduleNext(
+                                service, expectedTurn, serverRecheckAttempt);
+                    }
+                    if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
                     if (step == DriveStep.READ_RESULT && !readResultTransportFailure(error)) {
                         clearRecoveredDriveWarning(store);
                         networkAttempt = 0;
@@ -660,7 +758,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private void scheduleResultRetry(SelfRun3Engine.State state) {
-        if (SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
+        if (SelfRunServerFeaturePolicy.buildEnabled()
+                && SelfRunServerWaitPolicy.useServerPush(runtimeSettings.workMode(),
                 serverFallbackTurns.contains(state.turnId()))) {
             serverRegisteredTurns.remove(state.turnId());
             nextResultPoll.remove(state.turnId());
@@ -685,7 +784,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         }
         serverRegisteredTurns.remove(next.turnId());
         nextResultPoll.remove(next.turnId());
-        runDriveStep(next, DriveStep.READ_RESULT, ReadTrigger.RECOVERY, null);
+        runDriveStep(next, DriveStep.READ_RESULT, ReadTrigger.ON_DEVICE_BACKUP, null);
     }
 
     private void finishRecoveryRead() {
@@ -698,13 +797,48 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         recoveryCycleInFlight = false;
     }
 
-    private void acknowledgeProcessed(SelfRunPushEvent push) {
+    private void recordResultReadTrigger(SelfRun3Engine.State state, ReadTrigger trigger,
+                                         SelfRunPushEvent push, int serverRecheckAttempt) {
+        if (state == null) return;
+        String detail = "turn=" + state.turn() + ";trigger=" + trigger.name();
+        if (push != null) detail += ";event=" + push.safeFingerprint();
+        if (serverRecheckAttempt >= 0) detail += ";attempt=" + serverRecheckAttempt;
+        log.record(store, "V3_RESULT_READ_TRIGGER", detail);
+    }
+
+    private void rememberPendingServerPush(String turnId, SelfRunPushEvent push, String reason) {
         if (push == null) return;
         try {
+            SelfRunServerPendingPushStore.markPending(service, push);
+            log.record(store, "V3_SERVER_PUSH_PENDING",
+                    "turn=" + turnId + ";reason=" + safeCode(reason)
+                            + ";event=" + push.safeFingerprint());
+        } catch (Throwable error) {
+            log.record(store, "V3_SERVER_PENDING_PERSIST_FAILED",
+                    "turn=" + turnId + ";error=" + error.getClass().getSimpleName());
+        }
+    }
+
+    private void acknowledgeCompletedServerPushes(String turnId, SelfRunPushEvent push) {
+        SelfRunPushEvent pending = SelfRunServerPendingPushStore.load(service, turnId);
+        boolean currentAcked = push == null || acknowledgeProcessed(push);
+        boolean pendingAcked = true;
+        if (pending != null) {
+            pendingAcked = push != null && pending.sameLogicalEvent(push)
+                    ? currentAcked : acknowledgeProcessed(pending);
+            if (pendingAcked) SelfRunServerPendingPushStore.clearIfSame(service, pending);
+        }
+    }
+
+    private boolean acknowledgeProcessed(SelfRunPushEvent push) {
+        if (push == null || !SelfRunServerFeaturePolicy.enabled(service)) return false;
+        try {
             SelfRunPushAckOutbox.enqueue(service, push, SelfRunPushAckOutbox.AckState.PROCESSED);
+            return true;
         } catch (Throwable error) {
             log.record(store, "V3_PUSH_ACK_PERSIST_FAILED",
                     "error=" + error.getClass().getSimpleName());
+            return false;
         }
     }
 
@@ -726,6 +860,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 SelfRun3Engine.State after = SelfRun3UserInput.commit(service, store, ledger, current);
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch) || !current.taskId().equals(store.runId())) return;
+                    acknowledgeCompletedServerPushes(current.turnId(), null);
                     nextResultPoll.remove(current.turnId());
                     serverRegisteredTurns.remove(current.turnId());
                     serverFallbackTurns.remove(current.turnId());
@@ -800,7 +935,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void retryDriveStepAfterUnauthorized(SelfRun3Engine.State state, DriveStep step,
                                                   ReadTrigger trigger, SelfRunPushEvent push,
-                                                  int authRetryAttempt) {
+                                                  int authRetryAttempt, int serverRecheckAttempt) {
         requireMain();
         clearAccessToken();
         if (!canRun()) return;
@@ -813,21 +948,28 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 if (!validEpoch(expectedEpoch) || !canRun()) return;
                 setAccessToken(DriveAuthorization.accessToken(result));
                 if (accessToken.isEmpty()) {
-                    if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                    if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
+                    if (trigger == ReadTrigger.SERVER_RECHECK) {
+                        SelfRunServerResultRecheckWorker.scheduleNext(service, state.turnId(), serverRecheckAttempt);
+                    }
                     scheduleNetworkRetry("V3_DRIVE_TOKEN_EMPTY");
                     return;
                 }
                 log.record(store, "V3_DRIVE_TOKEN_REFRESH", "stage=IMMEDIATE_RETRY;step=" + step.name());
-                executeDriveStep(state, step, accessToken, trigger, push, authRetryAttempt + 1);
+                executeDriveStep(
+                        state, step, accessToken, trigger, push, authRetryAttempt + 1, serverRecheckAttempt);
             }
             @Override public void onResolutionRequired(PendingIntent pendingIntent) {
                 authorizationInFlight = false;
-                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
                 if (validEpoch(expectedEpoch)) pause("V3_DRIVE_AUTH_REQUIRED");
             }
             @Override public void onFailure(Throwable error) {
                 authorizationInFlight = false;
-                if (trigger == ReadTrigger.RECOVERY) abortRecoveryCycle();
+                if (trigger == ReadTrigger.ON_DEVICE_BACKUP) abortRecoveryCycle();
+                if (trigger == ReadTrigger.SERVER_RECHECK) {
+                    SelfRunServerResultRecheckWorker.scheduleNext(service, state.turnId(), serverRecheckAttempt);
+                }
                 if (validEpoch(expectedEpoch)) scheduleNetworkRetry("V3_DRIVE_AUTH_FAILED");
             }
         });
@@ -961,6 +1103,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 SelfRun3Engine.State state = ledger.loadExecution(task, turn);
                 if (!callbackMatches(state, task, turn, request)) return;
                 SelfRun3Engine.State after = ledger.apply(event(state, eventId, kind, payload));
+                if (kind == SelfRun3Engine.Kind.STARTED) {
+                    SelfRun3UserInput.consumeDispatchedRevision(service, after);
+                }
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
                     if (kind == SelfRun3Engine.Kind.STARTED || kind == SelfRun3Engine.Kind.ACCEPTED
@@ -1077,6 +1222,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         serverFallbackTurns.clear();
         recoveryQueue.clear();
         recoveryCycleInFlight = false;
+        SelfRunServerResultRecheckWorker.clearAll(service);
         SelfRunServerRecoveryWorker.cancel(service);
     }
 

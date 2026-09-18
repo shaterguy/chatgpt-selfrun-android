@@ -1,12 +1,14 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.*;
 
+@Category(ServerOnly.class)
 public final class SelfRunPushEventTest {
     @Test public void validPayloadParsesAndMatchesExactLedgerIdentity() {
         Map<String, String> data = valid();
@@ -20,6 +22,22 @@ public final class SelfRunPushEventTest {
                 "SR-20260915-ABCDEF:turn:4", "1AbcDefGhijkLMNopQRstuVwxyz012345"));
         assertFalse(event.matches("OTHER", "SR-20260915-ABCDEF",
                 "SR-20260915-ABCDEF:turn:4", "1AbcDefGhijkLMNopQRstuVwxyz012345"));
+    }
+
+    @Test public void logicalIdentityAndFingerprintAreStableWithoutLeakingEventId() {
+        SelfRunPushEvent first = SelfRunPushEvent.parse(valid(), "com.shaterguy.chatgptselfrun.drive.test");
+        SelfRunPushEvent same = SelfRunPushEvent.parse(valid(), "com.shaterguy.chatgptselfrun.drive.test");
+        Map<String, String> changedData = valid();
+        changedData.put("eventId", "EV-9999999999999999");
+        SelfRunPushEvent changed = SelfRunPushEvent.parse(
+                changedData, "com.shaterguy.chatgptselfrun.drive.test");
+
+        assertTrue(first.sameLogicalEvent(same));
+        assertFalse(first.sameLogicalEvent(changed));
+        assertTrue(first.safeFingerprint().matches("[0-9a-f]{16}"));
+        assertEquals(first.safeFingerprint(), same.safeFingerprint());
+        assertNotEquals(first.safeFingerprint(), changed.safeFingerprint());
+        assertFalse(first.safeFingerprint().contains(first.eventId));
     }
 
     @Test public void wrongApplicationIdIsRejected() {

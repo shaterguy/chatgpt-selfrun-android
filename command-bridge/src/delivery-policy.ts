@@ -31,8 +31,9 @@ export function ackMatchesIdentity(
     && ack.resultDocumentId === identity.resultDocumentId;
 }
 
-export function normalizeDriveResourceState(value: string): "IGNORE" | "DELIVER" {
-  return value.toLowerCase() === "sync" ? "IGNORE" : "DELIVER";
+export function shouldDeliverDriveContentChange(resourceState: string, changed: string): boolean {
+  if (resourceState.trim().toLowerCase() !== "update") return false;
+  return changed.split(",").some(part => part.trim().toLowerCase() === "content");
 }
 
 export function buildPushEnvelope(eventId: string, identity: RoutingIdentity): PushEnvelope {

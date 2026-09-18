@@ -61,7 +61,7 @@ public final class SelfRunLogMenuActivity extends Activity {
         page.addView(Ui.setting(this, R.drawable.ic_settings, "작업 모드",
                 workModeLabel(runtimeSettings.workMode()), v -> editWorkMode()));
         page.addView(Ui.muted(this,
-                "서버: Drive 변경을 빠르게 감지합니다. 온디바이스: 휴대폰이 일정 간격으로 확인합니다."));
+                "온디바이스가 기본·권장입니다. 필요하면 SERVER를 선택해 Drive 변경 알림 기반으로 실행할 수 있습니다."));
         page.addView(Ui.section(this, "SelfRun 3 시간 설정"));
         page.addView(Ui.setting(this, R.drawable.ic_settings, "Result 자동 복구 대기",
                 runtimeSettings.resultRepairMinutes() + "분",
@@ -91,27 +91,30 @@ public final class SelfRunLogMenuActivity extends Activity {
     }
 
     private void editWorkMode() {
-        String[] labels = {"서버를 통해 실행", "온디바이스"};
-        int selected = runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.SERVER ? 0 : 1;
-        new AlertDialog.Builder(this)
+        String[] labels = {"온디바이스(기본·권장)", "서버를 통해 실행"};
+        int selected = runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.ON_DEVICE ? 0 : 1;
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("작업 모드")
-                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                .setSingleChoiceItems(labels, selected, (d, which) -> {
                     SelfRun3RuntimeSettings.WorkMode mode = which == 0
-                            ? SelfRun3RuntimeSettings.WorkMode.SERVER
-                            : SelfRun3RuntimeSettings.WorkMode.ON_DEVICE;
+                            ? SelfRun3RuntimeSettings.WorkMode.ON_DEVICE
+                            : SelfRun3RuntimeSettings.WorkMode.SERVER;
                     if (!runtimeSettings.saveWorkMode(mode)) {
                         Toast.makeText(this, "작업 모드를 저장하지 못했습니다.", Toast.LENGTH_SHORT).show();
                         return;
                     }
-                    dialog.dismiss();
+                    d.dismiss();
                     render();
                 })
                 .setNegativeButton("취소", null)
-                .show();
+                .create();
+        dialog.show();
     }
 
     private static String workModeLabel(SelfRun3RuntimeSettings.WorkMode mode) {
-        return mode == SelfRun3RuntimeSettings.WorkMode.ON_DEVICE ? "온디바이스" : "서버를 통해 실행";
+        return mode == SelfRun3RuntimeSettings.WorkMode.ON_DEVICE
+                ? "온디바이스(기본·권장)"
+                : "서버를 통해 실행";
     }
 
     private void editPositiveSetting(String title, String unit, long currentValue, RuntimeSettingSaver saver) {

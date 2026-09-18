@@ -3,6 +3,8 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.Intent;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -82,6 +84,36 @@ final class SelfRunPushEvent {
                 && Objects.equals(taskId, expectedTaskId)
                 && Objects.equals(turnId, expectedTurnId)
                 && Objects.equals(resultDocumentId, expectedResultDocumentId);
+    }
+
+    boolean sameLogicalEvent(SelfRunPushEvent other) {
+        return other != null
+                && Objects.equals(eventId, other.eventId)
+                && Objects.equals(installationId, other.installationId)
+                && Objects.equals(applicationId, other.applicationId)
+                && Objects.equals(taskId, other.taskId)
+                && Objects.equals(turnId, other.turnId)
+                && Objects.equals(resultDocumentId, other.resultDocumentId);
+    }
+
+    String safeFingerprint() {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(eventId.getBytes(StandardCharsets.UTF_8));
+            char[] hex = "0123456789abcdef".toCharArray();
+            StringBuilder out = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                int value = digest[i] & 0xff;
+                out.append(hex[value >>> 4]).append(hex[value & 0x0f]);
+            }
+            return out.toString();
+        } catch (Throwable unavailable) {
+            String fallback = Long.toHexString(Integer.toUnsignedLong(eventId.hashCode()));
+            StringBuilder out = new StringBuilder(16);
+            for (int i = fallback.length(); i < 16; i++) out.append('0');
+            out.append(fallback);
+            return out.toString();
+        }
     }
 
     private static String required(Map<String, String> data, String key) {

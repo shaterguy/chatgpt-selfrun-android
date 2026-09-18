@@ -89,12 +89,16 @@ public final class SelfRun3Drive401RecoveryBehaviorTest {
     @Test public void productionWiringStillRoutes401ThroughThePolicyBackedImmediateRetryPath() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         int failure = coordinator.indexOf("SelfRun3DriveTokenPolicy.onUnauthorized(authRetryAttempt)");
-        int recovery = coordinator.indexOf("retryDriveStepAfterUnauthorized(state, step, trigger, push, authRetryAttempt)", failure);
-        int refresh = coordinator.indexOf("DriveAuthorization.requestSilently(service", recovery);
-        int retry = coordinator.indexOf("executeDriveStep(state, step, accessToken, trigger, push, authRetryAttempt + 1)", refresh);
+        int recovery = coordinator.indexOf("retryDriveStepAfterUnauthorized(", failure);
+        int forwardedAttempt = coordinator.indexOf("authRetryAttempt, serverRecheckAttempt);", recovery);
+        int method = coordinator.indexOf("private void retryDriveStepAfterUnauthorized", recovery);
+        int refresh = coordinator.indexOf("DriveAuthorization.requestSilently(service", method);
+        int retry = coordinator.indexOf("authRetryAttempt + 1, serverRecheckAttempt);", refresh);
         assertTrue(failure >= 0);
         assertTrue(recovery > failure);
-        assertTrue(refresh > recovery);
+        assertTrue(forwardedAttempt > recovery);
+        assertTrue(method > forwardedAttempt);
+        assertTrue(refresh > method);
         assertTrue(retry > refresh);
     }
 

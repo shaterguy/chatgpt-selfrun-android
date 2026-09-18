@@ -46,8 +46,8 @@ for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMED
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3027000" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.6'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3028000" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.7'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -82,6 +82,10 @@ grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES = 10L' "$SETTINGS"
 grep -Fq 'DEFAULT_STALL_ALERT_MINUTES = 125L' "$SETTINGS"
 grep -Fq 'DEFAULT_RESULT_POLL_SECONDS = 30L' "$SETTINGS"
 grep -Fq 'DEFAULT_WEB_PREPARATION_SECONDS = 90L' "$SETTINGS"
+grep -Fq 'DEFAULT_WORK_MODE = WorkMode.ON_DEVICE' "$SETTINGS"
+grep -Fq 'KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION' "$SETTINGS"
+grep -Fq 'FIREBASE_CONFIG_PREFLIGHT' "$WORKFLOW"
+grep -Fq 'GATEWAY_TEST - command-bridge tests and typecheck' "$WORKFLOW"
 grep -Fq 'value <= Long.MAX_VALUE / multiplier' "$SETTINGS"
 grep -Fq 'runtimeSettings.resultRepairMs()' "$COORD"
 grep -Fq 'runtimeSettings.resultPollMs()' "$COORD"
@@ -89,7 +93,7 @@ grep -Fq 'runtimeSettings.stallAlertMs()' "$NOTIFIER"
 grep -Fq 'settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)' "$NOTIFIER"
 grep -Fq 'prepareTimeoutMs = runtimeSettings.webPreparationMs()' "$WEB"
 grep -Fq 'long alertAfterMs' "$STALL"
-grep -Fq 'freshInstallDefaultsMatchCurrentBehavior' "$SETTINGS_ANDROID"
+grep -Fq 'freshInstallMigratesAtomicallyToOnDeviceAndKeepsTimingDefaultsLazy' "$SETTINGS_ANDROID"
 grep -Fq 'assertEquals(10L, settings.resultRepairMinutes())' "$SETTINGS_ANDROID"
 grep -Fq 'assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 10L"));' "$TURN_STALL_UNIT"
 ! grep -Fq 'assertTrue(settings.contains("DEFAULT_RESULT_REPAIR_MINUTES = 120L"));' "$TURN_STALL_UNIT"
@@ -186,11 +190,11 @@ grep -Fq 'd6c9176b480909ba6ca6ba588e3b37b41746018c1e354b557f6b12a9e0f16dcb' "$EM
 grep -Fq 'd4358e7670cfb876f0e95c20bfc4362cbbabb891/deliverables/SelfRun-Drive-TEST-3.2.5-dev3.apk' "$EMULATOR"
 grep -Fq "versionCode='3025003'" "$EMULATOR"
 grep -Fq "versionName='3.2.5-dev3'" "$EMULATOR"
-grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.5.apk' "$EMULATOR"
-grep -Fq '5f972ad0d1e547a37dbdd2e78b36e6eaa77db56cfa1783db86abe0b50f4cf72f' "$EMULATOR"
-grep -Fq 'releases/download/drive-v3.2.5/chatgpt-selfrun-drive-v3.2.5.apk' "$EMULATOR"
-grep -Fq "versionCode='3026000'" "$EMULATOR"
-grep -Fq "versionName='3.2.5'" "$EMULATOR"
+grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.6.apk' "$EMULATOR"
+grep -Fq '3107966104bb496348a84e8bf576eee333a0f323598f8242038b292748e02f66' "$EMULATOR"
+grep -Fq 'releases/download/drive-v3.2.6/chatgpt-selfrun-drive-v3.2.6.apk' "$EMULATOR"
+grep -Fq "versionCode='3027000'" "$EMULATOR"
+grep -Fq "versionName='3.2.6'" "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
@@ -200,4 +204,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.6 Firebase app identity regression, committed-only result gate, transport-retry, conversation-creation gate, preparation recovery, stopped-resume, result-repair, prompt-contract, upgrade-persistence, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.7 ON_DEVICE core identity, migration, committed-only result gate, transport-retry, stopped-resume, unbounded-payload and runtime-settings checks passed.'

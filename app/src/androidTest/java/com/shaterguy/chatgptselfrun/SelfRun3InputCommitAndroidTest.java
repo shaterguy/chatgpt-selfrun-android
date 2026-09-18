@@ -73,6 +73,26 @@ public final class SelfRun3InputCommitAndroidTest {
         assertEquals("accepted late edit", pending.text);
         assertEquals(revision, pending.revision);
     }
+    @Test public void canonicalDispatchConsumesExactAdditionalInstructionImmediately() {
+        assertTrue(UserNextInputStore.save("task", "send once"));
+        SelfRun3UserInput.Snapshot saved = SelfRun3UserInput.snapshot(context, "task");
+        SelfRun3Engine.State dispatched = inputState(saved.text, saved.revision);
+        assertTrue(SelfRun3UserInput.consumeDispatchedRevision(context, dispatched));
+        SelfRun3UserInput.Snapshot after = SelfRun3UserInput.snapshot(context, "task");
+        assertEquals("", after.text);
+        assertEquals(saved.revision + 1L, after.revision);
+    }
+    @Test public void canonicalDispatchDoesNotEraseNewerAdditionalInstruction() {
+        assertTrue(UserNextInputStore.save("task", "already sent"));
+        SelfRun3UserInput.Snapshot sent = SelfRun3UserInput.snapshot(context, "task");
+        SelfRun3Engine.State dispatched = inputState(sent.text, sent.revision);
+        assertTrue(UserNextInputStore.save("task", "next instruction"));
+        SelfRun3UserInput.Snapshot newer = SelfRun3UserInput.snapshot(context, "task");
+        assertFalse(SelfRun3UserInput.consumeDispatchedRevision(context, dispatched));
+        SelfRun3UserInput.Snapshot after = SelfRun3UserInput.snapshot(context, "task");
+        assertEquals("next instruction", after.text);
+        assertEquals(newer.revision, after.revision);
+    }
     @Test public void runReplacementWaitsForCommitThenKeepsNewRunActive() throws Exception {
         SelfRun3Engine.State result = ledger.ensure(doneState());
         CountDownLatch attempting = new CountDownLatch(1);
@@ -96,6 +116,17 @@ public final class SelfRun3InputCommitAndroidTest {
             assertEquals("STALE_INPUT_TASK", expected.getMessage());
         }
         assertTrue(store.active());
+    }
+
+    private SelfRun3Engine.State inputState(String inputText, long inputRevision) {
+        JSONObject raw = doneState().json();
+        SelfRun3Engine.put(raw, "stage", "WAITING");
+        SelfRun3Engine.put(raw, "executionKind", "NORMAL");
+        SelfRun3Engine.put(raw, "inputText", inputText);
+        SelfRun3Engine.put(raw, "inputRevision", inputRevision);
+        SelfRun3Engine.put(raw, "lastConsumedInputRevision", 0L);
+        raw.remove("result");
+        return new SelfRun3Engine.State(raw);
     }
 
     private SelfRun3Engine.State doneState() {

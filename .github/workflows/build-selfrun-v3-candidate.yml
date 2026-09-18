@@ -94,11 +94,11 @@ jobs:
             :app:compileQaAppJavaWithJavac \
             :app:compileQaAppUnitTestJavaWithJavac \
             :app:compileQaAppAndroidTestJavaWithJavac
-      - name: FAST_TEST - complete JVM regression suite
+      - name: FAST_TEST - complete JVM regression suite including SERVER
         shell: bash
         run: |
           set -euo pipefail
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:testQaAppUnitTest
+          gradle --build-cache --no-daemon --console=plain --stacktrace -PselfRunServerChecks=true :app:testQaAppUnitTest
       - name: ARTIFACT_BUILD - TEST target and TEST instrumentation APKs
         shell: bash
         run: |
@@ -204,14 +204,6 @@ jobs:
           [[ "$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)" == "$GITHUB_SHA" ]]
           grep -F "$(sha256sum current/candidate.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
           grep -F "$(sha256sum current/androidTest.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
-          mkdir -p stable
-          gh release download drive-v3.2.4 --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v3.2.4.apk' --dir stable
-          test -s stable/chatgpt-selfrun-drive-v3.2.4.apk
-          echo '8b7261a0e7f89c23a489a1934d86d095cf6d4db47877b96c351fc6fb051ac046  stable/chatgpt-selfrun-drive-v3.2.4.apk' | sha256sum -c -
-          BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v3.2.4.apk > stable-cert.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable-cert.txt
       - name: Enable hardware acceleration
         shell: bash
         run: |
@@ -245,7 +237,8 @@ jobs:
             selfrun-v3-work-fix-evidence.txt
             selfrun-v3-project-directory-evidence.txt
             selfrun-v3-stopped-resume-evidence.txt
-            stable-cert.txt
+            selfrun-v3-previous-formal-cert.txt
+            selfrun-v3-on-device-core-evidence.txt
             selfrun-v3-previous-test-cert.txt
             selfrun-v3-upgrade-seed.txt
             selfrun-v3-upgrade-verify.txt

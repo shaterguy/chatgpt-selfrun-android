@@ -3,10 +3,12 @@ set -euo pipefail
 
 : "${FORMAL_VERSION_NAME:?FORMAL_VERSION_NAME required}"
 : "${FORMAL_VERSION_CODE:?FORMAL_VERSION_CODE required}"
+: "${BASE_VERSION_NAME:?BASE_VERSION_NAME required}"
+: "${BASE_VERSION_CODE:?BASE_VERSION_CODE required}"
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-BASE_APK=stable/chatgpt-selfrun-drive-v3.2.5.apk
+BASE_APK="stable/chatgpt-selfrun-drive-v${BASE_VERSION_NAME}.apk"
 FORMAL_APK=current/formal.apk
 TEST_APK=current/test.apk
 ANDROID_TEST_APK=current/androidTest.apk
@@ -25,7 +27,8 @@ adb uninstall "$FORMAL" >/dev/null 2>&1 || true
 adb uninstall "$TEST" >/dev/null 2>&1 || true
 
 adb install --no-incremental "$BASE_APK" >/dev/null
-[[ "$(package_version "$FORMAL")" == '3.2.5' ]]
+[[ "$(package_version "$FORMAL")" == "$BASE_VERSION_NAME" ]]
+[[ "$(package_version_code "$FORMAL")" == "$BASE_VERSION_CODE" ]]
 BASE_UID="$(package_uid "$FORMAL")"
 test -n "$BASE_UID"
 

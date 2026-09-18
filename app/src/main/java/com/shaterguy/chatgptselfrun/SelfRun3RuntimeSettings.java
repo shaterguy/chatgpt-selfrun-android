@@ -3,6 +3,9 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.util.Collections;
+import java.util.Map;
+
 /** Persisted SelfRun 3 operator-tunable runtime policy. */
 final class SelfRun3RuntimeSettings {
     enum WorkMode { SERVER, ON_DEVICE }
@@ -13,12 +16,14 @@ final class SelfRun3RuntimeSettings {
     static final String KEY_RESULT_POLL_SECONDS = "selfrun3ResultPollSeconds";
     static final String KEY_WEB_PREPARATION_SECONDS = "selfrun3WebPreparationSeconds";
     static final String KEY_WORK_MODE = "selfrun3WorkMode";
+    static final String KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION = "selfrun3OnDeviceDefaultMigrationVersion";
+    static final int ON_DEVICE_DEFAULT_MIGRATION_VERSION = 1;
 
     static final long DEFAULT_RESULT_REPAIR_MINUTES = 10L;
     static final long DEFAULT_STALL_ALERT_MINUTES = 125L;
     static final long DEFAULT_RESULT_POLL_SECONDS = 30L;
     static final long DEFAULT_WEB_PREPARATION_SECONDS = 90L;
-    static final WorkMode DEFAULT_WORK_MODE = WorkMode.SERVER;
+    static final WorkMode DEFAULT_WORK_MODE = WorkMode.ON_DEVICE;
 
     private static final long MINUTE_MS = 60_000L;
     private static final long SECOND_MS = 1_000L;
@@ -27,6 +32,7 @@ final class SelfRun3RuntimeSettings {
 
     SelfRun3RuntimeSettings(Context context) {
         prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        migrateOnDeviceDefaultIfNeeded();
     }
 
     long resultRepairMinutes() {
@@ -46,18 +52,8 @@ final class SelfRun3RuntimeSettings {
     }
 
     WorkMode workMode() {
-        Object stored;
-        try {
-            stored = prefs.getAll().get(KEY_WORK_MODE);
-        } catch (Throwable unreadable) {
-            return DEFAULT_WORK_MODE;
-        }
-        if (!(stored instanceof String)) return DEFAULT_WORK_MODE;
-        try {
-            return WorkMode.valueOf((String) stored);
-        } catch (IllegalArgumentException invalid) {
-            return DEFAULT_WORK_MODE;
-        }
+        Map<String, ?> all = safeAll();
+        return effectiveWorkMode(all.get(KEY_WORK_MODE), all.get(KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION));
     }
 
     long resultRepairMs() { return toMillis(resultRepairMinutes(), MINUTE_MS); }
@@ -84,6 +80,44 @@ final class SelfRun3RuntimeSettings {
     boolean saveWorkMode(WorkMode mode) {
         if (mode == null) return false;
         return prefs.edit().putString(KEY_WORK_MODE, mode.name()).commit();
+    }
+
+    private void migrateOnDeviceDefaultIfNeeded() {
+        synchronized (SelfRun3RuntimeSettings.class) {
+            Map<String, ?> all = safeAll();
+            if (migrationVersion(all.get(KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION))
+                    >= ON_DEVICE_DEFAULT_MIGRATION_VERSION) return;
+            prefs.edit()
+                    .putString(KEY_WORK_MODE, WorkMode.ON_DEVICE.name())
+                    .putInt(KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION, ON_DEVICE_DEFAULT_MIGRATION_VERSION)
+                    .commit();
+        }
+    }
+
+    static WorkMode effectiveWorkMode(Object storedMode, Object storedMigrationVersion) {
+        if (migrationVersion(storedMigrationVersion) < ON_DEVICE_DEFAULT_MIGRATION_VERSION) {
+            return WorkMode.ON_DEVICE;
+        }
+        if (!(storedMode instanceof String)) return DEFAULT_WORK_MODE;
+        try {
+            return WorkMode.valueOf((String) storedMode);
+        } catch (IllegalArgumentException invalid) {
+            return DEFAULT_WORK_MODE;
+        }
+    }
+
+    private static int migrationVersion(Object stored) {
+        if (!(stored instanceof Number)) return 0;
+        int value = ((Number) stored).intValue();
+        return Math.max(0, value);
+    }
+
+    private Map<String, ?> safeAll() {
+        try {
+            return prefs.getAll();
+        } catch (Throwable unreadable) {
+            return Collections.emptyMap();
+        }
     }
 
     private long readPositiveUnits(String key, long fallback, long multiplier) {

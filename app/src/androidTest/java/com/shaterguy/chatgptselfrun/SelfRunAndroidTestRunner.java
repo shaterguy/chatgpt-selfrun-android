@@ -29,6 +29,11 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             super.onCreate(args);
             return;
         }
+        String formalUpgrade = "com.shaterguy.chatgptselfrun.SelfRun3OnDeviceFormalUpgradeAndroidTest";
+        if (selected.equals(formalUpgrade)) {
+            super.onCreate(args);
+            return;
+        }
         Set<String> merged = new LinkedHashSet<>();
         if (!selected.isEmpty()) {
             for (String item : selected.split(",")) {

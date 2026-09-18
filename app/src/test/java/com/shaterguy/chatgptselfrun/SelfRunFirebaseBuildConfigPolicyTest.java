@@ -1,6 +1,7 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -8,6 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
+@Category(ServerOnly.class)
 public final class SelfRunFirebaseBuildConfigPolicyTest {
     @Test public void firebaseCandidateConfigGateRequiresAllFourPublicValuesWithoutPrintingSecrets() throws Exception {
         String gate = text(resolve("tools/verify_selfrun_firebase_config_env.sh",

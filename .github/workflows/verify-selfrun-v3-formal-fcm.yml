@@ -2,10 +2,6 @@ name: Verify SelfRun 3 Formal FCM
 run-name: SelfRun 3 Formal FCM (${{ github.ref_name }}) #${{ github.run_number }} attempt-${{ github.run_attempt }}
 
 on:
-  push:
-    branches:
-      - 'validation/formal-fcm-v*'
-      - 'selfrun-v3/v3.2.6-dev2*'
   workflow_dispatch:
 
 permissions:

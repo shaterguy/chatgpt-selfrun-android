@@ -23,6 +23,10 @@ public final class SelfRunServerRecoveryWorker extends Worker {
     }
 
     static void schedule(Context context) {
+        if (!SelfRunServerFeaturePolicy.enabled(context)) {
+            cancel(context);
+            return;
+        }
         Context app = context.getApplicationContext();
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -45,7 +49,8 @@ public final class SelfRunServerRecoveryWorker extends Worker {
         Context app = getApplicationContext();
         SelfRunStore store = new SelfRunStore(app);
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(app);
-        if (!store.active() || store.paused() || store.userStopped()
+        if (!SelfRunServerFeaturePolicy.enabled(app)
+                || !store.active() || store.paused() || store.userStopped()
                 || settings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
             return Result.success();
         }

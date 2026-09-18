@@ -31,6 +31,20 @@ public final class TestAppVariantPolicyTest {
         assertTrue(candidate.contains(":app:testQaAppUnitTest"));
         assertTrue(candidate.contains(":app:assembleQaApp"));
         assertTrue(candidate.contains("com.shaterguy.chatgptselfrun.drive.test"));
+        assertFalse(candidate.contains(":app:assembleRelease"));
+        assertFalse(candidate.contains("formal-upgrade-regression:"));
+        assertFalse(candidate.contains("publish-direct-formal-dev-apk:"));
+        assertFalse(candidate.contains("SelfRun-Drive-DEV-"));
+        assertTrue(candidate.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
+        assertTrue(candidate.contains("-PselfRunServerChecks=true"));
+    }
+
+    @Test public void serverProductCapabilityIsIndependentFromServerOnlyTestSelection() throws Exception {
+        String gradle = read("app/build.gradle", "build.gradle");
+        assertTrue(gradle.contains("def selfRunServerChecks ="));
+        assertTrue(gradle.contains("def selfRunServerFeaturesEnabled = true"));
+        assertTrue(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED', selfRunServerFeaturesEnabled.toString()"));
+        assertFalse(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED', selfRunServerChecks.toString()"));
     }
 
     @Test public void testSigningLineageRemainsSeparated() throws Exception {

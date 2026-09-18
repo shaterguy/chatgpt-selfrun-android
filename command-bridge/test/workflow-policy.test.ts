@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ackMatchesIdentity,
   buildPushEnvelope,
-  normalizeDriveResourceState,
+  shouldDeliverDriveContentChange,
   shouldTerminateDelivery,
 } from "../src/delivery-policy.js";
 
@@ -30,11 +30,14 @@ describe("delivery policy", () => {
     expect(ackMatchesIdentity(ack, "different-event", identity)).toBe(false);
   });
 
-  it("ignores initial sync but treats content changes as delivery events", () => {
-    expect(normalizeDriveResourceState("sync")).toBe("IGNORE");
-    expect(normalizeDriveResourceState("update")).toBe("DELIVER");
-    expect(normalizeDriveResourceState("change")).toBe("DELIVER");
-    expect(normalizeDriveResourceState("trash")).toBe("DELIVER");
+  it("delivers only actual watched-file content updates, never message sequence or metadata changes alone", () => {
+    expect(shouldDeliverDriveContentChange("sync", "")).toBe(false);
+    expect(shouldDeliverDriveContentChange("update", "")).toBe(false);
+    expect(shouldDeliverDriveContentChange("update", "properties")).toBe(false);
+    expect(shouldDeliverDriveContentChange("update", "permissions, parents")).toBe(false);
+    expect(shouldDeliverDriveContentChange("update", "content")).toBe(true);
+    expect(shouldDeliverDriveContentChange("update", "content, properties")).toBe(true);
+    expect(shouldDeliverDriveContentChange("change", "content")).toBe(false);
   });
 
   it("builds a minimal push envelope without transport or Drive secrets", () => {
@@ -45,13 +48,25 @@ describe("delivery policy", () => {
     expect(push).not.toHaveProperty("driveAccessToken");
   });
 
-  it("keeps the per-turn Drive hook alive after one delivery is PROCESSED", () => {
+  it("keeps watching while newer Drive changes preempt an unresolved delivery", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(resolve(here, "../workflows/watch.ts"), "utf8");
-    expect(source).toContain("const retry = new AckDeliveryRetryState();");
-    expect(source).toContain("retry.onMatchingAck(ack.state);");
-    expect(source).toContain("if (!retry.deliveryProcessed()) {");
+    expect(source).toContain("const driveIterator = driveEvents[Symbol.asyncIterator]();");
+    expect(source).toContain("shouldDeliverDriveContentChange(signal.resourceState, signal.changed)");
+    expect(source).toContain('kind: "drive" as const');
+    expect(source).toContain("pendingDrive.then");
+    expect(source).toContain("active.pendingAck.then");
+    expect(source).toContain("active.retry.onMatchingAck(ack.state);");
+    expect(source).toContain("active = null;");
     expect(source).not.toContain('return { status: "PROCESSED", eventId };');
-    expect(source).toContain("for await (const signal of driveEvents)");
+    expect(source).not.toContain("for (let attempt = 0; attempt < 150; attempt += 1)");
+  });
+
+  it("filters non-content Drive notifications at webhook ingress before resuming the durable workflow", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(resolve(here, "../api/drive/webhook.ts"), "utf8");
+    expect(source).toContain('request.headers["x-goog-changed"]');
+    expect(source).toContain("shouldDeliverDriveContentChange(resourceState, changed)");
+    expect(source).toContain("changed, messageNumber, resourceId");
   });
 });

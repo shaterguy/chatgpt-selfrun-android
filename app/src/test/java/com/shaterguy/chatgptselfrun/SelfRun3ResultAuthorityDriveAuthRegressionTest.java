@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -99,8 +100,8 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
 
     @Test public void scenario11UnauthorizedRecoveryDoesNotOnlyReregisterServerWatch() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
-        int method = coordinator.indexOf("retryDriveStepAfterUnauthorized");
-        int retry = coordinator.indexOf("executeDriveStep(state, step", method);
+        int method = coordinator.indexOf("private void retryDriveStepAfterUnauthorized");
+        int retry = coordinator.indexOf("authRetryAttempt + 1, serverRecheckAttempt);", method);
         assertTrue(method >= 0 && retry > method);
         String body = coordinator.substring(method, Math.min(coordinator.length(), retry + 260));
         assertFalse(body.contains("startServerWatchRegistration"));
@@ -109,7 +110,10 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
     @Test public void scenario12ChangedResultBefore401IsRereadBeforeWait() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
-        assertTrue(coordinator.contains("retryDriveStepAfterUnauthorized(state, step, trigger, push"));
+        int unauthorized = coordinator.indexOf("SelfRun3DriveTokenPolicy.onUnauthorized(authRetryAttempt)");
+        int retry = coordinator.indexOf("retryDriveStepAfterUnauthorized(", unauthorized);
+        int forwarded = coordinator.indexOf("authRetryAttempt, serverRecheckAttempt);", retry);
+        assertTrue(unauthorized >= 0 && retry > unauthorized && forwarded > retry);
     }
 
     @Test public void scenario13SuccessfulRetriedReadClearsTransientTokenWarning() throws Exception {
@@ -131,12 +135,19 @@ public final class SelfRun3ResultAuthorityDriveAuthRegressionTest {
         assertTrue(coordinator.contains("V3_DRIVE_TOKEN_EXPIRED"));
     }
 
-    @Test public void scenario16ServerPushFallbackAckAndRestartProtectionsRemainWired() throws Exception {
+    @Test public void scenario16RestartAuthorityStillLoadsExactExecution() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(coordinator.contains("ledger.loadExecution"));
+        assertTrue(coordinator.contains("DriveStep.READ_RESULT"));
+    }
+
+    @Test @Category(ServerOnly.class)
+    public void scenario18DormantServerPushFallbackAndAckRemainWiredForOptionalChecks() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         assertTrue(coordinator.contains("SelfRunServerWaitPolicy.useServerPush"));
         assertTrue(coordinator.contains("activateServerFallback"));
         assertTrue(coordinator.contains("acknowledgeProcessed"));
-        assertTrue(coordinator.contains("ledger.loadExecution"));
+        assertTrue(coordinator.contains("SelfRunServerFeaturePolicy"));
     }
 
     @Test public void scenario17NoPersistentWakeLockRepeatingAlarmOrFastTokenRefreshLoop() throws Exception {

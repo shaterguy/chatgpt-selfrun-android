@@ -20,6 +20,10 @@ public final class SelfRunPushAckWorker extends Worker {
     }
 
     static void schedule(Context context) {
+        if (!SelfRunServerFeaturePolicy.enabled(context)) {
+            cancel(context);
+            return;
+        }
         try {
             Constraints constraints = new Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -32,7 +36,14 @@ public final class SelfRunPushAckWorker extends Worker {
         } catch (Throwable ignored) { }
     }
 
+    static void cancel(Context context) {
+        try {
+            WorkManager.getInstance(context.getApplicationContext()).cancelUniqueWork(UNIQUE_WORK);
+        } catch (Throwable ignored) { }
+    }
+
     @NonNull @Override public Result doWork() {
+        if (!SelfRunServerFeaturePolicy.enabled(getApplicationContext())) return Result.success();
         SelfRunPushGatewayClient gateway = new SelfRunPushGatewayClient(BuildConfig.SELFRUN_PUSH_GATEWAY_URL);
         boolean retry = false;
         for (SelfRunPushAckOutbox.Entry entry : SelfRunPushAckOutbox.pending(getApplicationContext())) {
