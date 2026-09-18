@@ -67,8 +67,10 @@ public final class SelfRun3RuntimeSettingsTest {
         assertTrue(ui.contains("runtimeSettings::saveWebPreparationSeconds"));
         assertTrue(ui.contains("\"작업 모드\""));
         assertTrue(ui.contains("온디바이스(기본·권장)"));
-        assertFalse(ui.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
+        assertTrue(ui.contains("서버를 통해 실행"));
+        assertTrue(ui.contains("String[] labels = {\"온디바이스(기본·권장)\", \"서버를 통해 실행\"}"));
         assertTrue(ui.contains("runtimeSettings.saveWorkMode"));
+        assertFalse(ui.contains("일반 빌드는 온디바이스 모드로 고정되어 있습니다."));
     }
 
     @Test public void removedTimingsNoLongerHideInPowerPolicy() throws Exception {
