@@ -146,6 +146,7 @@ public final class SelfRunFormalFcmSmokeAndroidTest {
             connection.setRequestProperty("x-goog-channel-id", watch.channelId);
             connection.setRequestProperty("x-goog-channel-token", watch.watchKey);
             connection.setRequestProperty("x-goog-resource-state", "update");
+            connection.setRequestProperty("x-goog-changed", "content");
             connection.setRequestProperty("x-goog-message-number", "2");
             connection.setRequestProperty("x-goog-resource-id", "formal-fcm-smoke-" + smokeId);
             int status = connection.getResponseCode();
