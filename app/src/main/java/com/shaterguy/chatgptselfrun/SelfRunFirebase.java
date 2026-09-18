@@ -28,7 +28,7 @@ final class SelfRunFirebase {
     }
 
     static synchronized boolean initialize(Context context) {
-        if (!configured()) return false;
+        if (!SelfRunServerFeaturePolicy.enabled(context) || !configured()) return false;
         Context app = context.getApplicationContext();
         try {
             FirebaseApp.getInstance();
@@ -47,7 +47,7 @@ final class SelfRunFirebase {
     }
 
     static void requestToken(Context context, TokenCallback callback) {
-        if (!initialize(context)) {
+        if (!SelfRunServerFeaturePolicy.enabled(context) || !initialize(context)) {
             callback.onUnavailable(new IllegalStateException("Firebase not configured"));
             return;
         }

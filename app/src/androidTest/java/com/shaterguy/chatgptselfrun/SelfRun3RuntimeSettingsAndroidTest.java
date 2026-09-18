@@ -28,18 +28,20 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertTrue(prefs.edit().clear().commit());
     }
 
-    @Test public void freshInstallDefaultsMatchCurrentBehavior() {
+    @Test public void freshInstallMigratesAtomicallyToOnDeviceAndKeepsTimingDefaultsLazy() {
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
         assertEquals(10L, settings.resultRepairMinutes());
         assertEquals(125L, settings.stallAlertMinutes());
         assertEquals(30L, settings.resultPollSeconds());
         assertEquals(90L, settings.webPreparationSeconds());
-        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, settings.workMode());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, settings.workMode());
+        assertEquals("ON_DEVICE", prefs.getString(SelfRun3RuntimeSettings.KEY_WORK_MODE, ""));
+        assertEquals(SelfRun3RuntimeSettings.ON_DEVICE_DEFAULT_MIGRATION_VERSION,
+                prefs.getInt(SelfRun3RuntimeSettings.KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION, 0));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_RESULT_REPAIR_MINUTES));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_STALL_ALERT_MINUTES));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_RESULT_POLL_SECONDS));
         assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_WEB_PREPARATION_SECONDS));
-        assertFalse(prefs.contains(SelfRun3RuntimeSettings.KEY_WORK_MODE));
     }
 
     @Test public void committedSettingsSurviveNewSettingsInstanceAndUseRequestedUnits() {
@@ -73,9 +75,13 @@ public final class SelfRun3RuntimeSettingsAndroidTest {
         assertEquals(30L, new SelfRun3RuntimeSettings(context).resultPollSeconds());
     }
 
-    @Test public void corruptWorkModeFallsBackToServer() {
+    @Test public void corruptOrUnknownWorkModeFallsBackToOnDevice() {
+        new SelfRun3RuntimeSettings(context);
         assertTrue(prefs.edit().putString(SelfRun3RuntimeSettings.KEY_WORK_MODE, "CORRUPT").commit());
-        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER,
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                new SelfRun3RuntimeSettings(context).workMode());
+        assertTrue(prefs.edit().putBoolean(SelfRun3RuntimeSettings.KEY_WORK_MODE, true).commit());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
                 new SelfRun3RuntimeSettings(context).workMode());
     }
 

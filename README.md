@@ -59,13 +59,13 @@ CHAT과 WORK 두 모드를 지원합니다. 앱은 사용자 선택 profile을 �
 
 ## Result 대기 작업 모드
 
-설정의 `작업 모드`는 `SERVER`와 `ON_DEVICE`를 선택합니다. 저장값이 없거나 손상된 경우 기본값은 `SERVER`입니다.
+SelfRun Drive 3.2.7-dev1부터 일반 빌드의 정상 경로는 `ON_DEVICE`입니다. 새 설치, 저장값 누락·손상·알 수 없는 값은 모두 ON_DEVICE로 해석하며, 3.2.6에서 저장된 `SERVER` 값은 최초 실행에서 다른 설정·Drive binding·원장을 지우지 않고 1회 ON_DEVICE로 전환합니다.
 
-- `SERVER`: Result document를 기다리는 정상 경로에서 짧은 주기 Drive polling을 예약하지 않습니다. 앱이 자기 Drive OAuth 권한으로 `files.watch`를 등록하고, Vercel Push Gateway가 Drive 변경 webhook을 받은 뒤 FCM high-priority data message로 해당 설치 인스턴스를 깨웁니다. 앱은 정확한 task/turn/result-document identity를 검증한 뒤 Result를 1회 읽습니다. 15분 WorkManager recovery watchdog은 정상 감지 수단이 아니라 push 유실에 대한 safety net입니다.
-- `ON_DEVICE`: 기존 `resultPollMs()` 기반 Result polling을 그대로 사용합니다.
-- SERVER에서 Firebase, Gateway 또는 Drive watch 등록이 불가능하면 해당 waiting turn만 ON_DEVICE-compatible polling으로 fallback하고 `V3_SERVER_PUSH_FALLBACK` 로그를 남깁니다. 구성 미완료만으로 run을 hard-pause하지 않습니다.
+- `ON_DEVICE`: 기존 `resultPollMs()` 기반 Result polling이 정상 경로입니다. PENDING Result는 유지하고, 현재 task/turn/result-document identity가 일치하는 `committed:true` Result만 소비하여 다음 논리 턴으로 진행합니다.
+- `SERVER`: 구현은 호환성과 선택형 검증을 위해 dormant 상태로 남아 있지만 일반 빌드에서는 비활성화되며 설정 화면에서도 선택하지 않습니다. 서버 watch, FCM, ACK/outbox, recovery worker는 일반 런타임의 필수 경로가 아닙니다.
+- 선택형 SERVER 검증이 필요한 개발자는 명시적으로 `-PselfRunServerChecks=true`를 사용합니다. 이 옵션은 일반 candidate/core CI의 기본값이 아닙니다.
 
-Android 빌드에 필요한 Firebase public configuration과 Gateway endpoint는 환경변수 또는 Gradle property로 주입합니다. 아래 값은 secret으로 취급되는 server private key가 아니지만 저장소에 환경별 실값을 고정하지 않습니다.
+Firebase public configuration과 Gateway endpoint는 선택형 SERVER 검사에만 필요하며 환경변수 또는 Gradle property로 주입합니다. 일반 ON_DEVICE 빌드는 이 값들이 비어 있어도 core compile/test/build가 가능해야 합니다.
 
 ```text
 SELFRUN_FIREBASE_API_KEY
@@ -75,15 +75,7 @@ SELFRUN_FIREBASE_SENDER_ID
 SELFRUN_PUSH_GATEWAY_URL
 ```
 
-Vercel `selfrun-command-bridge`는 다음 server-side 환경변수를 사용합니다. `FIREBASE_PRIVATE_KEY` 등 service-account 자격증명은 Git이나 APK에 포함하지 않습니다.
-
-```text
-FIREBASE_PROJECT_ID
-FIREBASE_CLIENT_EMAIL
-FIREBASE_PRIVATE_KEY
-```
-
-Gateway는 Drive OAuth token, Result body, Requirement body를 받지 않습니다. Google Drive webhook과 Android 단말이 호출할 수 있도록 실제 배포 endpoint는 인증 없는 HTTPS ingress 또는 별도의 안전한 machine-to-machine 접근 경로를 제공해야 합니다. Vercel Deployment Protection으로 외부 webhook이 차단된 상태는 SERVER push의 운영 준비 완료 상태가 아닙니다.
+Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`는 선택형 SERVER 검증용이며 Git이나 APK에 포함하지 않습니다.
 
 ## 앱 화면
 

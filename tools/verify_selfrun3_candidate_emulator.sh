@@ -5,9 +5,9 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_FORMAL=stable/chatgpt-selfrun-drive-v3.2.5.apk
-PREVIOUS_FORMAL_SHA256=5f972ad0d1e547a37dbdd2e78b36e6eaa77db56cfa1783db86abe0b50f4cf72f
-PREVIOUS_FORMAL_URL=https://github.com/shaterguy/chatgpt-selfrun-android/releases/download/drive-v3.2.5/chatgpt-selfrun-drive-v3.2.5.apk
+PREVIOUS_FORMAL=stable/chatgpt-selfrun-drive-v3.2.6.apk
+PREVIOUS_FORMAL_SHA256=3107966104bb496348a84e8bf576eee333a0f323598f8242038b292748e02f66
+PREVIOUS_FORMAL_URL=https://github.com/shaterguy/chatgpt-selfrun-android/releases/download/drive-v3.2.6/chatgpt-selfrun-drive-v3.2.6.apk
 PREVIOUS_TEST=previous/SelfRun-Drive-TEST-3.2.5-dev3.apk
 PREVIOUS_TEST_SHA256=d6c9176b480909ba6ca6ba588e3b37b41746018c1e354b557f6b12a9e0f16dcb
 PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/d4358e7670cfb876f0e95c20bfc4362cbbabb891/deliverables/SelfRun-Drive-TEST-3.2.5-dev3.apk
@@ -19,8 +19,8 @@ curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_FORMAL" 
 echo "$PREVIOUS_FORMAL_SHA256  $PREVIOUS_FORMAL" | sha256sum -c -
 "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_FORMAL" > selfrun-v3-previous-formal-cert.txt
 grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' selfrun-v3-previous-formal-cert.txt
-"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionName='3.2.5'"
-"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionCode='3026000'"
+"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionName='3.2.6'"
+"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionCode='3027000'"
 
 curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
 echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
@@ -46,7 +46,7 @@ adb shell am instrument -w -r \
 grep -Fq 'OK (' selfrun-v3-upgrade-verify.txt
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$FORMAL"
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$TEST"
-[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.2.5' ]]
+[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.2.6' ]]
 [[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == "$VERSION_NAME" ]]
 
 FORMAL_UID="$(adb shell pm list packages -U "$FORMAL" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"
@@ -64,8 +64,8 @@ INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^i
 test -n "$INSTRUMENTATION"
 RECOVERY_CLASS=com.shaterguy.chatgptselfrun.SelfRun3PreparationRecoveryAndroidTest
 CURRENT_31_REQUIRED=(
-  com.shaterguy.chatgptselfrun.SelfRunFirebaseConfiguredAndroidTest
-  com.shaterguy.chatgptselfrun.SelfRunPushAckOutboxAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3OnDeviceMigrationAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3OnDeviceCoordinatorAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun31FirstConversationAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest
@@ -121,3 +121,8 @@ adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRunStoppedResumeAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-stopped-resume-evidence.txt
 grep -Fq 'OK (' selfrun-v3-stopped-resume-evidence.txt
+
+adb shell am instrument -w -r \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3OnDeviceMigrationAndroidTest,com.shaterguy.chatgptselfrun.SelfRun3OnDeviceCoordinatorAndroidTest \
+  "$INSTRUMENTATION" | tee selfrun-v3-on-device-core-evidence.txt
+grep -Fq 'OK (' selfrun-v3-on-device-core-evidence.txt

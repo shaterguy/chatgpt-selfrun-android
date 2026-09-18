@@ -14,7 +14,20 @@ public final class SelfRun3RuntimeSettingsTest {
         assertEquals(125L, SelfRun3RuntimeSettings.DEFAULT_STALL_ALERT_MINUTES);
         assertEquals(30L, SelfRun3RuntimeSettings.DEFAULT_RESULT_POLL_SECONDS);
         assertEquals(90L, SelfRun3RuntimeSettings.DEFAULT_WEB_PREPARATION_SECONDS);
-        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, SelfRun3RuntimeSettings.DEFAULT_WORK_MODE);
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, SelfRun3RuntimeSettings.DEFAULT_WORK_MODE);
+    }
+
+    @Test public void missingOrCorruptMigrationStateNeverActivatesServer() {
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                SelfRun3RuntimeSettings.effectiveWorkMode("SERVER", null));
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                SelfRun3RuntimeSettings.effectiveWorkMode("SERVER", "corrupt"));
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                SelfRun3RuntimeSettings.effectiveWorkMode(true, 1));
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                SelfRun3RuntimeSettings.effectiveWorkMode("UNKNOWN", 1));
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER,
+                SelfRun3RuntimeSettings.effectiveWorkMode("SERVER", 1));
     }
 
     @Test public void positiveIntegerParserRejectsBlankZeroNegativeTextAndOverflow() {
@@ -53,7 +66,8 @@ public final class SelfRun3RuntimeSettingsTest {
         assertTrue(ui.contains("runtimeSettings::saveResultPollSeconds"));
         assertTrue(ui.contains("runtimeSettings::saveWebPreparationSeconds"));
         assertTrue(ui.contains("\"작업 모드\""));
-        assertTrue(ui.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
+        assertTrue(ui.contains("온디바이스(기본·권장)"));
+        assertFalse(ui.contains("String[] labels = {\"서버를 통해 실행\", \"온디바이스\"}"));
         assertTrue(ui.contains("runtimeSettings.saveWorkMode"));
     }
 
