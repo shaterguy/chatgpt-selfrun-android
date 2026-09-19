@@ -158,9 +158,11 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
             assertNotSame(second.web, third.web);
             awaitCount(listener.dispatched, 3, 8_000L, "third canonical POST");
             awaitBooleanField(adapter, "dispatchConfirmed", 2_000L, "third canonical POST observer");
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
-                    third.web.loadDataWithBaseURL(ROOT + "c/watchdog-recovered", fixture(),
-                            "text/html", "UTF-8", null));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                String recovered = ROOT + "c/watchdog-recovered";
+                third.web.loadDataWithBaseURL(recovered, fixture(),
+                        "text/html", "UTF-8", recovered);
+            });
             awaitCount(listener.started, 1, 8_000L, "conversation start after retry");
             assertTrue(booleanField(adapter, "dispatchConfirmed"));
             assertTrue(booleanField(adapter, "conversationCaptured"));
