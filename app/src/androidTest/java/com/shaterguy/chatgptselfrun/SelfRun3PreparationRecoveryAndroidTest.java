@@ -135,7 +135,7 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
             awaitCount(listener.prepared, 1, 8_000L, "initial bootstrap prepared");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> adapter.submit(claimed));
             awaitCount(listener.dispatched, 1, 8_000L, "first canonical POST");
-            assertTrue(booleanField(adapter, "dispatchConfirmed"));
+            awaitBooleanField(adapter, "dispatchConfirmed", 2_000L, "first canonical POST observer");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> adapter.prepare(claimed));
             SystemClock.sleep(250L);
             assertEquals("same attempt must not submit twice", 1, listener.dispatched.get());
@@ -149,7 +149,7 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
             Attempt second = startSubmissionAttempt(adapter, claimed, false);
             assertNotSame(first.web, second.web);
             awaitCount(listener.dispatched, 2, 8_000L, "second canonical POST");
-            assertTrue(booleanField(adapter, "dispatchConfirmed"));
+            awaitBooleanField(adapter, "dispatchConfirmed", 2_000L, "second canonical POST observer");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(
                     () -> expireCurrentPreparation(adapter));
             awaitCount(listener.failures, 2, 2_000L, "second post-submit timeout");
@@ -332,6 +332,16 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         assertEquals(expected.config().optString("mode"), actual.config().optString("mode"));
         assertEquals(expected.config().optString("model"), actual.config().optString("model"));
         assertEquals(expected.config().optString("reasoning"), actual.config().optString("reasoning"));
+    }
+
+    private static void awaitBooleanField(Object target, String name, long timeoutMs, String label)
+            throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (booleanField(target, name)) return;
+            SystemClock.sleep(25L);
+        }
+        fail(label + " did not become true");
     }
 
     private static boolean booleanField(Object target, String name) throws Exception {
