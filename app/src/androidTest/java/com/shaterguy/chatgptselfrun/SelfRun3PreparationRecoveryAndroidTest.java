@@ -157,6 +157,7 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
             Attempt third = startSubmissionAttempt(adapter, claimed, true);
             assertNotSame(second.web, third.web);
             awaitCount(listener.dispatched, 3, 8_000L, "third canonical POST");
+            awaitBooleanField(adapter, "dispatchConfirmed", 2_000L, "third canonical POST observer");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 String url = third.web.getUrl();
                 assertEquals("watchdog-recovered", SelfRunScript.conversationId(url));
