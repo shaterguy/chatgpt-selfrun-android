@@ -46,7 +46,7 @@ adb shell am instrument -w -r \
 grep -Fq 'OK (' selfrun-v3-upgrade-verify.txt
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$FORMAL"
 adb shell pm list packages | tr -d '\r' | grep -Fx "package:$TEST"
-[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.2.6' ]]
+[[ "$(adb shell dumpsys package "$FORMAL" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == '3.2.8' ]]
 [[ "$(adb shell dumpsys package "$TEST" | tr -d '\r' | sed -n 's/^[[:space:]]*versionName=//p' | head -1)" == "$VERSION_NAME" ]]
 
 FORMAL_UID="$(adb shell pm list packages -U "$FORMAL" | tr -d '\r' | sed -n 's/.*uid://p' | head -1)"

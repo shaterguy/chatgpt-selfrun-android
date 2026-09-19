@@ -195,6 +195,7 @@ grep -Fq 'd2cfd398efa193ba90cfb46e6d630021b9b415169422af521e374a45edb2e945' "$EM
 grep -Fq 'releases/download/drive-v3.2.8/chatgpt-selfrun-drive-v3.2.8.apk' "$EMULATOR"
 grep -Fq "versionCode='3029000'" "$EMULATOR"
 grep -Fq "versionName='3.2.8'" "$EMULATOR"
+grep -Fq "== '3.2.8' ]]" "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#seedSettingsBeforeProcessRestart' "$EMULATOR"
 grep -Fq 'adb shell am force-stop "$TEST"' "$EMULATOR"
 grep -Fq 'SelfRun3RuntimeSettingsProcessAndroidTest#verifySettingsAfterProcessRestart' "$EMULATOR"
