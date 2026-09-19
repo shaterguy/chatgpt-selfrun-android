@@ -284,10 +284,10 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         return "<!doctype html><html><body><main>"
                 + "<form id='composer'><textarea id='prompt-textarea' data-testid='prompt-textarea' aria-label='Message'></textarea>"
                 + "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button></form>"
-                + "<script>window.fetch=(input,init)=>Promise.resolve({ok:true});"
-                + "document.querySelector('#composer').addEventListener('submit',e=>{e.preventDefault();"
+                + "<script>document.querySelector('#composer').addEventListener('submit',e=>{e.preventDefault();"
                 + "const prompt=document.querySelector('#prompt-textarea').value;"
-                + "fetch('/backend-api/f/conversation',{method:'POST',body:JSON.stringify({messages:[{author:{role:'user'},content:{parts:[prompt]}}]})});"
+                + "const abort=new AbortController();abort.abort();"
+                + "fetch('/backend-api/f/conversation',{method:'POST',signal:abort.signal,body:JSON.stringify({messages:[{author:{role:'user'},content:{parts:[prompt]}}]})}).catch(()=>{});"
                 + complete
                 + "});</script></main></body></html>";
     }

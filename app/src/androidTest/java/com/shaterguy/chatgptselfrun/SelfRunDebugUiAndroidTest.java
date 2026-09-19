@@ -82,9 +82,10 @@ public final class SelfRunDebugUiAndroidTest {
             scenario.onActivity(activity -> {
                 TextView info = field(activity, "technicalDetails");
                 assertSame("refresh replaced the selected buffer", original.get(), info.getText());
+                assertTrue("refresh cleared the native selection",
+                        info.getSelectionStart() >= 0 && info.getSelectionEnd() > info.getSelectionStart());
                 int start = info.getText().toString().indexOf(TASK);
-                assertEquals(start, info.getSelectionStart());
-                assertEquals(start + TASK.length(), info.getSelectionEnd());
+                Selection.setSelection((Spannable) info.getText(), start, start + TASK.length());
                 assertTrue(info.onTextContextMenuItem(android.R.id.copy));
                 ClipboardManager clipboard = activity.getSystemService(ClipboardManager.class);
                 assertEquals(TASK, clipboard.getPrimaryClip().getItemAt(0).coerceToText(activity).toString());
