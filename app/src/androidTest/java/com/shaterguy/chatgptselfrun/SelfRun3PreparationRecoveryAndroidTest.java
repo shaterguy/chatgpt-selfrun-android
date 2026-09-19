@@ -257,10 +257,12 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
 
         JSONObject raw = new JSONObject();
         SelfRun3Engine.put(raw, "schema", SelfRun3Engine.STATE_SCHEMA);
+        String turnId = taskId + ":turn:1";
+        String requestId = turnId + "-request";
         SelfRun3Engine.put(raw, "taskId", taskId);
         SelfRun3Engine.put(raw, "taskMode", "CHAT");
-        SelfRun3Engine.put(raw, "turnId", taskId + ":turn:1");
-        SelfRun3Engine.put(raw, "requestId", taskId + ":turn:1-request");
+        SelfRun3Engine.put(raw, "turnId", turnId);
+        SelfRun3Engine.put(raw, "requestId", requestId);
         SelfRun3Engine.put(raw, "turn", 1);
         SelfRun3Engine.put(raw, "maxTurn", 1);
         SelfRun3Engine.put(raw, "stage", "READY");
@@ -269,7 +271,9 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         SelfRun3Engine.put(raw, "resources", new JSONObject());
         SelfRun3Engine.put(raw, "executionKind", "NORMAL");
         SelfRun3Engine.put(raw, "signalType", "AUTO_NEXT_TURN");
-        SelfRun3Engine.put(raw, "prompt", "preparation recovery fixture");
+        SelfRun3Engine.put(raw, "prompt", "[SELF_RUN_V3 3.1.0]\n"
+                + "TASK_ID=" + taskId + "\nTURN_ID=" + turnId + "\nREQUEST_ID=" + requestId
+                + "\npreparation recovery fixture");
         SelfRun3Engine.put(raw, "sendClaimed", false);
         SelfRun3Engine.put(raw, "dispatchObserved", false);
         SelfRun3Engine.put(raw, "accepted", false);
