@@ -347,6 +347,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
         for (SelfRun3Engine.State execution : waiting) {
             if (execution.resource("resultDocumentId").isEmpty()) continue;
+            requestDebugWait(execution);
             boolean useServer = SelfRunServerFeaturePolicy.buildEnabled()
                     && SelfRunServerWaitPolicy.useServerPush(
                     workMode, serverFallbackTurns.contains(execution.turnId()));
@@ -867,8 +868,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     authoritativeReadCheckedTurns.remove(current.turnId());
                     syncProjection(after);
                     if (after.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION) {
+                        log.record(store, "V3_USER_INTERVENTION", "turn=" + after.turn());
+                        SelfRunDebugLogSync.request(service, after, "USER_INTERVENTION");
                         notifyUserActionRequired();
                     } else if (after.stage() == SelfRun3Engine.Stage.PAUSED) {
+                        log.record(store, "V3_PAUSED", "turn=" + after.turn());
+                        SelfRunDebugLogSync.request(service, after, "PAUSE");
                         notifyPaused();
                     }
                     if (after.stage() == SelfRun3Engine.Stage.DONE) {
@@ -880,6 +885,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         web.close();
                         releaseWakeLock();
                         log.record(store, "V3_DONE", "turn=" + after.turn() + ";task=" + after.taskId());
+                        SelfRunDebugLogSync.request(service, after, "DONE");
                         service.stopForeground(Service.STOP_FOREGROUND_REMOVE);
                         if (!after.taskId().equals(completedTaskNotification)) {
                             completedTaskNotification = after.taskId();
@@ -1048,6 +1054,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
                     syncProjection(after);
+                    requestDebugWait(after.execution(turn));
                 });
             } catch (Throwable error) {
                 main.post(() -> hardPause("V3_CONVERSATION_BIND_FAILED", error));
@@ -1120,6 +1127,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         }
                     }
                     syncProjection(after);
+                    requestDebugWait(persisted);
                     scheduleNext(0L);
                 });
             } catch (Throwable error) {
@@ -1153,6 +1161,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     store.setPaused(true);
                     store.setLastError(reason, "SelfRun 3 실행이 상태를 보존한 채 일시정지되었습니다.");
                     if (paused != null) syncProjection(paused);
+                    log.record(store, "V3_PAUSED", "reason=" + reason);
+                    SelfRunDebugLogSync.requestStored(service, task, "PAUSE");
                     notifyPaused();
                 });
             } catch (Throwable error) {
@@ -1212,6 +1222,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             main.post(() -> {
                 if (!validEpoch(expectedEpoch)) return;
                 store.stopByUser();
+                log.record(store, "V3_STOP", "user_stop");
+                SelfRunDebugLogSync.requestStored(service, task, "STOP");
                 service.stopSelf();
             });
         });
@@ -1227,6 +1239,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         recoveryCycleInFlight = false;
         SelfRunServerResultRecheckWorker.clearAll(service);
         SelfRunServerRecoveryWorker.cancel(service);
+    }
+
+    private void requestDebugWait(SelfRun3Engine.State state) {
+        try {
+            if (SelfRunDebugLogSync.waitingReady(state))
+                SelfRunDebugLogSync.request(service, state, "WAIT");
+        } catch (Throwable ignored) { }
     }
 
     private void syncProjection(SelfRun3Engine.State state) {
@@ -1290,6 +1309,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         store.setLastError(code, "SelfRun 3 상태를 안전하게 확정하지 못해 자동 전송을 중지했습니다.");
         log.record(store, "V3_HARD_PAUSE", "code=" + code + ";error="
                 + (error == null ? "" : error.getClass().getSimpleName()));
+        SelfRunDebugLogSync.requestStored(service, store.runId(), "PAUSE");
         notifyPaused();
     }
 

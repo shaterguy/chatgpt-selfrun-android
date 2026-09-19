@@ -46,8 +46,8 @@ for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMED
   test -s "$file"
 done
 
-grep -Fq "selfRunDriveVersionCode = 3029001" "$BUILD"
-grep -Fq "selfRunDriveVersionName = '3.2.9-dev1'" "$BUILD"
+grep -Fq "selfRunDriveVersionCode = 3029002" "$BUILD"
+grep -Fq "selfRunDriveVersionName = '3.2.9-dev2'" "$BUILD"
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
@@ -204,4 +204,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.9-dev1 ON_DEVICE core identity, migration, committed-only result gate, transport-retry, stopped-resume, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun 3.2.9-dev2 ON_DEVICE core identity, migration, committed-only result gate, transport-retry, stopped-resume, unbounded-payload and runtime-settings checks passed.'

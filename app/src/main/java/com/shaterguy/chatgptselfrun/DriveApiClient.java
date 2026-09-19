@@ -25,7 +25,7 @@ final class DriveApiClient {
     static final String MIME_OCTET_STREAM = "application/octet-stream";
     private static final String GOOGLE_WORKSPACE_MIME_PREFIX = "application/vnd.google-apps.";
     private static final String FILE_FIELDS = "id,name,mimeType,size,parents,trashed,appProperties,version,"
-            + "createdTime,modifiedTime,webViewLink,isAppAuthorized,shared,capabilities(canAddChildren)";
+            + "createdTime,modifiedTime,webViewLink,isAppAuthorized,shared,driveId,capabilities(canAddChildren)";
     private static final String POLL_FIELDS = "id,name,mimeType,parents,trashed,version,createdTime,modifiedTime,shared";
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_DOCUMENT_CHARS = 1_000_000;
@@ -63,6 +63,7 @@ final class DriveApiClient {
         final JSONObject appProperties;
         final boolean isAppAuthorized;
         final boolean shared;
+        final String driveId;
         final boolean canAddChildren;
 
         Metadata(JSONObject json) {
@@ -81,6 +82,7 @@ final class DriveApiClient {
                     ? new JSONObject() : json.optJSONObject("appProperties");
             isAppAuthorized = json.optBoolean("isAppAuthorized", false);
             shared = json.optBoolean("shared", false);
+            driveId = json.optString("driveId", "");
             JSONObject capabilities = json.optJSONObject("capabilities");
             canAddChildren = capabilities != null && capabilities.optBoolean("canAddChildren", false);
         }
@@ -300,6 +302,79 @@ final class DriveApiClient {
         }
     }
 
+    Metadata createDebugLogDocument(String accessToken, String taskId, String parentId) throws Exception {
+        requireParent(parentId);
+        JSONObject metadata = baseMetadata(taskId + "-debug-log", MIME_DOCUMENT, parentId, "debug_log");
+        metadata.getJSONObject("appProperties").put("job_id", taskId);
+        return create(accessToken, metadata, true);
+    }
+
+    String findDebugLogDocument(String accessToken, String taskId, String parentId) throws Exception {
+        requireParent(parentId);
+        if (taskId == null || !taskId.matches("[A-Za-z0-9._-]{1,80}")) throw new IllegalArgumentException("debug task required");
+        String query = "'" + parentId + "' in parents and trashed = false and name = '" + taskId
+                + "-debug-log' and mimeType = '" + MIME_DOCUMENT + "'";
+        JSONObject result = request("GET", "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&pageSize=2&q="
+                + URLEncoder.encode(query, StandardCharsets.UTF_8.name()) + "&fields="
+                + URLEncoder.encode("nextPageToken,files(id)", StandardCharsets.UTF_8.name()), accessToken, null);
+        JSONArray files = result.optJSONArray("files");
+        if (!result.optString("nextPageToken").isEmpty() || files == null || files.length() > 1)
+            throw new IOException("debug lookup ambiguous");
+        return files.length() == 0 ? "" : files.getJSONObject(0).getString("id");
+    }
+
+    static final class DebugLogSnapshot {
+        final String text, revisionId, tabId;
+        final int endIndex;
+        DebugLogSnapshot(String text, String revisionId, String tabId, int endIndex) {
+            this.text = text; this.revisionId = revisionId; this.tabId = tabId; this.endIndex = endIndex;
+        }
+    }
+
+    DebugLogSnapshot readDebugLogSnapshot(String token, String id) throws Exception {
+        requireFileId(id);
+        // Read beyond the Result/tail ceiling, but fail this auxiliary attempt before exhausting the app heap.
+        long headroom = Runtime.getRuntime().maxMemory() - Runtime.getRuntime().totalMemory()
+                + Runtime.getRuntime().freeMemory();
+        int responseBudget = (int) Math.max(1L, Math.min(16L * 1024 * 1024, headroom / 16));
+        JSONObject doc = request("GET", "https://docs.googleapis.com/v1/documents/" + id + "?includeTabsContent=true",
+                token, null, false, "debug read failed", responseBudget);
+        JSONArray tabs = doc.getJSONArray("tabs");
+        if (tabs.length() != 1) throw new IOException("debug document tab mismatch");
+        JSONObject tab = tabs.getJSONObject(0);
+        if (tab.optJSONArray("childTabs") != null && tab.getJSONArray("childTabs").length() != 0)
+            throw new IOException("debug document child tabs");
+        String revision = doc.getString("revisionId"), tabId = tab.getJSONObject("tabProperties").getString("tabId");
+        if (revision.isEmpty() || tabId.isEmpty()) throw new IOException("debug revision missing");
+        JSONArray content = tab.getJSONObject("documentTab").getJSONObject("body").getJSONArray("content");
+        StringBuilder text = new StringBuilder(); int end = 1;
+        for (int i = 0; i < content.length(); i++) {
+            JSONObject item = content.getJSONObject(i);
+            if (item.has("sectionBreak")) continue;
+            if (!item.has("paragraph")) throw new IOException("unexpected debug document structure");
+            JSONArray elements = item.getJSONObject("paragraph").getJSONArray("elements");
+            for (int j = 0; j < elements.length(); j++) {
+                JSONObject element = elements.getJSONObject(j);
+                if (!element.has("textRun")) throw new IOException("unexpected debug document element");
+                text.append(element.getJSONObject("textRun").getString("content"));
+            }
+            end = item.getInt("endIndex") - 1;
+        }
+        return new DebugLogSnapshot(text.toString(), revision, tabId, end);
+    }
+
+    void replaceDebugLogDocument(String token, String id, DebugLogSnapshot current, String text) throws Exception {
+        requireFileId(id);
+        JSONArray requests = new JSONArray();
+        if (current.endIndex > 1) requests.put(new JSONObject().put("deleteContentRange", new JSONObject().put("range",
+                new JSONObject().put("startIndex", 1).put("endIndex", current.endIndex).put("tabId", current.tabId))));
+        requests.put(new JSONObject().put("insertText", new JSONObject().put("text", text).put("location",
+                new JSONObject().put("index", 1).put("tabId", current.tabId))));
+        request("POST", "https://docs.googleapis.com/v1/documents/" + id + ":batchUpdate", token,
+                new JSONObject().put("requests", requests).put("writeControl",
+                        new JSONObject().put("requiredRevisionId", current.revisionId)), true, "debug write outcome unknown");
+    }
+
     void initializeDocument(String accessToken, String documentId, String initialText) throws Exception {
         initializeDocument(accessToken, documentId, initialText, "");
     }
@@ -418,6 +493,11 @@ final class DriveApiClient {
 
     private static JSONObject request(String method, String endpoint, String accessToken, JSONObject body,
                                       boolean outcomeSensitive, String outcomeUnknownMessage) throws Exception {
+        return request(method, endpoint, accessToken, body, outcomeSensitive, outcomeUnknownMessage, MAX_RESPONSE_BYTES);
+    }
+
+    private static JSONObject request(String method, String endpoint, String accessToken, JSONObject body,
+                                      boolean outcomeSensitive, String outcomeUnknownMessage, int responseLimit) throws Exception {
         URL url = requireAllowedUrl(endpoint);
         HttpURLConnection connection = null;
         try {
@@ -439,7 +519,7 @@ final class DriveApiClient {
             int status = connection.getResponseCode();
             InputStream stream = status >= 200 && status < 300
                     ? connection.getInputStream() : connection.getErrorStream();
-            String response = readBounded(stream);
+            String response = readBounded(stream, responseLimit);
             if (status < 200 || status >= 300) {
                 ApiException api = apiException(status, response);
                 if (outcomeSensitive && (status == 408 || status == 429 || status >= 500)) {
@@ -484,15 +564,19 @@ final class DriveApiClient {
     }
 
     private static String readBounded(InputStream source) throws Exception {
+        return readBounded(source, MAX_RESPONSE_BYTES);
+    }
+
+    private static String readBounded(InputStream source, int limit) throws Exception {
         if (source == null) return "";
         try (InputStream input = new BufferedInputStream(source);
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
-            int total = 0;
+            long total = 0;
             int read;
             while ((read = input.read(buffer)) >= 0) {
                 total += read;
-                if (total > MAX_RESPONSE_BYTES) throw new IllegalStateException("Drive response too large");
+                if (total > limit) throw new IllegalStateException("Drive response too large");
                 output.write(buffer, 0, read);
             }
             return new String(output.toByteArray(), StandardCharsets.UTF_8);

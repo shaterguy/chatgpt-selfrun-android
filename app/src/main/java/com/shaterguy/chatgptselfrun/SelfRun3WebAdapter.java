@@ -282,7 +282,7 @@ final class SelfRun3WebAdapter {
             script = profileScript(state);
         } else {
             script = SelfRun3BootstrapTransport.prepare(
-                    state.config().optString("projectUrl"), state.text("prompt"), marker(state));
+                    state.config().optString("projectUrl"), state.text("prompt"), marker(state, preparationAttempt));
         }
         evaluate(script, result -> {
             String status = result.optString("status");
@@ -441,7 +441,7 @@ final class SelfRun3WebAdapter {
         preparing = true;
         submitIssued = true;
         String action = SelfRun3BootstrapTransport.submit(
-                claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed));
+                claimed.config().optString("projectUrl"), claimed.text("prompt"), marker(claimed, preparationAttempt));
         String arm = SelfRun3DispatchScript.arm(claimed.taskId(), claimed.turnId(), claimed.requestId());
         String wrapped = "(()=>{if(!(" + arm + "))return JSON.stringify({status:'TURN_PROTOCOL_UNAVAILABLE'});return (" + action + ");})()";
         evaluate(wrapped, result -> {
@@ -646,7 +646,9 @@ final class SelfRun3WebAdapter {
         }, delay);
     }
 
-    private static String marker(SelfRun3Engine.State s) { return "v31-" + s.requestId(); }
+    static String marker(SelfRun3Engine.State s, long attempt) {
+        return "v31-" + s.requestId() + "-preparation-" + Math.max(1L, attempt);
+    }
     private static JSONObject object(String raw) {
         try { return new JSONObject(raw); } catch (Exception e) { return new JSONObject(); }
     }

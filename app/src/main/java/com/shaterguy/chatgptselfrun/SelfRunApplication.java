@@ -17,6 +17,7 @@ public final class SelfRunApplication extends Application {
         WorkProtocolNativeObserver.installProcess(context);
         SelfRunProcessExitDiagnostics.capture(context);
         new SelfRun3RuntimeSettings(context);
+        SelfRunDebugLogSync.recover(context);
         if (SelfRunServerFeaturePolicy.enabled(context)) {
             SelfRunFirebase.initialize(context);
             if (SelfRunPushAckOutbox.pendingCount(context) > 0) SelfRunPushAckWorker.schedule(context);

@@ -117,6 +117,60 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         }
     }
 
+    @Test public void postSubmissionTimeoutStartsFreshBootstrapAndPostsAgainUntilConversationAppears()
+            throws Exception {
+        String task = "SR-WATCHDOG-POST-" + SystemClock.elapsedRealtimeNanos();
+        SelfRun3Engine.State ready = readyState(task);
+        SelfRun3Engine.State claimed = claimedState(ready);
+        SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
+        assertTrue(settings.saveWebPreparationSeconds("30"));
+        RecordingListener listener = new RecordingListener();
+        AtomicReference<SelfRun3WebAdapter> adapterRef = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                () -> adapterRef.set(new SelfRun3WebAdapter(context, listener)));
+        SelfRun3WebAdapter adapter = adapterRef.get();
+
+        try {
+            Attempt first = startSubmissionAttempt(adapter, ready, false);
+            awaitCount(listener.prepared, 1, 8_000L, "initial bootstrap prepared");
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> adapter.submit(claimed));
+            awaitCount(listener.dispatched, 1, 8_000L, "first canonical POST");
+            assertTrue(booleanField(adapter, "dispatchConfirmed"));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> adapter.prepare(claimed));
+            SystemClock.sleep(250L);
+            assertEquals("same attempt must not submit twice", 1, listener.dispatched.get());
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                    () -> expireCurrentPreparation(adapter));
+            awaitCount(listener.failures, 1, 2_000L, "first post-submit timeout");
+            assertIdentity(listener.lastFailureTask.get(), listener.lastFailureTurn.get(),
+                    listener.lastFailureRequest.get(), claimed);
+            assertEquals("WEB_PREPARATION_TIMEOUT", listener.lastFailureCode.get());
+
+            Attempt second = startSubmissionAttempt(adapter, claimed, false);
+            assertNotSame(first.web, second.web);
+            awaitCount(listener.dispatched, 2, 8_000L, "second canonical POST");
+            assertTrue(booleanField(adapter, "dispatchConfirmed"));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                    () -> expireCurrentPreparation(adapter));
+            awaitCount(listener.failures, 2, 2_000L, "second post-submit timeout");
+
+            Attempt third = startSubmissionAttempt(adapter, claimed, true);
+            assertNotSame(second.web, third.web);
+            awaitCount(listener.dispatched, 3, 8_000L, "third canonical POST");
+            awaitCount(listener.started, 1, 8_000L, "conversation start after retry");
+            assertTrue(booleanField(adapter, "dispatchConfirmed"));
+            assertTrue(booleanField(adapter, "conversationCaptured"));
+            assertEquals(1, listener.prepared.get());
+            assertEquals(3, listener.dispatched.get());
+            assertEquals(2, listener.failures.get());
+            assertEquals(1, listener.started.get());
+            assertEquals(1, listener.conversations.get());
+            assertSameRequest(adapter, claimed);
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(adapter::close);
+        }
+    }
+
     @Test public void preparationTimeoutErrorKeepsReadyRequestIdentityRetryable() {
         SelfRun3Engine.State state = readyState();
         JSONObject payload = new JSONObject();
@@ -135,6 +189,38 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         assertEquals("WEB_PREPARATION_TIMEOUT", errored.text("error"));
     }
 
+    private Attempt startSubmissionAttempt(SelfRun3WebAdapter adapter, SelfRun3Engine.State state,
+                                             boolean completeConversation) {
+        AtomicReference<Attempt> out = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            adapter.prepare(state);
+            WebView web = HeadlessWebViewHost.activeWebView();
+            assertNotNull(web);
+            WebViewClient client = web.getWebViewClient();
+            assertNotNull(client);
+            web.stopLoading();
+            setIntField(adapter, "step", 2);
+            web.loadDataWithBaseURL(ROOT, submissionFixture(completeConversation),
+                    "text/html", "UTF-8", null);
+            out.set(new Attempt(web, client));
+        });
+        return out.get();
+    }
+
+    private static void expireCurrentPreparation(SelfRun3WebAdapter adapter) {
+        try {
+            Field attempt = SelfRun3WebAdapter.class.getDeclaredField("preparationAttempt");
+            attempt.setAccessible(true);
+            long value = attempt.getLong(adapter);
+            java.lang.reflect.Method expire = SelfRun3WebAdapter.class
+                    .getDeclaredMethod("expireConversationCreation", long.class);
+            expire.setAccessible(true);
+            expire.invoke(adapter, value);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
     private Attempt startStalledAttempt(SelfRun3WebAdapter adapter, SelfRun3Engine.State state) {
         AtomicReference<Attempt> out = new AtomicReference<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
@@ -151,6 +237,18 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
     }
 
     private static SelfRun3Engine.State readyState() {
+        return readyState("SR-PREPARATION-RECOVERY-ANDROID");
+    }
+
+    private static SelfRun3Engine.State claimedState(SelfRun3Engine.State ready) {
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
+        return SelfRun3Engine.reduce(ready, new SelfRun3Engine.Event(
+                ready.requestId() + ":claim", SelfRun3Engine.Kind.CLAIM_SEND,
+                ready.taskId(), ready.turnId(), payload));
+    }
+
+    private static SelfRun3Engine.State readyState(String taskId) {
         JSONObject config = new JSONObject();
         SelfRun3Engine.put(config, "mode", "CHAT");
         SelfRun3Engine.put(config, "projectUrl", ROOT);
@@ -159,10 +257,10 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
 
         JSONObject raw = new JSONObject();
         SelfRun3Engine.put(raw, "schema", SelfRun3Engine.STATE_SCHEMA);
-        SelfRun3Engine.put(raw, "taskId", "SR-PREPARATION-RECOVERY-ANDROID");
+        SelfRun3Engine.put(raw, "taskId", taskId);
         SelfRun3Engine.put(raw, "taskMode", "CHAT");
-        SelfRun3Engine.put(raw, "turnId", "SR-PREPARATION-RECOVERY-ANDROID:turn:1");
-        SelfRun3Engine.put(raw, "requestId", "SR-PREPARATION-RECOVERY-ANDROID:turn:1-request");
+        SelfRun3Engine.put(raw, "turnId", taskId + ":turn:1");
+        SelfRun3Engine.put(raw, "requestId", taskId + ":turn:1-request");
         SelfRun3Engine.put(raw, "turn", 1);
         SelfRun3Engine.put(raw, "maxTurn", 1);
         SelfRun3Engine.put(raw, "stage", "READY");
@@ -177,6 +275,21 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         SelfRun3Engine.put(raw, "accepted", false);
         SelfRun3Engine.put(raw, "committed", false);
         return new SelfRun3Engine.State(raw);
+    }
+
+    private static String submissionFixture(boolean completeConversation) {
+        String complete = completeConversation
+                ? "history.replaceState({},'', '/c/watchdog-recovered');"
+                : "";
+        return "<!doctype html><html><body><main>"
+                + "<form id='composer'><textarea id='prompt-textarea' data-testid='prompt-textarea' aria-label='Message'></textarea>"
+                + "<button type='submit' data-testid='send-button' aria-label='Send'>Send</button></form>"
+                + "<script>window.fetch=(input,init)=>Promise.resolve({ok:true});"
+                + "document.querySelector('#composer').addEventListener('submit',e=>{e.preventDefault();"
+                + "const prompt=document.querySelector('#prompt-textarea').value;"
+                + "fetch('/backend-api/f/conversation',{method:'POST',body:JSON.stringify({messages:[{author:{role:'user'},content:{parts:[prompt]}}]})});"
+                + complete
+                + "});</script></main></body></html>";
     }
 
     private static String fixture() {
@@ -215,6 +328,9 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         assertEquals(expected.taskId(), actual.taskId());
         assertEquals(expected.turnId(), actual.turnId());
         assertEquals(expected.requestId(), actual.requestId());
+        assertEquals(expected.config().optString("mode"), actual.config().optString("mode"));
+        assertEquals(expected.config().optString("model"), actual.config().optString("model"));
+        assertEquals(expected.config().optString("reasoning"), actual.config().optString("reasoning"));
     }
 
     private static boolean booleanField(Object target, String name) throws Exception {
@@ -244,6 +360,7 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         final AtomicInteger prepared = new AtomicInteger();
         final AtomicInteger started = new AtomicInteger();
         final AtomicInteger dispatched = new AtomicInteger();
+        final AtomicInteger conversations = new AtomicInteger();
         final AtomicInteger failures = new AtomicInteger();
         final AtomicInteger unsent = new AtomicInteger();
         final AtomicReference<String> lastPreparedTask = new AtomicReference<>("");
@@ -260,7 +377,7 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
         }
         @Override public void onStarted(String task, String turn, String request) { started.incrementAndGet(); }
         @Override public void onAccepted(String task, String turn, String url) {}
-        @Override public void onConversation(String task, String turn, String url) {}
+        @Override public void onConversation(String task, String turn, String url) { conversations.incrementAndGet(); }
         @Override public void onUnsent(String task, String turn, String request, String status) { unsent.incrementAndGet(); }
         @Override public void onFailure(String task, String turn, String request, String code) {
             lastFailureTask.set(task); lastFailureTurn.set(turn); lastFailureRequest.set(request);

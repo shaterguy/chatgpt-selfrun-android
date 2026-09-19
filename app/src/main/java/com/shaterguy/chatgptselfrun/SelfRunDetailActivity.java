@@ -120,7 +120,7 @@ public final class SelfRunDetailActivity extends Activity {
                 if (result.length() == 0) {
                     JSONObject old = new SelfRunHistoryStore(this).get(detailRunId);
                     String url = old == null ? "" : canonicalConversationUrl(old.optString("conversationUrl"));
-                    if (!url.isEmpty()) conversations.addView(Ui.button(this, "ChatGPT 대화 열기", v -> openConversation(url)));
+                    if (!url.isEmpty()) addConversationActions(url, "");
                     else conversations.addView(Ui.muted(this, "아직 저장된 대화가 없습니다."));
                     return;
                 }
@@ -151,9 +151,25 @@ public final class SelfRunDetailActivity extends Activity {
         else if (entry.optBoolean("userIntervention") || "USER_ACTION_REQUIRED".equals(entry.optString("resultStatus")))
             conversations.addView(Ui.body(this, "사용자 조치가 필요한 대화입니다."));
         String url = canonicalConversationUrl(entry.optString("conversationUrl"));
-        if (!url.isEmpty()) conversations.addView(Ui.button(this, "ChatGPT 대화 열기", v -> openConversation(url)));
-        else conversations.addView(Ui.muted(this, "대화 주소 확인 중"));
+        addConversationActions(url, entry.optString("resultDocumentId"));
         conversations.addView(Ui.divider(this));
+    }
+
+    private void addConversationActions(String url, String documentId) {
+        android.widget.Button chat = Ui.textButton(this, "대화 열기", v -> openConversation(url));
+        chat.setEnabled(!url.isEmpty());
+        String documentUrl = DriveApiClient.validFileId(documentId)
+                ? "https://docs.google.com/document/d/" + documentId + "/edit" : "";
+        android.widget.Button document = Ui.textButton(this, "작업문서", v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(documentUrl)));
+            } catch (android.content.ActivityNotFoundException error) {
+                Toast.makeText(this, "작업문서를 열 수 있는 앱이나 브라우저가 없습니다.", Toast.LENGTH_LONG).show();
+            }
+        });
+        document.setEnabled(!documentUrl.isEmpty());
+        conversations.addView(Ui.actionStrip(this, chat, document));
+        if (url.isEmpty()) conversations.addView(Ui.muted(this, "대화 주소 확인 중"));
     }
 
     static String canonicalConversationUrl(String raw) {

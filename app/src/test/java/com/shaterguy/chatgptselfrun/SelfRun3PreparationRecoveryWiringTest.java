@@ -49,10 +49,26 @@ public final class SelfRun3PreparationRecoveryWiringTest {
         assertTrue(web.contains("dispatchConfirmed = false;"));
         assertTrue(web.contains("submitIssued = false;"));
         assertTrue(web.contains("conversationCaptured = false;"));
+        assertTrue(web.contains("step = 0;"));
+        assertTrue(web.contains("script = profileScript(state);"));
+        assertTrue(web.contains("marker(state, preparationAttempt)"));
+        assertTrue(web.contains("marker(claimed, preparationAttempt)"));
         assertTrue(web.contains("disposeHost();"));
         assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
         assertTrue(web.contains("status=reentry"));
         assertTrue(web.contains("status=recovered"));
+    }
+
+    @Test public void bootstrapMarkerSeparatesPhysicalAttemptsWithoutChangingLogicalRequest() {
+        SelfRun3Engine.State state = readyState();
+        String first = SelfRun3WebAdapter.marker(state, 1L);
+        String sameAttempt = SelfRun3WebAdapter.marker(state, 1L);
+        String second = SelfRun3WebAdapter.marker(state, 2L);
+
+        assertEquals("v31-" + state.requestId() + "-preparation-1", first);
+        assertEquals(first, sameAttempt);
+        assertFalse(first.equals(second));
+        assertEquals("v31-" + state.requestId() + "-preparation-2", second);
     }
 
     @Test public void replacementWebViewRejectsLateCallbacksAndKeepsTransientTlsInsideStage() throws Exception {

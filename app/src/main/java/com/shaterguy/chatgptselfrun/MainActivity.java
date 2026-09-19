@@ -178,14 +178,17 @@ public final class MainActivity extends Activity {
                 + actualMode + " · " + profile + " · " + store.turn() + "턴";
         if (!store.lastErrorCode().isEmpty()) meta += "\n오류  " + errorSummary();
         runMeta.setText(meta);
-        technicalDetails.setText("Run ID  " + runId
+        String technicalText = "Run ID  " + runId
                 + "\nTask mode  " + dash(taskMode)
                 + "\n현재 실행 모드  " + dash(store.mode())
                 + "\nconversation  " + dash(store.conversationUrl())
                 + "\n모델 / 추론  " + dash(store.pendingModel()) + " / " + dash(store.pendingReasoning())
                 + "\n내부 phase  " + dash(store.phase())
                 + "\nRun 폴더  " + dash(store.runBaseFolderId())
-                + "\n마지막 오류  " + errorSummary());
+                + "\n마지막 오류  " + errorSummary();
+        // Replacing an unchanged selectable buffer every second destroys Android's selection.
+        if (!android.text.TextUtils.equals(technicalDetails.getText(), technicalText))
+            technicalDetails.setText(technicalText);
 
         String conversationUrl = SelfRunDetailActivity.canonicalConversationUrl(store.conversationUrl());
         pauseButton.setVisibility(running ? View.VISIBLE : View.GONE);
@@ -280,6 +283,7 @@ public final class MainActivity extends Activity {
         if (store.runId().isEmpty()) return;
         store.stopByUser();
         runLog.record(store, "UI_STOP", "user_stop");
+        SelfRunDebugLogSync.requestStored(this, store.runId(), "STOP");
         stopService(new Intent(this, SelfRunService.class));
         refreshCurrent();
     }

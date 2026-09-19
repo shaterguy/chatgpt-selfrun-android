@@ -31,6 +31,7 @@ final class SelfRunRunLog {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
     private final File directory;
+    private final Context app;
     private final SelfRunHealthObservationStore health;
     private String lastEvaluatePhase = "";
     private long lastEvaluateAt;
@@ -38,7 +39,7 @@ final class SelfRunRunLog {
     private long lastResultAt;
 
     SelfRunRunLog(Context context) {
-        Context app = context.getApplicationContext();
+        app = context.getApplicationContext();
         directory = new File(app.getNoBackupFilesDir(), DIR);
         health = new SelfRunHealthObservationStore(app);
     }
@@ -59,9 +60,11 @@ final class SelfRunRunLog {
             item.put("event", safeEvent);
             item.put("phase", safeToken(store.phase()));
             item.put("turn", store.turn());
-            item.put("status", bounded(store.status(), 180));
+            item.put("status", bounded(sanitize(store.status()), 180));
             item.put("detail", safeDetail);
-            append(store.runId(), item.toString());
+            String line = item.toString();
+            SelfRunDebugLogSync.record(app, store.runId(), line);
+            append(store.runId(), line);
         } catch (Throwable ignored) {
         }
     }
