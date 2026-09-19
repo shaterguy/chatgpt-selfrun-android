@@ -41,6 +41,17 @@ public class SelfRunDomTest {
         assertFalse(model.contains("open-work-mode-fallback"));
     }
 
+    @Test public void v3InitialContextNeverReadsOrAppliesPastChatBootstrapSelection() throws Exception {
+        String dom = src("SelfRunDom.java");
+        String adapter = src("SelfRun3WebAdapter.java");
+
+        assertFalse(dom.contains("selectionForRun(runId)"));
+        assertFalse(adapter.contains("ChatReasoningPreferenceStore.selectionForRun(context, state.taskId())"));
+        assertTrue(adapter.contains("ChatReasoningPreferenceStore.KEEP"));
+        assertTrue(adapter.indexOf("script = SelfRunDom.prepareInitialContext(")
+                < adapter.indexOf("script = profileScript(state);"));
+    }
+
     private static String src(String file) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);

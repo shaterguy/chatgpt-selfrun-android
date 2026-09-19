@@ -10,8 +10,9 @@ final class SelfRunDom {
         boolean work = SelfRunStore.MODE_WORK.equals(mode);
         boolean general = SelfRunScript.GENERAL_CHAT_SCOPE.equals(projectId);
         String requested = work ? "work" : "chat";
-        String chatReasoning = work ? ChatReasoningPreferenceStore.KEEP
-                : ChatReasoningPreferenceStore.selectionForRun(runId);
+        // V3 applies the current turn's exact profile in SelfRun3WebAdapter.profileScript().
+        // Initial context must not inspect a stale bootstrap selection before that stage.
+        String chatReasoning = ChatReasoningPreferenceStore.KEEP;
         String newChatTarget = general ? WebUiCalibrationStore.PURPOSE_GENERAL_NEW_CHAT : WebUiCalibrationStore.PURPOSE_PROJECT_NEW_CHAT;
         String composerTarget = general ? WebUiCalibrationStore.TARGET_GENERAL_COMPOSER : WebUiCalibrationStore.TARGET_PROJECT_COMPOSER;
         String profileSetup = BootstrapModeDom.inline(requested, runId) + ChatReasoningOptionDom.inline(chatReasoning, runId);

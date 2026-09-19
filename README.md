@@ -2,7 +2,7 @@
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 현재 활성 개발 계보는 V3 하나뿐이며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
-현재 정식 승격 후보는 SelfRun Drive 3.2.9 / versionCode 3030000이며, 검증된 3.2.9-dev2 기능 상태를 기준으로 합니다.
+현재 개발 후보는 SelfRun Drive 3.2.10-dev1 / versionCode 3030010이며, 정식 3.2.9를 기준으로 합니다.
 
 ## 디버그 로그와 턴별 바로가기
 
@@ -47,7 +47,7 @@ RECEIPT=[SELF_RUN_3_RESULT ...]
 EXECUTION_PROFILE={"mode":"...","model":"...","reasoning":"..."}
 ```
 
-고정 phase·checkpoint·Result commit·Branch/Merge/Repair/User Action 의미론은 `SELF_RUN_SKILL_DOCUMENT_ID`의 최신 전체 본문이 유일한 원본입니다. 최초 요구사항과 초기 Result identity는 각각 지정된 Drive 문서에서 읽으므로 프롬프트에 다시 넣지 않습니다. CHAT 프롬프트에는 profile 후보목록을 삽입하지 않으며 다음 CHAT 실행은 직전 Result의 `next_execution.profile` 또는 `next_profile`에 기록된 model/reasoning을 원본으로 사용합니다. ProfileRegistry는 그 선택값을 실제 request profile로 검증·변환합니다. WORK/HYBRID 프롬프트의 WORK 후보는 `PROFILE_REGISTRY_WORK` compact 목록으로 유지합니다.
+고정 phase·checkpoint·Result commit·Branch/Merge/Repair/User Action 의미론은 `SELF_RUN_SKILL_DOCUMENT_ID`의 최신 전체 본문이 유일한 원본입니다. 최초 요구사항과 초기 Result identity는 각각 지정된 Drive 문서에서 읽으므로 프롬프트에 다시 넣지 않습니다. 생성 프롬프트에는 profile 후보목록을 삽입하지 않으며, 다음 실행은 직전 Result의 `next_execution.profile` 또는 `next_profile`에 기록된 model/reasoning을 원본으로 사용합니다. ProfileRegistry는 그 선택값을 실제 request profile로 검증·변환합니다. V3 초기 준비 단계는 과거 Chat bootstrap 설정을 적용하지 않고, 현재 턴의 정확한 프로필은 다음 단계에서 적용합니다.
 
 ## Drive 계약
 

@@ -1,8 +1,5 @@
 package com.shaterguy.chatgptselfrun;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 /** Dynamic SelfRun 3 envelope. Canonical execution semantics live in the Drive SKILL. */
 final class SelfRun3Protocol {
     static final String CONTRACT_VERSION="3.1.0";
@@ -62,7 +59,6 @@ final class SelfRun3Protocol {
             field(out,"REPAIR_TARGET_DOCUMENT_ID",s.text("repairTargetDocumentId"));
 
         out.append("\n[RESULT_DOCUMENT_CONTRACT]\n").append(RESULT_DOCUMENT_RULES).append('\n');
-        if(!SelfRun3Engine.isBranch(s)) appendProfileChoices(out,s.taskMode());
         if(!s.text("nextInput").isEmpty())
             out.append("\n[이전 턴에서 확정된 다음 입력]\n").append(s.text("nextInput")).append('\n');
         if(s.json().has("intervention"))
@@ -70,22 +66,6 @@ final class SelfRun3Protocol {
         if(userInput!=null && !userInput.isEmpty())
             out.append("\n[사용자 추가 지시 원문]\n").append(userInput).append('\n');
         return out.toString();
-    }
-
-    private static void appendProfileChoices(StringBuilder out,String taskMode) {
-        if("WORK".equals(taskMode) || "HYBRID".equals(taskMode))
-            out.append("\n[PROFILE_REGISTRY_WORK]\n").append(compactWorkProfileChoices()).append('\n');
-    }
-
-    private static String compactWorkProfileChoices() {
-        JSONArray choices=new JSONArray();
-        for(ProfileRegistry.Profile profile : ProfileRegistry.listWork()) {
-            JSONObject signal=new JSONObject();
-            SelfRun3Engine.put(signal,"model",profile.signalModel);
-            SelfRun3Engine.put(signal,"reasoning",profile.signalReasoning);
-            choices.put(signal);
-        }
-        return choices.toString();
     }
 
     private static void field(StringBuilder b,String key,String value) {

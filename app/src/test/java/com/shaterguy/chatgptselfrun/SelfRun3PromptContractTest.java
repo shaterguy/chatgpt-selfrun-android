@@ -10,7 +10,7 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class SelfRun3PromptContractTest {
-    @Test public void promptKeepsDynamicEnvelopeAndCompactWorkChoices() throws Exception {
+    @Test public void promptKeepsDynamicEnvelopeWithoutProfileRegistryChoices() throws Exception {
         SelfRun3Engine.State state=state("WORK","WORK","NORMAL");
         String prompt=SelfRun3Protocol.prompt(state,"current user constraint");
 
@@ -22,10 +22,10 @@ public final class SelfRun3PromptContractTest {
                 "PREVIOUS_RESULT_DOCUMENT_ID=previous","FOLDER_ID=folder",
                 "RECEIPT=[SELF_RUN_3_RESULT task:turn:2]","EXECUTION_PROFILE=",
                 "[RESULT_DOCUMENT_CONTRACT]","정해진 필드명, 구조, 값의 타입과 상태전이를 임의로 변경",
-                "[PROFILE_REGISTRY_WORK]","current user constraint"}) assertTrue(value,prompt.contains(value));
+                "current user constraint"}) assertTrue(value,prompt.contains(value));
         assertEquals(1,count(prompt,"[RESULT_DOCUMENT_CONTRACT]"));
 
-        assertFalse(prompt.contains("[PROFILE_REGISTRY_CHAT]"));
+        assertFalse(prompt.contains("[PROFILE_REGISTRY_"));
         assertFalse(prompt.contains("requirement body must not be copied"));
         assertFalse(prompt.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(prompt.contains("\"request\":"));
@@ -35,18 +35,9 @@ public final class SelfRun3PromptContractTest {
         assertFalse(prompt.contains("full checkpoint"));
     }
 
-    @Test public void hybridPromptOmitsChatRegistryAndKeepsCompactWorkChoices() throws Exception {
+    @Test public void hybridPromptOmitsEveryProfileRegistryChoice() throws Exception {
         String prompt=SelfRun3Protocol.prompt(state("HYBRID","CHAT","NORMAL"),"");
-        assertFalse(prompt.contains("[PROFILE_REGISTRY_CHAT]"));
-
-        JSONArray workChoices=new JSONArray(after(prompt,"[PROFILE_REGISTRY_WORK]\n").trim());
-        assertTrue(workChoices.length()>0);
-        for(int i=0;i<workChoices.length();i++) {
-            JSONObject choice=workChoices.getJSONObject(i);
-            assertEquals(2,choice.length());
-            assertTrue(choice.has("model"));
-            assertTrue(choice.has("reasoning"));
-        }
+        assertFalse(prompt.contains("[PROFILE_REGISTRY_"));
     }
 
     @Test public void branchMergeRepairAndInterventionContextStayConditional() throws Exception {
@@ -88,8 +79,8 @@ public final class SelfRun3PromptContractTest {
     @Test public void sourceCannotReintroduceStaticContractOrDriveOwnedPayloads() throws Exception {
         String source=src("SelfRun3Protocol.java");
         assertTrue(source.contains("REQUEST_ID"));
-        assertTrue(source.contains("compactWorkProfileChoices"));
-        assertFalse(source.contains("PROFILE_REGISTRY_CHAT"));
+        assertFalse(source.contains("compactWorkProfileChoices"));
+        assertFalse(source.contains("PROFILE_REGISTRY_"));
         assertTrue(source.contains("RESULT_DOCUMENT_RULES"));
         assertTrue(source.contains("[RESULT_DOCUMENT_CONTRACT]"));
         assertFalse(source.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));
