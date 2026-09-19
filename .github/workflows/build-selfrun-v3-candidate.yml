@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tools/verify_drive_variant.sh
+          bash tools/verify_drive_variant.sh
           bash tools/verify_selfrun3_dev4_limits_settings.sh
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:verifyDriveVariantIdentity \

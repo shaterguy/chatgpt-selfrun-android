@@ -41,6 +41,21 @@ public class SelfRunDomTest {
         assertFalse(model.contains("open-work-mode-fallback"));
     }
 
+    @Test public void v3InitialContextNeverReadsOrAppliesPastChatBootstrapSelection() throws Exception {
+        String dom = src("SelfRunDom.java");
+        String adapter = src("SelfRun3WebAdapter.java");
+        String initial = SelfRunDom.prepareInitialContext(SelfRunScript.GENERAL_CHAT_URL,
+                SelfRunStore.MODE_CHAT, "SR-20260919-CHAT");
+
+        assertFalse(dom.contains("selectionForRun(runId)"));
+        assertFalse(adapter.contains("ChatReasoningPreferenceStore.selectionForRun(context, state.taskId())"));
+        assertTrue(adapter.contains("ChatReasoningPreferenceStore.KEEP"));
+        assertTrue(adapter.indexOf("script = SelfRunDom.prepareInitialContext(")
+                < adapter.indexOf("script = profileScript(state);"));
+        assertTrue(initial.contains("skip-chat-profile-initial"));
+        assertFalse(initial.contains("CHAT_REASONING_OPTION_UNAVAILABLE"));
+    }
+
     private static String src(String file) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);

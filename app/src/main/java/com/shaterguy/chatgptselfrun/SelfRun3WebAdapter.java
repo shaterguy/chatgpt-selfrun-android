@@ -271,7 +271,7 @@ final class SelfRun3WebAdapter {
         if (step == 0) {
             BootstrapRunStateStore.touchBootstrap(
                     context, state.taskId(),
-                    ChatReasoningPreferenceStore.selectionForRun(context, state.taskId()),
+                    ChatReasoningPreferenceStore.KEEP,
                     System.currentTimeMillis());
             script = SelfRunDom.prepareInitialContext(
                     state.config().optString("projectUrl"),

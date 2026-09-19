@@ -2,15 +2,15 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3030000
-def selfRunDriveVersionName = '3.2.9'
+def selfRunDriveVersionCode = 3031000
+def selfRunDriveVersionName = '3.2.10'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 // Promotion provenance for the exact verified source candidate; the active formal identity is defined above.
-// verified source candidate: selfRunDriveVersionCode = 3029002
-// verified source candidate: selfRunDriveVersionName = '3.2.9-dev2'
+// verified source candidate: selfRunDriveVersionCode = 3030012
+// verified source candidate: selfRunDriveVersionName = '3.2.10-dev3'
 
 def configValue = { String name, String fallback ->
     def value = System.getenv(name)
@@ -248,8 +248,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !protocol.contains('EXECUTION_KIND') || !protocol.contains('SIGNAL_TYPE')
                 || !protocol.contains('RESULT_DOCUMENT_ID') || !protocol.contains('PREVIOUS_RESULT_DOCUMENT_ID')
                 || !protocol.contains('REQUIREMENT_DOCUMENT_ID') || !protocol.contains('EXECUTION_PROFILE')
-                || !protocol.contains('compactWorkProfileChoices') || protocol.contains('PROFILE_REGISTRY_CHAT')
-                || !protocol.contains('PROFILE_REGISTRY_WORK') || !protocol.contains('PARALLEL_MERGE')
+                || protocol.contains('PROFILE_REGISTRY_') || !protocol.contains('PARALLEL_MERGE')
                 || !protocol.contains('REPAIR_TARGET_DOCUMENT_ID') || !protocol.contains('사용자 추가 지시 원문')
                 || (protocol =~ /static\s+final\s+String\s+CONTRACT\s*=/).find() || protocol.contains('contract-version: 3.1.0')
                 || protocol.contains('RESULT_IDENTITY_TEMPLATE') || protocol.contains('SelfRun3Engine.emptyResult')
