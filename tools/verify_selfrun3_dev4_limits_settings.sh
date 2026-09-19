@@ -186,9 +186,9 @@ grep -Fq 'reads persisted runtime override instead of new default' "$UPGRADE_AND
 
 # Candidate upgrade fixture must use the latest delivered TEST and latest formal baselines.
 grep -Fq 'SelfRun-Drive-TEST-3.2.9-dev1.apk' "$EMULATOR"
-grep -Fq 'd6c9176b480909ba6ca6ba588e3b37b41746018c1e354b557f6b12a9e0f16dcb' "$EMULATOR"
+grep -Fq 'a201b9309ef775683100badc314ae120b05d796c6a1762fddf8fa9970e89e199' "$EMULATOR"
 grep -Fq '459e0d52bbd6de77aa3915e57342f10bb05c5fbe/deliverables/SelfRun-Drive-TEST-3.2.9-dev1.apk' "$EMULATOR"
-grep -Fq "versionCode='3025003'" "$EMULATOR"
+grep -Fq "versionCode='3029001'" "$EMULATOR"
 grep -Fq "versionName='3.2.9-dev1'" "$EMULATOR"
 grep -Fq 'stable/chatgpt-selfrun-drive-v3.2.6.apk' "$EMULATOR"
 grep -Fq '3107966104bb496348a84e8bf576eee333a0f323598f8242038b292748e02f66' "$EMULATOR"
