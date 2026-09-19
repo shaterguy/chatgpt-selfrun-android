@@ -5,9 +5,9 @@ set -euo pipefail
 
 FORMAL=com.shaterguy.chatgptselfrun.drive
 TEST=com.shaterguy.chatgptselfrun.drive.test
-PREVIOUS_FORMAL=stable/chatgpt-selfrun-drive-v3.2.6.apk
-PREVIOUS_FORMAL_SHA256=3107966104bb496348a84e8bf576eee333a0f323598f8242038b292748e02f66
-PREVIOUS_FORMAL_URL=https://github.com/shaterguy/chatgpt-selfrun-android/releases/download/drive-v3.2.6/chatgpt-selfrun-drive-v3.2.6.apk
+PREVIOUS_FORMAL=stable/chatgpt-selfrun-drive-v3.2.8.apk
+PREVIOUS_FORMAL_SHA256=d2cfd398efa193ba90cfb46e6d630021b9b415169422af521e374a45edb2e945
+PREVIOUS_FORMAL_URL=https://github.com/shaterguy/chatgpt-selfrun-android/releases/download/drive-v3.2.8/chatgpt-selfrun-drive-v3.2.8.apk
 PREVIOUS_TEST=previous/SelfRun-Drive-TEST-3.2.9-dev1.apk
 PREVIOUS_TEST_SHA256=a201b9309ef775683100badc314ae120b05d796c6a1762fddf8fa9970e89e199
 PREVIOUS_TEST_URL=https://raw.githubusercontent.com/shaterguy/chatgpt-selfrun-android/459e0d52bbd6de77aa3915e57342f10bb05c5fbe/deliverables/SelfRun-Drive-TEST-3.2.9-dev1.apk
@@ -19,8 +19,8 @@ curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_FORMAL" 
 echo "$PREVIOUS_FORMAL_SHA256  $PREVIOUS_FORMAL" | sha256sum -c -
 "$BT/apksigner" verify --verbose --print-certs "$PREVIOUS_FORMAL" > selfrun-v3-previous-formal-cert.txt
 grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' selfrun-v3-previous-formal-cert.txt
-"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionName='3.2.6'"
-"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionCode='3027000'"
+"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionName='3.2.8'"
+"$BT/aapt" dump badging "$PREVIOUS_FORMAL" | grep -F "versionCode='3029000'"
 
 curl --fail --location --retry 3 --retry-all-errors --output "$PREVIOUS_TEST" "$PREVIOUS_TEST_URL"
 echo "$PREVIOUS_TEST_SHA256  $PREVIOUS_TEST" | sha256sum -c -
