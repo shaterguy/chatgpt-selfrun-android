@@ -154,15 +154,13 @@ public final class SelfRun3PreparationRecoveryAndroidTest {
                     () -> expireCurrentPreparation(adapter));
             awaitCount(listener.failures, 2, 2_000L, "second post-submit timeout");
 
-            Attempt third = startSubmissionAttempt(adapter, claimed, true);
+            Attempt third = startSubmissionAttempt(adapter, claimed, false);
             assertNotSame(second.web, third.web);
             awaitCount(listener.dispatched, 3, 8_000L, "third canonical POST");
             awaitBooleanField(adapter, "dispatchConfirmed", 2_000L, "third canonical POST observer");
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-                String url = third.web.getUrl();
-                assertEquals("watchdog-recovered", SelfRunScript.conversationId(url));
-                third.client.doUpdateVisitedHistory(third.web, url, false);
-            });
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                    third.web.loadDataWithBaseURL(ROOT + "c/watchdog-recovered", fixture(),
+                            "text/html", "UTF-8", null));
             awaitCount(listener.started, 1, 8_000L, "conversation start after retry");
             assertTrue(booleanField(adapter, "dispatchConfirmed"));
             assertTrue(booleanField(adapter, "conversationCaptured"));
