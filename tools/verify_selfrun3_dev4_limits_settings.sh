@@ -22,6 +22,7 @@ SETTINGS=$SRC/SelfRun3RuntimeSettings.java
 COORD=$SRC/SelfRun3Coordinator.java
 SERVICE=$SRC/SelfRunService.java
 STOPPED_RESUME=$SRC/SelfRunStoppedResume.java
+STOPPED_RECOVERY=$SRC/SelfRun3StoppedRecovery.java
 STALL=$SRC/SelfRun3TurnStallPolicy.java
 NOTIFIER=$SRC/SelfRun3TurnStallNotifier.java
 WEB=$SRC/SelfRun3WebAdapter.java
@@ -41,7 +42,7 @@ UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
 STOPPED_RESUME_ANDROID=$ANDROID/SelfRunStoppedResumeAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
-  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$ALWAYS_REPAIR_UNIT" "$COMMITTED_PRIORITY_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
+  "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STOPPED_RECOVERY" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$ALWAYS_REPAIR_UNIT" "$COMMITTED_PRIORITY_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
   "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$CONVERSATION_GATE_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
@@ -163,6 +164,9 @@ grep -Fq '같은 문서를 다시 읽어 저장된 내용을 검증' "$PROTOCOL"
 # Explicit user-stopped recovery keeps the exact ledger lineage and cannot be reached by ordinary resume.
 grep -Fq 'RESUME_STOPPED' "$ENGINE"
 grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
+! grep -Fq 'if(!original.flag("taskStopped")) return original' "$ENGINE"
+! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RESUME"
+! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RECOVERY"
 grep -Fq 'ACTION_RESUME_STOPPED' "$SERVICE"
 grep -Fq 'stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN' "$SERVICE"
 grep -Fq 'ledger.load(target)' "$STOPPED_RESUME"

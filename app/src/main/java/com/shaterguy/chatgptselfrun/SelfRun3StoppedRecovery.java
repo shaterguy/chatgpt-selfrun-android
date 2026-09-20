@@ -13,7 +13,6 @@ final class SelfRun3StoppedRecovery {
     }
 
     static JSONObject plan(SelfRun3Engine.State stopped, Reader reader) throws Exception {
-        if (!stopped.flag("taskStopped")) throw new IllegalStateException("STOPPED_STATE_REQUIRED");
         JSONObject results = new JSONObject();
         for (SelfRun3Engine.State execution : stopped.executions()) {
             if (!needsRead(execution)) continue;

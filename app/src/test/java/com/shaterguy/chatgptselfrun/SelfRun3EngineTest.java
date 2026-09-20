@@ -72,6 +72,21 @@ public final class SelfRun3EngineTest {
         assertSame(resumed, duplicate);
     }
 
+    @Test public void explicitStoppedResumeDoesNotRequireLedgerStopFlag() throws Exception {
+        SelfRun3Engine.State claimed = claimedState();
+        SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
+        assertFalse(waiting.flag("taskStopped"));
+
+        SelfRun3Engine.State resumed = reduce(waiting, "resume-after-ui-stop",
+                SelfRun3Engine.Kind.RESUME_STOPPED,
+                SelfRun3StoppedRecovery.plan(waiting, x -> SelfRun3Engine.emptyResult(x).toString()));
+
+        assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
+        assertFalse(resumed.flag("taskStopped"));
+        assertEquals("resume-after-ui-stop", resumed.text("stoppedResumeOperation"));
+        assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(resumed));
+    }
+
     @Test public void stoppedTaskWithCommittedDriveResultResumesAtCommitWithoutRedispatch() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject resultPayload = new JSONObject();

@@ -8,18 +8,23 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class SelfRunStoppedResumePolicyTest {
-    @Test public void stoppedResumeIsExplicitAndNormalResumeCannotBypassStopLatch() throws Exception {
+    @Test public void stoppedResumeIsExplicitWithoutRequiringLedgerStopProof() throws Exception {
         String engine = src("SelfRun3Engine.java");
+        String recovery = src("SelfRun3StoppedRecovery.java");
+        String resume = src("SelfRunStoppedResume.java");
         assertTrue(engine.contains("RESUME_STOPPED"));
         assertTrue(engine.contains("original.flag(\"taskStopped\") && e.kind != Kind.RESUME_STOPPED"));
-        assertTrue(engine.contains("if(!original.flag(\"taskStopped\")) return original"));
         assertTrue(engine.contains("put(root,\"taskStopped\",false)"));
+        assertFalse(engine.contains("if(!original.flag(\"taskStopped\")) return original"));
+        assertFalse(recovery.contains("STOPPED_STATE_REQUIRED"));
+        assertFalse(resume.contains("STOPPED_STATE_REQUIRED"));
     }
 
     @Test public void historyOnlyOffersUserStoppedResumeAndServiceOwnsRecovery() throws Exception {
         String history = src("SelfRunHistoryActivity.java");
         String detail = src("SelfRunDetailActivity.java");
         String service = src("SelfRunService.java");
+        String main = src("MainActivity.java");
         assertTrue(history.contains("SelfRunStoppedResume.isEligible(item)"));
         assertTrue(detail.contains("SelfRunStoppedResume.isEligible(item)"));
         assertTrue(history.contains("중지된 작업 재개"));
@@ -27,6 +32,8 @@ public final class SelfRunStoppedResumePolicyTest {
         assertTrue(service.contains("ACTION_RESUME_STOPPED"));
         assertTrue(service.contains("stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN"));
         assertTrue(service.contains("stoppedResume.resumePending()"));
+        assertTrue(main.contains("sendRunnerAction(SelfRunService.ACTION_STOP)"));
+        assertFalse(main.contains("stopService(new Intent(this, SelfRunService.class))"));
     }
 
     @Test public void recoveryReusesExistingLedgerAndPinnedDriveIdentity() throws Exception {

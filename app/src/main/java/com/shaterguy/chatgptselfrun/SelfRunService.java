@@ -137,7 +137,10 @@ public final class SelfRunService extends Service {
 
         if (!coordinator.ownsCurrentRun()) {
             if (!store.runId().isEmpty()) {
-                runLog.record(store, "V3_STALE_RUN_RETIRED", "action=" + action);
+                if (ACTION_STOP.equals(action)) {
+                    runLog.record(store, "V3_STOP", "user_stop");
+                    SelfRunDebugLogSync.requestStored(this, store.runId(), "STOP");
+                } else runLog.record(store, "V3_STALE_RUN_RETIRED", "action=" + action);
                 store.stopByUser();
             }
             stopSelf(startId);

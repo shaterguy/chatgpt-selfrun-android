@@ -281,10 +281,7 @@ public final class MainActivity extends Activity {
 
     private void stopSelfRun() {
         if (store.runId().isEmpty()) return;
-        store.stopByUser();
-        runLog.record(store, "UI_STOP", "user_stop");
-        SelfRunDebugLogSync.requestStored(this, store.runId(), "STOP");
-        stopService(new Intent(this, SelfRunService.class));
+        sendRunnerAction(SelfRunService.ACTION_STOP);
         refreshCurrent();
     }
 

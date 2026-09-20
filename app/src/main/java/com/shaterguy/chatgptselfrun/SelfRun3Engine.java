@@ -95,7 +95,6 @@ final class SelfRun3Engine {
             if(e.kind==Kind.STOP) { put(v,"taskStopped",true); put(v,"pauseReason","USER_STOP"); put(v,"stopEventId",e.id); }
             else if(e.kind==Kind.PAUSE) { put(v,"taskPaused",true); put(v,"pauseReason",e.payload.optString("reason")); }
             else if(e.kind==Kind.RESUME_STOPPED) {
-                if(!original.flag("taskStopped")) return original;
                 return resumeStopped(original,e);
             } else { put(v,"taskPaused",false); v.remove("pauseReason"); }
             return persist(v,true);

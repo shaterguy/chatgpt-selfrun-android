@@ -118,31 +118,25 @@ final class SelfRunStoppedResume {
                 throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
             }
 
-            JSONObject recovery = null;
-            if (state.flag("taskStopped")) {
-                DriveApiClient api = new DriveApiClient();
-                if (!config.optString("accountId").equals(api.getAccountPermissionId(token)))
+            DriveApiClient api = new DriveApiClient();
+            if (!config.optString("accountId").equals(api.getAccountPermissionId(token)))
+                throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
+            if (!state.resource("folderId").isEmpty()) {
+                DriveApiClient.Metadata folder = api.getMetadata(token, state.resource("folderId"));
+                if (folder.trashed || !DriveApiClient.MIME_FOLDER.equals(folder.mimeType)
+                        || !config.optString("baseFolderId").equals(folder.parentId))
                     throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
-                if (!state.resource("folderId").isEmpty()) {
-                    DriveApiClient.Metadata folder = api.getMetadata(token, state.resource("folderId"));
-                    if (folder.trashed || !DriveApiClient.MIME_FOLDER.equals(folder.mimeType)
-                            || !config.optString("baseFolderId").equals(folder.parentId))
-                        throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
-                }
-                recovery = SelfRun3StoppedRecovery.plan(state, execution -> {
-                    if (!current(target, operation)) throw new IllegalStateException("RESUME_CANCELLED");
-                    String id = execution.resource("resultDocumentId");
-                    DriveApiClient.Metadata metadata = api.getMetadata(token, id);
-                    if (!SelfRun3ResultDocumentPolicy.acceptReadableResult(metadata, id, execution.resource("folderId")))
-                        throw new IllegalStateException("STOPPED_RESULT_UNREADABLE");
-                    SelfRun3ResultDocumentReader.Snapshot snapshot = SelfRun3ResultDocumentReader.read(token, id);
-                    SelfRun3ResultDocumentPolicy.Selection selection = SelfRun3ResultDocumentPolicy.select(snapshot.bodies, execution);
-                    return selection.committed ? selection.candidateBody : selection.rawBody;
-                });
-            } else if (!operation.equals(state.text("stoppedResumeOperation"))) {
-                throw new IllegalStateException("STOPPED_STATE_REQUIRED");
             }
-            final JSONObject plan = recovery;
+            final JSONObject plan = SelfRun3StoppedRecovery.plan(state, execution -> {
+                if (!current(target, operation)) throw new IllegalStateException("RESUME_CANCELLED");
+                String id = execution.resource("resultDocumentId");
+                DriveApiClient.Metadata metadata = api.getMetadata(token, id);
+                if (!SelfRun3ResultDocumentPolicy.acceptReadableResult(metadata, id, execution.resource("folderId")))
+                    throw new IllegalStateException("STOPPED_RESULT_UNREADABLE");
+                SelfRun3ResultDocumentReader.Snapshot snapshot = SelfRun3ResultDocumentReader.read(token, id);
+                SelfRun3ResultDocumentPolicy.Selection selection = SelfRun3ResultDocumentPolicy.select(snapshot.bodies, execution);
+                return selection.committed ? selection.candidateBody : selection.rawBody;
+            });
             final String expectedTurn = state.turnId();
             main.post(() -> {
                 try (SelfRun3Ledger finalLedger = new SelfRun3Ledger(service)) {
@@ -152,8 +146,7 @@ final class SelfRunStoppedResume {
                     if (!config.optString("accountId").equals(store.driveAccountId())
                             || !config.optString("baseFolderId").equals(store.driveRunsBaseFolderId()))
                         throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
-                    SelfRun3Engine.State ready = plan == null ? finalLedger.load(target)
-                            : finalLedger.apply(new SelfRun3Engine.Event(operation,
+                    SelfRun3Engine.State ready = finalLedger.apply(new SelfRun3Engine.Event(operation,
                             SelfRun3Engine.Kind.RESUME_STOPPED, target, expectedTurn, plan));
                     if (ready.flag("taskStopped") || !operation.equals(ready.text("stoppedResumeOperation")))
                         throw new IllegalStateException("STOPPED_LEDGER_NOT_RESUMED");
