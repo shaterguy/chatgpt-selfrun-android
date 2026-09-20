@@ -65,7 +65,7 @@ final class SelfRunDeliverableLinks {
             String scheme = uri.getScheme();
             if (scheme == null) return false;
             scheme = scheme.toLowerCase(Locale.ROOT);
-            return ("https".equals(scheme) || "http".equals(scheme))
+            return "https".equals(scheme)
                     && !uri.isOpaque()
                     && uri.getHost() != null
                     && !uri.getHost().isEmpty()
