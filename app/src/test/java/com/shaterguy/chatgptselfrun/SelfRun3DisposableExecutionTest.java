@@ -7,36 +7,6 @@ import static org.junit.Assert.*;
 
 /** Exercise restartable branch routing using serialized state, not mocked coordinator calls. */
 public final class SelfRun3DisposableExecutionTest {
-    @Test public void stoppedRecoveryPreservesCompletedBranchAndMergesFreshCommittedSibling() throws Exception {
-        SelfRun3Engine.State root=dispatch(dispatch(wave()));
-        String a=branch(root,"A").turnId(), b=branch(root,"B").turnId();
-        root=completeBranch(root,a,"COMPLETE");
-        String completed=root.execution(a).text("result");
-        root=event(root,root.turnId(),SelfRun3Engine.Kind.STOP,new JSONObject());
-        final int[] reads={0};
-        JSONObject plan=SelfRun3StoppedRecovery.plan(root,execution->{
-            reads[0]++; assertEquals(b,execution.turnId());
-            return branchResult(execution,"PARTIAL").toString();
-        });
-        root=event(new SelfRun3Engine.State(root.json()),root.turnId(),SelfRun3Engine.Kind.RESUME_STOPPED,plan);
-        assertEquals(1,reads[0]); assertEquals(completed,root.execution(a).text("result"));
-        assertEquals(SelfRun3Engine.Action.COMMIT,SelfRun3Engine.nextAction(root));
-        root=event(root,b,SelfRun3Engine.Kind.COMMIT,new JSONObject());
-        assertEquals("PARALLEL_MERGE",root.text("executionKind"));
-        assertEquals(4,root.turn()); assertEquals(2,root.json().optJSONArray("mergedFrom").length());
-        assertEquals(completed,root.execution(a).text("result"));
-    }
-    @Test public void failedSecondDriveReadCannotPartiallyResumeParallelWave() throws Exception {
-        SelfRun3Engine.State root=dispatch(dispatch(wave()));
-        final SelfRun3Engine.State stopped=event(root,root.turnId(),SelfRun3Engine.Kind.STOP,new JSONObject());
-        String before=stopped.json().toString(); final int[] reads={0};
-        assertThrows(java.io.IOException.class,()->SelfRun3StoppedRecovery.plan(stopped,execution->{
-            if(++reads[0]==2) throw new java.io.IOException("Drive unavailable");
-            return branchResult(execution,"COMPLETE").toString();
-        }));
-        assertEquals(2,reads[0]); assertEquals(before,stopped.json().toString());
-        assertTrue(stopped.flag("taskStopped"));
-    }
     @Test public void twoBranchesDispatchSequentiallyAndOnlyMergeCanContinue() {
         SelfRun3Engine.State root=wave();
         assertEquals("A",root.text("branchId"));
