@@ -18,6 +18,7 @@ public final class SelfRunDeliverableLinksWiringTest {
         String historyStore = src("SelfRunHistoryStore.java");
 
         assertTrue(engine.contains("SelfRunDeliverableLinks.fromResult(result)"));
+        assertTrue(engine.contains("x.optBoolean(\"committed\") && \"DONE\".equals(x.optString(\"stage\"))"));
         assertTrue(engine.contains("put(h,\"deliverableLinks\",deliverableLinks)"));
         assertTrue(coordinator.contains("store.setDeliverableLinks(SelfRunDeliverableLinks.fromResult(state.text(\"result\")))"));
         assertTrue(store.contains("KEY_DELIVERABLE_LINKS"));
