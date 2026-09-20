@@ -19,6 +19,7 @@ import java.util.Set;
 
 /** Optional DONE-only links for user-accessible final artifacts. Never participates in Result routing. */
 final class SelfRunDeliverableLinks {
+    private static final int MAX_LINKS = 20;
     private static final int MAX_NAME_CHARS = 160;
     private static final int MAX_URL_CHARS = 4096;
 
@@ -41,7 +42,7 @@ final class SelfRunDeliverableLinks {
         JSONArray output = new JSONArray();
         if (input == null) return output;
         Set<String> seen = new HashSet<>();
-        for (int i = 0; i < input.length(); i++) {
+        for (int i = 0; i < input.length() && output.length() < MAX_LINKS; i++) {
             JSONObject candidate = input.optJSONObject(i);
             if (candidate == null) continue;
             String name = candidate.optString("name", "").trim();
