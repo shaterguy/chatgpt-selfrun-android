@@ -2,15 +2,15 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3032001
-def selfRunDriveVersionName = '3.3.0-dev1'
+def selfRunDriveVersionCode = 3033000
+def selfRunDriveVersionName = '3.3.0'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 // Promotion provenance for the exact verified source candidate; the active formal identity is defined above.
-// verified source candidate: selfRunDriveVersionCode = 3031002
-// verified source candidate: selfRunDriveVersionName = '3.2.11-dev2'
+// verified source candidate: selfRunDriveVersionCode = 3032001
+// verified source candidate: selfRunDriveVersionName = '3.3.0-dev1'
 
 def configValue = { String name, String fallback ->
     def value = System.getenv(name)
