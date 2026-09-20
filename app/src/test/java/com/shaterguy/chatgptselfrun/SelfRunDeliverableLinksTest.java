@@ -7,7 +7,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class SelfRunDeliverableLinksTest {
-    @Test public void doneResultKeepsSafeHttpLinksAndDeduplicatesByDirectAccess() throws Exception {
+    @Test public void doneResultKeepsSafeHttpsLinksAndDeduplicatesByDirectAccess() throws Exception {
         JSONObject result = new JSONObject().put("committed", true).put("status", "DONE");
         JSONArray links = new JSONArray()
                 .put(new JSONObject().put("name", "APK").put("direct_access", "https://example.com/app.apk"))
@@ -61,6 +61,18 @@ public final class SelfRunDeliverableLinksTest {
 
         assertNotNull(SelfRun3Engine.parseResult(result.toString(), state));
         assertEquals(0, SelfRunDeliverableLinks.fromResult(result).length());
+    }
+
+    @Test public void displayProjectionIsBoundedToTwentyLinks() throws Exception {
+        JSONObject result = new JSONObject().put("committed", true).put("status", "DONE");
+        JSONArray links = new JSONArray();
+        for (int i = 0; i < 25; i++) {
+            links.put(new JSONObject()
+                    .put("name", "file-" + i)
+                    .put("direct_access", "https://example.com/file-" + i));
+        }
+        result.put("deliverable_links", links);
+        assertEquals(20, SelfRunDeliverableLinks.fromResult(result).length());
     }
 
     @Test public void unsafeSchemesAndCredentialBearingUrlsAreRejected() {
