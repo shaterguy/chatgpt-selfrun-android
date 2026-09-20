@@ -1279,6 +1279,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 state.resource("conversationUrl"));
         if (state.stage() == SelfRun3Engine.Stage.DONE) {
             SelfRunServerRecoveryWorker.cancel(service);
+            store.setDeliverableLinks(SelfRunDeliverableLinks.fromResult(state.text("result")));
             store.setActive(false);
             store.releaseCommittedAttachmentPermissions();
             store.setStatus("작업 완료");
