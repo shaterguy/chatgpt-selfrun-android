@@ -402,7 +402,10 @@ final class SelfRun3Engine {
             put(h,"resultBodyMutationObserved",x.optBoolean("resultBodyMutationObserved"));
             put(h,"dispatchStatus",x.optBoolean("dispatchObserved")?"CONFIRMED":x.optBoolean("sendClaimed")?"UNCERTAIN":"PENDING");
             JSONObject result=x.optString("result").isEmpty()?new JSONObject():object(x.optString("result"));
-            put(h,"resultStatus",result.optString("status",x.optBoolean("committed")?"COMMITTED":"PENDING")); history.put(h);
+            put(h,"resultStatus",result.optString("status",x.optBoolean("committed")?"COMMITTED":"PENDING"));
+            JSONArray deliverableLinks=SelfRunDeliverableLinks.fromResult(result);
+            if(deliverableLinks.length()>0) put(h,"deliverableLinks",deliverableLinks);
+            history.put(h);
         }
         put(v,"history",history);
         if(select && !v.optBoolean("taskPaused") && !v.optBoolean("taskStopped")) {
