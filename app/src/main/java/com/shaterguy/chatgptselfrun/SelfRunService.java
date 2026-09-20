@@ -135,6 +135,9 @@ public final class SelfRunService extends Service {
             return START_STICKY;
         }
 
+        // A startForegroundService request must publish its notification before any
+        // ledger ownership or persistence work can delay this service.
+        startForegroundCompat();
         if (!coordinator.ownsCurrentRun()) {
             if (!store.runId().isEmpty()) {
                 if (ACTION_STOP.equals(action)) {
@@ -151,7 +154,6 @@ public final class SelfRunService extends Service {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
-        startForegroundCompat();
         turnStallNotifier.start();
         return coordinator.onStart(action);
     }
