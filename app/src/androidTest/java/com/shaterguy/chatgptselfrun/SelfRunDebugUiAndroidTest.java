@@ -147,6 +147,44 @@ public final class SelfRunDebugUiAndroidTest {
         } finally { instrumentation.removeMonitor(monitor); }
     }
 
+    @Test public void doneDeliverableLinkButtonOpensValidatedHttpsOnly() throws Exception {
+        context.getSharedPreferences("selfrun_drive", 0).edit()
+                .putString("phase", SelfRunStore.PHASE_DONE)
+                .putBoolean("active", false)
+                .putBoolean("paused", false)
+                .putString("deliverableLinksJson", new org.json.JSONArray()
+                        .put(new JSONObject().put("name", "TEST APK")
+                                .put("direct_access", "https://example.com/SelfRun-Drive-TEST-3.3.0-dev1.apk"))
+                        .put(new JSONObject().put("name", "unsafe")
+                                .put("direct_access", "intent://example/#Intent;scheme=https;end"))
+                        .toString())
+                .commit();
+
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        AtomicReference<Intent> opened = new AtomicReference<>();
+        Instrumentation.ActivityMonitor monitor = new Instrumentation.ActivityMonitor() {
+            @Override public Instrumentation.ActivityResult onStartActivity(Intent outgoing) {
+                if (!Intent.ACTION_VIEW.equals(outgoing.getAction())) return null;
+                opened.set(outgoing);
+                return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null);
+            }
+        };
+        instrumentation.addMonitor(monitor);
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> {
+                View safe = find(activity.getWindow().getDecorView(), "다운로드 · TEST APK");
+                assertNotNull(safe);
+                assertNull(find(activity.getWindow().getDecorView(), "다운로드 · unsafe"));
+                safe.performClick();
+                assertNotNull(opened.get());
+                assertEquals("https://example.com/SelfRun-Drive-TEST-3.3.0-dev1.apk",
+                        opened.get().getDataString());
+            });
+        } finally {
+            instrumentation.removeMonitor(monitor);
+        }
+    }
+
     private static void render(SelfRunDetailActivity activity, String kind, String id) {
         try {
             JSONObject entry = new JSONObject().put("executionKind", kind).put("turn", 2)
