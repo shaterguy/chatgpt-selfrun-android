@@ -37,7 +37,7 @@ public final class MainActivity extends Activity {
     private EditText nextInputEditor;
     private Button newRunButton, nextInputSaveButton, nextInputDeleteButton;
     private Button pauseButton, resumeButton, stopButton, currentConversationButton, currentLogsButton;
-    private LinearLayout runControlSlot;
+    private LinearLayout runControlSlot, deliverablePanel;
     private String lastNextInputRunId = "", lastNextInputStored = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -87,6 +87,9 @@ public final class MainActivity extends Activity {
         technicalDetails = Ui.muted(this, "");
         technicalDetails.setVisibility(View.GONE);
         technicalDetails.setTextIsSelectable(true);
+        deliverablePanel = new LinearLayout(this);
+        deliverablePanel.setOrientation(LinearLayout.VERTICAL);
+        deliverablePanel.setVisibility(View.GONE);
         pauseButton = Ui.button(this, "일시정지", v -> pauseSelfRun());
         resumeButton = Ui.button(this, "재개", v -> resumeSelfRun());
         currentConversationButton = Ui.outlinedButton(this, "현재 대화", v -> openCurrentConversation());
@@ -111,6 +114,7 @@ public final class MainActivity extends Activity {
                 technicalDetails.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
         runStage = Ui.card(this, jobTitle, currentStatus, runMeta,
                 Ui.actionStrip(this, runControlSlot, stopButton),
+                deliverablePanel,
                 Ui.divider(this), Ui.actionStrip(this, currentLogsButton, detailsButton), technicalDetails);
         runPage.addView(runStage);
 
@@ -198,6 +202,7 @@ public final class MainActivity extends Activity {
         resumeButton.setEnabled(paused);
         stopButton.setEnabled(running || paused);
         currentConversationButton.setEnabled(!conversationUrl.isEmpty());
+        SelfRunDeliverableLinks.render(this, deliverablePanel, store.deliverableLinks());
         currentLogsButton.setVisibility(View.VISIBLE);
         refreshNextInput(runId);
     }
