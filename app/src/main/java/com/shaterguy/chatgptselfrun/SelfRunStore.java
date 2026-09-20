@@ -57,6 +57,7 @@ final class SelfRunStore {
     private static final String PREFS = "selfrun_drive";
     private static final String KEY_ATTACHMENTS = "attachmentsJson";
     private static final String KEY_ATTACHMENT_GRANT_CLEANUP = "attachmentGrantCleanupJson";
+    private static final String KEY_DELIVERABLE_LINKS = "deliverableLinksJson";
 
     static final class Attachment {
         final int index;
@@ -156,6 +157,7 @@ final class SelfRunStore {
                     .putString("projectUrl", target)
                     .putString("requirement", safe(requirement))
                     .putString("conversationUrl", "")
+                    .putString(KEY_DELIVERABLE_LINKS, "[]")
                     .putString("phase", SelfRun3Coordinator.PHASE_SETUP)
                     .putString("status", "SelfRun 3 원장 · Drive 준비")
                     .putString("pendingModel", safe(model))
@@ -289,6 +291,10 @@ final class SelfRunStore {
     String jobFolderId() { return get("jobFolderId"); }
     String turnDocumentId() { return get("turnDocumentId"); }
     String turnDocumentUrl() { return get("turnDocumentUrl"); }
+    JSONArray deliverableLinks() {
+        try { return SelfRunDeliverableLinks.normalize(new JSONArray(prefs.getString(KEY_DELIVERABLE_LINKS, "[]"))); }
+        catch (Exception ignored) { return new JSONArray(); }
+    }
 
     // V3 has no Drive title-signal protocol. These accessors remain empty for health/history compatibility.
     String lastDriveSignalRaw() { return ""; }
@@ -355,6 +361,15 @@ final class SelfRunStore {
                     .putString("pendingModel", safe(model))
                     .putString("pendingReasoning", safe(reasoning))
                     .putString("conversationUrl", url));
+            syncHistory();
+        }
+    }
+
+    void setDeliverableLinks(JSONArray links) {
+        String normalized = SelfRunDeliverableLinks.normalize(links).toString();
+        synchronized (RUN_STATE_LOCK) {
+            if (normalized.equals(prefs.getString(KEY_DELIVERABLE_LINKS, "[]"))) return;
+            commitOrThrow(prefs.edit().putString(KEY_DELIVERABLE_LINKS, normalized));
             syncHistory();
         }
     }
