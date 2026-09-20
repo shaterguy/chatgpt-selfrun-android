@@ -295,31 +295,11 @@ final class SelfRun3Engine {
     }
 
     private static State resumeStopped(State original, Event e) {
-        require(equivalent(original.json(),e.payload.optJSONObject("expectedSnapshot")),"STOPPED_SNAPSHOT_CHANGED");
-        JSONObject results=e.payload.optJSONObject("results");
-        require(results!=null,"STOPPED_DRIVE_READ_REQUIRED");
         JSONObject root=original.json(), all=copy(root.optJSONObject("executions"));
         for(State s:original.executions()) {
-            if(!SelfRun3StoppedRecovery.needsRead(s)) continue;
             JSONObject v=s.json();
-            JSONObject result=null;
-            if(!s.resource("resultDocumentId").isEmpty()) {
-                require(results.has(s.turnId()),"STOPPED_DRIVE_READ_REQUIRED");
-                result=SelfRun3StoppedRecovery.validate(results.optString(s.turnId()),s);
-            } else require(Set.of("SETUP","PREPARING").contains(s.text("stage")),"STOPPED_RESULT_ID_MISSING");
             v.remove("error"); v.remove("pauseReason");
-            if(result!=null && result.optBoolean("committed")) {
-                if(s.flag("committed")) {
-                    JSONObject old=object(s.text("result"));
-                    boolean resolved="USER_ACTION_REQUIRED".equals(old.optString("status"))
-                            && "USER_ACTION_RESOLVED".equals(result.optString("status"));
-                    require(resolved || equivalent(old,result),"committed result changed");
-                    if(resolved) { put(v,"result",result.toString()); put(v,"committed",false); put(v,"stage","RECONCILING"); }
-                } else {
-                    put(v,"result",result.toString()); put(v,"committed",false); put(v,"stage","RECONCILING");
-                }
-            } else {
-                require(!s.flag("committed"),"STOPPED_COMMITTED_RESULT_REGRESSED");
+            if(!s.flag("superseded") && !s.flag("committed") && !s.hasResult()) {
                 JSONArray attempts=array(v.optJSONArray("stoppedAttempts"));
                 JSONObject attempt=new JSONObject();
                 for(String k:new String[]{"requestId","stage","error","submittedAt","prompt","inputText","inputRevision"})
@@ -335,6 +315,8 @@ final class SelfRun3Engine {
                 put(v,"stoppedRestart",true);
                 put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
                 for(String k:new String[]{"sendClaimed","dispatchObserved","accepted","ended","committed"}) put(v,k,false);
+            } else if(!s.flag("committed") && s.hasResult()) {
+                put(v,"stage","RECONCILING");
             }
             put(all,s.turnId(),record(v));
         }

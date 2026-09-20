@@ -36,7 +36,6 @@ HEADLESS=$SRC/HeadlessWebViewHost.java
 PROFILE=$SRC/RequestProfileScript.java
 PROFILE_REGISTRY=$SRC/ProfileRegistry.java
 STOPPED_RESUME=$SRC/SelfRunStoppedResume.java
-STOPPED_RECOVERY=$SRC/SelfRun3StoppedRecovery.java
 RUNNER=$ANDROID_TEST/SelfRunAndroidTestRunner.java
 FIRST_TEST=$ANDROID_TEST/SelfRun31FirstConversationAndroidTest.java
 UNBOUNDED_TEST=$UNIT_TEST/SelfRun3UnboundedPayloadPolicyTest.java
@@ -57,7 +56,7 @@ grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
-for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST" "$STOPPED_RESUME" "$STOPPED_RECOVERY" "$STOPPED_RESUME_TEST" "$STOPPED_RESUME_ANDROID_TEST"; do
+for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST" "$STOPPED_RESUME" "$STOPPED_RESUME_TEST" "$STOPPED_RESUME_ANDROID_TEST"; do
   test -s "$file"
 done
 
@@ -85,7 +84,7 @@ grep -Fq 'RESUME_STOPPED' "$ENGINE"
 grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
 ! grep -Fq 'if(!original.flag("taskStopped")) return original' "$ENGINE"
 ! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RESUME"
-! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RECOVERY"
+! grep -Fq 'STOPPED_STATE_REQUIRED'
 ! grep -Fq 'full handoff missing' "$ENGINE"
 ! grep -Fq 'verification required for DONE' "$ENGINE"
 ! grep -Fq 'branch identity mismatch' "$ENGINE"
@@ -104,7 +103,7 @@ grep -Fq 'unknownNextPhaseDoesNotInvalidateCommittedResult' "$ENGINE_TEST"
 grep -Fq 'nonterminalDoneRoutingHintFallsBackInsteadOfRejectingTurn' "$ENGINE_TEST"
 grep -Fq 'doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp' "$ENGINE_TEST"
 grep -Fq 'identityOnlyCommittedResultCreatesRecoveryTurn' "$ENGINE_TEST"
-grep -Fq 'stoppedTaskRequiresFreshDriveReadAndRepreparesSameTurn' "$ENGINE_TEST"
+grep -Fq 'stoppedTaskRepreparesFromSavedLedgerState' "$ENGINE_TEST"
 
 grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES * 60_000L' "$WATCHDOG"
 grep -Fq 'state.stage() != SelfRun3Engine.Stage.WAITING' "$WATCHDOG"

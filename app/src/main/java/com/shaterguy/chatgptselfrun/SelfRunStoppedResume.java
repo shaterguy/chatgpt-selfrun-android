@@ -65,7 +65,7 @@ final class SelfRunStoppedResume {
         }
         Intent intent = new Intent(app, SelfRunService.class).setAction(SelfRunService.ACTION_RESUME_STOPPED);
         if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(intent); else app.startService(intent);
-        Toast.makeText(context, "Drive 작업문서를 확인해 확정된 작업은 이어가고, 미완료 턴은 처음부터 다시 시작합니다.", Toast.LENGTH_LONG).show();
+        Toast.makeText(context, "중지한 작업을 저장된 상태에서 다시 실행합니다.", Toast.LENGTH_LONG).show();
         return true;
     }
 
@@ -127,16 +127,6 @@ final class SelfRunStoppedResume {
                         || !config.optString("baseFolderId").equals(folder.parentId))
                     throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
             }
-            final JSONObject plan = SelfRun3StoppedRecovery.plan(state, execution -> {
-                if (!current(target, operation)) throw new IllegalStateException("RESUME_CANCELLED");
-                String id = execution.resource("resultDocumentId");
-                DriveApiClient.Metadata metadata = api.getMetadata(token, id);
-                if (!SelfRun3ResultDocumentPolicy.acceptReadableResult(metadata, id, execution.resource("folderId")))
-                    throw new IllegalStateException("STOPPED_RESULT_UNREADABLE");
-                SelfRun3ResultDocumentReader.Snapshot snapshot = SelfRun3ResultDocumentReader.read(token, id);
-                SelfRun3ResultDocumentPolicy.Selection selection = SelfRun3ResultDocumentPolicy.select(snapshot.bodies, execution);
-                return selection.committed ? selection.candidateBody : selection.rawBody;
-            });
             final String expectedTurn = state.turnId();
             main.post(() -> {
                 try (SelfRun3Ledger finalLedger = new SelfRun3Ledger(service)) {
@@ -147,7 +137,7 @@ final class SelfRunStoppedResume {
                             || !config.optString("baseFolderId").equals(store.driveRunsBaseFolderId()))
                         throw new IllegalStateException("DRIVE_BINDING_MISMATCH");
                     SelfRun3Engine.State ready = finalLedger.apply(new SelfRun3Engine.Event(operation,
-                            SelfRun3Engine.Kind.RESUME_STOPPED, target, expectedTurn, plan));
+                            SelfRun3Engine.Kind.RESUME_STOPPED, target, expectedTurn, new JSONObject()));
                     if (ready.flag("taskStopped") || !operation.equals(ready.text("stoppedResumeOperation")))
                         throw new IllegalStateException("STOPPED_LEDGER_NOT_RESUMED");
                     if (!store.active() || store.userStopped()) restoreProjection(target, ready);

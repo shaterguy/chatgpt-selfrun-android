@@ -10,13 +10,13 @@ import static org.junit.Assert.*;
 public final class SelfRunStoppedResumePolicyTest {
     @Test public void stoppedResumeIsExplicitWithoutRequiringLedgerStopProof() throws Exception {
         String engine = src("SelfRun3Engine.java");
-        String recovery = src("SelfRun3StoppedRecovery.java");
         String resume = src("SelfRunStoppedResume.java");
         assertTrue(engine.contains("RESUME_STOPPED"));
         assertTrue(engine.contains("original.flag(\"taskStopped\") && e.kind != Kind.RESUME_STOPPED"));
         assertTrue(engine.contains("put(root,\"taskStopped\",false)"));
         assertFalse(engine.contains("if(!original.flag(\"taskStopped\")) return original"));
-        assertFalse(recovery.contains("STOPPED_STATE_REQUIRED"));
+        assertFalse(engine.contains("STOPPED_DRIVE_READ_REQUIRED"));
+        assertFalse(engine.contains("STOPPED_SNAPSHOT_CHANGED"));
         assertFalse(resume.contains("STOPPED_STATE_REQUIRED"));
     }
 
@@ -50,7 +50,8 @@ public final class SelfRunStoppedResumePolicyTest {
     @Test public void competingActiveTasksAndDriveMismatchAreRejectedBeforeRecovery() throws Exception {
         String resume = src("SelfRunStoppedResume.java");
         assertFalse(resume.contains("TASK_ALREADY_DONE"));
-        assertTrue(resume.contains("SelfRun3StoppedRecovery.plan"));
+        assertFalse(resume.contains("SelfRun3StoppedRecovery.plan"));
+        assertFalse(resume.contains("STOPPED_RESULT_UNREADABLE"));
         assertTrue(resume.contains("DriveAuthorization.requestSilently"));
         assertTrue(resume.contains("ANOTHER_RUN_ACTIVE"));
         assertTrue(resume.contains("DRIVE_BINDING_MISMATCH"));

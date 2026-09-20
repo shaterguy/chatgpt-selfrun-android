@@ -76,7 +76,7 @@ public final class SelfRunStoppedResumeAndroidTest {
             int before = ledger.eventCount(taskId);
             String resumeEventId = "resume-stopped:" + taskId;
             SelfRun3Engine.State resumed = ledger.apply(event(stopped, resumeEventId,
-                    SelfRun3Engine.Kind.RESUME_STOPPED, SelfRun3StoppedRecovery.plan(stopped, x -> SelfRun3Engine.emptyResult(x).toString())));
+                    SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject()));
             int afterFirst = ledger.eventCount(taskId);
             SelfRun3Engine.State duplicate = ledger.apply(event(resumed, resumeEventId,
                     SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject()));

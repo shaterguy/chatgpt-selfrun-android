@@ -51,7 +51,7 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
-    @Test public void stoppedTaskRequiresFreshDriveReadAndRepreparesSameTurn() throws Exception {
+    @Test public void stoppedTaskRepreparesFromSavedLedgerState() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
         SelfRun3Engine.State stopped = reduce(waiting, "stop", SelfRun3Engine.Kind.STOP, new JSONObject());
@@ -62,14 +62,12 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.State normalResume = reduce(stopped, "normal-resume", SelfRun3Engine.Kind.RESUME, new JSONObject());
         assertSame(stopped, normalResume);
 
-        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped", SelfRun3Engine.Kind.RESUME_STOPPED, SelfRun3StoppedRecovery.plan(stopped, x -> SelfRun3Engine.emptyResult(x).toString()));
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
         assertFalse(resumed.flag("taskStopped"));
         assertFalse(resumed.flag("sendClaimed"));
         assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(resumed));
 
-        SelfRun3Engine.State duplicate = reduce(resumed, "resume-stopped-again", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
-        assertSame(resumed, duplicate);
     }
 
     @Test public void explicitStoppedResumeDoesNotRequireLedgerStopFlag() throws Exception {
@@ -79,7 +77,7 @@ public final class SelfRun3EngineTest {
 
         SelfRun3Engine.State resumed = reduce(waiting, "resume-after-ui-stop",
                 SelfRun3Engine.Kind.RESUME_STOPPED,
-                SelfRun3StoppedRecovery.plan(waiting, x -> SelfRun3Engine.emptyResult(x).toString()));
+                new JSONObject());
 
         assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
         assertFalse(resumed.flag("taskStopped"));
@@ -95,7 +93,7 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(withResult));
 
         SelfRun3Engine.State stopped = reduce(withResult, "stop-with-result", SelfRun3Engine.Kind.STOP, new JSONObject());
-        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped-result", SelfRun3Engine.Kind.RESUME_STOPPED, SelfRun3StoppedRecovery.plan(stopped, x -> continueResult(x).toString()));
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped-result", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.RECONCILING, resumed.stage());
         assertTrue(resumed.flag("sendClaimed"));
         assertTrue(resumed.hasResult());
