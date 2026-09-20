@@ -11,7 +11,7 @@ public final class SelfRunDeliverableLinksTest {
         JSONObject result = new JSONObject().put("committed", true).put("status", "DONE");
         JSONArray links = new JSONArray()
                 .put(new JSONObject().put("name", "APK").put("direct_access", "https://example.com/app.apk"))
-                .put(new JSONObject().put("name", "HTTP mirror").put("direct_access", "http://downloads.example.com/app.apk"))
+                .put(new JSONObject().put("name", "HTTPS mirror").put("direct_access", "https://downloads.example.com/app.apk"))
                 .put(new JSONObject().put("name", "duplicate").put("direct_access", "https://example.com/app.apk"))
                 .put(new JSONObject().put("name", "script").put("direct_access", "javascript:alert(1)"))
                 .put(new JSONObject().put("name", "file").put("direct_access", "file:///sdcard/a.apk"))
@@ -27,7 +27,7 @@ public final class SelfRunDeliverableLinksTest {
         assertEquals(2, normalized.length());
         assertEquals("APK", normalized.getJSONObject(0).getString("name"));
         assertEquals("https://example.com/app.apk", normalized.getJSONObject(0).getString("direct_access"));
-        assertEquals("HTTP mirror", normalized.getJSONObject(1).getString("name"));
+        assertEquals("HTTPS mirror", normalized.getJSONObject(1).getString("name"));
     }
 
     @Test public void missingMalformedOrNonDoneMetadataIsSilentlyIgnored() throws Exception {
@@ -65,7 +65,7 @@ public final class SelfRunDeliverableLinksTest {
 
     @Test public void unsafeSchemesAndCredentialBearingUrlsAreRejected() {
         assertTrue(SelfRunDeliverableLinks.safeDirectAccess("https://raw.githubusercontent.com/o/r/a/file.apk"));
-        assertTrue(SelfRunDeliverableLinks.safeDirectAccess("http://example.com/file"));
+        assertFalse(SelfRunDeliverableLinks.safeDirectAccess("http://example.com/file"));
         assertFalse(SelfRunDeliverableLinks.safeDirectAccess("javascript:alert(1)"));
         assertFalse(SelfRunDeliverableLinks.safeDirectAccess("intent://example/#Intent;scheme=https;end"));
         assertFalse(SelfRunDeliverableLinks.safeDirectAccess("file:///tmp/file"));
