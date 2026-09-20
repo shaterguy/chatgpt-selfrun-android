@@ -47,6 +47,10 @@ public final class SelfRunDetailActivity extends Activity {
         page.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
         page.addView(Ui.keyValue(this, "턴", String.valueOf(item.optInt("turn"))));
         page.addView(Ui.keyValue(this, "모델 조합", model(item)));
+        LinearLayout deliverablePanel = new LinearLayout(this);
+        deliverablePanel.setOrientation(LinearLayout.VERTICAL);
+        page.addView(deliverablePanel);
+        SelfRunDeliverableLinks.render(this, deliverablePanel, item.optJSONArray("deliverableLinks"));
         if (SelfRunStoppedResume.isEligible(item)) {
             page.addView(Ui.button(this, "중지된 작업 재개", v -> {
                 if (SelfRunStoppedResume.request(this, item.optString("runId"))) {
@@ -152,6 +156,10 @@ public final class SelfRunDetailActivity extends Activity {
             conversations.addView(Ui.body(this, "사용자 조치가 필요한 대화입니다."));
         String url = canonicalConversationUrl(entry.optString("conversationUrl"));
         addConversationActions(url, entry.optString("resultDocumentId"));
+        LinearLayout deliverablePanel = new LinearLayout(this);
+        deliverablePanel.setOrientation(LinearLayout.VERTICAL);
+        conversations.addView(deliverablePanel);
+        SelfRunDeliverableLinks.render(this, deliverablePanel, entry.optJSONArray("deliverableLinks"));
         conversations.addView(Ui.divider(this));
     }
 
