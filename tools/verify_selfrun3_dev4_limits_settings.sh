@@ -168,7 +168,7 @@ grep -Fq 'stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN' "$SER
 grep -Fq 'ledger.load(target)' "$STOPPED_RESUME"
 grep -Fq 'DRIVE_BINDING_MISMATCH' "$STOPPED_RESUME"
 grep -Fq 'coordinator.onStart(SelfRunService.ACTION_RUN)' "$STOPPED_RESUME"
-grep -Fq 'stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim' "$UNIT/SelfRun3EngineTest.java"
+grep -Fq 'stoppedTaskRequiresFreshDriveReadAndRepreparesSameTurn' "$UNIT/SelfRun3EngineTest.java"
 grep -Fq 'recoveryReusesExistingLedgerAndPinnedDriveIdentity' "$STOPPED_RESUME_UNIT"
 grep -Fq 'stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent' "$STOPPED_RESUME_ANDROID"
 

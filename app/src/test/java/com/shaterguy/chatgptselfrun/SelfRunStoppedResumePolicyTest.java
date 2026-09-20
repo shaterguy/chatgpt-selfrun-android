@@ -13,7 +13,7 @@ public final class SelfRunStoppedResumePolicyTest {
         assertTrue(engine.contains("RESUME_STOPPED"));
         assertTrue(engine.contains("original.flag(\"taskStopped\") && e.kind != Kind.RESUME_STOPPED"));
         assertTrue(engine.contains("if(!original.flag(\"taskStopped\")) return original"));
-        assertTrue(engine.contains("put(v,\"taskStopped\",false)"));
+        assertTrue(engine.contains("put(root,\"taskStopped\",false)"));
     }
 
     @Test public void historyOnlyOffersUserStoppedResumeAndServiceOwnsRecovery() throws Exception {
@@ -40,9 +40,11 @@ public final class SelfRunStoppedResumePolicyTest {
         assertFalse(resume.contains("conversationUrl") && resume.contains("ACTION_VIEW"));
     }
 
-    @Test public void doneAndCompetingActiveTasksAreRejectedBeforeRecovery() throws Exception {
+    @Test public void competingActiveTasksAndDriveMismatchAreRejectedBeforeRecovery() throws Exception {
         String resume = src("SelfRunStoppedResume.java");
-        assertTrue(resume.contains("TASK_ALREADY_DONE"));
+        assertFalse(resume.contains("TASK_ALREADY_DONE"));
+        assertTrue(resume.contains("SelfRun3StoppedRecovery.plan"));
+        assertTrue(resume.contains("DriveAuthorization.requestSilently"));
         assertTrue(resume.contains("ANOTHER_RUN_ACTIVE"));
         assertTrue(resume.contains("DRIVE_BINDING_MISMATCH"));
     }

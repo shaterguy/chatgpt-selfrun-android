@@ -2,7 +2,7 @@
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 현재 활성 개발 계보는 V3 하나뿐이며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
-현재 개발 후보는 SelfRun Drive 3.2.10-dev3 / versionCode 3030012이며, 정식 3.2.9를 기준으로 합니다.
+현재 개발 후보는 SelfRun Drive 3.2.11-dev1 / versionCode 3031001이며, 지정된 3.2.10-dev3 소스를 기준으로 STOP 재개와 Result routing 복구를 개선합니다.
 
 ## 디버그 로그와 턴별 바로가기
 
@@ -59,7 +59,11 @@ EXECUTION_PROFILE={"mode":"...","model":"...","reasoning":"..."}
 
 결과 판정은 파일 제목이나 새 파일 탐색 순서가 아니라 고정된 결과 문서 ID와 strict result identity를 사용합니다. V1 `TURN_COMPLETED`, Drive cursor, title signal document는 V3 실행 계약이 아닙니다.
 
-앱은 Result의 parse 가능한 JSON, 현재 task/turn/result-document/event identity와 boolean `committed`만 완료 무결성 hard gate로 검사합니다. `handoff`, `phase_completed`, 완료 근거와 같은 semantic checkpoint의 형식·충분성은 AI가 canonical 운영문서와 실제 권위 상태를 읽어 판단하며, semantic 필드 누락·별칭·shape drift만으로 committed Result를 거부하거나 Repair를 만들지 않습니다. 다음 실행 routing 힌트가 앱이 안전하게 실행할 수 없는 형태이면 Result 자체를 폐기하지 않고 현재 phase/profile의 SERIAL 경로로 폴백하여 다음 AI가 복구합니다.
+앱은 Result의 parse 가능한 JSON, 현재 task/turn/result-document/event identity와 boolean `committed`를 완료 무결성 hard gate로 검사합니다. `handoff`, `phase_completed`, 완료 근거와 같은 semantic checkpoint의 형식·충분성은 AI가 canonical 운영문서와 실제 권위 상태를 읽어 판단합니다. 다음 실행에 필요하지 않은 정보 누락은 Repair를 만들지 않으며, 앱의 기존 정보와 정상 Result 정보로 후속 실행을 생성할 수 있으면 그대로 진행합니다.
+
+후속 실행에 필요한 profile/model/reasoning 누락, 유효하지 않은 조합, Task mode 충돌, 서로 모순되는 routing 정보 때문에 후속 실행을 생성할 수 없으면 새 RESULT_REPAIR 턴으로 전환합니다. `REPAIR_PROBLEMS`에 확인된 필드와 누락·잘못된 값·모순 구분을 함께 전달합니다. 기존 committed Result는 수정하지 않고 `REPAIR_TARGET_DOCUMENT_ID`로 전달하며, 새 REPAIR Result를 작성한 뒤 그 문서에서 이어갑니다. REPAIR 대화방은 이전 턴의 실제 실행 config를 그대로 사용하므로 손상된 다음 profile에 의존하지 않습니다. SQLite/ledger·사용자 입력 저장·앱 내부 상태 오류는 Result Repair로 분류하지 않습니다.
+
+사용자 STOP 후 재개는 Drive의 기존 Result를 먼저 읽습니다. committed 결과는 후속 실행·완료·사용자 개입·병렬 Merge 경로로 반영하고, 미확정 결과는 같은 논리 턴과 문서 identity를 유지한 채 새 request로 준비부터 다시 시작합니다. 완료 branch와 기존 이력은 보존합니다. Drive 읽기 실패나 identity 불일치는 중지 상태를 유지하며, 전송 직전 재확인에서 늦게 확정된 결과를 발견하면 재전송하지 않습니다. PAUSE/RESUME의 기존 동작은 유지합니다.
 
 ## ChatGPT 실행
 

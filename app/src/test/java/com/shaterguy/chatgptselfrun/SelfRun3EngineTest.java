@@ -51,7 +51,7 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
-    @Test public void stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim() {
+    @Test public void stoppedTaskRequiresFreshDriveReadAndRepreparesSameTurn() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
         SelfRun3Engine.State stopped = reduce(waiting, "stop", SelfRun3Engine.Kind.STOP, new JSONObject());
@@ -62,17 +62,17 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.State normalResume = reduce(stopped, "normal-resume", SelfRun3Engine.Kind.RESUME, new JSONObject());
         assertSame(stopped, normalResume);
 
-        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
-        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped", SelfRun3Engine.Kind.RESUME_STOPPED, SelfRun3StoppedRecovery.plan(stopped, x -> SelfRun3Engine.emptyResult(x).toString()));
+        assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
         assertFalse(resumed.flag("taskStopped"));
-        assertTrue(resumed.flag("sendClaimed"));
-        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
+        assertFalse(resumed.flag("sendClaimed"));
+        assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(resumed));
 
         SelfRun3Engine.State duplicate = reduce(resumed, "resume-stopped-again", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
         assertSame(resumed, duplicate);
     }
 
-    @Test public void stoppedTaskWithCommittedDriveResultResumesAtCommitWithoutRedispatch() {
+    @Test public void stoppedTaskWithCommittedDriveResultResumesAtCommitWithoutRedispatch() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject resultPayload = new JSONObject();
         SelfRun3Engine.put(resultPayload, "text", continueResult(claimed).toString());
@@ -80,7 +80,7 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(withResult));
 
         SelfRun3Engine.State stopped = reduce(withResult, "stop-with-result", SelfRun3Engine.Kind.STOP, new JSONObject());
-        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped-result", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped-result", SelfRun3Engine.Kind.RESUME_STOPPED, SelfRun3StoppedRecovery.plan(stopped, x -> continueResult(x).toString()));
         assertEquals(SelfRun3Engine.Stage.RECONCILING, resumed.stage());
         assertTrue(resumed.flag("sendClaimed"));
         assertTrue(resumed.hasResult());
@@ -134,7 +134,7 @@ public final class SelfRun3EngineTest {
         assertEquals("PLAN", next.text("phase"));
     }
 
-    @Test public void nextExecutionProfileWinsAndTopLevelProfileCannotOverrideIt() {
+    @Test public void conflictingValidNextProfilesCreateRepairInsteadOfGuessing() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject result = continueResult(claimed);
         JSONObject next = new JSONObject();
@@ -148,8 +148,10 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result-priority", SelfRun3Engine.Kind.RESULT, payload);
         SelfRun3Engine.State advanced = reduce(withResult, "commit-priority", SelfRun3Engine.Kind.COMMIT, new JSONObject());
         assertEquals("CHAT", advanced.config().optString("mode"));
-        assertEquals("gpt-5-6-thinking", advanced.config().optString("model"));
-        assertEquals("xhigh", advanced.config().optString("reasoning"));
+        assertEquals(claimed.config().optString("model"), advanced.config().optString("model"));
+        assertEquals("medium", advanced.config().optString("reasoning"));
+        assertEquals("REPAIR", advanced.text("executionKind"));
+        assertTrue(advanced.json().optJSONArray("repairProblems").toString().contains("CONFLICT"));
     }
 
     @Test public void normalContinuationCannotUseTopLevelOrCurrentProfileFallback() {
@@ -159,8 +161,9 @@ public final class SelfRun3EngineTest {
         SelfRun3Engine.put(result, "profile", chatProfile("gpt-5-6-thinking", "high"));
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "text", result.toString());
         SelfRun3Engine.State withResult = reduce(claimed, claimed.turnId() + ":result-no-next-profile", SelfRun3Engine.Kind.RESULT, payload);
-        assertThrows(IllegalStateException.class,
-                () -> reduce(withResult, "commit-no-next-profile", SelfRun3Engine.Kind.COMMIT, new JSONObject()));
+        SelfRun3Engine.State repair = reduce(withResult, "commit-no-next-profile", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals("REPAIR", repair.text("executionKind"));
+        assertEquals(claimed.resource("resultDocumentId"), repair.text("repairTargetDocumentId"));
     }
 
     @Test public void hybridWorkToChatUsesExactResultProfile() {

@@ -621,7 +621,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         boolean branch = SelfRun3Engine.isBranch(after);
                         boolean repair = "REPAIR".equals(after.text("executionKind"));
                         long inputRevision = branch ? after.time("branchInputRevision") : repair ? consumed : input.revision;
+                        if (repair && after.json().has("repairSourceInputRevision")) inputRevision = after.time("repairSourceInputRevision");
                         String inputText = branch ? after.text("branchInputText") : repair ? "" : (input.revision > consumed ? input.text : "");
+                        if (after.flag("stoppedRestart") && !branch && !repair && !after.text("inputText").isEmpty()) {
+                            if (inputText.isEmpty() || input.revision == after.time("inputRevision")) {
+                                inputText = after.text("inputText");
+                                inputRevision = after.time("inputRevision");
+                            } else inputText = after.text("inputText") + "\n\n" + inputText;
+                        }
                         if (input.revision <= consumed && !input.text.isEmpty()) {
                             SelfRun3UserInput.consumeIfRevision(service, after.taskId(), input.revision);
                         }
@@ -629,7 +636,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         SelfRun3Engine.put(payload, "prompt", SelfRun3Protocol.prompt(after, inputText));
                         SelfRun3Engine.put(payload, "inputText", inputText);
                         SelfRun3Engine.put(payload, "inputRevision", inputRevision);
-                        after = ledger.apply(event(after, after.turnId() + ":turn-ready",
+                        after = ledger.apply(event(after, after.requestId() + ":turn-ready",
                                 SelfRun3Engine.Kind.TURN_READY, payload));
                     }
                 } else {
@@ -1004,6 +1011,18 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             try {
                 SelfRun3Engine.State before = ledger.loadExecution(task, turn);
                 if (!callbackMatches(before, task, turn, request) || before.stage() != SelfRun3Engine.Stage.READY) return;
+                if (before.flag("stoppedRestart")) {
+                    // Preparation can take long enough for the stopped conversation to commit.
+                    // Read again after web preparation and before the durable send claim.
+                    SelfRun3Engine.State checked = drive.recheckStoppedResultBeforeSend(accessToken, before);
+                    before = ledger.loadExecution(task, turn);
+                    if (!callbackMatches(before, task, turn, request)) return;
+                    if (checked.hasResult() || before.hasResult()) {
+                        main.post(() -> { if (validEpoch(expectedEpoch)) scheduleNext(0L); });
+                        return;
+                    }
+                    if (before.stage() != SelfRun3Engine.Stage.READY) return;
+                }
                 JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
                 SelfRun3Engine.State claimed = ledger.apply(event(before,
                         request + ":claim:" + UUID.randomUUID(), SelfRun3Engine.Kind.CLAIM_SEND, payload));

@@ -83,10 +83,22 @@ final class SelfRun3DriveAdapter {
             JSONObject payload = new JSONObject();
             SelfRun3Engine.put(payload, "documentId", s.resource("resultDocumentId"));
             SelfRun3Engine.put(payload, "fingerprint", SelfRun3ResultWatchdog.fingerprint(selection.rawBody));
-            s = ledger.apply(new SelfRun3Engine.Event(s.turnId() + ":result-baseline",
+            s = ledger.apply(new SelfRun3Engine.Event(s.requestId() + ":result-baseline",
                     SelfRun3Engine.Kind.RESULT_BASELINE, s.taskId(), s.turnId(), payload)).execution(s.turnId());
         }
         return s;
+    }
+
+    SelfRun3Engine.State recheckStoppedResultBeforeSend(String token, SelfRun3Engine.State state) throws Exception {
+        ResultObservation observation = readObservation(token, state);
+        String latest = SelfRun3Engine.parseResult(observation.candidateBody, state) != null
+                ? observation.candidateBody : observation.rawBody;
+        JSONObject result = SelfRun3StoppedRecovery.validate(latest, state);
+        if (!result.optBoolean("committed")) return state;
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "text", observation.candidateBody);
+        return ledger.apply(new SelfRun3Engine.Event(state.requestId() + ":presend-result:" + UUID.randomUUID(),
+                SelfRun3Engine.Kind.RESULT, state.taskId(), state.turnId(), payload)).execution(state.turnId());
     }
 
     private SelfRun3Engine.State reconcileCommittedBeforeDispatch(SelfRun3Engine.State state,

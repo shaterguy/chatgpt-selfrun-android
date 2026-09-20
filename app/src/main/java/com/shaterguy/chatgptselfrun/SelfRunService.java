@@ -122,6 +122,8 @@ public final class SelfRunService extends Service {
             return coordinator.onStart(ACTION_RUN);
         }
 
+        if (ACTION_STOP.equals(action)) stoppedResume.cancelPending();
+
         if (ACTION_RESUME_STOPPED.equals(action)) {
             if (!stoppedResume.hasPending()) {
                 stopSelf(startId);
@@ -177,6 +179,7 @@ public final class SelfRunService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (stoppedResume != null) stoppedResume.close();
         if (turnStallNotifier != null) turnStallNotifier.close();
         if (coordinator != null) coordinator.destroy();
         super.onDestroy();

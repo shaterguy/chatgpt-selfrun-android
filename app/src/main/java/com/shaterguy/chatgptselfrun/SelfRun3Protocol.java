@@ -57,8 +57,23 @@ final class SelfRun3Protocol {
             field(out,"MERGED_FROM",String.valueOf(s.json().optJSONArray("mergedFrom")));
         if(repair)
             field(out,"REPAIR_TARGET_DOCUMENT_ID",s.text("repairTargetDocumentId"));
+        if(repair && s.json().has("repairProblems")) {
+            field(out,"REPAIR_REASON",s.text("repairReason"));
+            field(out,"REPAIR_PROBLEMS",s.json().optJSONArray("repairProblems").toString());
+        }
 
         out.append("\n[RESULT_DOCUMENT_CONTRACT]\n").append(RESULT_DOCUMENT_RULES).append('\n');
+        if(repair && "RESULT_ROUTING_INVALID".equals(s.text("repairReason")))
+            out.append("\n[RESULT_REPAIR]\n")
+                    .append("REPAIR_TARGET_DOCUMENT_ID의 기존 Result 작업문서 전체를 직접 읽고 REPAIR_PROBLEMS에 기록된 실제 누락·오류·모순을 복구하십시오. ")
+                    .append("기존 committed Result는 수정하거나 덮어쓰지 마십시오. 정상 내용과 완료된 외부 작업을 보존하고, ")
+                    .append("현재 envelope의 새 identity를 사용해 복구된 전체 Result를 현재 RESULT_DOCUMENT_ID에 작성하십시오. ")
+                    .append("현재 REPAIR 대화방의 EXECUTION_PROFILE은 문제 발생 턴의 실제 실행정보이며 복구할 다음 실행 profile을 뜻하지 않습니다.\n");
+        if(s.flag("stoppedRestart"))
+            out.append("\n[완전 중지 후 동일 턴 재시작]\n")
+                    .append("Drive의 현재 작업문서와 Requirement, 이전 Result 및 실제 외부 작업상태를 먼저 확인하고, ")
+                    .append("미완료인 현재 턴을 처음부터 다시 시작하십시오. 이미 완료된 외부 작업은 확인 후 재사용하며 중복 수행하지 마십시오. ")
+                    .append("현재 Result가 이미 committed:true이면 같은 턴의 본 작업을 다시 수행하거나 Result를 덮어쓰지 마십시오.\n");
         if(!s.text("nextInput").isEmpty())
             out.append("\n[이전 턴에서 확정된 다음 입력]\n").append(s.text("nextInput")).append('\n');
         if(s.json().has("intervention"))

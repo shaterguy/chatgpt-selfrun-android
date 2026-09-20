@@ -71,6 +71,7 @@ CURRENT_31_REQUIRED=(
   com.shaterguy.chatgptselfrun.SelfRun3DispatchAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3ParallelLedgerAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3InputCommitAndroidTest
+  com.shaterguy.chatgptselfrun.SelfRun3ResultRoutingAndroidTest
   com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest
   com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest
   com.shaterguy.chatgptselfrun.SelfRun3WebViewDisposalAndroidTest
