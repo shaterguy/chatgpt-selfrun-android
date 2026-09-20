@@ -77,6 +77,7 @@ final class SelfRunHistoryStore {
             item.put("jobFolderId", store.jobFolderId());
             item.put("turnDocumentId", store.turnDocumentId());
             item.put("turnDocumentUrl", store.turnDocumentUrl());
+            item.put("deliverableLinks", store.deliverableLinks());
             item.put("phase", store.phase());
             item.put("status", bounded(store.status(), 1_000));
             item.put("pendingModel", store.pendingModel());
