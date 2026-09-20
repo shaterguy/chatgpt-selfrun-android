@@ -136,6 +136,10 @@ public final class SelfRunHistoryActivity extends Activity {
         detailPane.addView(Ui.keyValue(this, "모드", item.optString("mode", "-")));
         detailPane.addView(Ui.keyValue(this, "모델 조합", model(item)));
         detailPane.addView(Ui.keyValue(this, "마지막 실행", time(item.optLong("updatedAt"))));
+        LinearLayout deliverablePanel = new LinearLayout(this);
+        deliverablePanel.setOrientation(LinearLayout.VERTICAL);
+        detailPane.addView(deliverablePanel);
+        SelfRunDeliverableLinks.render(this, deliverablePanel, item.optJSONArray("deliverableLinks"));
         detailPane.addView(Ui.divider(this));
         detailPane.addView(Ui.actionStrip(this,
                 Ui.outlinedButton(this, "상세", v -> openDetail(runId)),
