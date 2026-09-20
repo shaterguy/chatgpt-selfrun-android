@@ -242,6 +242,29 @@ public final class SelfRun3EngineTest {
         assertEquals(5L, after.time("lastConsumedInputRevision"));
     }
 
+    @Test public void deliverableLinksProjectOnlyWhenDoneRemainsTerminal() throws Exception {
+        SelfRun3Engine.State verify = verifyCompletedState();
+        JSONObject raw = verify.json();
+        JSONObject result = new JSONObject(verify.text("result"));
+        SelfRun3Engine.put(result, "deliverable_links", new org.json.JSONArray()
+                .put(new JSONObject().put("name", "APK").put("direct_access", "https://example.com/app.apk")));
+        SelfRun3Engine.put(raw, "result", result.toString());
+        verify = new SelfRun3Engine.State(raw);
+
+        JSONObject late = new JSONObject();
+        SelfRun3Engine.put(late, "lateInput", true);
+        SelfRun3Engine.State continued = reduce(verify, "commit-late-deliverable", SelfRun3Engine.Kind.COMMIT, late);
+        JSONObject continuedTurn = continued.history().getJSONObject(0);
+        assertEquals(1, continuedTurn.getInt("turn"));
+        assertNull(continuedTurn.optJSONArray("deliverableLinks"));
+
+        SelfRun3Engine.State terminalVerify = new SelfRun3Engine.State(raw);
+        SelfRun3Engine.State done = reduce(terminalVerify, "commit-terminal-deliverable", SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        JSONObject doneTurn = done.history().getJSONObject(0);
+        assertEquals(SelfRun3Engine.Stage.DONE, done.stage());
+        assertEquals(1, doneTurn.getJSONArray("deliverableLinks").length());
+    }
+
     @Test public void normalDoneCanOnlyCommitFromVerifiedResultFixture() {
         SelfRun3Engine.State verify = verifyCompletedState();
         SelfRun3Engine.State done = reduce(verify, "commit-done", SelfRun3Engine.Kind.COMMIT, new JSONObject());
