@@ -1011,18 +1011,6 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             try {
                 SelfRun3Engine.State before = ledger.loadExecution(task, turn);
                 if (!callbackMatches(before, task, turn, request) || before.stage() != SelfRun3Engine.Stage.READY) return;
-                if (before.flag("stoppedRestart")) {
-                    // Preparation can take long enough for the stopped conversation to commit.
-                    // Read again after web preparation and before the durable send claim.
-                    SelfRun3Engine.State checked = drive.recheckStoppedResultBeforeSend(accessToken, before);
-                    before = ledger.loadExecution(task, turn);
-                    if (!callbackMatches(before, task, turn, request)) return;
-                    if (checked.hasResult() || before.hasResult()) {
-                        main.post(() -> { if (validEpoch(expectedEpoch)) scheduleNext(0L); });
-                        return;
-                    }
-                    if (before.stage() != SelfRun3Engine.Stage.READY) return;
-                }
                 JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
                 SelfRun3Engine.State claimed = ledger.apply(event(before,
                         request + ":claim:" + UUID.randomUUID(), SelfRun3Engine.Kind.CLAIM_SEND, payload));
