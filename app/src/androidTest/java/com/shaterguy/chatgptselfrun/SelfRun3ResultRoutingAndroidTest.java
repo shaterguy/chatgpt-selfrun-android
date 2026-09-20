@@ -114,6 +114,8 @@ public final class SelfRun3ResultRoutingAndroidTest {
             SelfRun3Engine.State state=SelfRun3Engine.create(id,id+":turn:1",config);
             try(SelfRun3Ledger ledger=new SelfRun3Ledger(context)) {
                 state=ledger.ensure(state);
+                state=apply(ledger,state,SelfRun3Engine.Kind.RESOURCE,new JSONObject().put("key","folderId").put("value","routing-folder"));
+                state=apply(ledger,state,SelfRun3Engine.Kind.RESOURCE,new JSONObject().put("key","requirementDocumentId").put("value","routing-requirement"));
                 state=apply(ledger,state,SelfRun3Engine.Kind.SETUP_DONE,new JSONObject());
                 state=apply(ledger,state,SelfRun3Engine.Kind.RESOURCE,new JSONObject().put("key","resultDocumentId").put("value","original-result"));
                 state=apply(ledger,state,SelfRun3Engine.Kind.TURN_READY,new JSONObject().put("prompt","work").put("inputRevision",7L).put("inputText","pending input"));
