@@ -1,3 +1,4 @@
+# Trigger-only retry after two mutually independent transient validation failures; release gates unchanged.
 name: Release SelfRun 3.2.11
 run-name: SelfRun Drive 3.2.11 Release (${{ github.ref_name }}) #${{ github.run_number }} attempt-${{ github.run_attempt }}
 
