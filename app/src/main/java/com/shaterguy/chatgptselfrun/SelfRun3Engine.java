@@ -403,7 +403,7 @@ final class SelfRun3Engine {
             put(h,"dispatchStatus",x.optBoolean("dispatchObserved")?"CONFIRMED":x.optBoolean("sendClaimed")?"UNCERTAIN":"PENDING");
             JSONObject result=x.optString("result").isEmpty()?new JSONObject():object(x.optString("result"));
             put(h,"resultStatus",result.optString("status",x.optBoolean("committed")?"COMMITTED":"PENDING"));
-            JSONArray deliverableLinks=x.optBoolean("committed")
+            JSONArray deliverableLinks=x.optBoolean("committed") && "DONE".equals(x.optString("stage"))
                     ? SelfRunDeliverableLinks.fromResult(result) : new JSONArray();
             if(deliverableLinks.length()>0) put(h,"deliverableLinks",deliverableLinks);
             history.put(h);
