@@ -163,12 +163,15 @@ grep -Fq '같은 문서를 다시 읽어 저장된 내용을 검증' "$PROTOCOL"
 # Explicit user-stopped recovery keeps the exact ledger lineage and cannot be reached by ordinary resume.
 grep -Fq 'RESUME_STOPPED' "$ENGINE"
 grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
+! grep -Fq 'if(!original.flag("taskStopped")) return original' "$ENGINE"
+! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RESUME"
+! grep -Fq 'STOPPED_STATE_REQUIRED'
 grep -Fq 'ACTION_RESUME_STOPPED' "$SERVICE"
 grep -Fq 'stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN' "$SERVICE"
 grep -Fq 'ledger.load(target)' "$STOPPED_RESUME"
 grep -Fq 'DRIVE_BINDING_MISMATCH' "$STOPPED_RESUME"
 grep -Fq 'coordinator.onStart(SelfRunService.ACTION_RUN)' "$STOPPED_RESUME"
-grep -Fq 'stoppedTaskRequiresExplicitRecoveryAndPreservesWaitingSendClaim' "$UNIT/SelfRun3EngineTest.java"
+grep -Fq 'stoppedTaskRepreparesFromSavedLedgerState' "$UNIT/SelfRun3EngineTest.java"
 grep -Fq 'recoveryReusesExistingLedgerAndPinnedDriveIdentity' "$STOPPED_RESUME_UNIT"
 grep -Fq 'stoppedLedgerSurvivesProjectionRestartAndResumeEventIsIdempotent' "$STOPPED_RESUME_ANDROID"
 

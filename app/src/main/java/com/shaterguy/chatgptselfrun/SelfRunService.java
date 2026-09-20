@@ -122,6 +122,8 @@ public final class SelfRunService extends Service {
             return coordinator.onStart(ACTION_RUN);
         }
 
+        if (ACTION_STOP.equals(action)) stoppedResume.cancelPending();
+
         if (ACTION_RESUME_STOPPED.equals(action)) {
             if (!stoppedResume.hasPending()) {
                 stopSelf(startId);
@@ -133,9 +135,15 @@ public final class SelfRunService extends Service {
             return START_STICKY;
         }
 
+        // A startForegroundService request must publish its notification before any
+        // ledger ownership or persistence work can delay this service.
+        startForegroundCompat();
         if (!coordinator.ownsCurrentRun()) {
             if (!store.runId().isEmpty()) {
-                runLog.record(store, "V3_STALE_RUN_RETIRED", "action=" + action);
+                if (ACTION_STOP.equals(action)) {
+                    runLog.record(store, "V3_STOP", "user_stop");
+                    SelfRunDebugLogSync.requestStored(this, store.runId(), "STOP");
+                } else runLog.record(store, "V3_STALE_RUN_RETIRED", "action=" + action);
                 store.stopByUser();
             }
             stopSelf(startId);
@@ -146,7 +154,6 @@ public final class SelfRunService extends Service {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
-        startForegroundCompat();
         turnStallNotifier.start();
         return coordinator.onStart(action);
     }
@@ -177,6 +184,7 @@ public final class SelfRunService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (stoppedResume != null) stoppedResume.close();
         if (turnStallNotifier != null) turnStallNotifier.close();
         if (coordinator != null) coordinator.destroy();
         super.onDestroy();

@@ -83,7 +83,7 @@ final class SelfRun3DriveAdapter {
             JSONObject payload = new JSONObject();
             SelfRun3Engine.put(payload, "documentId", s.resource("resultDocumentId"));
             SelfRun3Engine.put(payload, "fingerprint", SelfRun3ResultWatchdog.fingerprint(selection.rawBody));
-            s = ledger.apply(new SelfRun3Engine.Event(s.turnId() + ":result-baseline",
+            s = ledger.apply(new SelfRun3Engine.Event(s.requestId() + ":result-baseline",
                     SelfRun3Engine.Kind.RESULT_BASELINE, s.taskId(), s.turnId(), payload)).execution(s.turnId());
         }
         return s;

@@ -18,7 +18,7 @@ final class SelfRun3Engine {
     enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
         RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, PAUSE, RESUME, RESUME_STOPPED, STOP, ERROR }
     enum Action { SETUP, PREPARE_TURN, PREPARE_WEB, WAIT, READ_RESULT, CHECK_RECEIPT, COMMIT, NONE }
-    private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode");
+    private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode", "stopEventId", "stoppedResumeOperation");
     private static final Set<String> NO_SEND_PROOFS = Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING",
         "COMPOSER_INPUTTING", "TARGET_ERROR", "AUTH_REQUIRED", "TURN_PROTOCOL_BUSY", "TURN_PROTOCOL_UNAVAILABLE");
 
@@ -89,14 +89,13 @@ final class SelfRun3Engine {
     }
     static State reduce(State original, Event e) {
         if (!original.taskId().equals(e.taskId)) return original;
-        if (original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED) return original;
+        if (original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED && e.kind != Kind.STOP) return original;
         if (e.kind==Kind.PAUSE || e.kind==Kind.RESUME || e.kind==Kind.RESUME_STOPPED || e.kind==Kind.STOP) {
             JSONObject v=original.json();
-            if(e.kind==Kind.STOP) { put(v,"taskStopped",true); put(v,"pauseReason","USER_STOP"); }
+            if(e.kind==Kind.STOP) { put(v,"taskStopped",true); put(v,"pauseReason","USER_STOP"); put(v,"stopEventId",e.id); }
             else if(e.kind==Kind.PAUSE) { put(v,"taskPaused",true); put(v,"pauseReason",e.payload.optString("reason")); }
             else if(e.kind==Kind.RESUME_STOPPED) {
-                if(!original.flag("taskStopped")) return original;
-                put(v,"taskStopped",false); put(v,"taskPaused",false); v.remove("pauseReason");
+                return resumeStopped(original,e);
             } else { put(v,"taskPaused",false); v.remove("pauseReason"); }
             return persist(v,true);
         }
@@ -208,6 +207,18 @@ final class SelfRun3Engine {
             case COMMIT -> {
                 require(!original.flag("taskPaused") && s.hasResult() && !s.flag("committed"),"committed result required");
                 JSONObject r=parseResult(s.text("result"),s); require(r!=null,"result required");
+                if(!isBranch(s) && !"USER_ACTION_REQUIRED".equals(r.optString("status"))
+                        && !("DONE".equals(r.optString("status")) && !p.optBoolean("lateInput"))
+                        && !p.optBoolean("lateInput")) {
+                    try { nextProfile(r,s); }
+                    catch(SelfRun3RoutingException recoverable) {
+                        v=repair(s,v);
+                        put(v,"repairProblems",recoverable.problems);
+                        put(v,"repairReason","RESULT_ROUTING_INVALID");
+                        put(v,"repairSourceInputRevision",s.time("inputRevision"));
+                        return persist(v,true);
+                    }
+                }
                 put(v,"committed",true);
                 String status=r.optString("status");
                 if("USER_ACTION_REQUIRED".equals(status)) {
@@ -241,16 +252,7 @@ final class SelfRun3Engine {
             case REPAIR -> {
                 require(((!s.flag("committed") && !s.hasResult()) || stage==Stage.WAITING_USER_INTERVENTION) && s.number("repairAttempt")==0,"repair requires unresolved result");
                 require(p.optBoolean("safeToRepair"),"explicit evidence original automatic work is inactive required");
-                put(v,"stage","BRANCH_COMPLETE"); put(v,"committed",true); put(v,"superseded",true); State saved=persist(v,false);
-                v=fresh(saved,s.text("phase"),executionProfile(s),"REPAIR","REPAIR",s.text("previousResultDocumentId"));
-                put(v,"repairTargetDocumentId",s.resource("resultDocumentId"));
-                if(s.flag("interventionRequested")) put(v,"interventionRequested",true);
-                if(isBranch(s)) {
-                    put(v,"repairBranch",true);
-                    for(String key:new String[]{"parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","branchInputRevision","branchInputText"})
-                        if(s.json().has(key)) put(v,key,s.json().opt(key));
-                }
-                put(v,"checkpoint",s.text("checkpoint"));
+                v=repair(s,v);
             }
             case ERROR -> { String code=p.optString("code"); require(code.matches("[A-Z0-9_:-]{1,100}"),"safe error code required"); put(v,"error",code); }
             default -> { return original; }
@@ -268,6 +270,60 @@ final class SelfRun3Engine {
             case RECONCILING -> s.hasResult() ? Action.COMMIT : Action.READ_RESULT;
             default -> Action.NONE;
         };
+    }
+
+    private static JSONObject repair(State source,JSONObject v) {
+        JSONObject prior=executionProfile(source);
+        boolean keepChat="CHAT".equals(prior.optString("mode")) && prior.optString("model").isEmpty()
+                && "keep".equals(prior.optString("reasoning"))
+                && Set.of("CHAT","HYBRID").contains(source.taskMode());
+        // Initial CHAT may intentionally keep the user's browser profile. Copy that policy
+        // as used; all explicit source profiles must still be valid local execution state.
+        if(!keepChat) applyProfile(source.config(),prior,source.taskMode());
+        put(v,"stage","BRANCH_COMPLETE"); put(v,"committed",true); put(v,"superseded",true);
+        State saved=persist(v,false);
+        v=fresh(saved,source.text("phase"),executionProfile(source),"REPAIR","REPAIR",source.text("previousResultDocumentId"));
+        put(v,"repairTargetDocumentId",source.resource("resultDocumentId"));
+        if(source.flag("interventionRequested")) put(v,"interventionRequested",true);
+        if(isBranch(source)) {
+            put(v,"repairBranch",true);
+            for(String key:new String[]{"parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","branchInputRevision","branchInputText"})
+                if(source.json().has(key)) put(v,key,source.json().opt(key));
+        }
+        put(v,"checkpoint",source.text("checkpoint"));
+        return v;
+    }
+
+    private static State resumeStopped(State original, Event e) {
+        JSONObject root=original.json(), all=copy(root.optJSONObject("executions"));
+        for(State s:original.executions()) {
+            JSONObject v=s.json();
+            v.remove("error"); v.remove("pauseReason");
+            if(!s.flag("superseded") && !s.flag("committed") && !s.hasResult()) {
+                JSONArray attempts=array(v.optJSONArray("stoppedAttempts"));
+                JSONObject attempt=new JSONObject();
+                for(String k:new String[]{"requestId","stage","error","submittedAt","prompt","inputText","inputRevision"})
+                    if(s.json().has(k)) put(attempt,k,s.json().opt(k));
+                put(attempt,"conversationUrl",s.resource("conversationUrl")); attempts.put(attempt);
+                put(v,"stoppedAttempts",attempts);
+                for(String k:new String[]{"prompt","result","submittedAt","conversationId","repairAttempt",
+                        "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
+                        "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
+                        "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
+                JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("conversationUrl"); put(v,"resources",resources);
+                put(v,"requestId",s.turnId()+":resume:"+e.id);
+                put(v,"stoppedRestart",true);
+                put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
+                for(String k:new String[]{"sendClaimed","dispatchObserved","accepted","ended","committed"}) put(v,k,false);
+            } else if(!s.flag("committed") && s.hasResult()) {
+                put(v,"stage","RECONCILING");
+            }
+            put(all,s.turnId(),record(v));
+        }
+        put(root,"executions",all); put(root,"taskStopped",false); put(root,"taskPaused",false);
+        root.remove("pauseReason"); put(root,"stoppedResumeOperation",e.id);
+        root=withGlobals(all.optJSONObject(original.turnId()),root);
+        return maybeMerge(persist(root,true));
     }
     static List<State> waitingExecutions(State s) {
         ArrayList<State> out=new ArrayList<>();
@@ -317,10 +373,12 @@ final class SelfRun3Engine {
         int ordinal=Math.max(s.number("maxTurn"),s.turn())+1; require(ordinal>0,"turn ordinal overflow");
         JSONObject v=s.json(), resources=copy(v.optJSONObject("resources"));
         JSONObject all=copy(v.optJSONObject("executions")); put(all,s.turnId(),record(v));
-        JSONObject config=s.config(); applyProfile(config,profile,s.taskMode());
+        JSONObject config=s.config();
+        // Repair reuses the actual source execution, independent of broken next-profile hints.
+        if(!"REPAIR".equals(kind)) applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
-                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
+                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","stoppedRestart","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision"}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);
@@ -366,11 +424,7 @@ final class SelfRun3Engine {
         put(p,"reasoning",reason); return p;
     }
     static JSONObject nextProfile(JSONObject r,State s) {
-        JSONObject plan=r.optJSONObject("next_execution"), p=plan==null?null:plan.optJSONObject("profile");
-        if(p==null) p=r.optJSONObject("next_profile");
-        if(p==null && r.optString("status").isEmpty()) return executionProfile(s);
-        require(p!=null && validRoutingProfile(p,s),"explicit registered next profile required");
-        return copy(p);
+        return SelfRun3RoutingException.resolve(r,s);
     }
     static void applyProfile(JSONObject config,JSONObject p,String policy) {
         require(p!=null,"execution profile required"); String mode=p.optString("mode",config.optString("mode"));

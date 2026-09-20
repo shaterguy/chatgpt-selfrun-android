@@ -3,6 +3,7 @@ package com.shaterguy.chatgptselfrun;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
+import android.os.SystemClock;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -108,15 +109,16 @@ public final class SelfRunDebugLogLifecycleAndroidTest {
                     Method method = MainActivity.class.getDeclaredMethod("stopSelfRun");
                     method.setAccessible(true); method.invoke(activity);
                 } catch (Exception e) { throw new AssertionError(e); }
-                assertTrue(new SelfRunStore(activity).userStopped());
             });
         }
+        for (int attempt = 0; attempt < 100 && !new SelfRunStore(context).userStopped(); attempt++) SystemClock.sleep(50L);
+        assertTrue(new SelfRunStore(context).userStopped());
         drainJournal();
         SelfRunDebugLogArchive.Snapshot saved = SelfRunDebugLogSync.archive(context).state(task);
         assertEquals("STOP", saved.trigger);
         assertEquals(2, saved.requestedSequence);
         File journal = new File(context.getNoBackupFilesDir(), "selfrun-debug-archive/task-" + task + ".jsonl");
-        assertTrue(new String(Files.readAllBytes(journal.toPath()), java.nio.charset.StandardCharsets.UTF_8).contains("UI_STOP"));
+        assertTrue(new String(Files.readAllBytes(journal.toPath()), java.nio.charset.StandardCharsets.UTF_8).contains("V3_STOP"));
     }
 
     @Test public void unusableAuxiliaryStorageCannotPropagateOrPauseExecution() throws Exception {

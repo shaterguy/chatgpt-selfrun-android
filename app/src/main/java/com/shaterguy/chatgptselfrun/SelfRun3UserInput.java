@@ -62,6 +62,7 @@ final class SelfRun3UserInput {
                 SelfRun3Engine.State after = ledger.apply(new SelfRun3Engine.Event(
                         current.turnId() + ":commit:" + result.optString("status"),
                         SelfRun3Engine.Kind.COMMIT, current.taskId(), current.turnId(), payload));
+                if ("RESULT_ROUTING_INVALID".equals(after.text("repairReason"))) return after;
                 if (!SelfRun3Engine.isBranch(current) && !"REPAIR".equals(current.text("executionKind"))
                         && current.time("inputRevision") >= 0L) {
                     if (!consumeIfRevision(context, current.taskId(), current.time("inputRevision"))

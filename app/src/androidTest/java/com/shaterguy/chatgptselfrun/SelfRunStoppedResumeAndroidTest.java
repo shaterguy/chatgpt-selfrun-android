@@ -84,13 +84,13 @@ public final class SelfRunStoppedResumeAndroidTest {
 
             assertEquals(before + 1, afterFirst);
             assertEquals(afterFirst, afterSecond);
-            assertEquals(SelfRun3Engine.Stage.WAITING, duplicate.stage());
+            assertEquals(SelfRun3Engine.Stage.PREPARING, duplicate.stage());
             assertFalse(duplicate.flag("taskStopped"));
-            assertTrue(duplicate.flag("sendClaimed"));
+            assertFalse(duplicate.flag("sendClaimed"));
             assertEquals(taskId, duplicate.taskId());
             assertEquals(turnId, duplicate.turnId());
             assertEquals(resultId, duplicate.resource("resultDocumentId"));
-            assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(duplicate));
+            assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(duplicate));
 
             restartedStore.start(taskId, SelfRunStore.MODE_CHAT, SelfRunScript.GENERAL_CHAT_URL,
                     "resume requirement", new ArrayList<>(), SelfRunStore.MODE_CHAT);
