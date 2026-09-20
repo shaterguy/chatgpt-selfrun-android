@@ -89,18 +89,6 @@ final class SelfRun3DriveAdapter {
         return s;
     }
 
-    SelfRun3Engine.State recheckStoppedResultBeforeSend(String token, SelfRun3Engine.State state) throws Exception {
-        ResultObservation observation = readObservation(token, state);
-        String latest = SelfRun3Engine.parseResult(observation.candidateBody, state) != null
-                ? observation.candidateBody : observation.rawBody;
-        JSONObject result = SelfRun3StoppedRecovery.validate(latest, state);
-        if (!result.optBoolean("committed")) return state;
-        JSONObject payload = new JSONObject();
-        SelfRun3Engine.put(payload, "text", observation.candidateBody);
-        return ledger.apply(new SelfRun3Engine.Event(state.requestId() + ":presend-result:" + UUID.randomUUID(),
-                SelfRun3Engine.Kind.RESULT, state.taskId(), state.turnId(), payload)).execution(state.turnId());
-    }
-
     private SelfRun3Engine.State reconcileCommittedBeforeDispatch(SelfRun3Engine.State state,
                                                                    DriveApiClient.Metadata metadata,
                                                                    SelfRun3ResultDocumentPolicy.Selection selection) {
