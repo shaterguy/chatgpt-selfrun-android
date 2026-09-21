@@ -300,21 +300,25 @@ final class SelfRun3Engine {
             JSONObject v=s.json();
             v.remove("error"); v.remove("pauseReason");
             if(!s.flag("superseded") && !s.flag("committed") && !s.hasResult()) {
-                JSONArray attempts=array(v.optJSONArray("stoppedAttempts"));
-                JSONObject attempt=new JSONObject();
-                for(String k:new String[]{"requestId","stage","error","submittedAt","prompt","inputText","inputRevision"})
-                    if(s.json().has(k)) put(attempt,k,s.json().opt(k));
-                put(attempt,"conversationUrl",s.resource("conversationUrl")); attempts.put(attempt);
-                put(v,"stoppedAttempts",attempts);
-                for(String k:new String[]{"prompt","result","submittedAt","conversationId","repairAttempt",
-                        "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
-                        "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
-                        "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
-                JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("conversationUrl"); put(v,"resources",resources);
-                put(v,"requestId",s.turnId()+":resume:"+e.id);
-                put(v,"stoppedRestart",true);
-                put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
-                for(String k:new String[]{"sendClaimed","dispatchObserved","accepted","ended","committed"}) put(v,k,false);
+                if(resumeWaitsForPinnedResult(s)) {
+                    put(v,"stoppedResumeWait",true);
+                } else {
+                    JSONArray attempts=array(v.optJSONArray("stoppedAttempts"));
+                    JSONObject attempt=new JSONObject();
+                    for(String k:new String[]{"requestId","stage","error","submittedAt","prompt","inputText","inputRevision"})
+                        if(s.json().has(k)) put(attempt,k,s.json().opt(k));
+                    put(attempt,"conversationUrl",s.resource("conversationUrl")); attempts.put(attempt);
+                    put(v,"stoppedAttempts",attempts);
+                    for(String k:new String[]{"prompt","result","submittedAt","conversationId","repairAttempt",
+                            "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
+                            "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
+                            "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
+                    JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("conversationUrl"); put(v,"resources",resources);
+                    put(v,"requestId",s.turnId()+":resume:"+e.id);
+                    put(v,"stoppedRestart",true);
+                    put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
+                    for(String k:new String[]{"sendClaimed","dispatchObserved","accepted","ended","committed"}) put(v,k,false);
+                }
             } else if(!s.flag("committed") && s.hasResult()) {
                 put(v,"stage","RECONCILING");
             }
@@ -324,6 +328,13 @@ final class SelfRun3Engine {
         root.remove("pauseReason"); put(root,"stoppedResumeOperation",e.id);
         root=withGlobals(all.optJSONObject(original.turnId()),root);
         return maybeMerge(persist(root,true));
+    }
+    private static boolean resumeWaitsForPinnedResult(State s) {
+        String stage=s.text("stage");
+        return !s.resource("resultDocumentId").isEmpty()
+                && (("DISPATCHING".equals(stage) && !s.resource("conversationUrl").isEmpty())
+                || "WAITING".equals(stage)
+                || ("RECONCILING".equals(stage) && !s.hasResult()));
     }
     static List<State> waitingExecutions(State s) {
         ArrayList<State> out=new ArrayList<>();
@@ -378,7 +389,7 @@ final class SelfRun3Engine {
         if(!"REPAIR".equals(kind)) applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
-                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","stoppedRestart","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision"}) v.remove(k);
+                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","stoppedRestart","stoppedResumeWait","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision"}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);

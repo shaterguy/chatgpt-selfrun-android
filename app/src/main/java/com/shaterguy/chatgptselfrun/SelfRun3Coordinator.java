@@ -339,6 +339,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         serverRegisteredTurns.retainAll(waitingIds);
         serverFallbackTurns.retainAll(waitingIds);
 
+        for (SelfRun3Engine.State execution : waiting) {
+            if (shouldReadStoppedResumePinnedResult(execution)) {
+                runDriveStep(execution, DriveStep.READ_RESULT, ReadTrigger.AUTHORITY, null);
+                return;
+            }
+        }
+
         SelfRun3RuntimeSettings.WorkMode workMode = runtimeSettings.workMode();
         long now = SystemClock.elapsedRealtime();
         long nextDelay = resultPollMs;
@@ -401,6 +408,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 if (localPollingWaiting) scheduleNext(nextDelay);
             }
         }
+    }
+
+    private boolean shouldReadStoppedResumePinnedResult(SelfRun3Engine.State execution) {
+        return execution != null
+                && execution.flag("stoppedResumeWait")
+                && !authoritativeReadCheckedTurns.contains(execution.turnId());
     }
 
     private boolean startServerWatchRegistration(SelfRun3Engine.State execution) {
@@ -710,7 +723,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                             finishRecoveryRead();
                         } else if (trigger == ReadTrigger.AUTHORITY) {
                             authoritativeReadCheckedTurns.add(expectedTurn);
-                            nextResultPoll.remove(expectedTurn);
+                            nextResultPoll.put(expectedTurn,
+                                    SystemClock.elapsedRealtime() + runtimeSettings.resultPollMs());
                             scheduleNext(0L);
                         } else if (trigger == ReadTrigger.SERVER_RECHECK) {
                             SelfRunServerResultRecheckWorker.scheduleNext(

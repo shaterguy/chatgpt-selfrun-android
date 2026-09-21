@@ -51,9 +51,10 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
-    @Test public void stoppedTaskRepreparesFromSavedLedgerState() throws Exception {
+    @Test public void stoppedTaskAfterDispatchWaitsOnPinnedResultWithoutRedispatch() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
+        String originalRequestId = waiting.requestId();
         SelfRun3Engine.State stopped = reduce(waiting, "stop", SelfRun3Engine.Kind.STOP, new JSONObject());
         assertEquals(SelfRun3Engine.Stage.STOPPED, stopped.stage());
         assertTrue(stopped.flag("taskStopped"));
@@ -63,26 +64,46 @@ public final class SelfRun3EngineTest {
         assertSame(stopped, normalResume);
 
         SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
+        assertFalse(resumed.flag("taskStopped"));
+        assertTrue(resumed.flag("sendClaimed"));
+        assertTrue(resumed.flag("stoppedResumeWait"));
+        assertEquals(originalRequestId, resumed.requestId());
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
+    }
+
+    @Test public void stoppedTaskBeforeDispatchRepreparesWithFreshRequest() throws Exception {
+        SelfRun3Engine.State claimed = claimedState();
+        String originalRequestId = claimed.requestId();
+        SelfRun3Engine.State stopped = reduce(claimed, "stop-before-dispatch", SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-before-dispatch", SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+
         assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
         assertFalse(resumed.flag("taskStopped"));
         assertFalse(resumed.flag("sendClaimed"));
+        assertFalse(resumed.flag("stoppedResumeWait"));
+        assertTrue(resumed.flag("stoppedRestart"));
+        assertNotEquals(originalRequestId, resumed.requestId());
         assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(resumed));
-
     }
 
     @Test public void explicitStoppedResumeDoesNotRequireLedgerStopFlag() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         SelfRun3Engine.State waiting = reduce(claimed, "started", SelfRun3Engine.Kind.STARTED, request(claimed));
+        String originalRequestId = waiting.requestId();
         assertFalse(waiting.flag("taskStopped"));
 
         SelfRun3Engine.State resumed = reduce(waiting, "resume-after-ui-stop",
                 SelfRun3Engine.Kind.RESUME_STOPPED,
                 new JSONObject());
 
-        assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
+        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
         assertFalse(resumed.flag("taskStopped"));
+        assertTrue(resumed.flag("sendClaimed"));
+        assertTrue(resumed.flag("stoppedResumeWait"));
+        assertEquals(originalRequestId, resumed.requestId());
         assertEquals("resume-after-ui-stop", resumed.text("stoppedResumeOperation"));
-        assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(resumed));
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
     @Test public void stoppedTaskWithCommittedDriveResultResumesAtCommitWithoutRedispatch() throws Exception {
