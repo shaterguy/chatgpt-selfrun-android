@@ -36,7 +36,8 @@ final class SelfRun3ResultWatchdog {
         if (staleAfterMs <= 0L || state == null || state.stage() != SelfRun3Engine.Stage.WAITING
                 || !"WAITING".equals(state.text("stage"))) return false;
         if (!state.flag("sendClaimed") || state.flag("committed") || state.hasResult()
-                || state.flag("superseded") || state.number("repairAttempt") != 0) return false;
+                || state.flag("stoppedResumeWait") || state.flag("superseded")
+                || state.number("repairAttempt") != 0) return false;
         String resultDocumentId = state.resource("resultDocumentId");
         String seedFingerprint = state.text("resultSeedFingerprint");
         String mutationFingerprint = state.text("resultBodyMutationFingerprint");

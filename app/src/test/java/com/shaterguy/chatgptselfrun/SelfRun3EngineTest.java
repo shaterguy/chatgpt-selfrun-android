@@ -106,6 +106,43 @@ public final class SelfRun3EngineTest {
         assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
+    @Test public void stoppedTaskPendingResultThenCommittedAdvancesToFreshSuccessor() throws Exception {
+        SelfRun3Engine.State claimed = claimedState();
+        SelfRun3Engine.State waiting = reduce(claimed, "started-pending-result",
+                SelfRun3Engine.Kind.STARTED, request(claimed));
+        String originalTurnId = waiting.turnId();
+        String originalRequestId = waiting.requestId();
+        String originalResultDocumentId = waiting.resource("resultDocumentId");
+
+        SelfRun3Engine.State stopped = reduce(waiting, "stop-pending-result",
+                SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = reduce(stopped, "resume-stopped-pending-result",
+                SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+
+        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
+        assertTrue(resumed.flag("stoppedResumeWait"));
+        assertEquals(originalTurnId, resumed.turnId());
+        assertEquals(originalRequestId, resumed.requestId());
+        assertEquals(originalResultDocumentId, resumed.resource("resultDocumentId"));
+
+        JSONObject resultPayload = new JSONObject();
+        SelfRun3Engine.put(resultPayload, "text", continueResult(resumed).toString());
+        SelfRun3Engine.State withResult = reduce(resumed, resumed.turnId() + ":result-after-resume",
+                SelfRun3Engine.Kind.RESULT, resultPayload);
+        assertEquals(SelfRun3Engine.Stage.RECONCILING, withResult.stage());
+        assertEquals(SelfRun3Engine.Action.COMMIT, SelfRun3Engine.nextAction(withResult));
+
+        SelfRun3Engine.State next = reduce(withResult, "commit-after-resume",
+                SelfRun3Engine.Kind.COMMIT, new JSONObject());
+        assertEquals(2, next.turn());
+        assertEquals("task:turn:2", next.turnId());
+        assertEquals(SelfRun3Engine.Stage.PREPARING, next.stage());
+        assertFalse(next.flag("stoppedResumeWait"));
+        assertNotEquals(originalRequestId, next.requestId());
+        assertNotEquals(originalTurnId, next.turnId());
+        assertEquals("", next.resource("resultDocumentId"));
+    }
+
     @Test public void stoppedTaskWithCommittedDriveResultResumesAtCommitWithoutRedispatch() throws Exception {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject resultPayload = new JSONObject();

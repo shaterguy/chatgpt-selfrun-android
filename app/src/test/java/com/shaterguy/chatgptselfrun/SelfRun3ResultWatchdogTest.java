@@ -119,6 +119,29 @@ public final class SelfRun3ResultWatchdogTest {
         assertFalse(SelfRun3ResultWatchdog.shouldRepair(stopped, due, 2));
     }
 
+    @Test public void stoppedResumeWaitNeverRepairsBeforeOriginalTurnCommits() {
+        SelfRun3Engine.State waiting = waiting(100L, 200L, 2);
+        String originalRequestId = waiting.requestId();
+        String originalResultDocumentId = waiting.resource("resultDocumentId");
+        long due = 200L + SelfRun3ResultWatchdog.STALE_AFTER_MS;
+
+        SelfRun3Engine.State stopped = event(waiting, waiting.turnId(),
+                waiting.taskId() + ":stop-before-original-result",
+                SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = event(stopped, stopped.turnId(),
+                stopped.taskId() + ":resume-stopped-before-original-result",
+                SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+
+        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
+        assertTrue(resumed.flag("sendClaimed"));
+        assertTrue(resumed.flag("stoppedResumeWait"));
+        assertEquals(originalRequestId, resumed.requestId());
+        assertEquals(originalResultDocumentId, resumed.resource("resultDocumentId"));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(resumed, due, 2));
+        assertFalse(SelfRun3ResultWatchdog.shouldRepair(
+                resumed, due + SelfRun3ResultWatchdog.STALE_AFTER_MS, 2));
+    }
+
     @Test public void supersededExecutionRejectsLateProgressButKeepsHistoryUrlEnrichment() {
         SelfRun3Engine.State s = waiting(1L, 2L, 1);
         String oldTurn = s.turnId();
