@@ -12,7 +12,7 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 /** Drive transports pinned objects only. No title parsing, folder-order cursors or signal synthesis. */
-final class SelfRun3DriveAdapter implements SelfRun3DrivePort {
+final class SelfRun3DriveAdapter {
     interface TestTransport {
         String resultDocumentId(SelfRun3Engine.State state) throws Exception;
         ResultObservation observeResult(SelfRun3Engine.State state) throws Exception;
