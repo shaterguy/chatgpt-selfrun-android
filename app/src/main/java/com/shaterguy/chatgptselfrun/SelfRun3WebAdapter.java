@@ -12,6 +12,7 @@ import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import org.json.JSONObject;
@@ -225,6 +226,14 @@ final class SelfRun3WebAdapter {
                         state.config().optString("projectUrl"), url)) {
                     later(SelfRun3WebAdapter.this::advance, 250L);
                 }
+            }
+
+            @Override public WebResourceResponse shouldInterceptRequest(
+                    WebView view, WebResourceRequest request) {
+                WebResourceResponse fixture =
+                        SelfRun3RuntimeTestBridge.interceptWebFixture(request);
+                if (view == web && !closed && fixture != null) return fixture;
+                return super.shouldInterceptRequest(view, request);
             }
 
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
