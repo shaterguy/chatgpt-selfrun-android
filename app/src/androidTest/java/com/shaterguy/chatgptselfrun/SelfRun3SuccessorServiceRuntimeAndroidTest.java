@@ -131,7 +131,8 @@ public final class SelfRun3SuccessorServiceRuntimeAndroidTest {
             SelfRun3Engine.State successor = awaitState(state ->
                     state.turn() == 2
                             && predecessorTurnId.equals(
-                            state.successorTransition().optString("predecessorTurnId")), 10_000L);
+                            state.successorTransition().optString("predecessorTurnId"))
+                            && !state.resource("resultDocumentId").isEmpty(), 10_000L);
             String successorTurnId = successor.turnId();
             String successorRequestId = successor.requestId();
             String successorResultDocumentId = successor.resource("resultDocumentId");
@@ -405,19 +406,28 @@ public final class SelfRun3SuccessorServiceRuntimeAndroidTest {
 
         @Override public void load(WebView web, String url) {
             pageLoads.incrementAndGet();
-            web.loadDataWithBaseURL("https://chatgpt.com/", html(revealComposerAfterMs),
-                    "text/html", "UTF-8", null);
+            // Use a real HTTPS navigation so WebView document-start scripts execute exactly
+            // as they do in the installed app. The main-frame response itself is intercepted
+            // below, keeping the fixture hermetic without replacing the WebAdapter pipeline.
+            web.loadUrl(url);
         }
 
         @Override public WebResourceResponse intercept(WebResourceRequest request) {
-            if (request != null
-                    && "POST".equalsIgnoreCase(request.getMethod())
-                    && request.getUrl() != null
+            if (request == null || request.getUrl() == null) return null;
+            if ("POST".equalsIgnoreCase(request.getMethod())
                     && "/backend-api/f/conversation".equals(request.getUrl().getPath())) {
                 canonicalPosts.incrementAndGet();
                 return new WebResourceResponse(
                         "application/json", "UTF-8",
                         new ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)));
+            }
+            if ("GET".equalsIgnoreCase(request.getMethod())
+                    && request.isForMainFrame()
+                    && "chatgpt.com".equalsIgnoreCase(request.getUrl().getHost())) {
+                return new WebResourceResponse(
+                        "text/html", "UTF-8",
+                        new ByteArrayInputStream(
+                                html(revealComposerAfterMs).getBytes(StandardCharsets.UTF_8)));
             }
             return null;
         }
