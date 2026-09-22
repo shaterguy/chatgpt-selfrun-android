@@ -121,7 +121,9 @@ final class SelfRun3WebAdapter {
             evaluation++;
             loading = true;
             web.stopLoading();
-            web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+            if (!SelfRun3RuntimeTestBridge.loadWebFixture(web, s)) {
+                web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+            }
             if (!newRequest) {
                 trace("WEB_PREPARATION_RECOVERY", "status=reentry;attempt=" + preparationAttempt
                         + ";route=" + (ref == null ? "general" : "projects")
@@ -184,6 +186,7 @@ final class SelfRun3WebAdapter {
         if (!trusted(target)) { fail("TARGET_INVALID"); return; }
         host = HeadlessWebViewHost.create(context);
         web = host.webView();
+        SelfRun3RuntimeTestBridge.installNetworkSink(web);
         active = this;
         if (!WebViewConfig.applySelfRun3Automation(web)) { fail("TURN_PROTOCOL_UNAVAILABLE"); return; }
         loading = true;
