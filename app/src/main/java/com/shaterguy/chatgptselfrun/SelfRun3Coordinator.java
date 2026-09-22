@@ -263,6 +263,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> {
                     if (!validEpoch(expectedEpoch)) return;
                     syncProjection(ready);
+                    syncSuccessorWatchdog(ready, "restore");
                     if (ready.stage() != SelfRun3Engine.Stage.PAUSED && !store.paused()) scheduleNext(0L);
                 });
             } catch (Throwable error) {
@@ -322,6 +323,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         if (!canRun()) return;
         if (state.terminal() || state.stage() == SelfRun3Engine.Stage.PAUSED) {
             SelfRunFallbackWakeScheduler.cancel(service);
+            SelfRun3SuccessorWakeScheduler.cancel(service);
             SelfRunServerRecoveryWorker.cancel(service);
             return;
         }
@@ -662,8 +664,26 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (parsed != null) {
                         JSONObject payload = new JSONObject();
                         SelfRun3Engine.put(payload, "text", observation.candidateBody);
+                        SelfRun3Engine.put(payload, "acceptedAtElapsed", SystemClock.elapsedRealtime());
+                        SelfRun3Engine.put(payload, "acceptedAtWall", System.currentTimeMillis());
+                        SelfRun3Engine.put(payload, "acceptedBootCount", currentBootCount());
+                        SelfRun3Engine.put(payload, "successorTimeoutMs", runtimeSettings.webPreparationMs());
                         after = ledger.apply(event(current, current.turnId() + ":result:" + observation.version,
                                 SelfRun3Engine.Kind.RESULT, payload));
+                        SelfRun3Engine.State accepted = after.execution(expectedTurn);
+                        if (SelfRun3SuccessorTransitionPolicy.routingInvalid(accepted)) {
+                            log.record(store, "V3_SUCCESSOR_ROUTING", "status=FAIL;predecessor=" + expectedTurn);
+                            after = SelfRun3UserInput.commit(service, store, ledger, accepted);
+                        } else if (SelfRun3SuccessorTransitionPolicy.routingValid(accepted)) {
+                            // Arm the durable watchdog before returning to the main Handler. If that
+                            // progression callback is lost, AlarmManager still owns the deadline.
+                            SelfRun3SuccessorWakeScheduler.schedule(service, accepted,
+                                    SystemClock.elapsedRealtime(), System.currentTimeMillis(), currentBootCount());
+                            log.record(store, "V3_SUCCESSOR_PREDECESSOR_ACCEPTED",
+                                    "task=" + expectedTask + ";predecessor=" + expectedTurn
+                                            + ";request=" + accepted.requestId() + ";stage=ACCEPTED");
+                            log.record(store, "V3_SUCCESSOR_ROUTING", "status=PASS;predecessor=" + expectedTurn);
+                        }
                     } else if (SelfRun3ResultWatchdog.shouldRepair(current,
                             SystemClock.elapsedRealtime(), currentBootCount(), runtimeSettings.resultRepairMs())) {
                         JSONObject payload = new JSONObject();
@@ -702,6 +722,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         acknowledgeCompletedServerPushes(expectedTurn, push);
                     }
                     syncProjection(completed);
+                    syncSuccessorWatchdog(completed, "drive-read");
                     if (trigger == ReadTrigger.ON_DEVICE_BACKUP) finishRecoveryRead();
                     else scheduleNext(0L);
                 });
@@ -888,6 +909,16 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     serverFallbackTurns.remove(current.turnId());
                     authoritativeReadCheckedTurns.remove(current.turnId());
                     syncProjection(after);
+                    syncSuccessorWatchdog(after, "commit");
+                    if (SelfRun3SuccessorTransitionPolicy.armed(after)) {
+                        JSONObject transition = after.successorTransition();
+                        log.record(store, "V3_SUCCESSOR_PROGRESS",
+                                "task=" + after.taskId() + ";predecessor="
+                                        + transition.optString("predecessorTurnId") + ";successor="
+                                        + transition.optString("successorTurnId") + ";request="
+                                        + transition.optString("successorRequestId") + ";stage="
+                                        + transition.optString("stage"));
+                    }
                     if (after.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION) {
                         log.record(store, "V3_USER_INTERVENTION", "turn=" + after.turn());
                         SelfRunDebugLogSync.request(service, after, "USER_INTERVENTION");
@@ -1089,6 +1120,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     @Override public void onFailure(String task, String turn, String request, String code) {
+        if ("SUCCESSOR_TRANSITION_TIMEOUT".equals(code)) {
+            onSuccessorWatchdogWake("", -1);
+            return;
+        }
         if ("AUTH_REQUIRED".equals(code) || "TURN_PROTOCOL_UNAVAILABLE".equals(code)) {
             pause("V3_" + code);
             return;
@@ -1148,6 +1183,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         }
                     }
                     syncProjection(after);
+                    syncSuccessorWatchdog(after, kind == SelfRun3Engine.Kind.STARTED ? "canonical-confirmed" : "callback");
                     requestDebugWait(persisted);
                     scheduleNext(0L);
                 });
@@ -1155,6 +1191,167 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 main.post(() -> hardPause("V3_CALLBACK_COMMIT_FAILED", error));
             }
         });
+    }
+
+    void onSuccessorWatchdogWake(String predecessorTurnId, int expectedAttempt) {
+        requireMain();
+        if (!canRun()) { SelfRun3SuccessorWakeScheduler.cancel(service); return; }
+        int observedEpoch = epoch;
+        String task = store.runId();
+        io.execute(() -> {
+            try {
+                SelfRun3Engine.State observed = ledger.load(task);
+                main.post(() -> {
+                    if (!validEpoch(observedEpoch) || !task.equals(store.runId())) return;
+                    if (observed == null || !SelfRun3SuccessorTransitionPolicy.armed(observed)) {
+                        SelfRun3SuccessorWakeScheduler.cancel(service);
+                        scheduleNext(0L);
+                        return;
+                    }
+                    JSONObject transition = observed.successorTransition();
+                    String pinnedPredecessor = transition.optString("predecessorTurnId");
+                    int attempt = transition.optInt("recoveryAttempt", 0);
+                    if ((!predecessorTurnId.isEmpty() && !predecessorTurnId.equals(pinnedPredecessor))
+                            || (expectedAttempt >= 0 && expectedAttempt != attempt)) {
+                        syncSuccessorWatchdog(observed, "stale-wake");
+                        scheduleNext(0L);
+                        return;
+                    }
+                    long remaining = SelfRun3SuccessorTransitionPolicy.remainingMs(
+                            observed, SystemClock.elapsedRealtime(), System.currentTimeMillis(), currentBootCount());
+                    if (remaining > 0L) {
+                        syncSuccessorWatchdog(observed, "early-wake");
+                        scheduleNext(0L);
+                        return;
+                    }
+                    recoverExpiredSuccessor(observed, pinnedPredecessor, attempt);
+                });
+            } catch (Throwable error) {
+                main.post(() -> hardPause("V3_SUCCESSOR_WATCHDOG_READ_FAILED", error));
+            }
+        });
+    }
+
+    private void recoverExpiredSuccessor(SelfRun3Engine.State observed,
+                                         String predecessorTurnId, int observedAttempt) {
+        requireMain();
+        if (!canRun() || !SelfRun3SuccessorTransitionPolicy.armed(observed)) return;
+        epoch++;
+        serverGeneration++;
+        int recoveryEpoch = epoch;
+        String task = observed.taskId();
+        if (scheduledNext != null) main.removeCallbacks(scheduledNext);
+        boolean abandonedDrive = driveInFlight;
+        boolean abandonedAuthorization = authorizationInFlight;
+        boolean abandonedRegistration = serverRegistrationInFlight;
+        boolean abandonedRecovery = recoveryCycleInFlight;
+        String abandonedRequest = preparingRequest;
+        driveInFlight = false;
+        authorizationInFlight = false;
+        serverRegistrationInFlight = false;
+        recoveryCycleInFlight = false;
+        recoveryQueue.clear();
+        preparingRequest = "";
+        nextResultPoll.remove(predecessorTurnId);
+        serverRegisteredTurns.remove(predecessorTurnId);
+        serverFallbackTurns.remove(predecessorTurnId);
+        SelfRunServerResultRecheckWorker.clear(service, predecessorTurnId);
+        SelfRunServerRecoveryWorker.cancel(service);
+        SelfRunFallbackWakeScheduler.cancel(service);
+        web.quiesce();
+        releaseWakeLock();
+        log.record(store, "V3_SUCCESSOR_RUNTIME_SUPERSEDED",
+                "task=" + task + ";predecessor=" + predecessorTurnId
+                        + ";attempt=" + observedAttempt + ";drive=" + abandonedDrive
+                        + ";auth=" + abandonedAuthorization + ";registration=" + abandonedRegistration
+                        + ";recovery=" + abandonedRecovery + ";request=" + abandonedRequest);
+        io.execute(() -> {
+            try {
+                SelfRun3Engine.State current = ledger.load(task);
+                if (current == null || !SelfRun3SuccessorTransitionPolicy.armed(current)) {
+                    main.post(() -> {
+                        if (!validEpoch(recoveryEpoch)) return;
+                        SelfRun3SuccessorWakeScheduler.cancel(service);
+                        scheduleNext(0L);
+                    });
+                    return;
+                }
+                JSONObject transition = current.successorTransition();
+                if (!predecessorTurnId.equals(transition.optString("predecessorTurnId"))
+                        || observedAttempt != transition.optInt("recoveryAttempt", 0)) {
+                    SelfRun3Engine.State progressed = current;
+                    main.post(() -> {
+                        if (!validEpoch(recoveryEpoch)) return;
+                        syncSuccessorWatchdog(progressed, "progressed-during-timeout");
+                        scheduleNext(0L);
+                    });
+                    return;
+                }
+                long nowElapsed = SystemClock.elapsedRealtime();
+                long nowWall = System.currentTimeMillis();
+                int bootCount = currentBootCount();
+                long remaining = SelfRun3SuccessorTransitionPolicy.remainingMs(
+                        current, nowElapsed, nowWall, bootCount);
+                if (remaining > 0L) {
+                    SelfRun3Engine.State progressed = current;
+                    main.post(() -> {
+                        if (!validEpoch(recoveryEpoch)) return;
+                        syncSuccessorWatchdog(progressed, "deadline-moved");
+                        scheduleNext(0L);
+                    });
+                    return;
+                }
+                JSONObject payload = new JSONObject();
+                SelfRun3Engine.put(payload, "atElapsed", nowElapsed);
+                SelfRun3Engine.put(payload, "atWall", nowWall);
+                SelfRun3Engine.put(payload, "bootCount", bootCount);
+                SelfRun3Engine.State recovered = ledger.apply(event(current,
+                        predecessorTurnId + ":successor-timeout:" + (observedAttempt + 1),
+                        SelfRun3Engine.Kind.SUCCESSOR_TIMEOUT, payload));
+                main.post(() -> {
+                    if (!validEpoch(recoveryEpoch)) return;
+                    log.record(store, "V3_SUCCESSOR_WATCHDOG",
+                            "status=timeout-recovery;task=" + recovered.taskId()
+                                    + ";predecessor=" + predecessorTurnId
+                                    + ";attempt=" + (observedAttempt + 1)
+                                    + ";turn=" + recovered.turnId()
+                                    + ";request=" + recovered.requestId()
+                                    + ";stage=" + recovered.stage().name());
+                    syncProjection(recovered);
+                    syncSuccessorWatchdog(recovered, "timeout-recovery");
+                    scheduleNext(0L);
+                });
+            } catch (Throwable error) {
+                main.post(() -> hardPause("V3_SUCCESSOR_RECOVERY_FAILED", error));
+            }
+        });
+    }
+
+    private void syncSuccessorWatchdog(SelfRun3Engine.State state, String source) {
+        requireMain();
+        if (state == null || !canRun() || state.terminal()
+                || state.stage() == SelfRun3Engine.Stage.PAUSED
+                || !SelfRun3SuccessorTransitionPolicy.armed(state)) {
+            SelfRun3SuccessorWakeScheduler.cancel(service);
+            return;
+        }
+        long nowElapsed = SystemClock.elapsedRealtime();
+        long nowWall = System.currentTimeMillis();
+        int bootCount = currentBootCount();
+        long remaining = SelfRun3SuccessorTransitionPolicy.remainingMs(
+                state, nowElapsed, nowWall, bootCount);
+        if (remaining < 0L) {
+            SelfRun3SuccessorWakeScheduler.cancel(service);
+            return;
+        }
+        SelfRun3SuccessorWakeScheduler.schedule(service, state, nowElapsed, nowWall, bootCount);
+        JSONObject transition = state.successorTransition();
+        log.record(store, "V3_SUCCESSOR_WATCHDOG",
+                "status=armed;source=" + source + ";task=" + state.taskId()
+                        + ";predecessor=" + transition.optString("predecessorTurnId")
+                        + ";successor=" + transition.optString("successorTurnId")
+                        + ";request=" + transition.optString("successorRequestId")
+                        + ";stage=" + transition.optString("stage") + ";remainingMs=" + remaining);
     }
 
     private void pause(String reason) {
@@ -1252,6 +1449,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void cancelServerWaitState() {
         SelfRunFallbackWakeScheduler.cancel(service);
+        SelfRun3SuccessorWakeScheduler.cancel(service);
         serverGeneration++;
         serverRegistrationInFlight = false;
         serverRegisteredTurns.clear();
@@ -1304,6 +1502,14 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private static String statusFor(SelfRun3Engine.State state) {
+        if ("REPAIR".equals(state.text("executionKind")) && "RESULT_ROUTING_INVALID".equals(state.text("repairReason")))
+            return "SelfRun 3 Result 라우팅 자동 복구";
+        if (SelfRun3SuccessorTransitionPolicy.armed(state)) {
+            String transitionStage = state.successorTransition().optString("stage");
+            if ("TIMEOUT_RECOVERY".equals(transitionStage)) return "SelfRun 3 successor 전환 타임아웃 복구";
+            if (state.stage() == SelfRun3Engine.Stage.RECONCILING) return "SelfRun 3 successor 전환 · watchdog 대기";
+            return "SelfRun 3 successor 자동 전환";
+        }
         return switch (state.stage()) {
             case SETUP -> "SelfRun 3 원장 · Drive 준비";
             case PREPARING -> "SelfRun 3 다음 논리 턴 준비";
