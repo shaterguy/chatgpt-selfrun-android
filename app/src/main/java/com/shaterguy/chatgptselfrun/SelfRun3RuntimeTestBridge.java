@@ -60,12 +60,22 @@ final class SelfRun3RuntimeTestBridge {
 
     static synchronized SelfRun3DriveAdapter.ResultObservation observeResult(
             SelfRun3Engine.State state) {
-        if (!activeFor(state) || !predecessorTurnId.equals(state.turnId())) {
-            throw new IllegalStateException("fixture result requested for unexpected turn");
+        if (!activeFor(state)) {
+            throw new IllegalStateException("fixture result requested outside scenario");
         }
-        resultReads++;
-        return new SelfRun3DriveAdapter.ResultObservation(
-                "runtime-fixture:" + resultReads, committedResult, committedResult);
+        if (predecessorTurnId.equals(state.turnId())) {
+            resultReads++;
+            return new SelfRun3DriveAdapter.ResultObservation(
+                    "runtime-fixture:predecessor:" + resultReads,
+                    committedResult, committedResult);
+        }
+        if (state.turn() > 1) {
+            String pending = SelfRun3Engine.emptyResult(state).toString();
+            return new SelfRun3DriveAdapter.ResultObservation(
+                    "runtime-fixture:successor-pending:" + state.turn(),
+                    pending, pending);
+        }
+        throw new IllegalStateException("fixture result requested for unexpected turn");
     }
 
     static synchronized SelfRun3Engine.State prepareTurn(SelfRun3Ledger ledger,
