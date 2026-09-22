@@ -39,10 +39,11 @@ SETTINGS_ANDROID=$ANDROID/SelfRun3RuntimeSettingsAndroidTest.java
 SETTINGS_PROCESS=$ANDROID/SelfRun3RuntimeSettingsProcessAndroidTest.java
 UPGRADE_ANDROID=$ANDROID/SelfRun3UpgradePersistenceAndroidTest.java
 STOPPED_RESUME_ANDROID=$ANDROID/SelfRunStoppedResumeAndroidTest.java
+SUCCESSOR_RUNTIME_ANDROID=$ANDROID/SelfRun3SuccessorServiceRuntimeAndroidTest.java
 
 for file in "$ENGINE" "$DRIVE" "$WATCHDOG" "$PROTOCOL" "$PROBE" "$INPUT" "$IMMEDIATE" "$STORE" "$ACTIVITY" \
   "$SETTINGS" "$COORD" "$SERVICE" "$STOPPED_RESUME" "$STALL" "$NOTIFIER" "$WEB" "$UNBOUNDED" "$WATCHDOG_UNIT" "$ALWAYS_REPAIR_UNIT" "$COMMITTED_PRIORITY_UNIT" "$SETTINGS_UNIT" "$TURN_STALL_UNIT" \
-  "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$CONVERSATION_GATE_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
+  "$STOPPED_RESUME_UNIT" "$PREPARATION_RECOVERY_UNIT" "$CONVERSATION_GATE_UNIT" "$UNBOUNDED_ANDROID" "$SETTINGS_ANDROID" "$SETTINGS_PROCESS" "$UPGRADE_ANDROID" "$STOPPED_RESUME_ANDROID" "$SUCCESSOR_RUNTIME_ANDROID" "$WORKFLOW" "$EMULATOR"; do
   test -s "$file"
 done
 
@@ -113,7 +114,10 @@ grep -Fq 'conversationCaptured = false' "$WEB"
 grep -Fq 'conversationCaptured = true' "$WEB"
 grep -Fq 'listener.onConversation' "$WEB"
 grep -Fq 'listener.onStarted' "$WEB"
-grep -Fq 'web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));' "$WEB"
+grep -Fq 'loadPage(SelfRun3ProjectDirectoryNavigation.entryUrl(target));' "$WEB"
+grep -Fq 'testLineage() ? testPageTransport : null' "$WEB"
+grep -Fq 'lostDriveCompletionRecoversThroughServiceWatchdogAndRealWebAdapter' "$SUCCESSOR_RUNTIME_ANDROID"
+grep -Fq 'acceptedPredecessorSurvivesServiceRestartWithoutResultRereadOrDuplicates' "$SUCCESSOR_RUNTIME_ANDROID"
 grep -Fq 'case DISPATCHING -> s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;' "$ENGINE"
 grep -Fq 'x.stage()==Stage.DISPATCHING && !x.resource("conversationUrl").isEmpty()' "$ENGINE"
 grep -Fq 'request + ":claim:" + UUID.randomUUID()' "$COORD"
