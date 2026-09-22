@@ -54,7 +54,7 @@ public final class SelfRun3PreparationRecoveryWiringTest {
         assertTrue(web.contains("marker(state, preparationAttempt)"));
         assertTrue(web.contains("marker(claimed, preparationAttempt)"));
         assertTrue(web.contains("disposeHost();"));
-        assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
+        assertTrue(web.contains("loadPage(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
         assertTrue(web.contains("status=reentry"));
         assertTrue(web.contains("status=recovered"));
     }
