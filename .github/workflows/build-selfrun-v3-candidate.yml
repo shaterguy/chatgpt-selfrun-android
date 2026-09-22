@@ -230,6 +230,7 @@ jobs:
           name: selfrun-v3-runtime-evidence-${{ github.run_attempt }}
           path: |
             selfrun-v3-runtime-evidence.txt
+            selfrun-v3-successor-service-runtime-evidence.txt
             selfrun-v3-runtime-settings-evidence.txt
             selfrun-v3-runtime-settings-restart-seed.txt
             selfrun-v3-runtime-settings-restart-verify.txt
