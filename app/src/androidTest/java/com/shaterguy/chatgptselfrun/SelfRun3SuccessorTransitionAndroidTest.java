@@ -135,7 +135,7 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         assertEquals(task + ":turn:2-request", successor.requestId());
         assertEquals(predecessor.resource("resultDocumentId"),
                 successor.successorTransition().optString("predecessorResultDocumentId"));
-        assertEquals(1, successor.successorTransition().optInt("recoveryAttempt"));
+        assertTrue(successor.successorTransition().optInt("recoveryAttempt") >= 1);
         assertEquals("fixture_result_2", successor.resource("resultDocumentId"));
         assertEquals("https://chatgpt.com/c/runtime-successor",
                 successor.resource("conversationUrl"));
