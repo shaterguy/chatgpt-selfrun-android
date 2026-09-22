@@ -1,10 +1,14 @@
 package com.shaterguy.chatgptselfrun;
 
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
 /**
@@ -143,6 +147,20 @@ final class SelfRun3RuntimeTestBridge {
     static boolean loadWebFixture(WebView web, SelfRun3Engine.State state) {
         if (web == null || !activeFor(state) || state.turn() <= 1) return false;
         synchronized (SelfRun3RuntimeTestBridge.class) { fixtureLoads++; }
+        // Use a real HTTPS navigation so document-start scripts run under the same origin and
+        // lifecycle as the installed product. The main-frame response is intercepted below.
+        web.loadUrl(SelfRunScript.GENERAL_CHAT_URL);
+        return true;
+    }
+
+    static WebResourceResponse interceptWebFixture(WebResourceRequest request) {
+        if (!testVariant() || request == null || request.getUrl() == null
+                || !request.isForMainFrame()
+                || !"GET".equalsIgnoreCase(request.getMethod())
+                || !"chatgpt.com".equalsIgnoreCase(request.getUrl().getHost())) return null;
+        synchronized (SelfRun3RuntimeTestBridge.class) {
+            if (taskId.isEmpty()) return null;
+        }
         String html = """
                 <!doctype html><html><body>
                   <form id='composer'>
@@ -160,9 +178,9 @@ final class SelfRun3RuntimeTestBridge {
                   </script>
                 </body></html>
                 """;
-        web.loadDataWithBaseURL(
-                SelfRunScript.GENERAL_CHAT_URL, html, "text/html", "UTF-8", null);
-        return true;
+        return new WebResourceResponse(
+                "text/html", "UTF-8",
+                new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)));
     }
 
     static synchronized int resultReadCount() { return resultReads; }
