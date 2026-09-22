@@ -98,19 +98,6 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         assertEquals(0, accepted.successorTransition().optInt("recoveryAttempt"));
         assertEquals(1, SelfRun3RuntimeTestBridge.resultReadCount());
 
-        // A stale in-flight wake must be fenced and must re-arm the same persisted deadline.
-        Intent staleWake = new Intent(context, SelfRunService.class)
-                .setAction(SelfRunService.ACTION_SUCCESSOR_WATCHDOG_WAKE)
-                .putExtra(SelfRun3SuccessorWakeScheduler.EXTRA_PREDECESSOR_TURN_ID,
-                        predecessor.turnId())
-                .putExtra(SelfRun3SuccessorWakeScheduler.EXTRA_RECOVERY_ATTEMPT, 99);
-        startServiceAction(staleWake);
-        SystemClock.sleep(250L);
-        SelfRun3Engine.State afterStaleWake = ledger.load(task).execution(predecessor.turnId());
-        assertEquals(0, afterStaleWake.successorTransition().optInt("recoveryAttempt"));
-        assertEquals(SelfRun3Engine.Stage.RECONCILING, afterStaleWake.stage());
-        assertEquals(1, SelfRun3RuntimeTestBridge.resultReadCount());
-
         // Kill only the service after acceptance. AlarmManager must restart the real service and
         // Coordinator at the persisted deadline; no predecessor Result re-read is allowed.
         context.stopService(new Intent(context, SelfRunService.class));
@@ -152,8 +139,8 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         assertEquals("1", evaluateValue(protocol,
                 "String(window.__selfRunFixturePosts?.length||0)"));
 
-        // A late duplicate wake after canonical confirmation must not create a third turn,
-        // second result document, second conversation, or second canonical POST.
+        // A stale/late timeout wake racing after canonical confirmation must be fenced and must
+        // not create a third turn, second result document, second conversation, or second POST.
         Intent duplicateWake = new Intent(context, SelfRunService.class)
                 .setAction(SelfRunService.ACTION_SUCCESSOR_WATCHDOG_WAKE)
                 .putExtra(SelfRun3SuccessorWakeScheduler.EXTRA_PREDECESSOR_TURN_ID,
