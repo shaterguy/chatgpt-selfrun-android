@@ -294,9 +294,9 @@ public final class SelfRun3SuccessorServiceRuntimeAndroidTest {
     }
 
     private void fireWatchdog(String predecessor, int attempt) {
-        JSONObject extras = new JSONObject()
-                .put("predecessor", predecessor)
-                .put("attempt", attempt);
+        JSONObject extras = new JSONObject();
+        SelfRun3Engine.put(extras, "predecessor", predecessor);
+        SelfRun3Engine.put(extras, "attempt", attempt);
         startService(SelfRunService.ACTION_SUCCESSOR_WATCHDOG_WAKE, extras);
     }
 
@@ -331,8 +331,11 @@ public final class SelfRun3SuccessorServiceRuntimeAndroidTest {
 
     private SelfRun3Engine.State resource(SelfRun3Ledger ledger, SelfRun3Engine.State state,
                                            String key, String value) {
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "key", key);
+        SelfRun3Engine.put(payload, "value", value);
         return apply(ledger, state, SelfRun3Engine.Kind.RESOURCE,
-                new JSONObject().put("key", key).put("value", value), "resource-" + key);
+                payload, "resource-" + key);
     }
 
     private SelfRun3Engine.State apply(SelfRun3Ledger ledger, SelfRun3Engine.State state,
