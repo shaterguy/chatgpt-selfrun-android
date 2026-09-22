@@ -13,7 +13,7 @@ import static org.junit.Assert.assertTrue;
 public final class SelfRun3ProjectDirectoryWiringTest {
     @Test public void newAttemptUsesDirectoryEntryBeforeExistingBootstrapPipeline() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
+        assertTrue(web.contains("loadPage(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
         assertFalse(web.contains("web.loadUrl(target);"));
         assertTrue(web.contains("if (prepareProjectEntryIfNeeded()) return;"));
         assertTrue(web.contains("SelfRunDom.prepareInitialContext("));
@@ -53,7 +53,7 @@ public final class SelfRun3ProjectDirectoryWiringTest {
         assertTrue(web.contains("disposeHost();\n            ensureWeb();"));
         assertTrue(web.contains("WEB_PREPARATION_RECOVERY"));
         assertTrue(web.contains("strategy=recreate-webview"));
-        assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
+        assertTrue(web.contains("loadPage(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
         assertFalse(web.contains("loadProjectDirectory(\"preparation-restart\")"));
     }
 
