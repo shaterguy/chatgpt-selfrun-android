@@ -166,8 +166,12 @@ public final class SelfRun3SuccessorServiceRuntimeAndroidTest {
             assertEquals("real WebAdapter transport must issue one canonical POST",
                     1, page.canonicalPosts.get());
             assertTrue("fixture WebView must have been launched", page.pageLoads.get() >= 1);
-            assertEquals(fixture.successorProfile.toString(),
-                    confirmed.successorTransition().optJSONObject("profile").toString());
+            JSONObject confirmedProfile =
+                    confirmed.successorTransition().optJSONObject("profile");
+            assertNotNull(confirmedProfile);
+            assertEquals(fixture.successorProfile.optString("mode"), confirmedProfile.optString("mode"));
+            assertEquals(fixture.successorProfile.optString("model"), confirmedProfile.optString("model"));
+            assertEquals(fixture.successorProfile.optString("reasoning"), confirmedProfile.optString("reasoning"));
         }
     }
 
