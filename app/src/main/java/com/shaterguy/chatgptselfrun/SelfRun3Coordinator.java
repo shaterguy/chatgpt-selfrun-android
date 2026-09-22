@@ -573,6 +573,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         if (step == DriveStep.READ_RESULT) {
             recordResultReadTrigger(state, trigger, push, serverRecheckAttempt);
         }
+        if (step != DriveStep.SETUP && SelfRun3RuntimeTestBridge.activeFor(state)) {
+            executeDriveStep(state, step, "", trigger, push, 0, serverRecheckAttempt);
+            return;
+        }
         if (!SelfRun3DriveTokenPolicy.needsRefresh(accessToken, accessTokenIssuedElapsed, SystemClock.elapsedRealtime())) {
             executeDriveStep(state, step, accessToken, trigger, push, 0, serverRecheckAttempt);
             return;
@@ -629,7 +633,9 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     after = ledger.apply(event(after, after.turnId() + ":setup-done",
                             SelfRun3Engine.Kind.SETUP_DONE, new JSONObject()));
                 } else if (step == DriveStep.PREPARE_TURN) {
-                    after = drive.prepareTurn(token, state);
+                    after = SelfRun3RuntimeTestBridge.activeFor(state)
+                            ? SelfRun3RuntimeTestBridge.prepareTurn(ledger, state)
+                            : drive.prepareTurn(token, state);
                     if (!after.hasResult()) {
                         SelfRun3UserInput.Snapshot input = SelfRun3UserInput.snapshot(service, after.taskId());
                         long consumed = after.time("lastConsumedInputRevision");
@@ -657,7 +663,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                 } else {
                     SelfRun3Engine.State current = ledger.loadExecution(expectedTask, expectedTurn);
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
-                    SelfRun3DriveAdapter.ResultObservation observation = drive.observeResult(token, current);
+                    SelfRun3DriveAdapter.ResultObservation observation =
+                            SelfRun3RuntimeTestBridge.activeFor(current)
+                                    ? SelfRun3RuntimeTestBridge.observeResult(current)
+                                    : drive.observeResult(token, current);
                     current = ledger.loadExecution(expectedTask, expectedTurn);
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
                     JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);
@@ -723,6 +732,13 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     }
                     syncProjection(completed);
                     syncSuccessorWatchdog(completed, "drive-read");
+                    if (step == DriveStep.READ_RESULT
+                            && SelfRun3RuntimeTestBridge.consumeLostAcceptedProgression(
+                            completed, expectedTurn)) {
+                        log.record(store, "V3_SUCCESSOR_RUNTIME_TEST",
+                                "status=lost-progression;predecessor=" + expectedTurn);
+                        return;
+                    }
                     if (trigger == ReadTrigger.ON_DEVICE_BACKUP) finishRecoveryRead();
                     else scheduleNext(0L);
                 });
