@@ -13,7 +13,34 @@ import java.util.function.BooleanSupplier;
 
 /** Drive transports pinned objects only. No title parsing, folder-order cursors or signal synthesis. */
 final class SelfRun3DriveAdapter {
+    interface TestTransport {
+        String resultDocumentId(SelfRun3Engine.State state) throws Exception;
+        ResultObservation observeResult(SelfRun3Engine.State state) throws Exception;
+    }
+
+    private static volatile TestTransport testTransport;
     private static final int UNKNOWN_BOOT_COUNT = Integer.MAX_VALUE;
+
+    static void installTestTransport(TestTransport transport) {
+        if (!testLineage()) throw new IllegalStateException("TEST transport requires TEST applicationId");
+        testTransport = transport;
+    }
+
+    static void clearTestTransport() {
+        if (testLineage()) testTransport = null;
+    }
+
+    boolean testTransportActive() {
+        return activeTestTransport() != null;
+    }
+
+    private static TestTransport activeTestTransport() {
+        return testLineage() ? testTransport : null;
+    }
+
+    private static boolean testLineage() {
+        return BuildConfig.APPLICATION_ID.endsWith(".test");
+    }
     private final Context context;
     private final SelfRunStore projection;
     private final SelfRun3Ledger ledger;
@@ -61,6 +88,17 @@ final class SelfRun3DriveAdapter {
         return ledger.load(s.taskId());
     }
     SelfRun3Engine.State prepareTurn(String token, SelfRun3Engine.State original) throws Exception {
+        TestTransport test = activeTestTransport();
+        if (test != null) {
+            SelfRun3Engine.State s = ledger.loadExecution(original.taskId(), original.turnId());
+            require(s != null && !s.flag("superseded"), "STALE_TURN");
+            if (s.resource("resultDocumentId").isEmpty()) {
+                String id = test.resultDocumentId(s);
+                require(id != null && !id.trim().isEmpty(), "TEST_RESULT_DOCUMENT_INVALID");
+                s = pin(s, "resultDocumentId", id.trim());
+            }
+            return s;
+        }
         verifyAccount(token, original);
         SelfRun3Engine.State s = ensureDocument(token, original, "resultDocumentId", "resultCreateIntent", original.taskId() + "-" + original.turnId());
         DriveApiClient.Metadata metadata = validateDocument(token, s, s.resource("resultDocumentId"));
@@ -109,6 +147,12 @@ final class SelfRun3DriveAdapter {
     ResultObservation observeResult(String token, SelfRun3Engine.State s) throws Exception {
         acquireResultReadWakeLock();
         try {
+            TestTransport test = activeTestTransport();
+            if (test != null) {
+                ResultObservation observation = test.observeResult(s);
+                if (observation == null) throw new IllegalStateException("TEST_RESULT_OBSERVATION_MISSING");
+                return observation;
+            }
             ResultObservation observation = readObservation(token, s);
             if (SelfRun3Engine.parseResult(observation.candidateBody, s) != null) return observation;
             SelfRun3Engine.State current = recordResultBodyObservation(s, observation);
