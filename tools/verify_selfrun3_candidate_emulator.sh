@@ -91,6 +91,14 @@ for required in "${CURRENT_31_REQUIRED[@]}"; do
 done
 cat selfrun-v3-preparation-recovery-evidence.txt > selfrun-v3-runtime-evidence.txt
 
+SUCCESSOR_RUNTIME_CLASS=com.shaterguy.chatgptselfrun.SelfRun3SuccessorServiceRuntimeAndroidTest
+adb shell am instrument -w -r \
+  -e class "$SUCCESSOR_RUNTIME_CLASS" \
+  "$INSTRUMENTATION" | tee selfrun-v3-successor-service-runtime-evidence.txt
+grep -Fq 'OK (' selfrun-v3-successor-service-runtime-evidence.txt
+grep -Fq "class=$SUCCESSOR_RUNTIME_CLASS" selfrun-v3-successor-service-runtime-evidence.txt
+cat selfrun-v3-successor-service-runtime-evidence.txt >> selfrun-v3-runtime-evidence.txt
+
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
   "$INSTRUMENTATION" | tee -a selfrun-v3-runtime-evidence.txt
