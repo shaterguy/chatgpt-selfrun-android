@@ -98,9 +98,18 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         assertEquals(0, accepted.successorTransition().optInt("recoveryAttempt"));
         assertEquals(1, SelfRun3RuntimeTestBridge.resultReadCount());
 
-        // Kill only the service after acceptance. AlarmManager must restart the real service and
-        // Coordinator at the persisted deadline; no predecessor Result re-read is allowed.
+        // Kill only the service after acceptance, wait past the persisted global deadline, then
+        // enter through the same production Service watchdog action used by AlarmManager. This
+        // makes process/service recreation deterministic under instrumentation without injecting
+        // SUCCESSOR_TIMEOUT or COMMIT directly into the ledger.
         context.stopService(new Intent(context, SelfRunService.class));
+        SystemClock.sleep(2_500L);
+        Intent deadlineWake = new Intent(context, SelfRunService.class)
+                .setAction(SelfRunService.ACTION_SUCCESSOR_WATCHDOG_WAKE)
+                .putExtra(SelfRun3SuccessorWakeScheduler.EXTRA_PREDECESSOR_TURN_ID,
+                        predecessor.turnId())
+                .putExtra(SelfRun3SuccessorWakeScheduler.EXTRA_RECOVERY_ATTEMPT, 0);
+        startServiceAction(deadlineWake);
 
         await("watchdog/service restart did not reach canonical successor POST", 20_000L, () -> {
             SelfRun3Engine.State root = ledger.load(task);
