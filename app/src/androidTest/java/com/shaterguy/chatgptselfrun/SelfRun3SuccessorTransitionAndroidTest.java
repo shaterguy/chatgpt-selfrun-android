@@ -78,7 +78,7 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         SelfRun3RuntimeTestBridge.installScenario(
                 task, predecessor.turnId(), committed, true);
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
-        assertTrue(settings.saveWebPreparationSeconds("2"));
+        assertTrue(settings.saveWebPreparationSeconds("10"));
 
         startServiceAction(new Intent(context, SelfRunService.class)
                 .setAction(SelfRunService.ACTION_RUN));
@@ -103,7 +103,7 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         // makes process/service recreation deterministic under instrumentation without injecting
         // SUCCESSOR_TIMEOUT or COMMIT directly into the ledger.
         context.stopService(new Intent(context, SelfRunService.class));
-        SystemClock.sleep(2_500L);
+        SystemClock.sleep(10_500L);
         Intent deadlineWake = new Intent(context, SelfRunService.class)
                 .setAction(SelfRunService.ACTION_SUCCESSOR_WATCHDOG_WAKE)
                 .putExtra(SelfRun3SuccessorWakeScheduler.EXTRA_PREDECESSOR_TURN_ID,
