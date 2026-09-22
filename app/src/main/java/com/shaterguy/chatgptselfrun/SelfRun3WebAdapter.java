@@ -12,6 +12,7 @@ import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import org.json.JSONObject;
@@ -29,6 +30,30 @@ final class SelfRun3WebAdapter {
         void onUnsent(String task, String turn, String request, String status);
         void onFailure(String task, String turn, String request, String code);
         void onDispatched(String task, String turn, String request);
+    }
+
+    interface TestPageTransport {
+        void load(WebView web, String url);
+        WebResourceResponse intercept(WebResourceRequest request);
+    }
+
+    private static volatile TestPageTransport testPageTransport;
+
+    static void installTestPageTransport(TestPageTransport transport) {
+        if (!testLineage()) throw new IllegalStateException("TEST page transport requires TEST applicationId");
+        testPageTransport = transport;
+    }
+
+    static void clearTestPageTransport() {
+        if (testLineage()) testPageTransport = null;
+    }
+
+    private static TestPageTransport activeTestPageTransport() {
+        return testLineage() ? testPageTransport : null;
+    }
+
+    private static boolean testLineage() {
+        return BuildConfig.APPLICATION_ID.endsWith(".test");
     }
 
     private static final Set<String> DEFINITE_UNSENT = Set.of(
@@ -121,7 +146,7 @@ final class SelfRun3WebAdapter {
             evaluation++;
             loading = true;
             web.stopLoading();
-            web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+            loadPage(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
             if (!newRequest) {
                 trace("WEB_PREPARATION_RECOVERY", "status=reentry;attempt=" + preparationAttempt
                         + ";route=" + (ref == null ? "general" : "projects")
@@ -222,6 +247,16 @@ final class SelfRun3WebAdapter {
                         state.config().optString("projectUrl"), url)) {
                     later(SelfRun3WebAdapter.this::advance, 250L);
                 }
+            }
+
+            @Override public WebResourceResponse shouldInterceptRequest(
+                    WebView view, WebResourceRequest request) {
+                TestPageTransport test = activeTestPageTransport();
+                if (view == web && !closed && test != null) {
+                    WebResourceResponse response = test.intercept(request);
+                    if (response != null) return response;
+                }
+                return super.shouldInterceptRequest(view, request);
             }
 
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -424,6 +459,15 @@ final class SelfRun3WebAdapter {
         loadProjectDirectory("recovery-" + projectDirectoryRecoveries);
     }
 
+    private void loadPage(String url) {
+        TestPageTransport test = activeTestPageTransport();
+        if (test != null) {
+            test.load(web, url);
+            return;
+        }
+        web.loadUrl(url);
+    }
+
     private void loadProjectDirectory(String reason) {
         if (web == null || closed) return;
         projectProbeRetries = 0;
@@ -435,7 +479,7 @@ final class SelfRun3WebAdapter {
         trace("PROJECT_DIRECTORY_LOAD", "reason=" + safeStatus(reason)
                 + ";recovery=" + projectDirectoryRecoveries + ";candidate=" + projectCandidateIndex);
         web.stopLoading();
-        web.loadUrl(SelfRun3ProjectDirectoryNavigation.DIRECTORY_URL);
+        loadPage(SelfRun3ProjectDirectoryNavigation.DIRECTORY_URL);
     }
 
     void submit(SelfRun3Engine.State claimed) {
