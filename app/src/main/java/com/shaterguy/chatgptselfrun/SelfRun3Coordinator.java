@@ -34,6 +34,28 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     static final String PHASE_WAITING = "V3_WAITING";
     static final String PHASE_RECONCILING = "V3_RECONCILING";
 
+    private static volatile boolean dropAcceptedResultCompletionOnceForTest;
+
+    static void dropAcceptedResultCompletionOnceForTest() {
+        if (!BuildConfig.APPLICATION_ID.endsWith(".test")) {
+            throw new IllegalStateException("runtime fault injection requires TEST applicationId");
+        }
+        dropAcceptedResultCompletionOnceForTest = true;
+    }
+
+    static void clearRuntimeFaultInjectionForTest() {
+        if (BuildConfig.APPLICATION_ID.endsWith(".test")) {
+            dropAcceptedResultCompletionOnceForTest = false;
+        }
+    }
+
+    private static boolean consumeAcceptedResultCompletionDropForTest() {
+        if (!BuildConfig.APPLICATION_ID.endsWith(".test")
+                || !dropAcceptedResultCompletionOnceForTest) return false;
+        dropAcceptedResultCompletionOnceForTest = false;
+        return true;
+    }
+
     private final Service service;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -573,6 +595,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         if (step == DriveStep.READ_RESULT) {
             recordResultReadTrigger(state, trigger, push, serverRecheckAttempt);
         }
+        if ((step == DriveStep.PREPARE_TURN || step == DriveStep.READ_RESULT)
+                && drive.testTransportActive()) {
+            executeDriveStep(state, step, "test-transport", trigger, push, 0, serverRecheckAttempt);
+            return;
+        }
         if (!SelfRun3DriveTokenPolicy.needsRefresh(accessToken, accessTokenIssuedElapsed, SystemClock.elapsedRealtime())) {
             executeDriveStep(state, step, accessToken, trigger, push, 0, serverRecheckAttempt);
             return;
@@ -624,6 +651,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         io.execute(() -> {
             try {
                 SelfRun3Engine.State after;
+                boolean acceptedSuccessor = false;
                 if (step == DriveStep.SETUP) {
                     after = drive.setup(token, state);
                     after = ledger.apply(event(after, after.turnId() + ":setup-done",
@@ -683,6 +711,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                                     "task=" + expectedTask + ";predecessor=" + expectedTurn
                                             + ";request=" + accepted.requestId() + ";stage=ACCEPTED");
                             log.record(store, "V3_SUCCESSOR_ROUTING", "status=PASS;predecessor=" + expectedTurn);
+                            acceptedSuccessor = true;
                         }
                     } else if (SelfRun3ResultWatchdog.shouldRepair(current,
                             SystemClock.elapsedRealtime(), currentBootCount(), runtimeSettings.resultRepairMs())) {
@@ -696,6 +725,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     } else {
                         throw new ResultPendingException();
                     }
+                }
+                if (step == DriveStep.READ_RESULT && acceptedSuccessor
+                        && consumeAcceptedResultCompletionDropForTest()) {
+                    log.record(store, "V3_TEST_FAULT",
+                            "drop=drive-result-completion;turn=" + expectedTurn);
+                    return;
                 }
                 SelfRun3Engine.State completed = after;
                 main.post(() -> {
