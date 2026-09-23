@@ -7,10 +7,12 @@ import android.net.http.SslError;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import org.json.JSONObject;
@@ -80,6 +82,7 @@ final class SelfRun3WebAdapter {
                 || !"canonical_post".equals(event.optString("source"))
                 || a.dispatchConfirmed || !s.flag("sendClaimed")) return false;
         a.dispatchConfirmed = true;
+        SelfRun3RuntimeTestBridge.recordCanonicalPostConfirmation(s);
         a.captureConversation();
         return true;
     }
@@ -120,7 +123,9 @@ final class SelfRun3WebAdapter {
             evaluation++;
             loading = true;
             web.stopLoading();
-            web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+            if (!SelfRun3RuntimeTestBridge.loadWebFixture(web, s)) {
+                web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+            }
             if (!newRequest) {
                 trace("WEB_PREPARATION_RECOVERY", "status=reentry;attempt=" + preparationAttempt
                         + ";route=" + (ref == null ? "general" : "projects")
@@ -133,11 +138,15 @@ final class SelfRun3WebAdapter {
 
     private void startPreparationTimer() {
         prepareStarted = SystemClock.elapsedRealtime();
-        prepareTimeoutMs = runtimeSettings.webPreparationMs();
+        long successorRemaining = SelfRun3SuccessorTransitionPolicy.remainingMs(
+                state, prepareStarted, System.currentTimeMillis(), currentBootCount());
+        if (successorRemaining >= 0L) prepareTimeoutMs = Math.max(1L, successorRemaining);
+        else prepareTimeoutMs = runtimeSettings.webPreparationMs();
         long attempt = ++preparationAttempt;
         String request = state == null ? "" : state.requestId();
+        String scope = successorRemaining >= 0L ? "successor-transition" : "conversation-create";
         trace("WEB_PREPARATION_WATCHDOG", "status=armed;attempt=" + attempt
-                + ";timeoutMs=" + prepareTimeoutMs + ";scope=conversation-create");
+                + ";timeoutMs=" + prepareTimeoutMs + ";scope=" + scope);
         handler.postDelayed(() -> {
             if (closed || !preparing || state == null || attempt != preparationAttempt
                     || !request.equals(state.requestId())) return;
@@ -148,17 +157,19 @@ final class SelfRun3WebAdapter {
     private void expireConversationCreation(long attempt) {
         SelfRun3Engine.State timedOut = state;
         long elapsed = Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted);
+        boolean successor = SelfRun3SuccessorTransitionPolicy.armed(timedOut);
+        String scope = successor ? "successor-transition" : "conversation-create";
         trace("WEB_PREPARATION_WATCHDOG", "status=expired;attempt=" + attempt
                 + ";elapsedMs=" + elapsed + ";timeoutMs=" + prepareTimeoutMs
                 + ";loading=" + loading + ";route=" + routeClass(web == null ? "" : web.getUrl())
-                + ";scope=conversation-create");
+                + ";scope=" + scope);
         trace("WEB_PREPARATION_RECOVERY", "status=timeout;attempt=" + attempt
-                + ";strategy=recreate-webview;scope=conversation-create");
+                + ";strategy=recreate-webview;scope=" + scope);
         quiesce();
         disposeHost();
         if (timedOut != null) {
             listener.onFailure(timedOut.taskId(), timedOut.turnId(), timedOut.requestId(),
-                    "WEB_PREPARATION_TIMEOUT");
+                    successor ? "SUCCESSOR_TRANSITION_TIMEOUT" : "WEB_PREPARATION_TIMEOUT");
         }
     }
 
@@ -177,6 +188,7 @@ final class SelfRun3WebAdapter {
         if (!trusted(target)) { fail("TARGET_INVALID"); return; }
         host = HeadlessWebViewHost.create(context);
         web = host.webView();
+        SelfRun3RuntimeTestBridge.installNetworkSink(web);
         active = this;
         if (!WebViewConfig.applySelfRun3Automation(web)) { fail("TURN_PROTOCOL_UNAVAILABLE"); return; }
         loading = true;
@@ -215,6 +227,14 @@ final class SelfRun3WebAdapter {
                         state.config().optString("projectUrl"), url)) {
                     later(SelfRun3WebAdapter.this::advance, 250L);
                 }
+            }
+
+            @Override public WebResourceResponse shouldInterceptRequest(
+                    WebView view, WebResourceRequest request) {
+                WebResourceResponse fixture =
+                        SelfRun3RuntimeTestBridge.interceptWebFixture(request);
+                if (view == web && !closed && fixture != null) return fixture;
+                return super.shouldInterceptRequest(view, request);
             }
 
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -644,6 +664,11 @@ final class SelfRun3WebAdapter {
         handler.postDelayed(() -> {
             if (!closed && state != null && request.equals(state.requestId())) action.run();
         }, delay);
+    }
+
+    private int currentBootCount() {
+        try { return Settings.Global.getInt(context.getContentResolver(), Settings.Global.BOOT_COUNT); }
+        catch (Throwable unavailable) { return -1; }
     }
 
     static String marker(SelfRun3Engine.State s, long attempt) {

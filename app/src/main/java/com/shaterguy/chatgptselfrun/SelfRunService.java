@@ -18,6 +18,7 @@ public final class SelfRunService extends Service {
     static final String ACTION_SERVER_RECOVERY = BuildConfig.APPLICATION_ID + ".SERVER_RECOVERY";
     static final String ACTION_SERVER_RESULT_RECHECK = BuildConfig.APPLICATION_ID + ".SERVER_RESULT_RECHECK";
     static final String ACTION_RESULT_POLL_WAKE = BuildConfig.APPLICATION_ID + ".RESULT_POLL_WAKE";
+    static final String ACTION_SUCCESSOR_WATCHDOG_WAKE = BuildConfig.APPLICATION_ID + ".SUCCESSOR_WATCHDOG_WAKE";
     static final String EXTRA_SERVER_RESULT_RECHECK_TURN_ID =
             BuildConfig.APPLICATION_ID + ".SERVER_RESULT_RECHECK_TURN_ID";
     static final String EXTRA_SERVER_RESULT_RECHECK_ATTEMPT =
@@ -48,7 +49,7 @@ public final class SelfRunService extends Service {
                 && !ACTION_RESUME.equals(action) && !ACTION_RESUME_STOPPED.equals(action)
                 && !ACTION_STOP.equals(action) && !ACTION_PUSH_RESULT.equals(action)
                 && !ACTION_SERVER_RECOVERY.equals(action) && !ACTION_SERVER_RESULT_RECHECK.equals(action)
-                && !ACTION_RESULT_POLL_WAKE.equals(action)) {
+                && !ACTION_RESULT_POLL_WAKE.equals(action) && !ACTION_SUCCESSOR_WATCHDOG_WAKE.equals(action)) {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
@@ -103,6 +104,23 @@ public final class SelfRunService extends Service {
             startForegroundCompat();
             turnStallNotifier.start();
             coordinator.onServerResultRecheck(turnId, attempt);
+            return START_STICKY;
+        }
+
+        if (ACTION_SUCCESSOR_WATCHDOG_WAKE.equals(action)) {
+            String predecessorTurnId = intent == null ? ""
+                    : intent.getStringExtra(SelfRun3SuccessorWakeScheduler.EXTRA_PREDECESSOR_TURN_ID);
+            int attempt = intent == null ? -1
+                    : intent.getIntExtra(SelfRun3SuccessorWakeScheduler.EXTRA_RECOVERY_ATTEMPT, -1);
+            if (predecessorTurnId == null) predecessorTurnId = "";
+            SelfRun3SuccessorWakeScheduler.cancel(this);
+            if (!store.active() || store.paused() || store.userStopped() || !coordinator.ownsCurrentRun()) {
+                stopSelf(startId);
+                return START_NOT_STICKY;
+            }
+            startForegroundCompat();
+            turnStallNotifier.start();
+            coordinator.onSuccessorWatchdogWake(predecessorTurnId, attempt);
             return START_STICKY;
         }
 

@@ -6,19 +6,21 @@ import java.util.UUID;
 import static org.junit.Assert.*;
 
 public final class SelfRun3RecoveryBehaviorTest {
-    @Test public void stoppedResumeRepreparesStoredLedgerStateWithoutDriveResult() {
+    @Test public void stoppedResumeWaitsOnPinnedResultWithoutRedispatch() {
         SelfRun3Engine.State stopped = stop(waiting());
+        String originalRequestId = stopped.requestId();
         SelfRun3Engine.State resumed = resume(stopped);
 
-        assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
+        assertEquals(SelfRun3Engine.Stage.WAITING, resumed.stage());
         assertEquals(stopped.turnId(), resumed.turnId());
         assertEquals(stopped.turn(), resumed.turn());
         assertEquals(stopped.resource("resultDocumentId"), resumed.resource("resultDocumentId"));
         assertEquals(stopped.resource("requirementDocumentId"), resumed.resource("requirementDocumentId"));
-        assertNotEquals(stopped.requestId(), resumed.requestId());
+        assertEquals(originalRequestId, resumed.requestId());
         assertFalse(resumed.flag("taskStopped"));
-        assertFalse(resumed.flag("sendClaimed"));
-        assertEquals(SelfRun3Engine.Action.PREPARE_TURN, SelfRun3Engine.nextAction(resumed));
+        assertTrue(resumed.flag("sendClaimed"));
+        assertTrue(resumed.flag("stoppedResumeWait"));
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
     }
 
     @Test public void stoppedResumeKeepsCommittedLedgerResultForCommit() {

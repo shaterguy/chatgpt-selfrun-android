@@ -16,7 +16,7 @@ final class SelfRun3Engine {
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
     enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
-        RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, PAUSE, RESUME, RESUME_STOPPED, STOP, ERROR }
+        RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, SUCCESSOR_TIMEOUT, PAUSE, RESUME, RESUME_STOPPED, STOP, ERROR }
     enum Action { SETUP, PREPARE_TURN, PREPARE_WEB, WAIT, READ_RESULT, CHECK_RECEIPT, COMMIT, NONE }
     private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode", "stopEventId", "stoppedResumeOperation");
     private static final Set<String> NO_SEND_PROOFS = Set.of("SEND_DISABLED", "STOP", "COMPOSER_CLEARING",
@@ -45,6 +45,7 @@ final class SelfRun3Engine {
         Stage stage() { return flag("taskStopped") ? Stage.STOPPED : flag("taskPaused") ? Stage.PAUSED : Stage.valueOf(text("stage")); }
         JSONObject json() { return copy(value); }
         JSONObject config() { return copy(value.optJSONObject("config")); }
+        JSONObject successorTransition() { return copy(value.optJSONObject(SelfRun3SuccessorTransitionPolicy.KEY)); }
         String taskMode() { return value.optString("taskMode", config().optString("taskMode", config().optString("mode"))); }
         String resource(String k) { return copy(value.optJSONObject("resources")).optString(k, ""); }
         boolean terminal() { return stage() == Stage.DONE || stage() == Stage.STOPPED; }
@@ -115,6 +116,12 @@ final class SelfRun3Engine {
                 require(prior.isEmpty() || prior.equals(val),"pinned resource cannot change");
                 if(prior.equals(val)) return original;
                 put(r,k,val); put(v,"resources",r);
+                if(SelfRun3SuccessorTransitionPolicy.armed(s)) {
+                    JSONObject transition=s.successorTransition();
+                    if("resultDocumentId".equals(k)) put(transition,"stage","RESULT_DOCUMENT_CREATED");
+                    else if("conversationUrl".equals(k)) put(transition,"stage","CANONICAL_BOUND");
+                    put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
+                }
             }
             case SETUP_DONE -> {
                 require(stage==Stage.SETUP && !s.resource("folderId").isEmpty() && !s.resource("requirementDocumentId").isEmpty(),"setup resources required");
@@ -125,6 +132,10 @@ final class SelfRun3Engine {
                 require(!p.optString("prompt").isEmpty(),"prompt required");
                 put(v,"prompt",p.optString("prompt")); put(v,"inputText",p.optString("inputText"));
                 put(v,"inputRevision",p.optLong("inputRevision",-1)); put(v,"stage","READY");
+                if(SelfRun3SuccessorTransitionPolicy.armed(s)) {
+                    JSONObject transition=s.successorTransition(); put(transition,"stage","TURN_READY");
+                    put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
+                }
             }
             case RESULT_BASELINE -> {
                 String documentId=p.optString("documentId"), fingerprint=p.optString("fingerprint");
@@ -141,6 +152,10 @@ final class SelfRun3Engine {
                 require(activeCount(original)<2,"maximum two automatic conversations");
                 for(State other:original.executions()) require(other.turnId().equals(s.turnId()) || other.stage()!=Stage.DISPATCHING,"dispatch is sequential");
                 put(v,"sendClaimed",true); put(v,"stage","DISPATCHING"); put(v,"submittedAt",p.optLong("at"));
+                if(SelfRun3SuccessorTransitionPolicy.armed(s)) {
+                    JSONObject transition=s.successorTransition(); put(transition,"stage","REQUEST_CLAIMED");
+                    put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
+                }
             }
             case STARTED, ACCEPTED -> {
                 if (!s.flag("sendClaimed")) return original;
@@ -155,6 +170,13 @@ final class SelfRun3Engine {
                     put(v,"canonicalPostBootCount",p.optInt("bootCount"));
                 }
                 put(v,"dispatchObserved",true); put(v,"accepted",true);
+                if(e.kind==Kind.STARTED && SelfRun3SuccessorTransitionPolicy.armed(s)
+                        && "canonical_post".equals(p.optString("source"))
+                        && "turn_request".equals(p.optString("protocolStage"))) {
+                    JSONObject transition=s.successorTransition();
+                    put(transition,"active",false); put(transition,"stage","CANONICAL_CONFIRMED");
+                    put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
+                }
                 if(!s.flag("committed")) put(v,"stage",s.hasResult()?"RECONCILING":"WAITING");
             }
             case UNSENT -> {
@@ -203,13 +225,24 @@ final class SelfRun3Engine {
                     if(!resolved) { require(equivalent(old,r),"committed result changed"); return original; }
                 }
                 put(v,"result",r.toString()); put(v,"committed",false); put(v,"stage","RECONCILING");
+                v.remove(SelfRun3SuccessorTransitionPolicy.KEY);
+                recordSuccessorRouting(v,r,s,p);
             }
             case COMMIT -> {
                 require(!original.flag("taskPaused") && s.hasResult() && !s.flag("committed"),"committed result required");
                 JSONObject r=parseResult(s.text("result"),s); require(r!=null,"result required");
+                boolean lateInput=p.optBoolean("lateInput");
+                boolean successorRouting=SelfRun3SuccessorTransitionPolicy.routingValid(s) && !lateInput;
+                if(SelfRun3SuccessorTransitionPolicy.routingInvalid(s) && !lateInput) {
+                    v=repair(s,v);
+                    put(v,"repairProblems",SelfRun3SuccessorTransitionPolicy.routingProblems(s));
+                    put(v,"repairReason","RESULT_ROUTING_INVALID");
+                    put(v,"repairSourceInputRevision",s.time("inputRevision"));
+                    return persist(v,true);
+                }
                 if(!isBranch(s) && !"USER_ACTION_REQUIRED".equals(r.optString("status"))
-                        && !("DONE".equals(r.optString("status")) && !p.optBoolean("lateInput"))
-                        && !p.optBoolean("lateInput")) {
+                        && !("DONE".equals(r.optString("status")) && !lateInput)
+                        && !lateInput && !successorRouting) {
                     try { nextProfile(r,s); }
                     catch(SelfRun3RoutingException recoverable) {
                         v=repair(s,v);
@@ -237,10 +270,14 @@ final class SelfRun3Engine {
                         if(usableParallelPlan(plan,s) && !p.optBoolean("lateInput")) {
                             v=fanout(saved,r,plan);
                         } else {
-                            JSONObject profile=p.optBoolean("lateInput") ? executionProfile(s) : nextProfile(r,s);
-                            String phase=p.optBoolean("lateInput") ? "PLAN" : routingPhase(r,s);
-                            String signal="USER_ACTION_RESOLVED".equals(status) ? "USER_ACTION_RESUME" : p.optBoolean("lateInput") ? "USER_INPUT" : "AUTO_NEXT_TURN";
+                            JSONObject profile=lateInput ? executionProfile(s)
+                                    : successorRouting ? SelfRun3SuccessorTransitionPolicy.routingProfile(s) : nextProfile(r,s);
+                            String phase=lateInput ? "PLAN"
+                                    : successorRouting ? SelfRun3SuccessorTransitionPolicy.routingPhase(s) : routingPhase(r,s);
+                            String signal=successorRouting ? SelfRun3SuccessorTransitionPolicy.routingSignal(s)
+                                    : "USER_ACTION_RESOLVED".equals(status) ? "USER_ACTION_RESUME" : lateInput ? "USER_INPUT" : "AUTO_NEXT_TURN";
                             v=fresh(saved,phase,profile,"NORMAL",signal,s.resource("resultDocumentId"));
+                            if(successorRouting) v=carrySuccessorTransition(s,v);
                             put(v,"checkpoint",r.toString()); put(v,"nextInput",routingNextInput(r));
                             if(r.optJSONObject("intervention")!=null) put(v,"intervention",r.optJSONObject("intervention"));
                             if("PAUSED".equals(status)) put(v,"taskPaused",true);
@@ -253,6 +290,12 @@ final class SelfRun3Engine {
                 require(((!s.flag("committed") && !s.hasResult()) || stage==Stage.WAITING_USER_INTERVENTION) && s.number("repairAttempt")==0,"repair requires unresolved result");
                 require(p.optBoolean("safeToRepair"),"explicit evidence original automatic work is inactive required");
                 v=repair(s,v);
+            }
+            case SUCCESSOR_TIMEOUT -> {
+                require(SelfRun3SuccessorTransitionPolicy.armed(s),"active successor transition required");
+                JSONObject transition=s.successorTransition();
+                SelfRun3SuccessorTransitionPolicy.rearm(transition,p);
+                put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
             }
             case ERROR -> { String code=p.optString("code"); require(code.matches("[A-Z0-9_:-]{1,100}"),"safe error code required"); put(v,"error",code); }
             default -> { return original; }
@@ -300,21 +343,25 @@ final class SelfRun3Engine {
             JSONObject v=s.json();
             v.remove("error"); v.remove("pauseReason");
             if(!s.flag("superseded") && !s.flag("committed") && !s.hasResult()) {
-                JSONArray attempts=array(v.optJSONArray("stoppedAttempts"));
-                JSONObject attempt=new JSONObject();
-                for(String k:new String[]{"requestId","stage","error","submittedAt","prompt","inputText","inputRevision"})
-                    if(s.json().has(k)) put(attempt,k,s.json().opt(k));
-                put(attempt,"conversationUrl",s.resource("conversationUrl")); attempts.put(attempt);
-                put(v,"stoppedAttempts",attempts);
-                for(String k:new String[]{"prompt","result","submittedAt","conversationId","repairAttempt",
-                        "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
-                        "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
-                        "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
-                JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("conversationUrl"); put(v,"resources",resources);
-                put(v,"requestId",s.turnId()+":resume:"+e.id);
-                put(v,"stoppedRestart",true);
-                put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
-                for(String k:new String[]{"sendClaimed","dispatchObserved","accepted","ended","committed"}) put(v,k,false);
+                if(resumeWaitsForPinnedResult(s)) {
+                    put(v,"stoppedResumeWait",true);
+                } else {
+                    JSONArray attempts=array(v.optJSONArray("stoppedAttempts"));
+                    JSONObject attempt=new JSONObject();
+                    for(String k:new String[]{"requestId","stage","error","submittedAt","prompt","inputText","inputRevision"})
+                        if(s.json().has(k)) put(attempt,k,s.json().opt(k));
+                    put(attempt,"conversationUrl",s.resource("conversationUrl")); attempts.put(attempt);
+                    put(v,"stoppedAttempts",attempts);
+                    for(String k:new String[]{"prompt","result","submittedAt","conversationId","repairAttempt",
+                            "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
+                            "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
+                            "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
+                    JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("conversationUrl"); put(v,"resources",resources);
+                    put(v,"requestId",s.turnId()+":resume:"+e.id);
+                    put(v,"stoppedRestart",true);
+                    put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
+                    for(String k:new String[]{"sendClaimed","dispatchObserved","accepted","ended","committed"}) put(v,k,false);
+                }
             } else if(!s.flag("committed") && s.hasResult()) {
                 put(v,"stage","RECONCILING");
             }
@@ -324,6 +371,13 @@ final class SelfRun3Engine {
         root.remove("pauseReason"); put(root,"stoppedResumeOperation",e.id);
         root=withGlobals(all.optJSONObject(original.turnId()),root);
         return maybeMerge(persist(root,true));
+    }
+    private static boolean resumeWaitsForPinnedResult(State s) {
+        String stage=s.text("stage");
+        return !s.resource("resultDocumentId").isEmpty()
+                && (("DISPATCHING".equals(stage) && !s.resource("conversationUrl").isEmpty())
+                || "WAITING".equals(stage)
+                || ("RECONCILING".equals(stage) && !s.hasResult()));
     }
     static List<State> waitingExecutions(State s) {
         ArrayList<State> out=new ArrayList<>();
@@ -378,7 +432,7 @@ final class SelfRun3Engine {
         if(!"REPAIR".equals(kind)) applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
-                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","stoppedRestart","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision"}) v.remove(k);
+                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","stoppedRestart","stoppedResumeWait","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision",SelfRun3SuccessorTransitionPolicy.KEY}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);
@@ -386,6 +440,30 @@ final class SelfRun3Engine {
         put(v,"previousResultDocumentId",predecessor); put(v,"executionKind",kind); put(v,"signalType",signal);
         put(v,"stage","PREPARING"); put(v,"sendClaimed",false); put(v,"dispatchObserved",false); put(v,"accepted",false); put(v,"ended",false); put(v,"committed",false);
         return v;
+    }
+    private static void recordSuccessorRouting(JSONObject v,JSONObject result,State source,JSONObject payload) {
+        if(!SelfRun3SuccessorTransitionPolicy.shouldTrack(result,source,payload)) return;
+        JSONObject transition=SelfRun3SuccessorTransitionPolicy.begin(source,payload);
+        try {
+            put(transition,"routingState","VALID");
+            put(transition,"profile",nextProfile(result,source));
+            put(transition,"phase",routingPhase(result,source));
+            String signal="USER_ACTION_RESOLVED".equals(result.optString("status")) ? "USER_ACTION_RESUME" : "AUTO_NEXT_TURN";
+            put(transition,"signal",signal); put(transition,"active",true); put(transition,"stage","ACCEPTED");
+        } catch(SelfRun3RoutingException invalid) {
+            put(transition,"routingState","INVALID"); put(transition,"active",false); put(transition,"stage","ROUTING_INVALID");
+            put(transition,"problems",invalid.problems);
+        }
+        put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
+    }
+    private static JSONObject carrySuccessorTransition(State source,JSONObject successor) {
+        JSONObject transition=source.successorTransition();
+        if(!transition.optBoolean("active") || !"VALID".equals(transition.optString("routingState"))) return successor;
+        put(transition,"stage","SUCCESSOR_TURN_CREATED");
+        put(transition,"successorTurnId",successor.optString("turnId"));
+        put(transition,"successorRequestId",successor.optString("requestId"));
+        put(successor,SelfRun3SuccessorTransitionPolicy.KEY,transition);
+        return successor;
     }
     private static State persist(JSONObject value,boolean select) {
         JSONObject v=copy(value), all=copy(v.optJSONObject("executions")); put(all,v.optString("turnId"),record(v)); put(v,"executions",all);

@@ -103,7 +103,7 @@ grep -Fq 'unknownNextPhaseDoesNotInvalidateCommittedResult' "$ENGINE_TEST"
 grep -Fq 'nonterminalDoneRoutingHintFallsBackInsteadOfRejectingTurn' "$ENGINE_TEST"
 grep -Fq 'doneStatusIsTrustedAsAiDecisionInsteadOfRevalidatedByApp' "$ENGINE_TEST"
 grep -Fq 'identityOnlyCommittedResultCreatesRecoveryTurn' "$ENGINE_TEST"
-grep -Fq 'stoppedTaskRepreparesFromSavedLedgerState' "$ENGINE_TEST"
+grep -Fq 'stoppedTaskAfterDispatchWaitsOnPinnedResultWithoutRedispatch' "$ENGINE_TEST"
 
 grep -Fq 'DEFAULT_RESULT_REPAIR_MINUTES * 60_000L' "$WATCHDOG"
 grep -Fq 'state.stage() != SelfRun3Engine.Stage.WAITING' "$WATCHDOG"
