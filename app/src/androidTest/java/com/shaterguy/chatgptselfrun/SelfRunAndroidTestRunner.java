@@ -31,6 +31,14 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             super.onCreate(args);
             return;
         }
+        String successorProcessRestart =
+                "com.shaterguy.chatgptselfrun.SelfRun3SuccessorProcessRestartAndroidTest#";
+        if (selected.equals(successorProcessRestart + "seedAcceptedPredecessorBeforeProcessRestart")
+                || selected.equals(successorProcessRestart
+                + "verifyAcceptedPredecessorRecoversAfterProcessRestart")) {
+            super.onCreate(args);
+            return;
+        }
         String formalUpgrade = "com.shaterguy.chatgptselfrun.SelfRun3OnDeviceFormalUpgradeAndroidTest";
         if (selected.equals(formalUpgrade)) {
             super.onCreate(args);
