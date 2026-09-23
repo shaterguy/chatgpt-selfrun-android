@@ -82,6 +82,7 @@ final class SelfRun3WebAdapter {
                 || !"canonical_post".equals(event.optString("source"))
                 || a.dispatchConfirmed || !s.flag("sendClaimed")) return false;
         a.dispatchConfirmed = true;
+        SelfRun3RuntimeTestBridge.recordCanonicalPostConfirmation(s);
         a.captureConversation();
         return true;
     }

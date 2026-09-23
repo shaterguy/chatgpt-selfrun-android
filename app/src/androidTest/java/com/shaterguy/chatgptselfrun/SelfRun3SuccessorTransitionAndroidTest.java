@@ -5,11 +5,9 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.SystemClock;
 import android.provider.Settings;
-import android.webkit.WebView;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.json.JSONObject;
 import org.junit.After;
@@ -18,9 +16,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.File;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.Assert.*;
@@ -143,10 +138,7 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         assertEquals(1, SelfRun3RuntimeTestBridge.resultDocumentCreationCount());
         assertTrue(SelfRun3RuntimeTestBridge.fixtureLoadCount() >= 1);
 
-        WebView protocol = HeadlessWebViewHost.activeWebView();
-        assertNotNull(protocol);
-        assertEquals("1", evaluateValue(protocol,
-                "String(window.__selfRunFixturePosts?.length||0)"));
+        assertEquals(1, SelfRun3RuntimeTestBridge.canonicalPostConfirmationCount());
 
         // A stale/late timeout wake racing after canonical confirmation must be fenced and must
         // not create a third turn, second result document, second conversation, or second POST.
@@ -162,8 +154,7 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
         assertEquals(2, afterDuplicate.number("maxTurn"));
         assertEquals(1, SelfRun3RuntimeTestBridge.resultReadCount());
         assertEquals(1, SelfRun3RuntimeTestBridge.resultDocumentCreationCount());
-        assertEquals("1", evaluateValue(protocol,
-                "String(window.__selfRunFixturePosts?.length||0)"));
+        assertEquals(1, SelfRun3RuntimeTestBridge.canonicalPostConfirmationCount());
     }
 
     @Test public void lostProgressionPersistsAcrossLedgerRestartAndTimeoutRedrivesSameSuccessor() {
@@ -331,20 +322,6 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
             SystemClock.sleep(50L);
         } while (SystemClock.elapsedRealtime() < deadline);
         fail(message);
-    }
-
-    private static String evaluateValue(WebView web, String script) throws Exception {
-        CountDownLatch done = new CountDownLatch(1);
-        AtomicReference<String> raw = new AtomicReference<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
-                web.evaluateJavascript(script, value -> {
-                    raw.set(value);
-                    done.countDown();
-                }));
-        assertTrue("fixture JavaScript timed out", done.await(5, TimeUnit.SECONDS));
-        Object value = new org.json.JSONTokener(
-                raw.get() == null ? "null" : raw.get()).nextValue();
-        return value == null || value == JSONObject.NULL ? "" : String.valueOf(value);
     }
 
     private int currentBootCount() {

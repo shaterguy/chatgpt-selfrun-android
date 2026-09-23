@@ -29,6 +29,7 @@ final class SelfRun3RuntimeTestBridge {
     private static int resultReads;
     private static int resultDocumentCreations;
     private static int fixtureLoads;
+    private static int canonicalPostConfirmations;
 
     private SelfRun3RuntimeTestBridge() { }
 
@@ -46,6 +47,7 @@ final class SelfRun3RuntimeTestBridge {
         resultReads = 0;
         resultDocumentCreations = 0;
         fixtureLoads = 0;
+        canonicalPostConfirmations = 0;
     }
 
     static synchronized void clear() {
@@ -56,6 +58,7 @@ final class SelfRun3RuntimeTestBridge {
         resultReads = 0;
         resultDocumentCreations = 0;
         fixtureLoads = 0;
+        canonicalPostConfirmations = 0;
     }
 
     static synchronized boolean activeFor(SelfRun3Engine.State state) {
@@ -186,6 +189,10 @@ final class SelfRun3RuntimeTestBridge {
     static synchronized int resultReadCount() { return resultReads; }
     static synchronized int resultDocumentCreationCount() { return resultDocumentCreations; }
     static synchronized int fixtureLoadCount() { return fixtureLoads; }
+    static synchronized void recordCanonicalPostConfirmation(SelfRun3Engine.State state) {
+        if (activeFor(state)) canonicalPostConfirmations++;
+    }
+    static synchronized int canonicalPostConfirmationCount() { return canonicalPostConfirmations; }
 
     private static boolean testVariant() {
         return BuildConfig.APPLICATION_ID.endsWith(".test");
