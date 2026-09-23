@@ -91,6 +91,24 @@ for required in "${CURRENT_31_REQUIRED[@]}"; do
 done
 cat selfrun-v3-preparation-recovery-evidence.txt > selfrun-v3-runtime-evidence.txt
 
+PROCESS_RESTART_CLASS=com.shaterguy.chatgptselfrun.SelfRun3SuccessorProcessRestartAndroidTest
+adb shell am instrument -w -r \
+  -e class "$PROCESS_RESTART_CLASS#seedAcceptedPredecessorBeforeProcessRestart" \
+  "$INSTRUMENTATION" | tee selfrun-v3-successor-process-restart-seed.txt
+grep -Fq 'OK (' selfrun-v3-successor-process-restart-seed.txt
+adb shell am force-stop "$TEST"
+python3 - <<'PY'
+import time
+time.sleep(11)
+print('11초 대기완료')
+PY
+adb shell am instrument -w -r \
+  -e class "$PROCESS_RESTART_CLASS#verifyAcceptedPredecessorRecoversAfterProcessRestart" \
+  "$INSTRUMENTATION" | tee selfrun-v3-successor-process-restart-verify.txt
+grep -Fq 'OK (' selfrun-v3-successor-process-restart-verify.txt
+cat selfrun-v3-successor-process-restart-seed.txt >> selfrun-v3-runtime-evidence.txt
+cat selfrun-v3-successor-process-restart-verify.txt >> selfrun-v3-runtime-evidence.txt
+
 adb shell am instrument -w -r \
   -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
   "$INSTRUMENTATION" | tee -a selfrun-v3-runtime-evidence.txt
