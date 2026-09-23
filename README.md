@@ -93,7 +93,7 @@ SELFRUN_FIREBASE_SENDER_ID
 SELFRUN_PUSH_GATEWAY_URL
 ```
 
-Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`는 선택형 SERVER 검증용이며 Git이나 APK에 포함하지 않습니다.
+Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`는 SERVER 실행 경로의 Firebase Cloud Messaging 발송에 사용하는 서버 자격증명이며 Git이나 APK에 포함하지 않습니다.
 
 ## 앱 화면
 
