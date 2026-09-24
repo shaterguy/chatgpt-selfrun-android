@@ -113,7 +113,9 @@ grep -Fq 'conversationCaptured = false' "$WEB"
 grep -Fq 'conversationCaptured = true' "$WEB"
 grep -Fq 'listener.onConversation' "$WEB"
 grep -Fq 'listener.onStarted' "$WEB"
-grep -Fq 'web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));' "$WEB"
+grep -Fq 'web.loadUrl(target);' "$WEB"
+! grep -Fq 'SelfRun3ProjectDirectoryNavigation' "$WEB"
+! grep -Fq 'PROJECT_DIRECTORY_' "$WEB"
 grep -Fq 'case DISPATCHING -> s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;' "$ENGINE"
 grep -Fq 'x.stage()==Stage.DISPATCHING && !x.resource("conversationUrl").isEmpty()' "$ENGINE"
 grep -Fq 'request + ":claim:" + UUID.randomUUID()' "$COORD"
@@ -165,7 +167,6 @@ grep -Fq 'RESUME_STOPPED' "$ENGINE"
 grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
 ! grep -Fq 'if(!original.flag("taskStopped")) return original' "$ENGINE"
 ! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RESUME"
-! grep -Fq 'STOPPED_STATE_REQUIRED'
 grep -Fq 'ACTION_RESUME_STOPPED' "$SERVICE"
 grep -Fq 'stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN' "$SERVICE"
 grep -Fq 'ledger.load(target)' "$STOPPED_RESUME"
@@ -211,4 +212,4 @@ grep -Fq 'SelfRunStoppedResumeAndroidTest' "$EMULATOR"
 # Direct publication must expose a product/version-bearing APK filename.
 grep -Fq 'SelfRun-Drive-TEST-${VERSION_NAME}.apk' "$WORKFLOW"
 
-echo 'SelfRun 3.2.9 ON_DEVICE core identity, migration, committed-only result gate, transport-retry, stopped-resume, unbounded-payload and runtime-settings checks passed.'
+echo 'SelfRun V3 ON_DEVICE core identity, migration, committed-only result gate, transport-retry, stopped-resume, unbounded-payload and runtime-settings checks passed.'

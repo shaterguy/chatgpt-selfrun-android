@@ -84,7 +84,6 @@ grep -Fq 'RESUME_STOPPED' "$ENGINE"
 grep -Fq 'original.flag("taskStopped") && e.kind != Kind.RESUME_STOPPED' "$ENGINE"
 ! grep -Fq 'if(!original.flag("taskStopped")) return original' "$ENGINE"
 ! grep -Fq 'STOPPED_STATE_REQUIRED' "$STOPPED_RESUME"
-! grep -Fq 'STOPPED_STATE_REQUIRED'
 ! grep -Fq 'full handoff missing' "$ENGINE"
 ! grep -Fq 'verification required for DONE' "$ENGINE"
 ! grep -Fq 'branch identity mismatch' "$ENGINE"

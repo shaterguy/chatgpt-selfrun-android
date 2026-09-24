@@ -27,8 +27,8 @@ public final class SelfRun3CoreCiBoundaryTest {
     @Test public void currentIdentityAndOnDeviceMigrationAreExplicitCoreContracts() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
         String settings = source("SelfRun3RuntimeSettings.java");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 3034000"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '3.3.1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 3035000"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '3.3.2'"));
         assertTrue(settings.contains("DEFAULT_WORK_MODE = WorkMode.ON_DEVICE"));
         assertTrue(settings.contains("KEY_ON_DEVICE_DEFAULT_MIGRATION_VERSION"));
         assertTrue(settings.contains("putString(KEY_WORK_MODE, WorkMode.ON_DEVICE.name())"));

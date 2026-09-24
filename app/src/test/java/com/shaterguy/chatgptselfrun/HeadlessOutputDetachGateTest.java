@@ -76,7 +76,7 @@ public final class HeadlessOutputDetachGateTest {
         String web = source("SelfRun3WebAdapter.java");
         String coordinator = source("SelfRun3Coordinator.java");
         String capture = web.substring(web.indexOf("private void captureConversation()"),
-                web.indexOf("private boolean allowedPreparationRoute"));
+                web.indexOf("private boolean allowedRoute"));
         assertTrue(capture.contains("listener.onConversation"));
         assertTrue(capture.contains("listener.onStarted"));
         assertTrue(capture.contains("quiesce();"));
