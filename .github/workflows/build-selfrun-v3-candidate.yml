@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_ARTIFACT: selfrun-v3-candidate-${{ github.run_attempt }}
+  BUILD_ARTIFACT: selfrun-v3-candidate-${{ github.run_id }}
 
 jobs:
   static-test-build:
