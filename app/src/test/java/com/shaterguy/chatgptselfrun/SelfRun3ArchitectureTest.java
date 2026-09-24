@@ -26,8 +26,8 @@ public final class SelfRun3ArchitectureTest {
         String protocol=source("SelfRun3Protocol.java");
         String engine=source("SelfRun3Engine.java");
         assertTrue(protocol.contains("Minimal SelfRun 3 dispatch envelope"));
-        assertFalse(protocol.contains("\"TURN_ID\""));
-        assertFalse(protocol.contains("\"REQUEST_ID\""));
+        assertTrue(protocol.contains("\"TURN_ID\""));
+        assertTrue(protocol.contains("\"REQUEST_ID\""));
         assertFalse(protocol.contains("\"PHASE\""));
         assertFalse(protocol.contains("\"TASK_MODE\""));
         assertTrue(engine.contains("\"dispatch_context\""));

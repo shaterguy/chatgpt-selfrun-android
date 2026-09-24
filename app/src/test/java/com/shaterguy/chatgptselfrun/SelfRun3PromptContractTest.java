@@ -14,13 +14,13 @@ public final class SelfRun3PromptContractTest {
         SelfRun3Engine.State state=state("WORK","WORK","NORMAL");
         String prompt=SelfRun3Protocol.prompt(state,"current user constraint");
 
-        assertTrue(prompt.startsWith("TASK_ID=task\nSELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID+"\n"));
+        assertTrue(prompt.startsWith("TASK_ID=task\nTURN_ID=task:turn:2\nREQUEST_ID=task:turn:2-request\nSELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID+"\n"));
         for(String value : new String[]{
                 "RESULT_DOCUMENT_ID=result","REQUIREMENT_DOCUMENT_ID=requirement",
                 "PREVIOUS_RESULT_DOCUMENT_ID=previous","current user constraint"}) assertTrue(value,prompt.contains(value));
 
         for(String removed : new String[]{
-                "[SELF_RUN_V3","TURN_ID=","REQUEST_ID=","TURN=","PHASE=","TASK_MODE=","MODE=",
+                "[SELF_RUN_V3","TURN=","PHASE=","TASK_MODE=","MODE=",
                 "EXECUTION_KIND=","SIGNAL_TYPE=","FOLDER_ID=","RECEIPT=","EXECUTION_PROFILE=",
                 "[RESULT_DOCUMENT_CONTRACT]","정해진 필드명, 구조, 값의 타입과 상태전이"})
             assertFalse(removed,prompt.contains(removed));
@@ -77,7 +77,7 @@ public final class SelfRun3PromptContractTest {
         SelfRun3Engine.put(repairRaw,"nextInput","confirmed correction");
         SelfRun3Engine.put(repairRaw,"intervention",new JSONObject().put("user_reported_complete",true));
         String repair=SelfRun3Protocol.prompt(new SelfRun3Engine.State(repairRaw),"");
-        assertTrue(repair.startsWith("TASK_ID=task\nSELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID+"\n"));
+        assertTrue(repair.startsWith("TASK_ID=task\nTURN_ID=task:turn:2\nREQUEST_ID=task:turn:2-request\nSELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID+"\n"));
         assertTrue(repair.contains("REPAIR_TARGET_DOCUMENT_ID=bad-result"));
         assertTrue(repair.contains("[이전 턴에서 확정된 다음 입력]\nconfirmed correction"));
         assertTrue(repair.contains("[사용자 개입 결과·실제 상태 검증 필요]"));
@@ -85,8 +85,8 @@ public final class SelfRun3PromptContractTest {
 
     @Test public void sourceCannotReintroduceStaticContractOrDriveOwnedPayloads() throws Exception {
         String source=src("SelfRun3Protocol.java");
-        assertFalse(source.contains("REQUEST_ID"));
-        assertFalse(source.contains("TURN_ID"));
+        assertTrue(source.contains("REQUEST_ID"));
+        assertTrue(source.contains("TURN_ID"));
         assertFalse(source.contains("TASK_MODE"));
         assertFalse(source.contains("EXECUTION_PROFILE"));
         assertFalse(source.contains("FOLDER_ID"));

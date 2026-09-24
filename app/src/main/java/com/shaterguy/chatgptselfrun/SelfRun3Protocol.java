@@ -18,6 +18,8 @@ final class SelfRun3Protocol {
         boolean repair=forceRepair || "REPAIR".equals(s.text("executionKind"));
         StringBuilder out=new StringBuilder();
         field(out,"TASK_ID",s.taskId());
+        field(out,"TURN_ID",s.turnId());
+        field(out,"REQUEST_ID",s.requestId());
         field(out,"SELF_RUN_SKILL_DOCUMENT_ID",SKILL_DOCUMENT_ID);
         field(out,"RESULT_DOCUMENT_ID",s.resource("resultDocumentId"));
         field(out,"REQUIREMENT_DOCUMENT_ID",s.resource("requirementDocumentId"));

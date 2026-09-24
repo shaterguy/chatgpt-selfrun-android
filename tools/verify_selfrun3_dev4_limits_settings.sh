@@ -155,11 +155,11 @@ grep -Fq 'legacyFallbackWithoutClockReproducesObservedIllegalStateAfterRecovered
 grep -Fq 'coordinatorChecksCommittedCandidateBeforeMutationOrRepairFallback' "$COMMITTED_PRIORITY_UNIT"
 grep -Fq 'recoveredCommittedCandidateTransitionsExactlyOnceToCommitAndNextTurn' "$COMMITTED_PRIORITY_UNIT"
 
-# Normal prompts carry only the minimal document-pointer envelope; Result semantics live in Drive contracts.
-for field in TASK_ID SELF_RUN_SKILL_DOCUMENT_ID RESULT_DOCUMENT_ID REQUIREMENT_DOCUMENT_ID PREVIOUS_RESULT_DOCUMENT_ID; do
+# Normal prompts carry only the minimum dispatch-correlation tokens and document pointers; Result semantics live in Drive contracts.
+for field in TASK_ID TURN_ID REQUEST_ID SELF_RUN_SKILL_DOCUMENT_ID RESULT_DOCUMENT_ID REQUIREMENT_DOCUMENT_ID PREVIOUS_RESULT_DOCUMENT_ID; do
   grep -Fq "$field" "$PROTOCOL"
 done
-for removed in TURN_ID REQUEST_ID PHASE TASK_MODE FOLDER_ID RECEIPT EXECUTION_PROFILE RESULT_DOCUMENT_RULES '[RESULT_DOCUMENT_CONTRACT]' SELF_RUN_V3; do
+for removed in PHASE TASK_MODE FOLDER_ID RECEIPT EXECUTION_PROFILE RESULT_DOCUMENT_RULES '[RESULT_DOCUMENT_CONTRACT]' SELF_RUN_V3; do
   ! grep -Fq "$removed" "$PROTOCOL"
 done
 grep -Fq 'dispatch_context' "$ENGINE"
