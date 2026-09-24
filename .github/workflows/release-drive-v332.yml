@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_ARTIFACT: selfrun-v332-release-candidate-${{ github.run_attempt }}
+  RELEASE_ARTIFACT: selfrun-v332-release-candidate-${{ github.run_id }}
 
 jobs:
   build-release:
@@ -153,6 +153,7 @@ jobs:
             release-output/SOURCE_COMMIT.txt
             release-output/RELEASE_NOTES.md
           if-no-files-found: error
+          overwrite: true
           compression-level: 0
           retention-days: 30
 
