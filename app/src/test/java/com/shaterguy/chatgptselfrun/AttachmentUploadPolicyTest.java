@@ -73,9 +73,10 @@ public class AttachmentUploadPolicyTest {
         assertFalse(store.contains("resumableSession"));
     }
 
-    @Test public void v3PromptReferencesDriveFolderOnlyNotLocalFileNamesOrUris() throws Exception {
+    @Test public void v3PromptKeepsOnlyResultPointerNotFolderOrAttachmentMetadata() throws Exception {
         String protocol = src("SelfRun3Protocol.java");
-        assertTrue(protocol.contains("field(out,\"FOLDER_ID\",s.resource(\"folderId\"))"));
+        assertTrue(protocol.contains("field(out,\"RESULT_DOCUMENT_ID\",s.resource(\"resultDocumentId\"))"));
+        assertFalse(protocol.contains("FOLDER_ID"));
         assertFalse(protocol.contains("attachment.name"));
         assertFalse(protocol.contains("attachment.uri"));
     }

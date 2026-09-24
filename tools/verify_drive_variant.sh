@@ -136,20 +136,22 @@ grep -Fq 'selfrun3-ledger.db' "$LEDGER"
 grep -Fq 'getNoBackupFilesDir' "$LEDGER"
 ! grep -Fq 'deleteDatabase' "$LEDGER"
 
-grep -Fq 'CONTRACT_VERSION="3.1.0"' "$CONTRACT"
 grep -Fq 'SELF_RUN_SKILL_DOCUMENT_ID=SKILL_DOCUMENT_ID' "$CONTRACT"
 grep -Fq 'SKILL_DOCUMENT_ID="1gktKYJzz4zW_M2gbJ7OsodaTE1lkx-pUtuFBV5fucJo"' "$CONTRACT"
-for field in TASK_ID TURN_ID REQUEST_ID TURN PHASE TASK_MODE MODE EXECUTION_KIND SIGNAL_TYPE RESULT_DOCUMENT_ID REQUIREMENT_DOCUMENT_ID PREVIOUS_RESULT_DOCUMENT_ID FOLDER_ID RECEIPT EXECUTION_PROFILE; do
+for field in TASK_ID RESULT_DOCUMENT_ID REQUIREMENT_DOCUMENT_ID PREVIOUS_RESULT_DOCUMENT_ID; do
   grep -Fq "$field" "$CONTRACT"
 done
+for removed in TURN_ID REQUEST_ID 'TURN"' PHASE TASK_MODE 'MODE"' EXECUTION_KIND SIGNAL_TYPE FOLDER_ID RECEIPT EXECUTION_PROFILE RESULT_DOCUMENT_RULES '[RESULT_DOCUMENT_CONTRACT]' SELF_RUN_V3; do
+  ! grep -Fq "$removed" "$CONTRACT"
+done
+grep -Fq 'dispatch_context' "$ENGINE"
+grep -Fq '"phase"' "$ENGINE"
+grep -Fq '"task_mode"' "$ENGINE"
+grep -Fq '"task_folder_id"' "$ENGINE"
 ! grep -Fq 'PROFILE_REGISTRY_' "$CONTRACT"
 grep -Fq 'PARALLEL_MERGE' "$CONTRACT"
 grep -Fq 'REPAIR_TARGET_DOCUMENT_ID' "$CONTRACT"
 grep -Fq '사용자 추가 지시 원문' "$CONTRACT"
-grep -Fq 'RESULT_DOCUMENT_RULES' "$CONTRACT"
-grep -Fq '[RESULT_DOCUMENT_CONTRACT]' "$CONTRACT"
-grep -Fq '지정된 기존 RESULT_DOCUMENT_ID의 초기 identity를 보존' "$CONTRACT"
-grep -Fq 'committed를 boolean true로 확정' "$CONTRACT"
 ! grep -Eq 'static[[:space:]]+final[[:space:]]+String[[:space:]]+CONTRACT[[:space:]]*=' "$CONTRACT"
 ! grep -Fq 'contract-version: 3.1.0' "$CONTRACT"
 ! grep -Fq 'RESULT_IDENTITY_TEMPLATE' "$CONTRACT"

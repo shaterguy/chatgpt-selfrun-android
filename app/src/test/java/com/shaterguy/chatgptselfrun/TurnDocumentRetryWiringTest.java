@@ -79,8 +79,9 @@ public final class TurnDocumentRetryWiringTest {
         }
         String prompt = SelfRun3Protocol.prompt(state, "new user input");
         assertTrue(prompt.contains("\nRESULT_DOCUMENT_ID=resultdoc\n"));
-        assertTrue(prompt.contains("\nREQUEST_ID=" + state.requestId() + "\n"));
-        assertTrue(prompt.contains("\nTURN_ID=" + state.turnId() + "\n"));
+        assertTrue(prompt.startsWith("TASK_ID=" + state.taskId() + "\n"));
+        assertFalse(prompt.contains("\nREQUEST_ID="));
+        assertFalse(prompt.contains("\nTURN_ID="));
         assertTrue(prompt.contains("\nREQUIREMENT_DOCUMENT_ID=requirement\n"));
         assertTrue(prompt.contains("\nnew user input\n"));
         assertFalse(prompt.contains("[SELF_RUN_TURN_DOCUMENT_RETRY "));

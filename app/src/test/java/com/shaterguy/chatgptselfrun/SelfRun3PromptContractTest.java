@@ -10,20 +10,20 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public final class SelfRun3PromptContractTest {
-    @Test public void promptKeepsDynamicEnvelopeWithoutProfileRegistryChoices() throws Exception {
+    @Test public void promptKeepsOnlyRequiredPointersAndConditionalUserInput() throws Exception {
         SelfRun3Engine.State state=state("WORK","WORK","NORMAL");
         String prompt=SelfRun3Protocol.prompt(state,"current user constraint");
 
+        assertTrue(prompt.startsWith("TASK_ID=task\nSELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID+"\n"));
         for(String value : new String[]{
-                "[SELF_RUN_V3 3.1.0]","SELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID,
-                "TASK_ID=task","TURN_ID=task:turn:2","REQUEST_ID=task:turn:2-request","TURN=2",
-                "PHASE=WORK","TASK_MODE=WORK","MODE=WORK","EXECUTION_KIND=NORMAL","SIGNAL_TYPE=AUTO_NEXT_TURN",
                 "RESULT_DOCUMENT_ID=result","REQUIREMENT_DOCUMENT_ID=requirement",
-                "PREVIOUS_RESULT_DOCUMENT_ID=previous","FOLDER_ID=folder",
-                "RECEIPT=[SELF_RUN_3_RESULT task:turn:2]","EXECUTION_PROFILE=",
-                "[RESULT_DOCUMENT_CONTRACT]","정해진 필드명, 구조, 값의 타입과 상태전이를 임의로 변경",
-                "current user constraint"}) assertTrue(value,prompt.contains(value));
-        assertEquals(1,count(prompt,"[RESULT_DOCUMENT_CONTRACT]"));
+                "PREVIOUS_RESULT_DOCUMENT_ID=previous","current user constraint"}) assertTrue(value,prompt.contains(value));
+
+        for(String removed : new String[]{
+                "[SELF_RUN_V3","TURN_ID=","REQUEST_ID=","TURN=","PHASE=","TASK_MODE=","MODE=",
+                "EXECUTION_KIND=","SIGNAL_TYPE=","FOLDER_ID=","RECEIPT=","EXECUTION_PROFILE=",
+                "[RESULT_DOCUMENT_CONTRACT]","정해진 필드명, 구조, 값의 타입과 상태전이"})
+            assertFalse(removed,prompt.contains(removed));
 
         assertFalse(prompt.contains("[PROFILE_REGISTRY_"));
         assertFalse(prompt.contains("requirement body must not be copied"));
@@ -33,6 +33,16 @@ public final class SelfRun3PromptContractTest {
         assertFalse(prompt.contains("\"fingerprint\":"));
         assertFalse(prompt.contains("phase_completed"));
         assertFalse(prompt.contains("full checkpoint"));
+    }
+
+    @Test public void initialResultCarriesRemovedRuntimePolicyContext() {
+        SelfRun3Engine.State state=state("HYBRID","CHAT","NORMAL");
+        JSONObject context=SelfRun3Engine.emptyResult(state).optJSONObject("dispatch_context");
+        assertNotNull(context);
+        assertEquals("WORK",context.optString("phase"));
+        assertEquals("HYBRID",context.optString("task_mode"));
+        assertEquals("folder",context.optString("task_folder_id"));
+        assertEquals(3,context.length());
     }
 
     @Test public void hybridPromptOmitsEveryProfileRegistryChoice() throws Exception {
@@ -54,7 +64,6 @@ public final class SelfRun3PromptContractTest {
         assertTrue(branch.contains("MUTATION_BOUNDARY="));
         assertTrue(branch.contains("BRANCH_PLAN="));
         assertFalse(branch.contains("PROFILE_REGISTRY_"));
-        assertEquals(1,count(branch,"[RESULT_DOCUMENT_CONTRACT]"));
 
         JSONObject mergeRaw=state("HYBRID","WORK","PARALLEL_MERGE").json();
         SelfRun3Engine.put(mergeRaw,"parallelGroupId","group-1");
@@ -62,27 +71,29 @@ public final class SelfRun3PromptContractTest {
         String merge=SelfRun3Protocol.prompt(new SelfRun3Engine.State(mergeRaw),"");
         assertTrue(merge.contains("MERGED_FROM=[\"result-a\",\"result-b\"]"));
         assertFalse(merge.contains("BRANCH_OBJECTIVE="));
-        assertEquals(1,count(merge,"[RESULT_DOCUMENT_CONTRACT]"));
 
         JSONObject repairRaw=state("WORK","WORK","REPAIR").json();
         SelfRun3Engine.put(repairRaw,"repairTargetDocumentId","bad-result");
         SelfRun3Engine.put(repairRaw,"nextInput","confirmed correction");
         SelfRun3Engine.put(repairRaw,"intervention",new JSONObject().put("user_reported_complete",true));
         String repair=SelfRun3Protocol.prompt(new SelfRun3Engine.State(repairRaw),"");
-        assertTrue(repair.startsWith("[SELF_RUN_V3 3.1.0 RESULT_REPAIR=1]"));
+        assertTrue(repair.startsWith("TASK_ID=task\nSELF_RUN_SKILL_DOCUMENT_ID="+SelfRun3Protocol.SKILL_DOCUMENT_ID+"\n"));
         assertTrue(repair.contains("REPAIR_TARGET_DOCUMENT_ID=bad-result"));
         assertTrue(repair.contains("[이전 턴에서 확정된 다음 입력]\nconfirmed correction"));
         assertTrue(repair.contains("[사용자 개입 결과·실제 상태 검증 필요]"));
-        assertEquals(1,count(repair,"[RESULT_DOCUMENT_CONTRACT]"));
     }
 
     @Test public void sourceCannotReintroduceStaticContractOrDriveOwnedPayloads() throws Exception {
         String source=src("SelfRun3Protocol.java");
-        assertTrue(source.contains("REQUEST_ID"));
+        assertFalse(source.contains("REQUEST_ID"));
+        assertFalse(source.contains("TURN_ID"));
+        assertFalse(source.contains("TASK_MODE"));
+        assertFalse(source.contains("EXECUTION_PROFILE"));
+        assertFalse(source.contains("FOLDER_ID"));
+        assertFalse(source.contains("RESULT_DOCUMENT_RULES"));
+        assertFalse(source.contains("[RESULT_DOCUMENT_CONTRACT]"));
         assertFalse(source.contains("compactWorkProfileChoices"));
         assertFalse(source.contains("PROFILE_REGISTRY_"));
-        assertTrue(source.contains("RESULT_DOCUMENT_RULES"));
-        assertTrue(source.contains("[RESULT_DOCUMENT_CONTRACT]"));
         assertFalse(source.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));
         assertFalse(source.contains("RESULT_IDENTITY_TEMPLATE"));
         assertFalse(source.contains("SelfRun3Engine.emptyResult"));

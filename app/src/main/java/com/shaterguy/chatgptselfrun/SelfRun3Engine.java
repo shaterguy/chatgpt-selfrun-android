@@ -580,6 +580,11 @@ private static String routingPhase(JSONObject r,State s) {
     static JSONObject emptyResult(State s) {
         JSONObject r=new JSONObject(); put(r,"schema",RESULT_SCHEMA); put(r,"task_id",s.taskId()); put(r,"turn_id",s.turnId());
         put(r,"turn",s.turn()); put(r,"document_id",s.resource("resultDocumentId")); put(r,"event_id",s.turnId()+":result"); put(r,"committed",false);
+        JSONObject dispatch=new JSONObject();
+        put(dispatch,"phase",s.text("phase"));
+        put(dispatch,"task_mode",s.taskMode());
+        put(dispatch,"task_folder_id",s.resource("folderId"));
+        put(r,"dispatch_context",dispatch);
         if(isBranch(s) || "PARALLEL_MERGE".equals(s.text("executionKind"))) {
             JSONObject c=new JSONObject(); put(c,"type",isBranch(s)?"PARALLEL_BRANCH":s.text("executionKind")); put(c,"parallel_group_id",s.text("parallelGroupId"));
             if(isBranch(s)) { put(c,"branch_id",s.text("branchId")); put(c,"branch_depth",1); }

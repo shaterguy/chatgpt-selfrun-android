@@ -25,7 +25,12 @@ public final class SelfRun3ArchitectureTest {
     @Test public void promptIsEnvelopeWhileEngineOwnsOnlyMachineIntegrityAndSafeRouting() throws Exception {
         String protocol=source("SelfRun3Protocol.java");
         String engine=source("SelfRun3Engine.java");
-        assertTrue(protocol.contains("Dynamic SelfRun 3 envelope"));
+        assertTrue(protocol.contains("Minimal SelfRun 3 dispatch envelope"));
+        assertFalse(protocol.contains("\"TURN_ID\""));
+        assertFalse(protocol.contains("\"REQUEST_ID\""));
+        assertFalse(protocol.contains("\"PHASE\""));
+        assertFalse(protocol.contains("\"TASK_MODE\""));
+        assertTrue(engine.contains("\"dispatch_context\""));
         assertFalse(protocol.contains("PROFILE_REGISTRY_"));
         assertFalse(protocol.matches("(?s).*static\\s+final\\s+String\\s+CONTRACT\\s*=.*"));
         assertFalse(protocol.contains("RESULT_IDENTITY_TEMPLATE"));
