@@ -155,12 +155,17 @@ grep -Fq 'legacyFallbackWithoutClockReproducesObservedIllegalStateAfterRecovered
 grep -Fq 'coordinatorChecksCommittedCandidateBeforeMutationOrRepairFallback' "$COMMITTED_PRIORITY_UNIT"
 grep -Fq 'recoveredCommittedCandidateTransitionsExactlyOnceToCommitAndNextTurn' "$COMMITTED_PRIORITY_UNIT"
 
-# Every normal/branch/merge/repair prompt carries one strict Result-document contract.
-grep -Fq 'RESULT_DOCUMENT_RULES' "$PROTOCOL"
-grep -Fq '[RESULT_DOCUMENT_CONTRACT]' "$PROTOCOL"
-grep -Fq '지정된 기존 RESULT_DOCUMENT_ID의 초기 identity를 보존' "$PROTOCOL"
-grep -Fq 'committed를 boolean true로 확정' "$PROTOCOL"
-grep -Fq '같은 문서를 다시 읽어 저장된 내용을 검증' "$PROTOCOL"
+# Normal prompts carry only the minimal document-pointer envelope; Result semantics live in Drive contracts.
+for field in TASK_ID SELF_RUN_SKILL_DOCUMENT_ID RESULT_DOCUMENT_ID REQUIREMENT_DOCUMENT_ID PREVIOUS_RESULT_DOCUMENT_ID; do
+  grep -Fq "$field" "$PROTOCOL"
+done
+for removed in TURN_ID REQUEST_ID PHASE TASK_MODE FOLDER_ID RECEIPT EXECUTION_PROFILE RESULT_DOCUMENT_RULES '[RESULT_DOCUMENT_CONTRACT]' SELF_RUN_V3; do
+  ! grep -Fq "$removed" "$PROTOCOL"
+done
+grep -Fq 'dispatch_context' "$ENGINE"
+grep -Fq '"phase"' "$ENGINE"
+grep -Fq '"task_mode"' "$ENGINE"
+grep -Fq '"task_folder_id"' "$ENGINE"
 
 # Explicit user-stopped recovery keeps the exact ledger lineage and cannot be reached by ordinary resume.
 grep -Fq 'RESUME_STOPPED' "$ENGINE"
