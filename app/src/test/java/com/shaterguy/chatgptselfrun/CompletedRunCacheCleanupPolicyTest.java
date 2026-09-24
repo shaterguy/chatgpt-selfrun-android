@@ -54,6 +54,6 @@ public class CompletedRunCacheCleanupPolicyTest {
     private static String source(String name) throws Exception {
         Path p = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + name);
         if (!Files.exists(p)) p = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + name);
-        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8).replace("\r\n", "\n");
     }
 }

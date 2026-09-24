@@ -17,7 +17,7 @@ public final class SelfRun3EarlyObservationTest {
         assertFalse(protocol.contains("quiesce()"));
         assertFalse(protocol.contains("listener.onStarted"));
         String capture = web.substring(web.indexOf("private void captureConversation()"),
-                web.indexOf("private boolean allowedPreparationRoute"));
+                web.indexOf("private boolean allowedRoute"));
         assertTrue(capture.contains("listener.onConversation"));
         assertTrue(capture.contains("listener.onStarted"));
         assertTrue(capture.contains("quiesce();"));

@@ -158,6 +158,6 @@ public class WebUiCalibrationBackupPolicyTest {
     private static String read(String first, String fallback) throws Exception {
         Path path = Paths.get(first);
         if (!Files.exists(path)) path = Paths.get(fallback);
-        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8).replace("\r\n", "\n");
     }
 }

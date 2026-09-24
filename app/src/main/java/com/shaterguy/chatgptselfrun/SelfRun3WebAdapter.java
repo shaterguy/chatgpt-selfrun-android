@@ -53,11 +53,9 @@ final class SelfRun3WebAdapter {
     private HeadlessWebViewHost host;
     private WebView web;
     private SelfRun3Engine.State state;
-    private boolean preparing, loading, closed, dispatchConfirmed, submitIssued, conversationCaptured, projectRouteReadyLogged;
-    private int step, evaluation, generation, projectCandidateIndex;
-    private int projectProbeRetries, projectClickAttempts, projectDirectoryRecoveries;
-    private long preparationAttempt, prepareStarted, prepareTimeoutMs, projectDirectoryReadyAt;
-    private String projectDisplayName = "";
+    private boolean preparing, loading, closed, dispatchConfirmed, submitIssued, conversationCaptured;
+    private int step, evaluation, generation;
+    private long preparationAttempt, prepareStarted, prepareTimeoutMs;
 
     SelfRun3WebAdapter(Context context, Listener listener) {
         this.context = context;
@@ -104,7 +102,6 @@ final class SelfRun3WebAdapter {
             submitIssued = false;
             conversationCaptured = false;
             step = 0;
-            resetProjectNavigationState();
             if (!newRequest) disposeHost();
         }
         if (restartPreparation) startPreparationTimer();
@@ -115,20 +112,19 @@ final class SelfRun3WebAdapter {
         if (web == null || closed) return;
         if (host != null) host.attachOutput();
         if (restartPreparation) {
-            ProjectUrlPolicy.ProjectRef ref = ProjectUrlPolicy.parseProject(target);
-            projectDisplayName = ref == null ? "" : new ProjectCatalog(context).displayName(ref);
-            trace("WEBVIEW_LAUNCH", "route=" + (ref == null ? "general" : "projects")
+            String launchRoute = SelfRunScript.projectId(target).isEmpty() ? "general" : "project";
+            trace("WEBVIEW_LAUNCH", "route=" + launchRoute
                     + ";attempt=" + preparationAttempt + ";scope=conversation-create");
             generation++;
             evaluation++;
             loading = true;
             web.stopLoading();
             if (!SelfRun3RuntimeTestBridge.loadWebFixture(web, s)) {
-                web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));
+                web.loadUrl(target);
             }
             if (!newRequest) {
                 trace("WEB_PREPARATION_RECOVERY", "status=reentry;attempt=" + preparationAttempt
-                        + ";route=" + (ref == null ? "general" : "projects")
+                        + ";route=" + launchRoute
                         + ";scope=conversation-create");
             }
             return;
@@ -173,15 +169,6 @@ final class SelfRun3WebAdapter {
         }
     }
 
-    private void resetProjectNavigationState() {
-        projectCandidateIndex = 0;
-        projectProbeRetries = 0;
-        projectClickAttempts = 0;
-        projectDirectoryRecoveries = 0;
-        projectDirectoryReadyAt = 0L;
-        projectRouteReadyLogged = false;
-    }
-
     private void ensureWeb() {
         if (web != null) return;
         String target = state == null ? "" : state.config().optString("projectUrl");
@@ -198,7 +185,6 @@ final class SelfRun3WebAdapter {
                 generation++;
                 evaluation++;
                 loading = true;
-                projectDirectoryReadyAt = 0L;
                 trace("WEBVIEW_PAGE_START", "route=" + routeClass(url));
             }
 
@@ -206,17 +192,8 @@ final class SelfRun3WebAdapter {
                 if (view != web || closed) return;
                 loading = false;
                 captureConversation();
-                boolean directory = SelfRun3ProjectDirectoryNavigation.isDirectoryPage(url);
-                if (directory) {
-                    projectProbeRetries = 0;
-                    projectClickAttempts = 0;
-                    projectDirectoryReadyAt = SystemClock.elapsedRealtime()
-                            + SelfRun3ProjectDirectoryRecoveryPolicy.HYDRATION_SETTLE_MS;
-                }
-                trace("WEBVIEW_PAGE_FINISH", "route=" + routeClass(url)
-                        + ";settleMs=" + (directory ? SelfRun3ProjectDirectoryRecoveryPolicy.HYDRATION_SETTLE_MS : 500L));
-                if (preparing) later(SelfRun3WebAdapter.this::advance,
-                        directory ? SelfRun3ProjectDirectoryRecoveryPolicy.HYDRATION_SETTLE_MS : 500L);
+                trace("WEBVIEW_PAGE_FINISH", "route=" + routeClass(url) + ";settleMs=500");
+                if (preparing) later(SelfRun3WebAdapter.this::advance, 500L);
             }
 
             @Override public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
@@ -241,7 +218,7 @@ final class SelfRun3WebAdapter {
                 if (view != web || closed) return true;
                 if (!request.isForMainFrame()) return false;
                 Uri u = request.getUrl();
-                if (!allowedPreparationRoute(String.valueOf(u))) {
+                if (!allowedRoute(String.valueOf(u))) {
                     trace("CONVERSATION_CREATE_PENDING", "status=route-mismatch;attempt=" + preparationAttempt
                             + ";scope=conversation-create");
                     return true;
@@ -286,7 +263,6 @@ final class SelfRun3WebAdapter {
             return;
         }
         if (loading) return;
-        if (prepareProjectEntryIfNeeded()) return;
         String script;
         if (step == 0) {
             BootstrapRunStateStore.touchBootstrap(
@@ -337,118 +313,6 @@ final class SelfRun3WebAdapter {
             }
             later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
         });
-    }
-
-    private boolean prepareProjectEntryIfNeeded() {
-        if (state == null || web == null) return false;
-        String target = state.config().optString("projectUrl");
-        if (!SelfRun3ProjectDirectoryNavigation.isProjectTarget(target)) return false;
-        String actual = web.getUrl();
-        if (ProjectUrlPolicy.sameProject(target, actual)) {
-            projectProbeRetries = 0;
-            projectClickAttempts = 0;
-            projectDirectoryReadyAt = 0L;
-            if (!projectRouteReadyLogged) {
-                projectRouteReadyLogged = true;
-                trace("PROJECT_ROUTE_READY", "recoveries=" + projectDirectoryRecoveries
-                        + ";candidate=" + projectCandidateIndex);
-            }
-            return false;
-        }
-        projectRouteReadyLogged = false;
-        if (SelfRun3ProjectDirectoryNavigation.isWrongProjectRoute(target, actual)) {
-            projectCandidateIndex++;
-            loadProjectDirectory("wrong-project-candidate");
-            return true;
-        }
-        if (!SelfRun3ProjectDirectoryNavigation.isDirectoryPage(actual)) {
-            loadProjectDirectory("restore-directory-route");
-            return true;
-        }
-        long now = SystemClock.elapsedRealtime();
-        if (projectDirectoryReadyAt > now) {
-            later(this::advance, Math.max(1L, projectDirectoryReadyAt - now));
-            return true;
-        }
-        if (SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecoverAfterClick(projectClickAttempts)) {
-            recoverProjectDirectory("click-no-transition");
-            return true;
-        }
-        evaluate(SelfRun3ProjectDirectoryNavigation.build(projectDisplayName, projectCandidateIndex), result -> {
-            String status = result.optString("status");
-            JSONObject diagnostics = result.optJSONObject("diagnostics");
-            int rows = diagnostics == null ? -1 : diagnostics.optInt("rows", -1);
-            int matches = diagnostics == null ? -1 : diagnostics.optInt("matchingRows", -1);
-            trace("PROJECT_DIRECTORY_RESULT", "status=" + safeStatus(status)
-                    + ";rows=" + rows + ";matches=" + matches
-                    + ";probe=" + projectProbeRetries + ";click=" + projectClickAttempts
-                    + ";recovery=" + projectDirectoryRecoveries + ";candidate=" + projectCandidateIndex);
-            switch (status) {
-                case "PROJECT_ROW_CLICKED":
-                    projectProbeRetries = 0;
-                    projectClickAttempts++;
-                    later(this::advance, SelfRun3ProjectDirectoryRecoveryPolicy.POST_CLICK_SETTLE_MS);
-                    break;
-                case "RETRY":
-                    projectProbeRetries++;
-                    if (SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecoverAfterRetry(projectProbeRetries)) {
-                        recoverProjectDirectory("directory-hydration-stalled");
-                    } else {
-                        later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
-                    }
-                    break;
-                case "NAVIGATE_DIRECTORY":
-                    loadProjectDirectory("script-requested-directory");
-                    break;
-                case "AUTH_REQUIRED":
-                    fail(status);
-                    break;
-                case "PROJECT_NOT_FOUND":
-                case "TARGET_CONTEXT_MISMATCH":
-                    trace("CONVERSATION_CREATE_PENDING", "status=" + safeStatus(status)
-                            + ";attempt=" + preparationAttempt + ";scope=conversation-create");
-                    later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
-                    break;
-                default:
-                    trace("CONVERSATION_CREATE_PENDING", "status=project-directory-pending;attempt="
-                            + preparationAttempt + ";scope=conversation-create");
-                    later(this::advance, SelfRun3PowerPolicy.WEB_STEP_RETRY_MS);
-                    break;
-            }
-        });
-        return true;
-    }
-
-    private void recoverProjectDirectory(String reason) {
-        projectDirectoryRecoveries++;
-        projectProbeRetries = 0;
-        projectClickAttempts = 0;
-        projectDirectoryReadyAt = 0L;
-        boolean recreateHost = SelfRun3ProjectDirectoryRecoveryPolicy.shouldRecreateHost(projectDirectoryRecoveries);
-        trace("PROJECT_DIRECTORY_RECOVERY", "status=start;reason=" + safeStatus(reason)
-                + ";recovery=" + projectDirectoryRecoveries
-                + ";strategy=" + (recreateHost ? "recreate-webview" : "fresh-directory"));
-        if (recreateHost) {
-            disposeHost();
-            ensureWeb();
-            if (web == null || closed) return;
-            if (host != null) host.attachOutput();
-        }
-        loadProjectDirectory("recovery-" + projectDirectoryRecoveries);
-    }
-
-    private void loadProjectDirectory(String reason) {
-        if (web == null || closed) return;
-        projectProbeRetries = 0;
-        projectClickAttempts = 0;
-        projectDirectoryReadyAt = 0L;
-        generation++;
-        evaluation++;
-        loading = true;
-        trace("PROJECT_DIRECTORY_LOAD", "reason=" + safeStatus(reason)
-                + ";recovery=" + projectDirectoryRecoveries + ";candidate=" + projectCandidateIndex);
-        web.stopLoading();
-        web.loadUrl(SelfRun3ProjectDirectoryNavigation.DIRECTORY_URL);
     }
 
     void submit(SelfRun3Engine.State claimed) {
@@ -557,15 +421,6 @@ final class SelfRun3WebAdapter {
         }
     }
 
-    private boolean allowedPreparationRoute(String url) {
-        if (allowedRoute(url)) return true;
-        if (!preparing || state == null) return false;
-        String target = state.config().optString("projectUrl");
-        if (!SelfRun3ProjectDirectoryNavigation.isProjectTarget(target)) return false;
-        return SelfRun3ProjectDirectoryNavigation.isDirectoryPage(url)
-                || ProjectUrlPolicy.parseProject(url) != null;
-    }
-
     private boolean allowedRoute(String url) {
         if (!trusted(url) || state == null) return false;
         return SelfRunScript.projectId(state.config().optString("projectUrl"))
@@ -644,7 +499,6 @@ final class SelfRun3WebAdapter {
     }
 
     private String routeClass(String url) {
-        if (SelfRun3ProjectDirectoryNavigation.isDirectoryPage(url)) return "projects";
         if (state != null) {
             String target = state.config().optString("projectUrl");
             if (ProjectUrlPolicy.sameProject(target, url)) return "target-project";

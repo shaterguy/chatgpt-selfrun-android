@@ -52,7 +52,7 @@ public final class BootstrapSendLivenessPolicyTest {
 
     @Test public void intermediateDomFailuresStayInsideOneConversationCreationAttempt() throws Exception {
         String web = source("SelfRun3WebAdapter.java");
-        String advance = between(web, "private void advance()", "private boolean prepareProjectEntryIfNeeded");
+        String advance = between(web, "private void advance()", "void submit(SelfRun3Engine.State claimed)");
         assertTrue(advance.contains("status.endsWith(\"_FAILED\")"));
         assertTrue(advance.contains("status.endsWith(\"_UNAVAILABLE\")"));
         assertTrue(advance.contains("CONVERSATION_CREATE_PENDING"));

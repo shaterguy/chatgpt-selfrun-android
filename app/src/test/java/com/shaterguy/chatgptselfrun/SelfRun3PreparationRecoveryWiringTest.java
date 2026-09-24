@@ -33,7 +33,7 @@ public final class SelfRun3PreparationRecoveryWiringTest {
         assertFalse(protocol.contains("listener.onStarted"));
         assertFalse(protocol.contains("a.quiesce()"));
 
-        String capture = between(web, "private void captureConversation()", "private boolean allowedPreparationRoute");
+        String capture = between(web, "private void captureConversation()", "private boolean allowedRoute");
         assertTrue(capture.contains("conversationCaptured = true;"));
         assertTrue(capture.contains("listener.onConversation"));
         assertTrue(capture.contains("listener.onStarted"));
@@ -54,7 +54,7 @@ public final class SelfRun3PreparationRecoveryWiringTest {
         assertTrue(web.contains("marker(state, preparationAttempt)"));
         assertTrue(web.contains("marker(claimed, preparationAttempt)"));
         assertTrue(web.contains("disposeHost();"));
-        assertTrue(web.contains("web.loadUrl(SelfRun3ProjectDirectoryNavigation.entryUrl(target));"));
+        assertTrue(web.contains("web.loadUrl(target);"));
         assertTrue(web.contains("status=reentry"));
         assertTrue(web.contains("status=recovered"));
     }
