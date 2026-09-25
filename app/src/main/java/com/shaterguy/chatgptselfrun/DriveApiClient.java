@@ -23,6 +23,7 @@ final class DriveApiClient {
     static final String MIME_FOLDER = "application/vnd.google-apps.folder";
     static final String MIME_DOCUMENT = "application/vnd.google-apps.document";
     static final String MIME_OCTET_STREAM = "application/octet-stream";
+    static final String MIME_JSON = "application/json";
     private static final String GOOGLE_WORKSPACE_MIME_PREFIX = "application/vnd.google-apps.";
     private static final String FILE_FIELDS = "id,name,mimeType,size,parents,trashed,appProperties,version,"
             + "createdTime,modifiedTime,webViewLink,isAppAuthorized,shared,driveId,capabilities(canAddChildren)";
@@ -370,6 +371,55 @@ final class DriveApiClient {
         } catch (Throwable responseFailure) {
             throw new OutcomeUnknownException("native document create response was not trustworthy", responseFailure);
         }
+    }
+
+    Metadata createServerDispatchFile(String accessToken, String fileId, String name,
+                                      String parentId, JSONObject appProperties,
+                                      JSONObject content) throws Exception {
+        requireFileId(fileId);
+        requireParent(parentId);
+        if (name == null || name.isEmpty() || name.length() > 240) {
+            throw new IllegalArgumentException("safe dispatch name required");
+        }
+        JSONObject properties = appProperties == null ? new JSONObject() : new JSONObject(appProperties.toString());
+        properties.put("selfrun_kind", "server_dispatch");
+        JSONObject metadata = new JSONObject()
+                .put("id", fileId)
+                .put("name", name)
+                .put("mimeType", MIME_JSON)
+                .put("parents", new JSONArray().put(parentId))
+                .put("appProperties", properties);
+        Metadata created;
+        try {
+            created = create(accessToken, metadata, false);
+        } catch (Throwable createFailure) {
+            try {
+                created = getMetadata(accessToken, fileId);
+            } catch (Throwable missing) {
+                createFailure.addSuppressed(missing);
+                throw createFailure;
+            }
+        }
+        if (!fileId.equals(created.id) || !MIME_JSON.equals(created.mimeType)
+                || !parentId.equals(created.parentId) || created.trashed) {
+            throw new IllegalStateException("server dispatch metadata mismatch");
+        }
+        writeServerDispatchFile(accessToken, fileId, content);
+        return getMetadata(accessToken, fileId);
+    }
+
+    JSONObject readServerDispatchFile(String accessToken, String fileId) throws Exception {
+        requireFileId(fileId);
+        return request("GET", "https://www.googleapis.com/drive/v3/files/" + fileId
+                + "?alt=media&supportsAllDrives=true", accessToken, null, false);
+    }
+
+    void writeServerDispatchFile(String accessToken, String fileId, JSONObject content) throws Exception {
+        requireFileId(fileId);
+        if (content == null) throw new IllegalArgumentException("dispatch content required");
+        request("PATCH", "https://www.googleapis.com/upload/drive/v3/files/" + fileId
+                        + "?uploadType=media&supportsAllDrives=true&fields=id,modifiedTime",
+                accessToken, content, true, "dispatch write outcome unknown");
     }
 
     Metadata createDebugLogDocument(String accessToken, String taskId, String parentId) throws Exception {
