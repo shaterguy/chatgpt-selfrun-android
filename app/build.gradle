@@ -2,11 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 3035001
-def selfRunDriveVersionName = '3.3.3-dev1'
+def selfRunDriveVersionCode = 4000001
+def selfRunDriveVersionName = '4.0.0-dev1'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
-def selfRun3VersionPattern = ~/^3\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
+def selfRun3VersionPattern = ~/^(?:3|4)\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 // Promotion provenance for the exact verified source candidate; the active formal identity is defined above.
 // verified source candidate: selfRunDriveVersionCode = 3034001
@@ -149,7 +149,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (android.defaultConfig.applicationId != expectedId) throw new GradleException("SelfRun Drive applicationId must be ${expectedId}")
         if (android.defaultConfig.versionCode != selfRunDriveVersionCode
                 || android.defaultConfig.versionName != selfRunDriveVersionName) throw new GradleException('SelfRun Drive version identity mismatch')
-        if (!(selfRunDriveVersionName ==~ selfRun3VersionPattern)) throw new GradleException('SelfRun 3 version must be 3.x.y, 3.x.y-devN, or 3.x.y-rcN')
+        if (!(selfRunDriveVersionName ==~ selfRun3VersionPattern)) throw new GradleException('SelfRun version must be 3.x.y/4.x.y with optional devN or rcN suffix')
         if (selfRunDriveVersionCode <= 2020048) throw new GradleException('SelfRun 3 versionCode must advance the historical stable lineage')
         if (android.testBuildType != 'qaApp') throw new GradleException('SelfRun 3 instrumentation must target the qaApp TEST lineage')
         def testType = android.buildTypes.getByName('qaApp')
