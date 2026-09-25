@@ -18,7 +18,10 @@ final class SelfRun4DispatchFile {
 
     static String fileName(SelfRun3Engine.State state) {
         String fingerprint = SelfRun3ResultWatchdog.fingerprint(state.requestId());
-        return "dispatch-" + state.turn() + "-" + fingerprint.substring(0, 20) + SUFFIX;
+        String task = state.taskId().replaceAll("[^A-Za-z0-9._-]", "_");
+        if (task.length() > 80) task = task.substring(0, 80);
+        return "dispatch-" + task + "-turn-" + state.turn() + "-"
+                + fingerprint.substring(0, 20) + SUFFIX;
     }
 
     static JSONObject prepare(SelfRun3Engine.State state, String fileId, long attempt) {
