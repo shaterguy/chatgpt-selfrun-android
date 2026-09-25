@@ -17,7 +17,7 @@ final class SelfRun3DriveAdapter {
     private final Context context;
     private final SelfRunStore projection;
     private final SelfRun3Ledger ledger;
-    private final DriveApiClient api = new DriveApiClient();
+    private final DriveApiClient api = new DriveApiClient();\n    private final SelfRun4DispatchDriveClient dispatchDrive = new SelfRun4DispatchDriveClient();
     private final BooleanSupplier permitted;
     private final PowerManager.WakeLock resultReadWakeLock;
     private final SelfRunRunLog diagnosticLog;
@@ -86,6 +86,7 @@ final class SelfRun3DriveAdapter {
             s = ledger.apply(new SelfRun3Engine.Event(s.requestId() + ":result-baseline",
                     SelfRun3Engine.Kind.RESULT_BASELINE, s.taskId(), s.turnId(), payload)).execution(s.turnId());
         }
+        s = ensureRemoteDispatchFile(token, s);
         return s;
     }
 
@@ -246,6 +247,18 @@ final class SelfRun3DriveAdapter {
             return "";
         }
     }
+    private SelfRun3Engine.State ensureRemoteDispatchFile(String token, SelfRun3Engine.State original) throws Exception {
+        SelfRun3Engine.State current = ledger.loadExecution(original.taskId(), original.turnId());
+        require(current != null, "STALE_TURN");
+        if (current.resource("dispatchFileId").isEmpty()) {
+            checkpoint();
+            current = pin(current, "dispatchFileId", api.generateFileId(token));
+        }
+        checkpoint();
+        dispatchDrive.ensureFile(token, current.resource("dispatchFileId"), current);
+        return current;
+    }
+
     private SelfRun3Engine.State ensureDocument(String token, SelfRun3Engine.State original, String key, String intentKey, String name) throws Exception {
         SelfRun3Engine.State loaded = ledger.loadExecution(original.taskId(), original.turnId());
         require(loaded != null, "STALE_TURN");
