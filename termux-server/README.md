@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0-dev1
+# SelfRun Termux Server 4.0.0-dev2
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 
@@ -37,7 +37,7 @@ SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, 
 
 ## liveness
 
-서버는 응답 텍스트, 전체 페이지 텍스트, streaming 표시의 변화를 활동으로 봅니다. 기본 5분 동안 활동이 없고 응답이 아직 진행 중이면 같은 대화방에 `계속 진행해`를 입력하고 다시 감시합니다. 값은 환경변수로 조정할 수 있습니다.
+서버는 실제 사용자·어시스턴트 메시지 식별자와 텍스트 길이, streaming/재개 상태의 변화를 활동으로 봅니다. 기본 10분 동안 실질 변화가 없을 때 Task CONTROL이 `RUNNING`인지 먼저 확인합니다. `PAUSED`, `WAITING_USER_INTERVENTION`, `STOPPED`, `DONE`, `RESUME_REQUESTED`, `RESUME_STOPPED_REQUESTED` 상태에서는 liveness 복구를 수행하지 않습니다. `RUNNING`일 때만 Result 미완료와 최신 메시지 식별자 불변을 재확인한 뒤 같은 대화방에 `현재 턴에 할당된 잔여작업이 있으면 계속 수행해`를 입력하고 다시 감시합니다. 시간 값은 환경변수로 조정할 수 있습니다.
 
 ## 실행
 

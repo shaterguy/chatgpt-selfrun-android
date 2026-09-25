@@ -1165,6 +1165,25 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             onSuccessorWatchdogWake("", -1);
             return;
         }
+        if ("WEB_START_CONFIRMATION_TIMEOUT".equals(code)) {
+            int expectedEpoch = epoch;
+            io.execute(() -> {
+                SelfRun3Engine.State current = null;
+                try { current = ledger.loadExecution(task, turn); }
+                catch (Throwable ignored) { }
+                SelfRun3Engine.State exact = current;
+                main.post(() -> {
+                    if (!validEpoch(expectedEpoch) || !callbackMatches(exact, task, turn, request)) return;
+                    if (request.equals(preparingRequest)) preparingRequest = "";
+                    authoritativeReadCheckedTurns.remove(turn);
+                    releaseWakeLock();
+                    log.record(store, "V4_SERVER_UNCERTAIN_SEND_RECONCILE",
+                            "turn=" + turn + ";request=" + request);
+                    scheduleNext(0L);
+                });
+            });
+            return;
+        }
         if ("AUTH_REQUIRED".equals(code) || "TURN_PROTOCOL_UNAVAILABLE".equals(code)) {
             pause("V3_" + code);
             return;
@@ -1402,6 +1421,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         cancelServerWaitState();
         if (scheduledNext != null) main.removeCallbacks(scheduledNext);
         preparingRequest = "";
+        web.publishControlState("PAUSED", reason);
         web.quiesce();
         releaseWakeLock();
         int expectedEpoch = epoch;
@@ -1434,6 +1454,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (store.userStopped() || store.runId().isEmpty() || !ownsCurrentRun()) return;
         epoch++;
+        web.publishControlState("RESUME_REQUESTED", "USER_RESUME");
         store.setPaused(false);
         store.clearLastError();
         int expectedEpoch = epoch;
@@ -1464,6 +1485,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         epoch++;
         cancelServerWaitState();
         main.removeCallbacksAndMessages(null);
+        web.publishControlState("STOPPED", "USER_STOP");
         web.close();
         releaseWakeLock();
         int expectedEpoch = epoch;
@@ -1511,6 +1533,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void syncProjection(SelfRun3Engine.State state) {
         requireMain();
         if (state == null || !state.taskId().equals(store.runId())) return;
+        web.syncControlState(state);
         String phase = switch (state.stage()) {
             case SETUP -> PHASE_SETUP;
             case PREPARING -> PHASE_PREPARING;
@@ -1572,6 +1595,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         cancelServerWaitState();
         if (scheduledNext != null) main.removeCallbacks(scheduledNext);
         preparingRequest = "";
+        web.publishControlState("PAUSED", code);
         web.quiesce();
         releaseWakeLock();
         store.setPaused(true);

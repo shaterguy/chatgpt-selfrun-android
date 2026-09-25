@@ -53,7 +53,8 @@ final class SelfRunScript {
     }
 
     private static boolean validOpaqueId(String value) {
-        if (value == null || value.isEmpty() || value.length() > MAX_OPAQUE_ID_LENGTH) return false;
+        if (value == null || value.isEmpty() || value.length() > MAX_OPAQUE_ID_LENGTH
+                || "local-chatgpt".equalsIgnoreCase(value)) return false;
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')

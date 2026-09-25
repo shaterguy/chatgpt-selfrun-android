@@ -22,7 +22,9 @@ import java.util.concurrent.Executors;
  */
 final class SelfRun4DriveWebAdapter {
     private static final String SCHEMA = "selfrun-server-dispatch-v1";
+    private static final String CONTROL_SCHEMA = "selfrun-task-control-v1";
     private static final long POLL_MS = 1_000L;
+    private static final long LATE_START_GRACE_MS = 30_000L;
 
     private final Context context;
     private final SelfRun3WebAdapter.Listener listener;
@@ -39,6 +41,7 @@ final class SelfRun4DriveWebAdapter {
     private boolean preparedNotified;
     private boolean submitRequested;
     private boolean started;
+    private boolean lateStartGraceArmed;
     private long preparationAttempt;
     private long prepareStarted;
     private long prepareTimeoutMs;
@@ -46,6 +49,10 @@ final class SelfRun4DriveWebAdapter {
     private String accessToken = "";
     private String dispatchFileId = "";
     private JSONObject dispatchBody;
+    private String controlTaskId = "";
+    private String controlFileId = "";
+    private long controlEpoch;
+    private String lastControlPublishedKey = "";
 
     SelfRun4DriveWebAdapter(Context context, SelfRun3WebAdapter.Listener listener) {
         this.context = context.getApplicationContext();
@@ -53,6 +60,101 @@ final class SelfRun4DriveWebAdapter {
         this.runtimeSettings = new SelfRun3RuntimeSettings(this.context);
         this.runLog = new SelfRunRunLog(this.context);
         this.runStore = new SelfRunStore(this.context);
+    }
+
+    void syncControlState(SelfRun3Engine.State snapshot) {
+        requireMain();
+        if (snapshot == null) return;
+        String control = switch (snapshot.stage()) {
+            case WAITING_USER_INTERVENTION -> "WAITING_USER_INTERVENTION";
+            case PAUSED -> "PAUSED";
+            case STOPPED -> "STOPPED";
+            case DONE -> "DONE";
+            default -> "RUNNING";
+        };
+        publishControlState(snapshot, control, "STAGE_" + snapshot.stage().name());
+    }
+
+    void publishControlState(String control, String reason) {
+        requireMain();
+        publishControlState(state, control, reason);
+    }
+
+    private void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
+        if (snapshot == null || accessToken.isEmpty() || io.isShutdown()) return;
+        String token = accessToken;
+        try {
+            io.execute(() -> {
+                try {
+                    writeTaskControl(token, snapshot, control, reason);
+                } catch (Throwable error) {
+                    trace("V4_TASK_CONTROL_WRITE_FAILED", "state=" + control
+                            + ";error=" + error.getClass().getSimpleName());
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) { }
+    }
+
+    private static String controlKey(SelfRun3Engine.State snapshot, String control) {
+        return control + "|" + snapshot.turnId() + "|" + snapshot.requestId()
+                + "|" + snapshot.resource("conversationUrl");
+    }
+
+    private void writeTaskControl(String token, SelfRun3Engine.State snapshot,
+                                  String control, String reason) throws Exception {
+        String taskId = snapshot.taskId();
+        String parentId = snapshot.config().optString("baseFolderId");
+        if (taskId.isEmpty() || parentId.isEmpty()) return;
+        if (!taskId.equals(controlTaskId)) {
+            controlTaskId = taskId;
+            controlFileId = "";
+            controlEpoch = 0L;
+            lastControlPublishedKey = "";
+        }
+        String key = controlKey(snapshot, control);
+        if (key.equals(lastControlPublishedKey)) return;
+
+        boolean create = false;
+        if (controlFileId.isEmpty()) {
+            DriveApiClient.Metadata found = api.findTaskControlFile(token, taskId, parentId);
+            if (found == null) {
+                controlFileId = api.generateFileId(token);
+                create = true;
+            } else {
+                controlFileId = found.id;
+                JSONObject current = api.readServerDispatchFile(token, controlFileId);
+                if (!CONTROL_SCHEMA.equals(current.optString("schema"))
+                        || !taskId.equals(current.optString("task_id"))) {
+                    throw new IllegalStateException("task control content mismatch");
+                }
+                controlEpoch = Math.max(controlEpoch, current.optLong("control_epoch", 0L));
+            }
+        }
+
+        long nextEpoch = controlEpoch + 1L;
+        JSONObject body = new JSONObject()
+                .put("schema", CONTROL_SCHEMA)
+                .put("task_id", taskId)
+                .put("control_epoch", nextEpoch)
+                .put("state", control)
+                .put("turn_id", snapshot.turnId())
+                .put("request_id", snapshot.requestId())
+                .put("reason", reason == null ? "" : reason)
+                .put("conversation_url", snapshot.resource("conversationUrl"))
+                .put("updated_at_ms", System.currentTimeMillis());
+        if (create) api.createTaskControlFile(token, controlFileId, taskId, parentId, body);
+        else api.writeServerDispatchFile(token, controlFileId, body);
+
+        JSONObject readback = api.readServerDispatchFile(token, controlFileId);
+        if (!CONTROL_SCHEMA.equals(readback.optString("schema"))
+                || !taskId.equals(readback.optString("task_id"))
+                || readback.optLong("control_epoch", -1L) != nextEpoch
+                || !control.equals(readback.optString("state"))) {
+            throw new IllegalStateException("task control readback mismatch");
+        }
+        controlEpoch = nextEpoch;
+        lastControlPublishedKey = key;
+        trace("V4_TASK_CONTROL", "state=" + control + ";epoch=" + nextEpoch);
     }
 
     void prepare(SelfRun3Engine.State next) {
@@ -67,15 +169,22 @@ final class SelfRun4DriveWebAdapter {
     private void beginAttempt() {
         requireMain();
         cancelLocalAttempt(false);
-        if (state == null || state.stage() != SelfRun3Engine.Stage.READY) {
+        if (state == null) {
+            fail("SUBMISSION_STATE_INVALID");
+            return;
+        }
+        boolean recoveringExisting = state.stage() == SelfRun3Engine.Stage.DISPATCHING
+                && state.flag("sendClaimed") && state.resource("conversationUrl").isEmpty();
+        if (!recoveringExisting && state.stage() != SelfRun3Engine.Stage.READY) {
             fail("SUBMISSION_STATE_INVALID");
             return;
         }
         generation++;
         preparing = true;
-        preparedNotified = false;
-        submitRequested = false;
+        preparedNotified = recoveringExisting;
+        submitRequested = recoveringExisting;
         started = false;
+        lateStartGraceArmed = false;
         dispatchFileId = "";
         dispatchBody = null;
         prepareStarted = SystemClock.elapsedRealtime();
@@ -86,13 +195,70 @@ final class SelfRun4DriveWebAdapter {
         long attempt = ++preparationAttempt;
         int expectedGeneration = generation;
         String request = state.requestId();
-        trace("V4_SERVER_PREPARATION_WATCHDOG", "status=armed;attempt=" + attempt
-                + ";timeoutMs=" + prepareTimeoutMs);
+        trace("V4_SERVER_PREPARATION_WATCHDOG",
+                "status=" + (recoveringExisting ? "reconcile" : "armed")
+                        + ";attempt=" + attempt + ";timeoutMs=" + prepareTimeoutMs);
         main.postDelayed(() -> {
             if (!active(expectedGeneration, request) || !preparing || attempt != preparationAttempt) return;
             expireAttempt();
         }, Math.max(1L, prepareTimeoutMs));
-        authorizeAndCreate(expectedGeneration, request, attempt);
+        if (recoveringExisting) authorizeAndRecover(expectedGeneration, request);
+        else authorizeAndCreate(expectedGeneration, request, attempt);
+    }
+
+    private void authorizeAndRecover(int expectedGeneration, String request) {
+        DriveAuthorization.requestSilently(context, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) {
+                if (!active(expectedGeneration, request)) return;
+                String token = DriveAuthorization.accessToken(result);
+                if (token.isEmpty()) {
+                    fail("DRIVE_TOKEN_EMPTY");
+                    return;
+                }
+                accessToken = token;
+                recoverDispatch(expectedGeneration, request, token);
+            }
+
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                if (active(expectedGeneration, request)) fail("AUTH_REQUIRED");
+            }
+
+            @Override public void onFailure(Throwable error) {
+                if (active(expectedGeneration, request)) fail("DRIVE_AUTH_FAILED");
+            }
+        });
+    }
+
+    private void recoverDispatch(int expectedGeneration, String request, String token) {
+        SelfRun3Engine.State snapshot = state;
+        io.execute(() -> {
+            try {
+                writeTaskControl(token, snapshot, "RUNNING", "DISPATCH_RECOVERY");
+                DriveApiClient.Metadata found = api.findLatestServerDispatch(
+                        token, request, snapshot.config().optString("baseFolderId"));
+                if (found == null) throw new IllegalStateException("server dispatch not found");
+                JSONObject body = api.readServerDispatchFile(token, found.id);
+                if (!SCHEMA.equals(body.optString("schema"))
+                        || !request.equals(body.optString("request_id"))) {
+                    throw new IllegalStateException("server dispatch recovery mismatch");
+                }
+                main.post(() -> {
+                    if (!active(expectedGeneration, request)) return;
+                    dispatchFileId = found.id;
+                    dispatchBody = body;
+                    long recoveredAttempt = body.optLong("dispatch_attempt", preparationAttempt);
+                    preparationAttempt = Math.max(preparationAttempt, recoveredAttempt);
+                    trace("V4_SERVER_DISPATCH_RECOVERED",
+                            "turn=" + snapshot.turn() + ";attempt=" + recoveredAttempt
+                                    + ";file=" + found.id);
+                    handleRemote(expectedGeneration, request, body);
+                });
+            } catch (Throwable error) {
+                main.post(() -> {
+                    if (active(expectedGeneration, request)) fail("DRIVE_DISPATCH_RECOVERY_FAILED");
+                });
+            }
+        });
     }
 
     private void authorizeAndCreate(int expectedGeneration, String request, long attempt) {
@@ -122,6 +288,7 @@ final class SelfRun4DriveWebAdapter {
         SelfRun3Engine.State snapshot = state;
         io.execute(() -> {
             try {
+                writeTaskControl(token, snapshot, "RUNNING", "DISPATCH_CREATE");
                 String id = api.generateFileId(token);
                 JSONObject body = buildDispatch(snapshot, attempt);
                 JSONObject props = new JSONObject()
@@ -229,7 +396,12 @@ final class SelfRun4DriveWebAdapter {
             listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
         }
         String url = body.optString("conversation_url", "");
-        if ("STARTED".equals(serverStatus) && SelfRun3WebAdapter.trusted(url)
+        boolean conversationReady = "STARTED".equals(serverStatus)
+                || "COMPLETED".equals(serverStatus)
+                || "RECOVERY_SENDING".equals(serverStatus)
+                || "RECOVERY_SENT".equals(serverStatus)
+                || "PAGE_ERROR".equals(serverStatus);
+        if (conversationReady && SelfRun3WebAdapter.trusted(url)
                 && !SelfRunScript.conversationId(url).isEmpty()) {
             if (!started) {
                 started = true;
@@ -310,15 +482,39 @@ final class SelfRun4DriveWebAdapter {
         requireMain();
         closed = true;
         cancelLocalAttempt(true);
-        io.shutdownNow();
+        io.shutdown();
     }
 
     private void expireAttempt() {
         requireMain();
         SelfRun3Engine.State timedOut = state;
         boolean successor = SelfRun3SuccessorTransitionPolicy.armed(timedOut);
+        long elapsed = Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted);
+        if (timedOut != null && submitRequested && !started && !successor) {
+            if (!lateStartGraceArmed) {
+                lateStartGraceArmed = true;
+                long attempt = preparationAttempt;
+                int expectedGeneration = generation;
+                String request = timedOut.requestId();
+                trace("V4_SERVER_PREPARATION_WATCHDOG",
+                        "status=late-start-grace;attempt=" + attempt
+                                + ";elapsedMs=" + elapsed + ";graceMs=" + LATE_START_GRACE_MS);
+                main.postDelayed(() -> {
+                    if (!active(expectedGeneration, request) || !preparing
+                            || attempt != preparationAttempt || started) return;
+                    expireAttempt();
+                }, LATE_START_GRACE_MS);
+                return;
+            }
+            trace("V4_SERVER_PREPARATION_WATCHDOG",
+                    "status=uncertain-send-reconcile;attempt=" + preparationAttempt
+                            + ";elapsedMs=" + elapsed);
+            listener.onFailure(timedOut.taskId(), timedOut.turnId(), timedOut.requestId(),
+                    "WEB_START_CONFIRMATION_TIMEOUT");
+            return;
+        }
         trace("V4_SERVER_PREPARATION_WATCHDOG", "status=expired;attempt=" + preparationAttempt
-                + ";elapsedMs=" + Math.max(0L, SystemClock.elapsedRealtime() - prepareStarted));
+                + ";elapsedMs=" + elapsed);
         cancelLocalAttempt(true);
         if (timedOut != null) {
             listener.onFailure(timedOut.taskId(), timedOut.turnId(), timedOut.requestId(),

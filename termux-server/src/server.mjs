@@ -107,9 +107,15 @@ server.listen(config.port, config.host, () => {
   }));
 });
 
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  driveWatcher.stop();
+  await driveTransport.close().catch(() => {});
+  server.close(() => process.exit(0));
+}
+
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => {
-    driveWatcher.stop();
-    server.close(() => process.exit(0));
-  });
+  process.on(signal, () => { void shutdown(); });
 }

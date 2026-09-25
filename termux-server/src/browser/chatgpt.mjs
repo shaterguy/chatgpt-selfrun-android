@@ -14,9 +14,26 @@ async function evaluate(session, expression) {
     awaitPromise: true,
   });
   if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text || 'Browser script evaluation failed');
+    const detail = result.exceptionDetails.exception?.description
+      || result.exceptionDetails.exception?.value
+      || result.exceptionDetails.text
+      || 'Browser script evaluation failed';
+    throw new Error(String(detail));
   }
   return result.result?.value;
+}
+
+function conversationId(url) {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const index = parts.indexOf('c');
+    const raw = index >= 0 && index + 1 < parts.length ? parts[index + 1] : '';
+    const id = decodeURIComponent(raw);
+    if (!id || id.toLowerCase().startsWith('local-chatgpt')) return '';
+    return /^[A-Za-z0-9_-]{1,160}$/.test(id) ? id : '';
+  } catch {
+    return '';
+  }
 }
 
 function probeExpression() {
@@ -29,19 +46,40 @@ function probeExpression() {
     let composer=null;
     for(const selector of selectors){composer=[...document.querySelectorAll(selector)].find(visible);if(composer)break;}
     const stop=buttons.some(b=>b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
-    const assistants=[...document.querySelectorAll('[data-message-author-role="assistant"]')];
+    const paused=buttons.some(b=>/resume|continue generating|재개|계속 생성/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')+' '+(b.innerText||'')));
+    const assistants=[...document.querySelectorAll('[data-message-author-role="assistant"],[data-chatgpt-search-unit-key$=":assistant"],[data-content-search-unit-key$=":assistant"]')];
     const last=assistants.length?assistants[assistants.length-1]:null;
+    const users=[...document.querySelectorAll('[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"],[data-content-search-unit-key$=":user"]')];
+    const lastUser=users.length?users[users.length-1]:null;
+    const messageId=e=>{
+      for(let node=e,depth=0;node&&depth<6;node=node.parentElement,depth+=1){
+        for(const name of ['data-message-id','data-chatgpt-search-unit-key','data-content-search-unit-key']){
+          const value=String(node.getAttribute?.(name)||'').trim();
+          if(value)return name+':'+value;
+        }
+        const testid=String(node.getAttribute?.('data-testid')||'').trim();
+        if(/conversation-turn|message/i.test(testid))return 'data-testid:'+testid;
+        const id=String(node.id||'').trim();
+        if(/conversation|message|turn/i.test(id))return 'id:'+id;
+      }
+      return null;
+    };
     const body=String(document.body?.innerText||'');
     const errorMatch=body.match(/something went wrong|error generating|문제가 발생|오류가 발생/i);
     return {
       url:location.href,
       title:document.title,
       readyState:document.readyState,
-      loginPage:/\/auth(?:\/|$)|\/login(?:\/|$)/i.test(location.pathname),
+      loginPage:(()=>{const p=String(location.pathname||'').toLowerCase();return p==='/auth'||p.startsWith('/auth/')||p==='/login'||p.startsWith('/login/');})(),
       composer:!!composer,
       streaming:stop,
+      paused,
       assistantCount:assistants.length,
       assistantTextLength:String(last?.innerText||last?.textContent||'').length,
+      assistantMessageId:messageId(last),
+      userCount:users.length,
+      userTextLength:String(lastUser?.innerText||lastUser?.textContent||'').length,
+      userMessageId:messageId(lastUser),
       bodyTextLength:body.length,
       errorText:errorMatch?errorMatch[0]:null
     };
@@ -92,6 +130,24 @@ function inputExpression(prompt) {
   })()`;
 }
 
+function sendReadyExpression() {
+  return `(() => {
+    const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
+    const selectors=['textarea#prompt-textarea','textarea[data-testid="prompt-textarea"]',
+      'div#prompt-textarea[contenteditable="true"]','main form [contenteditable="true"][data-lexical-editor="true"]',
+      'main form [contenteditable="true"]'];
+    let composer=null;
+    for(const selector of selectors){composer=[...document.querySelectorAll(selector)].find(visible);if(composer)break;}
+    if(!composer)return {ready:false,status:'NO_COMPOSER'};
+    const scope=composer.closest('form')||document;
+    const send=[...scope.querySelectorAll('button')].filter(visible)
+      .find(b=>b.dataset.testid==='send-button'||b.dataset.testid==='composer-submit-button'||
+        /send|보내기|submit/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
+    return {ready:!!send&&!send.disabled&&send.getAttribute('aria-disabled')!=='true',
+      status:send?'SEND_FOUND':'NO_SEND'};
+  })()`;
+}
+
 function submitExpression() {
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
@@ -115,7 +171,9 @@ function isConversationRequest(url, method) {
   if (String(method || '').toUpperCase() !== 'POST') return false;
   try {
     const path = new URL(url).pathname.toLowerCase().replace(/\/+$/, '');
-    return path === '/backend-api/conversation' || path === '/backend-api/f/conversation';
+    return path === '/backend-api/conversation'
+      || path === '/backend-api/f/conversation'
+      || path === '/backend-api/conversation/init';
   } catch {
     return false;
   }
@@ -128,9 +186,18 @@ function applyProfileOperations(body, operations = []) {
     const path = String(operation?.path || '');
     const op = String(operation?.op || '').toUpperCase();
     if (!allowed.has(path)) throw new Error('Profile operation is not allowlisted');
-    if (op === 'SET') out[path] = String(operation.value ?? '');
-    else if (op === 'REMOVE') delete out[path];
-    else throw new Error('Unknown profile operation');
+    if (op === 'SET') {
+      const value = String(operation.value ?? '');
+      out[path] = value;
+      if (path === 'model' && Object.prototype.hasOwnProperty.call(out, 'requested_default_model')) {
+        out.requested_default_model = value;
+      }
+    } else if (op === 'REMOVE') {
+      delete out[path];
+      if (path === 'model' && Object.prototype.hasOwnProperty.call(out, 'requested_default_model')) {
+        delete out.requested_default_model;
+      }
+    } else throw new Error('Unknown profile operation');
   }
   return out;
 }
@@ -146,7 +213,13 @@ export class ChatGptBrowser {
     let last = null;
     while (Date.now() - started < timeoutMs) {
       if (signal?.aborted) throw signal.reason || new Error('aborted');
-      last = await evaluate(session, probeExpression());
+      try {
+        last = await evaluate(session, probeExpression());
+      } catch (error) {
+        last = { probeError: String(error?.message || error) };
+        await delay(250, signal);
+        continue;
+      }
       if (predicate(last)) return last;
       await delay(250, signal);
     }
@@ -204,6 +277,49 @@ export class ChatGptBrowser {
         baseline: {
           assistantCount: before.assistantCount || 0,
           assistantTextLength: before.assistantTextLength || 0,
+          userCount: before.userCount || 0,
+          userTextLength: before.userTextLength || 0,
+        },
+      };
+    } catch (error) {
+      session.close();
+      await this.chromium.closeTarget(target.id);
+      throw error;
+    }
+  }
+
+  async resume({ conversationUrl, signal }) {
+    const expectedId = conversationId(conversationUrl);
+    if (!expectedId) throw new Error('canonical conversation URL unavailable for resume');
+
+    const target = await this.chromium.createTarget(conversationUrl);
+    const session = await this.chromium.connectTarget(target);
+    await session.call('Page.enable');
+    await session.call('Runtime.enable');
+    await session.call('Network.enable');
+
+    try {
+      const probe = await this.#waitFor(session, (p) => p.loginPage
+        || ((p.readyState === 'complete' || p.readyState === 'interactive')
+          && conversationId(p.url) === expectedId
+          && p.composer), {
+        timeoutMs: this.config.navigationTimeoutMs,
+        signal,
+        label: 'existing conversation',
+      });
+      if (probe.loginPage) {
+        const error = new Error('ChatGPT browser profile requires sign-in');
+        error.code = 'AUTH_REQUIRED';
+        throw error;
+      }
+      return {
+        target,
+        session,
+        baseline: {
+          assistantCount: Math.max(0, Number(probe.assistantCount || 0) - 1),
+          assistantTextLength: 0,
+          userCount: probe.userCount || 0,
+          userTextLength: probe.userTextLength || 0,
         },
       };
     } catch (error) {
@@ -215,8 +331,25 @@ export class ChatGptBrowser {
 
   async #submitWithProfile({ session, profileOperations, signal }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
+
+    const sendReadyStarted = Date.now();
+    let sendReady = null;
+    while (Date.now() - sendReadyStarted < 5000) {
+      if (signal?.aborted) throw signal.reason || new Error('aborted');
+      sendReady = await evaluate(session, sendReadyExpression());
+      if (sendReady?.ready) break;
+      await delay(150, signal);
+    }
+    if (!sendReady?.ready) {
+      throw new Error(`Composer send control not ready: ${sendReady?.status || 'unknown'}`);
+    }
+
     await session.call('Fetch.enable', {
-      patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+      patterns: [
+        { urlPattern: 'https://chatgpt.com/backend-api/conversation', requestStage: 'Request' },
+        { urlPattern: 'https://chatgpt.com/backend-api/f/conversation', requestStage: 'Request' },
+        { urlPattern: 'https://chatgpt.com/backend-api/conversation/init', requestStage: 'Request' },
+      ],
     });
 
     let settled = false;
@@ -273,7 +406,7 @@ export class ChatGptBrowser {
         canonical.finally(() => clearTimeout(timer)).catch(() => {});
       });
       await Promise.race([canonical, timeout]);
-      return await this.#waitFor(session, (p) => /\/c\//.test(new URL(p.url).pathname), {
+      return await this.#waitFor(session, (p) => !!conversationId(p.url), {
         timeoutMs: this.config.navigationTimeoutMs,
         signal,
         label: 'canonical conversation URL',
@@ -288,13 +421,43 @@ export class ChatGptBrowser {
     return this.#submitWithProfile({ session, profileOperations, signal });
   }
 
+  async livenessSnapshot({ session, signal }) {
+    if (signal?.aborted) throw signal.reason || new Error('aborted');
+    return evaluate(session, probeExpression());
+  }
+
   async sendContinuation({ session, prompt, profileOperations, signal }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
+
+    const beforeStage = await evaluate(session, probeExpression());
+    const expectedId = conversationId(beforeStage.url);
+    if (!expectedId) throw new Error('existing conversation URL unavailable');
+
     const staged = await evaluate(session, inputExpression(prompt));
     if (staged?.status !== 'READY') {
       throw new Error(`Continuation staging failed: ${staged?.status || 'unknown'}`);
     }
-    return this.#submitWithProfile({ session, profileOperations, signal });
+
+    const beforeSubmit = await evaluate(session, probeExpression());
+    const sent = await evaluate(session, submitExpression());
+    if (sent?.status !== 'SUBMITTED') {
+      throw new Error(`Continuation send failed: ${sent?.status || 'unknown'}`);
+    }
+
+    const accepted = await this.#waitFor(session, (p) => {
+      if (conversationId(p.url) !== expectedId) return false;
+      return p.userCount > beforeSubmit.userCount
+        || p.userTextLength > beforeSubmit.userTextLength
+        || (!!p.userMessageId && p.userMessageId !== beforeSubmit.userMessageId)
+        || p.streaming;
+    }, {
+      timeoutMs: 10000,
+      signal,
+      label: 'continuation acceptance',
+    });
+
+    void profileOperations;
+    return accepted;
   }
 
   async dispatch({ projectUrl, prompt, profileOperations = [], signal, onTransition }) {
@@ -321,20 +484,39 @@ export class ChatGptBrowser {
     }
   }
 
-  async monitor({ session, baseline, signal, onActivity }) {
-    let previous = { ...baseline, streaming: false, url: null };
+  async monitor({ session, baseline, signal, onActivity, livenessGate }) {
+    let previous = { ...baseline, streaming: false, paused: false, url: null };
     let lastActivityAt = Date.now();
     let stalled = false;
     let lastReportedStatus = null;
+    let lastGateToken = null;
 
     while (!signal?.aborted) {
       const probe = await evaluate(session, probeExpression());
+      const gate = await livenessGate?.() || {};
+      const gateState = String(gate.state || 'UNKNOWN');
+      const gateEpoch = Number(gate.epoch || 0);
+      const gateToken = gateState + ':' + gateEpoch;
+      if (gateToken !== lastGateToken) {
+        lastGateToken = gateToken;
+        lastActivityAt = Date.now();
+        stalled = false;
+      }
+      const livenessSuspended = gateState !== 'RUNNING';
+      if (livenessSuspended) {
+        lastActivityAt = Date.now();
+        stalled = false;
+      }
       const changed =
         probe.url !== previous.url ||
         probe.streaming !== previous.streaming ||
+        probe.paused !== previous.paused ||
         probe.assistantCount !== previous.assistantCount ||
         probe.assistantTextLength !== previous.assistantTextLength ||
-        probe.bodyTextLength !== previous.bodyTextLength;
+        probe.assistantMessageId !== previous.assistantMessageId ||
+        probe.userCount !== previous.userCount ||
+        probe.userTextLength !== previous.userTextLength ||
+        probe.userMessageId !== previous.userMessageId;
 
       if (changed) {
         lastActivityAt = Date.now();
@@ -344,8 +526,9 @@ export class ChatGptBrowser {
       const hasResponse =
         probe.assistantCount > baseline.assistantCount ||
         probe.assistantTextLength > baseline.assistantTextLength;
-      const completed = hasResponse && !probe.streaming;
-      const isStalled = !completed && Date.now() - lastActivityAt >= this.config.stallAfterMs;
+      const completed = hasResponse && !probe.streaming && !probe.paused;
+      const isStalled = !livenessSuspended && !completed
+        && Date.now() - lastActivityAt >= this.config.stallAfterMs;
       if (isStalled) stalled = true;
 
       let status = 'RUNNING';
@@ -354,15 +537,24 @@ export class ChatGptBrowser {
       else if (stalled) status = 'STALLED';
 
       if (changed || status !== lastReportedStatus || completed || probe.errorText) {
-        await onActivity?.({
+        const action = await onActivity?.({
           status,
           pageUrl: probe.url,
           streaming: probe.streaming,
+          paused: probe.paused,
           assistantCount: probe.assistantCount,
           assistantTextLength: probe.assistantTextLength,
+          assistantMessageId: probe.assistantMessageId,
+          userCount: probe.userCount,
+          userTextLength: probe.userTextLength,
+          userMessageId: probe.userMessageId,
           lastActivityAt: new Date(lastActivityAt).toISOString(),
           pageError: probe.errorText,
         });
+        if (action?.resetLiveness) {
+          lastActivityAt = Date.now();
+          stalled = false;
+        }
         lastReportedStatus = status;
       }
 

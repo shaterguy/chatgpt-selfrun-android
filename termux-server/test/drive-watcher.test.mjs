@@ -55,6 +55,105 @@ test('watcher routes Drive document states without direct app-server networking'
   assert.equal(calls.length, 3);
 });
 
+test('watcher routes Task CONTROL documents to the controller', async () => {
+  const calls = [];
+  const body = {
+    schema: 'selfrun-task-control-v1',
+    task_id: 'SR-TEST',
+    control_epoch: 4,
+    state: 'PAUSED',
+    turn_id: 'SR-TEST:turn:1',
+    request_id: 'SR-TEST:turn:1-request',
+    updated_at_ms: Date.now(),
+  };
+  const transport = {
+    list: async () => [{
+      path: '__SELFRUN_CONTROL__SR-TEST.json',
+      modTime: '2026-09-25T00:00:00Z',
+      size: 200,
+    }],
+    read: async () => structuredClone(body),
+  };
+  const controller = {
+    active: null,
+    control: async (path, value) => calls.push([path, value.state, value.control_epoch]),
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000 },
+  });
+
+  await watcher.scanOnce();
+  assert.deepEqual(calls, [['__SELFRUN_CONTROL__SR-TEST.json', 'PAUSED', 4]]);
+  await watcher.scanOnce();
+  assert.equal(calls.length, 1);
+});
+
+test('watcher resumes a recent active conversation after restart', async () => {
+  const calls = [];
+  const now = Date.now();
+  const transport = {
+    list: async () => [{ path: 'started.json', modTime: '2026-09-25T00:00:00Z', size: 10 }],
+    read: async () => ({
+      schema: 'selfrun-server-dispatch-v1',
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      created_at_ms: now - 60 * 60 * 1000,
+      started_at_ms: now - 60 * 60 * 1000,
+      updated_at_ms: now - 60 * 60 * 1000,
+    }),
+  };
+  const controller = {
+    prepare: async () => calls.push('prepare'),
+    send: async () => calls.push('send'),
+    resume: async () => calls.push('resume'),
+    cancel: async () => calls.push('cancel'),
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000, dispatchRecoveryMs: 7200000 },
+  });
+
+  await watcher.scanOnce();
+  assert.deepEqual(calls, ['resume']);
+});
+
+test('watcher retries the same dispatch after a transient controller failure', async () => {
+  let resumeCalls = 0;
+  const now = Date.now();
+  const transport = {
+    list: async () => [{ path: 'retry.json', modTime: '2026-09-25T00:00:00Z', size: 10 }],
+    read: async () => ({
+      schema: 'selfrun-server-dispatch-v1',
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      created_at_ms: now,
+      updated_at_ms: now,
+    }),
+  };
+  const controller = {
+    active: null,
+    prepare: async () => {},
+    send: async () => {},
+    cancel: async () => {},
+    resume: async () => {
+      resumeCalls += 1;
+      if (resumeCalls === 1) throw new Error('temporary');
+    },
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000, dispatchRecoveryMs: 7200000 },
+  });
+
+  await assert.rejects(watcher.scanOnce(), /temporary/);
+  await watcher.scanOnce();
+  assert.equal(resumeCalls, 2);
+});
+
 test('watcher ignores stale unprocessed dispatch after restart', async () => {
   const calls = [];
   const transport = {

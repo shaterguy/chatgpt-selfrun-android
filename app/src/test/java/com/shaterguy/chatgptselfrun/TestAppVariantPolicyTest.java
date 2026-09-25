@@ -13,8 +13,8 @@ public final class TestAppVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        assertTrue(gradle.matches("(?s).*selfRunDriveVersionCode = 30[0-9]+.*"));
-        assertTrue(gradle.matches("(?s).*selfRunDriveVersionName = '3\\.[0-9]+\\.[0-9]+(?:-(?:dev|rc)[0-9]+)?'.*"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 4000002"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.0-dev2'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
@@ -37,6 +37,18 @@ public final class TestAppVariantPolicyTest {
         assertFalse(candidate.contains("SelfRun-Drive-DEV-"));
         assertTrue(candidate.contains("GATEWAY_TEST - command-bridge tests and typecheck"));
         assertTrue(candidate.contains("-PselfRunServerChecks=true"));
+    }
+
+    @Test public void v4DevWorkflowBuildsAndSignsOnlySeparateTestPackage() throws Exception {
+        String workflow = read(".github/workflows/build-selfrun-v4-dev.yml", "../.github/workflows/build-selfrun-v4-dev.yml");
+        assertTrue(workflow.contains("      - 'selfrun-v4/v4.0.0-dev2'"));
+        assertTrue(workflow.contains(":app:assembleQaApp"));
+        assertTrue(workflow.contains("tools/sign_test.sh"));
+        assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.test"));
+        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.0-dev2.apk"));
+        assertFalse(workflow.contains(":app:assembleRelease"));
+        assertFalse(workflow.contains("tools/sign_release.sh"));
+        assertFalse(workflow.contains("formal-aligned.apk"));
     }
 
     @Test public void serverProductCapabilityIsIndependentFromServerOnlyTestSelection() throws Exception {

@@ -172,6 +172,41 @@ final class DriveApiClient {
         return match;
     }
 
+    Metadata findLatestServerDispatch(String accessToken, String requestId, String parentId) throws Exception {
+        requireParent(parentId);
+        if (requestId == null || !requestId.matches("[A-Za-z0-9._:-]{1,240}")) {
+            throw new IllegalArgumentException("safe dispatch request id required");
+        }
+        String q = "'" + parentId + "' in parents and trashed = false and mimeType = '" + MIME_JSON + "'"
+                + " and appProperties has { key='selfrun_kind' and value='server_dispatch' }"
+                + " and appProperties has { key='request_id' and value='" + requestId + "' }";
+        String fields = "files(" + FILE_FIELDS + ")";
+        String endpoint = "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true"
+                + "&q=" + URLEncoder.encode(q, StandardCharsets.UTF_8.name())
+                + "&fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8.name()) + "&pageSize=100";
+        JSONArray files = request("GET", endpoint, accessToken, null, false).optJSONArray("files");
+        Metadata match = null;
+        int bestAttempt = -1;
+        if (files == null) return null;
+        for (int i = 0; i < files.length(); i++) {
+            JSONObject raw = files.optJSONObject(i);
+            if (raw == null) continue;
+            Metadata candidate = new Metadata(raw);
+            if (!MIME_JSON.equals(candidate.mimeType) || !parentId.equals(candidate.parentId)
+                    || candidate.trashed
+                    || !"server_dispatch".equals(candidate.appProperties.optString("selfrun_kind"))
+                    || !requestId.equals(candidate.appProperties.optString("request_id"))) continue;
+            int attempt;
+            try { attempt = Integer.parseInt(candidate.appProperties.optString("dispatch_attempt", "0")); }
+            catch (NumberFormatException invalid) { attempt = 0; }
+            if (match == null || attempt > bestAttempt) {
+                match = candidate;
+                bestAttempt = attempt;
+            }
+        }
+        return match;
+    }
+
     String getStartPageToken(String accessToken) throws Exception {
         JSONObject json = request("GET",
                 "https://www.googleapis.com/drive/v3/changes/startPageToken?supportsAllDrives=true",
@@ -373,6 +408,33 @@ final class DriveApiClient {
         }
     }
 
+    Metadata findTaskControlFile(String accessToken, String taskId, String parentId) throws Exception {
+        requireParent(parentId);
+        if (taskId == null || !taskId.matches("[A-Za-z0-9._:-]{1,240}")) {
+            throw new IllegalArgumentException("safe task control id required");
+        }
+        String name = "__SELFRUN_CONTROL__" + taskId + ".json";
+        String q = "'" + parentId + "' in parents and trashed = false and mimeType = '" + MIME_JSON + "'"
+                + " and name='" + name + "'"
+                + " and appProperties has { key='selfrun_kind' and value='task_control' }"
+                + " and appProperties has { key='task_id' and value='" + taskId + "' }";
+        String fields = "files(" + FILE_FIELDS + ")";
+        String endpoint = "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true"
+                + "&q=" + URLEncoder.encode(q, StandardCharsets.UTF_8.name())
+                + "&fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8.name()) + "&pageSize=2";
+        JSONArray files = request("GET", endpoint, accessToken, null, false).optJSONArray("files");
+        if (files == null || files.length() == 0) return null;
+        if (files.length() != 1) throw new IllegalStateException("multiple task control files found");
+        Metadata match = new Metadata(files.getJSONObject(0));
+        if (!name.equals(match.name) || !MIME_JSON.equals(match.mimeType)
+                || !parentId.equals(match.parentId) || match.trashed
+                || !"task_control".equals(match.appProperties.optString("selfrun_kind"))
+                || !taskId.equals(match.appProperties.optString("task_id"))) {
+            throw new IllegalStateException("task control metadata mismatch");
+        }
+        return match;
+    }
+
     Metadata createServerDispatchFile(String accessToken, String fileId, String name,
                                       String parentId, JSONObject appProperties,
                                       JSONObject content) throws Exception {
@@ -403,6 +465,43 @@ final class DriveApiClient {
         if (!fileId.equals(created.id) || !MIME_JSON.equals(created.mimeType)
                 || !parentId.equals(created.parentId) || created.trashed) {
             throw new IllegalStateException("server dispatch metadata mismatch");
+        }
+        writeServerDispatchFile(accessToken, fileId, content);
+        return getMetadata(accessToken, fileId);
+    }
+
+    Metadata createTaskControlFile(String accessToken, String fileId, String taskId,
+                                   String parentId, JSONObject content) throws Exception {
+        requireFileId(fileId);
+        requireParent(parentId);
+        if (taskId == null || !taskId.matches("[A-Za-z0-9._:-]{1,240}")) {
+            throw new IllegalArgumentException("safe task control id required");
+        }
+        String name = "__SELFRUN_CONTROL__" + taskId + ".json";
+        JSONObject metadata = new JSONObject()
+                .put("id", fileId)
+                .put("name", name)
+                .put("mimeType", MIME_JSON)
+                .put("parents", new JSONArray().put(parentId))
+                .put("appProperties", new JSONObject()
+                        .put("job_id", taskId)
+                        .put("task_id", taskId)
+                        .put("selfrun_kind", "task_control"));
+        Metadata created;
+        try {
+            created = create(accessToken, metadata, false);
+        } catch (Throwable createFailure) {
+            try {
+                created = getMetadata(accessToken, fileId);
+            } catch (Throwable missing) {
+                createFailure.addSuppressed(missing);
+                throw createFailure;
+            }
+        }
+        if (!fileId.equals(created.id) || !name.equals(created.name)
+                || !MIME_JSON.equals(created.mimeType) || !parentId.equals(created.parentId)
+                || created.trashed) {
+            throw new IllegalStateException("task control metadata mismatch");
         }
         writeServerDispatchFile(accessToken, fileId, content);
         return getMetadata(accessToken, fileId);

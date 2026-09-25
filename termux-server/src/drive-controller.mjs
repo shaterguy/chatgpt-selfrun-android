@@ -1,4 +1,9 @@
 const DISPATCH_SCHEMA = 'selfrun-server-dispatch-v1';
+const CONTROL_SCHEMA = 'selfrun-task-control-v1';
+const CONTROL_STATES = new Set([
+  'RUNNING', 'WAITING_USER_INTERVENTION', 'PAUSED', 'STOPPED',
+  'RESUME_REQUESTED', 'RESUME_STOPPED_REQUESTED', 'DONE',
+]);
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -16,12 +21,28 @@ function validateDispatch(body) {
   return body;
 }
 
+function validateControl(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('invalid control body');
+  if (body.schema !== CONTROL_SCHEMA) throw new Error('unsupported control schema');
+  const taskId = clean(body.task_id);
+  const state = clean(body.state);
+  const epoch = Number(body.control_epoch);
+  if (!taskId) throw new Error('control task_id required');
+  if (!CONTROL_STATES.has(state)) throw new Error('control state invalid');
+  if (!Number.isSafeInteger(epoch) || epoch < 1) throw new Error('control epoch invalid');
+  return { ...body, task_id: taskId, state, control_epoch: epoch };
+}
+
 function canonicalConversationUrl(url) {
   try {
     const parsed = new URL(url);
-    const match = parsed.pathname.match(/\/c\/([A-Za-z0-9-]+)/);
-    if (!match) return '';
-    return `https://chatgpt.com/c/${match[1]}`;
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const index = parts.indexOf('c');
+    const raw = index >= 0 && index + 1 < parts.length ? parts[index + 1] : '';
+    const id = decodeURIComponent(raw);
+    if (!id || id.toLowerCase().startsWith('local-chatgpt')) return '';
+    if (!/^[A-Za-z0-9_-]{1,160}$/.test(id)) return '';
+    return `https://chatgpt.com/c/${id}`;
   } catch {
     return '';
   }
@@ -33,12 +54,46 @@ export class DriveDispatchController {
     this.stateStore = stateStore;
     this.config = config;
     this.active = null;
+    this.controls = new Map();
+  }
+
+  async control(path, rawBody) {
+    const control = validateControl(rawBody);
+    const previous = this.controls.get(control.task_id);
+    if (previous && control.control_epoch <= previous.control_epoch) return;
+    this.controls.set(control.task_id, { ...control, path });
+
+    const active = this.active;
+    if (!active || active.identity.taskId !== control.task_id) return;
+    active.controlState = control.state;
+    active.controlEpoch = control.control_epoch;
+    active.controlUpdatedAtMs = Number(control.updated_at_ms || Date.now());
+    await this.stateStore.patchIfCurrent(
+      active.generation,
+      this.stateStore.snapshot().lastSignalId,
+      {
+        status: `CONTROL_${control.state}`,
+        lastActivityAt: new Date().toISOString(),
+        lastError: null,
+      },
+      'TASK_CONTROL_UPDATED',
+    );
+
+    if (control.state === 'STOPPED' || control.state === 'DONE') {
+      await this.#closeActive(active);
+    }
   }
 
   async prepare(path, rawBody, transport) {
     const body = validateDispatch(rawBody);
     if (clean(body.client_status) !== 'CREATE_REQUESTED') return;
-    if (this.active?.path === path && ['READY_TO_SUBMIT', 'STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
+    if (this.active?.path === path
+        && ['READY_TO_SUBMIT', 'STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
+      if (clean(body.server_status) !== clean(this.active.body?.server_status)
+          || this.active.publishPending) {
+        await transport.write(path, this.active.body);
+        this.active.publishPending = false;
+      }
       return;
     }
 
@@ -80,6 +135,7 @@ export class DriveDispatchController {
       });
       if (abortController.signal.aborted) throw abortController.signal.reason || new Error('superseded');
 
+      const control = this.controls.get(identity.taskId);
       this.active = {
         path,
         body: { ...body },
@@ -92,6 +148,10 @@ export class DriveDispatchController {
         serverStatus: 'READY_TO_SUBMIT',
         recoveryCount: 0,
         recovering: false,
+        publishPending: false,
+        controlState: clean(control?.state) || 'UNKNOWN',
+        controlEpoch: Number(control?.control_epoch || 0),
+        controlUpdatedAtMs: Number(control?.updated_at_ms || 0),
       };
 
       const next = {
@@ -102,14 +162,18 @@ export class DriveDispatchController {
         server_error: '',
       };
       this.active.body = next;
-      await transport.write(path, next);
       await this.stateStore.patchIfCurrent(generation, this.stateStore.snapshot().lastSignalId, {
         status: 'READY_TO_SUBMIT',
         activeTargetId: prepared.target.id,
         lastActivityAt: new Date().toISOString(),
       }, 'DRIVE_DISPATCH_READY');
+      await transport.write(path, next);
     } catch (error) {
       if (abortController.signal.aborted) return;
+      if (this.active?.path === path && this.active.serverStatus === 'READY_TO_SUBMIT') {
+        this.active.publishPending = true;
+        throw error;
+      }
       const next = {
         ...body,
         server_status: 'ERROR',
@@ -125,6 +189,126 @@ export class DriveDispatchController {
     }
   }
 
+  async resume(path, rawBody, transport) {
+    const body = validateDispatch(rawBody);
+    if (clean(body.client_status) !== 'SEND_REQUESTED') return;
+    const conversationUrl = canonicalConversationUrl(body.conversation_url);
+    if (!conversationUrl) {
+      await transport.write(path, {
+        ...body,
+        server_status: 'ERROR',
+        server_error: 'canonical conversation URL unavailable for resume',
+        updated_at_ms: Date.now(),
+      });
+      return;
+    }
+    if (this.active?.path === path
+        && ['STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
+      if (clean(body.server_status) !== clean(this.active.body?.server_status)
+          || canonicalConversationUrl(body.conversation_url)
+            !== canonicalConversationUrl(this.active.body?.conversation_url)
+          || this.active.publishPending) {
+        await transport.write(path, this.active.body);
+        this.active.publishPending = false;
+      }
+      return;
+    }
+
+    await this.#supersede(path, transport);
+    const generation = this.stateStore.snapshot().generation + 1;
+    const abortController = new AbortController();
+    const identity = {
+      taskId: body.task_id,
+      turnId: body.turn_id,
+      requestId: body.request_id,
+      attempt: Number(body.dispatch_attempt),
+    };
+    const signalId = `${identity.requestId}:attempt:${identity.attempt}`;
+
+    await this.stateStore.patch({
+      generation,
+      status: 'DRIVE_RESUMING',
+      activeSignal: {
+        signalId,
+        type: 'DRIVE_DISPATCH',
+        envelope: {
+          TASK_ID: identity.taskId,
+          TURN_ID: identity.turnId,
+          REQUEST_ID: identity.requestId,
+        },
+      },
+      activeTargetId: null,
+      conversationUrl,
+      acceptedAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      lastSignalId: signalId,
+      lastError: null,
+    }, 'DRIVE_DISPATCH_RESUME');
+
+    try {
+      const resumed = await this.browser.resume({
+        conversationUrl,
+        signal: abortController.signal,
+      });
+      if (abortController.signal.aborted) {
+        throw abortController.signal.reason || new Error('superseded');
+      }
+      const control = this.controls.get(identity.taskId);
+      this.active = {
+        path,
+        body: { ...body },
+        identity,
+        generation,
+        abortController,
+        target: resumed.target,
+        session: resumed.session,
+        baseline: resumed.baseline,
+        serverStatus: 'STARTED',
+        recoveryCount: Math.max(0, Number(body.recovery_count || 0)),
+        recovering: false,
+        publishPending: false,
+        controlState: clean(control?.state) || 'UNKNOWN',
+        controlEpoch: Number(control?.control_epoch || 0),
+        controlUpdatedAtMs: Number(control?.updated_at_ms || 0),
+      };
+      this.active.body = {
+        ...body,
+        server_status: 'STARTED',
+        conversation_url: conversationUrl,
+        server_generation: generation,
+        resumed_at_ms: Date.now(),
+        server_error: '',
+      };
+      await this.stateStore.patchIfCurrent(generation, signalId, {
+        status: 'RUNNING',
+        activeTargetId: resumed.target.id,
+        conversationUrl,
+        lastActivityAt: new Date().toISOString(),
+        lastError: null,
+      }, 'DRIVE_DISPATCH_RESUMED');
+      void this.#monitor(this.active, transport);
+      await transport.write(path, this.active.body);
+    } catch (error) {
+      if (abortController.signal.aborted) return;
+      if (this.active?.path === path
+          && ['STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
+        this.active.publishPending = true;
+        throw error;
+      }
+      const next = {
+        ...body,
+        server_status: 'ERROR',
+        server_error: String(error?.message || error).slice(0, 500),
+        updated_at_ms: Date.now(),
+      };
+      await transport.write(path, next).catch(() => {});
+      await this.stateStore.patchIfCurrent(generation, signalId, {
+        status: error?.code === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'ERROR',
+        lastError: next.server_error,
+      }, 'DRIVE_DISPATCH_RESUME_ERROR');
+    }
+  }
+
   async send(path, rawBody, transport) {
     const body = validateDispatch(rawBody);
     const active = this.active;
@@ -137,7 +321,16 @@ export class DriveDispatchController {
       });
       return;
     }
-    if (active.serverStatus === 'STARTED' || active.serverStatus === 'COMPLETED') return;
+    if (active.serverStatus === 'STARTED' || active.serverStatus === 'COMPLETED') {
+      if (clean(body.server_status) !== clean(active.body?.server_status)
+          || canonicalConversationUrl(body.conversation_url)
+            !== canonicalConversationUrl(active.body?.conversation_url)
+          || active.publishPending) {
+        await transport.write(path, active.body);
+        active.publishPending = false;
+      }
+      return;
+    }
     if (clean(body.client_status) !== 'SEND_REQUESTED') return;
 
     try {
@@ -158,7 +351,6 @@ export class DriveDispatchController {
         started_at_ms: Date.now(),
         server_error: '',
       };
-      await transport.write(path, active.body);
       await this.stateStore.patchIfCurrent(
         active.generation,
         this.stateStore.snapshot().lastSignalId,
@@ -171,8 +363,13 @@ export class DriveDispatchController {
         'DRIVE_DISPATCH_STARTED',
       );
       void this.#monitor(active, transport);
+      await transport.write(path, active.body);
     } catch (error) {
       if (active.abortController.signal.aborted) return;
+      if (active.serverStatus === 'STARTED' || active.serverStatus === 'COMPLETED') {
+        active.publishPending = true;
+        throw error;
+      }
       active.serverStatus = 'ERROR';
       active.body = {
         ...body,
@@ -204,12 +401,51 @@ export class DriveDispatchController {
     }
   }
 
+  async #resultCommitState(active, transport) {
+    const documentId = clean(active?.body?.result_document_id);
+    if (!documentId) return 'UNAVAILABLE';
+    try {
+      const raw = await transport.readGoogleDocText(documentId);
+      const text = String(raw || '').replace(/^\uFEFF/, '').trim();
+      if (!text) return 'UNAVAILABLE';
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed?.committed === true) return 'COMMITTED';
+        if (parsed?.committed === false) return 'NOT_COMMITTED';
+        return 'UNAVAILABLE';
+      } catch {
+        if (/"committed"\s*:\s*true/.test(text)) return 'COMMITTED';
+        if (/"committed"\s*:\s*false/.test(text)) return 'NOT_COMMITTED';
+        return 'UNAVAILABLE';
+      }
+    } catch {
+      return 'UNAVAILABLE';
+    }
+  }
+
+  #controlAllowsRecovery(active) {
+    const state = clean(active?.controlState) || 'UNKNOWN';
+    return state === 'RUNNING'
+      || (state === 'UNKNOWN' && this.config.allowUnknownControlRecovery === true);
+  }
+
+  #sameLivenessCursor(expected, current) {
+    const expectedUser = clean(expected?.userMessageId);
+    const currentUser = clean(current?.userMessageId);
+    if (!expectedUser || !currentUser || expectedUser !== currentUser) return false;
+    return clean(expected?.assistantMessageId) === clean(current?.assistantMessageId);
+  }
+
   async #monitor(active, transport) {
     try {
       const result = await this.browser.monitor({
         session: active.session,
         baseline: active.baseline,
         signal: active.abortController.signal,
+        livenessGate: async () => ({
+          state: this.#controlAllowsRecovery(active) ? 'RUNNING' : active.controlState,
+          epoch: active.controlEpoch,
+        }),
         onActivity: async (activity) => {
           if (this.active !== active || active.abortController.signal.aborted) return;
           await this.stateStore.patchIfCurrent(
@@ -224,6 +460,60 @@ export class DriveDispatchController {
             activity.status === 'STALLED' ? 'TURN_STALLED' : null,
           );
           if (activity.status === 'STALLED' && !active.recovering) {
+            if (!this.#controlAllowsRecovery(active)) {
+              return { resetLiveness: true };
+            }
+            const resultState = await this.#resultCommitState(active, transport);
+            if (resultState === 'COMMITTED') {
+              const now = Date.now();
+              active.serverStatus = 'COMPLETED';
+              active.body = {
+                ...active.body,
+                server_status: 'COMPLETED',
+                completion_source: 'RESULT_DOCUMENT',
+                completed_at_ms: now,
+                updated_at_ms: now,
+                server_error: '',
+              };
+              try {
+                await transport.write(active.path, active.body);
+                active.publishPending = false;
+              } catch {
+                active.publishPending = true;
+              }
+              await this.stateStore.patchIfCurrent(
+                active.generation,
+                this.stateStore.snapshot().lastSignalId,
+                {
+                  status: 'COMPLETED',
+                  lastActivityAt: new Date(now).toISOString(),
+                  lastError: null,
+                },
+                'RESULT_COMMITTED_SUPPRESSED_RECOVERY',
+              );
+              active.abortController.abort(new Error('result committed before recovery'));
+              return;
+            }
+
+            if (resultState === 'UNAVAILABLE' || activity.streaming || activity.paused) {
+              return { resetLiveness: true };
+            }
+
+            let current;
+            try {
+              current = await this.browser.livenessSnapshot({
+                session: active.session,
+                signal: active.abortController.signal,
+              });
+            } catch {
+              return { resetLiveness: true };
+            }
+            if (this.active !== active || active.abortController.signal.aborted) return;
+            if (current.streaming || current.paused
+                || !this.#sameLivenessCursor(activity, current)) {
+              return { resetLiveness: true };
+            }
+
             active.recovering = true;
             try {
               active.recoveryCount += 1;
@@ -247,6 +537,7 @@ export class DriveDispatchController {
                 recovery_sent_at_ms: Date.now(),
               };
               await transport.write(active.path, active.body);
+              return { resetLiveness: true };
             } finally {
               active.recovering = false;
             }
@@ -262,7 +553,12 @@ export class DriveDispatchController {
         completed_at_ms: result.status === 'COMPLETED' ? Date.now() : undefined,
         updated_at_ms: Date.now(),
       };
-      await transport.write(active.path, active.body).catch(() => {});
+      try {
+        await transport.write(active.path, active.body);
+        active.publishPending = false;
+      } catch {
+        active.publishPending = true;
+      }
     } catch (error) {
       if (active.abortController.signal.aborted || this.active !== active) return;
       active.serverStatus = 'ERROR';
@@ -272,7 +568,12 @@ export class DriveDispatchController {
         server_error: String(error?.message || error).slice(0, 500),
         updated_at_ms: Date.now(),
       };
-      await transport.write(active.path, active.body).catch(() => {});
+      try {
+        await transport.write(active.path, active.body);
+        active.publishPending = false;
+      } catch {
+        active.publishPending = true;
+      }
     }
   }
 
