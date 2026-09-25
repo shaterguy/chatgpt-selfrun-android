@@ -54,3 +54,29 @@ test('watcher routes Drive document states without direct app-server networking'
   await watcher.scanOnce();
   assert.equal(calls.length, 3);
 });
+
+test('watcher ignores stale unprocessed dispatch after restart', async () => {
+  const calls = [];
+  const transport = {
+    list: async () => [{ path: 'stale.json', modTime: '2026-09-25T00:00:00Z', size: 10 }],
+    read: async () => ({
+      schema: 'selfrun-server-dispatch-v1',
+      client_status: 'CREATE_REQUESTED',
+      server_status: 'PENDING',
+      created_at_ms: Date.now() - 700000,
+    }),
+  };
+  const controller = {
+    prepare: async () => calls.push('prepare'),
+    send: async () => calls.push('send'),
+    cancel: async () => calls.push('cancel'),
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000 },
+  });
+
+  await watcher.scanOnce();
+  assert.deepEqual(calls, []);
+});
