@@ -85,11 +85,13 @@ function probeExpression(markerKey) {
     "const stop=buttons.some(b=>b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));" +
     "const assistants=[...document.querySelectorAll('[data-message-author-role=\"assistant\"]')];" +
     "const users=[...document.querySelectorAll('[data-message-author-role=\"user\"]')];" +
+    "if(!window.__selfRunServerMutationState){const state={count:0};const observer=new MutationObserver(()=>{state.count+=1;});if(document.body)observer.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true});window.__selfRunServerMutationState=state;}" +
+    "const mutationCount=Number(window.__selfRunServerMutationState?.count||0);" +
     "const last=assistants.length?assistants[assistants.length-1]:null;" +
     "const body=String(document.body?.innerText||'');const errorMatch=body.match(/something went wrong|error generating|문제가 발생|오류가 발생/i);" +
     "let postObserved=false;try{postObserved=!!" + marker + "&&localStorage.getItem(" + marker + ")==='1';}catch(_){}" +
     "return {url:location.href,title:document.title,readyState:document.readyState,loginPage:/\\/auth(?:\\/|$)|\\/login(?:\\/|$)/i.test(location.pathname)," +
-      "composer:!!composer,streaming:stop,assistantCount:assistants.length,userCount:users.length," +
+      "composer:!!composer,streaming:stop,assistantCount:assistants.length,userCount:users.length,mutationCount," +
       "assistantTextLength:String(last?.innerText||last?.textContent||'').length,postObserved,errorText:errorMatch?errorMatch[0]:null};" +
     "})()";
 }
@@ -288,6 +290,7 @@ export class ChatGptBrowser {
         probe.streaming !== previous.streaming ||
         probe.assistantCount !== previous.assistantCount ||
         probe.userCount !== previous.userCount ||
+        probe.mutationCount !== previous.mutationCount ||
         probe.assistantTextLength !== previous.assistantTextLength;
       if (changed) lastActivityAt = Date.now();
 
