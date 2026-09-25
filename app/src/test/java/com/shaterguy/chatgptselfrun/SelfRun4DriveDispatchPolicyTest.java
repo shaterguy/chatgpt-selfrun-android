@@ -38,6 +38,20 @@ public final class SelfRun4DriveDispatchPolicyTest {
         assertFalse(adapter.contains("SELFRUN_PUSH_GATEWAY_URL"));
     }
 
+    @Test public void lateStartedConversationCanReattachWithoutDuplicateSend() throws Exception {
+        String adapter = source("SelfRun4DriveWebAdapter.java");
+        String drive = source("DriveApiClient.java");
+        String coordinator = source("SelfRun3Coordinator.java");
+        String runtime = source("SelfRun3RuntimeSettings.java");
+        assertTrue(adapter.contains("LATE_START_GRACE_MS = 30_000L"));
+        assertTrue(adapter.contains("findLatestServerDispatch"));
+        assertTrue(adapter.contains("WEB_START_CONFIRMATION_TIMEOUT"));
+        assertTrue(adapter.contains("V4_SERVER_DISPATCH_RECOVERED"));
+        assertTrue(drive.contains("Metadata findLatestServerDispatch"));
+        assertTrue(coordinator.contains("V4_SERVER_UNCERTAIN_SEND_RECONCILE"));
+        assertTrue(runtime.contains("Math.max(DEFAULT_WEB_PREPARATION_SECONDS"));
+    }
+
     @Test public void existingTaskAndResultAuthorityRemainInTheApp() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         String protocol = source("SelfRun3Protocol.java");
