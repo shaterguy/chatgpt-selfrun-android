@@ -240,6 +240,40 @@ export class ChatGptBrowser {
     if (sent?.status !== 'SUBMITTED') throw new Error('recovery send unavailable');
   }
 
+  async attachConversation(options) {
+    const target = await this.chromium.createTarget('about:blank');
+    const session = await this.chromium.connectTarget(target);
+    const markerKey = 'selfrun-server:post:' + options.markerId;
+    await session.call('Page.enable');
+    await session.call('Runtime.enable');
+    await session.call('Page.addScriptToEvaluateOnNewDocument', {
+      source: profilePatchScript(options.profileOperations, markerKey),
+    });
+    try {
+      await session.call('Page.navigate', { url: options.conversationUrl });
+      const probe = await this.#waitFor(session, (p) => p.composer && /\/c\//.test(new URL(p.url).pathname), {
+        timeoutMs: this.config.navigationTimeoutMs,
+        signal: options.signal,
+        label: 'existing conversation',
+        markerKey,
+      });
+      return {
+        target,
+        session,
+        markerKey,
+        baseline: {
+          assistantCount: probe.assistantCount || 0,
+          userCount: probe.userCount || 0,
+          assistantTextLength: probe.assistantTextLength || 0,
+        },
+      };
+    } catch (error) {
+      session.close();
+      await this.chromium.closeTarget(target.id);
+      throw error;
+    }
+  }
+
   async monitor(options) {
     const prepared = options.prepared;
     let previous = await evaluate(prepared.session, probeExpression(prepared.markerKey));
