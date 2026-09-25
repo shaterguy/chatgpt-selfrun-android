@@ -48,7 +48,8 @@ final class SelfRun3RuntimeSettings {
     }
 
     long webPreparationSeconds() {
-        return readPositiveUnits(KEY_WEB_PREPARATION_SECONDS, DEFAULT_WEB_PREPARATION_SECONDS, SECOND_MS);
+        return Math.max(DEFAULT_WEB_PREPARATION_SECONDS,
+                readPositiveUnits(KEY_WEB_PREPARATION_SECONDS, DEFAULT_WEB_PREPARATION_SECONDS, SECOND_MS));
     }
 
     WorkMode workMode() {
