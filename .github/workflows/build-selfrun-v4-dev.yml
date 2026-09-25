@@ -1,0 +1,144 @@
+name: Build SelfRun 4 Dev
+
+on:
+  push:
+    branches:
+      - 'selfrun-v4/v4.0.0-dev1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: selfrun-v4-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_ARTIFACT: selfrun-v4-dev1-${{ github.run_id }}
+
+jobs:
+  build-formal-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
+      SELFRUN_FIREBASE_APPLICATION_ID: ${{ secrets.SELFRUN_FIREBASE_APPLICATION_ID }}
+      SELFRUN_FIREBASE_PROJECT_ID: ${{ secrets.SELFRUN_FIREBASE_PROJECT_ID }}
+      SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+
+      - name: Resolve 4.0.0-dev1 identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          [[ "$VERSION_NAME" == '4.0.0-dev1' ]]
+          [[ "$VERSION_CODE" == '4000001' ]]
+          grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
+          printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
+
+      - name: Verify source and server
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/verify_drive_variant.sh
+          bash tools/verify_selfrun3_dev4_limits_settings.sh
+          (cd termux-server && npm run check && npm test)
+
+      - name: Compile and run complete JVM regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace             :app:verifyDriveVariantIdentity             :app:compileQaAppJavaWithJavac             :app:compileQaAppUnitTestJavaWithJavac             :app:compileQaAppAndroidTestJavaWithJavac
+          gradle --build-cache --no-daemon --console=plain --stacktrace             -PselfRunServerChecks=true :app:testQaAppUnitTest
+
+      - name: Build formal update APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace :app:assembleRelease
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          RAW=app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$RAW"
+          mkdir -p release-output
+          "$BT/zipalign" -p -f 4 "$RAW" release-output/formal-aligned.apk
+
+      - name: Install signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check             --require-hashes --only-binary=:all:             -r tools/signing-requirements-linux-x86_64-py312.txt
+
+      - name: Sign formal APK and verify 3.x update lineage
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          PASS_FILE="$RUNNER_TEMP/selfrun-v4-dev-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          APK="release-output/SelfRun-Drive-v${VERSION_NAME}.apk"
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh             release-output/formal-aligned.apk "$PASS_FILE" "$APK"             > release-output/APKSIGNER_VERIFY.txt
+
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/CERT.txt
+
+          BADGING="$($BT/aapt dump badging "$APK")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+          grep -Fq "versionCode='${VERSION_CODE}'" <<<"$BADGING"
+          grep -Fq "versionName='${VERSION_NAME}'" <<<"$BADGING"
+
+          mkdir -p baseline
+          gh release download drive-v3.3.2 --repo "$GITHUB_REPOSITORY"             --pattern 'chatgpt-selfrun-drive-v3.3.2.apk' --dir baseline
+          BASE=baseline/chatgpt-selfrun-drive-v3.3.2.apk
+          test -s "$BASE"
+          "$BT/apksigner" verify --verbose --print-certs "$BASE" > baseline/CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' baseline/CERT.txt
+          BASE_BADGING="$($BT/aapt dump badging "$BASE")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BASE_BADGING"
+          grep -Fq "versionCode='3035000'" <<<"$BASE_BADGING"
+          [[ "$VERSION_CODE" -gt 3035001 ]]
+
+          sha256sum "$APK" > release-output/SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
+          printf 'package=com.shaterguy.chatgptselfrun.drive\nversionName=%s\nversionCode=%s\ncertificateSha256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe\n'             "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
+
+      - name: Upload formal 4.0 dev APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.BUILD_ARTIFACT }}
+          path: |
+            release-output/SelfRun-Drive-v4.0.0-dev1.apk
+            release-output/SHA256SUMS.txt
+            release-output/APKSIGNER_VERIFY.txt
+            release-output/CERT.txt
+            release-output/SOURCE_COMMIT.txt
+            release-output/IDENTITY.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
