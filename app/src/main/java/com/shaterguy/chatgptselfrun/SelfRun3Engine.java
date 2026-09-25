@@ -112,7 +112,7 @@ final class SelfRun3Engine {
         switch(e.kind) {
             case RESOURCE -> {
                 String k=p.optString("key"), val=p.optString("value");
-                require(Set.of("folderId","requirementDocumentId","resultDocumentId","conversationUrl","resultCreateIntent","requirementCreateIntent").contains(k),"unknown resource");
+                require(Set.of("folderId","requirementDocumentId","resultDocumentId","dispatchFileId","conversationUrl","resultCreateIntent","requirementCreateIntent").contains(k),"unknown resource");
                 require(!val.isEmpty() && val.length()<=2048,"invalid resource");
                 JSONObject r=copy(v.optJSONObject("resources")); String prior=r.optString(k);
                 if("conversationUrl".equals(k)) require(val.matches("https://chatgpt\\.com/c/[A-Za-z0-9-]+"),"canonical conversation URL required");
