@@ -381,7 +381,7 @@ final class SelfRun3Engine {
                             "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
                             "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
                             "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
-                    JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("conversationUrl"); put(v,"resources",resources);
+                    JSONObject resources=copy(v.optJSONObject("resources")); resources.remove("dispatchFileId"); resources.remove("conversationUrl"); put(v,"resources",resources);
                     put(v,"requestId",s.turnId()+":resume:"+e.id);
                     put(v,"stoppedRestart",true);
                     put(v,"stage","SETUP".equals(s.text("stage"))?"SETUP":"PREPARING");
@@ -458,7 +458,7 @@ final class SelfRun3Engine {
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
                 "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","documentCreateStates","stoppedRestart","stoppedResumeWait","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision",SelfRun3SuccessorTransitionPolicy.KEY}) v.remove(k);
-        resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
+        resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("dispatchFileId"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);
         put(v,"requestId",s.taskId()+":turn:"+ordinal+"-request"); put(v,"phase",phase);
