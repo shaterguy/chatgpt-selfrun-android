@@ -34,6 +34,9 @@ final class SelfRun4DispatchFile {
         SelfRun3Engine.put(out, "attempt", attempt);
         SelfRun3Engine.put(out, "project_url", state.config().optString("projectUrl"));
         SelfRun3Engine.put(out, "prompt", state.text("prompt"));
+        SelfRun3Engine.put(out, "result_document_id", state.resource("resultDocumentId"));
+        SelfRun3Engine.put(out, "requirement_document_id", state.resource("requirementDocumentId"));
+        SelfRun3Engine.put(out, "previous_result_document_id", state.text("previousResultDocumentId"));
         SelfRun3Engine.put(out, "execution_mode", state.config().optString("mode"));
         ProfileRegistry.Profile profile = resolveProfile(state);
         SelfRun3Engine.put(out, "profile_fingerprint", profile.fingerprint);
@@ -50,6 +53,20 @@ final class SelfRun4DispatchFile {
         requireMatch(current, state, attempt);
         JSONObject out = copy(current);
         SelfRun3Engine.put(out, "state", SEND_REQUESTED);
+        SelfRun3Engine.put(out, "updated_at_ms", System.currentTimeMillis());
+        return out;
+    }
+
+    static JSONObject resultCommitted(JSONObject current, SelfRun3Engine.State state) {
+        if (current == null || state == null
+                || !SCHEMA.equals(current.optString("schema"))
+                || !state.taskId().equals(current.optString("task_id"))
+                || !state.turnId().equals(current.optString("turn_id"))
+                || !state.requestId().equals(current.optString("request_id"))) {
+            throw new IllegalStateException("dispatch identity changed");
+        }
+        JSONObject out = copy(current);
+        SelfRun3Engine.put(out, "state", RESULT_COMMITTED);
         SelfRun3Engine.put(out, "updated_at_ms", System.currentTimeMillis());
         return out;
     }
