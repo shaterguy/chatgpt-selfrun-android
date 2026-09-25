@@ -172,6 +172,41 @@ final class DriveApiClient {
         return match;
     }
 
+    Metadata findLatestServerDispatch(String accessToken, String requestId, String parentId) throws Exception {
+        requireParent(parentId);
+        if (requestId == null || !requestId.matches("[A-Za-z0-9._:-]{1,240}")) {
+            throw new IllegalArgumentException("safe dispatch request id required");
+        }
+        String q = "'" + parentId + "' in parents and trashed = false and mimeType = '" + MIME_JSON + "'"
+                + " and appProperties has { key='selfrun_kind' and value='server_dispatch' }"
+                + " and appProperties has { key='request_id' and value='" + requestId + "' }";
+        String fields = "files(" + FILE_FIELDS + ")";
+        String endpoint = "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true"
+                + "&q=" + URLEncoder.encode(q, StandardCharsets.UTF_8.name())
+                + "&fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8.name()) + "&pageSize=100";
+        JSONArray files = request("GET", endpoint, accessToken, null, false).optJSONArray("files");
+        Metadata match = null;
+        int bestAttempt = -1;
+        if (files == null) return null;
+        for (int i = 0; i < files.length(); i++) {
+            JSONObject raw = files.optJSONObject(i);
+            if (raw == null) continue;
+            Metadata candidate = new Metadata(raw);
+            if (!MIME_JSON.equals(candidate.mimeType) || !parentId.equals(candidate.parentId)
+                    || candidate.trashed
+                    || !"server_dispatch".equals(candidate.appProperties.optString("selfrun_kind"))
+                    || !requestId.equals(candidate.appProperties.optString("request_id"))) continue;
+            int attempt;
+            try { attempt = Integer.parseInt(candidate.appProperties.optString("dispatch_attempt", "0")); }
+            catch (NumberFormatException invalid) { attempt = 0; }
+            if (match == null || attempt > bestAttempt) {
+                match = candidate;
+                bestAttempt = attempt;
+            }
+        }
+        return match;
+    }
+
     String getStartPageToken(String accessToken) throws Exception {
         JSONObject json = request("GET",
                 "https://www.googleapis.com/drive/v3/changes/startPageToken?supportsAllDrives=true",
