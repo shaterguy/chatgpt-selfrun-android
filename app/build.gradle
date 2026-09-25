@@ -226,6 +226,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !remoteWeb.contains('schedulePoll(expectedGeneration')
                 || !coordinator.contains('new SelfRun4DriveDispatchAdapter(service, this, ledger)')
                 || !engine.contains('"dispatchFileId"')
+                || !engine.contains('resources.remove("dispatchFileId")')
                 || !remoteDispatch.contains('PREPARE_REQUESTED')
                 || !remoteDispatch.contains('SEND_REQUESTED')
                 || !remoteDispatch.contains('RESULT_COMMITTED')
