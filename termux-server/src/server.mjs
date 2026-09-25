@@ -5,6 +5,7 @@ import { StateStore, ensureToken } from './state-store.mjs';
 import { ChromiumManager } from './browser/cdp.mjs';
 import { ChatGptBrowser } from './browser/chatgpt.mjs';
 import { DispatchStore } from './drive/dispatch-store.mjs';
+import { RcloneRcClient } from './drive/rclone-rc.mjs';
 import { DriveDispatcher } from './drive/dispatcher.mjs';
 
 const startedAt = new Date().toISOString();
@@ -13,7 +14,8 @@ await stateStore.init();
 const token = await ensureToken(config);
 const chromium = new ChromiumManager(config);
 const browser = new ChatGptBrowser(chromium, config);
-const dispatchStore = new DispatchStore(config);
+const rcloneRc = new RcloneRcClient(config);
+const dispatchStore = new DispatchStore(config, rcloneRc);
 const dispatcher = new DriveDispatcher({
   store: dispatchStore,
   browser,
@@ -98,6 +100,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   await dispatcher.stop().catch(() => {});
+  await rcloneRc.close().catch(() => {});
   server.close(() => process.exit(0));
 }
 
