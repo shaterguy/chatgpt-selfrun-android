@@ -257,8 +257,9 @@ final class SelfRun4DriveWebAdapter {
         submitRequested = true;
         String token = accessToken;
         String fileId = dispatchFileId;
-        JSONObject body = dispatchBody == null ? new JSONObject() : new JSONObject(dispatchBody.toString());
+        JSONObject body;
         try {
+            body = dispatchBody == null ? new JSONObject() : new JSONObject(dispatchBody.toString());
             body.put("client_status", "SEND_REQUESTED");
             body.put("send_requested_at_ms", System.currentTimeMillis());
         } catch (Exception error) {
@@ -327,6 +328,7 @@ final class SelfRun4DriveWebAdapter {
     private void cancelLocalAttempt(boolean cancelRemote) {
         boolean wasPreparing = preparing;
         preparing = false;
+        generation++;
         main.removeCallbacksAndMessages(null);
         if (cancelRemote && wasPreparing && !started && !dispatchFileId.isEmpty()
                 && !accessToken.isEmpty() && dispatchBody != null) {
@@ -335,8 +337,9 @@ final class SelfRun4DriveWebAdapter {
     }
 
     private void cancelRemoteBestEffort(String token, String fileId, JSONObject source, String status) {
-        JSONObject cancelled = new JSONObject(source.toString());
+        JSONObject cancelled;
         try {
+            cancelled = new JSONObject(source.toString());
             cancelled.put("client_status", status);
             cancelled.put("cancelled_at_ms", System.currentTimeMillis());
         } catch (Exception ignored) {
