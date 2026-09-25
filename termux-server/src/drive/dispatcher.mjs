@@ -70,22 +70,23 @@ export class DriveDispatcher {
         for (const path of [...this.observed.keys()]) {
           if (!present.has(path)) this.observed.delete(path);
         }
+        let cycleError = null;
         for (const entry of entries) {
           if (!this.running) break;
           const fingerprint = entry.modTime + ':' + entry.size;
           if (this.observed.get(entry.path) === fingerprint) continue;
-          this.observed.set(entry.path, fingerprint);
           try {
             const value = await this.store.read(entry.path);
             if (validDispatch(value)) await this.#observe(entry.path, value);
+            this.observed.set(entry.path, fingerprint);
           } catch (error) {
-            this.lastError = 'dispatch-read:' + String(error?.message || error);
+            cycleError = 'dispatch-read:' + String(error?.message || error);
           }
         }
-        this.lastError = null;
+        this.lastError = cycleError;
         await this.stateStore.patch({
           status: this.workers.size ? 'DRIVE_EXECUTING' : 'DRIVE_WATCHING',
-          lastError: null,
+          lastError: this.lastError,
         });
       } catch (error) {
         this.lastError = 'drive-watch:' + String(error?.message || error);
