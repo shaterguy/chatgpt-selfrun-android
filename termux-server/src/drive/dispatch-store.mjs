@@ -30,7 +30,7 @@ export class DispatchStore {
       fs: this.config.driveRemote,
       remote: this.config.driveRunsRoot,
       opt: {
-        recurse: true,
+        recurse: false,
         filesOnly: true,
         noMimeType: true,
         showHash: false,
