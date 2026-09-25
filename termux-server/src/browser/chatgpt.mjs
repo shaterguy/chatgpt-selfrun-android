@@ -42,6 +42,7 @@ function probeExpression() {
       streaming:stop,
       assistantCount:assistants.length,
       assistantTextLength:String(last?.innerText||last?.textContent||'').length,
+      bodyTextLength:body.length,
       errorText:errorMatch?errorMatch[0]:null
     };
   })()`;
@@ -332,7 +333,8 @@ export class ChatGptBrowser {
         probe.url !== previous.url ||
         probe.streaming !== previous.streaming ||
         probe.assistantCount !== previous.assistantCount ||
-        probe.assistantTextLength !== previous.assistantTextLength;
+        probe.assistantTextLength !== previous.assistantTextLength ||
+        probe.bodyTextLength !== previous.bodyTextLength;
 
       if (changed) {
         lastActivityAt = Date.now();
