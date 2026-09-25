@@ -89,8 +89,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash tools/verify_drive_variant.sh
-          bash tools/verify_selfrun3_dev4_limits_settings.sh
+          bash -x tools/verify_drive_variant.sh
+          bash -x tools/verify_selfrun3_dev4_limits_settings.sh
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:verifyDriveVariantIdentity \
             :app:compileQaAppJavaWithJavac \
