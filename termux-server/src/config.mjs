@@ -25,4 +25,6 @@ export const config = Object.freeze({
   driveRemote: process.env.SELFRUN_DRIVE_REMOTE || 'selfrun-drive:',
   driveRunsRoot: process.env.SELFRUN_DRIVE_RUNS_ROOT || 'GPT/Self Run/Runs',
   rcloneCommand: process.env.SELFRUN_RCLONE || 'rclone',
+  rcloneRcSocket: process.env.SELFRUN_RCLONE_RC_SOCKET || path.join(dataDir, 'rclone-rc.sock'),
+  rcloneRcLogFile: process.env.SELFRUN_RCLONE_RC_LOG || path.join(dataDir, 'rclone-rc.log'),
 });
