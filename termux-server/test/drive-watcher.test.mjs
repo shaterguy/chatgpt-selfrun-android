@@ -4,21 +4,25 @@ import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 
 test('watcher routes Drive document states without direct app-server networking', async () => {
   const calls = [];
+  const createdAt = Date.now();
   const bodies = new Map([
     ['pending.json', {
       schema: 'selfrun-server-dispatch-v1',
       client_status: 'CREATE_REQUESTED',
       server_status: 'PENDING',
+      created_at_ms: createdAt,
     }],
     ['send.json', {
       schema: 'selfrun-server-dispatch-v1',
       client_status: 'SEND_REQUESTED',
       server_status: 'READY_TO_SUBMIT',
+      created_at_ms: createdAt,
     }],
     ['cancel.json', {
       schema: 'selfrun-server-dispatch-v1',
       client_status: 'CANCELLED',
       server_status: 'READY_TO_SUBMIT',
+      created_at_ms: createdAt,
     }],
   ]);
   const transport = {
@@ -37,7 +41,7 @@ test('watcher routes Drive document states without direct app-server networking'
   const watcher = new DriveDispatchWatcher({
     transport,
     controller,
-    config: { drivePollMs: 2000 },
+    config: { drivePollMs: 2000, dispatchFreshMs: 600000 },
   });
 
   await watcher.scanOnce();
