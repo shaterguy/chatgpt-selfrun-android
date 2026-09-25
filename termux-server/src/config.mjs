@@ -5,7 +5,7 @@ const home = os.homedir();
 const dataDir = process.env.SELFRUN_SERVER_DATA_DIR || path.join(home, '.selfrun-server');
 
 export const config = Object.freeze({
-  version: '3.3.3-dev2',
+  version: '4.0.0-dev1',
   host: process.env.SELFRUN_SERVER_HOST || '127.0.0.1',
   port: Number(process.env.SELFRUN_SERVER_PORT || 17831),
   dataDir,
@@ -17,7 +17,12 @@ export const config = Object.freeze({
   browserPort: Number(process.env.SELFRUN_BROWSER_PORT || 19227),
   chromiumCommand: process.env.SELFRUN_CHROMIUM || 'chromium-browser',
   probeIntervalMs: Number(process.env.SELFRUN_PROBE_INTERVAL_MS || 1500),
-  stallAfterMs: Number(process.env.SELFRUN_STALL_AFTER_MS || 120000),
   navigationTimeoutMs: Number(process.env.SELFRUN_NAVIGATION_TIMEOUT_MS || 30000),
-  defaultProjectUrl: process.env.SELFRUN_PROJECT_URL || '',
+  startConfirmationTimeoutMs: Number(process.env.SELFRUN_START_CONFIRMATION_TIMEOUT_MS || 90000),
+  livenessRecoveryMs: Number(process.env.SELFRUN_LIVENESS_RECOVERY_MS || 300000),
+  recoveryPrompt: process.env.SELFRUN_RECOVERY_PROMPT || '계속 진행해.',
+  drivePollMs: Number(process.env.SELFRUN_DRIVE_POLL_MS || 2000),
+  driveRemote: process.env.SELFRUN_DRIVE_REMOTE || 'selfrun-drive:',
+  driveRunsRoot: process.env.SELFRUN_DRIVE_RUNS_ROOT || 'GPT/Self Run/Runs',
+  rcloneCommand: process.env.SELFRUN_RCLONE || 'rclone',
 });
