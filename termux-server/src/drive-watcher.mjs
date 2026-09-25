@@ -44,18 +44,21 @@ export class DriveDispatchWatcher {
 
       const clientStatus = String(body.client_status || '').trim();
       const serverStatus = String(body.server_status || 'PENDING').trim();
+      const createdAt = Number(body.created_at_ms || 0);
+      const fresh = createdAt > 0 && Date.now() >= createdAt
+        && Date.now() - createdAt <= this.config.dispatchFreshMs;
 
       if (clientStatus === 'CANCELLED' || clientStatus === 'SUPERSEDED') {
         await this.controller.cancel(file.path, body, this.transport);
         continue;
       }
 
-      if (clientStatus === 'CREATE_REQUESTED' && serverStatus === 'PENDING') {
+      if (clientStatus === 'CREATE_REQUESTED' && serverStatus === 'PENDING' && fresh) {
         await this.controller.prepare(file.path, body, this.transport);
         continue;
       }
 
-      if (clientStatus === 'SEND_REQUESTED'
+      if (clientStatus === 'SEND_REQUESTED' && fresh
           && (serverStatus === 'READY_TO_SUBMIT' || serverStatus === 'RECOVERY_SENT')) {
         await this.controller.send(file.path, body, this.transport);
       }
