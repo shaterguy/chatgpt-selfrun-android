@@ -114,7 +114,9 @@ final class SelfRun4DispatchDriveClient {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         try {
             connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod(method);
+            boolean patch = "PATCH".equals(method);
+            connection.setRequestMethod(patch ? "POST" : method);
+            if (patch) connection.setRequestProperty("X-HTTP-Method-Override", "PATCH");
             connection.setConnectTimeout(20_000);
             connection.setReadTimeout(30_000);
             connection.setUseCaches(false);
