@@ -345,10 +345,13 @@ final class SelfRun4DriveWebAdapter {
         } catch (Exception ignored) {
             return;
         }
-        io.execute(() -> {
-            try { api.writeServerDispatchFile(token, fileId, cancelled); }
-            catch (Throwable ignored) { }
-        });
+        if (io.isShutdown()) return;
+        try {
+            io.execute(() -> {
+                try { api.writeServerDispatchFile(token, fileId, cancelled); }
+                catch (Throwable ignored) { }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) { }
     }
 
     private boolean active(int expectedGeneration, String request) {
