@@ -25,7 +25,9 @@ public final class TestAppVariantPolicyTest {
         assertTrue(candidate.contains("      - 'selfrun-v3/v3.*-rc*'"));
         assertTrue(candidate.contains("      - 'v3.*-dev*'"));
         assertTrue(candidate.contains("      - 'v3.*-rc*'"));
-        assertTrue(candidate.contains("^3\\.[0-9]+\\.[0-9]+-(dev|rc)[0-9]+$"));
+        assertTrue(candidate.contains("      - 'selfrun-drive/v4.*-dev*'"));
+        assertTrue(candidate.contains("      - 'selfrun-drive/v4.*-rc*'"));
+        assertTrue(candidate.contains("^(3|4)\\.[0-9]+\\.[0-9]+-(dev|rc)[0-9]+$"));
         assertTrue(candidate.contains(":app:compileQaAppJavaWithJavac"));
         assertTrue(candidate.contains(":app:compileQaAppAndroidTestJavaWithJavac"));
         assertTrue(candidate.contains(":app:testQaAppUnitTest"));
