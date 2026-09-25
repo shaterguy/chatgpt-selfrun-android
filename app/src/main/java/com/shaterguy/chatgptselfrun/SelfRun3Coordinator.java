@@ -671,6 +671,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     if (current == null || current.flag("superseded")) throw new ResultPendingException();
                     JSONObject parsed = SelfRun3Engine.parseResult(observation.candidateBody, current);
                     if (parsed != null) {
+                        drive.markDispatchResultCommitted(token, current);
                         JSONObject payload = new JSONObject();
                         SelfRun3Engine.put(payload, "text", observation.candidateBody);
                         SelfRun3Engine.put(payload, "acceptedAtElapsed", SystemClock.elapsedRealtime());
