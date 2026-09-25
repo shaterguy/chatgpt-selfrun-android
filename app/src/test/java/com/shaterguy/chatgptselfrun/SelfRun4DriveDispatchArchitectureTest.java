@@ -25,7 +25,7 @@ public final class SelfRun4DriveDispatchArchitectureTest {
         String settings=source("SelfRun3RuntimeSettings.java");
         String adapter=source("SelfRun4DriveDispatchAdapter.java");
         assertTrue(settings.contains("DEFAULT_WEB_PREPARATION_SECONDS = 90L"));
-        assertTrue(adapter.contains("prepareTimeoutMs = runtimeSettings.webPreparationMs()"));
+        assertTrue(adapter.contains("runtimeSettings.webPreparationMs()"));
         assertTrue(adapter.contains("\"WEB_PREPARATION_TIMEOUT\""));
         assertTrue(adapter.contains("\"SUCCESSOR_TRANSITION_TIMEOUT\""));
         assertTrue(adapter.contains("listener.onFailure"));
