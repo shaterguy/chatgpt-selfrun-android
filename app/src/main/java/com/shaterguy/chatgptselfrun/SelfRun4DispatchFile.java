@@ -118,6 +118,11 @@ final class SelfRun4DispatchFile {
     }
 
     private static JSONObject copy(JSONObject value) {
-        return value == null ? new JSONObject() : new JSONObject(value.toString());
+        if (value == null) return new JSONObject();
+        try {
+            return new JSONObject(value.toString());
+        } catch (Exception invalid) {
+            throw new IllegalStateException("valid dispatch JSON required", invalid);
+        }
     }
 }
