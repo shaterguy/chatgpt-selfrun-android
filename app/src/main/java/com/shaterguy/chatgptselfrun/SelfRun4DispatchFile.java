@@ -12,6 +12,7 @@ final class SelfRun4DispatchFile {
     static final String SEND_REQUESTED = "SEND_REQUESTED";
     static final String SUBMITTED = "SUBMITTED";
     static final String STARTED = "STARTED";
+    static final String RESULT_COMMITTED = "RESULT_COMMITTED";
     static final String ERROR = "ERROR";
 
     private SelfRun4DispatchFile() {}
