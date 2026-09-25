@@ -31,7 +31,6 @@ export class DriveDispatchTransport {
     const raw = await runRclone([
       'lsjson',
       this.config.driveRunsPath,
-      '--recursive',
       '--files-only',
       '--include',
       '__SELFRUN_DISPATCH__*.json',
