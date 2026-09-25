@@ -58,6 +58,15 @@ final class SelfRun4DispatchDriveClient {
         return new JSONObject(raw);
     }
 
+    void markResultCommitted(String token, SelfRun3Engine.State state) throws Exception {
+        String fileId = state == null ? "" : state.resource("dispatchFileId");
+        if (!DriveApiClient.validFileId(fileId)) return;
+        JSONObject current = read(token, fileId);
+        if (current.length() == 0) return;
+        if (SelfRun4DispatchFile.RESULT_COMMITTED.equals(SelfRun4DispatchFile.status(current))) return;
+        write(token, fileId, SelfRun4DispatchFile.resultCommitted(current, state));
+    }
+
     private DriveApiClient.Metadata createFile(String token, String fileId,
                                                 SelfRun3Engine.State state) throws Exception {
         JSONObject metadata = new JSONObject()
