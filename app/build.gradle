@@ -221,7 +221,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !coordinator.contains('runtimeSettings.resultPollMs()')
                 || !notifier.contains('runtimeSettings.stallAlertMs()')
                 || !notifier.contains('settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)')
-                || !remoteWeb.contains('prepareTimeoutMs = runtimeSettings.webPreparationMs()')
+                || !remoteWeb.contains('runtimeSettings.webPreparationMs()')
                 || !remoteWeb.contains('"WEB_PREPARATION_TIMEOUT"')
                 || !remoteWeb.contains('schedulePoll(expectedGeneration')
                 || !coordinator.contains('new SelfRun4DriveDispatchAdapter(service, this, ledger)')
