@@ -5,6 +5,9 @@ import { StateStore, ensureToken } from './state-store.mjs';
 import { ChromiumManager } from './browser/cdp.mjs';
 import { ChatGptBrowser } from './browser/chatgpt.mjs';
 import { SelfRunController } from './controller.mjs';
+import { DriveDispatchTransport } from './drive-transport.mjs';
+import { DriveDispatchController } from './drive-controller.mjs';
+import { DriveDispatchWatcher } from './drive-watcher.mjs';
 
 const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
@@ -14,6 +17,14 @@ const chromium = new ChromiumManager(config);
 const browser = new ChatGptBrowser(chromium, config);
 const controller = new SelfRunController({ browser, stateStore, config });
 await controller.initialize();
+const driveTransport = new DriveDispatchTransport(config);
+const driveController = new DriveDispatchController({ browser, stateStore, config });
+const driveWatcher = new DriveDispatchWatcher({
+  transport: driveTransport,
+  controller: driveController,
+  config,
+});
+void driveWatcher.start();
 
 function json(res, status, body) {
   const data = Buffer.from(JSON.stringify(body));
@@ -97,5 +108,8 @@ server.listen(config.port, config.host, () => {
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, () => {
+    driveWatcher.stop();
+    server.close(() => process.exit(0));
+  });
 }
