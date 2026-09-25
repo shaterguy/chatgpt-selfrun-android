@@ -20,7 +20,7 @@ final class SelfRun4DispatchDriveClient {
     private final DriveApiClient drive = new DriveApiClient();
 
     DriveApiClient.Metadata ensureFile(String token, String fileId, SelfRun3Engine.State state) throws Exception {
-        DriveApiClient.requireParent(state.resource("folderId"));
+        DriveApiClient.requireParent(state.config().optString("baseFolderId"));
         if (!DriveApiClient.validFileId(fileId)) throw new IllegalArgumentException("dispatch file id required");
         DriveApiClient.Metadata metadata;
         try {
@@ -73,7 +73,7 @@ final class SelfRun4DispatchDriveClient {
                 .put("id", fileId)
                 .put("name", SelfRun4DispatchFile.fileName(state))
                 .put("mimeType", MIME_JSON)
-                .put("parents", new JSONArray().put(state.resource("folderId")))
+                .put("parents", new JSONArray().put(state.config().optString("baseFolderId")))
                 .put("appProperties", new JSONObject()
                         .put("job_id", state.taskId())
                         .put("selfrun_kind", "remote_dispatch")
@@ -92,7 +92,7 @@ final class SelfRun4DispatchDriveClient {
                 && fileId.equals(metadata.id)
                 && SelfRun4DispatchFile.fileName(state).equals(metadata.name)
                 && MIME_JSON.equals(metadata.mimeType)
-                && state.resource("folderId").equals(metadata.parentId)
+                && state.config().optString("baseFolderId").equals(metadata.parentId)
                 && !metadata.trashed
                 && !metadata.shared
                 && metadata.isAppAuthorized
