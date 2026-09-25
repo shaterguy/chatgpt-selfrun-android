@@ -490,6 +490,7 @@ export class ChatGptBrowser {
     let stalled = false;
     let lastReportedStatus = null;
     let lastGateToken = null;
+    let nextStalledVerificationAt = 0;
 
     while (!signal?.aborted) {
       const probe = await evaluate(session, probeExpression());
@@ -536,7 +537,10 @@ export class ChatGptBrowser {
       else if (completed) status = 'COMPLETED';
       else if (stalled) status = 'STALLED';
 
-      if (changed || status !== lastReportedStatus || completed || probe.errorText) {
+      const verificationRetry = status === 'STALLED'
+        && nextStalledVerificationAt > 0
+        && Date.now() >= nextStalledVerificationAt;
+      if (changed || status !== lastReportedStatus || completed || probe.errorText || verificationRetry) {
         const action = await onActivity?.({
           status,
           pageUrl: probe.url,
@@ -550,10 +554,16 @@ export class ChatGptBrowser {
           userMessageId: probe.userMessageId,
           lastActivityAt: new Date(lastActivityAt).toISOString(),
           pageError: probe.errorText,
+          verificationRetry,
         });
         if (action?.resetLiveness) {
           lastActivityAt = Date.now();
           stalled = false;
+          nextStalledVerificationAt = 0;
+        } else if (status === 'STALLED' && Number(action?.retryAfterMs) > 0) {
+          nextStalledVerificationAt = Date.now() + Number(action.retryAfterMs);
+        } else if (status !== 'STALLED') {
+          nextStalledVerificationAt = 0;
         }
         lastReportedStatus = status;
       }

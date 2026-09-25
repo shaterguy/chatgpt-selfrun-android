@@ -4,9 +4,27 @@ const CONTROL_STATES = new Set([
   'RUNNING', 'WAITING_USER_INTERVENTION', 'PAUSED', 'STOPPED',
   'RESUME_REQUESTED', 'RESUME_STOPPED_REQUESTED', 'DONE',
 ]);
+const LIVENESS_VERIFY_RETRY_MS = 15_000;
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function errorMessage(error) {
+  return String(error?.message || error || 'unknown').slice(0, 500);
+}
+
+function cursorDetails(probe) {
+  return {
+    streaming: !!probe?.streaming,
+    paused: !!probe?.paused,
+    assistant_count: Number(probe?.assistantCount || 0),
+    assistant_text_length: Number(probe?.assistantTextLength || 0),
+    assistant_message_id: clean(probe?.assistantMessageId) || null,
+    user_count: Number(probe?.userCount || 0),
+    user_text_length: Number(probe?.userTextLength || 0),
+    user_message_id: clean(probe?.userMessageId) || null,
+  };
 }
 
 function validateDispatch(body) {
@@ -147,6 +165,9 @@ export class DriveDispatchController {
         baseline: prepared.baseline,
         serverStatus: 'READY_TO_SUBMIT',
         recoveryCount: 0,
+        verificationFailureCount: 0,
+        resultReadFailureCount: 0,
+        cursorProbeFailureCount: 0,
         recovering: false,
         publishPending: false,
         controlState: clean(control?.state) || 'UNKNOWN',
@@ -265,6 +286,9 @@ export class DriveDispatchController {
         baseline: resumed.baseline,
         serverStatus: 'STARTED',
         recoveryCount: Math.max(0, Number(body.recovery_count || 0)),
+        verificationFailureCount: 0,
+        resultReadFailureCount: 0,
+        cursorProbeFailureCount: 0,
         recovering: false,
         publishPending: false,
         controlState: clean(control?.state) || 'UNKNOWN',
@@ -403,23 +427,27 @@ export class DriveDispatchController {
 
   async #resultCommitState(active, transport) {
     const documentId = clean(active?.body?.result_document_id);
-    if (!documentId) return 'UNAVAILABLE';
+    if (!documentId) return { state: 'UNAVAILABLE', reason: 'MISSING_DOCUMENT_ID' };
     try {
       const raw = await transport.readGoogleDocText(documentId);
       const text = String(raw || '').replace(/^\uFEFF/, '').trim();
-      if (!text) return 'UNAVAILABLE';
+      if (!text) return { state: 'UNAVAILABLE', reason: 'EMPTY_DOCUMENT' };
       try {
         const parsed = JSON.parse(text);
-        if (parsed?.committed === true) return 'COMMITTED';
-        if (parsed?.committed === false) return 'NOT_COMMITTED';
-        return 'UNAVAILABLE';
-      } catch {
-        if (/"committed"\s*:\s*true/.test(text)) return 'COMMITTED';
-        if (/"committed"\s*:\s*false/.test(text)) return 'NOT_COMMITTED';
-        return 'UNAVAILABLE';
+        if (parsed?.committed === true) return { state: 'COMMITTED', reason: 'JSON' };
+        if (parsed?.committed === false) return { state: 'NOT_COMMITTED', reason: 'JSON' };
+        return { state: 'UNAVAILABLE', reason: 'COMMITTED_FIELD_MISSING' };
+      } catch (error) {
+        if (/"committed"\s*:\s*true/.test(text)) {
+          return { state: 'COMMITTED', reason: 'TEXT_FALLBACK' };
+        }
+        if (/"committed"\s*:\s*false/.test(text)) {
+          return { state: 'NOT_COMMITTED', reason: 'TEXT_FALLBACK' };
+        }
+        return { state: 'UNAVAILABLE', reason: 'PARSE_ERROR', error: errorMessage(error) };
       }
-    } catch {
-      return 'UNAVAILABLE';
+    } catch (error) {
+      return { state: 'UNAVAILABLE', reason: 'READ_ERROR', error: errorMessage(error) };
     }
   }
 
@@ -434,6 +462,20 @@ export class DriveDispatchController {
     const currentUser = clean(current?.userMessageId);
     if (!expectedUser || !currentUser || expectedUser !== currentUser) return false;
     return clean(expected?.assistantMessageId) === clean(current?.assistantMessageId);
+  }
+
+  async #recordLivenessEvent(active, event, details = {}) {
+    if (typeof this.stateStore.recordEvent !== 'function') return;
+    try {
+      await this.stateStore.recordEvent(event, {
+        task_id: active.identity.taskId,
+        turn_id: active.identity.turnId,
+        request_id: active.identity.requestId,
+        control_state: clean(active.controlState) || 'UNKNOWN',
+        control_epoch: Number(active.controlEpoch || 0),
+        ...details,
+      });
+    } catch {}
   }
 
   async #monitor(active, transport) {
@@ -457,14 +499,50 @@ export class DriveDispatchController {
               lastActivityAt: activity.lastActivityAt,
               lastError: activity.pageError || null,
             },
-            activity.status === 'STALLED' ? 'TURN_STALLED' : null,
+            activity.status === 'STALLED' && !activity.verificationRetry ? 'TURN_STALLED' : null,
           );
           if (activity.status === 'STALLED' && !active.recovering) {
+            const stallAgeMs = Math.max(0, Date.now() - Date.parse(activity.lastActivityAt || 0));
+            await this.#recordLivenessEvent(
+              active,
+              activity.verificationRetry ? 'LIVENESS_STALL_RECHECK' : 'LIVENESS_STALL_DETECTED',
+              {
+                stall_age_ms: stallAgeMs,
+                last_activity_at: activity.lastActivityAt || null,
+                cursor: cursorDetails(activity),
+              },
+            );
+
             if (!this.#controlAllowsRecovery(active)) {
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: 'SKIP_CONTROL_BLOCKED',
+                reset_liveness: true,
+              });
               return { resetLiveness: true };
             }
-            const resultState = await this.#resultCommitState(active, transport);
-            if (resultState === 'COMMITTED') {
+
+            const resultStartedAt = Date.now();
+            const resultCheck = await this.#resultCommitState(active, transport);
+            if (resultCheck.state === 'UNAVAILABLE') {
+              active.resultReadFailureCount += 1;
+              active.verificationFailureCount += 1;
+            } else {
+              active.resultReadFailureCount = 0;
+            }
+            await this.#recordLivenessEvent(active, 'LIVENESS_RESULT_CHECK', {
+              result_state: resultCheck.state,
+              reason: resultCheck.reason,
+              error: resultCheck.error || null,
+              duration_ms: Date.now() - resultStartedAt,
+              failure_count: active.resultReadFailureCount,
+            });
+
+            if (resultCheck.state === 'COMMITTED') {
+              active.verificationFailureCount = 0;
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: 'SKIP_RESULT_COMMITTED',
+                reset_liveness: false,
+              });
               const now = Date.now();
               active.serverStatus = 'COMPLETED';
               active.body = {
@@ -495,24 +573,86 @@ export class DriveDispatchController {
               return;
             }
 
-            if (resultState === 'UNAVAILABLE' || activity.streaming || activity.paused) {
+            if (resultCheck.state === 'UNAVAILABLE') {
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: 'DEFER_RESULT_UNAVAILABLE',
+                reason: resultCheck.reason,
+                retry_after_ms: LIVENESS_VERIFY_RETRY_MS,
+                reset_liveness: false,
+                verification_failure_count: active.verificationFailureCount,
+              });
+              return { retryAfterMs: LIVENESS_VERIFY_RETRY_MS };
+            }
+
+            if (activity.streaming || activity.paused) {
+              active.verificationFailureCount = 0;
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: activity.streaming ? 'DEFER_STREAMING' : 'DEFER_PAUSED',
+                reset_liveness: true,
+              });
               return { resetLiveness: true };
             }
 
             let current;
+            const cursorStartedAt = Date.now();
             try {
               current = await this.browser.livenessSnapshot({
                 session: active.session,
                 signal: active.abortController.signal,
               });
-            } catch {
-              return { resetLiveness: true };
+              active.cursorProbeFailureCount = 0;
+            } catch (error) {
+              active.cursorProbeFailureCount += 1;
+              active.verificationFailureCount += 1;
+              await this.#recordLivenessEvent(active, 'LIVENESS_CURSOR_RECHECK', {
+                status: 'ERROR',
+                error: errorMessage(error),
+                duration_ms: Date.now() - cursorStartedAt,
+                failure_count: active.cursorProbeFailureCount,
+              });
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: 'DEFER_CURSOR_PROBE_ERROR',
+                retry_after_ms: LIVENESS_VERIFY_RETRY_MS,
+                reset_liveness: false,
+                verification_failure_count: active.verificationFailureCount,
+              });
+              return { retryAfterMs: LIVENESS_VERIFY_RETRY_MS };
             }
             if (this.active !== active || active.abortController.signal.aborted) return;
-            if (current.streaming || current.paused
-                || !this.#sameLivenessCursor(activity, current)) {
+
+            const sameCursor = this.#sameLivenessCursor(activity, current);
+            await this.#recordLivenessEvent(active, 'LIVENESS_CURSOR_RECHECK', {
+              status: 'OK',
+              duration_ms: Date.now() - cursorStartedAt,
+              same_cursor: sameCursor,
+              stalled_cursor: cursorDetails(activity),
+              current_cursor: cursorDetails(current),
+            });
+
+            if (current.streaming || current.paused) {
+              active.verificationFailureCount = 0;
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: current.streaming ? 'DEFER_STREAMING' : 'DEFER_PAUSED',
+                reset_liveness: true,
+              });
               return { resetLiveness: true };
             }
+
+            if (!sameCursor) {
+              active.verificationFailureCount = 0;
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                decision: 'DEFER_CURSOR_CHANGED',
+                reset_liveness: true,
+              });
+              return { resetLiveness: true };
+            }
+
+            active.verificationFailureCount = 0;
+            await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+              decision: 'SEND',
+              reset_liveness: false,
+              recovery_count: active.recoveryCount + 1,
+            });
 
             active.recovering = true;
             try {
@@ -537,6 +677,9 @@ export class DriveDispatchController {
                 recovery_sent_at_ms: Date.now(),
               };
               await transport.write(active.path, active.body);
+              await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_SENT', {
+                recovery_count: active.recoveryCount,
+              });
               return { resetLiveness: true };
             } finally {
               active.recovering = false;

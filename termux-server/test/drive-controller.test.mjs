@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DriveDispatchController } from '../src/drive-controller.mjs';
+import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 
 function control(overrides = {}) {
   return {
@@ -41,6 +42,7 @@ function dispatch(overrides = {}) {
 class MemoryStateStore {
   constructor() {
     this.value = { generation: 0, lastSignalId: null };
+    this.events = [];
   }
   snapshot() { return structuredClone(this.value); }
   async patch(changes) {
@@ -53,6 +55,10 @@ class MemoryStateStore {
     }
     this.value = { ...this.value, ...changes };
     return { applied: true, state: this.snapshot() };
+  }
+  async recordEvent(event, details = {}) {
+    this.events.push({ event, details: structuredClone(details) });
+    return this.snapshot();
   }
 }
 
@@ -346,6 +352,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
     resultReadCalls: () => resultReadCalls,
     lastPrompt: () => lastPrompt,
     writes,
+    events: stateStore.events,
   };
 }
 
@@ -360,14 +367,22 @@ test('liveness recovery completes without continuation when Result is committed'
     && body.completion_source === 'RESULT_DOCUMENT'), true);
 });
 
-test('liveness recovery is deferred when Result lookup is unavailable', async () => {
+test('liveness recovery retries Result lookup failures without erasing stall age', async () => {
   const run = await startStalledResume({
     resultError: new Error('Drive unavailable'),
     snapshot: stalledActivity(),
   });
-  assert.equal(run.action?.resetLiveness, true);
+  assert.equal(run.action?.resetLiveness, undefined);
+  assert.equal(run.action?.retryAfterMs, 15000);
   assert.equal(run.snapshotCalls(), 0);
   assert.equal(run.sendCalls(), 0);
+  const check = run.events.find(({ event }) => event === 'LIVENESS_RESULT_CHECK');
+  assert.equal(check?.details.result_state, 'UNAVAILABLE');
+  assert.equal(check?.details.reason, 'READ_ERROR');
+  assert.match(check?.details.error, /Drive unavailable/);
+  const decision = run.events.find(({ event }) => event === 'LIVENESS_RECOVERY_DECISION');
+  assert.equal(decision?.details.decision, 'DEFER_RESULT_UNAVAILABLE');
+  assert.equal(decision?.details.reset_liveness, false);
 });
 
 test('UNKNOWN control suppresses recovery by default', async () => {
@@ -429,6 +444,25 @@ test('liveness recovery is deferred while generation is paused', async () => {
   assert.equal(run.sendCalls(), 0);
 });
 
+test('liveness recovery retries cursor probe failures without erasing stall age', async () => {
+  const run = await startStalledResume({
+    resultText: '{"committed":false}',
+    snapshot: new Error('CDP probe unavailable'),
+  });
+  assert.equal(run.action?.resetLiveness, undefined);
+  assert.equal(run.action?.retryAfterMs, 15000);
+  assert.equal(run.snapshotCalls(), 1);
+  assert.equal(run.sendCalls(), 0);
+  const probe = run.events.find(({ event }) => event === 'LIVENESS_CURSOR_RECHECK');
+  assert.equal(probe?.details.status, 'ERROR');
+  assert.match(probe?.details.error, /CDP probe unavailable/);
+  const decision = run.events.find(
+    ({ event, details }) => event === 'LIVENESS_RECOVERY_DECISION'
+      && details.decision === 'DEFER_CURSOR_PROBE_ERROR',
+  );
+  assert.equal(decision?.details.reset_liveness, false);
+});
+
 test('liveness recovery is deferred when the visible message cursor advanced', async () => {
   const run = await startStalledResume({
     resultText: '{"committed":false}',
@@ -437,6 +471,14 @@ test('liveness recovery is deferred when the visible message cursor advanced', a
   assert.equal(run.action?.resetLiveness, true);
   assert.equal(run.snapshotCalls(), 1);
   assert.equal(run.sendCalls(), 0);
+  const recheck = run.events.find(({ event }) => event === 'LIVENESS_CURSOR_RECHECK');
+  assert.equal(recheck?.details.status, 'OK');
+  assert.equal(recheck?.details.same_cursor, false);
+  const decision = run.events.find(
+    ({ event, details }) => event === 'LIVENESS_RECOVERY_DECISION'
+      && details.decision === 'DEFER_CURSOR_CHANGED',
+  );
+  assert.equal(decision?.details.reset_liveness, true);
 });
 
 test('liveness recovery sends continuation only when Result is not committed and cursor is unchanged', async () => {
@@ -451,4 +493,64 @@ test('liveness recovery sends continuation only when Result is not committed and
   assert.equal(run.sendCalls(), 1);
   assert.equal(run.lastPrompt(), '현재 턴에 할당된 잔여작업이 있으면 계속 수행해');
   assert.equal(run.writes.some(({ body }) => body.server_status === 'RECOVERY_SENT'), true);
+  const decision = run.events.find(
+    ({ event, details }) => event === 'LIVENESS_RECOVERY_DECISION'
+      && details.decision === 'SEND',
+  );
+  assert.equal(decision?.details.reset_liveness, false);
+  assert.equal(run.events.some(({ event }) => event === 'LIVENESS_RECOVERY_SENT'), true);
+});
+
+test('browser monitor schedules stalled verification retries without resetting real activity time', async () => {
+  let evaluateCalls = 0;
+  let stalledCalls = 0;
+  const stalledTimes = [];
+  const baseProbe = {
+    url: 'https://chatgpt.com/c/abc-123',
+    streaming: false,
+    paused: false,
+    assistantCount: 0,
+    assistantTextLength: 0,
+    assistantMessageId: null,
+    userCount: 1,
+    userTextLength: 10,
+    userMessageId: 'data-testid:conversation-turn-1',
+    errorText: null,
+  };
+  const session = {
+    call: async (method) => {
+      assert.equal(method, 'Runtime.evaluate');
+      evaluateCalls += 1;
+      const value = evaluateCalls >= 4
+        ? { ...baseProbe, assistantCount: 1, assistantTextLength: 5,
+          assistantMessageId: 'data-testid:conversation-turn-2' }
+        : baseProbe;
+      return { result: { value } };
+    },
+  };
+  const browser = new ChatGptBrowser(null, { stallAfterMs: 1, probeIntervalMs: 2 });
+  const result = await browser.monitor({
+    session,
+    baseline: {
+      assistantCount: 0,
+      assistantTextLength: 0,
+      userCount: 1,
+      userTextLength: 10,
+    },
+    livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+    onActivity: async (activity) => {
+      if (activity.status !== 'STALLED') return;
+      stalledCalls += 1;
+      stalledTimes.push(activity.lastActivityAt);
+      if (stalledCalls === 1) {
+        assert.equal(activity.verificationRetry, false);
+        return { retryAfterMs: 1 };
+      }
+      assert.equal(activity.verificationRetry, true);
+      return { resetLiveness: true };
+    },
+  });
+  assert.equal(stalledCalls, 2);
+  assert.equal(stalledTimes[0], stalledTimes[1]);
+  assert.equal(result.status, 'COMPLETED');
 });

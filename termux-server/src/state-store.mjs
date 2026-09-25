@@ -65,6 +65,13 @@ export class StateStore {
     });
   }
 
+  async recordEvent(event, details = {}) {
+    return this.#enqueue(async () => {
+      await this.appendEvent(event, this.state, details);
+      return this.snapshot();
+    });
+  }
+
   #enqueue(operation) {
     const queued = this.writeQueue.then(operation, operation);
     this.writeQueue = queued.catch(() => {});
@@ -77,7 +84,7 @@ export class StateStore {
     await fs.rename(temp, this.config.stateFile);
   }
 
-  async appendEvent(event, state = this.state) {
+  async appendEvent(event, state = this.state, details = null) {
     const row = JSON.stringify({
       at: new Date().toISOString(),
       event,
@@ -86,6 +93,7 @@ export class StateStore {
       signalId: state.activeSignal?.signalId ?? null,
       turnId: state.activeSignal?.envelope?.TURN_ID ?? null,
       conversationUrl: state.conversationUrl ?? null,
+      ...(details && typeof details === 'object' ? { details } : {}),
     });
     await fs.appendFile(this.config.eventsFile, row + '\n', { mode: 0o600 });
   }
