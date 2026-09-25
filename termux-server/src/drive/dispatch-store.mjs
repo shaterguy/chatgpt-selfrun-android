@@ -1,20 +1,10 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const execFileAsync = promisify(execFile);
 const SCHEMA = 'selfrun-drive-dispatch-v1';
 const SUFFIX = '.selfrun-dispatch.json';
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
-
-function joinRemote(remote, root, relative = '') {
-  const prefix = String(remote || '').endsWith(':') ? String(remote) : String(remote) + ':';
-  const cleanRoot = String(root || '').replace(/^\/+|\/+$/g, '');
-  const cleanRelative = String(relative || '').replace(/^\/+/, '');
-  return prefix + cleanRoot + (cleanRelative ? '/' + cleanRelative : '');
-}
 
 function safeRelative(value) {
   const text = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -22,29 +12,31 @@ function safeRelative(value) {
   return text;
 }
 
-export class DispatchStore {
-  constructor(config, runner = execFileAsync) {
-    this.config = config;
-    this.runner = runner;
-    this.root = joinRemote(config.driveRemote, config.driveRunsRoot);
-  }
+function remotePath(root, relative) {
+  const cleanRoot = String(root || '').replace(/^\/+|\/+$/g, '');
+  const cleanRelative = safeRelative(relative);
+  return cleanRoot ? cleanRoot + '/' + cleanRelative : cleanRelative;
+}
 
-  async #rclone(args) {
-    const result = await this.runner(this.config.rcloneCommand, args, {
-      maxBuffer: 12 * 1024 * 1024,
-      timeout: 120000,
-      env: process.env,
-    });
-    return String(result.stdout || '');
+export class DispatchStore {
+  constructor(config, rc) {
+    this.config = config;
+    this.rc = rc;
+    if (!rc) throw new Error('rclone RC client required');
   }
 
   async list() {
-    const raw = await this.#rclone([
-      'lsjson', this.root, '--recursive', '--files-only',
-      '--include', '*' + SUFFIX,
-    ]);
-    const values = raw.trim() ? JSON.parse(raw) : [];
-    if (!Array.isArray(values)) throw new Error('rclone lsjson response is not an array');
+    const response = await this.rc.call('operations/list', {
+      fs: this.config.driveRemote,
+      remote: this.config.driveRunsRoot,
+      opt: {
+        recurse: true,
+        filesOnly: true,
+        noMimeType: true,
+        showHash: false,
+      },
+    });
+    const values = Array.isArray(response.list) ? response.list : [];
     return values
       .filter((item) => item && !item.IsDir && String(item.Path || '').endsWith(SUFFIX))
       .map((item) => ({
@@ -56,13 +48,26 @@ export class DispatchStore {
 
   async read(relative) {
     const safe = safeRelative(relative);
-    const raw = await this.#rclone(['cat', joinRemote(this.config.driveRemote, this.config.driveRunsRoot, safe)]);
-    if (!raw.trim()) return null;
-    if (Buffer.byteLength(raw, 'utf8') > MAX_JSON_BYTES) throw new Error('dispatch JSON too large');
-    const value = JSON.parse(raw);
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('dispatch JSON must be an object');
-    if (value.schema !== SCHEMA) return null;
-    return value;
+    await fs.mkdir(this.config.dataDir, { recursive: true });
+    const localName = 'dispatch-read-' + crypto.randomUUID() + '.json';
+    const localPath = path.join(this.config.dataDir, localName);
+    try {
+      await this.rc.call('operations/copyfile', {
+        srcFs: this.config.driveRemote,
+        srcRemote: remotePath(this.config.driveRunsRoot, safe),
+        dstFs: this.config.dataDir,
+        dstRemote: localName,
+      });
+      const raw = await fs.readFile(localPath, 'utf8');
+      if (!raw.trim()) return null;
+      if (Buffer.byteLength(raw, 'utf8') > MAX_JSON_BYTES) throw new Error('dispatch JSON too large');
+      const value = JSON.parse(raw);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('dispatch JSON must be an object');
+      if (value.schema !== SCHEMA) return null;
+      return value;
+    } finally {
+      await fs.rm(localPath, { force: true }).catch(() => {});
+    }
   }
 
   async write(relative, value) {
@@ -73,16 +78,18 @@ export class DispatchStore {
     const encoded = JSON.stringify(value);
     if (Buffer.byteLength(encoded, 'utf8') > MAX_JSON_BYTES) throw new Error('dispatch JSON too large');
     await fs.mkdir(this.config.dataDir, { recursive: true });
-    const local = path.join(this.config.dataDir, 'dispatch-' + crypto.randomUUID() + '.json');
+    const localName = 'dispatch-write-' + crypto.randomUUID() + '.json';
+    const localPath = path.join(this.config.dataDir, localName);
     try {
-      await fs.writeFile(local, encoded + '\n', { mode: 0o600 });
-      await this.#rclone([
-        'copyto', local,
-        joinRemote(this.config.driveRemote, this.config.driveRunsRoot, safe),
-        '--no-traverse',
-      ]);
+      await fs.writeFile(localPath, encoded + '\n', { mode: 0o600 });
+      await this.rc.call('operations/copyfile', {
+        srcFs: this.config.dataDir,
+        srcRemote: localName,
+        dstFs: this.config.driveRemote,
+        dstRemote: remotePath(this.config.driveRunsRoot, safe),
+      });
     } finally {
-      await fs.rm(local, { force: true });
+      await fs.rm(localPath, { force: true }).catch(() => {});
     }
   }
 
@@ -102,6 +109,17 @@ export class DispatchStore {
     if (!next) return { applied: false, reason: 'mutator_skipped', current };
     next.schema = SCHEMA;
     next.updated_at_ms = Date.now();
+
+    // Re-read immediately before the write. This is not a server-side transaction, but it prevents
+    // an already-observed newer Android attempt from being overwritten by a stale browser callback.
+    const preflight = await this.read(relative);
+    if (!preflight
+        || preflight.request_id !== current.request_id
+        || Number(preflight.attempt) !== Number(current.attempt)
+        || preflight.state !== current.state) {
+      return { applied: false, reason: 'preflight_changed', current: preflight };
+    }
+
     await this.write(relative, next);
     const readback = await this.read(relative);
     if (!readback || readback.request_id !== next.request_id
