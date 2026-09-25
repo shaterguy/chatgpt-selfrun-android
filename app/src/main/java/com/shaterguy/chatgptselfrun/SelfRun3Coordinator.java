@@ -41,7 +41,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final SelfRunRunLog log;
     private final SelfRun3Ledger ledger;
     private final SelfRun3DriveAdapter drive;
-    private final SelfRun3WebAdapter web;
+    private final SelfRun4DriveWebAdapter web;
     private final SelfRun3RuntimeSettings runtimeSettings;
     private final SelfRunServerWatch serverWatch;
     private final SharedPreferences runtimePrefs;
@@ -73,7 +73,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         this.log = log;
         ledger = new SelfRun3Ledger(service);
         drive = new SelfRun3DriveAdapter(service, store, ledger, this::operationPermitted);
-        web = new SelfRun3WebAdapter(service, this);
+        web = new SelfRun4DriveWebAdapter(service, this);
         runtimeSettings = new SelfRun3RuntimeSettings(service);
         serverWatch = new SelfRunServerWatch(service);
         runtimePrefs = service.getSharedPreferences(SelfRun3RuntimeSettings.PREFS, Context.MODE_PRIVATE);
