@@ -138,13 +138,6 @@ final class SelfRun3DriveAdapter {
             String raw = selection.rawBody;
             String candidate = selection.candidateBody;
             if (selection.committed) {
-                try {
-                    dispatchDrive.markResultCommitted(token, s);
-                } catch (Throwable dispatchCloseError) {
-                    diagnosticLog.record(projection, "V4_DISPATCH_CLOSE",
-                            "stage=ERROR;turn=" + s.turn() + ";type="
-                                    + dispatchCloseError.getClass().getSimpleName());
-                }
                 diagnosticLog.record(projection, "V3_RESULT_READ",
                         "stage=" + (selection.recovered ? "COMMITTED_RECOVERED_TRAILING_BRACE" : "COMMITTED")
                                 + ";turn=" + s.turn());
@@ -231,6 +224,16 @@ final class SelfRun3DriveAdapter {
     }
     String readResult(String token, SelfRun3Engine.State s) throws Exception {
         return observeResult(token, s).candidateBody;
+    }
+
+    void markDispatchResultCommitted(String token, SelfRun3Engine.State state) {
+        try {
+            dispatchDrive.markResultCommitted(token, state);
+        } catch (Throwable dispatchCloseError) {
+            diagnosticLog.record(projection, "V4_DISPATCH_CLOSE",
+                    "stage=ERROR;turn=" + (state == null ? 0 : state.turn()) + ";type="
+                            + dispatchCloseError.getClass().getSimpleName());
+        }
     }
     private void acquireResultReadWakeLock() {
         if (resultReadWakeLock != null && !resultReadWakeLock.isHeld()) {
