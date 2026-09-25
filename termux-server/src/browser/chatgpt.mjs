@@ -172,7 +172,7 @@ export class ChatGptBrowser {
       throw error;
     }
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (!/\\/c\\//.test(new URL(probe.url).pathname)) break;
+      if (!/\/c\//.test(new URL(probe.url).pathname)) break;
       const result = await evaluate(session, newChatExpression());
       if (result?.status === 'MISSING') break;
       await delay(700, signal);
@@ -223,7 +223,7 @@ export class ChatGptBrowser {
     await options.onSubmitted?.();
     const started = await this.#waitFor(
       prepared.session,
-      (p) => p.postObserved && /\\/c\\//.test(new URL(p.url).pathname),
+      (p) => p.postObserved && /\/c\//.test(new URL(p.url).pathname),
       {
         timeoutMs: this.config.startConfirmationTimeoutMs,
         signal: options.signal,
