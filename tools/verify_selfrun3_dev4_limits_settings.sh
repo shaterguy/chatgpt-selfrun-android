@@ -50,7 +50,7 @@ VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$
 VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUILD" | head -1)"
 [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
 [[ "$VERSION_CODE" -gt 3030000 ]]
-[[ "$VERSION_NAME" =~ ^3\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+$ ]]
+[[ "$VERSION_NAME" =~ ^(3|4)\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+$ ]]
 
 # Former product payload ceilings must not survive in runtime code.
 ! grep -Fq 'MAX_RESULT_BYTES' "$ENGINE"
