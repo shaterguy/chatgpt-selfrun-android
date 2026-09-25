@@ -49,8 +49,11 @@ public final class SelfRun4DriveDispatchArchitectureTest {
     @Test public void resultCompletionClosesOnlyServerLivenessAndDoesNotReplaceResultAuthority() throws Exception {
         String drive=source("SelfRun3DriveAdapter.java");
         String contract=source("SelfRun4DispatchFile.java");
+        String coordinator=source("SelfRun3Coordinator.java");
         assertTrue(drive.contains("selection.committed"));
-        assertTrue(drive.contains("dispatchDrive.markResultCommitted(token, s)"));
+        assertTrue(drive.contains("markDispatchResultCommitted"));
+        assertTrue(coordinator.contains("SelfRun3Engine.parseResult(observation.candidateBody, current)"));
+        assertTrue(coordinator.contains("drive.markDispatchResultCommitted(token, current)"));
         assertTrue(contract.contains("RESULT_COMMITTED"));
         assertTrue(drive.contains("SelfRun3ResultDocumentReader.read"));
         assertTrue(drive.contains("SelfRun3ResultDocumentPolicy.select"));
