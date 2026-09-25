@@ -175,8 +175,18 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
          'SelfRunServerFeaturePolicy.java', 'SelfRun3TurnStallPolicy.java', 'SelfRun3TurnStallNotifier.java', 'SelfRunStoppedResume.java'].each { name ->
             if (!new File(src, name).isFile()) throw new GradleException("SelfRun 3 source missing: ${name}")
         }
+        if (selfRunDriveVersionName.startsWith('4.')) {
+            if (!new File(src, 'SelfRun4DriveWebAdapter.java').isFile()) {
+                throw new GradleException('SelfRun 4 Drive browser adapter source missing')
+            }
+        }
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
         def coordinator = new File(src, 'SelfRun3Coordinator.java').getText('UTF-8')
+        if (selfRunDriveVersionName.startsWith('4.')
+                && (!coordinator.contains('new SelfRun4DriveWebAdapter(service, this)')
+                || coordinator.contains('new SelfRun3WebAdapter(service, this)'))) {
+            throw new GradleException('SelfRun 4 must delegate browser execution through Drive')
+        }
         def ledger = new File(src, 'SelfRun3Ledger.java').getText('UTF-8')
         def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')
         def drive = new File(src, 'SelfRun3DriveAdapter.java').getText('UTF-8')
