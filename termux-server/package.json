@@ -1,0 +1,15 @@
+{
+  "name": "selfrun-termux-server",
+  "version": "3.3.3-dev2",
+  "private": true,
+  "type": "module",
+  "description": "Local Termux execution server for SelfRun browser dispatch and liveness monitoring.",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "check": "node --check src/server.mjs && node --check src/controller.mjs && node --check src/browser/cdp.mjs && node --check src/browser/chatgpt.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
