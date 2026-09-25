@@ -61,6 +61,8 @@ public final class SelfRun3SuccessorTransitionAndroidTest {
     }
 
     @Test public void productionServiceWatchdogRedrivesSameSuccessorThroughRealWebAdapter() throws Exception {
+        org.junit.Assume.assumeFalse("V4 delegates canonical successor POST to the Termux Drive executor",
+                BuildConfig.VERSION_NAME.startsWith("4."));
         String task = "runtime-successor-" + System.nanoTime();
         SelfRunStore store = new SelfRunStore(context);
         store.bindBaseFolder("acct_123", "abcdefgh", "Runs", "", 1L);
