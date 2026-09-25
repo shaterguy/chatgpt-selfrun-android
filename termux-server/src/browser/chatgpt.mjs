@@ -14,7 +14,11 @@ async function evaluate(session, expression) {
     awaitPromise: true,
   });
   if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text || 'Browser script evaluation failed');
+    const detail = result.exceptionDetails.exception?.description
+      || result.exceptionDetails.exception?.value
+      || result.exceptionDetails.text
+      || 'Browser script evaluation failed';
+    throw new Error(String(detail));
   }
   return result.result?.value;
 }
@@ -37,7 +41,7 @@ function probeExpression() {
       url:location.href,
       title:document.title,
       readyState:document.readyState,
-      loginPage:/\/auth(?:\/|$)|\/login(?:\/|$)/i.test(location.pathname),
+      loginPage:(()=>{const p=String(location.pathname||'').toLowerCase();return p==='/auth'||p.startsWith('/auth/')||p==='/login'||p.startsWith('/login/');})(),
       composer:!!composer,
       streaming:stop,
       assistantCount:assistants.length,
@@ -146,7 +150,13 @@ export class ChatGptBrowser {
     let last = null;
     while (Date.now() - started < timeoutMs) {
       if (signal?.aborted) throw signal.reason || new Error('aborted');
-      last = await evaluate(session, probeExpression());
+      try {
+        last = await evaluate(session, probeExpression());
+      } catch (error) {
+        last = { probeError: String(error?.message || error) };
+        await delay(250, signal);
+        continue;
+      }
       if (predicate(last)) return last;
       await delay(250, signal);
     }
