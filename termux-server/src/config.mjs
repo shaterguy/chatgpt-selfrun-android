@@ -18,9 +18,10 @@ export const config = Object.freeze({
   chromiumCommand: process.env.SELFRUN_CHROMIUM || 'chromium-browser',
   probeIntervalMs: Number(process.env.SELFRUN_PROBE_INTERVAL_MS || 1500),
   stallAfterMs: Number(process.env.SELFRUN_STALL_AFTER_MS || 300000),
-  drivePollMs: Number(process.env.SELFRUN_DRIVE_POLL_MS || 2000),
+  drivePollMs: Number(process.env.SELFRUN_DRIVE_POLL_MS || 5000),
   driveRunsPath: process.env.SELFRUN_DRIVE_RUNS_PATH || 'selfrun-drive:GPT/Self Run/Runs',
   recoveryPrompt: process.env.SELFRUN_RECOVERY_PROMPT || '계속 진행해',
+  dispatchFreshMs: Number(process.env.SELFRUN_DISPATCH_FRESH_MS || 600000),
   navigationTimeoutMs: Number(process.env.SELFRUN_NAVIGATION_TIMEOUT_MS || 30000),
   defaultProjectUrl: process.env.SELFRUN_PROJECT_URL || '',
 });
