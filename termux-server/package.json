@@ -1,12 +1,12 @@
 {
   "name": "selfrun-termux-server",
-  "version": "3.3.3-dev2",
+  "version": "4.0.0-dev1",
   "private": true,
   "type": "module",
-  "description": "Local Termux execution server for SelfRun browser dispatch and liveness monitoring.",
+  "description": "Termux Drive-dispatch executor and liveness monitor for SelfRun 4.",
   "scripts": {
     "start": "node src/server.mjs",
-    "check": "node --check src/server.mjs && node --check src/controller.mjs && node --check src/browser/cdp.mjs && node --check src/browser/chatgpt.mjs",
+    "check": "node --check src/server.mjs && node --check src/state-store.mjs && node --check src/browser/cdp.mjs && node --check src/browser/chatgpt.mjs && node --check src/drive/dispatch-store.mjs && node --check src/drive/dispatcher.mjs",
     "test": "node --test"
   },
   "engines": {
