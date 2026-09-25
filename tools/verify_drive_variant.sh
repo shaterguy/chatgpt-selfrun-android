@@ -14,6 +14,7 @@ ENGINE_TEST=$UNIT_TEST/SelfRun3EngineTest.java
 LEDGER=$SRC/SelfRun3Ledger.java
 CONTRACT=$SRC/SelfRun3Protocol.java
 DRIVE=$SRC/SelfRun3DriveAdapter.java
+CREATE_RECOVERY=$SRC/SelfRun3DocumentCreateRecovery.java
 WATCHDOG=$SRC/SelfRun3ResultWatchdog.java
 SETTINGS=$SRC/SelfRun3RuntimeSettings.java
 STALL=$SRC/SelfRun3TurnStallPolicy.java
@@ -56,7 +57,7 @@ grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
-for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST" "$STOPPED_RESUME" "$STOPPED_RESUME_TEST" "$STOPPED_RESUME_ANDROID_TEST"; do
+for file in "$SERVICE" "$COORD" "$ENGINE" "$ENGINE_TEST" "$LEDGER" "$CONTRACT" "$DRIVE" "$CREATE_RECOVERY" "$WATCHDOG" "$SETTINGS" "$STALL" "$NOTIFIER" "$USER_NEXT" "$LOOKUP" "$WEB" "$DISPATCH" "$BOOTSTRAP" "$POWER" "$STRICT" "$MARKER" "$INPUT" "$RUNNER" "$FIRST_TEST" "$UNBOUNDED_TEST" "$SETTINGS_TEST" "$SETTINGS_ANDROID_TEST" "$STOPPED_RESUME" "$STOPPED_RESUME_TEST" "$STOPPED_RESUME_ANDROID_TEST"; do
   test -s "$file"
 done
 
@@ -165,7 +166,11 @@ grep -Fq '사용자 추가 지시 원문' "$CONTRACT"
 ! grep -Fq 'USER_ACTION_RESOLVED' "$CONTRACT"
 
 grep -Fq 'SelfRun3DriveLookup.findSingleDocumentId' "$DRIVE"
-grep -Fq 'DOCUMENT_CREATE_UNCONFIRMED' "$DRIVE"
+grep -Fq 'SelfRun3DocumentCreateRecovery.ensure' "$DRIVE"
+grep -Fq 'DOCUMENT_CREATE_STATE' "$DRIVE"
+grep -Fq 'DOCUMENT_CREATE_OUTCOME_PENDING' "$CREATE_RECOVERY"
+grep -Fq 'findCreatedSince' "$CREATE_RECOVERY"
+! grep -Fq 'DOCUMENT_CREATE_UNCONFIRMED' "$DRIVE"
 grep -Fq 'REQUIREMENT_READBACK_MISMATCH' "$DRIVE"
 grep -Fq 'static final class ResultObservation' "$DRIVE"
 grep -Fq 'ResultObservation observeResult(' "$DRIVE"

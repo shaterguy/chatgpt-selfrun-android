@@ -15,7 +15,7 @@ final class SelfRun3Engine {
     static final String RESULT_SCHEMA = "selfrun-turn-result-v3";
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
-    enum Kind { RESOURCE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
+    enum Kind { RESOURCE, DOCUMENT_CREATE_STATE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
         RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, SUCCESSOR_TIMEOUT, PAUSE, RESUME, RESUME_STOPPED, STOP, ERROR }
     enum Action { SETUP, PREPARE_TURN, PREPARE_WEB, WAIT, READ_RESULT, CHECK_RECEIPT, COMMIT, NONE }
     private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode", "stopEventId", "stoppedResumeOperation");
@@ -48,6 +48,9 @@ final class SelfRun3Engine {
         JSONObject successorTransition() { return copy(value.optJSONObject(SelfRun3SuccessorTransitionPolicy.KEY)); }
         String taskMode() { return value.optString("taskMode", config().optString("taskMode", config().optString("mode"))); }
         String resource(String k) { return copy(value.optJSONObject("resources")).optString(k, ""); }
+        String documentCreateState(String k) {
+            return copy(value.optJSONObject("documentCreateStates")).optString(k, "");
+        }
         boolean terminal() { return stage() == Stage.DONE || stage() == Stage.STOPPED; }
         boolean hasResult() { return !text("result").isEmpty(); }
         JSONArray history() { return array(value.optJSONArray("history")); }
@@ -122,6 +125,28 @@ final class SelfRun3Engine {
                     else if("conversationUrl".equals(k)) put(transition,"stage","CANONICAL_BOUND");
                     put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
                 }
+            }
+            case DOCUMENT_CREATE_STATE -> {
+                String key=p.optString("key"), next=p.optString("state");
+                require(Set.of("requirementDocumentId","resultDocumentId").contains(key),
+                        "document create key required");
+                String intentKey="requirementDocumentId".equals(key)
+                        ? "requirementCreateIntent" : "resultCreateIntent";
+                require(!s.resource(intentKey).isEmpty(), "document create intent required");
+                require(Set.of("SUBMITTING","RETRYABLE").contains(next),
+                        "document create state required");
+                require(("requirementDocumentId".equals(key) && stage==Stage.SETUP)
+                                || ("resultDocumentId".equals(key) && stage==Stage.PREPARING),
+                        "document create stage mismatch");
+                JSONObject states=copy(v.optJSONObject("documentCreateStates"));
+                String prior=states.optString(key, "");
+                boolean allowed=prior.isEmpty() && "SUBMITTING".equals(next)
+                        || "SUBMITTING".equals(prior) && "RETRYABLE".equals(next)
+                        || "RETRYABLE".equals(prior) && "SUBMITTING".equals(next)
+                        || prior.equals(next);
+                require(allowed, "document create state transition invalid");
+                if(prior.equals(next)) return original;
+                put(states,key,next); put(v,"documentCreateStates",states);
             }
             case SETUP_DONE -> {
                 require(stage==Stage.SETUP && !s.resource("folderId").isEmpty() && !s.resource("requirementDocumentId").isEmpty(),"setup resources required");
@@ -432,7 +457,7 @@ final class SelfRun3Engine {
         if(!"REPAIR".equals(kind)) applyProfile(config,profile,s.taskMode());
         for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
-                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","stoppedRestart","stoppedResumeWait","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision",SelfRun3SuccessorTransitionPolicy.KEY}) v.remove(k);
+                "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","documentCreateStates","stoppedRestart","stoppedResumeWait","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision",SelfRun3SuccessorTransitionPolicy.KEY}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");
         put(v,"resources",resources); put(v,"executions",all); put(v,"config",config);
         put(v,"turn",ordinal); put(v,"maxTurn",ordinal); put(v,"turnId",s.taskId()+":turn:"+ordinal);

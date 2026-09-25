@@ -36,7 +36,12 @@ final class DriveApiClient {
     static final class ApiException extends Exception {
         final int status;
         ApiException(int status, String message) { super(message); this.status = status; }
-        boolean retryable() { return status == 429 || status >= 500; }
+        boolean retryable() { return status == 408 || status == 429 || status >= 500; }
+    }
+
+    /** The request body was not opened, so a native create could not have been submitted. */
+    static final class CreateNotSubmittedException extends IOException {
+        CreateNotSubmittedException(String message, Throwable cause) { super(message, cause); }
     }
 
     /** A non-idempotent create may have reached Drive even though no response was received. */
@@ -164,6 +169,71 @@ final class DriveApiClient {
             match = candidate;
         }
         return match;
+    }
+
+    String getStartPageToken(String accessToken) throws Exception {
+        JSONObject json = request("GET",
+                "https://www.googleapis.com/drive/v3/changes/startPageToken?supportsAllDrives=true",
+                accessToken, null, false);
+        return requireChangeToken(json.optString("startPageToken", ""));
+    }
+
+    Metadata findSingleTurnDocumentSince(String accessToken, String startPageToken,
+                                         String jobId, String parentId) throws Exception {
+        requireParent(parentId);
+        if (jobId == null || !jobId.matches("[A-Za-z0-9._:-]{1,240}")) {
+            throw new IllegalArgumentException("safe V3 document name required");
+        }
+        String pageToken = requireChangeToken(startPageToken);
+        Set<String> seenTokens = new HashSet<>();
+        Metadata match = null;
+        while (true) {
+            if (!seenTokens.add(pageToken)) {
+                throw new IllegalStateException("DOCUMENT_CREATE_CHANGE_TOKEN_LOOP");
+            }
+            String fields = "nextPageToken,newStartPageToken,changes(fileId,removed,file(" + FILE_FIELDS + "))";
+            String endpoint = "https://www.googleapis.com/drive/v3/changes?supportsAllDrives=true"
+                    + "&includeItemsFromAllDrives=true&spaces=drive&pageSize=1000&pageToken="
+                    + URLEncoder.encode(pageToken, StandardCharsets.UTF_8.name())
+                    + "&fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8.name());
+            JSONObject page = request("GET", endpoint, accessToken, null, false);
+            JSONArray changes = page.optJSONArray("changes");
+            if (changes != null) for (int i = 0; i < changes.length(); i++) {
+                JSONObject change = changes.optJSONObject(i);
+                if (change == null || change.optBoolean("removed", false)) continue;
+                JSONObject raw = change.optJSONObject("file");
+                if (raw == null) continue;
+                Metadata candidate = new Metadata(raw);
+                if (!jobId.equals(candidate.name) || !MIME_DOCUMENT.equals(candidate.mimeType)
+                        || !parentId.equals(candidate.parentId) || candidate.trashed || candidate.shared
+                        || !candidate.isAppAuthorized
+                        || !jobId.equals(candidate.appProperties.optString("job_id"))
+                        || !"turn_document".equals(candidate.appProperties.optString("selfrun_kind"))) continue;
+                if (match != null && !match.id.equals(candidate.id)) {
+                    throw new IllegalStateException("DOCUMENT_CREATE_DUPLICATE");
+                }
+                match = candidate;
+            }
+            String next = page.optString("nextPageToken", "");
+            if (next.isEmpty()) {
+                requireChangeToken(page.optString("newStartPageToken", ""));
+                return match;
+            }
+            pageToken = requireChangeToken(next);
+        }
+    }
+
+    private static String requireChangeToken(String token) {
+        if (token == null || token.isEmpty() || token.length() > 1024) {
+            throw new IllegalStateException("DOCUMENT_CREATE_CHANGE_TOKEN_INVALID");
+        }
+        for (int i = 0; i < token.length(); i++) {
+            char ch = token.charAt(i);
+            if (ch < 0x21 || ch > 0x7e) {
+                throw new IllegalStateException("DOCUMENT_CREATE_CHANGE_TOKEN_INVALID");
+            }
+        }
+        return token;
     }
 
     String generateFileId(String accessToken) throws Exception {
@@ -500,6 +570,7 @@ final class DriveApiClient {
                                       boolean outcomeSensitive, String outcomeUnknownMessage, int responseLimit) throws Exception {
         URL url = requireAllowedUrl(endpoint);
         HttpURLConnection connection = null;
+        boolean requestBodyOpened = false;
         try {
             connection = (HttpURLConnection) url.openConnection();
             connection.setInstanceFollowRedirects(false);
@@ -514,7 +585,10 @@ final class DriveApiClient {
                 connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(bytes.length);
-                try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
+                try (OutputStream output = connection.getOutputStream()) {
+                    requestBodyOpened = true;
+                    output.write(bytes);
+                }
             }
             int status = connection.getResponseCode();
             InputStream stream = status >= 200 && status < 300
@@ -522,7 +596,7 @@ final class DriveApiClient {
             String response = readBounded(stream, responseLimit);
             if (status < 200 || status >= 300) {
                 ApiException api = apiException(status, response);
-                if (outcomeSensitive && (status == 408 || status == 429 || status >= 500)) {
+                if (outcomeSensitive && status >= 500) {
                     throw new OutcomeUnknownException(outcomeUnknownMessage, api);
                 }
                 throw api;
@@ -530,6 +604,9 @@ final class DriveApiClient {
             return response.trim().isEmpty() ? new JSONObject() : new JSONObject(response);
         } catch (IOException error) {
             if (error instanceof OutcomeUnknownException) throw error;
+            if (outcomeSensitive && body != null && !requestBodyOpened) {
+                throw new CreateNotSubmittedException("native create was not submitted", error);
+            }
             if (outcomeSensitive) throw new OutcomeUnknownException(outcomeUnknownMessage, error);
             throw error;
         } finally {

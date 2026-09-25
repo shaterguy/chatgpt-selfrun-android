@@ -39,10 +39,15 @@ public final class TurnDocumentRetryWiringTest {
         assertTrue(coordinator.contains("SelfRun3Engine.Kind.REPAIR"));
     }
 
-    @Test public void malformedOrPartiallyWrittenResultPreservesRawObservationWithoutCreatingAnotherDocument() throws Exception {
+    @Test public void malformedResultPreservesRawObservationAndCreateRecoveryUsesDurableReconciliation() throws Exception {
         String drive = src("SelfRun3DriveAdapter.java");
+        String api = src("DriveApiClient.java");
+        assertTrue(drive.contains("SelfRun3DocumentCreateRecovery.ensure"));
         assertTrue(drive.contains("SelfRun3DriveLookup.findSingleDocumentId"));
-        assertTrue(drive.contains("DOCUMENT_CREATE_UNCONFIRMED"));
+        assertTrue(drive.contains("findSingleTurnDocumentSince"));
+        assertTrue(api.contains("changes/startPageToken"));
+        assertTrue(api.contains("DOCUMENT_CREATE_DUPLICATE"));
+        assertFalse(drive.contains("DOCUMENT_CREATE_UNCONFIRMED"));
         assertTrue(drive.contains("static final class ResultObservation"));
         assertTrue(drive.contains("candidate = SelfRun3Engine.emptyResult(s).toString();"));
         assertTrue(drive.contains("new ResultObservation(metadata.modifiedTime + \":\" + metadata.version, raw, candidate)"));

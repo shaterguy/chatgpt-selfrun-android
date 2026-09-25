@@ -990,7 +990,32 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         return error instanceof DriveApiClient.ApiException || error instanceof IOException;
     }
 
+    static String safeDriveErrorDetail(Throwable error) {
+        if (error == null) return "NONE";
+        if (error instanceof SelfRun3DocumentCreateRecovery.PendingOutcomeException)
+            return "DOCUMENT_CREATE_OUTCOME_PENDING";
+        if (error instanceof DriveApiClient.CreateNotSubmittedException)
+            return "DOCUMENT_CREATE_NOT_SUBMITTED";
+        if (error instanceof DriveApiClient.OutcomeUnknownException) return "DRIVE_CREATE_OUTCOME_UNKNOWN";
+        if (error instanceof DriveApiClient.ApiException api) return "DRIVE_HTTP_" + api.status;
+        if (error instanceof IllegalStateException state) {
+            String message = state.getMessage();
+            if (message != null && message.matches("[A-Z][A-Z0-9_]{2,80}")) return message;
+            if ("multiple V3 documents match exact identity".equals(message)
+                    || "multiple turn documents found for one SelfRun job".equals(message)) {
+                return "DOCUMENT_CREATE_DUPLICATE";
+            }
+            return "STATE_INVALID";
+        }
+        if (error instanceof IllegalArgumentException) return "INVALID_ARGUMENT";
+        if (error instanceof IOException) return "DRIVE_IO";
+        return "UNEXPECTED_" + error.getClass().getSimpleName();
+    }
+
     private void handleDriveFailure(SelfRun3Engine.State state, DriveStep step, Throwable error) {
+        log.record(store, "V3_DRIVE_FAILURE", "step=" + step.name() + ";detail="
+                + safeDriveErrorDetail(error) + ";error="
+                + (error == null ? "" : error.getClass().getSimpleName()));
         if (error instanceof DriveApiClient.ApiException api && api.status == 401) {
             clearAccessToken();
             scheduleNetworkRetry("V3_DRIVE_TOKEN_EXPIRED");
@@ -1552,7 +1577,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         store.setPaused(true);
         store.setLastError(code, "SelfRun 3 상태를 안전하게 확정하지 못해 자동 전송을 중지했습니다.");
         log.record(store, "V3_HARD_PAUSE", "code=" + code + ";error="
-                + (error == null ? "" : error.getClass().getSimpleName()));
+                + (error == null ? "" : error.getClass().getSimpleName())
+                + ";detail=" + safeDriveErrorDetail(error));
         SelfRunDebugLogSync.requestStored(service, store.runId(), "PAUSE");
         notifyPaused();
     }

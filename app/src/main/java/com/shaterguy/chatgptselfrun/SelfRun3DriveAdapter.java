@@ -247,18 +247,47 @@ final class SelfRun3DriveAdapter {
         }
     }
     private SelfRun3Engine.State ensureDocument(String token, SelfRun3Engine.State original, String key, String intentKey, String name) throws Exception {
-        SelfRun3Engine.State s = ledger.loadExecution(original.taskId(), original.turnId());
-        require(s != null, "STALE_TURN");
-        if (!s.resource(key).isEmpty()) { validateDocument(token, s, s.resource(key)); return s; }
-        checkpoint();
-        String foundId = SelfRun3DriveLookup.findSingleDocumentId(token, name, s.resource("folderId"));
-        DriveApiClient.Metadata found = foundId.isEmpty() ? null : api.getMetadata(token, foundId);
-        if (found != null) return pin(s, key, found.id);
-        require(s.resource(intentKey).isEmpty(), "DOCUMENT_CREATE_UNCONFIRMED");
-        s = pin(s, intentKey, name); checkpoint();
-        DriveApiClient.Metadata created = api.createTurnDocument(token, name, s.resource("folderId"));
-        s = pin(s, key, created.id);
-        validateDocument(token, s, created.id); return s;
+        SelfRun3Engine.State loaded = ledger.loadExecution(original.taskId(), original.turnId());
+        require(loaded != null, "STALE_TURN");
+        final SelfRun3Engine.State[] current = new SelfRun3Engine.State[]{loaded};
+        String documentId = SelfRun3DocumentCreateRecovery.ensure(name,
+                new SelfRun3DocumentCreateRecovery.Store() {
+                    @Override public String documentId() { return current[0].resource(key); }
+                    @Override public String createIntent() { return current[0].resource(intentKey); }
+                    @Override public String createState() { return current[0].documentCreateState(key); }
+                    @Override public void pinIntent(String value) { current[0] = pin(current[0], intentKey, value); }
+                    @Override public void markSubmitting() {
+                        current[0] = markDocumentCreateState(current[0], key, "SUBMITTING");
+                    }
+                    @Override public void markRetryable() {
+                        current[0] = markDocumentCreateState(current[0], key, "RETRYABLE");
+                    }
+                    @Override public void pinDocument(String id) { current[0] = pin(current[0], key, id); }
+                },
+                new SelfRun3DocumentCreateRecovery.Remote() {
+                    @Override public String findExact() throws Exception {
+                        checkpoint();
+                        return SelfRun3DriveLookup.findSingleDocumentId(
+                                token, name, current[0].resource("folderId"));
+                    }
+                    @Override public String currentChangeToken() throws Exception {
+                        checkpoint();
+                        return api.getStartPageToken(token);
+                    }
+                    @Override public String findCreatedSince(String changeToken) throws Exception {
+                        checkpoint();
+                        DriveApiClient.Metadata found = api.findSingleTurnDocumentSince(
+                                token, changeToken, name, current[0].resource("folderId"));
+                        return found == null ? "" : found.id;
+                    }
+                    @Override public String create() throws Exception {
+                        checkpoint();
+                        return api.createTurnDocument(
+                                token, name, current[0].resource("folderId")).id;
+                    }
+                });
+        validateDocument(token, current[0], documentId);
+        return current[0];
     }
     private DriveApiClient.Metadata validateDocument(String token, SelfRun3Engine.State s, String id) throws Exception {
         checkpoint();
@@ -307,6 +336,15 @@ final class SelfRun3DriveAdapter {
                 api.uploadAttachmentResumable(token, a.driveFileId, s.taskId(), s.resource("folderId"), a.index, a.name, a.mimeType, a.size, in);
             }
         }
+    }
+    private SelfRun3Engine.State markDocumentCreateState(SelfRun3Engine.State s,
+                                                               String key, String state) {
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "key", key);
+        SelfRun3Engine.put(payload, "state", state);
+        return ledger.apply(new SelfRun3Engine.Event("document-create-" + UUID.randomUUID(),
+                SelfRun3Engine.Kind.DOCUMENT_CREATE_STATE, s.taskId(), s.turnId(), payload))
+                .execution(s.turnId());
     }
     private SelfRun3Engine.State pin(SelfRun3Engine.State s, String key, String value) {
         JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "key", key); SelfRun3Engine.put(payload, "value", value);
