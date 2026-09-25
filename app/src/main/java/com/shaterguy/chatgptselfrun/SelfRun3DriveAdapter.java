@@ -17,7 +17,8 @@ final class SelfRun3DriveAdapter {
     private final Context context;
     private final SelfRunStore projection;
     private final SelfRun3Ledger ledger;
-    private final DriveApiClient api = new DriveApiClient();\n    private final SelfRun4DispatchDriveClient dispatchDrive = new SelfRun4DispatchDriveClient();
+    private final DriveApiClient api = new DriveApiClient();
+    private final SelfRun4DispatchDriveClient dispatchDrive = new SelfRun4DispatchDriveClient();
     private final BooleanSupplier permitted;
     private final PowerManager.WakeLock resultReadWakeLock;
     private final SelfRunRunLog diagnosticLog;
