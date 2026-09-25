@@ -169,6 +169,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
          'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
+         'SelfRun4DispatchFile.java', 'SelfRun4DispatchDriveClient.java', 'SelfRun4DriveDispatchAdapter.java',
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
          'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java', 'SelfRun3ResultDocumentPolicy.java',
          'SelfRun3ResultDocumentReader.java', 'SelfRun3DriveTokenPolicy.java', 'SelfRun3RuntimeSettings.java',
@@ -185,6 +186,9 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def stall = new File(src, 'SelfRun3TurnStallPolicy.java').getText('UTF-8')
         def notifier = new File(src, 'SelfRun3TurnStallNotifier.java').getText('UTF-8')
         def web = new File(src, 'SelfRun3WebAdapter.java').getText('UTF-8')
+        def remoteWeb = new File(src, 'SelfRun4DriveDispatchAdapter.java').getText('UTF-8')
+        def remoteDispatch = new File(src, 'SelfRun4DispatchFile.java').getText('UTF-8')
+        def remoteDrive = new File(src, 'SelfRun4DispatchDriveClient.java').getText('UTF-8')
         def dispatch = new File(src, 'SelfRun3DispatchScript.java').getText('UTF-8')
         def bootstrap = new File(src, 'SelfRun3BootstrapTransport.java').getText('UTF-8')
         def power = new File(src, 'SelfRun3PowerPolicy.java').getText('UTF-8')
@@ -217,11 +221,17 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || !coordinator.contains('runtimeSettings.resultPollMs()')
                 || !notifier.contains('runtimeSettings.stallAlertMs()')
                 || !notifier.contains('settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)')
-                || !web.contains('prepareTimeoutMs = runtimeSettings.webPreparationMs()')
-                || !web.contains('scope=conversation-create')
-                || !web.contains('conversationCaptured')
+                || !remoteWeb.contains('prepareTimeoutMs = runtimeSettings.webPreparationMs()')
+                || !remoteWeb.contains('"WEB_PREPARATION_TIMEOUT"')
+                || !remoteWeb.contains('schedulePoll(expectedGeneration')
+                || !coordinator.contains('new SelfRun4DriveDispatchAdapter(service, this, ledger)')
+                || !engine.contains('"dispatchFileId"')
+                || !remoteDispatch.contains('PREPARE_REQUESTED')
+                || !remoteDispatch.contains('SEND_REQUESTED')
+                || !remoteDispatch.contains('RESULT_COMMITTED')
+                || !remoteDrive.contains('markResultCommitted')
                 || !engine.contains('s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT')
-                || !stall.contains('long alertAfterMs')) throw new GradleException('V3 runtime must consume operator timings and gate result wait on canonical conversation creation')
+                || !stall.contains('long alertAfterMs')) throw new GradleException('V4 must preserve the app state machine while delegating browser dispatch through Drive')
         if (power.contains('NORMAL_WAIT_POLL_MS') || power.contains('WEB_PREPARATION_MAX_MS')) throw new GradleException('operator-configurable timings must not remain fixed in power policy')
         if (engine.contains('MAX_RESULT_BYTES') || drive.contains('MAX_RESULT_BYTES')
                 || userNext.contains('MAX_USER_UTF8_BYTES') || userNext.contains('MAX_COMBINED_UTF8_BYTES')
