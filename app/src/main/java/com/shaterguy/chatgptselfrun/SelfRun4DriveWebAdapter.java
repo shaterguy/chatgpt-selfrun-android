@@ -132,7 +132,7 @@ final class SelfRun4DriveWebAdapter {
                         .put("dispatch_attempt", String.valueOf(attempt));
                 String name = "__SELFRUN_DISPATCH__" + safeName(snapshot.requestId())
                         + "__A" + attempt + ".json";
-                api.createServerDispatchFile(token, id, name, snapshot.resource("folderId"), props, body);
+                api.createServerDispatchFile(token, id, name, snapshot.config().optString("baseFolderId"), props, body);
                 main.post(() -> {
                     if (!active(expectedGeneration, request)) {
                         cancelRemoteBestEffort(token, id, body, "SUPERSEDED");
@@ -169,6 +169,7 @@ final class SelfRun4DriveWebAdapter {
         body.put("reasoning", snapshot.config().optString("reasoning"));
         body.put("result_document_id", snapshot.resource("resultDocumentId"));
         body.put("requirement_document_id", snapshot.resource("requirementDocumentId"));
+        body.put("task_folder_id", snapshot.resource("folderId"));
         body.put("previous_result_document_id", snapshot.text("previousResultDocumentId"));
         body.put("profile_operations", profileOperations(snapshot));
         body.put("created_at_ms", System.currentTimeMillis());
