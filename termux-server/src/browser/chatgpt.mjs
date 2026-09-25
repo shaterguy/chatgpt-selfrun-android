@@ -110,6 +110,30 @@ function submitExpression() {
   })()`;
 }
 
+function isConversationRequest(url, method) {
+  if (String(method || '').toUpperCase() !== 'POST') return false;
+  try {
+    const path = new URL(url).pathname.toLowerCase().replace(/\/+$/, '');
+    return path === '/backend-api/conversation' || path === '/backend-api/f/conversation';
+  } catch {
+    return false;
+  }
+}
+
+function applyProfileOperations(body, operations = []) {
+  const out = { ...body };
+  const allowed = new Set(['model', 'thinking_effort', 'conversation_origin', 'service_tier']);
+  for (const operation of operations) {
+    const path = String(operation?.path || '');
+    const op = String(operation?.op || '').toUpperCase();
+    if (!allowed.has(path)) throw new Error('Profile operation is not allowlisted');
+    if (op === 'SET') out[path] = String(operation.value ?? '');
+    else if (op === 'REMOVE') delete out[path];
+    else throw new Error('Unknown profile operation');
+  }
+  return out;
+}
+
 export class ChatGptBrowser {
   constructor(chromium, config) {
     this.chromium = chromium;
@@ -159,40 +183,139 @@ export class ChatGptBrowser {
     });
   }
 
-  async dispatch({ projectUrl, prompt, signal, onTransition }) {
+  async prepare({ projectUrl, prompt, signal }) {
     const target = await this.chromium.createTarget('about:blank');
     const session = await this.chromium.connectTarget(target);
     await session.call('Page.enable');
     await session.call('Runtime.enable');
+    await session.call('Network.enable');
 
     try {
       const before = await this.#prepareNewChat(session, projectUrl, signal);
-      const baseline = {
-        assistantCount: before.assistantCount || 0,
-        assistantTextLength: before.assistantTextLength || 0,
-      };
-
       if (signal?.aborted) throw signal.reason || new Error('aborted');
       const staged = await evaluate(session, inputExpression(prompt));
       if (staged?.status !== 'READY') {
         throw new Error(`Composer staging failed: ${staged?.status || 'unknown'}`);
       }
-      await onTransition?.('STAGED', {
-        targetId: target.id,
-        pageUrl: before.url,
-      });
+      return {
+        target,
+        session,
+        baseline: {
+          assistantCount: before.assistantCount || 0,
+          assistantTextLength: before.assistantTextLength || 0,
+        },
+      };
+    } catch (error) {
+      session.close();
+      await this.chromium.closeTarget(target.id);
+      throw error;
+    }
+  }
 
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
+  async #submitWithProfile({ session, profileOperations, signal }) {
+    if (signal?.aborted) throw signal.reason || new Error('aborted');
+    await session.call('Fetch.enable', {
+      patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+    });
+
+    let settled = false;
+    let resolveCanonical;
+    let rejectCanonical;
+    const canonical = new Promise((resolve, reject) => {
+      resolveCanonical = resolve;
+      rejectCanonical = reject;
+    });
+
+    const off = session.on('Fetch.requestPaused', async (params) => {
+      const request = params.request || {};
+      try {
+        if (!isConversationRequest(request.url, request.method)) {
+          await session.call('Fetch.continueRequest', { requestId: params.requestId });
+          return;
+        }
+        let body;
+        try {
+          body = JSON.parse(String(request.postData || ''));
+        } catch {
+          throw new Error('Conversation request body is not valid JSON');
+        }
+        const patched = JSON.stringify(applyProfileOperations(body, profileOperations));
+        await session.call('Fetch.continueRequest', {
+          requestId: params.requestId,
+          postData: Buffer.from(patched, 'utf8').toString('base64'),
+        });
+        if (!settled) {
+          settled = true;
+          resolveCanonical({ url: request.url });
+        }
+      } catch (error) {
+        try {
+          await session.call('Fetch.failRequest', {
+            requestId: params.requestId,
+            errorReason: 'Aborted',
+          });
+        } catch {}
+        if (!settled) {
+          settled = true;
+          rejectCanonical(error);
+        }
+      }
+    });
+
+    try {
       const sent = await evaluate(session, submitExpression());
       if (sent?.status !== 'SUBMITTED') {
         throw new Error(`Composer send failed: ${sent?.status || 'unknown'}`);
       }
-      await onTransition?.('SENT', { targetId: target.id });
+      const timeout = new Promise((_, reject) => {
+        const timer = setTimeout(() => reject(new Error('Canonical conversation POST timeout')), 10000);
+        canonical.finally(() => clearTimeout(timer)).catch(() => {});
+      });
+      await Promise.race([canonical, timeout]);
+      return await this.#waitFor(session, (p) => /\/c\//.test(new URL(p.url).pathname), {
+        timeoutMs: this.config.navigationTimeoutMs,
+        signal,
+        label: 'canonical conversation URL',
+      });
+    } finally {
+      off();
+      try { await session.call('Fetch.disable'); } catch {}
+    }
+  }
 
-      return { target, session, baseline };
+  async submitPrepared({ session, profileOperations, signal }) {
+    return this.#submitWithProfile({ session, profileOperations, signal });
+  }
+
+  async sendContinuation({ session, prompt, profileOperations, signal }) {
+    if (signal?.aborted) throw signal.reason || new Error('aborted');
+    const staged = await evaluate(session, inputExpression(prompt));
+    if (staged?.status !== 'READY') {
+      throw new Error(`Continuation staging failed: ${staged?.status || 'unknown'}`);
+    }
+    return this.#submitWithProfile({ session, profileOperations, signal });
+  }
+
+  async dispatch({ projectUrl, prompt, profileOperations = [], signal, onTransition }) {
+    const prepared = await this.prepare({ projectUrl, prompt, signal });
+    await onTransition?.('STAGED', {
+      targetId: prepared.target.id,
+      pageUrl: (await evaluate(prepared.session, probeExpression())).url,
+    });
+    try {
+      const probe = await this.submitPrepared({
+        session: prepared.session,
+        profileOperations,
+        signal,
+      });
+      await onTransition?.('SENT', {
+        targetId: prepared.target.id,
+        pageUrl: probe.url,
+      });
+      return prepared;
     } catch (error) {
-      session.close();
-      await this.chromium.closeTarget(target.id);
+      prepared.session.close();
+      await this.chromium.closeTarget(prepared.target.id);
       throw error;
     }
   }
