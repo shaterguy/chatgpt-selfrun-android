@@ -64,38 +64,41 @@ export class DriveDispatcher {
 
   async #loop() {
     while (this.running) {
-      try {
-        const entries = await this.store.list();
-        const present = new Set(entries.map((entry) => entry.path));
-        for (const path of [...this.observed.keys()]) {
-          if (!present.has(path)) this.observed.delete(path);
-        }
-        let cycleError = null;
-        for (const entry of entries) {
-          if (!this.running) break;
-          const fingerprint = entry.modTime + ':' + entry.size;
-          if (this.observed.get(entry.path) === fingerprint) continue;
-          try {
-            const value = await this.store.read(entry.path);
-            if (validDispatch(value)) await this.#observe(entry.path, value);
-            this.observed.set(entry.path, fingerprint);
-          } catch (error) {
-            cycleError = 'dispatch-read:' + String(error?.message || error);
-          }
-        }
-        this.lastError = cycleError;
-        await this.stateStore.patch({
-          status: this.workers.size ? 'DRIVE_EXECUTING' : 'DRIVE_WATCHING',
-          lastError: this.lastError,
-        });
-      } catch (error) {
-        this.lastError = 'drive-watch:' + String(error?.message || error);
-        await this.stateStore.patch({
-          status: 'DRIVE_WATCH_ERROR',
-          lastError: this.lastError,
-        }).catch(() => {});
-      }
+      await this.tick();
       if (this.running) await delay(Math.max(500, this.config.drivePollMs));
+    }
+  }
+
+  async tick() {
+    try {
+      const entries = await this.store.list();
+      const present = new Set(entries.map((entry) => entry.path));
+      for (const path of [...this.observed.keys()]) {
+        if (!present.has(path)) this.observed.delete(path);
+      }
+      let cycleError = null;
+      for (const entry of entries) {
+        const fingerprint = entry.modTime + ':' + entry.size;
+        if (this.observed.get(entry.path) === fingerprint) continue;
+        try {
+          const value = await this.store.read(entry.path);
+          if (validDispatch(value)) await this.#observe(entry.path, value);
+          this.observed.set(entry.path, fingerprint);
+        } catch (error) {
+          cycleError = 'dispatch-read:' + String(error?.message || error);
+        }
+      }
+      this.lastError = cycleError;
+      await this.stateStore.patch({
+        status: this.workers.size ? 'DRIVE_EXECUTING' : 'DRIVE_WATCHING',
+        lastError: this.lastError,
+      });
+    } catch (error) {
+      this.lastError = 'drive-watch:' + String(error?.message || error);
+      await this.stateStore.patch({
+        status: 'DRIVE_WATCH_ERROR',
+        lastError: this.lastError,
+      }).catch(() => {});
     }
   }
 
