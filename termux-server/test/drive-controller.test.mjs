@@ -931,3 +931,56 @@ test('completed browser monitor removes the active dispatch immediately', async 
   assert.equal(targetClosed, 1);
   assert.equal(writes.some(({ body }) => body.server_status === 'COMPLETED'), true);
 });
+
+test('final committed DONE result evicts stale RUNNING task control without reopening the conversation', async () => {
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => {
+      resumeCalls += 1;
+      throw new Error('final DONE result must not reopen conversation');
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-DONE:turn:10-request__A1.json';
+  let stored = dispatch({
+    task_id: 'SR-DONE',
+    turn_id: 'SR-DONE:turn:10',
+    request_id: 'SR-DONE:turn:10-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/final-done',
+    result_document_id: 'RESULT-DONE',
+  });
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    read: async () => structuredClone(stored),
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+    },
+    readGoogleDocText: async () => '{"committed":true,"status":"DONE"}',
+  };
+
+  await controller.control('control-done.json', control({
+    task_id: 'SR-DONE',
+    turn_id: 'SR-DONE:turn:10',
+    request_id: 'SR-DONE:turn:10-request',
+    control_epoch: 22,
+    state: 'RUNNING',
+  }), transport);
+
+  assert.equal(resumeCalls, 0);
+  assert.equal(stored.server_status, 'COMPLETED');
+  assert.equal(controller.controls.has('SR-DONE'), false);
+  assert.equal(controller.controlForTask('SR-DONE'), null);
+  const skipped = stateStore.events.find(({ event }) =>
+    event === 'DRIVE_DISPATCH_REATTACH_SKIPPED_COMMITTED');
+  assert.equal(skipped?.details.result_status, 'DONE');
+});
