@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0
+# SelfRun Termux Server 4.0.1
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 

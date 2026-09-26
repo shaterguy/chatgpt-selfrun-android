@@ -5,7 +5,7 @@ const home = os.homedir();
 const dataDir = process.env.SELFRUN_SERVER_DATA_DIR || path.join(home, '.selfrun-server');
 
 export const config = Object.freeze({
-  version: '4.0.0',
+  version: '4.0.1',
   host: process.env.SELFRUN_SERVER_HOST || '127.0.0.1',
   port: Number(process.env.SELFRUN_SERVER_PORT || 17831),
   dataDir,
