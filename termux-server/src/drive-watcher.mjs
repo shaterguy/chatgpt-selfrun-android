@@ -1,4 +1,10 @@
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const CONTROL_PREFIX = '__SELFRUN_CONTROL__';
+const TERMINAL_CONTROL_STATES = new Set(['STOPPED', 'DONE']);
+
+const clean = (value) => String(value || '').trim();
+const controlPath = (taskId) => `${CONTROL_PREFIX}${clean(taskId)}.json`;
+const terminalControl = (control) => TERMINAL_CONTROL_STATES.has(clean(control?.state));
 
 export class DriveDispatchWatcher {
   constructor({ transport, controller, config }) {
@@ -47,6 +53,9 @@ export class DriveDispatchWatcher {
 
   async scanOnce() {
     const files = await this.transport.list();
+    const filesByPath = new Map(files.map((file) => [String(file.path || ''), file]));
+    const scanControls = new Map();
+    const blockedTasks = new Set();
     const orderedFiles = [...files].sort((a, b) => {
       const aControl = String(a.path || '').startsWith('__SELFRUN_CONTROL__') ? 0 : 1;
       const bControl = String(b.path || '').startsWith('__SELFRUN_CONTROL__') ? 0 : 1;
@@ -69,12 +78,43 @@ export class DriveDispatchWatcher {
       }
 
       if (body?.schema === 'selfrun-task-control-v1') {
+        const taskId = clean(body.task_id);
+        if (taskId) {
+          scanControls.set(taskId, body);
+          if (terminalControl(body)) blockedTasks.add(taskId);
+        }
         await this.controller.control(file.path, body, this.transport);
         this.seen.set(file.path, fingerprint);
         continue;
       }
 
       if (body?.schema !== 'selfrun-server-dispatch-v1') {
+        this.seen.set(file.path, fingerprint);
+        continue;
+      }
+
+      const taskId = clean(body.task_id);
+      let taskControl = scanControls.get(taskId) || null;
+      if (!taskControl && taskId && typeof this.controller.controlForTask === 'function') {
+        taskControl = this.controller.controlForTask(taskId);
+      }
+      if (!taskControl && taskId) {
+        const controlFile = filesByPath.get(controlPath(taskId));
+        if (controlFile) {
+          try {
+            const authority = await this.transport.read(controlFile.path);
+            if (authority?.schema === 'selfrun-task-control-v1'
+                && clean(authority.task_id) === taskId) {
+              taskControl = authority;
+              scanControls.set(taskId, authority);
+              if (terminalControl(authority)) blockedTasks.add(taskId);
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+      if (blockedTasks.has(taskId) || terminalControl(taskControl)) {
         this.seen.set(file.path, fingerprint);
         continue;
       }

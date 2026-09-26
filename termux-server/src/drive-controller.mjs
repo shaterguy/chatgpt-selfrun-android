@@ -86,6 +86,10 @@ export class DriveDispatchController {
     return [...this.actives.values()];
   }
 
+  controlForTask(taskId) {
+    return this.controls.get(clean(taskId)) || null;
+  }
+
   #isActive(active) {
     return !!active
       && this.actives.get(active.path) === active
@@ -142,6 +146,7 @@ export class DriveDispatchController {
 
     if (control.state === 'STOPPED' || control.state === 'DONE') {
       for (const active of matches) await this.#closeActive(active);
+      this.controls.delete(control.task_id);
       return;
     }
 
@@ -195,7 +200,11 @@ export class DriveDispatchController {
         task_id: control.task_id,
         turn_id: clean(control.turn_id),
         request_id: clean(control.request_id),
+        result_status: clean(resultCheck.resultStatus) || null,
       });
+      if (clean(resultCheck.resultStatus) === 'DONE') {
+        this.controls.delete(control.task_id);
+      }
       return;
     }
 
@@ -552,8 +561,13 @@ export class DriveDispatchController {
       if (!text) return { state: 'UNAVAILABLE', reason: 'EMPTY_DOCUMENT' };
       try {
         const parsed = JSON.parse(text);
-        if (parsed?.committed === true) return { state: 'COMMITTED', reason: 'JSON' };
-        if (parsed?.committed === false) return { state: 'NOT_COMMITTED', reason: 'JSON' };
+        const resultStatus = clean(parsed?.status);
+        if (parsed?.committed === true) {
+          return { state: 'COMMITTED', reason: 'JSON', resultStatus };
+        }
+        if (parsed?.committed === false) {
+          return { state: 'NOT_COMMITTED', reason: 'JSON', resultStatus };
+        }
         return { state: 'UNAVAILABLE', reason: 'COMMITTED_FIELD_MISSING' };
       } catch (error) {
         if (/"committed"\s*:\s*true/.test(text)) {
@@ -687,7 +701,10 @@ export class DriveDispatchController {
                 },
                 'RESULT_COMMITTED_SUPPRESSED_RECOVERY',
               );
-              active.abortController.abort(new Error('result committed before recovery'));
+              await this.#closeActive(active);
+              if (clean(resultCheck.resultStatus) === 'DONE') {
+                this.controls.delete(active.identity.taskId);
+              }
               return;
             }
 
@@ -819,6 +836,9 @@ export class DriveDispatchController {
         active.publishPending = false;
       } catch {
         active.publishPending = true;
+      }
+      if (result.status === 'COMPLETED') {
+        await this.#closeActive(active);
       }
     } catch (error) {
       if (!this.#isActive(active)) return;

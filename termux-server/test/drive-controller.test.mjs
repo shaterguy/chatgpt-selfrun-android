@@ -188,47 +188,32 @@ test('Task CONTROL applies only increasing epochs and STOPPED closes the active 
 
   await controller.control('__SELFRUN_CONTROL__SR-TEST.json', control({ control_epoch: 4, state: 'STOPPED' }));
   assert.equal(controller.active, null);
+  assert.equal(controller.controls.has('SR-TEST'), false);
   assert.equal(sessionClosed, 1);
   assert.equal(targetClosed, 1);
 });
 
-test('STOPPED control prevents restart recovery from reopening its conversation', async () => {
-  let resumeCalls = 0;
-  const browser = {
-    chromium: { closeTarget: async () => true },
-    resume: async () => {
-      resumeCalls += 1;
-      throw new Error('must not reopen while stopped');
-    },
-    monitor: async () => new Promise(() => {}),
-  };
-  const stateStore = new MemoryStateStore();
+test('terminal CONTROL states are evicted immediately from the in-memory control cache', async () => {
   const controller = new DriveDispatchController({
-    browser,
-    stateStore,
+    browser: {
+      chromium: { closeTarget: async () => true },
+      monitor: async () => new Promise(() => {}),
+    },
+    stateStore: new MemoryStateStore(),
     config: { recoveryPrompt: 'continue' },
   });
-  const transport = { write: async () => {} };
 
-  await controller.control('control-stopped.json', control({
-    task_id: 'SR-STOPPED',
-    turn_id: 'SR-STOPPED:turn:9',
-    request_id: 'SR-STOPPED:turn:9-request',
-    control_epoch: 10,
-    state: 'STOPPED',
-  }), transport);
-
-  await controller.resume('job/stopped.json', dispatch({
-    task_id: 'SR-STOPPED',
-    turn_id: 'SR-STOPPED:turn:9',
-    request_id: 'SR-STOPPED:turn:9-request',
-    client_status: 'SEND_REQUESTED',
-    server_status: 'STARTED',
-    conversation_url: 'https://chatgpt.com/c/stopped-turn',
-  }), transport);
-
-  assert.equal(resumeCalls, 0);
-  assert.equal(controller.getActive('job/stopped.json'), null);
+  for (const state of ['STOPPED', 'DONE']) {
+    await controller.control('control-terminal.json', control({
+      task_id: `SR-${state}`,
+      turn_id: `SR-${state}:turn:9`,
+      request_id: `SR-${state}:turn:9-request`,
+      control_epoch: 10,
+      state,
+    }));
+    assert.equal(controller.controls.has(`SR-${state}`), false, state);
+    assert.equal(controller.controlForTask(`SR-${state}`), null, state);
+  }
 });
 
 test('Drive resume retries publication without reopening the conversation', async () => {
@@ -834,6 +819,15 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
     task_id: 'SR-ORPHAN',
     turn_id: 'SR-ORPHAN:turn:9',
     request_id: 'SR-ORPHAN:turn:9-request',
+    control_epoch: 19,
+    state: 'STOPPED',
+  }), transport);
+  assert.equal(controller.controls.has('SR-ORPHAN'), false);
+
+  await controller.control('control-orphan.json', control({
+    task_id: 'SR-ORPHAN',
+    turn_id: 'SR-ORPHAN:turn:9',
+    request_id: 'SR-ORPHAN:turn:9-request',
     control_epoch: 20,
     state: 'RUNNING',
   }), transport);
@@ -887,4 +881,106 @@ test('same request retry still supersedes only the older attempt', async () => {
   assert.deepEqual(closed, ['retry-target-1']);
   assert.equal(writes.some(({ path, body }) =>
     path === 'job/retry-a1.json' && body.server_status === 'SUPERSEDED'), true);
+});
+
+test('completed browser monitor removes the active dispatch immediately', async () => {
+  let sessionClosed = 0;
+  let targetClosed = 0;
+  const browser = {
+    chromium: { closeTarget: async () => { targetClosed += 1; return true; } },
+    resume: async () => ({
+      target: { id: 'target-completed-cleanup' },
+      session: { close() { sessionClosed += 1; } },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    monitor: async () => ({ status: 'COMPLETED' }),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const writes = [];
+  const transport = { write: async (path, body) => writes.push({ path, body: structuredClone(body) }) };
+
+  await controller.control('control-completed.json', control({
+    task_id: 'SR-COMPLETED',
+    turn_id: 'SR-COMPLETED:turn:1',
+    request_id: 'SR-COMPLETED:turn:1-request',
+    control_epoch: 1,
+    state: 'RUNNING',
+  }));
+  await controller.resume('job/completed.json', dispatch({
+    task_id: 'SR-COMPLETED',
+    turn_id: 'SR-COMPLETED:turn:1',
+    request_id: 'SR-COMPLETED:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/completed-cleanup',
+  }), transport);
+
+  for (let i = 0; i < 20 && controller.getActive('job/completed.json'); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal(controller.getActive('job/completed.json'), null);
+  assert.equal(controller.activeDispatches().length, 0);
+  assert.equal(stateStore.snapshot().activeCount, 0);
+  assert.equal(sessionClosed, 1);
+  assert.equal(targetClosed, 1);
+  assert.equal(writes.some(({ body }) => body.server_status === 'COMPLETED'), true);
+});
+
+test('final committed DONE result evicts stale RUNNING task control without reopening the conversation', async () => {
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => {
+      resumeCalls += 1;
+      throw new Error('final DONE result must not reopen conversation');
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-DONE:turn:10-request__A1.json';
+  let stored = dispatch({
+    task_id: 'SR-DONE',
+    turn_id: 'SR-DONE:turn:10',
+    request_id: 'SR-DONE:turn:10-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/final-done',
+    result_document_id: 'RESULT-DONE',
+  });
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    read: async () => structuredClone(stored),
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+    },
+    readGoogleDocText: async () => '{"committed":true,"status":"DONE"}',
+  };
+
+  await controller.control('control-done.json', control({
+    task_id: 'SR-DONE',
+    turn_id: 'SR-DONE:turn:10',
+    request_id: 'SR-DONE:turn:10-request',
+    control_epoch: 22,
+    state: 'RUNNING',
+  }), transport);
+
+  assert.equal(resumeCalls, 0);
+  assert.equal(stored.server_status, 'COMPLETED');
+  assert.equal(controller.controls.has('SR-DONE'), false);
+  assert.equal(controller.controlForTask('SR-DONE'), null);
+  const skipped = stateStore.events.find(({ event }) =>
+    event === 'DRIVE_DISPATCH_REATTACH_SKIPPED_COMMITTED');
+  assert.equal(skipped?.details.result_status, 'DONE');
 });
