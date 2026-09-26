@@ -444,6 +444,23 @@ test('liveness recovery is deferred while generation is paused', async () => {
   assert.equal(run.sendCalls(), 0);
 });
 
+test('visible Stop button alone does not suppress recovery when cursor is unchanged', async () => {
+  const current = stalledActivity({ streaming: true });
+  const run = await startStalledResume({
+    resultText: '{"committed":false}',
+    snapshot: current,
+    activity: current,
+  });
+  assert.equal(run.resultReadCalls(), 1);
+  assert.equal(run.snapshotCalls(), 1);
+  assert.equal(run.sendCalls(), 1);
+  const decision = run.events.find(
+    ({ event, details }) => event === 'LIVENESS_RECOVERY_DECISION'
+      && details.decision === 'SEND',
+  );
+  assert.equal(decision?.details.reset_liveness, false);
+});
+
 test('liveness recovery retries cursor probe failures without erasing stall age', async () => {
   const run = await startStalledResume({
     resultText: '{"committed":false}',
@@ -499,6 +516,102 @@ test('liveness recovery sends continuation only when Result is not committed and
   );
   assert.equal(decision?.details.reset_liveness, false);
   assert.equal(run.events.some(({ event }) => event === 'LIVENESS_RECOVERY_SENT'), true);
+});
+
+test('browser monitor does not treat Stop button visibility changes as liveness activity', async () => {
+  const originalNow = Date.now;
+  let now = 1000;
+  let evaluateCalls = 0;
+  let stalledCalls = 0;
+  const baseProbe = {
+    url: 'https://chatgpt.com/c/abc-123',
+    streaming: false,
+    stopButtonVisible: false,
+    paused: false,
+    assistantCount: 0,
+    assistantTextLength: 0,
+    assistantMessageId: null,
+    userCount: 1,
+    userTextLength: 10,
+    userMessageId: 'data-testid:conversation-turn-1',
+    errorText: null,
+  };
+  const session = {
+    call: async (method) => {
+      assert.equal(method, 'Runtime.evaluate');
+      evaluateCalls += 1;
+      now += 6;
+      let value = baseProbe;
+      if (evaluateCalls === 2 || evaluateCalls === 3) {
+        value = { ...baseProbe, streaming: true, stopButtonVisible: true };
+      } else if (evaluateCalls >= 4) {
+        value = { ...baseProbe, assistantCount: 1, assistantTextLength: 5,
+          assistantMessageId: 'data-testid:conversation-turn-2' };
+      }
+      return { result: { value } };
+    },
+  };
+  Date.now = () => now;
+  try {
+    const browser = new ChatGptBrowser(null, { stallAfterMs: 10, probeIntervalMs: 1 });
+    const result = await browser.monitor({
+      session,
+      baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
+      livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+      onActivity: async (activity) => {
+        if (activity.status === 'STALLED') {
+          stalledCalls += 1;
+          return { resetLiveness: true };
+        }
+      },
+    });
+    assert.equal(stalledCalls, 1);
+    assert.equal(result.status, 'COMPLETED');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('continuation acceptance ignores a pre-existing Stop button', async () => {
+  let evaluateCalls = 0;
+  const probe = {
+    url: 'https://chatgpt.com/c/abc-123',
+    streaming: true,
+    stopButtonVisible: true,
+    paused: false,
+    assistantCount: 0,
+    assistantTextLength: 0,
+    assistantMessageId: null,
+    userCount: 1,
+    userTextLength: 10,
+    userMessageId: 'data-testid:conversation-turn-1',
+    errorText: null,
+  };
+  const values = [
+    probe,
+    { status: 'READY' },
+    probe,
+    { status: 'SUBMITTED' },
+    probe,
+    { ...probe, userCount: 2, userTextLength: 20,
+      userMessageId: 'data-testid:conversation-turn-2' },
+  ];
+  const session = {
+    call: async (method) => {
+      assert.equal(method, 'Runtime.evaluate');
+      const value = values[evaluateCalls];
+      evaluateCalls += 1;
+      return { result: { value } };
+    },
+  };
+  const browser = new ChatGptBrowser(null, {});
+  const accepted = await browser.sendContinuation({
+    session,
+    prompt: '현재 턴에 할당된 잔여작업이 있으면 계속 수행해',
+    profileOperations: [],
+  });
+  assert.equal(evaluateCalls, 6);
+  assert.equal(accepted.userCount, 2);
 });
 
 test('browser monitor schedules stalled verification retries without resetting real activity time', async () => {
