@@ -180,7 +180,7 @@ test('watcher ignores stale unprocessed dispatch after restart', async () => {
   assert.deepEqual(calls, []);
 });
 
-test('watcher processes task CONTROL before restart dispatch recovery regardless of Drive listing order', async () => {
+test('watcher processes terminal task CONTROL before and blocks restart dispatch recovery regardless of Drive listing order', async () => {
   const calls = [];
   const now = Date.now();
   const bodies = new Map([
@@ -226,5 +226,64 @@ test('watcher processes task CONTROL before restart dispatch recovery regardless
   });
 
   await watcher.scanOnce();
-  assert.deepEqual(calls, ['control', 'resume']);
+  assert.deepEqual(calls, ['control']);
+});
+
+test('STOPPED Drive control blocks restart recovery without retaining controller control memory', async () => {
+  const calls = [];
+  const now = Date.now();
+  let dispatchRevision = 1;
+  const taskControlPath = '__SELFRUN_CONTROL__SR-BLOCKED.json';
+  const dispatchPath = '__SELFRUN_DISPATCH__SR-BLOCKED:turn:9-request__A1.json';
+  const bodies = new Map([
+    [taskControlPath, {
+      schema: 'selfrun-task-control-v1',
+      task_id: 'SR-BLOCKED',
+      control_epoch: 7,
+      state: 'STOPPED',
+      turn_id: 'SR-BLOCKED:turn:9',
+      request_id: 'SR-BLOCKED:turn:9-request',
+      updated_at_ms: now,
+    }],
+    [dispatchPath, {
+      schema: 'selfrun-server-dispatch-v1',
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      task_id: 'SR-BLOCKED',
+      turn_id: 'SR-BLOCKED:turn:9',
+      request_id: 'SR-BLOCKED:turn:9-request',
+      created_at_ms: now - 1000,
+      started_at_ms: now - 1000,
+      updated_at_ms: now - 1000,
+    }],
+  ]);
+  const transport = {
+    list: async () => [
+      { path: dispatchPath, modTime: `2026-09-26T00:00:0${dispatchRevision}Z`, size: 100 + dispatchRevision },
+      { path: taskControlPath, modTime: '2026-09-26T00:00:00Z', size: 200 },
+    ],
+    read: async (path) => structuredClone(bodies.get(path)),
+  };
+  const controller = {
+    active: null,
+    control: async (path, value) => calls.push(['control', path, value.state]),
+    controlForTask: () => null,
+    resume: async (path) => calls.push(['resume', path]),
+    prepare: async () => {},
+    send: async () => {},
+    cancel: async () => {},
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000, dispatchRecoveryMs: 7200000 },
+  });
+
+  await watcher.scanOnce();
+  assert.deepEqual(calls, [['control', taskControlPath, 'STOPPED']]);
+
+  dispatchRevision = 2;
+  bodies.get(dispatchPath).updated_at_ms = now + 1000;
+  await watcher.scanOnce();
+  assert.deepEqual(calls, [['control', taskControlPath, 'STOPPED']]);
 });

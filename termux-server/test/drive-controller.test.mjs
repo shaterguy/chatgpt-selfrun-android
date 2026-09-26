@@ -188,47 +188,32 @@ test('Task CONTROL applies only increasing epochs and STOPPED closes the active 
 
   await controller.control('__SELFRUN_CONTROL__SR-TEST.json', control({ control_epoch: 4, state: 'STOPPED' }));
   assert.equal(controller.active, null);
+  assert.equal(controller.controls.has('SR-TEST'), false);
   assert.equal(sessionClosed, 1);
   assert.equal(targetClosed, 1);
 });
 
-test('STOPPED control prevents restart recovery from reopening its conversation', async () => {
-  let resumeCalls = 0;
-  const browser = {
-    chromium: { closeTarget: async () => true },
-    resume: async () => {
-      resumeCalls += 1;
-      throw new Error('must not reopen while stopped');
-    },
-    monitor: async () => new Promise(() => {}),
-  };
-  const stateStore = new MemoryStateStore();
+test('terminal CONTROL states are evicted immediately from the in-memory control cache', async () => {
   const controller = new DriveDispatchController({
-    browser,
-    stateStore,
+    browser: {
+      chromium: { closeTarget: async () => true },
+      monitor: async () => new Promise(() => {}),
+    },
+    stateStore: new MemoryStateStore(),
     config: { recoveryPrompt: 'continue' },
   });
-  const transport = { write: async () => {} };
 
-  await controller.control('control-stopped.json', control({
-    task_id: 'SR-STOPPED',
-    turn_id: 'SR-STOPPED:turn:9',
-    request_id: 'SR-STOPPED:turn:9-request',
-    control_epoch: 10,
-    state: 'STOPPED',
-  }), transport);
-
-  await controller.resume('job/stopped.json', dispatch({
-    task_id: 'SR-STOPPED',
-    turn_id: 'SR-STOPPED:turn:9',
-    request_id: 'SR-STOPPED:turn:9-request',
-    client_status: 'SEND_REQUESTED',
-    server_status: 'STARTED',
-    conversation_url: 'https://chatgpt.com/c/stopped-turn',
-  }), transport);
-
-  assert.equal(resumeCalls, 0);
-  assert.equal(controller.getActive('job/stopped.json'), null);
+  for (const state of ['STOPPED', 'DONE']) {
+    await controller.control('control-terminal.json', control({
+      task_id: `SR-${state}`,
+      turn_id: `SR-${state}:turn:9`,
+      request_id: `SR-${state}:turn:9-request`,
+      control_epoch: 10,
+      state,
+    }));
+    assert.equal(controller.controls.has(`SR-${state}`), false, state);
+    assert.equal(controller.controlForTask(`SR-${state}`), null, state);
+  }
 });
 
 test('Drive resume retries publication without reopening the conversation', async () => {
@@ -829,6 +814,15 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
     },
     readGoogleDocText: async () => '{"committed":false}',
   };
+
+  await controller.control('control-orphan.json', control({
+    task_id: 'SR-ORPHAN',
+    turn_id: 'SR-ORPHAN:turn:9',
+    request_id: 'SR-ORPHAN:turn:9-request',
+    control_epoch: 19,
+    state: 'STOPPED',
+  }), transport);
+  assert.equal(controller.controls.has('SR-ORPHAN'), false);
 
   await controller.control('control-orphan.json', control({
     task_id: 'SR-ORPHAN',

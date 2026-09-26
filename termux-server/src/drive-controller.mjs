@@ -86,6 +86,10 @@ export class DriveDispatchController {
     return [...this.actives.values()];
   }
 
+  controlForTask(taskId) {
+    return this.controls.get(clean(taskId)) || null;
+  }
+
   #isActive(active) {
     return !!active
       && this.actives.get(active.path) === active
@@ -142,6 +146,7 @@ export class DriveDispatchController {
 
     if (control.state === 'STOPPED' || control.state === 'DONE') {
       for (const active of matches) await this.#closeActive(active);
+      this.controls.delete(control.task_id);
       return;
     }
 
