@@ -41,6 +41,7 @@ public final class SelfRunStoppedResumePolicyTest {
         assertTrue(service.contains("stoppedResume.resumePending()"));
         assertTrue(main.contains("sendRunnerAction(SelfRunService.ACTION_STOP)"));
         assertFalse(main.contains("stopService(new Intent(this, SelfRunService.class))"));
+        assertTrue(coordinator.contains("web.quiesce()"));
     }
 
     @Test public void recoveryReusesExistingLedgerAndPinnedDriveIdentity() throws Exception {
@@ -49,6 +50,7 @@ public final class SelfRunStoppedResumePolicyTest {
         assertTrue(resume.contains("config.optString(\"accountId\").equals(store.driveAccountId())"));
         assertTrue(resume.contains("config.optString(\"baseFolderId\").equals(store.driveRunsBaseFolderId())"));
         assertTrue(resume.contains("SelfRun3Engine.Kind.RESUME_STOPPED"));
+        assertTrue(resume.contains("coordinator.onStoppedResumeAuthorized(token)"));
         assertTrue(resume.contains("coordinator.onStart(SelfRunService.ACTION_RUN)"));
         assertFalse(resume.contains("generateFolderId"));
         assertFalse(resume.contains("conversationUrl") && resume.contains("ACTION_VIEW"));

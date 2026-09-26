@@ -147,6 +147,7 @@ final class SelfRunStoppedResume {
                     runLog.record(store, "V3_STOPPED_RUN_RESUMED",
                             "turn=" + ready.turn() + ";stage=" + ready.stage().name()
                                     + ";resultDocumentId=" + ready.resource("resultDocumentId"));
+                    coordinator.onStoppedResumeAuthorized(token);
                     coordinator.onStart(SelfRunService.ACTION_RUN);
                     clearPending(target);
                     }

@@ -91,6 +91,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         return SelfRun3RunMarker.current(service, store.runId());
     }
 
+    void onStoppedResumeAuthorized(String token) {
+        requireMain();
+        setAccessToken(token);
+        web.restoreAccessToken(token);
+    }
+
     int onStart(String action) {
         requireMain();
         if ((BuildConfig.APPLICATION_ID + ".PAUSE").equals(action)) {
@@ -1486,7 +1492,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         cancelServerWaitState();
         main.removeCallbacksAndMessages(null);
         web.publishControlState("STOPPED", "USER_STOP");
-        web.close();
+        web.quiesce();
         releaseWakeLock();
         int expectedEpoch = epoch;
         String task = store.runId();

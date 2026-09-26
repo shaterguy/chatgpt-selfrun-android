@@ -62,6 +62,13 @@ final class SelfRun4DriveWebAdapter {
         this.runStore = new SelfRunStore(this.context);
     }
 
+    void restoreAccessToken(String token) {
+        requireMain();
+        if (io.isShutdown()) throw new IllegalStateException("WEB_ADAPTER_CLOSED");
+        accessToken = token == null ? "" : token.trim();
+        if (accessToken.isEmpty()) throw new IllegalArgumentException("DRIVE_TOKEN_EMPTY");
+    }
+
     void syncControlState(SelfRun3Engine.State snapshot) {
         requireMain();
         if (snapshot == null) return;
