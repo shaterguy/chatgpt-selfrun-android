@@ -32,6 +32,7 @@ public final class SelfRunStoppedResumePolicyTest {
         String detail = src("SelfRunDetailActivity.java");
         String service = src("SelfRunService.java");
         String main = src("MainActivity.java");
+        String coordinator = src("SelfRun3Coordinator.java");
         assertTrue(history.contains("SelfRunStoppedResume.isEligible(item)"));
         assertTrue(detail.contains("SelfRunStoppedResume.isEligible(item)"));
         assertTrue(history.contains("중지된 작업 재개"));
