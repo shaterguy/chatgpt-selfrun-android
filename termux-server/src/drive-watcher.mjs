@@ -14,8 +14,11 @@ export class DriveDispatchWatcher {
     this.running = true;
     while (this.running) {
       try {
-        const active = this.controller.active;
-        if (active?.publishPending && active.path && active.body) {
+        const actives = typeof this.controller.activeDispatches === 'function'
+          ? this.controller.activeDispatches()
+          : (this.controller.active ? [this.controller.active] : []);
+        for (const active of actives) {
+          if (!active?.publishPending || !active.path || !active.body) continue;
           try {
             await this.transport.write(active.path, active.body);
             active.publishPending = false;
@@ -28,9 +31,12 @@ export class DriveDispatchWatcher {
           error: String(error?.message || error),
         }));
       }
-      const activeStatus = String(this.controller.active?.serverStatus || '');
-      const nextDelay = activeStatus === 'READY_TO_SUBMIT' || activeStatus === 'RECOVERY_SENT'
-        ? 10000 : this.config.drivePollMs;
+      const delayActives = typeof this.controller.activeDispatches === 'function'
+        ? this.controller.activeDispatches()
+        : (this.controller.active ? [this.controller.active] : []);
+      const fastActive = delayActives.some((active) =>
+        active.serverStatus === 'READY_TO_SUBMIT' || active.serverStatus === 'RECOVERY_SENT');
+      const nextDelay = fastActive ? 10000 : this.config.drivePollMs;
       await delay(nextDelay);
     }
   }
@@ -41,10 +47,18 @@ export class DriveDispatchWatcher {
 
   async scanOnce() {
     const files = await this.transport.list();
-    for (const file of files) {
+    const orderedFiles = [...files].sort((a, b) => {
+      const aControl = String(a.path || '').startsWith('__SELFRUN_CONTROL__') ? 0 : 1;
+      const bControl = String(b.path || '').startsWith('__SELFRUN_CONTROL__') ? 0 : 1;
+      if (aControl !== bControl) return aControl - bControl;
+      return String(a.modTime || '').localeCompare(String(b.modTime || ''));
+    });
+    for (const file of orderedFiles) {
       const fingerprint = `${file.modTime}|${file.size}`;
-      const publishPending = this.controller.active?.path === file.path
-        && this.controller.active?.publishPending;
+      const pathActive = typeof this.controller.getActive === 'function'
+        ? this.controller.getActive(file.path)
+        : (this.controller.active?.path === file.path ? this.controller.active : null);
+      const publishPending = !!pathActive?.publishPending;
       if (this.seen.get(file.path) === fingerprint && !publishPending) continue;
 
       let body;
