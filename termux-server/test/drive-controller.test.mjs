@@ -192,6 +192,45 @@ test('Task CONTROL applies only increasing epochs and STOPPED closes the active 
   assert.equal(targetClosed, 1);
 });
 
+test('STOPPED control prevents restart recovery from reopening its conversation', async () => {
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => {
+      resumeCalls += 1;
+      throw new Error('must not reopen while stopped');
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const transport = { write: async () => {} };
+
+  await controller.control('control-stopped.json', control({
+    task_id: 'SR-STOPPED',
+    turn_id: 'SR-STOPPED:turn:9',
+    request_id: 'SR-STOPPED:turn:9-request',
+    control_epoch: 10,
+    state: 'STOPPED',
+  }), transport);
+
+  await controller.resume('job/stopped.json', dispatch({
+    task_id: 'SR-STOPPED',
+    turn_id: 'SR-STOPPED:turn:9',
+    request_id: 'SR-STOPPED:turn:9-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/stopped-turn',
+  }), transport);
+
+  assert.equal(resumeCalls, 0);
+  assert.equal(controller.getActive('job/stopped.json'), null);
+});
+
 test('Drive resume retries publication without reopening the conversation', async () => {
   let resumeCalls = 0;
   let writeCalls = 0;
@@ -418,8 +457,6 @@ test('non-RUNNING task CONTROL states suppress liveness recovery before Result i
     'PAUSED',
     'RESUME_REQUESTED',
     'RESUME_STOPPED_REQUESTED',
-    'STOPPED',
-    'DONE',
   ]) {
     const run = await startStalledResume({
       controlState,
@@ -666,4 +703,188 @@ test('browser monitor schedules stalled verification retries without resetting r
   assert.equal(stalledCalls, 2);
   assert.equal(stalledTimes[0], stalledTimes[1]);
   assert.equal(result.status, 'COMPLETED');
+});
+
+
+test('parallel Drive dispatches stay active independently and STOPPED only closes its task', async () => {
+  const closedTargets = [];
+  const closedSessions = [];
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async (id) => { closedTargets.push(id); return true; } },
+    resume: async ({ conversationUrl }) => {
+      resumeCalls += 1;
+      const suffix = conversationUrl.endsWith('/parallel-a') ? 'a' : 'b';
+      return {
+        target: { id: `target-${suffix}` },
+        session: { close() { closedSessions.push(suffix); } },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const writes = [];
+  const transport = {
+    write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
+  };
+
+  await controller.control('control-a.json', control({
+    task_id: 'SR-A',
+    turn_id: 'SR-A:turn:1',
+    request_id: 'SR-A:turn:1-request',
+    control_epoch: 1,
+  }));
+  await controller.resume('job/a.json', dispatch({
+    task_id: 'SR-A',
+    turn_id: 'SR-A:turn:1',
+    request_id: 'SR-A:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/parallel-a',
+  }), transport);
+
+  await controller.control('control-b.json', control({
+    task_id: 'SR-B',
+    turn_id: 'SR-B:turn:1',
+    request_id: 'SR-B:turn:1-request',
+    control_epoch: 1,
+  }));
+  await controller.resume('job/b.json', dispatch({
+    task_id: 'SR-B',
+    turn_id: 'SR-B:turn:1',
+    request_id: 'SR-B:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/parallel-b',
+  }), transport);
+
+  assert.equal(resumeCalls, 2);
+  assert.equal(controller.activeDispatches().length, 2);
+  assert.ok(controller.getActive('job/a.json'));
+  assert.ok(controller.getActive('job/b.json'));
+  assert.equal(writes.some(({ body }) => body.server_status === 'SUPERSEDED'), false);
+
+  await controller.control('control-a.json', control({
+    task_id: 'SR-A',
+    turn_id: 'SR-A:turn:1',
+    request_id: 'SR-A:turn:1-request',
+    control_epoch: 2,
+    state: 'STOPPED',
+  }), transport);
+
+  assert.equal(controller.getActive('job/a.json'), null);
+  assert.ok(controller.getActive('job/b.json'));
+  assert.deepEqual(closedTargets, ['target-a']);
+  assert.deepEqual(closedSessions, ['a']);
+});
+
+test('RUNNING control reattaches a stopped superseded dispatch by exact task turn and request', async () => {
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async ({ conversationUrl }) => {
+      resumeCalls += 1;
+      assert.equal(conversationUrl, 'https://chatgpt.com/c/orphan-turn');
+      return {
+        target: { id: 'target-orphan' },
+        session: { close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-ORPHAN:turn:9-request__A1.json';
+  let stored = dispatch({
+    task_id: 'SR-ORPHAN',
+    turn_id: 'SR-ORPHAN:turn:9',
+    request_id: 'SR-ORPHAN:turn:9-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'SUPERSEDED',
+    conversation_url: 'https://chatgpt.com/c/orphan-turn',
+    result_document_id: 'RESULT-ORPHAN',
+  });
+  const writes = [];
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    read: async (requested) => {
+      assert.equal(requested, path);
+      return structuredClone(stored);
+    },
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+      writes.push(structuredClone(body));
+    },
+    readGoogleDocText: async () => '{"committed":false}',
+  };
+
+  await controller.control('control-orphan.json', control({
+    task_id: 'SR-ORPHAN',
+    turn_id: 'SR-ORPHAN:turn:9',
+    request_id: 'SR-ORPHAN:turn:9-request',
+    control_epoch: 20,
+    state: 'RUNNING',
+  }), transport);
+
+  assert.equal(resumeCalls, 1);
+  assert.ok(controller.getActive(path));
+  assert.equal(controller.getActive(path).controlState, 'RUNNING');
+  assert.equal(stored.server_status, 'STARTED');
+  assert.equal(writes.at(-1).conversation_url, 'https://chatgpt.com/c/orphan-turn');
+  assert.equal(stateStore.events.some(({ event }) => event === 'DRIVE_DISPATCH_REATTACH_REQUESTED'), true);
+});
+
+test('same request retry still supersedes only the older attempt', async () => {
+  const closed = [];
+  let n = 0;
+  const browser = {
+    chromium: { closeTarget: async (id) => { closed.push(id); return true; } },
+    resume: async () => {
+      n += 1;
+      return {
+        target: { id: `retry-target-${n}` },
+        session: { close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const writes = [];
+  const transport = { write: async (path, body) => writes.push({ path, body: structuredClone(body) }) };
+
+  const common = {
+    task_id: 'SR-RETRY',
+    turn_id: 'SR-RETRY:turn:1',
+    request_id: 'SR-RETRY:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/retry',
+  };
+  await controller.resume('job/retry-a1.json', dispatch({ ...common, dispatch_attempt: 1 }), transport);
+  await controller.resume('job/retry-a2.json', dispatch({ ...common, dispatch_attempt: 2 }), transport);
+
+  assert.equal(controller.activeDispatches().length, 1);
+  assert.equal(controller.getActive('job/retry-a1.json'), null);
+  assert.ok(controller.getActive('job/retry-a2.json'));
+  assert.deepEqual(closed, ['retry-target-1']);
+  assert.equal(writes.some(({ path, body }) =>
+    path === 'job/retry-a1.json' && body.server_status === 'SUPERSEDED'), true);
 });
