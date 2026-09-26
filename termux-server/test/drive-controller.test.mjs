@@ -882,3 +882,52 @@ test('same request retry still supersedes only the older attempt', async () => {
   assert.equal(writes.some(({ path, body }) =>
     path === 'job/retry-a1.json' && body.server_status === 'SUPERSEDED'), true);
 });
+
+test('completed browser monitor removes the active dispatch immediately', async () => {
+  let sessionClosed = 0;
+  let targetClosed = 0;
+  const browser = {
+    chromium: { closeTarget: async () => { targetClosed += 1; return true; } },
+    resume: async () => ({
+      target: { id: 'target-completed-cleanup' },
+      session: { close() { sessionClosed += 1; } },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    monitor: async () => ({ status: 'COMPLETED' }),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const writes = [];
+  const transport = { write: async (path, body) => writes.push({ path, body: structuredClone(body) }) };
+
+  await controller.control('control-completed.json', control({
+    task_id: 'SR-COMPLETED',
+    turn_id: 'SR-COMPLETED:turn:1',
+    request_id: 'SR-COMPLETED:turn:1-request',
+    control_epoch: 1,
+    state: 'RUNNING',
+  }));
+  await controller.resume('job/completed.json', dispatch({
+    task_id: 'SR-COMPLETED',
+    turn_id: 'SR-COMPLETED:turn:1',
+    request_id: 'SR-COMPLETED:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/completed-cleanup',
+  }), transport);
+
+  for (let i = 0; i < 20 && controller.getActive('job/completed.json'); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal(controller.getActive('job/completed.json'), null);
+  assert.equal(controller.activeDispatches().length, 0);
+  assert.equal(stateStore.snapshot().activeCount, 0);
+  assert.equal(sessionClosed, 1);
+  assert.equal(targetClosed, 1);
+  assert.equal(writes.some(({ body }) => body.server_status === 'COMPLETED'), true);
+});

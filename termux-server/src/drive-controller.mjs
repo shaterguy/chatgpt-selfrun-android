@@ -692,7 +692,7 @@ export class DriveDispatchController {
                 },
                 'RESULT_COMMITTED_SUPPRESSED_RECOVERY',
               );
-              active.abortController.abort(new Error('result committed before recovery'));
+              await this.#closeActive(active);
               return;
             }
 
@@ -824,6 +824,9 @@ export class DriveDispatchController {
         active.publishPending = false;
       } catch {
         active.publishPending = true;
+      }
+      if (result.status === 'COMPLETED') {
+        await this.#closeActive(active);
       }
     } catch (error) {
       if (!this.#isActive(active)) return;
