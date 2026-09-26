@@ -45,7 +45,7 @@ function probeExpression() {
       'main form [contenteditable="true"]'];
     let composer=null;
     for(const selector of selectors){composer=[...document.querySelectorAll(selector)].find(visible);if(composer)break;}
-    const stop=buttons.some(b=>b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
+    const stopButtonVisible=buttons.some(b=>b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
     const paused=buttons.some(b=>/resume|continue generating|재개|계속 생성/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')+' '+(b.innerText||'')));
     const assistants=[...document.querySelectorAll('[data-message-author-role="assistant"],[data-chatgpt-search-unit-key$=":assistant"],[data-content-search-unit-key$=":assistant"]')];
     const last=assistants.length?assistants[assistants.length-1]:null;
@@ -72,7 +72,8 @@ function probeExpression() {
       readyState:document.readyState,
       loginPage:(()=>{const p=String(location.pathname||'').toLowerCase();return p==='/auth'||p.startsWith('/auth/')||p==='/login'||p.startsWith('/login/');})(),
       composer:!!composer,
-      streaming:stop,
+      streaming:stopButtonVisible,
+      stopButtonVisible,
       paused,
       assistantCount:assistants.length,
       assistantTextLength:String(last?.innerText||last?.textContent||'').length,
@@ -448,8 +449,7 @@ export class ChatGptBrowser {
       if (conversationId(p.url) !== expectedId) return false;
       return p.userCount > beforeSubmit.userCount
         || p.userTextLength > beforeSubmit.userTextLength
-        || (!!p.userMessageId && p.userMessageId !== beforeSubmit.userMessageId)
-        || p.streaming;
+        || (!!p.userMessageId && p.userMessageId !== beforeSubmit.userMessageId);
     }, {
       timeoutMs: 10000,
       signal,
@@ -510,7 +510,6 @@ export class ChatGptBrowser {
       }
       const changed =
         probe.url !== previous.url ||
-        probe.streaming !== previous.streaming ||
         probe.paused !== previous.paused ||
         probe.assistantCount !== previous.assistantCount ||
         probe.assistantTextLength !== previous.assistantTextLength ||
@@ -545,6 +544,7 @@ export class ChatGptBrowser {
           status,
           pageUrl: probe.url,
           streaming: probe.streaming,
+          stopButtonVisible: probe.stopButtonVisible,
           paused: probe.paused,
           assistantCount: probe.assistantCount,
           assistantTextLength: probe.assistantTextLength,

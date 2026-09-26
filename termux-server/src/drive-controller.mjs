@@ -15,8 +15,10 @@ function errorMessage(error) {
 }
 
 function cursorDetails(probe) {
+  const stopButtonVisible = probe?.stopButtonVisible ?? probe?.streaming;
   return {
     streaming: !!probe?.streaming,
+    stop_button_visible: !!stopButtonVisible,
     paused: !!probe?.paused,
     assistant_count: Number(probe?.assistantCount || 0),
     assistant_text_length: Number(probe?.assistantTextLength || 0),
@@ -584,10 +586,10 @@ export class DriveDispatchController {
               return { retryAfterMs: LIVENESS_VERIFY_RETRY_MS };
             }
 
-            if (activity.streaming || activity.paused) {
+            if (activity.paused) {
               active.verificationFailureCount = 0;
               await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
-                decision: activity.streaming ? 'DEFER_STREAMING' : 'DEFER_PAUSED',
+                decision: 'DEFER_PAUSED',
                 reset_liveness: true,
               });
               return { resetLiveness: true };
@@ -629,10 +631,10 @@ export class DriveDispatchController {
               current_cursor: cursorDetails(current),
             });
 
-            if (current.streaming || current.paused) {
+            if (current.paused) {
               active.verificationFailureCount = 0;
               await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
-                decision: current.streaming ? 'DEFER_STREAMING' : 'DEFER_PAUSED',
+                decision: 'DEFER_PAUSED',
                 reset_liveness: true,
               });
               return { resetLiveness: true };
