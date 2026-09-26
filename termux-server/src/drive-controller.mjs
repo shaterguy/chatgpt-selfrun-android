@@ -74,50 +74,160 @@ export class DriveDispatchController {
     this.stateStore = stateStore;
     this.config = config;
     this.active = null;
+    this.actives = new Map();
     this.controls = new Map();
   }
 
-  async control(path, rawBody) {
+  getActive(path) {
+    return this.actives.get(path) || null;
+  }
+
+  activeDispatches() {
+    return [...this.actives.values()];
+  }
+
+  #isActive(active) {
+    return !!active
+      && this.actives.get(active.path) === active
+      && !active.abortController.signal.aborted;
+  }
+
+  async #syncActiveSummary() {
+    const rows = this.activeDispatches().map((active) => ({
+      path: active.path,
+      task_id: active.identity.taskId,
+      turn_id: active.identity.turnId,
+      request_id: active.identity.requestId,
+      generation: active.generation,
+      server_status: active.serverStatus,
+      control_state: clean(active.controlState) || 'UNKNOWN',
+      target_id: active.target?.id || null,
+      conversation_url: canonicalConversationUrl(active.body?.conversation_url) || null,
+    }));
+    await this.stateStore.patch({
+      activeCount: rows.length,
+      activeDispatches: rows,
+    });
+  }
+
+  async #registerActive(active) {
+    this.actives.set(active.path, active);
+    this.active = active;
+    await this.#syncActiveSummary();
+  }
+
+  async control(path, rawBody, transport) {
     const control = validateControl(rawBody);
     const previous = this.controls.get(control.task_id);
     if (previous && control.control_epoch <= previous.control_epoch) return;
     this.controls.set(control.task_id, { ...control, path });
 
-    const active = this.active;
-    if (!active || active.identity.taskId !== control.task_id) return;
-    active.controlState = control.state;
-    active.controlEpoch = control.control_epoch;
-    active.controlUpdatedAtMs = Number(control.updated_at_ms || Date.now());
-    await this.stateStore.patchIfCurrent(
-      active.generation,
-      this.stateStore.snapshot().lastSignalId,
-      {
-        status: `CONTROL_${control.state}`,
-        lastActivityAt: new Date().toISOString(),
-        lastError: null,
-      },
-      'TASK_CONTROL_UPDATED',
-    );
+    const matches = this.activeDispatches()
+      .filter((active) => active.identity.taskId === control.task_id);
+    for (const active of matches) {
+      active.controlState = control.state;
+      active.controlEpoch = control.control_epoch;
+      active.controlUpdatedAtMs = Number(control.updated_at_ms || Date.now());
+      await this.stateStore.patchIfCurrent(
+        active.generation,
+        this.stateStore.snapshot().lastSignalId,
+        {
+          status: `CONTROL_${control.state}`,
+          lastActivityAt: new Date().toISOString(),
+          lastError: null,
+        },
+        'TASK_CONTROL_UPDATED',
+      );
+    }
 
     if (control.state === 'STOPPED' || control.state === 'DONE') {
-      await this.#closeActive(active);
+      for (const active of matches) await this.#closeActive(active);
+      return;
     }
+
+    const exactActive = matches.find(
+      (active) => active.identity.turnId === clean(control.turn_id)
+        && active.identity.requestId === clean(control.request_id),
+    );
+    if (control.state === 'RUNNING' && !exactActive && transport) {
+      await this.#resumeFromControl(control, transport);
+    }
+  }
+
+  async #resumeFromControl(control, transport) {
+    if (typeof transport?.list !== 'function' || typeof transport?.read !== 'function') return;
+    const files = await transport.list();
+    const candidates = [];
+    for (const file of files) {
+      if (!String(file.path || '').startsWith('__SELFRUN_DISPATCH__')) continue;
+      let body;
+      try {
+        body = await transport.read(file.path);
+      } catch {
+        continue;
+      }
+      if (body?.schema !== DISPATCH_SCHEMA
+          || clean(body.task_id) !== control.task_id
+          || clean(body.turn_id) !== clean(control.turn_id)
+          || clean(body.request_id) !== clean(control.request_id)) continue;
+      candidates.push({ path: file.path, body });
+    }
+    candidates.sort((a, b) => Number(b.body.dispatch_attempt || 0) - Number(a.body.dispatch_attempt || 0));
+    const candidate = candidates[0];
+    if (!candidate || this.getActive(candidate.path)) return;
+    const body = candidate.body;
+    if (clean(body.client_status) !== 'SEND_REQUESTED') return;
+    if (!['STARTED', 'RECOVERY_SENT', 'SUPERSEDED'].includes(clean(body.server_status))) return;
+    if (!canonicalConversationUrl(body.conversation_url)) return;
+
+    const resultCheck = await this.#resultCommitState({ body }, transport);
+    if (resultCheck.state === 'COMMITTED') {
+      const now = Date.now();
+      await transport.write(candidate.path, {
+        ...body,
+        server_status: 'COMPLETED',
+        completion_source: 'RESULT_DOCUMENT',
+        completed_at_ms: now,
+        updated_at_ms: now,
+        server_error: '',
+      }).catch(() => {});
+      await this.stateStore.recordEvent('DRIVE_DISPATCH_REATTACH_SKIPPED_COMMITTED', {
+        task_id: control.task_id,
+        turn_id: clean(control.turn_id),
+        request_id: clean(control.request_id),
+      });
+      return;
+    }
+
+    await this.stateStore.recordEvent('DRIVE_DISPATCH_REATTACH_REQUESTED', {
+      task_id: control.task_id,
+      turn_id: clean(control.turn_id),
+      request_id: clean(control.request_id),
+      previous_server_status: clean(body.server_status),
+    });
+    await this.resume(candidate.path, {
+      ...body,
+      server_status: 'STARTED',
+      server_error: '',
+      updated_at_ms: Date.now(),
+    }, transport);
   }
 
   async prepare(path, rawBody, transport) {
     const body = validateDispatch(rawBody);
     if (clean(body.client_status) !== 'CREATE_REQUESTED') return;
-    if (this.active?.path === path
-        && ['READY_TO_SUBMIT', 'STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
-      if (clean(body.server_status) !== clean(this.active.body?.server_status)
-          || this.active.publishPending) {
-        await transport.write(path, this.active.body);
-        this.active.publishPending = false;
+    const existing = this.getActive(path);
+    if (existing
+        && ['READY_TO_SUBMIT', 'STARTED', 'COMPLETED'].includes(existing.serverStatus)) {
+      if (clean(body.server_status) !== clean(existing.body?.server_status)
+          || existing.publishPending) {
+        await transport.write(path, existing.body);
+        existing.publishPending = false;
       }
       return;
     }
 
-    await this.#supersede(path, transport);
+    await this.#supersede(path, body, transport);
     const generation = this.stateStore.snapshot().generation + 1;
     const abortController = new AbortController();
     const identity = {
@@ -156,7 +266,7 @@ export class DriveDispatchController {
       if (abortController.signal.aborted) throw abortController.signal.reason || new Error('superseded');
 
       const control = this.controls.get(identity.taskId);
-      this.active = {
+      const active = {
         path,
         body: { ...body },
         identity,
@@ -184,7 +294,8 @@ export class DriveDispatchController {
         prepared_at_ms: Date.now(),
         server_error: '',
       };
-      this.active.body = next;
+      active.body = next;
+      await this.#registerActive(active);
       await this.stateStore.patchIfCurrent(generation, this.stateStore.snapshot().lastSignalId, {
         status: 'READY_TO_SUBMIT',
         activeTargetId: prepared.target.id,
@@ -193,8 +304,9 @@ export class DriveDispatchController {
       await transport.write(path, next);
     } catch (error) {
       if (abortController.signal.aborted) return;
-      if (this.active?.path === path && this.active.serverStatus === 'READY_TO_SUBMIT') {
-        this.active.publishPending = true;
+      const current = this.getActive(path);
+      if (current?.serverStatus === 'READY_TO_SUBMIT') {
+        current.publishPending = true;
         throw error;
       }
       const next = {
@@ -215,6 +327,8 @@ export class DriveDispatchController {
   async resume(path, rawBody, transport) {
     const body = validateDispatch(rawBody);
     if (clean(body.client_status) !== 'SEND_REQUESTED') return;
+    const taskControl = this.controls.get(clean(body.task_id));
+    if (taskControl && ['STOPPED', 'DONE'].includes(clean(taskControl.state))) return;
     const conversationUrl = canonicalConversationUrl(body.conversation_url);
     if (!conversationUrl) {
       await transport.write(path, {
@@ -225,19 +339,19 @@ export class DriveDispatchController {
       });
       return;
     }
-    if (this.active?.path === path
-        && ['STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
-      if (clean(body.server_status) !== clean(this.active.body?.server_status)
+    const existing = this.getActive(path);
+    if (existing && ['STARTED', 'COMPLETED'].includes(existing.serverStatus)) {
+      if (clean(body.server_status) !== clean(existing.body?.server_status)
           || canonicalConversationUrl(body.conversation_url)
-            !== canonicalConversationUrl(this.active.body?.conversation_url)
-          || this.active.publishPending) {
-        await transport.write(path, this.active.body);
-        this.active.publishPending = false;
+            !== canonicalConversationUrl(existing.body?.conversation_url)
+          || existing.publishPending) {
+        await transport.write(path, existing.body);
+        existing.publishPending = false;
       }
       return;
     }
 
-    await this.#supersede(path, transport);
+    await this.#supersede(path, body, transport);
     const generation = this.stateStore.snapshot().generation + 1;
     const abortController = new AbortController();
     const identity = {
@@ -277,7 +391,7 @@ export class DriveDispatchController {
         throw abortController.signal.reason || new Error('superseded');
       }
       const control = this.controls.get(identity.taskId);
-      this.active = {
+      const active = {
         path,
         body: { ...body },
         identity,
@@ -297,7 +411,7 @@ export class DriveDispatchController {
         controlEpoch: Number(control?.control_epoch || 0),
         controlUpdatedAtMs: Number(control?.updated_at_ms || 0),
       };
-      this.active.body = {
+      active.body = {
         ...body,
         server_status: 'STARTED',
         conversation_url: conversationUrl,
@@ -305,6 +419,7 @@ export class DriveDispatchController {
         resumed_at_ms: Date.now(),
         server_error: '',
       };
+      await this.#registerActive(active);
       await this.stateStore.patchIfCurrent(generation, signalId, {
         status: 'RUNNING',
         activeTargetId: resumed.target.id,
@@ -312,13 +427,13 @@ export class DriveDispatchController {
         lastActivityAt: new Date().toISOString(),
         lastError: null,
       }, 'DRIVE_DISPATCH_RESUMED');
-      void this.#monitor(this.active, transport);
-      await transport.write(path, this.active.body);
+      void this.#monitor(active, transport);
+      await transport.write(path, active.body);
     } catch (error) {
       if (abortController.signal.aborted) return;
-      if (this.active?.path === path
-          && ['STARTED', 'COMPLETED'].includes(this.active.serverStatus)) {
-        this.active.publishPending = true;
+      const current = this.getActive(path);
+      if (current && ['STARTED', 'COMPLETED'].includes(current.serverStatus)) {
+        current.publishPending = true;
         throw error;
       }
       const next = {
@@ -337,8 +452,8 @@ export class DriveDispatchController {
 
   async send(path, rawBody, transport) {
     const body = validateDispatch(rawBody);
-    const active = this.active;
-    if (!active || active.path !== path) {
+    const active = this.getActive(path);
+    if (!active) {
       await transport.write(path, {
         ...body,
         server_status: 'ERROR',
@@ -415,8 +530,9 @@ export class DriveDispatchController {
 
   async cancel(path, rawBody, transport) {
     const body = validateDispatch(rawBody);
-    if (this.active?.path === path) {
-      await this.#closeActive();
+    const active = this.getActive(path);
+    if (active) {
+      await this.#closeActive(active);
     }
     if (!['CANCELLED', 'SUPERSEDED'].includes(clean(body.server_status))) {
       await transport.write(path, {
@@ -491,7 +607,7 @@ export class DriveDispatchController {
           epoch: active.controlEpoch,
         }),
         onActivity: async (activity) => {
-          if (this.active !== active || active.abortController.signal.aborted) return;
+          if (!this.#isActive(active)) return;
           await this.stateStore.patchIfCurrent(
             active.generation,
             this.stateStore.snapshot().lastSignalId,
@@ -620,7 +736,7 @@ export class DriveDispatchController {
               });
               return { retryAfterMs: LIVENESS_VERIFY_RETRY_MS };
             }
-            if (this.active !== active || active.abortController.signal.aborted) return;
+            if (!this.#isActive(active)) return;
 
             const sameCursor = this.#sameLivenessCursor(activity, current);
             await this.#recordLivenessEvent(active, 'LIVENESS_CURSOR_RECHECK', {
@@ -690,7 +806,7 @@ export class DriveDispatchController {
         },
       });
 
-      if (this.active !== active || active.abortController.signal.aborted) return;
+      if (!this.#isActive(active)) return;
       active.serverStatus = result.status;
       active.body = {
         ...active.body,
@@ -705,7 +821,7 @@ export class DriveDispatchController {
         active.publishPending = true;
       }
     } catch (error) {
-      if (active.abortController.signal.aborted || this.active !== active) return;
+      if (!this.#isActive(active)) return;
       active.serverStatus = 'ERROR';
       active.body = {
         ...active.body,
@@ -722,25 +838,33 @@ export class DriveDispatchController {
     }
   }
 
-  async #supersede(nextPath, transport) {
-    const active = this.active;
-    if (!active || active.path === nextPath) return;
-    active.abortController.abort(new Error('superseded by newer Drive dispatch'));
-    active.body = {
-      ...active.body,
-      server_status: 'SUPERSEDED',
-      updated_at_ms: Date.now(),
-    };
-    await transport.write(active.path, active.body).catch(() => {});
-    await this.#closeActive(active);
+  async #supersede(nextPath, nextBody, transport) {
+    const requestId = clean(nextBody?.request_id);
+    if (!requestId) return;
+    for (const active of this.activeDispatches()) {
+      if (active.path === nextPath || active.identity.requestId !== requestId) continue;
+      active.abortController.abort(new Error('superseded by newer retry of the same Drive request'));
+      active.body = {
+        ...active.body,
+        server_status: 'SUPERSEDED',
+        updated_at_ms: Date.now(),
+      };
+      await transport.write(active.path, active.body).catch(() => {});
+      await this.#closeActive(active);
+    }
   }
 
   async #closeActive(expected = this.active) {
     const active = expected;
-    if (!active) return;
+    if (!active || this.actives.get(active.path) !== active) return;
     active.abortController.abort(new Error('Drive dispatch closed'));
     try { active.session.close(); } catch {}
     try { await this.browser.chromium.closeTarget(active.target.id); } catch {}
-    if (this.active === active) this.active = null;
+    this.actives.delete(active.path);
+    if (this.active === active) {
+      const remaining = this.activeDispatches();
+      this.active = remaining.length ? remaining[remaining.length - 1] : null;
+    }
+    await this.#syncActiveSummary();
   }
 }

@@ -6,6 +6,8 @@ const EMPTY_STATE = Object.freeze({
   status: 'IDLE',
   activeSignal: null,
   activeTargetId: null,
+  activeCount: 0,
+  activeDispatches: [],
   conversationUrl: null,
   acceptedAt: null,
   lastActivityAt: null,

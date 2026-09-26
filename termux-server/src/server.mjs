@@ -12,6 +12,18 @@ import { DriveDispatchWatcher } from './drive-watcher.mjs';
 const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
 await stateStore.init();
+await stateStore.patch({
+  status: 'IDLE',
+  activeSignal: null,
+  activeTargetId: null,
+  conversationUrl: null,
+  acceptedAt: null,
+  lastActivityAt: null,
+  lastSignalId: null,
+  lastError: null,
+  activeCount: 0,
+  activeDispatches: [],
+}, 'SERVER_RUNTIME_RESET');
 const token = await ensureToken(config);
 const chromium = new ChromiumManager(config);
 const browser = new ChatGptBrowser(chromium, config);

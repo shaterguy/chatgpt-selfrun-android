@@ -179,3 +179,52 @@ test('watcher ignores stale unprocessed dispatch after restart', async () => {
   await watcher.scanOnce();
   assert.deepEqual(calls, []);
 });
+
+test('watcher processes task CONTROL before restart dispatch recovery regardless of Drive listing order', async () => {
+  const calls = [];
+  const now = Date.now();
+  const bodies = new Map([
+    ['started.json', {
+      schema: 'selfrun-server-dispatch-v1',
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      task_id: 'SR-ORDER',
+      turn_id: 'SR-ORDER:turn:9',
+      request_id: 'SR-ORDER:turn:9-request',
+      created_at_ms: now - 1000,
+      started_at_ms: now - 1000,
+      updated_at_ms: now - 1000,
+    }],
+    ['__SELFRUN_CONTROL__SR-ORDER.json', {
+      schema: 'selfrun-task-control-v1',
+      task_id: 'SR-ORDER',
+      control_epoch: 5,
+      state: 'STOPPED',
+      turn_id: 'SR-ORDER:turn:9',
+      request_id: 'SR-ORDER:turn:9-request',
+      updated_at_ms: now,
+    }],
+  ]);
+  const transport = {
+    list: async () => [
+      { path: 'started.json', modTime: '2026-09-26T00:00:00Z', size: 10 },
+      { path: '__SELFRUN_CONTROL__SR-ORDER.json', modTime: '2026-09-26T00:00:01Z', size: 10 },
+    ],
+    read: async (path) => structuredClone(bodies.get(path)),
+  };
+  const controller = {
+    control: async () => calls.push('control'),
+    resume: async () => calls.push('resume'),
+    prepare: async () => {},
+    send: async () => {},
+    cancel: async () => {},
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000, dispatchRecoveryMs: 7200000 },
+  });
+
+  await watcher.scanOnce();
+  assert.deepEqual(calls, ['control', 'resume']);
+});
