@@ -603,6 +603,7 @@ export class ChatGptBrowser {
     let lastReportedStatus = null;
     let lastGateToken = null;
     let nextStalledVerificationAt = 0;
+    let nextResponseVerificationAt = 0;
     let evaluateTimeoutRetries = 0;
     let conversationStateMissingSince = 0;
 
@@ -664,8 +665,8 @@ export class ChatGptBrowser {
       const hasResponse =
         probe.assistantCount > baseline.assistantCount ||
         probe.assistantTextLength > baseline.assistantTextLength;
-      const completed = structurallyReady && hasResponse && !probe.streaming && !probe.paused;
-      const isStalled = !livenessSuspended && !completed
+      const responseIdle = structurallyReady && hasResponse && !probe.streaming && !probe.paused;
+      const isStalled = !livenessSuspended
         && Date.now() - lastActivityAt >= this.config.stallAfterMs;
       if (isStalled) stalled = true;
 
@@ -673,13 +674,17 @@ export class ChatGptBrowser {
       const pageError = conversationAvailable ? null : (probe.errorText || structuralError);
       let status = 'RUNNING';
       if (pageError) status = 'PAGE_ERROR';
-      else if (completed) status = 'COMPLETED';
       else if (stalled) status = 'STALLED';
+      else if (responseIdle) status = 'RESPONSE_IDLE';
 
       const verificationRetry = status === 'STALLED'
         && nextStalledVerificationAt > 0
         && Date.now() >= nextStalledVerificationAt;
-      if (changed || status !== lastReportedStatus || completed || pageError || verificationRetry) {
+      const responseVerificationRetry = status === 'RESPONSE_IDLE'
+        && nextResponseVerificationAt > 0
+        && Date.now() >= nextResponseVerificationAt;
+      if (changed || status !== lastReportedStatus || pageError
+          || verificationRetry || responseVerificationRetry) {
         const action = await onActivity?.({
           status,
           pageUrl: probe.url,
@@ -695,22 +700,40 @@ export class ChatGptBrowser {
           lastActivityAt: new Date(lastActivityAt).toISOString(),
           pageError,
           conversationStateReady: structurallyReady,
+          responseIdle,
           verificationRetry,
+          responseVerificationRetry,
         });
+        if (action?.complete) {
+          return {
+            status: 'COMPLETED',
+            probe: { ...probe, errorText: null },
+            lastActivityAt,
+          };
+        }
         if (action?.resetLiveness) {
           lastActivityAt = Date.now();
           stalled = false;
           nextStalledVerificationAt = 0;
-        } else if (status === 'STALLED' && Number(action?.retryAfterMs) > 0) {
-          nextStalledVerificationAt = Date.now() + Number(action.retryAfterMs);
-        } else if (status !== 'STALLED') {
-          nextStalledVerificationAt = 0;
+          nextResponseVerificationAt = 0;
+        } else {
+          const retryAfterMs = Number(action?.retryAfterMs || 0);
+          if (status === 'STALLED' && retryAfterMs > 0) {
+            nextStalledVerificationAt = Date.now() + retryAfterMs;
+          } else if (status !== 'STALLED') {
+            nextStalledVerificationAt = 0;
+          }
+          if (status === 'RESPONSE_IDLE' && retryAfterMs > 0) {
+            nextResponseVerificationAt = Date.now() + retryAfterMs;
+          } else if (status !== 'RESPONSE_IDLE') {
+            nextResponseVerificationAt = 0;
+          }
         }
         lastReportedStatus = status;
       }
 
       previous = probe;
-      if (completed || pageError) {
+      if (pageError) {
         return {
           status,
           probe: { ...probe, errorText: pageError },

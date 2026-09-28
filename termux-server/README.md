@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0-dev2
+# SelfRun Termux Server 1.0.0-dev1
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 
@@ -56,3 +56,14 @@ npm start
 - `deploy/20-selfrun-server.sh`
 
 서버는 외부 공개가 필요하지 않습니다. Google Drive만 앱↔서버 메시지 버스로 사용합니다.
+
+## Server version identity
+
+The Android app and the Termux server use independent version lineages.
+
+- Android app versions remain app-scoped (for example `4.0.2-dev1`).
+- The Termux server starts its independent lineage at `1.0.0-dev1`.
+- Server state and health output include `component=selfrun-termux-server`, `version_scope=server`,
+  `server_version`, and `version_label=server/<semver>`.
+- Never infer an Android app version from a server version, or a server version from an app version.
+- Bump the server version only when Termux server source/runtime behavior changes. App-only changes do not bump it.

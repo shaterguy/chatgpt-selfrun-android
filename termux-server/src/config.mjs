@@ -1,11 +1,20 @@
 import os from 'node:os';
 import path from 'node:path';
+import {
+  SERVER_COMPONENT,
+  SERVER_VERSION,
+  SERVER_VERSION_LABEL,
+  SERVER_VERSION_SCOPE,
+} from './version.mjs';
 
 const home = os.homedir();
 const dataDir = process.env.SELFRUN_SERVER_DATA_DIR || path.join(home, '.selfrun-server');
 
 export const config = Object.freeze({
-  version: '4.0.0-dev2',
+  component: SERVER_COMPONENT,
+  versionScope: SERVER_VERSION_SCOPE,
+  version: SERVER_VERSION,
+  versionLabel: SERVER_VERSION_LABEL,
   host: process.env.SELFRUN_SERVER_HOST || '127.0.0.1',
   port: Number(process.env.SELFRUN_SERVER_PORT || 17831),
   dataDir,

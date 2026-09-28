@@ -142,6 +142,8 @@ test('browser monitor ignores visible page error text while message identity and
     session,
     baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 2, userTextLength: 100 },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+    onActivity: async (activity) =>
+      activity.status === 'RESPONSE_IDLE' ? { complete: true } : undefined,
   });
   assert.equal(result.status, 'COMPLETED');
   assert.equal(result.probe.errorText, null);
@@ -187,9 +189,54 @@ test('browser monitor retries transient Runtime.evaluate timeouts and completes'
     session,
     baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+    onActivity: async (activity) =>
+      activity.status === 'RESPONSE_IDLE' ? { complete: true } : undefined,
   });
   assert.equal(calls, 3);
   assert.equal(result.status, 'COMPLETED');
+});
+
+test('browser monitor keeps an idle assistant response nonterminal until owner confirms completion', async () => {
+  let calls = 0;
+  let idleChecks = 0;
+  const session = {
+    call: async (method) => {
+      assert.equal(method, 'Runtime.evaluate');
+      calls += 1;
+      return { result: { value: {
+        url: 'https://chatgpt.com/c/result-gate',
+        composer: true,
+        streaming: false,
+        stopButtonVisible: false,
+        paused: false,
+        assistantCount: 1,
+        assistantTextLength: 5,
+        assistantMessageId: 'assistant-1',
+        userCount: 1,
+        userTextLength: 10,
+        userMessageId: 'user-1',
+        errorText: null,
+      } } };
+    },
+  };
+  const browser = new ChatGptBrowser(null, {
+    stallAfterMs: 600000,
+    probeIntervalMs: 1,
+    conversationStateGraceMs: 0,
+  });
+  const result = await browser.monitor({
+    session,
+    baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
+    livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+    onActivity: async (activity) => {
+      if (activity.status !== 'RESPONSE_IDLE') return undefined;
+      idleChecks += 1;
+      return idleChecks >= 2 ? { complete: true } : { retryAfterMs: 1 };
+    },
+  });
+  assert.equal(result.status, 'COMPLETED');
+  assert.ok(idleChecks >= 2);
+  assert.ok(calls >= 2);
 });
 
 test('browser monitor gives up only after three Runtime.evaluate retries', async () => {

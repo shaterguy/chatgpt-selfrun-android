@@ -1025,6 +1025,62 @@ export class DriveDispatchController {
             },
             activity.status === 'STALLED' && !activity.verificationRetry ? 'TURN_STALLED' : null,
           );
+          if (activity.status === 'RESPONSE_IDLE') {
+            if (!this.#controlAllowsRecovery(active)) {
+              return { resetLiveness: true };
+            }
+            const resultStartedAt = Date.now();
+            const resultCheck = await this.#resultCommitState(active, transport);
+            if (resultCheck.state === 'UNAVAILABLE') {
+              active.resultReadFailureCount += 1;
+              active.verificationFailureCount += 1;
+            } else {
+              active.resultReadFailureCount = 0;
+            }
+            await this.#recordLivenessEvent(active, 'RESPONSE_IDLE_RESULT_CHECK', {
+              result_state: resultCheck.state,
+              reason: resultCheck.reason,
+              error: resultCheck.error || null,
+              duration_ms: Date.now() - resultStartedAt,
+              failure_count: active.resultReadFailureCount,
+            });
+            if (resultCheck.state === 'COMMITTED') {
+              active.verificationFailureCount = 0;
+              const now = Date.now();
+              active.serverStatus = 'COMPLETED';
+              active.body = {
+                ...active.body,
+                server_status: 'COMPLETED',
+                completion_source: 'RESULT_DOCUMENT',
+                completed_at_ms: now,
+                updated_at_ms: now,
+                server_error: '',
+              };
+              try {
+                await transport.write(active.path, active.body);
+                active.publishPending = false;
+              } catch {
+                active.publishPending = true;
+              }
+              await this.stateStore.patchIfCurrent(
+                active.generation,
+                this.stateStore.snapshot().lastSignalId,
+                {
+                  status: 'COMPLETED',
+                  lastActivityAt: new Date(now).toISOString(),
+                  lastError: null,
+                },
+                'RESPONSE_IDLE_RESULT_COMMITTED',
+              );
+              await this.#closeActive(active);
+              if (clean(resultCheck.resultStatus) === 'DONE') {
+                this.controls.delete(active.identity.taskId);
+              }
+              return { complete: true };
+            }
+            return { retryAfterMs: LIVENESS_VERIFY_RETRY_MS };
+          }
+
           if (activity.status === 'STALLED' && !active.recovering) {
             const stallAgeMs = Math.max(0, Date.now() - Date.parse(activity.lastActivityAt || 0));
             await this.#recordLivenessEvent(

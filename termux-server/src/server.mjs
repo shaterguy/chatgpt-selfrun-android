@@ -81,7 +81,11 @@ const server = http.createServer(async (req, res) => {
       const state = stateStore.snapshot();
       return json(res, 200, {
         ok: true,
+        component: config.component,
+        versionScope: config.versionScope,
         version: config.version,
+        serverVersion: config.version,
+        versionLabel: config.versionLabel,
         startedAt,
         status: state.status,
         generation: state.generation,
@@ -117,9 +121,13 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.port, config.host, () => {
   console.log(JSON.stringify({
     event: 'SERVER_READY',
+    component: config.component,
+    versionScope: config.versionScope,
     host: config.host,
     port: config.port,
     version: config.version,
+    serverVersion: config.version,
+    versionLabel: config.versionLabel,
     stateFile: config.stateFile,
   }));
 });

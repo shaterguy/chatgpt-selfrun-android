@@ -394,6 +394,37 @@ async function startStalledResume({ resultText, resultError, snapshot,
   };
 }
 
+test('response-idle remains active when Result is not committed', async () => {
+  const run = await startStalledResume({
+    resultText: '{"committed":false}',
+    snapshot: stalledActivity(),
+    activity: stalledActivity({ status: 'RESPONSE_IDLE' }),
+  });
+  assert.equal(run.resultReadCalls(), 1);
+  assert.equal(run.snapshotCalls(), 0);
+  assert.equal(run.sendCalls(), 0);
+  assert.equal(run.action?.retryAfterMs, 15000);
+  assert.notEqual(run.controller.getActive('job/stalled.json'), null);
+  assert.equal(run.writes.some(({ body }) => body.server_status === 'COMPLETED'), false);
+  const check = run.events.find(({ event }) => event === 'RESPONSE_IDLE_RESULT_CHECK');
+  assert.equal(check?.details.result_state, 'NOT_COMMITTED');
+});
+
+test('response-idle completes only after Result is committed', async () => {
+  const run = await startStalledResume({
+    resultText: '{"committed":true}',
+    snapshot: stalledActivity(),
+    activity: stalledActivity({ status: 'RESPONSE_IDLE' }),
+  });
+  assert.equal(run.resultReadCalls(), 1);
+  assert.equal(run.snapshotCalls(), 0);
+  assert.equal(run.sendCalls(), 0);
+  assert.equal(run.action?.complete, true);
+  assert.equal(run.controller.getActive('job/stalled.json'), null);
+  assert.equal(run.writes.some(({ body }) => body.server_status === 'COMPLETED'
+    && body.completion_source === 'RESULT_DOCUMENT'), true);
+});
+
 test('liveness recovery completes without continuation when Result is committed', async () => {
   const run = await startStalledResume({
     resultText: '{"committed":true}',
@@ -599,6 +630,7 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
           stalledCalls += 1;
           return { resetLiveness: true };
         }
+        if (activity.status === 'RESPONSE_IDLE') return { complete: true };
       },
     });
     assert.equal(stalledCalls, 1);
@@ -689,6 +721,7 @@ test('browser monitor schedules stalled verification retries without resetting r
     },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
     onActivity: async (activity) => {
+      if (activity.status === 'RESPONSE_IDLE') return { complete: true };
       if (activity.status !== 'STALLED') return;
       stalledCalls += 1;
       stalledTimes.push(activity.lastActivityAt);

@@ -259,7 +259,11 @@ export class SelfRunClusterCoordinator {
     members[this.serverName] = {
       ...(members[this.serverName] || {}),
       schema: 'selfrun-server-state-v1',
+      component: this.config.component,
+      version_scope: this.config.versionScope,
       version: this.config.version,
+      server_version: this.config.version,
+      version_label: this.config.versionLabel,
       server_name: this.serverName,
       host: this.serverName,
       server_priority: this.serverPriority,
@@ -320,7 +324,11 @@ export class SelfRunClusterCoordinator {
 
     const memberBody = {
       schema: 'selfrun-server-state-v1',
+      component: this.config.component,
+      version_scope: this.config.versionScope,
       version: this.config.version,
+      server_version: this.config.version,
+      version_label: this.config.versionLabel,
       server_name: this.serverName,
       host: this.serverName,
       server_priority: this.serverPriority,
@@ -339,7 +347,11 @@ export class SelfRunClusterCoordinator {
     if (this.role === 'ACTIVE') {
       await this.transport.upsertJson(CLUSTER_FILE, {
         schema: 'selfrun-cluster-state-v1',
+        component: this.config.component,
+        version_scope: this.config.versionScope,
         version: this.config.version,
+        server_version: this.config.version,
+        version_label: this.config.versionLabel,
         updated_at: new Date(now).toISOString(),
         active_server: this.activeServer,
         active_priority: this.activePriority,
@@ -362,7 +374,11 @@ export class SelfRunClusterCoordinator {
     const localState = this.stateStore.snapshot();
     await this.transport.upsertJson(this.memberFileName(), {
       schema: 'selfrun-server-state-v1',
+      component: this.config.component,
+      version_scope: this.config.versionScope,
       version: this.config.version,
+      server_version: this.config.version,
+      version_label: this.config.versionLabel,
       server_name: this.serverName,
       host: this.serverName,
       server_priority: this.serverPriority,
