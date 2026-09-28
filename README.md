@@ -2,7 +2,7 @@
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 현재 활성 개발 계보는 V3 하나뿐이며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
-현재 정식 버전은 SelfRun Drive 4.0.1 / versionCode 4001001입니다. 최신 4.0.0-dev2의 최종 검증 기능 상태를 정식 계보로 승격했으며, 정식 4.0.0에서 4.0.1로 인플레이스 업데이트할 수 있습니다. 최신 정식 Release는 [drive-v4.0.1](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.1)입니다.
+현재 정식 버전은 SelfRun Drive 4.0.2 / versionCode 4001002입니다. 4.0.2-dev1에서 검증된 stoppedRestart 복구 프롬프트 제거를 채택하고 최신 정식 4.0.1의 Termux 서버 제어 정리를 유지했으며, 정식 4.0.1에서 4.0.2로 인플레이스 업데이트할 수 있습니다. 최신 정식 Release는 [drive-v4.0.2](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.2)입니다.
 
 ## 디버그 로그와 턴별 바로가기
 

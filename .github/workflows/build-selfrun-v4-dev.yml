@@ -3,7 +3,7 @@ name: Build SelfRun 4 Dev
 on:
   push:
     branches:
-      - 'selfrun-v4/v4.0.0-dev2'
+      - 'selfrun-v4/v4.0.2-dev1'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_ARTIFACT: selfrun-v4-dev2-${{ github.run_id }}
+  BUILD_ARTIFACT: selfrun-v4-402-dev1-${{ github.run_id }}
 
 jobs:
   build-test-dev:
@@ -45,14 +45,14 @@ jobs:
           gradle-version: '9.5.0'
           cache-read-only: false
 
-      - name: Resolve 4.0.0-dev2 TEST identity
+      - name: Resolve 4.0.2-dev1 TEST identity
         shell: bash
         run: |
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '4.0.0-dev2' ]]
-          [[ "$VERSION_CODE" == '4000002' ]]
+          [[ "$VERSION_NAME" == '4.0.2-dev1' ]]
+          [[ "$VERSION_CODE" == '4001002' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
           grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
@@ -130,12 +130,12 @@ jobs:
           printf 'package=com.shaterguy.chatgptselfrun.drive.test\nversionName=%s\nversionCode=%s\ncertificateSha256=2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e\n' \
             "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
 
-      - name: Upload SelfRun 4.0.0-dev2 TEST APK
+      - name: Upload SelfRun 4.0.2-dev1 TEST APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: |
-            release-output/SelfRun-Drive-TEST-v4.0.0-dev2.apk
+            release-output/SelfRun-Drive-TEST-v4.0.2-dev1.apk
             release-output/SHA256SUMS.txt
             release-output/APKSIGNER_VERIFY.txt
             release-output/CERT.txt
