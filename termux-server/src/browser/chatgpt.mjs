@@ -69,6 +69,39 @@ function conversationId(url) {
   }
 }
 
+
+const DECORATIVE_ANIMATION_PAUSE_SOURCE = "(() => {" +
+  "const id='__selfrun_decorative_animation_pause';" +
+  "const css=[" +
+    "'[class*=\\\"LoadingResultsShimmer\\\"]'," +
+    "'[class*=\\\"LoadingResultsShimmer\\\"]::before'," +
+    "'[class*=\\\"LoadingResultsShimmer\\\"]::after'," +
+    "'.loading-shimmer-pure-text'," +
+    "'.loading-shimmer-pure-text::before'," +
+    "'.loading-shimmer-pure-text::after'," +
+    "'.pulsing-dot'," +
+    "'.pulsing-dot::before'," +
+    "'.pulsing-dot::after'" +
+  "].join(',')+'{animation-play-state:paused !important;}';" +
+  "const install=()=>{" +
+    "if(document.getElementById(id))return true;" +
+    "const style=document.createElement('style');" +
+    "style.id=id;style.textContent=css;" +
+    "(document.head||document.documentElement).appendChild(style);" +
+    "return true;" +
+  "};" +
+  "if(document.documentElement)return install();" +
+  "document.addEventListener('DOMContentLoaded',install,{once:true});" +
+  "return false;" +
+"})()";
+
+async function installDecorativeAnimationPause(session) {
+  await session.call('Page.addScriptToEvaluateOnNewDocument', {
+    source: DECORATIVE_ANIMATION_PAUSE_SOURCE,
+  });
+  await evaluate(session, DECORATIVE_ANIMATION_PAUSE_SOURCE);
+}
+
 function probeExpression() {
   const errorPattern = JSON.stringify(PAGE_ERROR_PATTERN);
   return `(() => {
@@ -298,6 +331,7 @@ export class ChatGptBrowser {
     await session.call('Page.enable');
     await session.call('Runtime.enable');
     await session.call('Network.enable');
+    await installDecorativeAnimationPause(session);
 
     try {
       const before = await this.#prepareNewChat(session, projectUrl, signal);
@@ -332,6 +366,7 @@ export class ChatGptBrowser {
     await session.call('Page.enable');
     await session.call('Runtime.enable');
     await session.call('Network.enable');
+    await installDecorativeAnimationPause(session);
 
     try {
       const probe = await this.#waitFor(session, (p) => p.loginPage
