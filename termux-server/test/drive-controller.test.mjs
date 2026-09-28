@@ -27,6 +27,7 @@ function dispatch(overrides = {}) {
     turn_id: 'SR-TEST:turn:1',
     request_id: 'SR-TEST:turn:1-request',
     dispatch_attempt: 1,
+    server_control_epoch: 1,
     project_url: 'https://chatgpt.com/g/example/project',
     prompt: 'TASK_ID=SR-TEST',
     profile_operations: [
@@ -56,8 +57,12 @@ class MemoryStateStore {
     this.value = { ...this.value, ...changes };
     return { applied: true, state: this.snapshot() };
   }
-  async recordEvent(event, details = {}) {
-    this.events.push({ event, details: structuredClone(details) });
+  async recordEvent(event, details = {}, context = null) {
+    this.events.push({
+      event,
+      details: structuredClone(details),
+      context: context ? structuredClone(context) : null,
+    });
     return this.snapshot();
   }
 }
@@ -100,6 +105,9 @@ test('Drive dispatch preserves app claim boundary before browser send', async ()
   await controller.send('job/dispatch.json', claimed, transport);
   assert.equal(submitCalls, 1);
   assert.equal(writes.at(-1).body.server_status, 'STARTED');
+  assert.equal(stateStore.snapshot().activeDispatches?.[0]?.server_status, 'STARTED');
+  assert.equal(stateStore.snapshot().activeDispatches?.[0]?.conversation_url,
+    'https://chatgpt.com/c/abc-123');
   assert.equal(writes.at(-1).body.conversation_url, 'https://chatgpt.com/c/abc-123');
   assert.equal(stateStore.snapshot().status, 'RUNNING');
 });
@@ -159,6 +167,7 @@ test('Task CONTROL applies only increasing epochs and STOPPED closes the active 
       session: { close() { sessionClosed += 1; } },
       baseline: { assistantCount: 0, assistantTextLength: 0 },
     }),
+    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'user-2' }),
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -313,6 +322,8 @@ function stalledActivity(overrides = {}) {
 async function startStalledResume({ resultText, resultError, snapshot,
   activity = stalledActivity(), controlState = 'RUNNING', allowUnknownControlRecovery = false }) {
   let sendCalls = 0;
+  let resumeSendCalls = 0;
+  let monitorStarted = false;
   let snapshotCalls = 0;
   let resultReadCalls = 0;
   let lastPrompt = null;
@@ -326,6 +337,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
       baseline: { assistantCount: 0, assistantTextLength: 0 },
     }),
     monitor: async ({ onActivity }) => {
+      monitorStarted = true;
       const action = await onActivity(activity);
       resolveActivity(action);
       return new Promise(() => {});
@@ -336,7 +348,8 @@ async function startStalledResume({ resultText, resultError, snapshot,
       return snapshot;
     },
     sendContinuation: async ({ prompt }) => {
-      sendCalls += 1;
+      if (monitorStarted) sendCalls += 1;
+      else resumeSendCalls += 1;
       lastPrompt = prompt;
     },
   };
@@ -372,6 +385,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
     action,
     controller,
     sendCalls: () => sendCalls,
+    resumeSendCalls: () => resumeSendCalls,
     snapshotCalls: () => snapshotCalls,
     resultReadCalls: () => resultReadCalls,
     lastPrompt: () => lastPrompt,
@@ -612,6 +626,7 @@ test('continuation acceptance ignores a pre-existing Stop button', async () => {
   const values = [
     probe,
     { status: 'READY' },
+    { ready: true, status: 'SEND_FOUND' },
     probe,
     { status: 'SUBMITTED' },
     probe,
@@ -632,7 +647,7 @@ test('continuation acceptance ignores a pre-existing Stop button', async () => {
     prompt: '현재 턴에 할당된 잔여작업이 있으면 계속 수행해',
     profileOperations: [],
   });
-  assert.equal(evaluateCalls, 6);
+  assert.equal(evaluateCalls, 7);
   assert.equal(accepted.userCount, 2);
 });
 
@@ -706,6 +721,7 @@ test('parallel Drive dispatches stay active independently and STOPPED only close
         baseline: { assistantCount: 0, assistantTextLength: 0 },
       };
     },
+    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'resume-user' }),
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -769,8 +785,92 @@ test('parallel Drive dispatches stay active independently and STOPPED only close
   assert.deepEqual(closedSessions, ['a']);
 });
 
+test('parallel monitor event keeps its own task identity after another task becomes global latest', async () => {
+  const monitorResolvers = new Map();
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async ({ conversationUrl }) => {
+      const suffix = conversationUrl.endsWith('/parallel-event-a') ? 'a' : 'b';
+      return {
+        target: { id: `target-event-${suffix}` },
+        session: { id: suffix, close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'resume-user' }),
+    monitor: async ({ session }) => new Promise((resolve) => {
+      monitorResolvers.set(session.id, resolve);
+    }),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue', resumeRetryMs: 30000 },
+  });
+  const writes = [];
+  const transport = {
+    write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
+  };
+
+  await controller.control('control-event-a.json', control({
+    task_id: 'SR-EVENT-A',
+    turn_id: 'SR-EVENT-A:turn:1',
+    request_id: 'SR-EVENT-A:turn:1-request',
+    control_epoch: 1,
+  }));
+  await controller.resume('job/event-a.json', dispatch({
+    task_id: 'SR-EVENT-A',
+    turn_id: 'SR-EVENT-A:turn:1',
+    request_id: 'SR-EVENT-A:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/parallel-event-a',
+  }), transport);
+
+  await controller.control('control-event-b.json', control({
+    task_id: 'SR-EVENT-B',
+    turn_id: 'SR-EVENT-B:turn:1',
+    request_id: 'SR-EVENT-B:turn:1-request',
+    control_epoch: 1,
+  }));
+  await controller.resume('job/event-b.json', dispatch({
+    task_id: 'SR-EVENT-B',
+    turn_id: 'SR-EVENT-B:turn:1',
+    request_id: 'SR-EVENT-B:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/parallel-event-b',
+  }), transport);
+
+  assert.equal(controller.activeDispatches().length, 2);
+  assert.ok(monitorResolvers.has('a'));
+  monitorResolvers.get('a')({
+    status: 'PAGE_ERROR',
+    probe: { errorText: 'Conversation state unavailable' },
+  });
+
+  for (let i = 0; i < 30; i += 1) {
+    const found = stateStore.events.find(({ event, details }) =>
+      event === 'DRIVE_DISPATCH_MONITOR_RETRY_SCHEDULED'
+      && details.task_id === 'SR-EVENT-A');
+    if (found) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  const event = stateStore.events.find(({ event, details }) =>
+    event === 'DRIVE_DISPATCH_MONITOR_RETRY_SCHEDULED'
+    && details.task_id === 'SR-EVENT-A');
+  assert.ok(event);
+  assert.equal(event.context.signalId, 'SR-EVENT-A:turn:1-request:attempt:1');
+  assert.equal(event.context.turnId, 'SR-EVENT-A:turn:1');
+  assert.equal(event.context.conversationUrl, 'https://chatgpt.com/c/parallel-event-a');
+  assert.equal(event.context.generation, 1);
+});
+
 test('RUNNING control reattaches a stopped superseded dispatch by exact task turn and request', async () => {
   let resumeCalls = 0;
+  let continuationCalls = 0;
   const browser = {
     chromium: { closeTarget: async () => true },
     resume: async ({ conversationUrl }) => {
@@ -782,6 +882,11 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
         baseline: { assistantCount: 0, assistantTextLength: 0 },
       };
     },
+    sendContinuation: async ({ prompt }) => {
+      continuationCalls += 1;
+      assert.equal(prompt, 'continue');
+      return { userCount: 2, userTextLength: 20, userMessageId: 'user-2' };
+    },
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -791,6 +896,8 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
     config: { recoveryPrompt: 'continue' },
   });
   const path = '__SELFRUN_DISPATCH__SR-ORPHAN:turn:9-request__A1.json';
+  const unrelatedPath = '__SELFRUN_DISPATCH__SR-OTHER:turn:1-request__A1.json';
+  let unrelatedReads = 0;
   let stored = dispatch({
     task_id: 'SR-ORPHAN',
     turn_id: 'SR-ORPHAN:turn:9',
@@ -802,8 +909,15 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
   });
   const writes = [];
   const transport = {
-    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    list: async () => [
+      { path: unrelatedPath, modTime: '2026-09-25T00:00:00Z', size: 1 },
+      { path, modTime: '2026-09-26T00:00:00Z', size: 1 },
+    ],
     read: async (requested) => {
+      if (requested === unrelatedPath) {
+        unrelatedReads += 1;
+        return dispatch({ task_id: 'SR-OTHER', request_id: 'SR-OTHER:turn:1-request' });
+      }
       assert.equal(requested, path);
       return structuredClone(stored);
     },
@@ -833,11 +947,324 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
   }), transport);
 
   assert.equal(resumeCalls, 1);
+  assert.equal(continuationCalls, 1);
+  assert.equal(unrelatedReads, 0);
   assert.ok(controller.getActive(path));
   assert.equal(controller.getActive(path).controlState, 'RUNNING');
   assert.equal(stored.server_status, 'STARTED');
+  assert.equal(stored.resume_continuation_control_epoch, 20);
   assert.equal(writes.at(-1).conversation_url, 'https://chatgpt.com/c/orphan-turn');
   assert.equal(stateStore.events.some(({ event }) => event === 'DRIVE_DISPATCH_REATTACH_REQUESTED'), true);
+});
+
+test('RUNNING control reattaches an errored monitor dispatch with a canonical conversation', async () => {
+  let resumeCalls = 0;
+  let continuationCalls = 0;
+  let continuationPrompt = null;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async ({ conversationUrl }) => {
+      resumeCalls += 1;
+      assert.equal(conversationUrl, 'https://chatgpt.com/c/error-monitor');
+      return {
+        target: { id: 'target-error-monitor' },
+        session: { close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    sendContinuation: async ({ prompt }) => {
+      continuationCalls += 1;
+      continuationPrompt = prompt;
+      return { userCount: 2, userTextLength: 20, userMessageId: 'user-2' };
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-ERROR:turn:2-request__A2.json';
+  let stored = dispatch({
+    task_id: 'SR-ERROR',
+    turn_id: 'SR-ERROR:turn:2',
+    request_id: 'SR-ERROR:turn:2-request',
+    dispatch_attempt: 2,
+    client_status: 'SEND_REQUESTED',
+    server_status: 'ERROR',
+    server_error: 'CDP command timeout: Runtime.evaluate',
+    conversation_url: 'https://chatgpt.com/c/error-monitor',
+    result_document_id: 'RESULT-ERROR',
+    server_control_epoch: 6,
+  });
+  const writes = [];
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    read: async (requested) => {
+      assert.equal(requested, path);
+      return structuredClone(stored);
+    },
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+      writes.push(structuredClone(body));
+    },
+    readGoogleDocText: async () => '{"committed":false}',
+  };
+
+  await controller.control('control-error.json', control({
+    task_id: 'SR-ERROR',
+    turn_id: 'SR-ERROR:turn:2',
+    request_id: 'SR-ERROR:turn:2-request',
+    control_epoch: 7,
+    state: 'RUNNING',
+  }), transport);
+
+  assert.equal(resumeCalls, 1);
+  assert.equal(continuationCalls, 1);
+  assert.equal(continuationPrompt, 'continue');
+  assert.ok(controller.getActive(path));
+  assert.equal(controller.getActive(path).controlState, 'RUNNING');
+  assert.equal(stored.server_status, 'STARTED');
+  assert.equal(stored.server_error, '');
+  assert.equal(stored.server_control_epoch, 7);
+  assert.equal(stored.resume_continuation_control_epoch, 7);
+  assert.ok(stored.resume_continuation_sent_at_ms > 0);
+  assert.equal(writes.at(-1).conversation_url, 'https://chatgpt.com/c/error-monitor');
+  assert.equal(stateStore.events.some(({ event }) => event === 'DRIVE_DISPATCH_REATTACH_REQUESTED'), true);
+});
+
+test('resume continuation failure closes resumed target and schedules retry', async () => {
+  let sessionClosed = 0;
+  let targetClosed = 0;
+  const browser = {
+    chromium: { closeTarget: async () => { targetClosed += 1; return true; } },
+    resume: async () => ({
+      target: { id: 'target-continuation-failure' },
+      session: { close() { sessionClosed += 1; } },
+      baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
+    }),
+    sendContinuation: async () => { throw new Error('Continuation send failed'); },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser, stateStore, config: { recoveryPrompt: 'continue', resumeRetryMs: 30000 },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-CONT-FAIL:turn:2-request__A2.json';
+  let stored = dispatch({
+    task_id: 'SR-CONT-FAIL', turn_id: 'SR-CONT-FAIL:turn:2',
+    request_id: 'SR-CONT-FAIL:turn:2-request', dispatch_attempt: 2,
+    client_status: 'SEND_REQUESTED', server_status: 'ERROR',
+    conversation_url: 'https://chatgpt.com/c/continuation-failure',
+    result_document_id: 'RESULT-CONT-FAIL', server_control_epoch: 7,
+  });
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-27T00:00:00Z', size: 1 }],
+    read: async () => structuredClone(stored),
+    write: async (_path, body) => { stored = structuredClone(body); },
+    readGoogleDocText: async () => '{"committed":false}',
+  };
+  await controller.control('control-cont-fail.json', control({
+    task_id: 'SR-CONT-FAIL', turn_id: 'SR-CONT-FAIL:turn:2',
+    request_id: 'SR-CONT-FAIL:turn:2-request', control_epoch: 8, state: 'RUNNING',
+  }), transport);
+  assert.equal(controller.getActive(path), null);
+  assert.equal(sessionClosed, 1);
+  assert.equal(targetClosed, 1);
+  assert.equal(stored.server_status, 'ERROR');
+  assert.equal(stored.server_error, 'Continuation send failed');
+  assert.equal(stored.resume_retry_count, 1);
+  assert.ok(stored.resume_retry_at_ms > 0);
+});
+
+test('reconnect sends resume continuation even when control epoch is unchanged', async () => {
+  let continuationCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => ({
+      target: { id: 'target-same-epoch' },
+      session: { close() {} },
+      baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
+    }),
+    sendContinuation: async () => { continuationCalls += 1; },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({ browser, stateStore, config: { recoveryPrompt: 'continue' } });
+  const path = '__SELFRUN_DISPATCH__SR-SAME-EPOCH:turn:2-request__A2.json';
+  let stored = dispatch({
+    task_id: 'SR-SAME-EPOCH', turn_id: 'SR-SAME-EPOCH:turn:2', request_id: 'SR-SAME-EPOCH:turn:2-request',
+    dispatch_attempt: 2, client_status: 'SEND_REQUESTED', server_status: 'ERROR',
+    conversation_url: 'https://chatgpt.com/c/same-epoch', result_document_id: 'RESULT-SAME-EPOCH',
+    server_control_epoch: 7, resume_continuation_control_epoch: 7, resume_continuation_sent_at_ms: 1,
+  });
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    read: async () => structuredClone(stored),
+    write: async (_requested, body) => { stored = structuredClone(body); },
+    readGoogleDocText: async () => '{"committed":false}',
+  };
+  await controller.control('control-same-epoch.json', control({
+    task_id: 'SR-SAME-EPOCH', turn_id: 'SR-SAME-EPOCH:turn:2', request_id: 'SR-SAME-EPOCH:turn:2-request',
+    control_epoch: 7, state: 'RUNNING',
+  }), transport);
+  assert.equal(continuationCalls, 1);
+  assert.ok(controller.getActive(path));
+  assert.equal(stored.resume_continuation_control_epoch, 7);
+});
+
+test('RUNNING control does not reattach errored dispatch without a canonical conversation', async () => {
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => { resumeCalls += 1; throw new Error('unexpected resume'); },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-ERROR-NOURL:turn:2-request__A2.json';
+  let stored = dispatch({
+    task_id: 'SR-ERROR-NOURL',
+    turn_id: 'SR-ERROR-NOURL:turn:2',
+    request_id: 'SR-ERROR-NOURL:turn:2-request',
+    dispatch_attempt: 2,
+    client_status: 'SEND_REQUESTED',
+    server_status: 'ERROR',
+    server_error: 'CDP command timeout: Network.enable',
+    conversation_url: null,
+    result_document_id: 'RESULT-ERROR-NOURL',
+  });
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-26T00:00:00Z', size: 1 }],
+    read: async () => structuredClone(stored),
+    write: async (_requested, body) => { stored = structuredClone(body); },
+    readGoogleDocText: async () => '{"committed":false}',
+  };
+
+  await controller.control('control-error-nourl.json', control({
+    task_id: 'SR-ERROR-NOURL',
+    turn_id: 'SR-ERROR-NOURL:turn:2',
+    request_id: 'SR-ERROR-NOURL:turn:2-request',
+    control_epoch: 7,
+    state: 'RUNNING',
+  }), transport);
+
+  assert.equal(resumeCalls, 0);
+  assert.equal(controller.getActive(path), null);
+  assert.equal(stored.server_status, 'ERROR');
+});
+
+test('resume failure schedules a persistent retry while preserving the canonical conversation', async () => {
+  const stateStore = new MemoryStateStore();
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => { throw new Error('Too Many Requests'); },
+    monitor: async () => new Promise(() => {}),
+  };
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue', resumeRetryMs: 30000 },
+  });
+  const path = 'job/rate-limited-resume.json';
+  let stored = dispatch({
+    task_id: 'SR-RATE',
+    turn_id: 'SR-RATE:turn:2',
+    request_id: 'SR-RATE:turn:2-request',
+    dispatch_attempt: 2,
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/rate-limited-resume',
+    result_document_id: 'RESULT-RATE',
+  });
+  const transport = {
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+    },
+  };
+  const started = Date.now();
+  await controller.resume(path, stored, transport);
+  assert.equal(stored.server_status, 'ERROR');
+  assert.equal(stored.server_error, 'Too Many Requests');
+  assert.equal(stored.conversation_url, 'https://chatgpt.com/c/rate-limited-resume');
+  assert.equal(stored.resume_retry_count, 1);
+  assert.ok(stored.resume_retry_at_ms >= started + 29000);
+  assert.ok(stored.resume_retry_at_ms <= Date.now() + 31000);
+  assert.equal(stateStore.events.some(({ event }) => event === 'DRIVE_DISPATCH_RESUME_RETRY_SCHEDULED'), true);
+});
+
+test('monitor page load failure schedules a persistent resume retry', async () => {
+  let targetClosed = 0;
+  const stateStore = new MemoryStateStore();
+  const browser = {
+    chromium: { closeTarget: async () => { targetClosed += 1; return true; } },
+    resume: async () => ({
+      target: { id: 'target-load-failure' },
+      session: { close() {} },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'resume-user' }),
+    monitor: async () => ({
+      status: 'PAGE_ERROR',
+      probe: { errorText: 'Could not load this ChatGPT conversation' },
+    }),
+  };
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue', resumeRetryMs: 30000 },
+  });
+  const path = 'job/load-failure-resume.json';
+  let stored = dispatch({
+    task_id: 'SR-LOAD-FAIL',
+    turn_id: 'SR-LOAD-FAIL:turn:2',
+    request_id: 'SR-LOAD-FAIL:turn:2-request',
+    dispatch_attempt: 2,
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/load-failure-resume',
+    result_document_id: 'RESULT-LOAD-FAIL',
+    server_control_epoch: 8,
+  });
+  const transport = {
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+    },
+  };
+  await controller.control('control-load-failure.json', control({
+    task_id: 'SR-LOAD-FAIL',
+    turn_id: 'SR-LOAD-FAIL:turn:2',
+    request_id: 'SR-LOAD-FAIL:turn:2-request',
+    control_epoch: 8,
+    state: 'RUNNING',
+  }), transport);
+
+  const started = Date.now();
+  await controller.resume(path, stored, transport);
+  for (let i = 0; i < 20 && controller.getActive(path); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal(controller.getActive(path), null);
+  assert.equal(targetClosed, 1);
+  assert.equal(stored.server_status, 'ERROR');
+  assert.equal(stored.server_error, 'Could not load this ChatGPT conversation');
+  assert.equal(stored.conversation_url, 'https://chatgpt.com/c/load-failure-resume');
+  assert.equal(stored.resume_retry_count, 1);
+  assert.ok(stored.resume_retry_at_ms >= started + 29000);
+  assert.ok(stored.resume_retry_at_ms <= Date.now() + 31000);
+  assert.equal(
+    stateStore.events.some(({ event }) => event === 'DRIVE_DISPATCH_MONITOR_RETRY_SCHEDULED'),
+    true,
+  );
 });
 
 test('same request retry still supersedes only the older attempt', async () => {
@@ -893,6 +1320,7 @@ test('completed browser monitor removes the active dispatch immediately', async 
       session: { close() { sessionClosed += 1; } },
       baseline: { assistantCount: 0, assistantTextLength: 0 },
     }),
+    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'resume-user' }),
     monitor: async () => ({ status: 'COMPLETED' }),
   };
   const stateStore = new MemoryStateStore();
@@ -983,4 +1411,280 @@ test('final committed DONE result evicts stale RUNNING task control without reop
   const skipped = stateStore.events.find(({ event }) =>
     event === 'DRIVE_DISPATCH_REATTACH_SKIPPED_COMMITTED');
   assert.equal(skipped?.details.result_status, 'DONE');
+});
+
+
+test('successor prepare releases the linked predecessor browser before opening the new turn', async () => {
+  const order = [];
+  let prepareCount = 0;
+  const browser = {
+    chromium: {
+      closeTarget: async (id) => { order.push(`close:${id}`); return true; },
+    },
+    prepare: async ({ prompt }) => {
+      prepareCount += 1;
+      const id = `target-${prepareCount}`;
+      order.push(`prepare:${prompt}`);
+      return {
+        target: { id },
+        session: { close() { order.push(`session-close:${id}`); } },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    submitPrepared: async () => ({ url: `https://chatgpt.com/c/conversation-${prepareCount}` }),
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const transport = { write: async () => {} };
+
+  const predecessor = dispatch({
+    task_id: 'SR-SUCCESSOR',
+    turn_id: 'SR-SUCCESSOR:turn:1',
+    request_id: 'SR-SUCCESSOR:turn:1-request',
+    prompt: 'turn-1',
+    result_document_id: 'result-turn-1',
+  });
+  await controller.prepare('dispatch-turn-1.json', predecessor, transport);
+  await controller.send('dispatch-turn-1.json', {
+    ...predecessor,
+    client_status: 'SEND_REQUESTED',
+    server_status: 'READY_TO_SUBMIT',
+  }, transport);
+
+  const successor = dispatch({
+    task_id: 'SR-SUCCESSOR',
+    turn_id: 'SR-SUCCESSOR:turn:2',
+    request_id: 'SR-SUCCESSOR:turn:2-request',
+    prompt: 'turn-2',
+    result_document_id: 'result-turn-2',
+    previous_result_document_id: 'result-turn-1',
+  });
+  await controller.prepare('dispatch-turn-2.json', successor, transport);
+
+  const closeIndex = order.indexOf('close:target-1');
+  const nextPrepareIndex = order.indexOf('prepare:turn-2');
+  assert.ok(closeIndex >= 0);
+  assert.ok(nextPrepareIndex > closeIndex);
+  assert.equal(controller.activeDispatches().length, 1);
+  assert.equal(controller.activeDispatches()[0].identity.turnId, 'SR-SUCCESSOR:turn:2');
+  assert.equal(stateStore.events.some(({ event, details }) =>
+    event === 'PREDECESSOR_BROWSER_RELEASED'
+      && details.predecessor_turn_id === 'SR-SUCCESSOR:turn:1'
+      && details.successor_turn_id === 'SR-SUCCESSOR:turn:2'), true);
+});
+
+
+test('browser prepare is serialized across parallel Drive tasks', async () => {
+  let inPrepare = 0;
+  let maxPrepare = 0;
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  let prepareCalls = 0;
+  const browser = {
+    chromium: {
+      closeTarget: async () => true,
+      listExistingTargets: async () => [],
+      residentSetMb: async () => 100,
+      recycle: async () => ({ recycled: false }),
+    },
+    prepare: async () => {
+      prepareCalls += 1;
+      inPrepare += 1;
+      maxPrepare = Math.max(maxPrepare, inPrepare);
+      if (prepareCalls === 1) await firstGate;
+      const id = `target-${prepareCalls}`;
+      inPrepare -= 1;
+      return {
+        target: { id },
+        session: { close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: {
+      recoveryPrompt: 'continue',
+      browserIdleRecycleMs: 0,
+      browserIdleRssMb: 0,
+      browserOrphanGcEnabled: true,
+    },
+  });
+  const transport = { write: async () => {} };
+
+  const a = controller.prepare('a.json', dispatch({
+    task_id: 'SR-A', turn_id: 'SR-A:turn:1', request_id: 'SR-A:turn:1-request', prompt: 'A',
+  }), transport);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const b = controller.prepare('b.json', dispatch({
+    task_id: 'SR-B', turn_id: 'SR-B:turn:1', request_id: 'SR-B:turn:1-request', prompt: 'B',
+  }), transport);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(prepareCalls, 1);
+  assert.equal(maxPrepare, 1);
+  releaseFirst();
+  await Promise.all([a, b]);
+  assert.equal(prepareCalls, 2);
+  assert.equal(maxPrepare, 1);
+});
+
+test('idle browser lifecycle closes orphan ChatGPT targets and recycles above RSS limit', async () => {
+  const closed = [];
+  const recycled = [];
+  const browser = {
+    chromium: {
+      closeTarget: async (id) => { closed.push(id); return true; },
+      listExistingTargets: async () => [
+        { id: 'active-1', type: 'page', url: 'https://chatgpt.com/c/active' },
+        { id: 'orphan-1', type: 'page', url: 'https://chatgpt.com/c/orphan' },
+        { id: 'blank-1', type: 'page', url: 'about:blank' },
+      ],
+      residentSetMb: async () => 750,
+      recycle: async (reason) => {
+        recycled.push(reason);
+        return { recycled: true, reason, rssMb: 750, rootPid: 123 };
+      },
+    },
+    prepare: async () => ({
+      target: { id: 'active-1' },
+      session: { close() {} },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    submitPrepared: async () => ({ url: 'https://chatgpt.com/c/active' }),
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: {
+      recoveryPrompt: 'continue',
+      browserIdleRecycleMs: 60000,
+      browserIdleRssMb: 600,
+      browserOrphanGcEnabled: true,
+    },
+  });
+  const transport = { write: async () => {} };
+  const body = dispatch();
+  await controller.prepare('dispatch.json', body, transport);
+  await controller.send('dispatch.json', dispatch({
+    client_status: 'SEND_REQUESTED',
+    server_status: 'READY_TO_SUBMIT',
+  }), transport);
+
+  await controller.control('control.json', control({ state: 'STOPPED', control_epoch: 2 }), transport);
+
+  assert.ok(closed.includes('active-1'));
+  assert.ok(closed.includes('orphan-1'));
+  assert.ok(!closed.includes('blank-1'));
+  assert.deepEqual(recycled, ['idle_rss_limit']);
+  assert.equal(stateStore.events.some(({ event }) => event === 'BROWSER_ORPHAN_TARGETS_CLOSED'), true);
+  assert.equal(stateStore.events.some(({ event }) => event === 'BROWSER_RECYCLED'), true);
+});
+
+test('idle browser recycles after timeout when RSS is below the limit', async () => {
+  const recycled = [];
+  const browser = {
+    chromium: {
+      closeTarget: async () => true,
+      listExistingTargets: async () => [],
+      residentSetMb: async () => 120,
+      recycle: async (reason) => {
+        recycled.push(reason);
+        return { recycled: true, reason, rssMb: 120, rootPid: 321 };
+      },
+    },
+    prepare: async () => ({
+      target: { id: 'target-idle' },
+      session: { close() {} },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    submitPrepared: async () => ({ url: 'https://chatgpt.com/c/idle' }),
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: {
+      recoveryPrompt: 'continue',
+      browserIdleRecycleMs: 10,
+      browserIdleRssMb: 600,
+      browserOrphanGcEnabled: true,
+    },
+  });
+  const transport = { write: async () => {} };
+  await controller.prepare('idle.json', dispatch(), transport);
+  await controller.send('idle.json', dispatch({
+    client_status: 'SEND_REQUESTED',
+    server_status: 'READY_TO_SUBMIT',
+  }), transport);
+  await controller.control('control.json', control({ state: 'STOPPED', control_epoch: 2 }), transport);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(recycled, ['idle_timeout']);
+});
+
+
+test('resume releases browser-open slot when pre-browser state patch fails', async () => {
+  let failPatch = true;
+  class FailingStateStore extends MemoryStateStore {
+    async patch(changes) {
+      if (failPatch) {
+        failPatch = false;
+        throw new Error('synthetic state patch failure');
+      }
+      return super.patch(changes);
+    }
+  }
+  const browser = {
+    chromium: {
+      closeTarget: async () => true,
+      listExistingTargets: async () => [],
+      residentSetMb: async () => 100,
+      recycle: async () => ({ recycled: false }),
+    },
+    resume: async () => {
+      throw new Error('resume should not be reached');
+    },
+    prepare: async () => ({
+      target: { id: 'after-failure' },
+      session: { close() {} },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+  };
+  const stateStore = new FailingStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: {
+      recoveryPrompt: 'continue',
+      browserIdleRecycleMs: 0,
+      browserIdleRssMb: 0,
+      browserOrphanGcEnabled: true,
+    },
+  });
+  const transport = { write: async () => {} };
+  await assert.rejects(
+    controller.resume('resume.json', dispatch({
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      conversation_url: 'https://chatgpt.com/c/resume-test',
+    }), transport),
+    /synthetic state patch failure/,
+  );
+  await Promise.race([
+    controller.prepare('after.json', dispatch({
+      task_id: 'SR-AFTER',
+      turn_id: 'SR-AFTER:turn:1',
+      request_id: 'SR-AFTER:turn:1-request',
+    }), transport),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('browser slot leaked')), 100)),
+  ]);
 });

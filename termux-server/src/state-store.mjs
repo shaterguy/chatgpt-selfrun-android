@@ -67,9 +67,9 @@ export class StateStore {
     });
   }
 
-  async recordEvent(event, details = {}) {
+  async recordEvent(event, details = {}, context = null) {
     return this.#enqueue(async () => {
-      await this.appendEvent(event, this.state, details);
+      await this.appendEvent(event, this.state, details, context);
       return this.snapshot();
     });
   }
@@ -86,15 +86,20 @@ export class StateStore {
     await fs.rename(temp, this.config.stateFile);
   }
 
-  async appendEvent(event, state = this.state, details = null) {
+  async appendEvent(event, state = this.state, details = null, context = null) {
+    const eventContext = context && typeof context === 'object' ? context : null;
+    const value = (key, fallback) => eventContext
+      && Object.prototype.hasOwnProperty.call(eventContext, key)
+      ? eventContext[key]
+      : fallback;
     const row = JSON.stringify({
       at: new Date().toISOString(),
       event,
-      generation: state.generation,
-      status: state.status,
-      signalId: state.activeSignal?.signalId ?? null,
-      turnId: state.activeSignal?.envelope?.TURN_ID ?? null,
-      conversationUrl: state.conversationUrl ?? null,
+      generation: value('generation', state.generation),
+      status: value('status', state.status),
+      signalId: value('signalId', state.activeSignal?.signalId ?? null),
+      turnId: value('turnId', state.activeSignal?.envelope?.TURN_ID ?? null),
+      conversationUrl: value('conversationUrl', state.conversationUrl ?? null),
       ...(details && typeof details === 'object' ? { details } : {}),
     });
     await fs.appendFile(this.config.eventsFile, row + '\n', { mode: 0o600 });

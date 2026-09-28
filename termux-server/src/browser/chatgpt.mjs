@@ -1,3 +1,32 @@
+const RUNTIME_EVALUATE_TIMEOUT_MS = 5000;
+const SUBMIT_POST_GRACE_MS = 5000;
+
+const PAGE_ERROR_PATTERN = [
+  'too many requests',
+  'could not load this chatgpt conversation',
+  'something went wrong',
+  'error generating',
+  '문제가 발생',
+  '오류가 발생',
+].join('|');
+
+export function detectPageErrorText(body) {
+  const match = String(body || '').match(new RegExp(PAGE_ERROR_PATTERN, 'i'));
+  return match ? match[0] : null;
+}
+
+export function conversationStateReady(probe) {
+  const userMessageId = String(probe?.userMessageId || '').trim();
+  const assistantMessageId = String(probe?.assistantMessageId || '').trim();
+  const hasResponseState = !!probe?.streaming || !!probe?.paused || !!assistantMessageId;
+  return !!userMessageId && hasResponseState;
+}
+
+export function conversationResumeReady(probe) {
+  const userMessageId = String(probe?.userMessageId || '').trim();
+  return !!probe?.composer && !!userMessageId;
+}
+
 const delay = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) return reject(signal.reason || new Error('aborted'));
   const timer = setTimeout(resolve, ms);
@@ -7,12 +36,12 @@ const delay = (ms, signal) => new Promise((resolve, reject) => {
   }, { once: true });
 });
 
-async function evaluate(session, expression) {
+async function evaluate(session, expression, timeoutMs = RUNTIME_EVALUATE_TIMEOUT_MS) {
   const result = await session.call('Runtime.evaluate', {
     expression,
     returnByValue: true,
     awaitPromise: true,
-  });
+  }, { timeoutMs });
   if (result.exceptionDetails) {
     const detail = result.exceptionDetails.exception?.description
       || result.exceptionDetails.exception?.value
@@ -21,6 +50,10 @@ async function evaluate(session, expression) {
     throw new Error(String(detail));
   }
   return result.result?.value;
+}
+
+function runtimeEvaluateTimedOut(error) {
+  return String(error?.message || error) === 'CDP command timeout: Runtime.evaluate';
 }
 
 function conversationId(url) {
@@ -37,6 +70,7 @@ function conversationId(url) {
 }
 
 function probeExpression() {
+  const errorPattern = JSON.stringify(PAGE_ERROR_PATTERN);
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
     const buttons=[...document.querySelectorAll('button')].filter(visible);
@@ -65,7 +99,7 @@ function probeExpression() {
       return null;
     };
     const body=String(document.body?.innerText||'');
-    const errorMatch=body.match(/something went wrong|error generating|문제가 발생|오류가 발생/i);
+    const errorMatch=body.match(new RegExp(${errorPattern},'i'));
     return {
       url:location.href,
       title:document.title,
@@ -303,7 +337,7 @@ export class ChatGptBrowser {
       const probe = await this.#waitFor(session, (p) => p.loginPage
         || ((p.readyState === 'complete' || p.readyState === 'interactive')
           && conversationId(p.url) === expectedId
-          && p.composer), {
+          && conversationResumeReady(p)), {
         timeoutMs: this.config.navigationTimeoutMs,
         signal,
         label: 'existing conversation',
@@ -398,15 +432,46 @@ export class ChatGptBrowser {
     });
 
     try {
-      const sent = await evaluate(session, submitExpression());
-      if (sent?.status !== 'SUBMITTED') {
-        throw new Error(`Composer send failed: ${sent?.status || 'unknown'}`);
+      const submitOutcome = evaluate(session, submitExpression()).then(
+        (value) => ({ type: 'evaluate', value }),
+        (error) => ({ type: 'evaluate-error', error }),
+      );
+      const canonicalOutcome = canonical.then(
+        (value) => ({ type: 'canonical', value }),
+        (error) => ({ type: 'canonical-error', error }),
+      );
+      const first = await Promise.race([submitOutcome, canonicalOutcome]);
+      let uncertainSubmitError = null;
+      if (first.type === 'evaluate') {
+        if (first.value?.status !== 'SUBMITTED') {
+          throw new Error(`Composer send failed: ${first.value?.status || 'unknown'}`);
+        }
+      } else if (first.type === 'evaluate-error') {
+        if (!runtimeEvaluateTimedOut(first.error)) throw first.error;
+        uncertainSubmitError = first.error;
+      } else if (first.type === 'canonical-error') {
+        throw first.error;
       }
-      const timeout = new Promise((_, reject) => {
-        const timer = setTimeout(() => reject(new Error('Canonical conversation POST timeout')), 10000);
-        canonical.finally(() => clearTimeout(timer)).catch(() => {});
-      });
-      await Promise.race([canonical, timeout]);
+
+      if (first.type !== 'canonical') {
+        const canonicalTimeoutMs = uncertainSubmitError ? SUBMIT_POST_GRACE_MS : 10000;
+        const timeout = new Promise((_, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error('Canonical conversation POST timeout')),
+            canonicalTimeoutMs,
+          );
+          canonical.finally(() => clearTimeout(timer)).catch(() => {});
+        });
+        try {
+          await Promise.race([canonical, timeout]);
+        } catch (error) {
+          if (uncertainSubmitError
+              && String(error?.message || error) === 'Canonical conversation POST timeout') {
+            throw uncertainSubmitError;
+          }
+          throw error;
+        }
+      }
       return await this.#waitFor(session, (p) => !!conversationId(p.url), {
         timeoutMs: this.config.navigationTimeoutMs,
         signal,
@@ -437,6 +502,18 @@ export class ChatGptBrowser {
     const staged = await evaluate(session, inputExpression(prompt));
     if (staged?.status !== 'READY') {
       throw new Error(`Continuation staging failed: ${staged?.status || 'unknown'}`);
+    }
+
+    const sendReadyStarted = Date.now();
+    let sendReady = null;
+    while (Date.now() - sendReadyStarted < 5000) {
+      if (signal?.aborted) throw signal.reason || new Error('aborted');
+      sendReady = await evaluate(session, sendReadyExpression());
+      if (sendReady?.ready) break;
+      await delay(150, signal);
+    }
+    if (!sendReady?.ready) {
+      throw new Error(`Continuation send control not ready: ${sendReady?.status || 'unknown'}`);
     }
 
     const beforeSubmit = await evaluate(session, probeExpression());
@@ -491,9 +568,25 @@ export class ChatGptBrowser {
     let lastReportedStatus = null;
     let lastGateToken = null;
     let nextStalledVerificationAt = 0;
+    let evaluateTimeoutRetries = 0;
+    let conversationStateMissingSince = 0;
 
     while (!signal?.aborted) {
-      const probe = await evaluate(session, probeExpression());
+      let probe;
+      try {
+        probe = await evaluate(session, probeExpression());
+        evaluateTimeoutRetries = 0;
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason || new Error('aborted');
+        const message = String(error?.message || error);
+        if (message !== 'CDP command timeout: Runtime.evaluate'
+            || evaluateTimeoutRetries >= 3) {
+          throw error;
+        }
+        evaluateTimeoutRetries += 1;
+        await delay(this.config.probeIntervalMs, signal);
+        continue;
+      }
       const gate = await livenessGate?.() || {};
       const gateState = String(gate.state || 'UNKNOWN');
       const gateEpoch = Number(gate.epoch || 0);
@@ -523,23 +616,35 @@ export class ChatGptBrowser {
         stalled = false;
       }
 
+      const structurallyReady = conversationStateReady(probe);
+      const resumeReady = conversationResumeReady(probe);
+      const conversationAvailable = structurallyReady || resumeReady;
+      if (conversationAvailable) conversationStateMissingSince = 0;
+      else if (!conversationStateMissingSince) conversationStateMissingSince = Date.now();
+      const stateGraceMs = Math.max(0, Number(this.config.conversationStateGraceMs ?? 5000));
+      const conversationStateUnavailable = !livenessSuspended
+        && conversationStateMissingSince > 0
+        && Date.now() - conversationStateMissingSince >= stateGraceMs;
+
       const hasResponse =
         probe.assistantCount > baseline.assistantCount ||
         probe.assistantTextLength > baseline.assistantTextLength;
-      const completed = hasResponse && !probe.streaming && !probe.paused;
+      const completed = structurallyReady && hasResponse && !probe.streaming && !probe.paused;
       const isStalled = !livenessSuspended && !completed
         && Date.now() - lastActivityAt >= this.config.stallAfterMs;
       if (isStalled) stalled = true;
 
+      const structuralError = conversationStateUnavailable ? 'Conversation state unavailable' : null;
+      const pageError = conversationAvailable ? null : (probe.errorText || structuralError);
       let status = 'RUNNING';
-      if (probe.errorText) status = 'PAGE_ERROR';
+      if (pageError) status = 'PAGE_ERROR';
       else if (completed) status = 'COMPLETED';
       else if (stalled) status = 'STALLED';
 
       const verificationRetry = status === 'STALLED'
         && nextStalledVerificationAt > 0
         && Date.now() >= nextStalledVerificationAt;
-      if (changed || status !== lastReportedStatus || completed || probe.errorText || verificationRetry) {
+      if (changed || status !== lastReportedStatus || completed || pageError || verificationRetry) {
         const action = await onActivity?.({
           status,
           pageUrl: probe.url,
@@ -553,7 +658,8 @@ export class ChatGptBrowser {
           userTextLength: probe.userTextLength,
           userMessageId: probe.userMessageId,
           lastActivityAt: new Date(lastActivityAt).toISOString(),
-          pageError: probe.errorText,
+          pageError,
+          conversationStateReady: structurallyReady,
           verificationRetry,
         });
         if (action?.resetLiveness) {
@@ -569,7 +675,13 @@ export class ChatGptBrowser {
       }
 
       previous = probe;
-      if (completed || probe.errorText) return { status, probe, lastActivityAt };
+      if (completed || pageError) {
+        return {
+          status,
+          probe: { ...probe, errorText: pageError },
+          lastActivityAt,
+        };
+      }
       await delay(this.config.probeIntervalMs, signal);
     }
 

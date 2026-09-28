@@ -8,6 +8,7 @@ import { SelfRunController } from './controller.mjs';
 import { DriveDispatchTransport } from './drive-transport.mjs';
 import { DriveDispatchController } from './drive-controller.mjs';
 import { DriveDispatchWatcher } from './drive-watcher.mjs';
+import { SelfRunClusterCoordinator } from './cluster-coordinator.mjs';
 
 const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
@@ -30,12 +31,15 @@ const browser = new ChatGptBrowser(chromium, config);
 const controller = new SelfRunController({ browser, stateStore, config });
 await controller.initialize();
 const driveTransport = new DriveDispatchTransport(config);
+const cluster = new SelfRunClusterCoordinator({ stateStore, config });
 const driveController = new DriveDispatchController({ browser, stateStore, config });
 const driveWatcher = new DriveDispatchWatcher({
   transport: driveTransport,
   controller: driveController,
   config,
+  canDispatch: () => cluster.canDispatch(),
 });
+cluster.start();
 void driveWatcher.start();
 
 function json(res, status, body) {
@@ -81,6 +85,7 @@ const server = http.createServer(async (req, res) => {
         startedAt,
         status: state.status,
         generation: state.generation,
+        cluster: cluster.snapshot(),
       });
     }
 
@@ -124,6 +129,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   driveWatcher.stop();
+  await cluster.close().catch(() => {});
   await driveTransport.close().catch(() => {});
   server.close(() => process.exit(0));
 }
