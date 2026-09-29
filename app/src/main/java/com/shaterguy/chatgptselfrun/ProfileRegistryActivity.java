@@ -186,22 +186,6 @@ public final class ProfileRegistryActivity extends Activity {
     }
 
     private void confirmDelete(ProfileRegistry.Profile profile) {
-        new AlertDialog.Builder(this)
-                .setTitle("등록 조합 삭제")
-                .setMessage((profile.mode == ProfileRegistry.Mode.WORK
-                        ? "MODEL=" + profile.signalModel + " REASONING=" + profile.signalReasoning
-                        : "REASONING=" + profile.signalReasoning)
-                        + "\n실제 조합 " + profile.actualCombination()
-                        + "\n\n삭제 후 같은 신호는 즉시 미지원 처리됩니다. 이름을 바꾸려면 삭제 후 다시 등록하세요.")
-                .setNegativeButton("취소", null)
-                .setPositiveButton("삭제", (dialog, which) -> {
-                    if (!ProfileRegistry.delete(profile.fingerprint)) {
-                        Toast.makeText(this, "삭제 내용을 저장하지 못했습니다.", Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    syncRegistryToWeb();
-                    renderRegistry();
-                }).show();
     }
 
     private void startCapture(ProfileRegistry.Mode mode) {
