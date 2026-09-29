@@ -1,3 +1,5 @@
+import { appendTurnStartDirective } from './prompt-directives.mjs';
+
 const DISPATCH_TYPES = new Set(['START', 'NEXT']);
 const CONTROL_TYPES = new Set(['START', 'NEXT', 'PAUSE', 'STOP']);
 const ENVELOPE_KEYS = [
@@ -69,10 +71,11 @@ export function buildPrompt(signal) {
 }
 
 export class SelfRunController {
-  constructor({ browser, stateStore, config }) {
+  constructor({ browser, stateStore, config, promptDirectives = null }) {
     this.browser = browser;
     this.stateStore = stateStore;
     this.config = config;
+    this.promptDirectives = promptDirectives;
     this.activeAbort = null;
     this.activePromise = null;
   }
@@ -145,7 +148,10 @@ export class SelfRunController {
   }
 
   async #run(signal, generation, abortSignal) {
-    const prompt = buildPrompt(signal);
+    const directives = this.promptDirectives?.current
+      ? await this.promptDirectives.current()
+      : { turnStartDirective: cleanString(this.config.turnStartDirective) };
+    const prompt = appendTurnStartDirective(buildPrompt(signal), directives.turnStartDirective);
     try {
       const dispatched = await this.browser.dispatch({
         projectUrl: signal.projectUrl,

@@ -9,6 +9,7 @@ import { DriveDispatchTransport } from './drive-transport.mjs';
 import { DriveDispatchController } from './drive-controller.mjs';
 import { DriveDispatchWatcher } from './drive-watcher.mjs';
 import { SelfRunClusterCoordinator } from './cluster-coordinator.mjs';
+import { PromptDirectiveStore, PROMPT_DIRECTIVES_SCHEMA } from './prompt-directives.mjs';
 
 const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
@@ -28,11 +29,22 @@ await stateStore.patch({
 const token = await ensureToken(config);
 const chromium = new ChromiumManager(config);
 const browser = new ChatGptBrowser(chromium, config);
-const controller = new SelfRunController({ browser, stateStore, config });
+const promptDirectives = new PromptDirectiveStore(config);
+const controller = new SelfRunController({
+  browser,
+  stateStore,
+  config,
+  promptDirectives,
+});
 await controller.initialize();
 const driveTransport = new DriveDispatchTransport(config);
 const cluster = new SelfRunClusterCoordinator({ stateStore, config });
-const driveController = new DriveDispatchController({ browser, stateStore, config });
+const driveController = new DriveDispatchController({
+  browser,
+  stateStore,
+  config,
+  promptDirectives,
+});
 const driveWatcher = new DriveDispatchWatcher({
   transport: driveTransport,
   controller: driveController,
@@ -79,6 +91,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/health') {
       const state = stateStore.snapshot();
+      const directives = await promptDirectives.current();
       return json(res, 200, {
         ok: true,
         version: config.version,
@@ -86,6 +99,14 @@ const server = http.createServer(async (req, res) => {
         status: state.status,
         generation: state.generation,
         cluster: cluster.snapshot(),
+        prompt_directives: {
+          schema: PROMPT_DIRECTIVES_SCHEMA,
+          source: directives.source,
+          file: config.promptDirectivesFile,
+          turn_start_enabled: Boolean(directives.turnStartDirective),
+          turn_continue_enabled: Boolean(directives.turnContinueDirective),
+          error: directives.error,
+        },
       });
     }
 

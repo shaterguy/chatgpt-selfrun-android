@@ -70,13 +70,17 @@ class MemoryStateStore {
 test('Drive dispatch preserves app claim boundary before browser send', async () => {
   const writes = [];
   let submitCalls = 0;
+  let preparedPrompt = null;
   const browser = {
     chromium: { closeTarget: async () => true },
-    prepare: async () => ({
-      target: { id: 'target-1' },
-      session: { close() {} },
-      baseline: { assistantCount: 0, assistantTextLength: 0 },
-    }),
+    prepare: async ({ prompt }) => {
+      preparedPrompt = prompt;
+      return {
+        target: { id: 'target-1' },
+        session: { close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
     submitPrepared: async () => {
       submitCalls += 1;
       return { url: 'https://chatgpt.com/g/example/c/abc-123' };
@@ -87,7 +91,10 @@ test('Drive dispatch preserves app claim boundary before browser send', async ()
   const controller = new DriveDispatchController({
     browser,
     stateStore,
-    config: { recoveryPrompt: '현재 턴에 할당된 잔여작업이 있으면 계속 수행해' },
+    config: {
+      turnStartDirective: 'SERVER START DIRECTIVE',
+      recoveryPrompt: '현재 턴에 할당된 잔여작업이 있으면 계속 수행해',
+    },
   });
   const transport = {
     write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
@@ -95,6 +102,9 @@ test('Drive dispatch preserves app claim boundary before browser send', async ()
 
   const body = dispatch();
   await controller.prepare('job/dispatch.json', body, transport);
+  assert.equal(preparedPrompt,
+    'TASK_ID=SR-TEST\n\n[SelfRun 서버 실행 지시]\nSERVER START DIRECTIVE');
+  assert.equal(writes.at(-1).body.prompt, 'TASK_ID=SR-TEST');
   assert.equal(writes.at(-1).body.server_status, 'READY_TO_SUBMIT');
   assert.equal(submitCalls, 0);
 
@@ -155,6 +165,44 @@ test('Drive dispatch resumes an existing conversation without resending the prom
   assert.equal(writes.at(-1).body.server_status, 'STARTED');
   assert.equal(writes.at(-1).body.conversation_url, body.conversation_url);
   assert.equal(stateStore.snapshot().status, 'RUNNING');
+});
+
+
+test('resume continuation uses the server-managed continue directive', async () => {
+  let continuationPrompt = null;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => ({
+      target: { id: 'target-dynamic-resume' },
+      session: { close() {} },
+      baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
+    }),
+    sendContinuation: async ({ prompt }) => {
+      continuationPrompt = prompt;
+      return { userCount: 2, userTextLength: 20, userMessageId: 'user-dynamic-resume' };
+    },
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'fallback continue' },
+    promptDirectives: {
+      current: async () => ({
+        turnStartDirective: 'dynamic start',
+        turnContinueDirective: 'dynamic continue',
+      }),
+    },
+  });
+  const transport = { write: async () => {} };
+  await controller.control('__SELFRUN_CONTROL__SR-TEST.json', control({ state: 'RUNNING' }));
+  await controller.resume('job/dynamic-resume.json', dispatch({
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/dynamic-resume',
+  }), transport);
+  assert.equal(continuationPrompt, 'dynamic continue');
 });
 
 test('Task CONTROL applies only increasing epochs and STOPPED closes the active browser', async () => {

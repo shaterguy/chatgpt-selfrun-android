@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_TURN_START_DIRECTIVE, DEFAULT_TURN_CONTINUE_DIRECTIVE } from './prompt-directives.mjs';
 
 const home = os.homedir();
 const dataDir = process.env.SELFRUN_SERVER_DATA_DIR || path.join(home, '.selfrun-server');
@@ -30,7 +31,10 @@ export const config = Object.freeze({
   preparedPollMs: Number(process.env.SELFRUN_PREPARED_POLL_MS || 1000),
   driveRunsPath: process.env.SELFRUN_DRIVE_RUNS_PATH || 'selfrun-drive:GPT/Self Run/Runs',
   driveRunsFolderId: process.env.SELFRUN_DRIVE_RUNS_FOLDER_ID || '1LaIjBACRA4bgTblTOHOki5OF39Cyxi4c',
-  recoveryPrompt: process.env.SELFRUN_RECOVERY_PROMPT || '현재 턴에 할당된 잔여작업이 있으면 계속 수행해',
+  promptDirectivesFile: process.env.SELFRUN_PROMPT_DIRECTIVES_FILE
+    || path.join(dataDir, 'prompt-directives.json'),
+  turnStartDirective: process.env.SELFRUN_TURN_START_DIRECTIVE || DEFAULT_TURN_START_DIRECTIVE,
+  recoveryPrompt: process.env.SELFRUN_RECOVERY_PROMPT || DEFAULT_TURN_CONTINUE_DIRECTIVE,
   allowUnknownControlRecovery: process.env.SELFRUN_ALLOW_UNKNOWN_CONTROL_RECOVERY === '1',
   dispatchFreshMs: Number(process.env.SELFRUN_DISPATCH_FRESH_MS || 600000),
   dispatchRecoveryMs: Number(process.env.SELFRUN_DISPATCH_RECOVERY_MS || 7200000),

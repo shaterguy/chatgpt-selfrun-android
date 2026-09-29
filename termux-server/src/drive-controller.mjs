@@ -1,3 +1,5 @@
+import { appendTurnStartDirective } from './prompt-directives.mjs';
+
 const DISPATCH_SCHEMA = 'selfrun-server-dispatch-v1';
 const CONTROL_SCHEMA = 'selfrun-task-control-v1';
 const CONTROL_STATES = new Set([
@@ -69,10 +71,11 @@ function canonicalConversationUrl(url) {
 }
 
 export class DriveDispatchController {
-  constructor({ browser, stateStore, config }) {
+  constructor({ browser, stateStore, config, promptDirectives = null }) {
     this.browser = browser;
     this.stateStore = stateStore;
     this.config = config;
+    this.promptDirectives = promptDirectives;
     this.active = null;
     this.actives = new Map();
     this.controls = new Map();
@@ -99,6 +102,14 @@ export class DriveDispatchController {
     return !!active
       && this.actives.get(active.path) === active
       && !active.abortController.signal.aborted;
+  }
+
+  async #directiveState() {
+    if (this.promptDirectives?.current) return this.promptDirectives.current();
+    return {
+      turnStartDirective: clean(this.config.turnStartDirective),
+      turnContinueDirective: clean(this.config.recoveryPrompt),
+    };
   }
 
   #cancelIdleRecycle() {
@@ -294,7 +305,7 @@ export class DriveDispatchController {
       } else {
         replacement = await this.browser.prepare({
           projectUrl: body.project_url,
-          prompt: body.prompt,
+          prompt: active.effectivePrompt || body.prompt,
           signal: active.abortController.signal,
         });
         mode = 'FRESH_PREPARE';
@@ -559,9 +570,14 @@ export class DriveDispatchController {
         lastError: null,
       }, 'DRIVE_DISPATCH_PREPARE');
 
+      const directives = await this.#directiveState();
+      const effectivePrompt = appendTurnStartDirective(
+        body.prompt,
+        directives.turnStartDirective,
+      );
       const prepared = await this.browser.prepare({
         projectUrl: body.project_url,
-        prompt: body.prompt,
+        prompt: effectivePrompt,
         signal: abortController.signal,
       });
       if (abortController.signal.aborted) throw abortController.signal.reason || new Error('superseded');
@@ -576,6 +592,7 @@ export class DriveDispatchController {
         target: prepared.target,
         session: prepared.session,
         baseline: prepared.baseline,
+        effectivePrompt,
         serverStatus: 'READY_TO_SUBMIT',
         recoveryCount: 0,
         verificationFailureCount: 0,
@@ -707,9 +724,10 @@ export class DriveDispatchController {
       let resumeContinuationSent = false;
       let continuationAccepted = null;
       if (clean(control?.state) === 'RUNNING') {
+        const directives = await this.#directiveState();
         continuationAccepted = await this.browser.sendContinuation({
           session: resumed.session,
-          prompt: this.config.recoveryPrompt,
+          prompt: directives.turnContinueDirective || this.config.recoveryPrompt,
           profileOperations: body.profile_operations,
           signal: abortController.signal,
         });
@@ -1192,9 +1210,10 @@ export class DriveDispatchController {
               };
               await this.#syncActiveSummary();
               await transport.write(active.path, active.body);
+              const directives = await this.#directiveState();
               await this.browser.sendContinuation({
                 session: active.session,
-                prompt: this.config.recoveryPrompt,
+                prompt: directives.turnContinueDirective || this.config.recoveryPrompt,
                 profileOperations: active.body.profile_operations,
                 signal: active.abortController.signal,
               });
