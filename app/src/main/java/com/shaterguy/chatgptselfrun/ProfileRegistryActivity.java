@@ -74,7 +74,8 @@ public final class ProfileRegistryActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         LinearLayout page = Ui.page(this);
-        page.addView(Ui.toolbar(this, "모델 조합",\n                Ui.textButton(this, "새로고침", v -> refreshRegistry())));
+        page.addView(Ui.toolbar(this, "모델 조합",
+                Ui.textButton(this, "새로고침", v -> refreshRegistry())));
         status = Ui.body(this, "");
         page.addView(status);
         registryScroll = new ScrollView(this);
