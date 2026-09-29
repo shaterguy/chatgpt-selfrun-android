@@ -542,9 +542,7 @@ public final class SelfRunNewActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
     }
 
-    @Override protected void onResume() {
-        super.onResume();
-        if (chatReasoning != null) refreshChatReasoningOptions(selectedChatReasoning());
+    @Override protected void onResume() {\n        super.onResume();\n        ProfileRegistryRefresher.refresh(this, null);\n        if (chatReasoning != null) refreshChatReasoningOptions(selectedChatReasoning());
 
         if (workBootstrapProfile != null) {
             ProfileRegistry.Profile selected = selectedWorkBootstrapProfile();
