@@ -84,17 +84,17 @@ public final class UiArchitecturePolicyTest {
         assertFalse(tools.contains("웹 UI 보정 로그"));
     }
 
-    @Test public void profileManagementUsesPurposeSpecificCaptureLayout() throws Exception {
+    @Test public void profileManagementUsesCanonicalReadOnlyLayout() throws Exception {
         String profiles = src("ProfileRegistryActivity.java");
         String drive = src("DriveSetupActivity.java");
         assertTrue(profiles.contains("모델 조합"));
         assertTrue(profiles.contains("일반 채팅"));
-        assertTrue(profiles.contains("Work"));
-        assertTrue(profiles.contains("조합 등록"));
-        assertTrue(profiles.contains("조합 내보내기"));
-        assertTrue(profiles.contains("webView.setVisibility(View.VISIBLE)"));
-        assertTrue(profiles.contains("registryScroll.setVisibility(View.GONE)"));
-        assertTrue(profiles.contains("메뉴 클릭만으로는 캡처되지 않습니다"));
+        assertTrue(profiles.contains("워크"));
+        assertTrue(profiles.contains("ProfileRegistrySync.refresh"));
+        assertTrue(src("ProfileRegistrySync.java").contains(ProfileRegistrySync.CHAT_DOCUMENT_ID));
+        assertTrue(src("ProfileRegistrySync.java").contains(ProfileRegistrySync.WORK_DOCUMENT_ID));
+        assertFalse(profiles.contains("조합 등록"));
+        assertFalse(profiles.contains("ACTION_OPEN_DOCUMENT"));
         assertTrue(drive.contains("연결됨"));
     }
 

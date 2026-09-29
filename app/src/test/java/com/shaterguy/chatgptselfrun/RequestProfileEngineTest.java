@@ -1,5 +1,6 @@
 package com.shaterguy.chatgptselfrun;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -11,6 +12,7 @@ import java.util.Set;
 import static org.junit.Assert.*;
 
 public class RequestProfileEngineTest {
+    @Before public void resetRegistry() { ProfileRegistry.resetForTests(); }
     private static Map<String,Object> nativeRequest() {
         Map<String,Object> body = new LinkedHashMap<>();
         body.put("action", "next");
@@ -62,7 +64,7 @@ public class RequestProfileEngineTest {
     }
 
     @Test public void workSolUltraIsAbsolute() {
-        Map<String,Object> out = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "ultra"));
+        Map<String,Object> out = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "ultra"));
         assertEquals("gpt-5.6-sol-wm", out.get("model"));
         assertEquals("ultra", out.get("thinking_effort"));
         assertEquals("tpp", out.get("conversation_origin"));
@@ -70,25 +72,25 @@ public class RequestProfileEngineTest {
     }
 
     @Test public void workTerraHighIsAbsolute() {
-        Map<String,Object> out = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "terra", "high"));
+        Map<String,Object> out = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6terra", "high"));
         assertEquals("gpt-5.6-terra-wm", out.get("model"));
         assertEquals("extended", out.get("thinking_effort"));
     }
 
     @Test public void workLunaMaxIsAbsolute() {
-        Map<String,Object> out = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "luna", "max"));
+        Map<String,Object> out = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6luna", "max"));
         assertEquals("gpt-5.6-luna-wm", out.get("model"));
         assertEquals("max", out.get("thinking_effort"));
     }
 
     @Test public void workLunaUltraIsRejectedRatherThanDowngraded() {
         assertThrows(IllegalArgumentException.class, () -> apply(
-                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "luna", "ultra")));
+                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6luna", "ultra")));
     }
 
     @Test public void workFactorizationSupportsTerraMaxCrossCheck() {
-        Map<String,Object> sol = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "max"));
-        Map<String,Object> terra = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "terra", "max"));
+        Map<String,Object> sol = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "max"));
+        Map<String,Object> terra = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6terra", "max"));
         assertEquals(sol.get("thinking_effort"), terra.get("thinking_effort"));
         assertNotEquals(sol.get("model"), terra.get("model"));
         assertEquals(sol.get("conversation_origin"), terra.get("conversation_origin"));
@@ -96,17 +98,17 @@ public class RequestProfileEngineTest {
     }
 
     @Test public void priorTurnStateDoesNotInfluenceNextTarget() {
-        Map<String,Object> first = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "ultra"));
+        Map<String,Object> first = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "ultra"));
         Map<String,Object> middle = RequestProfileEngine.apply(first,
-                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "terra", "high"));
+                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6terra", "high"));
         Map<String,Object> last = RequestProfileEngine.apply(middle,
-                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "ultra"));
+                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "ultra"));
         assertEquals("gpt-5.6-sol-wm", last.get("model"));
         assertEquals("ultra", last.get("thinking_effort"));
     }
 
     @Test public void workToChatRemovesWorkOnlyControlFields() {
-        Map<String,Object> work = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "terra", "max"));
+        Map<String,Object> work = apply(new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6terra", "max"));
         Map<String,Object> chat = RequestProfileEngine.apply(work,
                 new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.CHAT, "", "high"));
         assertFalse(chat.containsKey("conversation_origin"));
@@ -117,7 +119,7 @@ public class RequestProfileEngineTest {
     @Test public void nonControlDataPlaneIsSemanticallyPreserved() {
         Map<String,Object> before = nativeRequest();
         Map<String,Object> after = RequestProfileEngine.apply(before,
-                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "max"));
+                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "max"));
         assertTrue(RequestProfileEngine.nonControlEquivalent(before, after));
         assertSame(before.get("messages"), after.get("messages"));
         assertEquals(before.get("conversation_id"), after.get("conversation_id"));
@@ -129,7 +131,7 @@ public class RequestProfileEngineTest {
         Map<String,Object> first = nativeRequest();
         first.remove("conversation_id");
         Map<String,Object> followup = nativeRequest();
-        RequestProfileEngine.TargetProfile target = new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "terra", "high");
+        RequestProfileEngine.TargetProfile target = new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6terra", "high");
         Map<String,Object> a = RequestProfileEngine.apply(first, target);
         Map<String,Object> b = RequestProfileEngine.apply(followup, target);
         assertEquals(a.get("model"), b.get("model"));
@@ -142,12 +144,12 @@ public class RequestProfileEngineTest {
         Map<String,Object> body = new LinkedHashMap<>();
         body.put("action", "next");
         assertThrows(IllegalArgumentException.class, () -> RequestProfileEngine.apply(body,
-                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "max")));
+                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "max")));
     }
 
     @Test public void unsupportedProfileVersionFailsClosed() {
         assertThrows(IllegalArgumentException.class, () -> RequestProfileEngine.plan(
-                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "sol", "max", "future-unknown")));
+                new RequestProfileEngine.TargetProfile(RequestProfileEngine.Mode.WORK, "5.6sol", "max", "future-unknown")));
     }
 
     @Test public void controlAllowlistIsExactlyCalibrationProvenSet() {
@@ -168,7 +170,7 @@ public class RequestProfileEngineTest {
     }
 
     @Test public void legacyUiSelectorsAreNotRequiredByV2ProfileBridges() {
-        String work = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/abc", "sol");
+        String work = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/abc", "5.6sol");
         String chat = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.HIGH, "run");
         assertFalse(work.contains("querySelectorAll('button"));
         assertFalse(work.contains("click()"));

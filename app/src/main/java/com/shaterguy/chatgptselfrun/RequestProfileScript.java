@@ -9,7 +9,7 @@ import java.util.Set;
 
 /** Document-start request profile registry executor plus one-shot outgoing submission capture. */
 final class RequestProfileScript {
-    static final String ENGINE_VERSION = "profile-registry-v6";
+    static final String ENGINE_VERSION = "profile-registry-v7";
     private static final Set<String> CHATGPT_ORIGINS = Set.of(
             "https://chatgpt.com", "https://www.chatgpt.com");
 
@@ -32,7 +32,11 @@ final class RequestProfileScript {
     }
 
     static String beginTarget(String mode, String runId) {
-        return syncRegistry() + call("begin", mode, runId);
+        return beginTarget(mode, runId, "", "");
+    }
+
+    static String beginTarget(String mode, String taskId, String turnId, String requestId) {
+        return syncRegistry() + call("begin", mode, taskId, turnId, requestId);
     }
 
     static String setChatReasoning(String reasoning) {
@@ -61,6 +65,10 @@ final class RequestProfileScript {
 
     static String cancelCapture() {
         return "window.__selfRunRequestProfileEngine?.cancelCapture();";
+    }
+
+    static String diagnosticsExpression() {
+        return "JSON.stringify(window.__selfRunRequestProfileEngine?.diagnostics?.()||{})";
     }
 
     static String consumeCapture() {
@@ -118,6 +126,7 @@ final class RequestProfileScript {
                   };
                   const targetValid=t=>{
                     if(!t||typeof t!=='object'||Array.isArray(t)||typeof t.runId!=='string'||t.runId.length>128)return false;
+                    if(typeof t.taskId!=='string'||t.taskId.length>160||typeof t.turnId!=='string'||t.turnId.length>200||typeof t.requestId!=='string'||t.requestId.length>240)return false;
                     if(t.mode==='chat'){
                       if(t.ready===false)return t.model===''&&t.reasoning===''&&norm(t.bootstrapReasoning)===''&&norm(t.continuationReasoning)==='';
                       const b=norm(t.bootstrapReasoning||t.reasoning),c=norm(t.continuationReasoning||t.reasoning),m=norm(t.model);
@@ -133,7 +142,7 @@ final class RequestProfileScript {
                   const persistRegistry=()=>{try{localStorage.setItem(REGISTRY_STORE,JSON.stringify(state.registry));}catch(_){}};
                   const restoreRegistry=()=>{try{const raw=localStorage.getItem(REGISTRY_STORE);if(!raw)return[];const list=JSON.parse(raw);if(!Array.isArray(list))return[];return list.map(normalizeProfile);}catch(_){return[];}};
                   const persistTarget=()=>{try{if(targetValid(state.target))localStorage.setItem(TARGET_STORE,JSON.stringify(state.target));else localStorage.removeItem(TARGET_STORE);}catch(_){}};
-                  const restoreTarget=()=>{try{const raw=localStorage.getItem(TARGET_STORE);if(!raw)return null;const t=JSON.parse(raw);const restored={mode:t.mode,model:t.model,reasoning:t.reasoning,bootstrapReasoning:norm(t.bootstrapReasoning||t.reasoning),continuationReasoning:norm(t.continuationReasoning||t.reasoning),runId:t.runId,ready:t.ready};if(!targetValid(restored)){localStorage.removeItem(TARGET_STORE);return null;}return restored;}catch(_){return null;}};
+                  const restoreTarget=()=>{try{const raw=localStorage.getItem(TARGET_STORE);if(!raw)return null;const t=JSON.parse(raw);const restored={mode:t.mode,model:t.model,reasoning:t.reasoning,bootstrapReasoning:norm(t.bootstrapReasoning||t.reasoning),continuationReasoning:norm(t.continuationReasoning||t.reasoning),runId:t.runId,taskId:String(t.taskId||t.runId||''),turnId:String(t.turnId||''),requestId:String(t.requestId||''),ready:t.ready};if(!targetValid(restored)){localStorage.removeItem(TARGET_STORE);return null;}return restored;}catch(_){return null;}};
                   state.registry=restoreRegistry();
                   state.target=restoreTarget();
                   if(state.target)state.last={ok:true,reason:'target_restored',mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning};
@@ -147,7 +156,7 @@ final class RequestProfileScript {
                     return true;
                   };
                   const refreshRegistry=()=>{const restored=restoreRegistry();if(restored.length||state.registry.length===0)state.registry=restored;};
-                  const begin=(mode,runId)=>{refreshRegistry();const m=norm(mode);if(m!=='chat'&&m!=='work')fail('unsupported_mode');state.target={mode:m,model:'',reasoning:'',bootstrapReasoning:'',continuationReasoning:'',runId:String(runId||'').slice(0,128),ready:false};persistTarget();state.last={ok:true,reason:'target_begun',mode:m};return true;};
+                  const begin=(mode,taskId,turnId='',requestId='')=>{refreshRegistry();const m=norm(mode);if(m!=='chat'&&m!=='work')fail('unsupported_mode');const task=String(taskId||'').slice(0,160);state.target={mode:m,model:'',reasoning:'',bootstrapReasoning:'',continuationReasoning:'',runId:task.slice(0,128),taskId:task,turnId:String(turnId||'').slice(0,200),requestId:String(requestId||'').slice(0,240),ready:false};persistTarget();state.last={ok:true,reason:'target_begun',mode:m,taskId:state.target.taskId,turnId:state.target.turnId,requestId:state.target.requestId};return true;};
                   const requireTarget=mode=>{const t=state.target;if(!t||t.mode!==mode)fail('target_mode_not_initialized');return t;};
                   const setChatProfiles=(bootstrapReasoning,continuationReasoning)=>{refreshRegistry();const t=requireTarget('chat'),b=norm(bootstrapReasoning),c=norm(continuationReasoning);if(!resolveProfile('chat','',b))fail('unsupported_chat_bootstrap_reasoning');if(!resolveProfile('chat','',c))fail('unsupported_chat_continuation_reasoning');t.model='';t.reasoning=b;t.bootstrapReasoning=b;t.continuationReasoning=c;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'chat',reasoning:b,bootstrapReasoning:b,continuationReasoning:c};return true;};
                   const setChatReasoning=reasoning=>setChatProfiles(reasoning,reasoning);
@@ -156,7 +165,7 @@ final class RequestProfileScript {
                   const setWorkReasoning=reasoning=>{refreshRegistry();const t=requireTarget('work'),r=norm(reasoning);if(!t.model)fail('work_model_missing');if(!resolveProfile('work',t.model,r))fail('unsupported_work_profile');t.reasoning=r;t.ready=true;persistTarget();state.last={ok:true,reason:'target_ready',mode:'work',model:t.model,reasoning:r};return true;};
                   const latestMessageText=body=>{try{const list=Array.isArray(body?.messages)?body.messages:[];return list.length?JSON.stringify(list[list.length-1]):'';}catch(_){return'';}};
                   const chatReasoningForBody=(body,t)=>{const latest=latestMessageText(body);const bootstrap=latest.includes('SELF_RUN_BOOTSTRAP')&&(!t.runId||latest.includes(t.runId));return bootstrap?norm(t.bootstrapReasoning||t.reasoning):norm(t.continuationReasoning||t.reasoning);};
-                  const targetSnapshot=()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning,runId:state.target.runId,ready:state.target.ready}:null;
+                  const targetSnapshot=()=>state.target?{mode:state.target.mode,model:state.target.model,reasoning:state.target.reasoning,bootstrapReasoning:state.target.bootstrapReasoning,continuationReasoning:state.target.continuationReasoning,runId:state.target.runId,taskId:state.target.taskId,turnId:state.target.turnId,requestId:state.target.requestId,ready:state.target.ready}:null;
                   const profileForBody=(body,t)=>{refreshRegistry();if(!t||!t.ready)fail('target_not_ready');if(t.mode==='chat'){const reasoning=chatReasoningForBody(body,t),p=resolveProfile('chat',t.model,reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:reasoning};}const p=resolveProfile('work',t.model,t.reasoning);if(!p)fail('profile_deleted_or_unsupported');return{profile:p,effectiveReasoning:t.reasoning};};
                   const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
                   const conversationRoute=url=>{try{let p=new URL(url,location.href).pathname.toLowerCase();if(p.length>1)p=p.replace(/\\/+$/,'');return p==='/backend-api/conversation'||p==='/backend-api/f/conversation';}catch(_){return false;}};
@@ -183,7 +192,7 @@ final class RequestProfileScript {
                   const cancelCapture=()=>{state.capture={armed:false,mode:'',value:null};state.last={ok:true,reason:'capture_cancelled'};return true;};
                   const consumeCapture=()=>{const value=state.capture.value;state.capture.value=null;return value;};
                   const parseSubmission=text=>{if(typeof text!=='string')fail('non_text_conversation_body');let body;try{body=JSON.parse(text);}catch(_){fail('invalid_conversation_json');}if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))fail('unknown_conversation_schema');return body;};
-                  const patchObject=(body,t)=>{const before=JSON.stringify(strip(body)),out={...body},planned=profileForBody(body,t),ops=planned.profile.operations;for(const op of ops){if(!CONTROL.includes(op.path))fail('control_allowlist_violation');if(op.op==='SET')out[op.path]=op.value;else if(op.op==='REMOVE')delete out[op.path];else fail('unknown_operation');}if(JSON.stringify(strip(out))!==before)fail('data_plane_changed');state.last={ok:true,reason:'patched',mode:t.mode,model:t.model,reasoning:planned.effectiveReasoning,bootstrapReasoning:t.bootstrapReasoning,continuationReasoning:t.continuationReasoning,ops:ops.map(op=>op.op+':'+op.path),schema:'messages-array'};return out;};
+                  const patchObject=(body,t)=>{const before=JSON.stringify(strip(body)),out={...body},planned=profileForBody(body,t),ops=planned.profile.operations;for(const op of ops){if(!CONTROL.includes(op.path))fail('control_allowlist_violation');if(op.op==='SET')out[op.path]=op.value;else if(op.op==='REMOVE')delete out[op.path];else fail('unknown_operation');}if(JSON.stringify(strip(out))!==before)fail('data_plane_changed');state.last={ok:true,reason:'patched',mode:t.mode,taskId:t.taskId,turnId:t.turnId,requestId:t.requestId,signalModel:t.mode==='work'?t.model:'',signalReasoning:planned.effectiveReasoning,configuredModel:t.model,configuredReasoning:t.reasoning,bootstrapReasoning:t.bootstrapReasoning,continuationReasoning:t.continuationReasoning,postModel:typeof out.model==='string'?out.model:'',postThinkingEffort:own(out,'thinking_effort')&&typeof out.thinking_effort==='string'?out.thinking_effort:'<removed>',postConversationOrigin:own(out,'conversation_origin')&&typeof out.conversation_origin==='string'?out.conversation_origin:'<removed>',postServiceTier:own(out,'service_tier')&&typeof out.service_tier==='string'?out.service_tier:'<removed>',ops:ops.map(op=>op.op+':'+op.path),schema:'messages-array'};return out;};
                   const nativeFetch=window.fetch.bind(window);
                   const fetchProbe=(input,init)=>{try{const isReq=typeof Request!=='undefined'&&input instanceof Request;const url=isReq?input.url:String(input??'');const method=init&&init.method!==undefined?init.method:(isReq?input.method:'GET');return{url,method,eligible:norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url)};}catch(_){return{url:'',method:'',eligible:false};}};
                   window.fetch=async function(input,init){

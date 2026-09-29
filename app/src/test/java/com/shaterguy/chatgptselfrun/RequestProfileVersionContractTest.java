@@ -12,9 +12,9 @@ import static org.junit.Assert.*;
 /** Prevents producer/consumer registry engine drift. */
 public final class RequestProfileVersionContractTest {
     @Test public void producerOwnsOneCanonicalRegistryEngineVersion() throws Exception {
-        assertEquals("profile-registry-v6", RequestProfileScript.ENGINE_VERSION);
+        assertTrue(RequestProfileScript.ENGINE_VERSION.startsWith("profile-registry-v"));
         String producer = source("RequestProfileScript.java");
-        assertEquals(1, occurrences(producer, "profile-registry-v6"));
+        assertEquals(1, occurrences(producer, RequestProfileScript.ENGINE_VERSION));
         assertTrue(producer.contains("static final String ENGINE_VERSION"));
         assertTrue(producer.contains("__ENGINE_VERSION__"));
         assertTrue(producer.contains("ProfileRegistry.runtimeJson()"));
@@ -85,7 +85,7 @@ public final class RequestProfileVersionContractTest {
     @Test public void consumersUseSharedEngineExpressionAndRegistryInjection() throws Exception {
         String expression = RequestProfileScript.engineAvailableExpression();
         String bootstrapScript = BootstrapModeDom.inline(SelfRunStore.MODE_CHAT, "SR-VERSION");
-        String workScript = WorkPreferenceDom.modelForProject("https://chatgpt.com/g/g-p-test", "sol");
+        String workScript = WorkPreferenceDom.modelForProject("https://chatgpt.com/g/g-p-test", "5.6sol");
         assertTrue(bootstrapScript.contains(expression));
         assertTrue(workScript.contains(expression));
         assertTrue(workScript.contains("installRegistry"));

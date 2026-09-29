@@ -34,7 +34,10 @@ final class ProfileRegistry {
             new LinkedHashSet<>(CONTROL_PATH_ORDER));
 
     private static final String PREFS = "selfrun_drive_profile_registry";
-    private static final String KEY_STATE = "state";
+    private static final String KEY_CHAT_LKG = "canonical_chat_lkg";
+    private static final String KEY_WORK_LKG = "canonical_work_lkg";
+    private static final String KEY_CHAT_SOURCE_VERSION = "canonical_chat_source_version";
+    private static final String KEY_WORK_SOURCE_VERSION = "canonical_work_source_version";
     private static final Pattern SIGNAL_TOKEN = Pattern.compile("[a-z0-9][a-z0-9._:-]{0,79}");
     private static final Set<String> RESERVED_TOKENS = Set.of(
             "body", "none", "null", "true", "false", "keep", "chat", "work",
@@ -185,17 +188,13 @@ final class ProfileRegistry {
 
     private static final class State {
         final List<Profile> profiles;
-        final List<Profile> userProfiles;
-        final Set<String> tombstones;
-        State(List<Profile> profiles, List<Profile> userProfiles, Set<String> tombstones) {
+        State(List<Profile> profiles) {
             this.profiles = Collections.unmodifiableList(new ArrayList<>(profiles));
-            this.userProfiles = Collections.unmodifiableList(new ArrayList<>(userProfiles));
-            this.tombstones = Collections.unmodifiableSet(new LinkedHashSet<>(tombstones));
         }
     }
 
     private static volatile SharedPreferences preferences;
-    private static volatile State state = defaults(Set.of(), List.of());
+    private static volatile State state = new State(List.of());
     private static volatile boolean storageHealthy = true;
 
     private ProfileRegistry() {}
@@ -276,96 +275,15 @@ final class ProfileRegistry {
 
     static synchronized RegisterResult registerCaptured(CapturedProfile captured,
                                                         String signalModel, String signalReasoning) {
-        Objects.requireNonNull(captured, "captured");
-        Profile duplicate = findByFingerprint(captured.mode, captured.fingerprint);
-        if (duplicate != null) return new RegisterResult(RegisterResult.DUPLICATE_PROFILE, duplicate);
-
-        String reasoning = canonicalSignalToken(signalReasoning);
-        String model = captured.mode == Mode.WORK ? canonicalSignalToken(signalModel) : "";
-        validateSignalCompatibility(captured, model, reasoning);
-        Profile profile = new Profile(captured.mode, model, reasoning, captured.operations, false, "");
-
-        ArrayList<Profile> users = new ArrayList<>(state.userProfiles);
-        users.removeIf(existing -> existing.fingerprint.equals(profile.fingerprint));
-        users.add(profile);
-        State next = defaults(state.tombstones, users);
-        if (!persistLocked(next.userProfiles, next.tombstones)) {
-            throw new IllegalStateException("profile registry persistence failed");
-        }
-        state = next;
-        storageHealthy = true;
-        return new RegisterResult(RegisterResult.ADDED, profile);
+        throw new UnsupportedOperationException("수동 profile 등록은 Drive canonical registry 동기화로 대체되었습니다.");
     }
 
     static synchronized ImportResult importJson(Mode expectedMode, String raw) {
-        Objects.requireNonNull(expectedMode, "expectedMode");
-        if (raw == null || raw.isEmpty()) throw new IllegalArgumentException("가져오기 파일이 비어 있습니다.");
-        if (raw.length() > MAX_IMPORT_JSON_CHARS) throw new IllegalArgumentException("가져오기 파일 크기 제한을 초과했습니다.");
-        try {
-            JSONObject root = new JSONObject(raw);
-            requireOnlyKeys(root, EXPORT_ROOT_KEYS, "root");
-            String expectedSchema = exportSchema(expectedMode);
-            if (!expectedSchema.equals(root.getString("schema"))) {
-                throw new IllegalArgumentException("선택한 영역과 조합 파일 형식이 일치하지 않습니다.");
-            }
-            if (root.getInt("registrySchemaVersion") != SCHEMA_VERSION) {
-                throw new IllegalArgumentException("지원하지 않는 Registry schema 버전입니다.");
-            }
-            if (root.has("appVersion")) {
-                String appVersion = root.getString("appVersion");
-                if (appVersion.length() > 128) throw new IllegalArgumentException("appVersion 값이 너무 깁니다.");
-            }
-            JSONArray profiles = root.getJSONArray("profiles");
-            if (profiles.length() > MAX_IMPORT_PROFILES) {
-                throw new IllegalArgumentException("가져오기 profile 개수 제한을 초과했습니다.");
-            }
-
-            ArrayList<Profile> combined = new ArrayList<>(state.profiles);
-            ArrayList<Profile> users = new ArrayList<>(state.userProfiles);
-            int added = 0, skipped = 0;
-            for (int i = 0; i < profiles.length(); i++) {
-                Profile candidate = parseImportedProfile(profiles.getJSONObject(i), expectedMode);
-                if (findByFingerprint(combined, expectedMode, candidate.fingerprint) != null) {
-                    skipped++;
-                    continue;
-                }
-                validateStoredSignalCompatibility(combined, candidate);
-                combined.add(candidate);
-                users.add(candidate);
-                added++;
-            }
-
-            State next = defaults(state.tombstones, users);
-            if (!persistLocked(next.userProfiles, next.tombstones)) {
-                throw new IllegalStateException("profile registry import persistence failed");
-            }
-            state = next;
-            storageHealthy = true;
-            return new ImportResult(expectedMode, added, skipped);
-        } catch (IllegalArgumentException | IllegalStateException error) {
-            throw error;
-        } catch (Exception error) {
-            throw new IllegalArgumentException("조합 파일을 안전하게 해석하지 못했습니다.", error);
-        }
+        throw new UnsupportedOperationException("수동 registry 가져오기는 Drive canonical registry 동기화로 대체되었습니다.");
     }
 
     static synchronized boolean delete(String fingerprint) {
-        Profile existing = null;
-        for (Profile profile : state.profiles) {
-            if (profile.fingerprint.equals(fingerprint)) { existing = profile; break; }
-        }
-        if (existing == null) return false;
-
-        String deletingFingerprint = existing.fingerprint;
-        ArrayList<Profile> users = new ArrayList<>(state.userProfiles);
-        users.removeIf(profile -> profile.fingerprint.equals(deletingFingerprint));
-        LinkedHashSet<String> tombstones = new LinkedHashSet<>(state.tombstones);
-        if (existing.builtIn || builtInFingerprint(deletingFingerprint)) tombstones.add(deletingFingerprint);
-        State next = defaults(tombstones, users);
-        if (!persistLocked(next.userProfiles, next.tombstones)) return false;
-        state = next;
-        storageHealthy = true;
-        return true;
+        return false;
     }
 
     static String runtimeJson() {
@@ -528,124 +446,155 @@ final class ProfileRegistry {
     private static void loadLocked() {
         SharedPreferences prefs = preferences;
         if (prefs == null) return;
-        String raw = prefs.getString(KEY_STATE, "");
-        if (raw == null || raw.isEmpty()) { state = defaults(Set.of(), List.of()); storageHealthy = true; return; }
+        ArrayList<Profile> all = new ArrayList<>();
+        boolean healthy = true;
+        String chat = prefs.getString(KEY_CHAT_LKG, "");
+        String work = prefs.getString(KEY_WORK_LKG, "");
+        if (chat != null && !chat.isEmpty()) {
+            try { all.addAll(parseCanonicalRegistry(Mode.CHAT, chat)); }
+            catch (Exception error) { healthy = false; }
+        }
+        if (work != null && !work.isEmpty()) {
+            try { all.addAll(parseCanonicalRegistry(Mode.WORK, work)); }
+            catch (Exception error) { healthy = false; }
+        }
+        state = new State(all);
+        storageHealthy = healthy;
+    }
+
+    static synchronized void replaceCanonicalSnapshot(Mode mode, String raw, String sourceVersion) {
+        Objects.requireNonNull(mode, "mode");
+        if (raw == null || raw.trim().isEmpty()) throw new IllegalArgumentException("canonical registry is empty");
+        List<Profile> replacement = parseCanonicalRegistry(mode, raw);
+        if (replacement.isEmpty()) throw new IllegalArgumentException("canonical registry returned zero profiles");
+        ArrayList<Profile> all = new ArrayList<>();
+        for (Profile profile : state.profiles) if (profile.mode != mode) all.add(profile);
+        all.addAll(replacement);
+
+        SharedPreferences prefs = preferences;
+        if (prefs != null) {
+            SharedPreferences.Editor editor = prefs.edit()
+                    .putString(rawKey(mode), raw)
+                    .putString(versionKey(mode), sourceVersion == null ? "" : sourceVersion)
+                    .remove("state");
+            if (!editor.commit()) throw new IllegalStateException("canonical registry persistence failed");
+        }
+        state = new State(all);
+        storageHealthy = true;
+    }
+
+    static String sourceVersion(Mode mode) {
+        SharedPreferences prefs = preferences;
+        return prefs == null ? "" : prefs.getString(versionKey(mode), "");
+    }
+
+    static boolean hasUsableMode(Mode mode) {
+        for (Profile profile : state.profiles) if (profile.mode == mode) return true;
+        return false;
+    }
+
+    static int profileCount(Mode mode) {
+        int count = 0;
+        for (Profile profile : state.profiles) if (profile.mode == mode) count++;
+        return count;
+    }
+
+    private static String rawKey(Mode mode) {
+        return mode == Mode.CHAT ? KEY_CHAT_LKG : KEY_WORK_LKG;
+    }
+
+    private static String versionKey(Mode mode) {
+        return mode == Mode.CHAT ? KEY_CHAT_SOURCE_VERSION : KEY_WORK_SOURCE_VERSION;
+    }
+
+    private static List<Profile> parseCanonicalRegistry(Mode mode, String raw) {
         try {
             JSONObject root = new JSONObject(raw);
-            if (!SCHEMA.equals(root.getString("schema")) || root.getInt("schemaVersion") != SCHEMA_VERSION) {
-                throw new IllegalArgumentException("unsupported registry schema");
+            requireOnlyKeys(root, EXPORT_ROOT_KEYS, "root");
+            if (!exportSchema(mode).equals(root.getString("schema"))) {
+                throw new IllegalArgumentException("canonical registry mode/schema mismatch");
             }
-            LinkedHashSet<String> tombstones = new LinkedHashSet<>();
-            JSONArray tombstoneArray = root.optJSONArray("tombstones");
-            if (tombstoneArray != null) {
-                for (int i = 0; i < tombstoneArray.length(); i++) {
-                    String value = tombstoneArray.getString(i);
-                    if (!value.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("invalid tombstone");
-                    tombstones.add(value);
-                }
+            if (root.getInt("registrySchemaVersion") != SCHEMA_VERSION) {
+                throw new IllegalArgumentException("unsupported canonical registry schema");
             }
-            ArrayList<Profile> users = new ArrayList<>();
-            JSONArray profiles = root.optJSONArray("profiles");
-            if (profiles != null) for (int i = 0; i < profiles.length(); i++) users.add(parseStoredProfile(profiles.getJSONObject(i)));
-            state = defaults(tombstones, users);
-            storageHealthy = true;
+            String appVersion = root.getString("appVersion");
+            if (appVersion.length() > 128) throw new IllegalArgumentException("canonical appVersion too long");
+            JSONArray profiles = root.getJSONArray("profiles");
+            if (profiles.length() == 0 || profiles.length() > MAX_IMPORT_PROFILES) {
+                throw new IllegalArgumentException("canonical registry profile count invalid");
+            }
+            ArrayList<Profile> parsed = new ArrayList<>();
+            LinkedHashSet<String> fingerprints = new LinkedHashSet<>();
+            LinkedHashSet<String> signals = new LinkedHashSet<>();
+            for (int i = 0; i < profiles.length(); i++) {
+                Profile profile = parseCanonicalProfile(profiles.getJSONObject(i), mode);
+                if (!fingerprints.add(profile.fingerprint)) throw new IllegalArgumentException("duplicate canonical fingerprint");
+                String signal = mode.name() + "|" + profile.signalModel + "|" + profile.signalReasoning;
+                if (!signals.add(signal)) throw new IllegalArgumentException("duplicate canonical signal");
+                validateStoredSignalCompatibility(parsed, profile);
+                parsed.add(profile);
+            }
+            return Collections.unmodifiableList(parsed);
+        } catch (IllegalArgumentException error) {
+            throw error;
         } catch (Exception error) {
-            state = new State(List.of(), List.of(), Set.of());
-            storageHealthy = false;
+            throw new IllegalArgumentException("invalid canonical registry", error);
         }
     }
 
-    private static Profile parseStoredProfile(JSONObject item) throws Exception {
-        Mode mode = Mode.valueOf(item.getString("mode"));
-        String model = mode == Mode.WORK ? canonicalSignalToken(item.getString("signalModel")) : "";
-        String reasoning = canonicalSignalToken(item.getString("signalReasoning"));
-        ArrayList<Operation> parsed = parseOperations(item.getJSONArray("operations"));
-        Profile profile = new Profile(mode, model, reasoning, parsed, false, "");
-        if (!profile.fingerprint.equals(item.getString("fingerprint"))) throw new IllegalArgumentException("stored fingerprint mismatch");
+    private static Profile parseCanonicalProfile(JSONObject item, Mode mode) throws Exception {
+        requireOnlyKeys(item, EXPORT_PROFILE_KEYS, "profile");
+        JSONObject signal = item.getJSONObject("signal");
+        requireOnlyKeys(signal, EXPORT_SIGNAL_KEYS, "signal");
+        String reasoning = canonicalSignalToken(signal.getString("reasoning"));
+        String model = "";
+        if (mode == Mode.WORK) {
+            model = canonicalSignalToken(signal.getString("model"));
+        } else if (signal.has("model") && !signal.optString("model").isEmpty()) {
+            throw new IllegalArgumentException("Chat canonical signal must not carry model");
+        }
+        ArrayList<Operation> operations = parseOperations(item.getJSONArray("operations"));
+        validateExportRequest(item, operations);
+        boolean builtIn = item.getBoolean("builtIn");
+        Profile profile = new Profile(mode, model, reasoning, operations, builtIn, "");
+        String fingerprint = item.getString("fingerprint");
+        if (!fingerprint.matches("[0-9a-f]{64}") || !profile.fingerprint.equals(fingerprint)) {
+            throw new IllegalArgumentException("canonical fingerprint mismatch");
+        }
         return profile;
-    }
-
-    private static boolean persistLocked(List<Profile> users, Set<String> tombstones) {
-        SharedPreferences prefs = preferences;
-        if (prefs == null) return true;
-        JSONObject root = new JSONObject();
-        try {
-            root.put("schema", SCHEMA); root.put("schemaVersion", SCHEMA_VERSION);
-            JSONArray profiles = new JSONArray();
-            for (Profile profile : users) profiles.put(profile.toStorageJson());
-            root.put("profiles", profiles);
-            JSONArray deleted = new JSONArray();
-            for (String fingerprint : tombstones) deleted.put(fingerprint);
-            root.put("tombstones", deleted);
-        } catch (Exception error) { return false; }
-        return prefs.edit().putString(KEY_STATE, root.toString()).commit();
-    }
-
-    private static State defaults(Set<String> tombstones, List<Profile> users) {
-        ArrayList<Profile> all = new ArrayList<>();
-        for (Profile profile : builtIns()) if (!tombstones.contains(profile.fingerprint)) all.add(profile);
-        for (Profile profile : users) {
-            if (findByFingerprint(all, profile.mode, profile.fingerprint) != null) {
-                throw new IllegalArgumentException("duplicate stored profile fingerprint");
-            }
-            validateStoredSignalCompatibility(all, profile);
-            all.add(profile);
-        }
-        return new State(all, users, tombstones);
     }
 
     private static void validateStoredSignalCompatibility(List<Profile> existing, Profile profile) {
         for (Profile other : existing) {
             if (other.mode != profile.mode) continue;
             if (profile.mode == Mode.CHAT) {
-                if (other.signalReasoning.equals(profile.signalReasoning)) throw new IllegalArgumentException("duplicate Chat signal");
+                if (other.signalReasoning.equals(profile.signalReasoning)) {
+                    throw new IllegalArgumentException("duplicate Chat signal");
+                }
             } else {
-                if (other.signalModel.equals(profile.signalModel) && other.signalReasoning.equals(profile.signalReasoning)) {
+                if (other.signalModel.equals(profile.signalModel)
+                        && other.signalReasoning.equals(profile.signalReasoning)) {
                     throw new IllegalArgumentException("duplicate Work signal pair");
                 }
-                if (other.signalModel.equals(profile.signalModel) && !other.requestValue("model").equals(profile.requestValue("model"))) {
+                if (other.signalModel.equals(profile.signalModel)
+                        && !other.requestValue("model").equals(profile.requestValue("model"))) {
                     throw new IllegalArgumentException("Work model signal collision");
                 }
                 if (other.signalReasoning.equals(profile.signalReasoning)
-                        && !operationIdentity(other.operations, "thinking_effort").equals(operationIdentity(profile.operations, "thinking_effort"))) {
+                        && !operationIdentity(other.operations, "thinking_effort")
+                        .equals(operationIdentity(profile.operations, "thinking_effort"))) {
                     throw new IllegalArgumentException("Work reasoning signal collision");
                 }
             }
         }
     }
 
-    private static boolean builtInFingerprint(String fingerprint) {
-        for (Profile profile : builtIns()) if (profile.fingerprint.equals(fingerprint)) return true;
-        return false;
-    }
-
     private static Profile findByFingerprint(List<Profile> profiles, Mode mode, String fingerprint) {
-        for (Profile profile : profiles) if (profile.mode == mode && profile.fingerprint.equals(fingerprint)) return profile;
+        for (Profile profile : profiles) {
+            if (profile.mode == mode && profile.fingerprint.equals(fingerprint)) return profile;
+        }
         return null;
     }
-
-    private static List<Profile> builtIns() {
-        ArrayList<Profile> out = new ArrayList<>();
-        out.add(profile(Mode.CHAT, "", "instant", "Instant", set("model", "gpt-5-6"), remove("thinking_effort"), remove("conversation_origin"), remove("service_tier")));
-        out.add(profile(Mode.CHAT, "", "medium", "Medium", set("model", "gpt-5-6-thinking"), set("thinking_effort", "standard"), remove("conversation_origin"), remove("service_tier")));
-        out.add(profile(Mode.CHAT, "", "high", "High", set("model", "gpt-5-6-thinking"), set("thinking_effort", "extended"), remove("conversation_origin"), remove("service_tier")));
-        out.add(profile(Mode.CHAT, "", "xhigh", "Extra High", set("model", "gpt-5-6-thinking"), set("thinking_effort", "max"), remove("conversation_origin"), remove("service_tier")));
-        addWork(out, "sol", "high", "gpt-5.6-sol-wm", "extended"); addWork(out, "sol", "xhigh", "gpt-5.6-sol-wm", "xhigh");
-        addWork(out, "sol", "max", "gpt-5.6-sol-wm", "max"); addWork(out, "sol", "ultra", "gpt-5.6-sol-wm", "ultra");
-        addWork(out, "terra", "high", "gpt-5.6-terra-wm", "extended"); addWork(out, "terra", "xhigh", "gpt-5.6-terra-wm", "xhigh");
-        addWork(out, "terra", "max", "gpt-5.6-terra-wm", "max"); addWork(out, "luna", "max", "gpt-5.6-luna-wm", "max");
-        return out;
-    }
-
-    private static void addWork(List<Profile> out, String modelSignal, String reasoningSignal, String requestModel, String effort) {
-        out.add(profile(Mode.WORK, modelSignal, reasoningSignal, "", set("model", requestModel), set("thinking_effort", effort), set("conversation_origin", "tpp"), set("service_tier", "standard")));
-    }
-
-    private static Profile profile(Mode mode, String model, String reasoning, String label, Operation... operations) {
-        return new Profile(mode, model, reasoning, List.of(operations), true, label);
-    }
-    private static Operation set(String path, String value) { return Operation.set(path, value); }
-    private static Operation remove(String path) { return Operation.remove(path); }
 
     private static List<Operation> canonicalOperations(List<Operation> operations) {
         if (operations == null) throw new IllegalArgumentException("operations required");
@@ -694,7 +643,31 @@ final class ProfileRegistry {
 
     static synchronized void resetForTests() {
         preferences = null;
-        state = defaults(Set.of(), List.of());
+        state = new State(List.of());
         storageHealthy = true;
+        try {
+            ArrayList<Profile> fixtures = new ArrayList<>();
+            String chat = testResource("/selfrun-chat-profile-registry-v1.json");
+            String work = testResource("/selfrun-work-profile-registry-v1.json");
+            if (!chat.isEmpty()) fixtures.addAll(parseCanonicalRegistry(Mode.CHAT, chat));
+            if (!work.isEmpty()) fixtures.addAll(parseCanonicalRegistry(Mode.WORK, work));
+            if (!fixtures.isEmpty()) state = new State(fixtures);
+        } catch (Exception error) {
+            state = new State(List.of());
+            storageHealthy = false;
+        }
+    }
+
+    private static String testResource(String name) throws Exception {
+        try (java.io.InputStream input = ProfileRegistry.class.getResourceAsStream(name)) {
+            if (input == null) return "";
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) bytes.write(buffer, 0, read);
+            }
+            return bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 }

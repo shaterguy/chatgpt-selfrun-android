@@ -53,7 +53,8 @@ final class SelfRun3WebAdapter {
     private HeadlessWebViewHost host;
     private WebView web;
     private SelfRun3Engine.State state;
-    private boolean preparing, loading, closed, dispatchConfirmed, submitIssued, conversationCaptured;
+    private boolean preparing, loading, closed, dispatchConfirmed, submitIssued, conversationCaptured, registryRefreshPending;
+    private String registryRefreshRequest = "";
     private int step, evaluation, generation;
     private long preparationAttempt, prepareStarted, prepareTimeoutMs;
 
@@ -81,12 +82,43 @@ final class SelfRun3WebAdapter {
                 || a.dispatchConfirmed || !s.flag("sendClaimed")) return false;
         a.dispatchConfirmed = true;
         SelfRun3RuntimeTestBridge.recordCanonicalPostConfirmation(s);
+        a.captureProfilePostDiagnostics();
         a.captureConversation();
         return true;
     }
 
     void prepare(SelfRun3Engine.State s) {
         requireMain();
+        if (!s.requestId().equals(registryRefreshRequest)) {
+            state = s;
+            if (registryRefreshPending) return;
+            registryRefreshPending = true;
+            String refreshRequest = s.requestId();
+            ProfileRegistrySync.refresh(context, result -> {
+                registryRefreshPending = false;
+                if (closed || state == null || !refreshRequest.equals(state.requestId())) return;
+                boolean usable = "WORK".equals(state.config().optString("mode"))
+                        ? result.workUsable : result.chatUsable;
+                if (!usable) {
+                    trace("PROFILE_REGISTRY_REFRESH",
+                            "status=unavailable;task=" + state.taskId()
+                                    + ";turn=" + state.turnId()
+                                    + ";request=" + state.requestId()
+                                    + ";detail=" + safeStatus(result.error));
+                    fail("PROFILE_REGISTRY_UNAVAILABLE");
+                    return;
+                }
+                registryRefreshRequest = refreshRequest;
+                trace("PROFILE_REGISTRY_REFRESH",
+                        "status=ready;task=" + state.taskId()
+                                + ";turn=" + state.turnId()
+                                + ";request=" + state.requestId()
+                                + ";chatUpdated=" + result.chatUpdated
+                                + ";workUpdated=" + result.workUpdated);
+                prepare(state);
+            });
+            return;
+        }
         boolean newRequest = state == null || !state.requestId().equals(s.requestId());
         boolean restartPreparation = newRequest || !preparing;
         state = s;
@@ -283,6 +315,10 @@ final class SelfRun3WebAdapter {
         evaluate(script, result -> {
             String status = result.optString("status");
             if ("READY".equals(status) && step < 2) {
+                if (step == 1) {
+                    JSONObject d = result.optJSONObject("diagnostics");
+                    trace("PROFILE_SELECTION_READY", diagnosticsDetail(d));
+                }
                 step++;
                 later(this::advance, 0L);
                 return;
@@ -356,9 +392,32 @@ final class SelfRun3WebAdapter {
         });
     }
 
+    private void captureProfilePostDiagnostics() {
+        if (web == null || state == null) return;
+        evaluate(RequestProfileScript.diagnosticsExpression(), diagnostics ->
+                trace("PROFILE_POST_APPLIED", diagnosticsDetail(diagnostics)));
+    }
+
+    private static String diagnosticsDetail(JSONObject d) {
+        if (d == null) return "status=missing";
+        return "status=" + safeStatus(d.optString("reason"))
+                + ";task=" + safeStatus(d.optString("taskId"))
+                + ";turn=" + safeStatus(d.optString("turnId"))
+                + ";request=" + safeStatus(d.optString("requestId"))
+                + ";mode=" + safeStatus(d.optString("mode"))
+                + ";signalModel=" + safeStatus(d.optString("signalModel"))
+                + ";signalReasoning=" + safeStatus(d.optString("signalReasoning"))
+                + ";configuredModel=" + safeStatus(d.optString("configuredModel"))
+                + ";configuredReasoning=" + safeStatus(d.optString("configuredReasoning"))
+                + ";postModel=" + safeStatus(d.optString("postModel"))
+                + ";postThinkingEffort=" + safeStatus(d.optString("postThinkingEffort"))
+                + ";postConversationOrigin=" + safeStatus(d.optString("postConversationOrigin"))
+                + ";postServiceTier=" + safeStatus(d.optString("postServiceTier"));
+    }
+
     private static String profileScript(SelfRun3Engine.State s) {
         JSONObject c = s.config();
-        String calls = RequestProfileScript.beginTarget(c.optString("mode"), s.taskId());
+        String calls = RequestProfileScript.beginTarget(c.optString("mode"), s.taskId(), s.turnId(), s.requestId());
         if ("WORK".equals(c.optString("mode"))) {
             calls += RequestProfileScript.setWorkModel(c.optString("model"))
                     + RequestProfileScript.setWorkReasoning(c.optString("reasoning"));
@@ -369,7 +428,8 @@ final class SelfRun3WebAdapter {
                     : RequestProfileScript.setChatProfile(c.optString("model"), reasoning);
         }
         return "(()=>{try{" + calls
-                + "return JSON.stringify({status:'READY'});}catch(_){return JSON.stringify({status:'PROFILE_ERROR'});}})()";
+                + "return JSON.stringify({status:'READY',diagnostics:window.__selfRunRequestProfileEngine?.diagnostics?.()||{}});"
+                + "}catch(_){return JSON.stringify({status:'PROFILE_ERROR'});}})()";
     }
 
     private void evaluate(String script, Consumer<JSONObject> callback) {

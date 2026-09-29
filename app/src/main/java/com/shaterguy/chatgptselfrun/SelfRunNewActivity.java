@@ -63,6 +63,8 @@ public final class SelfRunNewActivity extends Activity {
     private boolean attachmentsHandedOff;
     private boolean firstResume = true;
 
+    private boolean profileRefreshPending;
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
@@ -456,6 +458,40 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void startSelfRun() {
+        if (profileRefreshPending) return;
+        final String previousChatReasoning = selectedChatReasoning();
+        final ProfileRegistry.Profile previousWorkProfile = selectedWorkBootstrapProfile();
+        final String previousMode = selectedActualMode();
+        profileRefreshPending = true;
+        ProfileRegistrySync.refresh(this, result -> {
+            profileRefreshPending = false;
+            if (isFinishing()) return;
+            refreshChatReasoningOptions(previousChatReasoning);
+            if (workBootstrapProfile != null) {
+                refreshWorkBootstrapOptions(
+                        previousWorkProfile == null ? "" : previousWorkProfile.signalModel,
+                        previousWorkProfile == null ? "" : previousWorkProfile.signalReasoning);
+            }
+            updateChatReasoningAvailability();
+            if (SelfRunStore.MODE_CHAT.equals(previousMode)
+                    && !ChatReasoningPreferenceStore.KEEP.equals(previousChatReasoning)
+                    && ProfileRegistry.resolveChat(previousChatReasoning) == null) {
+                Toast.makeText(this, "선택한 일반 채팅 조합이 최신 Drive 목록에서 제거되었습니다. 다시 선택하세요.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (SelfRunStore.MODE_WORK.equals(previousMode) && previousWorkProfile != null
+                    && ProfileRegistry.resolveWork(previousWorkProfile.signalModel,
+                    previousWorkProfile.signalReasoning) == null) {
+                Toast.makeText(this, "선택한 워크 조합이 최신 Drive 목록에서 제거되었습니다. 다시 선택하세요.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            startSelfRunWithCurrentProfiles();
+        });
+    }
+
+    private void startSelfRunWithCurrentProfiles() {
         if (store.active() && !store.userStopped()
                 && !SelfRunStore.PHASE_DONE.equals(store.phase()) && !SelfRunStore.PHASE_IDLE.equals(store.phase())) {
             Toast.makeText(this, "현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.", Toast.LENGTH_LONG).show();
@@ -552,6 +588,17 @@ public final class SelfRunNewActivity extends Activity {
                     selected == null ? fallback.reasoning : selected.signalReasoning);
         }
         updateChatReasoningAvailability();
+        ProfileRegistrySync.refresh(this, result -> {
+            if (isFinishing()) return;
+            String chat = selectedChatReasoning();
+            ProfileRegistry.Profile work = selectedWorkBootstrapProfile();
+            refreshChatReasoningOptions(chat);
+            if (workBootstrapProfile != null) {
+                refreshWorkBootstrapOptions(work == null ? "" : work.signalModel,
+                        work == null ? "" : work.signalReasoning);
+            }
+            updateChatReasoningAvailability();
+        });
         if (firstResume) { firstResume = false; return; }
         if (project != null) reloadProjects(selectedProjectUrl());
     }

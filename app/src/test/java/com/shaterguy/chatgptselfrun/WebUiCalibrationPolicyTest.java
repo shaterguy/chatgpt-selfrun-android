@@ -36,15 +36,12 @@ public final class WebUiCalibrationPolicyTest {
         assertTrue(tools.contains("모델 조합"));
     }
 
-    @Test public void activeCaptureAddsNoJavascriptBridgeOrPermissionSurface() throws Exception {
+    @Test public void activeRegistryUiAddsNoCaptureBridgeOrPermissionSurface() throws Exception {
         String activity = src("ProfileRegistryActivity.java");
-        String config = src("WebViewConfig.java");
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
-        assertTrue(activity.contains("evaluateJavascript(RequestProfileScript.consumeCapture()"));
-        assertTrue(activity.contains("trustedUrl(url)"));
+        assertTrue(activity.contains("ProfileRegistrySync.refresh"));
+        assertFalse(activity.contains("evaluateJavascript(RequestProfileScript.consumeCapture()"));
         assertFalse(activity.contains("addJavascriptInterface"));
-        assertFalse(activity.contains("setAllowUniversalAccessFromFileURLs(true)"));
-        assertTrue(config.contains("RequestProfileScript.installDocumentStart(webView)"));
         assertFalse(manifest.contains("MANAGE_EXTERNAL_STORAGE"));
         assertFalse(manifest.contains("WRITE_EXTERNAL_STORAGE"));
     }
@@ -60,8 +57,9 @@ public final class WebUiCalibrationPolicyTest {
         String activity = src("ProfileRegistryActivity.java");
         assertTrue(activity.contains("REASONING="));
         assertTrue(activity.contains("MODEL="));
-        assertTrue(activity.contains("실제 조합 "));
-        assertTrue(activity.contains("confirmDelete(profile)"));
+        assertTrue(activity.contains("실제 요청 조합: "));
+        assertFalse(activity.contains("confirmDelete(profile)"));
+        assertFalse(activity.contains("registerCaptured("));
         assertFalse(activity.contains("이름 수정"));
         assertFalse(activity.contains("displayName"));
     }

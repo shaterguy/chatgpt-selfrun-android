@@ -2,11 +2,13 @@ package com.shaterguy.chatgptselfrun;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 /** Exercise restartable branch routing using serialized state, not mocked coordinator calls. */
 public final class SelfRun3DisposableExecutionTest {
+    @Before public void resetRegistry() { ProfileRegistry.resetForTests(); }
     @Test public void twoBranchesDispatchSequentiallyAndOnlyMergeCanContinue() {
         SelfRun3Engine.State root=wave();
         assertEquals("A",root.text("branchId"));
@@ -96,11 +98,11 @@ public final class SelfRun3DisposableExecutionTest {
     }
     @Test public void hybridRoutesBothDirectionsAndFixedModeRejectsSwitch() {
         JSONObject config=new JSONObject(); put(config,"mode","CHAT"); put(config,"reasoning","medium");
-        SelfRun3Engine.applyProfile(config,profile("WORK","sol","high"),"HYBRID");
+        SelfRun3Engine.applyProfile(config,profile("WORK","5.6sol","high"),"HYBRID");
         assertEquals("WORK",config.optString("mode"));
         SelfRun3Engine.applyProfile(config,profile("CHAT","","high"),"HYBRID");
         assertEquals("CHAT",config.optString("mode"));
-        assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","sol","high"),"CHAT"));
+        assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","5.6sol","high"),"CHAT"));
         assertThrows(IllegalStateException.class,()->SelfRun3Engine.applyProfile(config,profile("WORK","invented","high"),"HYBRID"));
     }
     @Test public void committedResultRequiresMachineIdentityButIgnoresAiCheckpointShapeDrift() {

@@ -1,67 +1,47 @@
 package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
-
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import static org.junit.Assert.*;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
-/** Locks portable registry transfer and initial Chat profile wiring into production sources. */
 public final class ProfileRegistryTransferWiringTest {
-    @Test public void registryActivityExposesModeSpecificImportAndExportThroughSaf() throws Exception {
+    @Test public void registryActivityIsReadOnlyCanonicalStatusAndRefresh() throws Exception {
         String activity = source("ProfileRegistryActivity.java");
-        assertTrue(activity.contains("startExport(selectedMode)"));
-        assertTrue(activity.contains("startImport(selectedMode)"));
-        assertTrue(activity.contains("Intent.ACTION_CREATE_DOCUMENT"));
-        assertTrue(activity.contains("Intent.ACTION_OPEN_DOCUMENT"));
-        assertTrue(activity.contains("CodingErrorAction.REPORT"));
-        assertTrue(activity.contains("MAX_IMPORT_BYTES"));
-        assertFalse(activity.contains("MANAGE_EXTERNAL_STORAGE"));
+        assertTrue(activity.contains("ProfileRegistrySync.refresh"));
+        assertTrue(source("ProfileRegistrySync.java").contains(ProfileRegistrySync.CHAT_DOCUMENT_ID));
+        assertTrue(source("ProfileRegistrySync.java").contains(ProfileRegistrySync.WORK_DOCUMENT_ID));
+        assertFalse(activity.contains("ACTION_OPEN_DOCUMENT"));
+        assertFalse(activity.contains("startCapture("));
+        assertFalse(activity.contains("registerCaptured("));
+        assertFalse(activity.contains("confirmDelete("));
     }
 
-    @Test public void registryCodecIsStrictBoundedAndAtomic() throws Exception {
+    @Test public void registryCodecVerifiesCanonicalFingerprintsAndLkg() throws Exception {
         String registry = source("ProfileRegistry.java");
-        assertTrue(registry.contains("CHAT_EXPORT_SCHEMA"));
-        assertTrue(registry.contains("WORK_EXPORT_SCHEMA"));
-        assertTrue(registry.contains("MAX_IMPORT_PROFILES"));
-        assertTrue(registry.contains("requireOnlyKeys"));
-        assertTrue(registry.contains("validateExportRequest"));
-        assertTrue(registry.contains("new Profile(mode, model, reasoning, operations, false"));
-        assertTrue(registry.contains("if (!persistLocked(next.userProfiles, next.tombstones))"));
+        assertTrue(registry.contains("parseCanonicalRegistry"));
+        assertTrue(registry.contains("canonical fingerprint mismatch"));
+        assertTrue(registry.contains("KEY_CHAT_LKG"));
+        assertTrue(registry.contains("KEY_WORK_LKG"));
+        assertTrue(registry.contains("replaceCanonicalSnapshot"));
+        assertTrue(registry.contains("canonical registry returned zero profiles"));
     }
 
-    @Test public void newRunRequiresConcreteInitialProfileAndPreservesTaskMode() throws Exception {
+    @Test public void newRunRefreshesRegistryBeforeValidationAndUsesSharedAuthority() throws Exception {
         String activity = source("SelfRunNewActivity.java");
-        String preference = source("ChatReasoningPreferenceStore.java");
         String engine = source("RequestProfileScript.java");
-        assertTrue(activity.contains("첫 턴 모델 조합"));
-        assertTrue(activity.contains("초기 프로필 선택 필요"));
-        assertTrue(activity.contains("ProfileRegistry.resolveChat(bootstrapReasoning) == null"));
-        assertTrue(activity.contains("ChatReasoningPreferenceStore.save(this, runId, bootstrapReasoning, bootstrapReasoning)"));
-        assertTrue(activity.contains("store.start(runId, selectedMode, project, request, new ArrayList<>(selectedAttachments), selectedTaskMode)"));
-        assertFalse(activity.contains("첫 턴 추론 정도"));
-        assertTrue(preference.contains("KEY_BOOTSTRAP_SELECTION"));
-        assertTrue(preference.contains("KEY_CONTINUATION_SELECTION"));
-        assertTrue(engine.contains("setChatProfiles"));
-        assertTrue(engine.contains("latestMessageText"));
-        assertTrue(engine.contains("SELF_RUN_BOOTSTRAP"));
-        assertTrue(engine.contains("continuationReasoning"));
+        assertTrue(activity.contains("ProfileRegistrySync.refresh"));
+        assertTrue(activity.contains("ProfileRegistry.listChat()"));
+        assertTrue(activity.contains("ProfileRegistry.listWork()"));
+        assertTrue(engine.contains("installRegistry"));
+        assertTrue(engine.contains("ProfileRegistry.runtimeJson()"));
     }
 
     private static String source(String file) throws Exception {
         Path path = Paths.get("app/src/main/java/com/shaterguy/chatgptselfrun/" + file);
         if (!Files.exists(path)) path = Paths.get("src/main/java/com/shaterguy/chatgptselfrun/" + file);
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-    }
-
-    private static int occurrences(String value, String needle) {
-        int count = 0;
-        for (int at = value.indexOf(needle); at >= 0;
-             at = value.indexOf(needle, at + needle.length())) count++;
-        return count;
     }
 }
