@@ -34,7 +34,13 @@ public final class SelfRun4TaskControlPolicyTest {
         String coordinator = source("SelfRun3Coordinator.java");
         assertOrdered(coordinator, "web.publishControlState(\"PAUSED\", reason)", "web.quiesce()");
         assertOrdered(coordinator, "web.publishControlState(\"RESUME_REQUESTED\", \"USER_RESUME\")", "SelfRun3Engine.Kind.RESUME");
-        assertOrdered(coordinator, "web.publishControlState(\"STOPPED\", \"USER_STOP\")", "web.quiesce()");
+        int stop = coordinator.indexOf("private void stop()");
+        int stopQuiesce = coordinator.indexOf("web.quiesce();", stop);
+        int confirmedStop = coordinator.indexOf("web.publishControlStateConfirmed(\"STOPPED\", \"USER_STOP\"", stop);
+        int retry = coordinator.indexOf("main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);", confirmedStop);
+        int finalize = coordinator.indexOf("finalizeConfirmedStop(task, expectedEpoch);", confirmedStop);
+        assertTrue(stop >= 0 && stopQuiesce > stop && confirmedStop > stopQuiesce);
+        assertTrue(retry > confirmedStop && finalize > confirmedStop);
         int projection = coordinator.indexOf("syncProjection(after);");
         int done = coordinator.indexOf("if (after.stage() == SelfRun3Engine.Stage.DONE)", projection);
         int close = coordinator.indexOf("web.close();", done);
