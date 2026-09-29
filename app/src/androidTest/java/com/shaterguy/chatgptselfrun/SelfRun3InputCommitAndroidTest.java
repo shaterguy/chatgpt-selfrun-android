@@ -25,6 +25,7 @@ public final class SelfRun3InputCommitAndroidTest {
         clearFiles();
         context.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences("selfrun_drive_user_next_input", Context.MODE_PRIVATE).edit().clear().commit();
+        CanonicalProfileAndroidTestFixtures.install(context);
         store = new SelfRunStore(context);
         store.bindBaseFolder("acct_123", "abcdefgh", "Runs", "", 1L);
         store.start("task", "CHAT", "https://chatgpt.com/", "test");
@@ -36,6 +37,7 @@ public final class SelfRun3InputCommitAndroidTest {
         if (ledger != null) ledger.close();
         context.getSharedPreferences("selfrun_drive", Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences("selfrun_drive_user_next_input", Context.MODE_PRIVATE).edit().clear().commit();
+        CanonicalProfileAndroidTestFixtures.clear(context);
         clearFiles();
     }
     @Test public void saveAttemptDuringTerminalCommitIsRejectedWithoutBeingAcceptedThenLost() throws Exception {

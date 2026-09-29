@@ -17,9 +17,9 @@ public final class SelfRun3ParallelLedgerAndroidTest {
     private Context context;
     @Before public void before() {
         context=ApplicationProvider.getApplicationContext();
-        cleanup(); ProfileRegistry.resetForTests(); ledger=new SelfRun3Ledger(context);
+        cleanup(); CanonicalProfileAndroidTestFixtures.install(context); ledger=new SelfRun3Ledger(context);
     }
-    @After public void after() { if(ledger!=null) ledger.close(); cleanup(); }
+    @After public void after() { if(ledger!=null) ledger.close(); cleanup(); CanonicalProfileAndroidTestFixtures.clear(context); }
     private void cleanup() {
         for(String suffix:new String[]{"","-wal","-shm","-journal"}) {
             File f=new File(context.getNoBackupFilesDir(),"selfrun3-ledger.db"+suffix);

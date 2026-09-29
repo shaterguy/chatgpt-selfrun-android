@@ -47,10 +47,8 @@ public final class SelfRun31WorkFixAndroidTest {
 
     @Before public void setUp() {
         context = ApplicationProvider.getApplicationContext();
-        context.getSharedPreferences(REGISTRY_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences(STORE_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
-        ProfileRegistry.resetForTests();
-        ProfileRegistry.initialize(context);
+        CanonicalProfileAndroidTestFixtures.install(context);
         notifications = context.getSystemService(NotificationManager.class);
         notifications.cancelAll();
         if (Build.VERSION.SDK_INT >= 33

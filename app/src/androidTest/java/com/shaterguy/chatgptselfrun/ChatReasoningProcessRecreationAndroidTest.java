@@ -20,6 +20,7 @@ public final class ChatReasoningProcessRecreationAndroidTest {
         Context context = ApplicationProvider.getApplicationContext();
         String runId = "SR-PROCESS-RECREATION-ANDROID";
         clearPersistentState(context);
+        CanonicalProfileAndroidTestFixtures.install(context);
         try {
             resetProcessCache();
             assertTrue(ChatReasoningPreferenceStore.save(
@@ -36,6 +37,7 @@ public final class ChatReasoningProcessRecreationAndroidTest {
         } finally {
             clearPersistentState(context);
             resetProcessCache();
+            CanonicalProfileAndroidTestFixtures.install(context);
             SelfRunApplication.initializeProcess(context);
         }
     }

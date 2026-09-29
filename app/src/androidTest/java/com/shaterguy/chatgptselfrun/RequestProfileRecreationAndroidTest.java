@@ -1,9 +1,11 @@
 package com.shaterguy.chatgptselfrun;
 
+import android.content.Context;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import androidx.test.core.app.ActivityScenario;
+import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import org.json.JSONObject;
@@ -18,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
 
 /** Reproduces request-profile lifetime across WebView destruction and recreation. */
 @RunWith(AndroidJUnit4.class)
@@ -26,6 +29,8 @@ public final class RequestProfileRecreationAndroidTest {
     private static final String RUN_ID = "SR-PROFILE-RECREATE";
 
     @Test public void readyChatTargetRestoresAgainstCurrentRegistryAfterRecreation() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        CanonicalProfileAndroidTestFixtures.install(context);
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
             evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
@@ -58,6 +63,8 @@ public final class RequestProfileRecreationAndroidTest {
     }
 
     @Test public void legacyV3TargetWithoutHybridFlagRestoresAsNormalMode() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        CanonicalProfileAndroidTestFixtures.install(context);
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
             evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
@@ -85,26 +92,30 @@ public final class RequestProfileRecreationAndroidTest {
     }
 
     @Test public void workRetargetPreservesSelfRunIdentityAcrossRecreation() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        CanonicalProfileAndroidTestFixtures.install(context);
         try (ActivityScenario<SelfRunNewActivity> scenario = ActivityScenario.launch(SelfRunNewActivity.class)) {
             AtomicReference<WebView> web = loadFixture(scenario);
             evaluateIgnoringResult(scenario, web, RequestProfileScript.documentStartScript());
             read(scenario, web, "(()=>{" + RequestProfileScript.beginTarget("work", RUN_ID) + "return 'seeded';})()");
 
+            ProfileRegistry.Profile workProfile = ProfileRegistry.resolveWork("5.6luna", "max");
+            assertNotNull(workProfile);
             JSONObject modelResult = new JSONObject(read(scenario, web,
-                    WorkPreferenceDom.modelForProject(BASE_URL, "luna")));
+                    WorkPreferenceDom.modelForProject(BASE_URL, workProfile.signalModel)));
             assertEquals("READY", modelResult.getString("status"));
             assertEquals(RUN_ID, modelResult.getJSONObject("diagnostics").getString("targetRunId"));
 
             JSONObject reasoningResult = new JSONObject(read(scenario, web,
-                    WorkPreferenceDom.reasoningForProject(BASE_URL, "max")));
+                    WorkPreferenceDom.reasoningForProject(BASE_URL, workProfile.signalReasoning)));
             assertEquals("READY", reasoningResult.getString("status"));
             assertEquals(RUN_ID, reasoningResult.getJSONObject("diagnostics").getString("targetRunId"));
 
             JSONObject target = new JSONObject(read(scenario, web,
                     "JSON.stringify(window.__selfRunRequestProfileEngine.target())"));
             assertEquals("work", target.getString("mode"));
-            assertEquals("luna", target.getString("model"));
-            assertEquals("max", target.getString("reasoning"));
+            assertEquals(workProfile.signalModel, target.getString("model"));
+            assertEquals(workProfile.signalReasoning, target.getString("reasoning"));
             assertEquals(RUN_ID, target.getString("runId"));
             assertTrue(target.getBoolean("ready"));
 
@@ -113,8 +124,8 @@ public final class RequestProfileRecreationAndroidTest {
             JSONObject restored = new JSONObject(read(scenario, web,
                     "JSON.stringify(window.__selfRunRequestProfileEngine.target())"));
             assertEquals("work", restored.getString("mode"));
-            assertEquals("luna", restored.getString("model"));
-            assertEquals("max", restored.getString("reasoning"));
+            assertEquals(workProfile.signalModel, restored.getString("model"));
+            assertEquals(workProfile.signalReasoning, restored.getString("reasoning"));
             assertEquals(RUN_ID, restored.getString("runId"));
             assertTrue(restored.getBoolean("ready"));
             read(scenario, web, "(()=>{localStorage.removeItem('selfrun-drive:request-profile-target:v3');return 'cleared';})()");

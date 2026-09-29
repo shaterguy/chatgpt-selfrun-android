@@ -18,6 +18,9 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             "com.shaterguy.chatgptselfrun.SelfRun3InputCommitAndroidTest",
             "com.shaterguy.chatgptselfrun.RequestProfileRecreationAndroidTest",
             "com.shaterguy.chatgptselfrun.ChatReasoningProcessRecreationAndroidTest",
+            "com.shaterguy.chatgptselfrun.ProfileRegistryPersistenceAndroidTest",
+            "com.shaterguy.chatgptselfrun.WorkBootstrapPreferenceStoreAndroidTest",
+            "com.shaterguy.chatgptselfrun.SelfRun31WorkFixAndroidTest",
             "com.shaterguy.chatgptselfrun.SelfRunDebugLogLifecycleAndroidTest",
             "com.shaterguy.chatgptselfrun.SelfRunDebugUiAndroidTest"
     );

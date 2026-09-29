@@ -21,9 +21,7 @@ public final class ProfileRegistryPersistenceAndroidTest {
 
     @Before public void setUp() {
         context = ApplicationProvider.getApplicationContext();
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit();
-        ProfileRegistry.resetForTests();
-        ProfileRegistry.initialize(context);
+        CanonicalProfileAndroidTestFixtures.install(context);
     }
 
     @After public void tearDown() {
