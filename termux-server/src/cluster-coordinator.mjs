@@ -165,6 +165,7 @@ export class SelfRunClusterCoordinator {
     memberTimeoutMs = null,
     settleMs = null,
     heartbeatMs = null,
+    onRoleChange = null,
     now = () => Date.now(),
     sleep = delay,
   }) {
@@ -179,6 +180,7 @@ export class SelfRunClusterCoordinator {
     this.memberTimeoutMs = Math.max(15000, Number(memberTimeoutMs ?? process.env.SELFRUN_CLUSTER_MEMBER_TIMEOUT_MS ?? 65000));
     this.settleMs = Math.max(0, Number(settleMs ?? process.env.SELFRUN_CLUSTER_SETTLE_MS ?? 10000));
     this.heartbeatMs = Math.max(2000, Number(heartbeatMs ?? process.env.SELFRUN_CLUSTER_HEARTBEAT_MS ?? 5000));
+    this.onRoleChange = typeof onRoleChange === 'function' ? onRoleChange : null;
     this.now = now;
     this.sleep = sleep;
     const started = this.now();
@@ -317,6 +319,15 @@ export class SelfRunClusterCoordinator {
         active_count: Number(localState.activeCount || 0),
       }));
     }
+    if (this.role !== previousRole && this.onRoleChange) {
+      await this.onRoleChange({
+        previousRole,
+        role: this.role,
+        activeServer: this.activeServer,
+        activePriority: this.activePriority,
+      });
+    }
+    const publishedLocalState = this.stateStore.snapshot();
 
     const memberBody = {
       schema: 'selfrun-server-state-v1',
@@ -327,8 +338,8 @@ export class SelfRunClusterCoordinator {
       role: this.role,
       active_server: this.activeServer,
       active_priority: this.activePriority,
-      active_count: Number(localState.activeCount || 0),
-      status: clean(localState.status) || 'IDLE',
+      active_count: Number(publishedLocalState.activeCount || 0),
+      status: clean(publishedLocalState.status) || 'IDLE',
       updated_at: new Date(now).toISOString(),
       heartbeat_at: new Date(now).toISOString(),
       claim_ready_at: new Date(this.claimReadyAt || 0).toISOString(),

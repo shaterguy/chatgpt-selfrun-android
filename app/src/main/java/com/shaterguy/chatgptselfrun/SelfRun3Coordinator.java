@@ -91,10 +91,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         return SelfRun3RunMarker.current(service, store.runId());
     }
 
-    void onStoppedResumeAuthorized(String token) {
+    void onStoppedResumeAuthorized(String token, SelfRun3Engine.State snapshot) {
         requireMain();
         setAccessToken(token);
         web.restoreAccessToken(token);
+        web.publishControlState(snapshot, "RESUME_STOPPED_REQUESTED", "USER_RESUME_STOPPED");
     }
 
     int onStart(String action) {

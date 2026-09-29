@@ -109,3 +109,33 @@ test('stale higher-priority member is ignored', async () => {
   assert.equal(cluster.snapshot().active_server, 'Galaxy-S25');
   assert.equal(cluster.canDispatch(), true);
 });
+
+
+test('losing ACTIVE ownership quiesces local work before publishing STANDBY state', async () => {
+  const now = 1_800_000_000_000;
+  let activeCount = 1;
+  let callback = null;
+  const stateStore = { snapshot: () => ({ activeCount, status: activeCount ? 'RUNNING' : 'IDLE' }) };
+  const transport = new FakeTransport([{
+    schema: 'selfrun-server-state-v1',
+    server_name: 'Galaxy-Tab-S11-Ultra',
+    server_priority: 1,
+    role: 'ACTIVE',
+    active_count: 1,
+    status: 'RUNNING',
+    updated_at: new Date(now).toISOString(),
+  }]);
+  const cluster = new SelfRunClusterCoordinator({
+    stateStore, config, transport, serverName: 'Galaxy-S25', serverPriority: 2,
+    settleMs: 0, now: () => now,
+    onRoleChange: async (change) => { callback = change; activeCount = 0; },
+  });
+  cluster.role = 'ACTIVE';
+  cluster.activeServer = 'Galaxy-S25';
+  cluster.claimReadyAt = now;
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role, 'STANDBY');
+  assert.equal(callback?.previousRole, 'ACTIVE');
+  assert.equal(callback?.role, 'STANDBY');
+  assert.equal(transport.writes.get('__SELFRUN_SERVER__Galaxy-S25.json')?.active_count, 0);
+});

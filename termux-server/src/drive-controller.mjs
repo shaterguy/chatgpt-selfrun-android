@@ -101,6 +101,21 @@ export class DriveDispatchController {
     return this.controls.get(clean(taskId)) || null;
   }
 
+  async quiesceForStandby() {
+    this.#cancelIdleRecycle();
+    for (const pending of this.pendingPrepares.values()) {
+      pending.abortController.abort(new Error('server entered standby'));
+    }
+    this.pendingPrepares.clear();
+    const actives = this.activeDispatches();
+    for (const active of actives) await this.#closeActive(active);
+    if (actives.length && typeof this.stateStore.recordEvent === 'function') {
+      await this.stateStore.recordEvent('CLUSTER_STANDBY_ACTIVE_RELEASED', {
+        count: actives.length,
+      });
+    }
+  }
+
   #isActive(active) {
     return !!active
       && this.actives.get(active.path) === active

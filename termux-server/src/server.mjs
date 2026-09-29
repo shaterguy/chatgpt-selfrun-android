@@ -38,12 +38,18 @@ const controller = new SelfRunController({
 });
 await controller.initialize();
 const driveTransport = new DriveDispatchTransport(config);
-const cluster = new SelfRunClusterCoordinator({ stateStore, config });
 const driveController = new DriveDispatchController({
   browser,
   stateStore,
   config,
   promptDirectives,
+});
+const cluster = new SelfRunClusterCoordinator({
+  stateStore,
+  config,
+  onRoleChange: async ({ role }) => {
+    if (role === 'STANDBY') await driveController.quiesceForStandby();
+  },
 });
 const driveWatcher = new DriveDispatchWatcher({
   transport: driveTransport,

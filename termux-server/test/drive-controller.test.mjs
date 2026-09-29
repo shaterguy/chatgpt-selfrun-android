@@ -1849,3 +1849,44 @@ test('resume releases browser-open slot when pre-browser state patch fails', asy
     new Promise((_, reject) => setTimeout(() => reject(new Error('browser slot leaked')), 100)),
   ]);
 });
+
+
+test('standby quiesce releases local active browser ownership without rewriting dispatch', async () => {
+  let sessionClosed = 0;
+  let targetClosed = 0;
+  const browser = {
+    chromium: {
+      closeTarget: async () => { targetClosed += 1; return true; },
+      listExistingTargets: async () => [],
+      residentSetMb: async () => 100,
+      recycle: async () => ({ recycled: false }),
+    },
+    resume: async () => ({
+      target: { id: 'standby-target' },
+      session: { close() { sessionClosed += 1; } },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser, stateStore,
+    config: { recoveryPrompt: 'continue', browserIdleRecycleMs: 0, browserIdleRssMb: 0 },
+  });
+  const writes = [];
+  const transport = { write: async (path, body) => writes.push({ path, body: structuredClone(body) }) };
+  await controller.resume('standby.json', dispatch({
+    client_status: 'SEND_REQUESTED',
+    server_status: 'STARTED',
+    conversation_url: 'https://chatgpt.com/c/standby',
+  }), transport);
+  const before = writes.length;
+  assert.equal(stateStore.snapshot().activeCount, 1);
+  await controller.quiesceForStandby();
+  assert.equal(controller.activeDispatches().length, 0);
+  assert.equal(stateStore.snapshot().activeCount, 0);
+  assert.equal(sessionClosed, 1);
+  assert.equal(targetClosed, 1);
+  assert.equal(writes.length, before);
+  assert.equal(stateStore.events.some(({ event }) => event === 'CLUSTER_STANDBY_ACTIVE_RELEASED'), true);
+});

@@ -32,13 +32,26 @@ public final class SelfRun4TaskControlPolicyTest {
 
     @Test public void explicitPauseResumeStopAndDonePreserveControlOrdering() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
+        String stoppedResume = source("SelfRunStoppedResume.java");
         assertOrdered(coordinator, "web.publishControlState(\"PAUSED\", reason)", "web.quiesce()");
         assertOrdered(coordinator, "web.publishControlState(\"RESUME_REQUESTED\", \"USER_RESUME\")", "SelfRun3Engine.Kind.RESUME");
         assertOrdered(coordinator, "web.publishControlState(\"STOPPED\", \"USER_STOP\")", "web.quiesce()");
+        assertTrue(coordinator.contains("web.publishControlState(snapshot, \"RESUME_STOPPED_REQUESTED\", \"USER_RESUME_STOPPED\")"));
+        assertOrdered(stoppedResume, "coordinator.onStoppedResumeAuthorized(token, ready)", "coordinator.onStart(SelfRunService.ACTION_RUN)");
         int projection = coordinator.indexOf("syncProjection(after);");
         int done = coordinator.indexOf("if (after.stage() == SelfRun3Engine.Stage.DONE)", projection);
         int close = coordinator.indexOf("web.close();", done);
         assertTrue(projection >= 0 && done > projection && close > done);
+    }
+
+
+    @Test public void terminalControlCannotFallBackToRunningWithoutExplicitStoppedResume() throws Exception {
+        String adapter = source("SelfRun4DriveWebAdapter.java");
+        assertTrue(adapter.contains("if (\"DONE\".equals(current)) return \"DONE\".equals(next)"));
+        assertTrue(adapter.contains("return \"STOPPED\".equals(next) || \"RESUME_STOPPED_REQUESTED\".equals(next)"));
+        assertTrue(adapter.contains("if (!controlTransitionAllowed(lastControlState, control))"));
+        assertTrue(adapter.contains("lastControlState = current.optString(\"state\")"));
+        assertTrue(adapter.contains("lastControlState = control"));
     }
 
     private static void assertOrdered(String source, String first, String second) {

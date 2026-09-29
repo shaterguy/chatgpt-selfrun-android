@@ -53,6 +53,7 @@ final class SelfRun4DriveWebAdapter {
     private String controlFileId = "";
     private long controlEpoch;
     private String lastControlPublishedKey = "";
+    private String lastControlState = "";
 
     SelfRun4DriveWebAdapter(Context context, SelfRun3WebAdapter.Listener listener) {
         this.context = context.getApplicationContext();
@@ -87,7 +88,7 @@ final class SelfRun4DriveWebAdapter {
         publishControlState(state, control, reason);
     }
 
-    private void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
+    void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
         if (snapshot == null || accessToken.isEmpty() || io.isShutdown()) return;
         String token = accessToken;
         try {
@@ -107,6 +108,14 @@ final class SelfRun4DriveWebAdapter {
                 + "|" + snapshot.resource("conversationUrl");
     }
 
+    static boolean controlTransitionAllowed(String current, String next) {
+        if ("DONE".equals(current)) return "DONE".equals(next);
+        if ("STOPPED".equals(current)) {
+            return "STOPPED".equals(next) || "RESUME_STOPPED_REQUESTED".equals(next);
+        }
+        return true;
+    }
+
     private void writeTaskControl(String token, SelfRun3Engine.State snapshot,
                                   String control, String reason) throws Exception {
         String taskId = snapshot.taskId();
@@ -117,6 +126,7 @@ final class SelfRun4DriveWebAdapter {
             controlFileId = "";
             controlEpoch = 0L;
             lastControlPublishedKey = "";
+            lastControlState = "";
         }
         String key = controlKey(snapshot, control);
         if (key.equals(lastControlPublishedKey)) return;
@@ -135,7 +145,12 @@ final class SelfRun4DriveWebAdapter {
                     throw new IllegalStateException("task control content mismatch");
                 }
                 controlEpoch = Math.max(controlEpoch, current.optLong("control_epoch", 0L));
+                lastControlState = current.optString("state");
             }
+        }
+        if (!controlTransitionAllowed(lastControlState, control)) {
+            trace("V4_TASK_CONTROL_BLOCKED", "from=" + lastControlState + ";to=" + control);
+            return;
         }
 
         long nextEpoch = controlEpoch + 1L;
@@ -161,6 +176,7 @@ final class SelfRun4DriveWebAdapter {
         }
         controlEpoch = nextEpoch;
         lastControlPublishedKey = key;
+        lastControlState = control;
         trace("V4_TASK_CONTROL", "state=" + control + ";epoch=" + nextEpoch);
     }
 
