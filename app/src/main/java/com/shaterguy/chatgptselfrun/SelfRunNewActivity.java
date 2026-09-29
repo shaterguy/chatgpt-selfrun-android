@@ -148,7 +148,8 @@ public final class SelfRunNewActivity extends Activity {
         }
         LinearLayout.LayoutParams launch = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         launch.setMargins(Ui.dp(this, 20), Ui.dp(this, 8), Ui.dp(this, 20), Ui.dp(this, 12));
-        shell.addView(Ui.button(this, "시작", v -> startSelfRun()), launch);
+        shell.addView(Ui.button(this, "시작", v -> ProfileRegistryRefresher.refresh(
+                this, (changed, error) -> runOnUiThread(this::startSelfRun))), launch);
         updateChatReasoningAvailability();
         Ui.setContent(this, shell);
         project.clearFocus();
