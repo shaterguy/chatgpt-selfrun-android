@@ -21,6 +21,11 @@ import java.util.concurrent.Executors;
  * delegates only ChatGPT conversation execution to the Termux server through Drive.
  */
 final class SelfRun4DriveWebAdapter {
+    interface ControlWriteCallback {
+        void onConfirmed();
+        void onFailure(Throwable error);
+    }
+
     private static final String SCHEMA = "selfrun-server-dispatch-v1";
     private static final String CONTROL_SCHEMA = "selfrun-task-control-v1";
     private static final long POLL_MS = 1_000L;
@@ -87,6 +92,58 @@ final class SelfRun4DriveWebAdapter {
         publishControlState(state, control, reason);
     }
 
+    void publishControlStateConfirmed(String control, String reason, ControlWriteCallback callback) {
+        requireMain();
+        SelfRun3Engine.State snapshot = state;
+        if (snapshot == null || io.isShutdown()) {
+            callback.onFailure(new IllegalStateException("TASK_CONTROL_UNAVAILABLE"));
+            return;
+        }
+        if (!accessToken.isEmpty()) {
+            submitConfirmedControlWrite(accessToken, snapshot, control, reason, callback);
+            return;
+        }
+        DriveAuthorization.requestSilently(context, new DriveAuthorization.Callback() {
+            @Override public void onAuthorized(AuthorizationResult result) {
+                String token = DriveAuthorization.accessToken(result);
+                if (token.isEmpty()) {
+                    callback.onFailure(new IllegalStateException("DRIVE_TOKEN_EMPTY"));
+                    return;
+                }
+                accessToken = token;
+                submitConfirmedControlWrite(token, snapshot, control, reason, callback);
+            }
+
+            @Override public void onResolutionRequired(PendingIntent pendingIntent) {
+                callback.onFailure(new IllegalStateException("AUTH_REQUIRED"));
+            }
+
+            @Override public void onFailure(Throwable error) {
+                callback.onFailure(error);
+            }
+        });
+    }
+
+    private void submitConfirmedControlWrite(String token, SelfRun3Engine.State snapshot,
+                                             String control, String reason,
+                                             ControlWriteCallback callback) {
+        try {
+            io.execute(() -> {
+                try {
+                    writeTaskControl(token, snapshot, control, reason);
+                    main.post(callback::onConfirmed);
+                } catch (Throwable error) {
+                    main.post(() -> {
+                        accessToken = "";
+                        callback.onFailure(error);
+                    });
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException error) {
+            callback.onFailure(error);
+        }
+    }
+
     private void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
         if (snapshot == null || accessToken.isEmpty() || io.isShutdown()) return;
         String token = accessToken;
@@ -138,6 +195,7 @@ final class SelfRun4DriveWebAdapter {
             }
         }
 
+        if (!create) refreshControlEpoch(token, taskId);
         long nextEpoch = controlEpoch + 1L;
         JSONObject body = new JSONObject()
                 .put("schema", CONTROL_SCHEMA)
@@ -163,6 +221,8 @@ final class SelfRun4DriveWebAdapter {
         lastControlPublishedKey = key;
         trace("V4_TASK_CONTROL", "state=" + control + ";epoch=" + nextEpoch);
     }
+
+    private void refreshControlEpoch(String token, String taskId) throws Exception { JSONObject current = api.readServerDispatchFile(token, controlFileId); if (!CONTROL_SCHEMA.equals(current.optString("schema")) || !taskId.equals(current.optString("task_id"))) throw new IllegalStateException("task control content mismatch"); controlEpoch = Math.max(controlEpoch, current.optLong("control_epoch", 0L)); }
 
     void prepare(SelfRun3Engine.State next) {
         requireMain();
