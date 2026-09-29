@@ -137,6 +137,19 @@ final class ProfileRegistry {
         }
     }
 
+    static final class CapturedProfile {
+        final Mode mode;
+        final List<Operation> operations;
+        final String fingerprint;
+        private CapturedProfile(Mode mode, List<Operation> operations) {
+            this.mode = mode;
+            this.operations = Collections.unmodifiableList(canonicalOperations(operations));
+            this.fingerprint = fingerprint(mode, this.operations);
+        }
+        String requestValue(String path) { return ProfileRegistry.requestValue(operations, path); }
+        boolean requestHas(String path) { return ProfileRegistry.requestHas(operations, path); }
+    }
+
     static final class SnapshotInfo {
         final String driveVersion;
         final String modifiedTime;
