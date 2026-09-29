@@ -12,6 +12,7 @@ public final class SelfRunApplication extends Application {
 
     static void initializeProcess(Context context) {
         ProfileRegistry.initialize(context);
+        ProfileRegistryRefresher.refresh(context, null);
         ChatReasoningPreferenceStore.initialize(context);
         UserNextInputStore.initialize(context);
         WorkProtocolNativeObserver.installProcess(context);
