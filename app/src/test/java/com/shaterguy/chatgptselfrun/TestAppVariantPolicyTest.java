@@ -39,16 +39,22 @@ public final class TestAppVariantPolicyTest {
         assertTrue(candidate.contains("-PselfRunServerChecks=true"));
     }
 
-    @Test public void v4DevWorkflowBuildsAndSignsOnlySeparateTestPackage() throws Exception {
+    @Test public void v4DevWorkflowBuildsUpgradeableFormalDevAndSeparateTestPackage() throws Exception {
         String workflow = read(".github/workflows/build-selfrun-v4-dev.yml", "../.github/workflows/build-selfrun-v4-dev.yml");
-        assertTrue(workflow.contains("      - 'selfrun-v4/v4.0.2-dev1'"));
+        assertTrue(workflow.contains("      - 'selfrun-v4/v4.0.4-dev1'"));
+        assertTrue(workflow.contains(":app:assembleRelease"));
         assertTrue(workflow.contains(":app:assembleQaApp"));
+        assertTrue(workflow.contains(":app:assembleQaAppAndroidTest"));
+        assertTrue(workflow.contains("tools/sign_release.sh"));
         assertTrue(workflow.contains("tools/sign_test.sh"));
+        assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.test"));
-        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.2-dev1.apk"));
-        assertFalse(workflow.contains(":app:assembleRelease"));
-        assertFalse(workflow.contains("tools/sign_release.sh"));
-        assertFalse(workflow.contains("formal-aligned.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-v4.0.4-dev1.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.4-dev1.apk"));
+        assertTrue(workflow.contains("drive-v4.0.3"));
+        assertTrue(workflow.contains("BASE_VERSION_NAME=4.0.3"));
+        assertTrue(workflow.contains("bash tools/verify_selfrun3_release_emulator.sh"));
+        assertTrue(workflow.contains("github.run_attempt"));
     }
 
     @Test public void serverProductCapabilityIsIndependentFromServerOnlyTestSelection() throws Exception {

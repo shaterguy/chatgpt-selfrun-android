@@ -5,6 +5,8 @@ import android.content.Context;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -29,43 +31,46 @@ public final class ProfileRegistryPersistenceAndroidTest {
         ProfileRegistry.resetForTests();
     }
 
-    @Test public void userProfileSurvivesProcessLocalRegistryRecreation() {
-        ProfileRegistry.CapturedProfile captured = ProfileRegistry.parseCaptured(
-                "{\"mode\":\"work\",\"operations\":["
-                        + "{\"op\":\"SET\",\"path\":\"model\",\"value\":\"gpt-5.7-nova-wm\"},"
-                        + "{\"op\":\"SET\",\"path\":\"thinking_effort\",\"value\":\"extreme\"},"
-                        + "{\"op\":\"SET\",\"path\":\"conversation_origin\",\"value\":\"tpp\"},"
-                        + "{\"op\":\"SET\",\"path\":\"service_tier\",\"value\":\"standard\"}]}");
-        ProfileRegistry.RegisterResult result = ProfileRegistry.registerCaptured(captured, "nova", "extreme");
-        assertEquals(ProfileRegistry.RegisterResult.ADDED, result.status);
-        String fingerprint = result.profile.fingerprint;
+    @Test public void canonicalSnapshotSurvivesProcessLocalRegistryRecreation() {
+        String canonical = ProfileRegistry.exportWorkJson("test");
+        ProfileRegistry.replaceCanonicalSnapshot(ProfileRegistry.Mode.WORK, canonical, "version-1");
+        int expectedCount = ProfileRegistry.profileCount(ProfileRegistry.Mode.WORK);
+        assertTrue(expectedCount > 0);
 
-        ProfileRegistry.resetForTests(); ProfileRegistry.initialize(context);
-        ProfileRegistry.Profile restored = ProfileRegistry.resolveWork("nova", "extreme");
-        assertNotNull(restored); assertEquals(fingerprint, restored.fingerprint);
+        ProfileRegistry.resetForTests();
+        ProfileRegistry.initialize(context);
+
+        assertEquals(expectedCount, ProfileRegistry.profileCount(ProfileRegistry.Mode.WORK));
+        assertEquals("version-1", ProfileRegistry.sourceVersion(ProfileRegistry.Mode.WORK));
     }
 
-    @Test public void builtInDeletionTombstoneSurvivesRecreationAndAllowsExplicitReregistration() {
-        ProfileRegistry.Profile builtIn = ProfileRegistry.resolveWork("sol", "max");
-        assertNotNull(builtIn); String fingerprint = builtIn.fingerprint;
-        assertTrue(ProfileRegistry.delete(fingerprint));
-        ProfileRegistry.resetForTests(); ProfileRegistry.initialize(context);
-        assertNull(ProfileRegistry.resolveWork("sol", "max"));
+    @Test public void canonicalAdditionRemovalAndMalformedRefreshPreserveLastKnownGood() throws Exception {
+        String full = ProfileRegistry.exportWorkJson("test");
+        JSONObject subsetRoot = new JSONObject(full);
+        JSONArray profiles = subsetRoot.getJSONArray("profiles");
+        assertTrue(profiles.length() >= 2);
+        JSONObject removed = profiles.getJSONObject(0);
+        String removedModel = removed.getJSONObject("signal").getString("model");
+        String removedReasoning = removed.getJSONObject("signal").getString("reasoning");
+        profiles.remove(0);
+        String subset = subsetRoot.toString();
 
-        ProfileRegistry.CapturedProfile recaptured = ProfileRegistry.parseCaptured(
-                "{\"mode\":\"work\",\"operations\":["
-                        + "{\"op\":\"SET\",\"path\":\"model\",\"value\":\"gpt-5.6-sol-wm\"},"
-                        + "{\"op\":\"SET\",\"path\":\"thinking_effort\",\"value\":\"max\"},"
-                        + "{\"op\":\"SET\",\"path\":\"conversation_origin\",\"value\":\"tpp\"},"
-                        + "{\"op\":\"SET\",\"path\":\"service_tier\",\"value\":\"standard\"}]}");
-        ProfileRegistry.RegisterResult added = ProfileRegistry.registerCaptured(recaptured, "solar", "maximum");
-        assertEquals(ProfileRegistry.RegisterResult.ADDED, added.status);
-        assertNotNull(ProfileRegistry.resolveWork("solar", "maximum"));
-        assertNull(ProfileRegistry.resolveWork("sol", "max"));
+        ProfileRegistry.replaceCanonicalSnapshot(ProfileRegistry.Mode.WORK, subset, "version-1");
+        assertNull(ProfileRegistry.resolveWork(removedModel, removedReasoning));
 
-        assertTrue(ProfileRegistry.delete(added.profile.fingerprint));
-        ProfileRegistry.resetForTests(); ProfileRegistry.initialize(context);
-        assertNull(ProfileRegistry.resolveWork("sol", "max"));
-        assertNull(ProfileRegistry.resolveWork("solar", "maximum"));
+        ProfileRegistry.replaceCanonicalSnapshot(ProfileRegistry.Mode.WORK, full, "version-2");
+        assertNotNull(ProfileRegistry.resolveWork(removedModel, removedReasoning));
+
+        assertThrows(IllegalArgumentException.class, () ->
+                ProfileRegistry.replaceCanonicalSnapshot(ProfileRegistry.Mode.WORK,
+                        "{\"schema\":\"selfrun-work-profile-registry-v1\",\"registrySchemaVersion\":1,\"appVersion\":\"test\",\"profiles\":[]}",
+                        "version-bad"));
+        assertNotNull(ProfileRegistry.resolveWork(removedModel, removedReasoning));
+        assertEquals("version-2", ProfileRegistry.sourceVersion(ProfileRegistry.Mode.WORK));
+
+        ProfileRegistry.resetForTests();
+        ProfileRegistry.initialize(context);
+        assertNotNull(ProfileRegistry.resolveWork(removedModel, removedReasoning));
+        assertEquals("version-2", ProfileRegistry.sourceVersion(ProfileRegistry.Mode.WORK));
     }
 }

@@ -85,43 +85,23 @@ public final class SelfRun31WorkFixAndroidTest {
         assertEquals("manual action required", store.lastErrorMessage());
     }
 
-    @Test public void workLabelsIncludeModelAndPersistForCapturedAndImportedProfiles() {
-        ProfileRegistry.Profile sol = ProfileRegistry.resolveWork("sol", "high");
-        assertNotNull(sol);
-        assertEquals("Sol · high", sol.displayLabel());
-        assertEquals("Instant", ProfileRegistry.resolveChat("instant").displayLabel());
+    @Test public void workLabelsComeOnlyFromCanonicalRegistryAndManualMutationIsDisabled() {
+        java.util.List<ProfileRegistry.Profile> work = ProfileRegistry.listWork();
+        assertFalse(work.isEmpty());
+        ProfileRegistry.Profile first = work.get(0);
+        assertTrue(first.displayLabel().contains(" · "));
+        assertFalse(first.actualCombination().startsWith(" / "));
 
         ProfileRegistry.CapturedProfile captured = ProfileRegistry.parseCaptured(
                 "{\"mode\":\"work\",\"operations\":["
-                        + "{\"op\":\"SET\",\"path\":\"model\",\"value\":\"gpt-6-astra-wm\"},"
-                        + "{\"op\":\"SET\",\"path\":\"thinking_effort\",\"value\":\"extended\"},"
+                        + "{\"op\":\"SET\",\"path\":\"model\",\"value\":\"gpt-test-wm\"},"
+                        + "{\"op\":\"SET\",\"path\":\"thinking_effort\",\"value\":\"standard\"},"
                         + "{\"op\":\"SET\",\"path\":\"conversation_origin\",\"value\":\"tpp\"},"
                         + "{\"op\":\"SET\",\"path\":\"service_tier\",\"value\":\"standard\"}]}");
-        ProfileRegistry.RegisterResult added = ProfileRegistry.registerCaptured(captured, "astra", "high");
-        assertEquals(ProfileRegistry.RegisterResult.ADDED, added.status);
-        assertEquals("Astra · high", added.profile.displayLabel());
-        assertEquals("gpt-6-astra-wm / extended", added.profile.actualCombination());
-
-        String imported = "{"
-                + "\"schema\":\"selfrun-work-profile-registry-v1\","
-                + "\"registrySchemaVersion\":1,"
-                + "\"appVersion\":\"3.1.0-dev7\","
-                + "\"profiles\":[{"
-                + "\"signal\":{\"model\":\"orion\",\"reasoning\":\"balanced\"},"
-                + "\"request\":{\"model\":\"gpt-6-orion-wm\",\"thinking_effort\":\"balanced\",\"conversation_origin\":\"tpp\",\"service_tier\":\"standard\"},"
-                + "\"operations\":["
-                + "{\"op\":\"SET\",\"path\":\"model\",\"value\":\"gpt-6-orion-wm\"},"
-                + "{\"op\":\"SET\",\"path\":\"thinking_effort\",\"value\":\"balanced\"},"
-                + "{\"op\":\"SET\",\"path\":\"conversation_origin\",\"value\":\"tpp\"},"
-                + "{\"op\":\"SET\",\"path\":\"service_tier\",\"value\":\"standard\"}],"
-                + "\"builtIn\":false}]}";
-        ProfileRegistry.ImportResult importResult = ProfileRegistry.importJson(ProfileRegistry.Mode.WORK, imported);
-        assertEquals(1, importResult.added);
-
-        ProfileRegistry.resetForTests();
-        ProfileRegistry.initialize(context);
-        assertEquals("Astra · high", ProfileRegistry.resolveWork("astra", "high").displayLabel());
-        assertEquals("Orion · balanced", ProfileRegistry.resolveWork("orion", "balanced").displayLabel());
+        assertThrows(UnsupportedOperationException.class,
+                () -> ProfileRegistry.registerCaptured(captured, "test", "standard"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> ProfileRegistry.importJson(ProfileRegistry.Mode.WORK, "{}"));
     }
 
     @Test public void mainRunControlsKeepStableSpacingAcrossHistoryRoundTrip() {

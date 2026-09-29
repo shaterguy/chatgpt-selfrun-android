@@ -3,7 +3,7 @@ name: Build SelfRun 4 Dev
 on:
   push:
     branches:
-      - 'selfrun-v4/v4.0.2-dev1'
+      - 'selfrun-v4/v4.0.4-dev1'
   workflow_dispatch:
 
 permissions:
@@ -15,12 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_ARTIFACT: selfrun-v4-402-dev1-${{ github.run_id }}
+  BUILD_ARTIFACT: selfrun-v4-404-dev1-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  build-test-dev:
+  build-dev:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
       SELFRUN_FIREBASE_APPLICATION_ID: ${{ secrets.SELFRUN_FIREBASE_APPLICATION_ID }}
@@ -45,14 +45,14 @@ jobs:
           gradle-version: '9.5.0'
           cache-read-only: false
 
-      - name: Resolve 4.0.2-dev1 TEST identity
+      - name: Resolve 4.0.4-dev1 identities
         shell: bash
         run: |
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '4.0.2-dev1' ]]
-          [[ "$VERSION_CODE" == '4001002' ]]
+          [[ "$VERSION_NAME" == '4.0.4-dev1' ]]
+          [[ "$VERSION_CODE" == '4001004' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
           grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
@@ -71,26 +71,28 @@ jobs:
           set -euo pipefail
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:verifyDriveVariantIdentity \
+            :app:compileReleaseJavaWithJavac \
             :app:compileQaAppJavaWithJavac \
             :app:compileQaAppUnitTestJavaWithJavac \
             :app:compileQaAppAndroidTestJavaWithJavac
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             -PselfRunServerChecks=true :app:testQaAppUnitTest
 
-      - name: Build TEST qaApp APK only
+      - name: Build formal DEV and TEST APKs
         shell: bash
         run: |
           set -euo pipefail
-          gradle --build-cache --no-daemon --console=plain --stacktrace :app:assembleQaApp
+          gradle --build-cache --no-daemon --console=plain --stacktrace \
+            :app:assembleRelease :app:assembleQaApp :app:assembleQaAppAndroidTest
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          RAW="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -s "$RAW"
-          BADGING="$($BT/aapt dump badging "$RAW")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$BADGING"
-          grep -Fq "versionCode='${VERSION_CODE}'" <<<"$BADGING"
-          grep -Fq "versionName='${VERSION_NAME}'" <<<"$BADGING"
+          FORMAL_RAW=app/build/outputs/apk/release/app-release-unsigned.apk
+          TEST_RAW="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          ANDROID_TEST_RAW="$(find app/build/outputs/apk/androidTest -type f -name '*.apk' -print -quit)"
+          test -s "$FORMAL_RAW"; test -s "$TEST_RAW"; test -s "$ANDROID_TEST_RAW"
           mkdir -p release-output
-          "$BT/zipalign" -p -f 4 "$RAW" release-output/test-aligned.apk
+          "$BT/zipalign" -p -f 4 "$FORMAL_RAW" release-output/formal-aligned.apk
+          "$BT/zipalign" -p -f 4 "$TEST_RAW" release-output/test-aligned.apk
+          "$BT/zipalign" -p -f 4 "$ANDROID_TEST_RAW" release-output/androidTest-aligned.apk
 
       - name: Install signing dependencies
         shell: bash
@@ -100,47 +102,120 @@ jobs:
             --require-hashes --only-binary=:all: \
             -r tools/signing-requirements-linux-x86_64-py312.txt
 
-      - name: Sign and verify TEST APK
+      - name: Sign and verify exact DEV candidates
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
           test -n "$SIGNING_PASSPHRASE"
-          PASS_FILE="$RUNNER_TEMP/selfrun-v4-test-signing-pass"
+          PASS_FILE="$RUNNER_TEMP/selfrun-v4-dev-signing-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
 
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          APK="release-output/SelfRun-Drive-TEST-v${VERSION_NAME}.apk"
+          FORMAL="release-output/SelfRun-Drive-v${VERSION_NAME}.apk"
+          TEST="release-output/SelfRun-Drive-TEST-v${VERSION_NAME}.apk"
+          ANDROID_TEST="release-output/SelfRun-Drive-TEST-v${VERSION_NAME}-androidTest.apk"
+
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh \
+            release-output/formal-aligned.apk "$PASS_FILE" "$FORMAL" \
+            > release-output/FORMAL_APKSIGNER_VERIFY.txt
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh \
-            release-output/test-aligned.apk "$PASS_FILE" "$APK" \
-            > release-output/APKSIGNER_VERIFY.txt
+            release-output/test-aligned.apk "$PASS_FILE" "$TEST" \
+            > release-output/TEST_APKSIGNER_VERIFY.txt
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh \
+            release-output/androidTest-aligned.apk "$PASS_FILE" "$ANDROID_TEST" \
+            > release-output/ANDROIDTEST_APKSIGNER_VERIFY.txt
 
-          "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/CERT.txt
-          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' release-output/CERT.txt
-          BADGING="$($BT/aapt dump badging "$APK")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$BADGING"
-          grep -Fq "versionCode='${VERSION_CODE}'" <<<"$BADGING"
-          grep -Fq "versionName='${VERSION_NAME}'" <<<"$BADGING"
+          "$BT/apksigner" verify --verbose --print-certs "$FORMAL" > release-output/FORMAL_CERT.txt
+          "$BT/apksigner" verify --verbose --print-certs "$TEST" > release-output/TEST_CERT.txt
+          "$BT/apksigner" verify --verbose --print-certs "$ANDROID_TEST" > release-output/ANDROIDTEST_CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/FORMAL_CERT.txt
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' release-output/TEST_CERT.txt
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' release-output/ANDROIDTEST_CERT.txt
 
-          sha256sum "$APK" > release-output/SHA256SUMS.txt
+          FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL")"
+          TEST_BADGING="$($BT/aapt dump badging "$TEST")"
+          ANDROID_TEST_BADGING="$($BT/aapt dump badging "$ANDROID_TEST")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
+          grep -Fq "versionCode='${VERSION_CODE}'" <<<"$FORMAL_BADGING"
+          grep -Fq "versionName='${VERSION_NAME}'" <<<"$FORMAL_BADGING"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING"
+          grep -Fq "versionCode='${VERSION_CODE}'" <<<"$TEST_BADGING"
+          grep -Fq "versionName='${VERSION_NAME}'" <<<"$TEST_BADGING"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test.test'" <<<"$ANDROID_TEST_BADGING"
+
+          sha256sum "$FORMAL" > release-output/SHA256SUMS.txt
+          sha256sum "$TEST" "$ANDROID_TEST" > release-output/TEST_SHA256SUMS.txt
           printf '%s\n' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
-          printf 'package=com.shaterguy.chatgptselfrun.drive.test\nversionName=%s\nversionCode=%s\ncertificateSha256=2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e\n' \
+          printf 'package=com.shaterguy.chatgptselfrun.drive\nversionName=%s\nversionCode=%s\ncertificateSha256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe\n' \
             "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
 
-      - name: Upload SelfRun 4.0.2-dev1 TEST APK
+      - name: Prepare 4.0.3 upgrade baseline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p current stable
+          cp "release-output/SelfRun-Drive-v${VERSION_NAME}.apk" current/formal.apk
+          cp "release-output/SelfRun-Drive-TEST-v${VERSION_NAME}.apk" current/test.apk
+          cp "release-output/SelfRun-Drive-TEST-v${VERSION_NAME}-androidTest.apk" current/androidTest.apk
+          [[ "$(tr -d '[:space:]' < release-output/SOURCE_COMMIT.txt)" == "$GITHUB_SHA" ]]
+          gh release download drive-v4.0.3 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chatgpt-selfrun-drive-v4.0.3.apk' --dir stable
+          test -s stable/chatgpt-selfrun-drive-v4.0.3.apk
+          echo '4ecf855d666ef62c9c21ae750810eaba1dcd735a8b82f0611fe67965296778f8  stable/chatgpt-selfrun-drive-v4.0.3.apk' | sha256sum -c -
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v4.0.3.apk > stable/STABLE_CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable/STABLE_CERT.txt
+          STABLE_BADGING="$($BT/aapt dump badging stable/chatgpt-selfrun-drive-v4.0.3.apk)"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$STABLE_BADGING"
+          grep -Fq "versionCode='4001003'" <<<"$STABLE_BADGING"
+          grep -Fq "versionName='4.0.3'" <<<"$STABLE_BADGING"
+          printf 'BASE_VERSION_NAME=4.0.3\nBASE_VERSION_CODE=4001003\nFORMAL_VERSION_NAME=%s\nFORMAL_VERSION_CODE=%s\n' \
+            "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
+
+      - name: Enable hardware acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+
+      - name: Verify 4.0.3 to 4.0.4-dev1 update and TEST co-install
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: bash tools/verify_selfrun3_release_emulator.sh
+
+      - name: Upload SelfRun 4.0.4-dev1 DEV and TEST APKs
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: |
-            release-output/SelfRun-Drive-TEST-v4.0.2-dev1.apk
+            release-output/SelfRun-Drive-v4.0.4-dev1.apk
+            release-output/SelfRun-Drive-TEST-v4.0.4-dev1.apk
+            release-output/SelfRun-Drive-TEST-v4.0.4-dev1-androidTest.apk
             release-output/SHA256SUMS.txt
-            release-output/APKSIGNER_VERIFY.txt
-            release-output/CERT.txt
+            release-output/TEST_SHA256SUMS.txt
+            release-output/*APKSIGNER_VERIFY.txt
+            release-output/*CERT.txt
             release-output/SOURCE_COMMIT.txt
             release-output/IDENTITY.txt
+            stable/STABLE_CERT.txt
+            selfrun-v3-release-runtime-evidence.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

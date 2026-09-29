@@ -5,14 +5,16 @@ import android.content.Context;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import java.util.List;
+
+import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public final class WorkBootstrapPreferenceStoreAndroidTest {
@@ -34,29 +36,42 @@ public final class WorkBootstrapPreferenceStoreAndroidTest {
         ProfileRegistry.resetForTests();
     }
 
-    @Test public void firstLoadPreservesLegacySolXhighDefaultWhenAvailable() {
+    @Test public void firstLoadUsesCurrentCanonicalRegistryOnly() {
+        List<ProfileRegistry.Profile> profiles = ProfileRegistry.listWork();
+        assertFalse(profiles.isEmpty());
+        ProfileRegistry.Profile expected = profiles.get(0);
         WorkBootstrapPreferenceStore.Selection selected = WorkBootstrapPreferenceStore.load(context);
-        assertEquals("sol", selected.model);
-        assertEquals("xhigh", selected.reasoning);
+        assertEquals(expected.signalModel, selected.model);
+        assertEquals(expected.signalReasoning, selected.reasoning);
         assertTrue(selected.valid());
     }
 
     @Test public void mostRecentlySavedValidPairIsRestored() {
-        assertTrue(WorkBootstrapPreferenceStore.save(context, "terra", "max"));
+        List<ProfileRegistry.Profile> profiles = ProfileRegistry.listWork();
+        assertTrue(profiles.size() >= 2);
+        ProfileRegistry.Profile expected = profiles.get(profiles.size() - 1);
+        assertTrue(WorkBootstrapPreferenceStore.save(context, expected.signalModel, expected.signalReasoning));
         WorkBootstrapPreferenceStore.Selection selected = WorkBootstrapPreferenceStore.load(context);
-        assertEquals("terra", selected.model);
-        assertEquals("max", selected.reasoning);
+        assertEquals(expected.signalModel, selected.model);
+        assertEquals(expected.signalReasoning, selected.reasoning);
         assertTrue(selected.valid());
     }
 
-    @Test public void deletedSavedProfileFallsBackToAnotherValidRegistryPair() {
-        ProfileRegistry.Profile saved = ProfileRegistry.resolveWork("sol", "max");
-        assertNotNull(saved);
+    @Test public void removedSavedProfileFallsBackOnlyWithinLatestRegistry() throws Exception {
+        List<ProfileRegistry.Profile> current = ProfileRegistry.listWork();
+        assertTrue(current.size() >= 2);
+        ProfileRegistry.Profile saved = current.get(0);
         assertTrue(WorkBootstrapPreferenceStore.save(context, saved.signalModel, saved.signalReasoning));
-        assertTrue(ProfileRegistry.delete(saved.fingerprint));
+
+        JSONObject root = new JSONObject(ProfileRegistry.exportWorkJson("test"));
+        JSONArray profiles = root.getJSONArray("profiles");
+        profiles.remove(0);
+        ProfileRegistry.replaceCanonicalSnapshot(ProfileRegistry.Mode.WORK, root.toString(), "version-removed");
+        assertNull(ProfileRegistry.resolveWork(saved.signalModel, saved.signalReasoning));
 
         WorkBootstrapPreferenceStore.Selection selected = WorkBootstrapPreferenceStore.load(context);
         assertTrue(selected.valid());
+        assertNotEquals(saved.signalModel + "|" + saved.signalReasoning, selected.model + "|" + selected.reasoning);
         assertNotNull(ProfileRegistry.resolveWork(selected.model, selected.reasoning));
     }
 }
