@@ -58,7 +58,7 @@ public final class ProfileRegistryActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (captureMode == null) renderRegistry();
+        refreshRegistry();
     }
 
     @Override protected void onDestroy() {
@@ -74,8 +74,7 @@ public final class ProfileRegistryActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         LinearLayout page = Ui.page(this);
-        page.addView(Ui.toolbar(this, "모델 조합",
-                Ui.iconButton(this, R.drawable.ic_more_vert, "조합 관리", v -> showTransferMenu(v))));
+        page.addView(Ui.toolbar(this, "모델 조합",\n                Ui.textButton(this, "새로고침", v -> refreshRegistry())));
         status = Ui.body(this, "");
         page.addView(status);
         registryScroll = new ScrollView(this);
@@ -86,7 +85,6 @@ public final class ProfileRegistryActivity extends Activity {
         tabs.addTab(tabs.newTab().setText("일반 채팅"));
         tabs.addTab(tabs.newTab().setText("워크"));
         content.addView(tabs);
-        content.addView(Ui.textButton(this, "조합 등록", v -> startCapture(selectedMode)));
         chatList = new LinearLayout(this);
         chatList.setOrientation(LinearLayout.VERTICAL);
         workList = new LinearLayout(this);
@@ -138,6 +136,15 @@ public final class ProfileRegistryActivity extends Activity {
         webView.loadUrl(SelfRunScript.GENERAL_CHAT_URL);
     }
 
+    private void refreshRegistry() {
+        if (status != null) {
+            status.setVisibility(View.VISIBLE);
+            status.setText("최신 모델 조합을 확인하는 중입니다.");
+        }
+        ProfileRegistryRefresher.refresh(this,
+                (changed, error) -> runOnUiThread(this::renderRegistry));
+    }
+
     private void renderRegistry() {
         if (chatList == null || workList == null) return;
         chatList.removeAllViews();
@@ -146,8 +153,13 @@ public final class ProfileRegistryActivity extends Activity {
         for (ProfileRegistry.Profile profile : ProfileRegistry.listWork()) addProfile(workList, profile);
         if (ProfileRegistry.listChat().isEmpty()) chatList.addView(Ui.muted(this, "등록된 조합이 없습니다."));
         if (ProfileRegistry.listWork().isEmpty()) workList.addView(Ui.muted(this, "등록된 조합이 없습니다."));
-        status.setText(ProfileRegistry.storageHealthy() ? "" : "저장된 모델 조합을 읽을 수 없습니다.");
-        status.setVisibility(ProfileRegistry.storageHealthy() ? View.GONE : View.VISIBLE);
+        ProfileRegistry.SnapshotInfo chat = ProfileRegistry.snapshotInfo(ProfileRegistry.Mode.CHAT);
+        ProfileRegistry.SnapshotInfo work = ProfileRegistry.snapshotInfo(ProfileRegistry.Mode.WORK);
+        String registryStatus = "Drive 기준 · 일반 채팅 " + chat.count + "개 · 워크 " + work.count + "개";
+        if (!ProfileRegistry.storageHealthy()) registryStatus += "\n저장된 정상 목록 일부를 읽지 못했습니다.";
+        else if (!ProfileRegistry.lastRefreshError().isEmpty()) registryStatus += "\n최신 확인에 실패해 기존 정상 목록을 유지하고 있습니다.";
+        status.setText(registryStatus);
+        status.setVisibility(View.VISIBLE);
     }
 
     private void addProfile(LinearLayout list, ProfileRegistry.Profile profile) {
@@ -162,8 +174,7 @@ public final class ProfileRegistryActivity extends Activity {
                 : "REASONING=" + profile.signalReasoning;
         new AlertDialog.Builder(this).setTitle(profile.displayLabel())
                 .setMessage(signal + "\n\n" + profile.actualCombination())
-                .setPositiveButton("닫기", null)
-                .setNeutralButton("삭제", (dialog, which) -> confirmDelete(profile)).show();
+                .setPositiveButton("닫기", null).show();
     }
 
     private void showTransferMenu(View anchor) {
