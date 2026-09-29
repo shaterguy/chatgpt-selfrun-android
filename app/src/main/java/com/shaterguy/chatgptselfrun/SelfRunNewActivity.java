@@ -544,7 +544,17 @@ public final class SelfRunNewActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        ProfileRegistryRefresher.refresh(this, null);
+        ProfileRegistryRefresher.refresh(this, (changed, error) -> {
+            if (!changed) return;
+            runOnUiThread(() -> {
+                if (chatReasoning != null) refreshChatReasoningOptions(selectedChatReasoning());
+                if (workBootstrapProfile != null) {
+                    WorkBootstrapPreferenceStore.Selection fallback = WorkBootstrapPreferenceStore.load(this);
+                    refreshWorkBootstrapOptions(fallback.model, fallback.reasoning);
+                }
+                updateChatReasoningAvailability();
+            });
+        });
         if (chatReasoning != null) refreshChatReasoningOptions(selectedChatReasoning());
 
         if (workBootstrapProfile != null) {
