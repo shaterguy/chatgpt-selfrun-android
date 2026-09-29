@@ -33,6 +33,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     static final String PHASE_DISPATCHING = "V3_DISPATCHING";
     static final String PHASE_WAITING = "V3_WAITING";
     static final String PHASE_RECONCILING = "V3_RECONCILING";
+    private static final long STOP_CONTROL_RETRY_MS = 2_000L;
 
     private final Service service;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -91,11 +92,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         return SelfRun3RunMarker.current(service, store.runId());
     }
 
-    void onStoppedResumeAuthorized(String token, SelfRun3Engine.State snapshot) {
+    void onStoppedResumeAuthorized(String token) {
         requireMain();
         setAccessToken(token);
         web.restoreAccessToken(token);
-        web.publishControlState(snapshot, "RESUME_STOPPED_REQUESTED", "USER_RESUME_STOPPED");
     }
 
     int onStart(String action) {
@@ -1492,29 +1492,56 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         epoch++;
         cancelServerWaitState();
         main.removeCallbacksAndMessages(null);
-        web.publishControlState("STOPPED", "USER_STOP");
+        preparingRequest = "";
         web.quiesce();
         releaseWakeLock();
         int expectedEpoch = epoch;
         String task = store.runId();
-        io.execute(() -> {
-            try {
-                SelfRun3Engine.State state = ledger.load(task);
-                if (state != null && !state.terminal()) {
-                    ledger.apply(event(state, task + ":stop:" + UUID.randomUUID(),
-                            SelfRun3Engine.Kind.STOP, new JSONObject()));
-                }
-            } catch (Throwable ignored) {
-                // A user stop wins even when the preserved ledger cannot be read.
+        web.publishControlStateConfirmed("STOPPED", "USER_STOP",
+                new SelfRun4DriveWebAdapter.ControlWriteCallback() {
+                    @Override public void onConfirmed() {
+                        onStopControlResult(task, expectedEpoch, null);
+                    }
+                    @Override public void onFailure(Throwable error) {
+                        onStopControlResult(task, expectedEpoch, error);
+                    }
+                });
+    }
+
+    private void onStopControlResult(String task, int expectedEpoch, Throwable error) {
+        requireMain();
+        if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+        if (error != null) {
+            log.record(store, "V3_STOP_CONTROL_RETRY", "error=" + error.getClass().getSimpleName());
+            main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);
+            return;
+        }
+        finalizeConfirmedStop(task, expectedEpoch);
+    }
+
+    private void finalizeConfirmedStop(String task, int expectedEpoch) {
+        requireMain();
+        io.execute(() -> finalizeStopLedger(task, expectedEpoch));
+    }
+
+    private void finalizeStopLedger(String task, int expectedEpoch) {
+        try {
+            SelfRun3Engine.State state = ledger.load(task);
+            if (state != null && !state.terminal()) {
+                ledger.apply(event(state, task + ":stop:" + UUID.randomUUID(),
+                        SelfRun3Engine.Kind.STOP, new JSONObject()));
             }
-            main.post(() -> {
-                if (!validEpoch(expectedEpoch)) return;
-                store.stopByUser();
-                log.record(store, "V3_STOP", "user_stop");
-                SelfRunDebugLogSync.requestStored(service, task, "STOP");
-                service.stopSelf();
-            });
-        });
+        } catch (Throwable ignored) { }
+        main.post(() -> finishLocalStop(task, expectedEpoch));
+    }
+
+    private void finishLocalStop(String task, int expectedEpoch) {
+        requireMain();
+        if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+        store.stopByUser();
+        log.record(store, "V3_STOP", "user_stop_control_confirmed");
+        SelfRunDebugLogSync.requestStored(service, task, "STOP");
+        service.stopSelf();
     }
 
     private void cancelServerWaitState() {

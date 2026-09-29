@@ -2,6 +2,7 @@ import { appendTurnStartDirective } from './prompt-directives.mjs';
 
 const DISPATCH_SCHEMA = 'selfrun-server-dispatch-v1';
 const CONTROL_SCHEMA = 'selfrun-task-control-v1';
+const CONTROL_PREFIX = '__SELFRUN_CONTROL__';
 const CONTROL_STATES = new Set([
   'RUNNING', 'WAITING_USER_INTERVENTION', 'PAUSED', 'STOPPED',
   'RESUME_REQUESTED', 'RESUME_STOPPED_REQUESTED', 'DONE',
@@ -99,6 +100,30 @@ export class DriveDispatchController {
 
   controlForTask(taskId) {
     return this.controls.get(clean(taskId)) || null;
+  }
+
+  async #readFreshTaskControl(taskId, transport) {
+    const normalizedTaskId = clean(taskId);
+    if (!normalizedTaskId || typeof transport?.read !== 'function') {
+      throw new Error('fresh task control unavailable');
+    }
+    const path = `${CONTROL_PREFIX}${normalizedTaskId}.json`;
+    const control = validateControl(await transport.read(path));
+    if (control.task_id !== normalizedTaskId) throw new Error('fresh task control task mismatch');
+    const previous = this.controls.get(normalizedTaskId);
+    if (previous && control.control_epoch < previous.control_epoch) {
+      throw new Error('fresh task control epoch regressed');
+    }
+    await this.control(path, control, transport, { allowResume: false });
+    return control;
+  }
+
+  async #freshRunningControlForDispatch(body, transport) {
+    const control = await this.#readFreshTaskControl(body?.task_id, transport);
+    if (clean(control.state) !== 'RUNNING') return null;
+    if (clean(control.turn_id) !== clean(body?.turn_id)
+        || clean(control.request_id) !== clean(body?.request_id)) return null;
+    return control;
   }
 
   async quiesceForStandby() {
@@ -288,7 +313,7 @@ export class DriveDispatchController {
     }
   }
 
-  async #recoverPreparedSend(active, body, error) {
+  async #recoverPreparedSend(active, body, error, transport) {
     if (!this.#retryablePreparedSendError(error)
         || active.sendRecoveryAttempted
         || active.abortController.signal.aborted) {
@@ -302,6 +327,11 @@ export class DriveDispatchController {
       if (active.abortController.signal.aborted) {
         throw active.abortController.signal.reason || new Error('aborted');
       }
+      const control = await this.#freshRunningControlForDispatch(body, transport);
+      if (!control) return null;
+      active.controlState = control.state;
+      active.controlEpoch = control.control_epoch;
+      active.controlUpdatedAtMs = Number(control.updated_at_ms || Date.now());
 
       const observed = await this.#inspectPreparedTargetConversation(active);
       if (!observed.inspected) throw error;
@@ -401,10 +431,10 @@ export class DriveDispatchController {
     await this.#syncActiveSummary();
   }
 
-  async control(path, rawBody, transport) {
+  async control(path, rawBody, transport, { allowResume = true } = {}) {
     const control = validateControl(rawBody);
     const previous = this.controls.get(control.task_id);
-    if (previous && control.control_epoch <= previous.control_epoch) return;
+    if (previous && control.control_epoch < previous.control_epoch) return;
     this.controls.set(control.task_id, { ...control, path });
 
     const matches = this.activeDispatches()
@@ -439,8 +469,12 @@ export class DriveDispatchController {
     }
 
     if (control.state === 'STOPPED' || control.state === 'DONE') {
+      for (const [pendingPath, pending] of this.pendingPrepares.entries()) {
+        if (pending.identity.taskId !== control.task_id) continue;
+        pending.abortController.abort(new Error(`task control ${control.state.toLowerCase()}`));
+        this.pendingPrepares.delete(pendingPath);
+      }
       for (const active of matches) await this.#closeActive(active);
-      this.controls.delete(control.task_id);
       return;
     }
 
@@ -448,19 +482,22 @@ export class DriveDispatchController {
       (active) => active.identity.turnId === clean(control.turn_id)
         && active.identity.requestId === clean(control.request_id),
     );
-    if (control.state === 'RUNNING' && !exactActive && transport) {
+    if (allowResume && control.state === 'RUNNING' && !exactActive && transport) {
       await this.#resumeFromControl(control, transport);
     }
   }
 
   async retryResumeFromControl(rawControl, transport) {
-    const control = validateControl(rawControl);
+    const requested = validateControl(rawControl);
+    const control = await this.#readFreshTaskControl(requested.task_id, transport);
     if (control.state !== 'RUNNING') return;
     await this.#resumeFromControl(control, transport);
   }
 
   async #resumeFromControl(control, transport) {
     if (typeof transport?.list !== 'function' || typeof transport?.read !== 'function') return;
+    control = await this.#readFreshTaskControl(control.task_id, transport);
+    if (control.state !== 'RUNNING') return;
     const files = await transport.list();
     const candidates = [];
     const dispatchPrefix = `__SELFRUN_DISPATCH__${clean(control.request_id)}__A`;
@@ -511,9 +548,6 @@ export class DriveDispatchController {
         request_id: clean(control.request_id),
         result_status: clean(resultCheck.resultStatus) || null,
       }, this.#dispatchEventContext(body));
-      if (clean(resultCheck.resultStatus) === 'DONE') {
-        this.controls.delete(control.task_id);
-      }
       return;
     }
 
@@ -696,6 +730,8 @@ export class DriveDispatchController {
     const browserSlot = this.#reserveBrowserOpenSlot();
     try {
       await browserSlot.wait();
+      const freshControl = await this.#freshRunningControlForDispatch(body, transport);
+      if (!freshControl) return;
       await this.#supersede(path, body, transport);
       const generation = this.stateStore.snapshot().generation + 1;
     const abortController = new AbortController();
@@ -736,7 +772,7 @@ export class DriveDispatchController {
       if (abortController.signal.aborted) {
         throw abortController.signal.reason || new Error('superseded');
       }
-      const control = this.controls.get(identity.taskId);
+      const control = freshControl;
       const controlEpoch = Math.max(0, Number(control?.control_epoch || 0));
       const previousControlEpoch = Math.max(0, Number(body.server_control_epoch || 0));
       const continuationEpoch = Math.max(0, Number(body.resume_continuation_control_epoch || 0));
@@ -896,6 +932,8 @@ export class DriveDispatchController {
       return;
     }
     if (clean(body.client_status) !== 'SEND_REQUESTED') return;
+    const freshControl = await this.#freshRunningControlForDispatch(body, transport);
+    if (!freshControl) return;
 
     try {
       let probe;
@@ -906,8 +944,9 @@ export class DriveDispatchController {
           signal: active.abortController.signal,
         });
       } catch (error) {
-        probe = await this.#recoverPreparedSend(active, body, error);
+        probe = await this.#recoverPreparedSend(active, body, error, transport);
       }
+      if (!probe) return;
       const conversationUrl = canonicalConversationUrl(probe.url);
       if (!conversationUrl) throw new Error('canonical conversation URL unavailable');
 
@@ -1148,9 +1187,6 @@ export class DriveDispatchController {
                 'RESULT_COMMITTED_SUPPRESSED_RECOVERY',
               );
               await this.#closeActive(active);
-              if (clean(resultCheck.resultStatus) === 'DONE') {
-                this.controls.delete(active.identity.taskId);
-              }
               return;
             }
 
@@ -1346,11 +1382,21 @@ export class DriveDispatchController {
       return;
     } catch (error) {
       if (!this.#isActive(active)) return;
+      const scheduleRetry = clean(active.controlState) === 'RUNNING'
+        && Boolean(canonicalConversationUrl(active.body?.conversation_url));
+      const retryCount = scheduleRetry
+        ? Math.max(0, Number(active.body?.resume_retry_count || 0)) + 1
+        : Math.max(0, Number(active.body?.resume_retry_count || 0));
+      const retryAtMs = scheduleRetry
+        ? Date.now() + Math.max(5000, Number(this.config.resumeRetryMs || 30000))
+        : 0;
       active.serverStatus = 'ERROR';
       active.body = {
         ...active.body,
         server_status: 'ERROR',
         server_error: String(error?.message || error).slice(0, 500),
+        resume_retry_count: retryCount,
+        resume_retry_at_ms: retryAtMs,
         updated_at_ms: Date.now(),
       };
       try {

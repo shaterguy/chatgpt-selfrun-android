@@ -277,6 +277,7 @@ test('monitor error evicts active bookkeeping while preserving conversation targ
   const writes = [];
   const transport = {
     write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
+    read: async () => control(),
   };
 
   await controller.control('control-hotfix.json', control());
@@ -379,7 +380,11 @@ test('prepared send Runtime.evaluate timeout recovers with a fresh target once',
     stateStore,
     config: { recoveryPrompt: 'continue', browserIdleRecycleMs: 0, browserIdleRssMb: 0 },
   });
-  const transport = { write: async (_path, body) => writes.push(structuredClone(body)) };
+  const currentControl = control({ conversation_url: '' });
+  const transport = {
+    read: async () => structuredClone(currentControl),
+    write: async (_path, body) => writes.push(structuredClone(body)),
+  };
   const initial = dispatch({
     client_status: 'CREATE_REQUESTED',
     server_status: 'PREPARING',
@@ -452,7 +457,11 @@ test('prepared send timeout adopts an already-created conversation without resen
     stateStore,
     config: { recoveryPrompt: 'continue', browserIdleRecycleMs: 0, browserIdleRssMb: 0 },
   });
-  const transport = { write: async (_path, body) => writes.push(structuredClone(body)) };
+  const currentControl = control({ conversation_url: '' });
+  const transport = {
+    read: async () => structuredClone(currentControl),
+    write: async (_path, body) => writes.push(structuredClone(body)),
+  };
   const initial = dispatch({
     client_status: 'CREATE_REQUESTED',
     server_status: 'PREPARING',

@@ -495,3 +495,51 @@ test('prepared dispatch reads only its exact file and sends without waiting for 
   assert.equal(readCalls, 1);
   assert.equal(listCalls, 0);
 });
+
+test('watcher creates a durable retry for RUNNING errored dispatch missing retry_at', async () => {
+  const realNow = Date.now;
+  let now = 1_900_000_000_000;
+  Date.now = () => now;
+  try {
+    const taskId = 'SR-MISSING-RETRY';
+    const controlPath = '__SELFRUN_CONTROL__' + taskId + '.json';
+    const dispatchPath = '__SELFRUN_DISPATCH__SR-MISSING-RETRY:turn:1-request__A1.json';
+    const controlBody = {
+      schema: 'selfrun-task-control-v1', task_id: taskId, control_epoch: 2,
+      state: 'RUNNING', turn_id: taskId + ':turn:1',
+      request_id: taskId + ':turn:1-request', updated_at_ms: now,
+    };
+    let dispatchBody = {
+      schema: 'selfrun-server-dispatch-v1', task_id: taskId,
+      turn_id: taskId + ':turn:1', request_id: taskId + ':turn:1-request',
+      client_status: 'SEND_REQUESTED', server_status: 'ERROR',
+      conversation_url: 'https://chatgpt.com/c/missing-retry-at', updated_at_ms: now,
+    };
+    let retries = 0;
+    const transport = {
+      list: async () => [
+        { path: controlPath, modTime: '2026-09-29T00:00:00Z', size: 20 },
+        { path: dispatchPath, modTime: '2026-09-29T00:00:01Z', size: 30 },
+      ],
+      read: async (path) => structuredClone(path === controlPath ? controlBody : dispatchBody),
+      write: async (path, body) => { if (path === dispatchPath) dispatchBody = structuredClone(body); },
+    };
+    const controller = {
+      control: async () => {},
+      retryResumeFromControl: async () => { retries += 1; },
+      controlForTask: () => controlBody,
+    };
+    const watcher = new DriveDispatchWatcher({
+      transport, controller,
+      config: { drivePollMs: 5000, dispatchFreshMs: 600000, resumeRetryMs: 30000 },
+    });
+    await watcher.scanOnce();
+    assert.ok(dispatchBody.resume_retry_at_ms >= now + 30000);
+    assert.equal(retries, 0);
+    now = dispatchBody.resume_retry_at_ms;
+    await watcher.scanOnce();
+    assert.equal(retries, 1);
+  } finally {
+    Date.now = realNow;
+  }
+});

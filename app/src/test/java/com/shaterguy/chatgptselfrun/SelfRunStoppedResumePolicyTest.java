@@ -27,6 +27,14 @@ public final class SelfRunStoppedResumePolicyTest {
         assertFalse(resume.contains("STOPPED_STATE_REQUIRED"));
     }
 
+    @Test public void stoppedRestartRemainsInternalAndDoesNotInjectRecoveryPrompt() throws Exception {
+        String engine = src("SelfRun3Engine.java");
+        String protocol = src("SelfRun3Protocol.java");
+        assertTrue(engine.contains("put(v,\"stoppedRestart\",true)"));
+        assertFalse(protocol.contains("s.flag(\"stoppedRestart\")"));
+        assertFalse(protocol.contains("[완전 중지 후 동일 턴 재시작]"));
+    }
+
     @Test public void historyOnlyOffersUserStoppedResumeAndServiceOwnsRecovery() throws Exception {
         String history = src("SelfRunHistoryActivity.java");
         String detail = src("SelfRunDetailActivity.java");

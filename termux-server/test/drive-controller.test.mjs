@@ -40,6 +40,27 @@ function dispatch(overrides = {}) {
   };
 }
 
+function transportWithControl(base = {}, controller = null, controlOverrides = {}) {
+  const baseRead = base.read;
+  return {
+    ...base,
+    read: async (path) => {
+      if (String(path).startsWith('__SELFRUN_CONTROL__')) {
+        const taskId = String(path).slice('__SELFRUN_CONTROL__'.length, -'.json'.length);
+        const cached = controller?.controlForTask?.(taskId);
+        if (cached) return structuredClone(cached);
+        if (typeof baseRead === 'function') {
+          const candidate = await baseRead(path);
+          if (candidate?.task_id) return control({ task_id: candidate.task_id, turn_id: candidate.turn_id, request_id: candidate.request_id, control_epoch: Number(candidate.server_control_epoch || 1), ...controlOverrides });
+        }
+        return structuredClone(control({ task_id: taskId, ...controlOverrides }));
+      }
+      if (typeof baseRead === 'function') return baseRead(path);
+      throw new Error('unexpected transport read');
+    },
+  };
+}
+
 class MemoryStateStore {
   constructor() {
     this.value = { generation: 0, lastSignalId: null };
@@ -98,10 +119,11 @@ test('Drive dispatch preserves app claim boundary before browser send', async ()
   });
   const transport = {
     write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
+    read: async () => control(),
   };
 
   const body = dispatch();
-  await controller.prepare('job/dispatch.json', body, transport);
+  await controller.prepare('job/dispatch.json', body, transportWithControl(transport, controller));
   assert.equal(preparedPrompt,
     'TASK_ID=SR-TEST\n\n[SelfRun 서버 실행 지시]\nSERVER START DIRECTIVE');
   assert.equal(writes.at(-1).body.prompt, 'TASK_ID=SR-TEST');
@@ -112,7 +134,7 @@ test('Drive dispatch preserves app claim boundary before browser send', async ()
     client_status: 'SEND_REQUESTED',
     server_status: 'READY_TO_SUBMIT',
   });
-  await controller.send('job/dispatch.json', claimed, transport);
+  await controller.send('job/dispatch.json', claimed, transportWithControl(transport, controller));
   assert.equal(submitCalls, 1);
   assert.equal(writes.at(-1).body.server_status, 'STARTED');
   assert.equal(stateStore.snapshot().activeDispatches?.[0]?.server_status, 'STARTED');
@@ -141,6 +163,7 @@ test('Drive dispatch resumes an existing conversation without resending the prom
       submitCalls += 1;
       throw new Error('must not resend');
     },
+    sendContinuation: async () => ({ userCount: 1, userTextLength: 10, userMessageId: 'resume-user' }),
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -151,6 +174,7 @@ test('Drive dispatch resumes an existing conversation without resending the prom
   });
   const transport = {
     write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
+    read: async () => control(),
   };
   const body = dispatch({
     client_status: 'SEND_REQUESTED',
@@ -158,7 +182,7 @@ test('Drive dispatch resumes an existing conversation without resending the prom
     conversation_url: 'https://chatgpt.com/c/6ab65275-7f9c-83e8-8a58-0e02ce714138',
   });
 
-  await controller.resume('job/resume.json', body, transport);
+  await controller.resume('job/resume.json', body, transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 1);
   assert.equal(submitCalls, 0);
@@ -201,7 +225,7 @@ test('resume continuation uses the server-managed continue directive', async () 
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/dynamic-resume',
-  }), transport);
+  }), transportWithControl(transport, controller));
   assert.equal(continuationPrompt, 'dynamic continue');
 });
 
@@ -231,7 +255,7 @@ test('Task CONTROL applies only increasing epochs and STOPPED closes the active 
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/abc-123',
-  }), transport);
+  }), transportWithControl(transport, controller));
   assert.equal(controller.active.controlState, 'RUNNING');
   assert.equal(controller.active.controlEpoch, 2);
 
@@ -245,12 +269,13 @@ test('Task CONTROL applies only increasing epochs and STOPPED closes the active 
 
   await controller.control('__SELFRUN_CONTROL__SR-TEST.json', control({ control_epoch: 4, state: 'STOPPED' }));
   assert.equal(controller.active, null);
-  assert.equal(controller.controls.has('SR-TEST'), false);
+  assert.equal(controller.controls.has('SR-TEST'), true);
+  assert.equal(controller.controlForTask('SR-TEST')?.state, 'STOPPED');
   assert.equal(sessionClosed, 1);
   assert.equal(targetClosed, 1);
 });
 
-test('terminal CONTROL states are evicted immediately from the in-memory control cache', async () => {
+test('terminal CONTROL states remain authoritative in the in-memory control cache', async () => {
   const controller = new DriveDispatchController({
     browser: {
       chromium: { closeTarget: async () => true },
@@ -268,8 +293,8 @@ test('terminal CONTROL states are evicted immediately from the in-memory control
       control_epoch: 10,
       state,
     }));
-    assert.equal(controller.controls.has(`SR-${state}`), false, state);
-    assert.equal(controller.controlForTask(`SR-${state}`), null, state);
+    assert.equal(controller.controls.has(`SR-${state}`), true, state);
+    assert.equal(controller.controlForTask(`SR-${state}`)?.state, state);
   }
 });
 
@@ -286,6 +311,7 @@ test('Drive resume retries publication without reopening the conversation', asyn
         baseline: { assistantCount: 0, assistantTextLength: 0 },
       };
     },
+    sendContinuation: async () => ({ userCount: 1, userTextLength: 10, userMessageId: 'resume-retry-user' }),
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -306,11 +332,11 @@ test('Drive resume retries publication without reopening the conversation', asyn
     conversation_url: 'https://chatgpt.com/c/6ab65275-7f9c-83e8-8a58-0e02ce714138',
   });
 
-  await assert.rejects(controller.resume('job/resume-retry.json', body, transport), /Drive quota/);
+  await assert.rejects(controller.resume('job/resume-retry.json', body, transportWithControl(transport, controller)), /Drive quota/);
   assert.equal(controller.active.publishPending, true);
   assert.equal(stateStore.snapshot().status, 'RUNNING');
 
-  await controller.resume('job/resume-retry.json', body, transport);
+  await controller.resume('job/resume-retry.json', body, transportWithControl(transport, controller));
   assert.equal(resumeCalls, 1);
   assert.equal(writeCalls, 2);
   assert.equal(controller.active.publishPending, false);
@@ -338,11 +364,11 @@ test('Drive dispatch rejects the local-chatgpt placeholder as a conversation URL
     write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
   };
 
-  await controller.prepare('job/placeholder.json', dispatch(), transport);
+  await controller.prepare('job/placeholder.json', dispatch(), transportWithControl(transport, controller));
   await controller.send('job/placeholder.json', dispatch({
     client_status: 'SEND_REQUESTED',
     server_status: 'READY_TO_SUBMIT',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(writes.at(-1).body.server_status, 'ERROR');
   assert.match(writes.at(-1).body.server_error, /canonical conversation URL unavailable/);
@@ -427,7 +453,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/abc-123',
     result_document_id: 'RESULT-DOC',
-  }), transport);
+  }), transportWithControl(transport, controller));
   const action = await activityDone;
   return {
     action,
@@ -471,49 +497,80 @@ test('liveness recovery retries Result lookup failures without erasing stall age
   assert.equal(decision?.details.reset_liveness, false);
 });
 
-test('UNKNOWN control suppresses recovery by default', async () => {
-  const run = await startStalledResume({
-    controlState: null,
-    resultText: '{"committed":false}',
-    snapshot: stalledActivity(),
+test('missing Task Control blocks resume before browser reattachment', async () => {
+  let resumeCalls = 0;
+  const controller = new DriveDispatchController({
+    browser: {
+      chromium: { closeTarget: async () => true },
+      resume: async () => { resumeCalls += 1; throw new Error('browser must not open'); },
+    },
+    stateStore: new MemoryStateStore(),
+    config: { recoveryPrompt: 'continue' },
   });
-  assert.equal(run.action?.resetLiveness, true);
-  assert.equal(run.resultReadCalls(), 0);
-  assert.equal(run.snapshotCalls(), 0);
-  assert.equal(run.sendCalls(), 0);
+  const transport = { write: async () => {} };
+  await assert.rejects(
+    controller.resume('job/missing-control.json', dispatch({
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      conversation_url: 'https://chatgpt.com/c/missing-control',
+    }), transport),
+    /fresh task control unavailable/,
+  );
+  assert.equal(resumeCalls, 0);
 });
 
-test('UNKNOWN control can be temporarily allowed for legacy app compatibility', async () => {
-  const current = stalledActivity();
-  const run = await startStalledResume({
-    controlState: null,
-    allowUnknownControlRecovery: true,
-    resultText: '{"committed":false}',
-    snapshot: current,
-    activity: current,
+test('legacy unknown-control option cannot bypass fresh Task Control authority', async () => {
+  let resumeCalls = 0;
+  const controller = new DriveDispatchController({
+    browser: {
+      chromium: { closeTarget: async () => true },
+      resume: async () => { resumeCalls += 1; throw new Error('browser must not open'); },
+    },
+    stateStore: new MemoryStateStore(),
+    config: { recoveryPrompt: 'continue', allowUnknownControlRecovery: true },
   });
-  assert.equal(run.resultReadCalls(), 1);
-  assert.equal(run.snapshotCalls(), 1);
-  assert.equal(run.sendCalls(), 1);
-  assert.equal(run.lastPrompt(), '현재 턴에 할당된 잔여작업이 있으면 계속 수행해');
+  const transport = { write: async () => {} };
+  await assert.rejects(
+    controller.resume('job/legacy-missing-control.json', dispatch({
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      conversation_url: 'https://chatgpt.com/c/legacy-missing-control',
+    }), transport),
+    /fresh task control unavailable/,
+  );
+  assert.equal(resumeCalls, 0);
 });
 
-test('non-RUNNING task CONTROL states suppress liveness recovery before Result inspection', async () => {
+test('non-RUNNING Task Control blocks browser reattachment before Result inspection', async () => {
   for (const controlState of [
     'WAITING_USER_INTERVENTION',
     'PAUSED',
     'RESUME_REQUESTED',
     'RESUME_STOPPED_REQUESTED',
   ]) {
-    const run = await startStalledResume({
-      controlState,
-      resultText: '{"committed":false}',
-      snapshot: stalledActivity(),
+    let resumeCalls = 0;
+    let resultReadCalls = 0;
+    const controller = new DriveDispatchController({
+      browser: {
+        chromium: { closeTarget: async () => true },
+        resume: async () => { resumeCalls += 1; throw new Error('browser must not open'); },
+      },
+      stateStore: new MemoryStateStore(),
+      config: { recoveryPrompt: 'continue' },
     });
-    assert.equal(run.action?.resetLiveness, true, controlState);
-    assert.equal(run.resultReadCalls(), 0, controlState);
-    assert.equal(run.snapshotCalls(), 0, controlState);
-    assert.equal(run.sendCalls(), 0, controlState);
+    await controller.control('__SELFRUN_CONTROL__SR-TEST.json', control({ state: controlState }));
+    const transport = {
+      write: async () => {},
+      readGoogleDocText: async () => { resultReadCalls += 1; return '{"committed":false}'; },
+    };
+    await controller.resume('job/non-running-control.json', dispatch({
+      client_status: 'SEND_REQUESTED',
+      server_status: 'STARTED',
+      conversation_url: 'https://chatgpt.com/c/non-running-control',
+      result_document_id: 'RESULT-NON-RUNNING',
+    }), transportWithControl(transport, controller));
+    assert.equal(resumeCalls, 0, controlState);
+    assert.equal(resultReadCalls, 0, controlState);
   }
 });
 
@@ -826,7 +883,7 @@ test('parallel Drive dispatches stay active independently and STOPPED only close
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/parallel-a',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   await controller.control('control-b.json', control({
     task_id: 'SR-B',
@@ -841,7 +898,7 @@ test('parallel Drive dispatches stay active independently and STOPPED only close
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/parallel-b',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 2);
   assert.equal(controller.activeDispatches().length, 2);
@@ -855,7 +912,7 @@ test('parallel Drive dispatches stay active independently and STOPPED only close
     request_id: 'SR-A:turn:1-request',
     control_epoch: 2,
     state: 'STOPPED',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(controller.getActive('job/a.json'), null);
   assert.ok(controller.getActive('job/b.json'));
@@ -904,7 +961,7 @@ test('parallel monitor event keeps its own task identity after another task beco
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/parallel-event-a',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   await controller.control('control-event-b.json', control({
     task_id: 'SR-EVENT-B',
@@ -919,7 +976,7 @@ test('parallel monitor event keeps its own task identity after another task beco
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/parallel-event-b',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(controller.activeDispatches().length, 2);
   assert.ok(monitorResolvers.has('a'));
@@ -1013,8 +1070,9 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
     request_id: 'SR-ORPHAN:turn:9-request',
     control_epoch: 19,
     state: 'STOPPED',
-  }), transport);
-  assert.equal(controller.controls.has('SR-ORPHAN'), false);
+  }), transportWithControl(transport, controller));
+  assert.equal(controller.controls.has('SR-ORPHAN'), true);
+  assert.equal(controller.controlForTask('SR-ORPHAN')?.state, 'STOPPED');
 
   await controller.control('control-orphan.json', control({
     task_id: 'SR-ORPHAN',
@@ -1022,7 +1080,7 @@ test('RUNNING control reattaches a stopped superseded dispatch by exact task tur
     request_id: 'SR-ORPHAN:turn:9-request',
     control_epoch: 20,
     state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 1);
   assert.equal(continuationCalls, 1);
@@ -1097,7 +1155,7 @@ test('RUNNING control reattaches an errored monitor dispatch with a canonical co
     request_id: 'SR-ERROR:turn:2-request',
     control_epoch: 7,
     state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 1);
   assert.equal(continuationCalls, 1);
@@ -1147,7 +1205,7 @@ test('resume continuation failure closes resumed target and schedules retry', as
   await controller.control('control-cont-fail.json', control({
     task_id: 'SR-CONT-FAIL', turn_id: 'SR-CONT-FAIL:turn:2',
     request_id: 'SR-CONT-FAIL:turn:2-request', control_epoch: 8, state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
   assert.equal(controller.getActive(path), null);
   assert.equal(sessionClosed, 1);
   assert.equal(targetClosed, 1);
@@ -1187,7 +1245,7 @@ test('reconnect sends resume continuation even when control epoch is unchanged',
   await controller.control('control-same-epoch.json', control({
     task_id: 'SR-SAME-EPOCH', turn_id: 'SR-SAME-EPOCH:turn:2', request_id: 'SR-SAME-EPOCH:turn:2-request',
     control_epoch: 7, state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
   assert.equal(continuationCalls, 1);
   assert.ok(controller.getActive(path));
   assert.equal(stored.resume_continuation_control_epoch, 7);
@@ -1231,7 +1289,7 @@ test('RUNNING control does not reattach errored dispatch without a canonical con
     request_id: 'SR-ERROR-NOURL:turn:2-request',
     control_epoch: 7,
     state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 0);
   assert.equal(controller.getActive(path), null);
@@ -1267,8 +1325,9 @@ test('resume failure schedules a persistent retry while preserving the canonical
       stored = structuredClone(body);
     },
   };
+  await controller.control('control-rate.json', control({ task_id: 'SR-RATE', turn_id: 'SR-RATE:turn:2', request_id: 'SR-RATE:turn:2-request', control_epoch: 2, state: 'RUNNING' }));
   const started = Date.now();
-  await controller.resume(path, stored, transport);
+  await controller.resume(path, stored, transportWithControl(transport, controller));
   assert.equal(stored.server_status, 'ERROR');
   assert.equal(stored.server_error, 'Too Many Requests');
   assert.equal(stored.conversation_url, 'https://chatgpt.com/c/rate-limited-resume');
@@ -1323,10 +1382,10 @@ test('monitor page load failure schedules a persistent resume retry', async () =
     request_id: 'SR-LOAD-FAIL:turn:2-request',
     control_epoch: 8,
     state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   const started = Date.now();
-  await controller.resume(path, stored, transport);
+  await controller.resume(path, stored, transportWithControl(transport, controller));
   for (let i = 0; i < 20 && controller.getActive(path); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -1358,6 +1417,7 @@ test('same request retry still supersedes only the older attempt', async () => {
         baseline: { assistantCount: 0, assistantTextLength: 0 },
       };
     },
+    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'retry-user' }),
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -1377,8 +1437,9 @@ test('same request retry still supersedes only the older attempt', async () => {
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/retry',
   };
-  await controller.resume('job/retry-a1.json', dispatch({ ...common, dispatch_attempt: 1 }), transport);
-  await controller.resume('job/retry-a2.json', dispatch({ ...common, dispatch_attempt: 2 }), transport);
+  await controller.control('control-retry.json', control({ task_id: 'SR-RETRY', turn_id: 'SR-RETRY:turn:1', request_id: 'SR-RETRY:turn:1-request', control_epoch: 1, state: 'RUNNING' }));
+  await controller.resume('job/retry-a1.json', dispatch({ ...common, dispatch_attempt: 1 }), transportWithControl(transport, controller));
+  await controller.resume('job/retry-a2.json', dispatch({ ...common, dispatch_attempt: 2 }), transportWithControl(transport, controller));
 
   assert.equal(controller.activeDispatches().length, 1);
   assert.equal(controller.getActive('job/retry-a1.json'), null);
@@ -1428,7 +1489,7 @@ test('browser completion status cannot remove an active dispatch', async () => {
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/browser-completion-ignored',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -1445,7 +1506,7 @@ test('browser completion status cannot remove an active dispatch', async () => {
     request_id: 'SR-BROWSER-COMPLETION:turn:1-request',
     control_epoch: 2,
     state: 'STOPPED',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(controller.getActive('job/browser-completion.json'), null);
   assert.equal(stateStore.snapshot().activeCount, 0);
@@ -1504,7 +1565,7 @@ test('RUNNING control reattaches a stale COMPLETED dispatch when Result is not c
     request_id: 'SR-STALE-COMPLETED:turn:1-request',
     control_epoch: 3,
     state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 1);
   assert.ok(controller.getActive(path));
@@ -1518,10 +1579,10 @@ test('RUNNING control reattaches a stale COMPLETED dispatch when Result is not c
     request_id: 'SR-STALE-COMPLETED:turn:1-request',
     control_epoch: 4,
     state: 'STOPPED',
-  }), transport);
+  }), transportWithControl(transport, controller));
 });
 
-test('final committed DONE result evicts stale RUNNING task control without reopening the conversation', async () => {
+test('final committed DONE result suppresses reopening without fabricating terminal Task Control', async () => {
   let resumeCalls = 0;
   const browser = {
     chromium: { closeTarget: async () => true },
@@ -1563,12 +1624,12 @@ test('final committed DONE result evicts stale RUNNING task control without reop
     request_id: 'SR-DONE:turn:10-request',
     control_epoch: 22,
     state: 'RUNNING',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
   assert.equal(resumeCalls, 0);
   assert.equal(stored.server_status, 'COMPLETED');
-  assert.equal(controller.controls.has('SR-DONE'), false);
-  assert.equal(controller.controlForTask('SR-DONE'), null);
+  assert.equal(controller.controls.has('SR-DONE'), true);
+  assert.equal(controller.controlForTask('SR-DONE')?.state, 'RUNNING');
   const skipped = stateStore.events.find(({ event }) =>
     event === 'DRIVE_DISPATCH_REATTACH_SKIPPED_COMMITTED');
   assert.equal(skipped?.details.result_status, 'DONE');
@@ -1610,12 +1671,12 @@ test('successor prepare releases the linked predecessor browser before opening t
     prompt: 'turn-1',
     result_document_id: 'result-turn-1',
   });
-  await controller.prepare('dispatch-turn-1.json', predecessor, transport);
+  await controller.prepare('dispatch-turn-1.json', predecessor, transportWithControl(transport, controller));
   await controller.send('dispatch-turn-1.json', {
     ...predecessor,
     client_status: 'SEND_REQUESTED',
     server_status: 'READY_TO_SUBMIT',
-  }, transport);
+  }, transportWithControl(transport, controller));
 
   const successor = dispatch({
     task_id: 'SR-SUCCESSOR',
@@ -1625,7 +1686,7 @@ test('successor prepare releases the linked predecessor browser before opening t
     result_document_id: 'result-turn-2',
     previous_result_document_id: 'result-turn-1',
   });
-  await controller.prepare('dispatch-turn-2.json', successor, transport);
+  await controller.prepare('dispatch-turn-2.json', successor, transportWithControl(transport, controller));
 
   const closeIndex = order.indexOf('close:target-1');
   const nextPrepareIndex = order.indexOf('prepare:turn-2');
@@ -1682,11 +1743,11 @@ test('browser prepare is serialized across parallel Drive tasks', async () => {
 
   const a = controller.prepare('a.json', dispatch({
     task_id: 'SR-A', turn_id: 'SR-A:turn:1', request_id: 'SR-A:turn:1-request', prompt: 'A',
-  }), transport);
+  }), transportWithControl(transport, controller));
   await new Promise((resolve) => setTimeout(resolve, 5));
   const b = controller.prepare('b.json', dispatch({
     task_id: 'SR-B', turn_id: 'SR-B:turn:1', request_id: 'SR-B:turn:1-request', prompt: 'B',
-  }), transport);
+  }), transportWithControl(transport, controller));
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(prepareCalls, 1);
   assert.equal(maxPrepare, 1);
@@ -1734,13 +1795,13 @@ test('idle browser lifecycle closes orphan ChatGPT targets and recycles above RS
   });
   const transport = { write: async () => {} };
   const body = dispatch();
-  await controller.prepare('dispatch.json', body, transport);
+  await controller.prepare('dispatch.json', body, transportWithControl(transport, controller));
   await controller.send('dispatch.json', dispatch({
     client_status: 'SEND_REQUESTED',
     server_status: 'READY_TO_SUBMIT',
-  }), transport);
+  }), transportWithControl(transport, controller));
 
-  await controller.control('control.json', control({ state: 'STOPPED', control_epoch: 2 }), transport);
+  await controller.control('control.json', control({ state: 'STOPPED', control_epoch: 2 }), transportWithControl(transport, controller));
 
   assert.ok(closed.includes('active-1'));
   assert.ok(closed.includes('orphan-1'));
@@ -1782,12 +1843,12 @@ test('idle browser recycles after timeout when RSS is below the limit', async ()
     },
   });
   const transport = { write: async () => {} };
-  await controller.prepare('idle.json', dispatch(), transport);
+  await controller.prepare('idle.json', dispatch(), transportWithControl(transport, controller));
   await controller.send('idle.json', dispatch({
     client_status: 'SEND_REQUESTED',
     server_status: 'READY_TO_SUBMIT',
-  }), transport);
-  await controller.control('control.json', control({ state: 'STOPPED', control_epoch: 2 }), transport);
+  }), transportWithControl(transport, controller));
+  await controller.control('control.json', control({ state: 'STOPPED', control_epoch: 2 }), transportWithControl(transport, controller));
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.deepEqual(recycled, ['idle_timeout']);
 });
@@ -1837,7 +1898,7 @@ test('resume releases browser-open slot when pre-browser state patch fails', asy
       client_status: 'SEND_REQUESTED',
       server_status: 'STARTED',
       conversation_url: 'https://chatgpt.com/c/resume-test',
-    }), transport),
+    }), transportWithControl(transport, controller)),
     /synthetic state patch failure/,
   );
   await Promise.race([
@@ -1866,6 +1927,7 @@ test('standby quiesce releases local active browser ownership without rewriting 
       session: { close() { sessionClosed += 1; } },
       baseline: { assistantCount: 0, assistantTextLength: 0 },
     }),
+    sendContinuation: async () => ({ userCount: 1, userTextLength: 10, userMessageId: 'standby-user' }),
     monitor: async () => new Promise(() => {}),
   };
   const stateStore = new MemoryStateStore();
@@ -1879,7 +1941,7 @@ test('standby quiesce releases local active browser ownership without rewriting 
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
     conversation_url: 'https://chatgpt.com/c/standby',
-  }), transport);
+  }), transportWithControl(transport, controller));
   const before = writes.length;
   assert.equal(stateStore.snapshot().activeCount, 1);
   await controller.quiesceForStandby();
@@ -1889,4 +1951,64 @@ test('standby quiesce releases local active browser ownership without rewriting 
   assert.equal(targetClosed, 1);
   assert.equal(writes.length, before);
   assert.equal(stateStore.events.some(({ event }) => event === 'CLUSTER_STANDBY_ACTIVE_RELEASED'), true);
+});
+
+test('fresh STOPPED control cancels a prepared dispatch before browser submit', async () => {
+  let submitCalls = 0;
+  let sessionClosed = 0;
+  let targetClosed = 0;
+  let authority = control({ control_epoch: 1, state: 'RUNNING' });
+  const browser = {
+    chromium: { closeTarget: async () => { targetClosed += 1; return true; } },
+    prepare: async () => ({
+      target: { id: 'prepared-stop-target' },
+      session: { close() { sessionClosed += 1; } },
+      baseline: { assistantCount: 0, assistantTextLength: 0 },
+    }),
+    submitPrepared: async () => { submitCalls += 1; return { url: 'https://chatgpt.com/c/must-not-send' }; },
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser, stateStore, config: { recoveryPrompt: 'continue' },
+  });
+  const writes = [];
+  const transport = {
+    read: async () => structuredClone(authority),
+    write: async (path, body) => writes.push({ path, body: structuredClone(body) }),
+  };
+  await controller.prepare('prepared-stop.json', dispatch(), transport);
+  authority = control({ control_epoch: 2, state: 'STOPPED' });
+  await controller.send('prepared-stop.json', dispatch({
+    client_status: 'SEND_REQUESTED', server_status: 'READY_TO_SUBMIT',
+  }), transport);
+  assert.equal(submitCalls, 0);
+  assert.equal(controller.getActive('prepared-stop.json'), null);
+  assert.equal(controller.controlForTask('SR-TEST')?.state, 'STOPPED');
+  assert.equal(sessionClosed, 1);
+  assert.equal(targetClosed, 1);
+});
+
+test('terminal Task Control aborts an in-flight prepare for the whole task', async () => {
+  let prepareStarted;
+  const started = new Promise((resolve) => { prepareStarted = resolve; });
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    prepare: async ({ signal }) => {
+      prepareStarted();
+      return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    },
+  };
+  const controller = new DriveDispatchController({
+    browser, stateStore: new MemoryStateStore(), config: { recoveryPrompt: 'continue' },
+  });
+  const transport = { write: async () => {} };
+  const preparing = controller.prepare('pending-prepare.json', dispatch(), transport);
+  await started;
+  await controller.control('__SELFRUN_CONTROL__SR-TEST.json',
+    control({ control_epoch: 2, state: 'STOPPED' }), transport);
+  await preparing;
+  assert.equal(controller.getActive('pending-prepare.json'), null);
+  assert.equal(controller.controlForTask('SR-TEST')?.state, 'STOPPED');
 });

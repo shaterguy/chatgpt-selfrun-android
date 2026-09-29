@@ -17,6 +17,20 @@ export class DriveDispatchWatcher {
     this.resumeRetryAt = new Map();
   }
 
+  #retryEntry(path) {
+    const value = this.resumeRetryAt.get(path);
+    if (value && typeof value === 'object') return value;
+    const at = Number(value || 0);
+    return at > 0 ? { at, taskId: '' } : null;
+  }
+
+  #clearTaskRetries(taskId) {
+    const normalized = clean(taskId);
+    for (const [path, entry] of this.resumeRetryAt.entries()) {
+      if (clean(this.#retryEntry(path)?.taskId) === normalized) this.resumeRetryAt.delete(path);
+    }
+  }
+
   async start() {
     if (this.running) return;
     this.running = true;
@@ -119,7 +133,7 @@ export class DriveDispatchWatcher {
         ? this.controller.getActive(file.path)
         : (this.controller.active?.path === file.path ? this.controller.active : null);
       const publishPending = !!pathActive?.publishPending;
-      const scheduledRetryAt = Number(this.resumeRetryAt.get(file.path) || 0);
+      const scheduledRetryAt = Number(this.#retryEntry(file.path)?.at || 0);
       const scheduledRetryDue = scheduledRetryAt > 0 && Date.now() >= scheduledRetryAt;
       if (this.seen.get(file.path) === fingerprint && !publishPending && !scheduledRetryDue) continue;
 
@@ -134,7 +148,10 @@ export class DriveDispatchWatcher {
         const taskId = clean(body.task_id);
         if (taskId) {
           scanControls.set(taskId, body);
-          if (terminalControl(body)) blockedTasks.add(taskId);
+          if (terminalControl(body)) {
+            blockedTasks.add(taskId);
+            this.#clearTaskRetries(taskId);
+          }
         }
         await this.controller.control(file.path, body, this.transport);
         this.seen.set(file.path, fingerprint);
@@ -182,9 +199,17 @@ export class DriveDispatchWatcher {
 
       const clientStatus = String(body.client_status || '').trim();
       const serverStatus = String(body.server_status || 'PENDING').trim();
-      const resumeRetryAt = Number(body.resume_retry_at_ms || 0);
+      let resumeRetryAt = Number(body.resume_retry_at_ms || 0);
+      if (serverStatus === 'ERROR'
+          && clean(taskControl?.state) === 'RUNNING'
+          && resumeRetryAt <= 0
+          && clean(body.conversation_url)) {
+        resumeRetryAt = Date.now() + Math.max(5000, Number(this.config.resumeRetryMs || 30000));
+        body = { ...body, resume_retry_at_ms: resumeRetryAt, updated_at_ms: Date.now() };
+        await this.transport.write(file.path, body);
+      }
       if (serverStatus === 'ERROR' && resumeRetryAt > 0) {
-        this.resumeRetryAt.set(file.path, resumeRetryAt);
+        this.resumeRetryAt.set(file.path, { at: resumeRetryAt, taskId });
       } else {
         this.resumeRetryAt.delete(file.path);
       }
