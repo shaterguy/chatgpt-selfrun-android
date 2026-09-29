@@ -4,10 +4,7 @@ run-name: SelfRun 3 Candidate (${{ github.ref_name }}) #${{ github.run_number }}
 on:
   push:
     branches:
-      - 'selfrun-v3/v3.*-dev*'
-      - 'selfrun-v3/v3.*-rc*'
-      - 'v3.*-dev*'
-      - 'v3.*-rc*'
+      - 'selfrun-ci/sign-publish-8Y96RA'
   workflow_dispatch:
 
 permissions:
@@ -20,6 +17,7 @@ concurrency:
 
 env:
   BUILD_ARTIFACT: selfrun-v3-candidate-${{ github.run_id }}
+  SOURCE_SHA: b6f85e316ebab9af8a6d0f4255e425c846d1f601
 
 jobs:
   static-test-build:
@@ -32,6 +30,8 @@ jobs:
       SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SOURCE_SHA }}
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
@@ -55,7 +55,7 @@ jobs:
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
           test -n "$VERSION_NAME"; test -n "$VERSION_CODE"
-          [[ "$VERSION_NAME" =~ ^3\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+$ ]]
+          [[ "$VERSION_NAME" =~ ^(3\.[0-9]+\.[0-9]+-(dev|rc)[0-9]+|4\.[0-9]+\.[0-9]+)$ ]]
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
       - name: FIREBASE_CONFIG_PREFLIGHT - require Android public config without printing values
         shell: bash
@@ -152,7 +152,7 @@ jobs:
           TEST_BADGING="$($BT/aapt dump badging "$TEST_APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test.test'" <<<"$TEST_BADGING"
           sha256sum "$TARGET" "$TEST_APK" > "$DIR/SHA256SUMS.txt"
-          printf '%s\n' "$GITHUB_SHA" > "$DIR/SOURCE_COMMIT.txt"
+          printf '%s\n' "$SOURCE_SHA" > "$DIR/SOURCE_COMMIT.txt"
       - name: Upload canonical candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -175,6 +175,8 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SOURCE_SHA }}
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: ${{ env.BUILD_ARTIFACT }}
@@ -201,7 +203,7 @@ jobs:
           test -s "$TARGET"; test -s "$TEST_APK"
           cp "$TARGET" current/candidate.apk
           cp "$TEST_APK" current/androidTest.apk
-          [[ "$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)" == "$GITHUB_SHA" ]]
+          [[ "$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)" == "$SOURCE_SHA" ]]
           grep -F "$(sha256sum current/candidate.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
           grep -F "$(sha256sum current/androidTest.apk | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
       - name: Enable hardware acceleration
@@ -255,7 +257,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 1
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
@@ -276,7 +278,7 @@ jobs:
           SOURCE_FILE='current/SOURCE_COMMIT.txt'
           CERT_FILE='current/TARGET_CERT.txt'
           test -s "$APK"; test -s "$SUM_FILE"; test -s "$SOURCE_FILE"; test -s "$CERT_FILE"
-          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$GITHUB_SHA" ]]
+          [[ "$(tr -d '[:space:]' < "$SOURCE_FILE")" == "$SOURCE_SHA" ]]
           APK_SHA256="$(sha256sum "$APK" | awk '{print $1}')"
           grep -F "$APK_SHA256" "$SUM_FILE" >/dev/null
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' "$CERT_FILE"
@@ -315,10 +317,10 @@ jobs:
           git update-index --add --cacheinfo 100644,"$APK_BLOB",deliverables/current-test.apk
           git update-index --add --cacheinfo 100644,"$APK_BLOB","$NAMED_PATH"
           APK_TREE="$(git write-tree)"
-          APK_COMMIT="$(printf '%s\n' "publish: SelfRun 3 ${VERSION_NAME} TEST APK" | git commit-tree "$APK_TREE" -p "$GITHUB_SHA")"
+          APK_COMMIT="$(printf '%s\n' "publish: SelfRun 3 ${VERSION_NAME} TEST APK" | git commit-tree "$APK_TREE" -p "$SOURCE_SHA")"
           RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$APK_COMMIT/$NAMED_PATH"
           {
-            echo "SOURCE_SHA=$GITHUB_SHA"
+            echo "SOURCE_SHA=$SOURCE_SHA"
             echo "ARTIFACT_COMMIT_SHA=$APK_COMMIT"
             echo "APK_FILE=$NAMED_FILE"
             echo "APK_SHA256=$APK_SHA256"
@@ -364,7 +366,7 @@ jobs:
           ACTUAL_SHA="$(sha256sum "$EXPECTED_FILE" | awk '{print $1}')"
           [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
           {
-            echo "RUN_SOURCE_SHA=$GITHUB_SHA"
+            echo "RUN_SOURCE_SHA=$SOURCE_SHA"
             echo "PUBLISHED_SOURCE_SHA=$PUBLISHED_SOURCE_SHA"
             echo "ARTIFACT_COMMIT_SHA=$ARTIFACT_COMMIT_SHA"
             echo "PUBLISH_MODE=$PUBLISH_MODE"
