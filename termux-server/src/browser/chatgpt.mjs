@@ -18,7 +18,8 @@ export function detectPageErrorText(body) {
 export function conversationStateReady(probe) {
   const userMessageId = String(probe?.userMessageId || '').trim();
   const assistantMessageId = String(probe?.assistantMessageId || '').trim();
-  const hasResponseState = !!probe?.streaming || !!probe?.paused || !!assistantMessageId;
+  const hasResponseState = !!probe?.streaming || !!probe?.paused || !!assistantMessageId
+    || Number(probe?.responseTextLength || 0) > 0;
   return !!userMessageId && hasResponseState;
 }
 
@@ -131,6 +132,55 @@ function probeExpression() {
       }
       return null;
     };
+    const normalizeProgressText=value=>String(value||'')
+      .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi,' ')
+      .replace(/(?:Worked|Thought|Thinking)\s+for\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h)(?:\s+\d+(?:\.\d+)?\s*(?:s|m|h))*/gi,' ')
+      .replace(/(?:You said:|ChatGPT said:)/gi,' ')
+      .replace(/\s+/g,' ').trim();
+    const fingerprint=value=>{
+      const input=String(value||'');
+      if(!input)return '';
+      let hash=2166136261;
+      for(let i=0;i<input.length;i+=1){hash^=input.charCodeAt(i);hash=Math.imul(hash,16777619);}
+      return (hash>>>0).toString(16).padStart(8,'0');
+    };
+    const turns=[...document.querySelectorAll('main [data-turn-key]')];
+    const responseTurn=turns.length?turns[turns.length-1]:null;
+    const responseTurnId=String(responseTurn?.getAttribute?.('data-turn-key')||'').trim()||null;
+    let responseText='';
+    if(responseTurn){
+      const excludedSelector=[
+        '[data-user-message-bubble]',
+        '[data-message-author-role="user"]',
+        '[data-chatgpt-search-unit-key$=":user"]',
+        '[data-content-search-unit-key$=":user"]',
+        'form','textarea','input','select','time','script','style','noscript','svg',
+        '[data-markdown-copy="exclude"]','[aria-hidden="true"]','.sr-only'
+      ].join(',');
+      const parts=[];
+      const walker=document.createTreeWalker(responseTurn,NodeFilter.SHOW_TEXT);
+      while(walker.nextNode()){
+        const node=walker.currentNode;
+        const parent=node.parentElement;
+        if(!parent||parent.closest(excludedSelector))continue;
+        const button=parent.closest('button');
+        if(button){
+          const label=String(button.getAttribute('aria-label')||button.title||button.innerText||'');
+          if(/copy|good response|bad response|share|regenerate|retry|more|복사|공유|다시 생성|재시도|더보기/i.test(label))continue;
+        }
+        let hidden=false;
+        for(let el=parent;el&&el!==responseTurn.parentElement;el=el.parentElement){
+          const style=getComputedStyle(el);
+          if(style.display==='none'||style.visibility==='hidden'||style.opacity==='0'){hidden=true;break;}
+        }
+        if(hidden)continue;
+        const value=String(node.nodeValue||'').trim();
+        if(value)parts.push(value);
+      }
+      responseText=normalizeProgressText(parts.join(' '));
+    }
+    const responseTextLength=responseText.length;
+    const responseFingerprint=fingerprint(responseText);
     const body=String(document.body?.innerText||'');
     const errorMatch=body.match(new RegExp(${errorPattern},'i'));
     return {
@@ -145,6 +195,9 @@ function probeExpression() {
       assistantCount:assistants.length,
       assistantTextLength:String(last?.innerText||last?.textContent||'').length,
       assistantMessageId:messageId(last),
+      responseTurnId,
+      responseTextLength,
+      responseFingerprint,
       userCount:users.length,
       userTextLength:String(lastUser?.innerText||lastUser?.textContent||'').length,
       userMessageId:messageId(lastUser),
@@ -346,6 +399,9 @@ export class ChatGptBrowser {
         baseline: {
           assistantCount: before.assistantCount || 0,
           assistantTextLength: before.assistantTextLength || 0,
+          responseTurnId: before.responseTurnId || null,
+          responseTextLength: before.responseTextLength || 0,
+          responseFingerprint: before.responseFingerprint || '',
           userCount: before.userCount || 0,
           userTextLength: before.userTextLength || 0,
         },
@@ -388,6 +444,9 @@ export class ChatGptBrowser {
         baseline: {
           assistantCount: Math.max(0, Number(probe.assistantCount || 0) - 1),
           assistantTextLength: 0,
+          responseTurnId: probe.responseTurnId || null,
+          responseTextLength: probe.responseTextLength || 0,
+          responseFingerprint: probe.responseFingerprint || '',
           userCount: probe.userCount || 0,
           userTextLength: probe.userTextLength || 0,
         },
@@ -642,6 +701,9 @@ export class ChatGptBrowser {
         probe.assistantCount !== previous.assistantCount ||
         probe.assistantTextLength !== previous.assistantTextLength ||
         probe.assistantMessageId !== previous.assistantMessageId ||
+        probe.responseTurnId !== previous.responseTurnId ||
+        probe.responseTextLength !== previous.responseTextLength ||
+        probe.responseFingerprint !== previous.responseFingerprint ||
         probe.userCount !== previous.userCount ||
         probe.userTextLength !== previous.userTextLength ||
         probe.userMessageId !== previous.userMessageId;
@@ -663,7 +725,10 @@ export class ChatGptBrowser {
 
       const hasResponse =
         probe.assistantCount > baseline.assistantCount ||
-        probe.assistantTextLength > baseline.assistantTextLength;
+        probe.assistantTextLength > baseline.assistantTextLength ||
+        Number(probe.responseTextLength || 0) > Number(baseline.responseTextLength || 0) ||
+        (!!probe.responseFingerprint
+          && probe.responseFingerprint !== String(baseline.responseFingerprint || ''));
       const completed = structurallyReady && hasResponse && !probe.streaming && !probe.paused;
       const isStalled = !livenessSuspended && !completed
         && Date.now() - lastActivityAt >= this.config.stallAfterMs;
@@ -689,6 +754,9 @@ export class ChatGptBrowser {
           assistantCount: probe.assistantCount,
           assistantTextLength: probe.assistantTextLength,
           assistantMessageId: probe.assistantMessageId,
+          responseTurnId: probe.responseTurnId,
+          responseTextLength: probe.responseTextLength,
+          responseFingerprint: probe.responseFingerprint,
           userCount: probe.userCount,
           userTextLength: probe.userTextLength,
           userMessageId: probe.userMessageId,

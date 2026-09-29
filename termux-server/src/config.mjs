@@ -25,7 +25,7 @@ export const config = Object.freeze({
   browserIdleRecycleMs: Number(process.env.SELFRUN_BROWSER_IDLE_RECYCLE_MS || 60000),
   browserIdleRssMb: Number(process.env.SELFRUN_BROWSER_IDLE_RSS_MB || 600),
   browserOrphanGcEnabled: process.env.SELFRUN_BROWSER_ORPHAN_GC !== '0',
-  probeIntervalMs: Number(process.env.SELFRUN_PROBE_INTERVAL_MS || 1500),
+  probeIntervalMs: Number(process.env.SELFRUN_PROBE_INTERVAL_MS || 60000),
   stallAfterMs: Number(process.env.SELFRUN_STALL_AFTER_MS || 600000),
   drivePollMs: Number(process.env.SELFRUN_DRIVE_POLL_MS || 1000),
   preparedPollMs: Number(process.env.SELFRUN_PREPARED_POLL_MS || 1000),

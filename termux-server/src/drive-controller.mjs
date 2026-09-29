@@ -25,6 +25,9 @@ function cursorDetails(probe) {
     assistant_count: Number(probe?.assistantCount || 0),
     assistant_text_length: Number(probe?.assistantTextLength || 0),
     assistant_message_id: clean(probe?.assistantMessageId) || null,
+    response_turn_id: clean(probe?.responseTurnId) || null,
+    response_text_length: Number(probe?.responseTextLength || 0),
+    response_fingerprint: clean(probe?.responseFingerprint) || null,
     user_count: Number(probe?.userCount || 0),
     user_text_length: Number(probe?.userTextLength || 0),
     user_message_id: clean(probe?.userMessageId) || null,
@@ -725,13 +728,27 @@ export class DriveDispatchController {
       let continuationAccepted = null;
       if (clean(control?.state) === 'RUNNING') {
         const directives = await this.#directiveState();
-        continuationAccepted = await this.browser.sendContinuation({
-          session: resumed.session,
-          prompt: directives.turnContinueDirective || this.config.recoveryPrompt,
-          profileOperations: body.profile_operations,
-          signal: abortController.signal,
-        });
-        resumeContinuationSent = true;
+        try {
+          continuationAccepted = await this.browser.sendContinuation({
+            session: resumed.session,
+            prompt: directives.turnContinueDirective || this.config.recoveryPrompt,
+            profileOperations: body.profile_operations,
+            signal: abortController.signal,
+          });
+          resumeContinuationSent = true;
+        } catch (error) {
+          const message = String(error?.message || error);
+          if (message !== 'Continuation send control not ready: NO_SEND') throw error;
+          if (typeof this.stateStore.recordEvent === 'function') {
+            await this.stateStore.recordEvent('DRIVE_DISPATCH_RESUME_CONTINUATION_DEFERRED', {
+              task_id: identity.taskId,
+              turn_id: identity.turnId,
+              request_id: identity.requestId,
+              reason: 'SEND_CONTROL_NOT_READY',
+              error: message,
+            }, this.#dispatchEventContext(body, generation));
+          }
+        }
       }
       const monitorBaseline = resumeContinuationSent
         ? {
@@ -983,7 +1000,10 @@ export class DriveDispatchController {
     const expectedUser = clean(expected?.userMessageId);
     const currentUser = clean(current?.userMessageId);
     if (!expectedUser || !currentUser || expectedUser !== currentUser) return false;
-    return clean(expected?.assistantMessageId) === clean(current?.assistantMessageId);
+    if (clean(expected?.assistantMessageId) !== clean(current?.assistantMessageId)) return false;
+    if (clean(expected?.responseTurnId) !== clean(current?.responseTurnId)) return false;
+    if (Number(expected?.responseTextLength || 0) !== Number(current?.responseTextLength || 0)) return false;
+    return clean(expected?.responseFingerprint) === clean(current?.responseFingerprint);
   }
 
   #dispatchEventContext(body, generation = null) {
@@ -1211,12 +1231,35 @@ export class DriveDispatchController {
               await this.#syncActiveSummary();
               await transport.write(active.path, active.body);
               const directives = await this.#directiveState();
-              await this.browser.sendContinuation({
-                session: active.session,
-                prompt: directives.turnContinueDirective || this.config.recoveryPrompt,
-                profileOperations: active.body.profile_operations,
-                signal: active.abortController.signal,
-              });
+              try {
+                await this.browser.sendContinuation({
+                  session: active.session,
+                  prompt: directives.turnContinueDirective || this.config.recoveryPrompt,
+                  profileOperations: active.body.profile_operations,
+                  signal: active.abortController.signal,
+                });
+              } catch (error) {
+                const message = String(error?.message || error);
+                if (message === 'Continuation send control not ready: NO_SEND') {
+                  active.recoveryCount = Math.max(0, active.recoveryCount - 1);
+                  active.body = {
+                    ...active.body,
+                    server_status: 'STARTED',
+                    server_error: '',
+                    recovery_count: active.recoveryCount,
+                    updated_at_ms: Date.now(),
+                  };
+                  await this.#syncActiveSummary();
+                  await transport.write(active.path, active.body);
+                  await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                    decision: 'DEFER_SEND_CONTROL_NOT_READY',
+                    reset_liveness: true,
+                    error: message,
+                  });
+                  return { resetLiveness: true };
+                }
+                throw error;
+              }
               active.body = {
                 ...active.body,
                 server_status: 'RECOVERY_SENT',
