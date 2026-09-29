@@ -33,7 +33,7 @@ public final class ChatReasoningPolicyTest {
     }
 
     @Test public void registeredReasoningStagesBootstrapAndContinuationProfilesWithoutMenuInteraction() {
-        String script = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.EXTRA_HIGH, "SR-PROFILE");
+        String script = ChatReasoningOptionDom.inline("xhigh", "SR-PROFILE");
         assertTrue(script.contains("__selfRunRequestProfileEngine"));
         assertTrue(script.contains("installRegistry"));
         assertTrue(script.contains("setChatProfiles"));

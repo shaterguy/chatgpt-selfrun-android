@@ -11,9 +11,6 @@ final class WorkBootstrapPreferenceStore {
     private static final String PREFS = "selfrun_drive_work_bootstrap";
     private static final String KEY_MODEL = "model";
     private static final String KEY_REASONING = "reasoning";
-    private static final String LEGACY_DEFAULT_MODEL = "sol";
-    private static final String LEGACY_DEFAULT_REASONING = "xhigh";
-
     static final class Selection {
         final String model;
         final String reasoning;
@@ -34,10 +31,6 @@ final class WorkBootstrapPreferenceStore {
         Selection stored = new Selection(prefs.getString(KEY_MODEL, ""),
                 prefs.getString(KEY_REASONING, ""));
         if (stored.valid()) return stored;
-
-        ProfileRegistry.Profile legacy = ProfileRegistry.resolveWork(
-                LEGACY_DEFAULT_MODEL, LEGACY_DEFAULT_REASONING);
-        if (legacy != null) return new Selection(legacy.signalModel, legacy.signalReasoning);
 
         List<ProfileRegistry.Profile> profiles = ProfileRegistry.listWork();
         if (!profiles.isEmpty()) {

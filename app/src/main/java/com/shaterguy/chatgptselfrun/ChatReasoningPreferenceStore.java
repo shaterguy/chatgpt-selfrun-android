@@ -9,11 +9,6 @@ import java.util.Locale;
 /** Durable current-run Chat bootstrap and continuation profiles backed by ProfileRegistry. */
 final class ChatReasoningPreferenceStore {
     static final String KEEP = "keep";
-    static final String INSTANT = "instant";
-    static final String MEDIUM = "medium";
-    static final String HIGH = "high";
-    static final String EXTRA_HIGH = "xhigh";
-
     private static final String PREFS = "selfrun_drive_chat_reasoning";
     private static final String KEY_RUN_ID = "runId";
     private static final String KEY_SELECTION = "selection"; // legacy single-profile key

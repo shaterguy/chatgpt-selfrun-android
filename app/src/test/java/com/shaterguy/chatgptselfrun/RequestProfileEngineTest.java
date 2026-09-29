@@ -171,7 +171,7 @@ public class RequestProfileEngineTest {
 
     @Test public void legacyUiSelectorsAreNotRequiredByV2ProfileBridges() {
         String work = WorkPreferenceDom.modelForConversation("https://chatgpt.com/c/abc", "5.6sol");
-        String chat = ChatReasoningOptionDom.inline(ChatReasoningPreferenceStore.HIGH, "run");
+        String chat = ChatReasoningOptionDom.inline("high", "run");
         assertFalse(work.contains("querySelectorAll('button"));
         assertFalse(work.contains("click()"));
         assertFalse(chat.contains("querySelectorAll"));

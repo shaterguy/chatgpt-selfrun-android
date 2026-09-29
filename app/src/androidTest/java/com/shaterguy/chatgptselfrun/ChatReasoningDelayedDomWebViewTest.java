@@ -93,36 +93,36 @@ public final class ChatReasoningDelayedDomWebViewTest {
             scenario.onActivity(activity -> {
                 String runId = "SR-BOOTSTRAP-STATE-A";
                 assertTrue(BootstrapRunStateStore.startRun(activity, runId,
-                        ChatReasoningPreferenceStore.HIGH));
+                        "high"));
                 BootstrapRunStateStore.Window first = BootstrapRunStateStore.touchBootstrap(
-                        activity, runId, ChatReasoningPreferenceStore.HIGH, 1_000L);
+                        activity, runId, "high", 1_000L);
                 BootstrapRunStateStore.Window recorded = BootstrapRunStateStore.recordBootstrapResult(
                         activity, runId, "UI_WAIT", "mode", 1_500L);
                 BootstrapRunStateStore.Window second = BootstrapRunStateStore.touchBootstrap(
-                        activity, runId, ChatReasoningPreferenceStore.HIGH, 2_000L);
+                        activity, runId, "high", 2_000L);
                 assertTrue(first.persisted);
                 assertTrue(recorded.persisted);
                 assertTrue(second.persisted);
                 assertEquals(first.deadlineAt, second.deadlineAt);
                 assertEquals(2, second.attempts);
                 assertTrue(BootstrapRunStateStore.markReasoningApplied(activity, runId,
-                        ChatReasoningPreferenceStore.HIGH));
+                        "high"));
                 assertTrue(BootstrapRunStateStore.markBootstrapCompleted(activity, runId, "READY"));
 
                 JSONObject history = new JSONObject();
                 BootstrapRunStateStore.appendHistory(activity, runId, history);
-                assertEquals(ChatReasoningPreferenceStore.HIGH,
+                assertEquals("high",
                         history.optString("chatReasoningRequested"));
                 assertEquals(BootstrapRunStateStore.REASONING_APPLIED,
                         history.optString("chatReasoningStatus"));
-                assertEquals(ChatReasoningPreferenceStore.HIGH,
+                assertEquals("high",
                         history.optString("chatReasoningVerified"));
                 assertEquals("요청: High / 적용: 확인 완료 / 확인: High",
                         BootstrapRunStateStore.summary(history));
 
                 String firstSummary = BootstrapRunStateStore.summary(activity, runId);
                 assertTrue(BootstrapRunStateStore.startRun(activity, "SR-BOOTSTRAP-STATE-B",
-                        ChatReasoningPreferenceStore.EXTRA_HIGH));
+                        "xhigh"));
                 assertEquals(firstSummary, BootstrapRunStateStore.summary(activity, runId));
             });
         }

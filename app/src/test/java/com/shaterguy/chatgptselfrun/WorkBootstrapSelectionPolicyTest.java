@@ -27,8 +27,9 @@ public final class WorkBootstrapSelectionPolicyTest {
         assertTrue(activity.contains("STATE_WORK_BOOTSTRAP_MODEL"));
         assertFalse(activity.contains("Work 모드는 새 작업에서 수동 선택하지 않고"));
 
-        assertTrue(preferences.contains("LEGACY_DEFAULT_MODEL = \"sol\""));
-        assertTrue(preferences.contains("LEGACY_DEFAULT_REASONING = \"xhigh\""));
+        assertFalse(preferences.contains("LEGACY_DEFAULT_MODEL"));
+        assertFalse(preferences.contains("LEGACY_DEFAULT_REASONING"));
+        assertTrue(preferences.contains("ProfileRegistry.listWork()"));
         assertTrue(preferences.contains("ProfileRegistry.resolveWork(model, reasoning)"));
         assertTrue(preferences.contains("putString(KEY_MODEL, selection.model)"));
         assertTrue(preferences.contains("putString(KEY_REASONING, selection.reasoning)"));

@@ -48,7 +48,7 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         assertTrue(restoreMethod >= 0 && defaultRefresh > restoreMethod);
         assertTrue(activity.contains("초기 프로필 선택 필요"));
         assertTrue(activity.contains("ProfileRegistry.resolveChat(bootstrapReasoning) == null"));
-        assertFalse(activity.contains("ProfileRegistry.resolveChat(ChatReasoningPreferenceStore.EXTRA_HIGH)"));
+        assertFalse(activity.contains("ProfileRegistry.resolveChat(\"xhigh\")"));
         assertTrue(restoredSelection > defaultRefresh);
         assertTrue(restoredRefresh > restoredSelection);
         assertTrue(activity.contains("for (ProfileRegistry.Profile profile : ProfileRegistry.listChat())"));
