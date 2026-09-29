@@ -723,14 +723,8 @@ export class ChatGptBrowser {
         && conversationStateMissingSince > 0
         && Date.now() - conversationStateMissingSince >= stateGraceMs;
 
-      const hasResponse =
-        probe.assistantCount > baseline.assistantCount ||
-        probe.assistantTextLength > baseline.assistantTextLength ||
-        Number(probe.responseTextLength || 0) > Number(baseline.responseTextLength || 0) ||
-        (!!probe.responseFingerprint
-          && probe.responseFingerprint !== String(baseline.responseFingerprint || ''));
-      const completed = structurallyReady && hasResponse && !probe.streaming && !probe.paused;
-      const isStalled = !livenessSuspended && !completed
+      // ChatGPT response lifecycle is telemetry only. It must never terminate a SelfRun dispatch.
+      const isStalled = !livenessSuspended
         && Date.now() - lastActivityAt >= this.config.stallAfterMs;
       if (isStalled) stalled = true;
 
@@ -738,13 +732,12 @@ export class ChatGptBrowser {
       const pageError = conversationAvailable ? null : (probe.errorText || structuralError);
       let status = 'RUNNING';
       if (pageError) status = 'PAGE_ERROR';
-      else if (completed) status = 'COMPLETED';
       else if (stalled) status = 'STALLED';
 
       const verificationRetry = status === 'STALLED'
         && nextStalledVerificationAt > 0
         && Date.now() >= nextStalledVerificationAt;
-      if (changed || status !== lastReportedStatus || completed || pageError || verificationRetry) {
+      if (changed || status !== lastReportedStatus || pageError || verificationRetry) {
         const action = await onActivity?.({
           status,
           pageUrl: probe.url,
@@ -778,7 +771,7 @@ export class ChatGptBrowser {
       }
 
       previous = probe;
-      if (completed || pageError) {
+      if (pageError) {
         return {
           status,
           probe: { ...probe, errorText: pageError },

@@ -607,8 +607,10 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
   let now = 1000;
   let evaluateCalls = 0;
   let stalledCalls = 0;
+  let forcePageError = false;
   const baseProbe = {
     url: 'https://chatgpt.com/c/abc-123',
+    composer: true,
     streaming: false,
     stopButtonVisible: false,
     paused: false,
@@ -625,32 +627,48 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
       assert.equal(method, 'Runtime.evaluate');
       evaluateCalls += 1;
       now += 6;
-      let value = baseProbe;
-      if (evaluateCalls === 2 || evaluateCalls === 3) {
-        value = { ...baseProbe, streaming: true, stopButtonVisible: true };
-      } else if (evaluateCalls >= 4) {
-        value = { ...baseProbe, assistantCount: 1, assistantTextLength: 5,
-          assistantMessageId: 'data-testid:conversation-turn-2' };
+      if (forcePageError) {
+        return { result: { value: {
+          ...baseProbe,
+          composer: false,
+          userCount: 0,
+          userTextLength: 0,
+          userMessageId: null,
+        } } };
       }
+      const value = evaluateCalls === 2 || evaluateCalls === 3
+        ? { ...baseProbe, streaming: true, stopButtonVisible: true }
+        : baseProbe;
       return { result: { value } };
     },
   };
   Date.now = () => now;
   try {
-    const browser = new ChatGptBrowser(null, { stallAfterMs: 10, probeIntervalMs: 1 });
+    const browser = new ChatGptBrowser(null, {
+      stallAfterMs: 10,
+      probeIntervalMs: 1,
+      conversationStateGraceMs: 0,
+    });
     const result = await browser.monitor({
       session,
-      baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
+      baseline: {
+        assistantCount: 0,
+        assistantTextLength: 0,
+        userCount: 1,
+        userTextLength: 10,
+        userMessageId: 'data-testid:conversation-turn-1',
+      },
       livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
       onActivity: async (activity) => {
         if (activity.status === 'STALLED') {
           stalledCalls += 1;
+          forcePageError = true;
           return { resetLiveness: true };
         }
       },
     });
     assert.equal(stalledCalls, 1);
-    assert.equal(result.status, 'COMPLETED');
+    assert.equal(result.status, 'PAGE_ERROR');
   } finally {
     Date.now = originalNow;
   }
@@ -702,9 +720,11 @@ test('continuation acceptance ignores a pre-existing Stop button', async () => {
 test('browser monitor schedules stalled verification retries without resetting real activity time', async () => {
   let evaluateCalls = 0;
   let stalledCalls = 0;
+  let forcePageError = false;
   const stalledTimes = [];
   const baseProbe = {
     url: 'https://chatgpt.com/c/abc-123',
+    composer: true,
     streaming: false,
     paused: false,
     assistantCount: 0,
@@ -719,14 +739,23 @@ test('browser monitor schedules stalled verification retries without resetting r
     call: async (method) => {
       assert.equal(method, 'Runtime.evaluate');
       evaluateCalls += 1;
-      const value = evaluateCalls >= 4
-        ? { ...baseProbe, assistantCount: 1, assistantTextLength: 5,
-          assistantMessageId: 'data-testid:conversation-turn-2' }
-        : baseProbe;
-      return { result: { value } };
+      if (forcePageError) {
+        return { result: { value: {
+          ...baseProbe,
+          composer: false,
+          userCount: 0,
+          userTextLength: 0,
+          userMessageId: null,
+        } } };
+      }
+      return { result: { value: baseProbe } };
     },
   };
-  const browser = new ChatGptBrowser(null, { stallAfterMs: 1, probeIntervalMs: 2 });
+  const browser = new ChatGptBrowser(null, {
+    stallAfterMs: 1,
+    probeIntervalMs: 2,
+    conversationStateGraceMs: 0,
+  });
   const result = await browser.monitor({
     session,
     baseline: {
@@ -734,6 +763,7 @@ test('browser monitor schedules stalled verification retries without resetting r
       assistantTextLength: 0,
       userCount: 1,
       userTextLength: 10,
+      userMessageId: 'data-testid:conversation-turn-1',
     },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
     onActivity: async (activity) => {
@@ -745,14 +775,14 @@ test('browser monitor schedules stalled verification retries without resetting r
         return { retryAfterMs: 1 };
       }
       assert.equal(activity.verificationRetry, true);
+      forcePageError = true;
       return { resetLiveness: true };
     },
   });
   assert.equal(stalledCalls, 2);
   assert.equal(stalledTimes[0], stalledTimes[1]);
-  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.status, 'PAGE_ERROR');
 });
-
 
 test('parallel Drive dispatches stay active independently and STOPPED only closes its task', async () => {
   const closedTargets = [];
@@ -1358,17 +1388,21 @@ test('same request retry still supersedes only the older attempt', async () => {
     path === 'job/retry-a1.json' && body.server_status === 'SUPERSEDED'), true);
 });
 
-test('completed browser monitor removes the active dispatch immediately', async () => {
+test('browser completion status cannot remove an active dispatch', async () => {
   let sessionClosed = 0;
   let targetClosed = 0;
   const browser = {
     chromium: { closeTarget: async () => { targetClosed += 1; return true; } },
     resume: async () => ({
-      target: { id: 'target-completed-cleanup' },
+      target: { id: 'target-browser-completion-ignored' },
       session: { close() { sessionClosed += 1; } },
       baseline: { assistantCount: 0, assistantTextLength: 0 },
     }),
-    sendContinuation: async () => ({ userCount: 2, userTextLength: 20, userMessageId: 'resume-user' }),
+    sendContinuation: async () => ({
+      userCount: 2,
+      userTextLength: 20,
+      userMessageId: 'resume-user',
+    }),
     monitor: async () => ({ status: 'COMPLETED' }),
   };
   const stateStore = new MemoryStateStore();
@@ -1380,32 +1414,111 @@ test('completed browser monitor removes the active dispatch immediately', async 
   const writes = [];
   const transport = { write: async (path, body) => writes.push({ path, body: structuredClone(body) }) };
 
-  await controller.control('control-completed.json', control({
-    task_id: 'SR-COMPLETED',
-    turn_id: 'SR-COMPLETED:turn:1',
-    request_id: 'SR-COMPLETED:turn:1-request',
+  await controller.control('control-browser-completion.json', control({
+    task_id: 'SR-BROWSER-COMPLETION',
+    turn_id: 'SR-BROWSER-COMPLETION:turn:1',
+    request_id: 'SR-BROWSER-COMPLETION:turn:1-request',
     control_epoch: 1,
     state: 'RUNNING',
   }));
-  await controller.resume('job/completed.json', dispatch({
-    task_id: 'SR-COMPLETED',
-    turn_id: 'SR-COMPLETED:turn:1',
-    request_id: 'SR-COMPLETED:turn:1-request',
+  await controller.resume('job/browser-completion.json', dispatch({
+    task_id: 'SR-BROWSER-COMPLETION',
+    turn_id: 'SR-BROWSER-COMPLETION:turn:1',
+    request_id: 'SR-BROWSER-COMPLETION:turn:1-request',
     client_status: 'SEND_REQUESTED',
     server_status: 'STARTED',
-    conversation_url: 'https://chatgpt.com/c/completed-cleanup',
+    conversation_url: 'https://chatgpt.com/c/browser-completion-ignored',
   }), transport);
 
-  for (let i = 0; i < 20 && controller.getActive('job/completed.json'); i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
 
-  assert.equal(controller.getActive('job/completed.json'), null);
-  assert.equal(controller.activeDispatches().length, 0);
+  assert.ok(controller.getActive('job/browser-completion.json'));
+  assert.equal(controller.activeDispatches().length, 1);
+  assert.equal(stateStore.snapshot().activeCount, 1);
+  assert.equal(sessionClosed, 0);
+  assert.equal(targetClosed, 0);
+  assert.equal(writes.some(({ body }) => body.server_status === 'COMPLETED'), false);
+
+  await controller.control('control-browser-completion.json', control({
+    task_id: 'SR-BROWSER-COMPLETION',
+    turn_id: 'SR-BROWSER-COMPLETION:turn:1',
+    request_id: 'SR-BROWSER-COMPLETION:turn:1-request',
+    control_epoch: 2,
+    state: 'STOPPED',
+  }), transport);
+
+  assert.equal(controller.getActive('job/browser-completion.json'), null);
   assert.equal(stateStore.snapshot().activeCount, 0);
   assert.equal(sessionClosed, 1);
   assert.equal(targetClosed, 1);
-  assert.equal(writes.some(({ body }) => body.server_status === 'COMPLETED'), true);
+});
+
+test('RUNNING control reattaches a stale COMPLETED dispatch when Result is not committed', async () => {
+  let resumeCalls = 0;
+  const browser = {
+    chromium: { closeTarget: async () => true },
+    resume: async () => {
+      resumeCalls += 1;
+      return {
+        target: { id: 'target-stale-completed' },
+        session: { close() {} },
+        baseline: { assistantCount: 0, assistantTextLength: 0 },
+      };
+    },
+    sendContinuation: async () => ({
+      userCount: 2,
+      userTextLength: 20,
+      userMessageId: 'resume-user',
+    }),
+    monitor: async () => new Promise(() => {}),
+  };
+  const stateStore = new MemoryStateStore();
+  const controller = new DriveDispatchController({
+    browser,
+    stateStore,
+    config: { recoveryPrompt: 'continue' },
+  });
+  const path = '__SELFRUN_DISPATCH__SR-STALE-COMPLETED:turn:1-request__A1.json';
+  let stored = dispatch({
+    task_id: 'SR-STALE-COMPLETED',
+    turn_id: 'SR-STALE-COMPLETED:turn:1',
+    request_id: 'SR-STALE-COMPLETED:turn:1-request',
+    client_status: 'SEND_REQUESTED',
+    server_status: 'COMPLETED',
+    conversation_url: 'https://chatgpt.com/c/stale-completed',
+    result_document_id: 'RESULT-NOT-COMMITTED',
+  });
+  const transport = {
+    list: async () => [{ path, modTime: '2026-09-29T00:00:00Z', size: 1 }],
+    read: async () => structuredClone(stored),
+    write: async (requested, body) => {
+      assert.equal(requested, path);
+      stored = structuredClone(body);
+    },
+    readGoogleDocText: async () => '{"committed":false}',
+  };
+
+  await controller.control('control-stale-completed.json', control({
+    task_id: 'SR-STALE-COMPLETED',
+    turn_id: 'SR-STALE-COMPLETED:turn:1',
+    request_id: 'SR-STALE-COMPLETED:turn:1-request',
+    control_epoch: 3,
+    state: 'RUNNING',
+  }), transport);
+
+  assert.equal(resumeCalls, 1);
+  assert.ok(controller.getActive(path));
+  assert.equal(controller.activeDispatches().length, 1);
+  assert.equal(stateStore.snapshot().activeCount, 1);
+  assert.equal(stored.server_status, 'STARTED');
+
+  await controller.control('control-stale-completed.json', control({
+    task_id: 'SR-STALE-COMPLETED',
+    turn_id: 'SR-STALE-COMPLETED:turn:1',
+    request_id: 'SR-STALE-COMPLETED:turn:1-request',
+    control_epoch: 4,
+    state: 'STOPPED',
+  }), transport);
 });
 
 test('final committed DONE result evicts stale RUNNING task control without reopening the conversation', async () => {

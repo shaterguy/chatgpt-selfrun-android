@@ -473,7 +473,8 @@ export class DriveDispatchController {
     const recoverableErroredMonitor = resumableStatus === 'ERROR'
       && clean(body.client_status) === 'SEND_REQUESTED'
       && Boolean(canonicalConversationUrl(body.conversation_url));
-    if (!['STARTED', 'RECOVERY_SENT', 'SUPERSEDED'].includes(resumableStatus)
+    // A stale COMPLETED marker is not authoritative. RUNNING control + uncommitted Result may reattach it.
+    if (!['STARTED', 'RECOVERY_SENT', 'SUPERSEDED', 'COMPLETED'].includes(resumableStatus)
         && !recoverableErroredMonitor) return;
     if (!canonicalConversationUrl(body.conversation_url)) return;
 
@@ -1325,23 +1326,9 @@ export class DriveDispatchController {
         await this.#closeActive(active);
         return;
       }
-      active.serverStatus = result.status;
-      active.body = {
-        ...active.body,
-        server_status: result.status,
-        completed_at_ms: result.status === 'COMPLETED' ? Date.now() : undefined,
-        updated_at_ms: Date.now(),
-      };
-      try {
-        await transport.write(active.path, active.body);
-        active.publishPending = false;
-      } catch {
-        active.publishPending = true;
-      }
-      await this.#syncActiveSummary();
-      if (result.status === 'COMPLETED') {
-        await this.#closeActive(active);
-      }
+      // Browser response lifecycle must not alter dispatch terminal state.
+      // Only authoritative SelfRun Result/Control state may complete or close the dispatch.
+      return;
     } catch (error) {
       if (!this.#isActive(active)) return;
       active.serverStatus = 'ERROR';

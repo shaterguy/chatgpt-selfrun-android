@@ -111,8 +111,9 @@ test('browser monitor reports structural failure when neither resume nor respons
   assert.equal(calls, 1);
 });
 
-test('browser monitor ignores visible page error text while message identity and composer remain usable', async () => {
+test('browser monitor ignores visible page error text while usable and does not complete on response idle', async () => {
   let calls = 0;
+  const statuses = [];
   const session = {
     call: async (method) => {
       assert.equal(method, 'Runtime.evaluate');
@@ -126,11 +127,20 @@ test('browser monitor ignores visible page error text while message identity and
           errorText: 'Could not load this ChatGPT conversation',
         } } };
       }
+      if (calls === 2) {
+        return { result: { value: {
+          url: 'https://chatgpt.com/c/error-but-usable',
+          composer: true, streaming: false, stopButtonVisible: false, paused: false,
+          assistantCount: 1, assistantTextLength: 5, assistantMessageId: 'assistant-1',
+          userCount: 2, userTextLength: 100, userMessageId: 'user-2',
+          errorText: 'Could not load this ChatGPT conversation',
+        } } };
+      }
       return { result: { value: {
         url: 'https://chatgpt.com/c/error-but-usable',
-        composer: true, streaming: false, stopButtonVisible: false, paused: false,
-        assistantCount: 1, assistantTextLength: 5, assistantMessageId: 'assistant-1',
-        userCount: 2, userTextLength: 100, userMessageId: 'user-2',
+        composer: false, streaming: false, stopButtonVisible: false, paused: false,
+        assistantCount: 0, assistantTextLength: 0, assistantMessageId: null,
+        userCount: 0, userTextLength: 0, userMessageId: null,
         errorText: 'Could not load this ChatGPT conversation',
       } } };
     },
@@ -142,10 +152,12 @@ test('browser monitor ignores visible page error text while message identity and
     session,
     baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 2, userTextLength: 100 },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+    onActivity: async (activity) => { statuses.push(activity.status); },
   });
-  assert.equal(result.status, 'COMPLETED');
-  assert.equal(result.probe.errorText, null);
-  assert.equal(calls, 2);
+  assert.equal(result.status, 'PAGE_ERROR');
+  assert.equal(result.probe.errorText, 'Could not load this ChatGPT conversation');
+  assert.equal(statuses.includes('COMPLETED'), false);
+  assert.equal(calls, 3);
 });
 
 test('page error detector recognizes the observed conversation load failure fixture', () => {
@@ -156,40 +168,68 @@ test('page error detector recognizes the observed conversation load failure fixt
   assert.equal(detectPageErrorText(body), 'Could not load this ChatGPT conversation');
 });
 
-test('browser monitor retries transient Runtime.evaluate timeouts and completes', async () => {
+test('browser monitor retries transient Runtime.evaluate timeouts without completing on response idle', async () => {
   let calls = 0;
+  const statuses = [];
   const session = {
     call: async (method) => {
       assert.equal(method, 'Runtime.evaluate');
       calls += 1;
       if (calls <= 2) throw new Error('CDP command timeout: Runtime.evaluate');
+      if (calls === 3) {
+        return {
+          result: {
+            value: {
+              url: 'https://chatgpt.com/c/hotfix',
+              composer: true,
+              streaming: false,
+              stopButtonVisible: false,
+              paused: false,
+              assistantCount: 1,
+              assistantTextLength: 5,
+              assistantMessageId: 'assistant-1',
+              userCount: 1,
+              userTextLength: 10,
+              userMessageId: 'user-1',
+              errorText: null,
+            },
+          },
+        };
+      }
       return {
         result: {
           value: {
             url: 'https://chatgpt.com/c/hotfix',
+            composer: false,
             streaming: false,
             stopButtonVisible: false,
             paused: false,
-            assistantCount: 1,
-            assistantTextLength: 5,
-            assistantMessageId: 'assistant-1',
-            userCount: 1,
-            userTextLength: 10,
-            userMessageId: 'user-1',
-            errorText: null,
+            assistantCount: 0,
+            assistantTextLength: 0,
+            assistantMessageId: null,
+            userCount: 0,
+            userTextLength: 0,
+            userMessageId: null,
+            errorText: 'Could not load this ChatGPT conversation',
           },
         },
       };
     },
   };
-  const browser = new ChatGptBrowser(null, { stallAfterMs: 1000, probeIntervalMs: 0 });
+  const browser = new ChatGptBrowser(null, {
+    stallAfterMs: 1000,
+    probeIntervalMs: 0,
+    conversationStateGraceMs: 0,
+  });
   const result = await browser.monitor({
     session,
     baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+    onActivity: async (activity) => { statuses.push(activity.status); },
   });
-  assert.equal(calls, 3);
-  assert.equal(result.status, 'COMPLETED');
+  assert.equal(calls, 4);
+  assert.equal(result.status, 'PAGE_ERROR');
+  assert.equal(statuses.includes('COMPLETED'), false);
 });
 
 test('browser monitor gives up only after three Runtime.evaluate retries', async () => {
