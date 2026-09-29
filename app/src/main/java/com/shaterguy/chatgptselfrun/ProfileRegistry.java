@@ -262,6 +262,18 @@ final class ProfileRegistry {
         return null;
     }
 
+    static CapturedProfile parseCaptured(String raw) {
+        try {
+            JSONObject root = new JSONObject(raw == null ? "" : raw);
+            Mode mode = Mode.valueOf(root.getString("mode").toUpperCase(Locale.ROOT));
+            return new CapturedProfile(mode, parseOperations(root.getJSONArray("operations")));
+        } catch (RuntimeException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalArgumentException("invalid captured profile", error);
+        }
+    }
+
     static synchronized boolean acceptCanonicalSnapshot(Mode mode, String raw,
                                                         String driveVersion, String modifiedTime) {
         Objects.requireNonNull(mode, "mode");
