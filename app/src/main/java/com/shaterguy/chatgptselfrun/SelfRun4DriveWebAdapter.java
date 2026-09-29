@@ -356,6 +356,7 @@ final class SelfRun4DriveWebAdapter {
         io.execute(() -> {
             try {
                 writeTaskControl(token, snapshot, "RUNNING", "DISPATCH_CREATE");
+                ProfileRegistryRefresher.refreshWithTokenBlocking(context, token);
                 String id = api.generateFileId(token);
                 JSONObject body = buildDispatch(snapshot, attempt);
                 JSONObject props = new JSONObject()
