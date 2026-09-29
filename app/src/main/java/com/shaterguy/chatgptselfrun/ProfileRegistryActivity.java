@@ -264,52 +264,7 @@ public final class ProfileRegistryActivity extends Activity {
     }
 
     private void showRegistrationDialog(ProfileRegistry.CapturedProfile captured) {
-        LinearLayout fields = new LinearLayout(this);
-        fields.setOrientation(LinearLayout.VERTICAL);
-        int pad = Ui.dp(this, 18);
-        fields.setPadding(pad, 0, pad, 0);
-        fields.addView(Ui.body(this, "실제 캡처: " + captured.actualCombination()));
-
-        EditText model = null;
-        if (captured.mode == ProfileRegistry.Mode.WORK) {
-            model = new EditText(this);
-            model.setHint("모델 신호명 (예: nova)");
-            model.setSingleLine(true);
-            model.setInputType(InputType.TYPE_CLASS_TEXT);
-            fields.addView(model);
-        }
-        EditText reasoning = new EditText(this);
-        reasoning.setHint(captured.mode == ProfileRegistry.Mode.WORK
-                ? "추론 신호명 (예: extreme)" : "추론 신호명");
-        reasoning.setSingleLine(true);
-        reasoning.setInputType(InputType.TYPE_CLASS_TEXT);
-        fields.addView(reasoning);
-
-        EditText finalModel = model;
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(captured.mode == ProfileRegistry.Mode.WORK ? "Work 신호 등록" : "Chat 신호 등록")
-                .setView(fields)
-                .setNegativeButton("취소", (d, which) -> endCapture("등록을 취소했습니다."))
-                .setPositiveButton("등록", null)
-                .create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            try {
-                String modelSignal = finalModel == null ? "" : finalModel.getText().toString();
-                ProfileRegistry.RegisterResult result = ProfileRegistry.registerCaptured(
-                        captured, modelSignal, reasoning.getText().toString());
-                Toast.makeText(this,
-                        ProfileRegistry.RegisterResult.DUPLICATE_PROFILE.equals(result.status)
-                                ? "이미 등록된 실제 profile입니다." : "Profile Registry에 등록했습니다.",
-                        Toast.LENGTH_SHORT).show();
-                dialog.dismiss();
-                syncRegistryToWeb();
-                endCapture("등록 내용을 즉시 반영했습니다.");
-            } catch (IllegalArgumentException | IllegalStateException error) {
-                Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
-            }
-        }));
-        dialog.setOnCancelListener(d -> endCapture("등록을 취소했습니다."));
-        dialog.show();
+        endCapture("모델 조합은 Drive에서 자동 관리됩니다.");
     }
 
     private void endCapture(String note) {
