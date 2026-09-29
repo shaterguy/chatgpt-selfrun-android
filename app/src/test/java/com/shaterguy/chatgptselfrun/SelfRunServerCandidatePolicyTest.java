@@ -13,8 +13,8 @@ import static org.junit.Assert.*;
 public final class SelfRunServerCandidatePolicyTest {
     @Test public void currentCandidateIdentityAndExplicitServerGateArePinned() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 4001004"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.4-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002004"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.4-dev2'"));
         assertTrue(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED"));
         assertTrue(gradle.contains("def selfRunServerFeaturesEnabled = true"));
         assertTrue(gradle.contains("selfRunServerChecks"));

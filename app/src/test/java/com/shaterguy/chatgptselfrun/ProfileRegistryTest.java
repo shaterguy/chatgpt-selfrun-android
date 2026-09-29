@@ -54,7 +54,7 @@ public final class ProfileRegistryTest {
     }
 
     @Test public void exportIsReadOnlyDiagnosticOfCurrentCanonicalState() throws Exception {
-        String raw = ProfileRegistry.exportWorkJson("4.0.4-dev1");
+        String raw = ProfileRegistry.exportWorkJson("4.0.4-dev2");
         assertFalse(raw.contains("conversation_id"));
         assertFalse(raw.contains("parent_message_id"));
         assertFalse(raw.contains("messages"));

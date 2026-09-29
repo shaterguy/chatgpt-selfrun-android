@@ -38,6 +38,21 @@ public final class SelfRun4DriveDispatchPolicyTest {
         assertFalse(adapter.contains("SELFRUN_PUSH_GATEWAY_URL"));
     }
 
+    @Test public void everyV4RequestRefreshesCanonicalRegistryBeforeDispatch() throws Exception {
+        String adapter = source("SelfRun4DriveWebAdapter.java");
+        assertTrue(adapter.contains("private boolean registryRefreshPending;"));
+        assertTrue(adapter.contains("private String registryRefreshRequest = \"\";"));
+        assertTrue(adapter.contains("ProfileRegistrySync.refresh(context, result ->"));
+        assertTrue(adapter.contains("if (!refreshRequest.equals(state.requestId()))"));
+        assertTrue(adapter.contains("refreshRegistryForCurrentRequest();"));
+        assertTrue(adapter.contains("registryRefreshRequest = refreshRequest;"));
+        assertTrue(adapter.contains("fail(\"PROFILE_REGISTRY_UNAVAILABLE\")"));
+        int prepare = adapter.indexOf("void prepare(SelfRun3Engine.State next)");
+        int refresh = adapter.indexOf("ProfileRegistrySync.refresh(context, result ->", prepare);
+        int dispatch = adapter.indexOf("private void beginAttempt()", prepare);
+        assertTrue(prepare >= 0 && refresh > prepare && dispatch > refresh);
+    }
+
     @Test public void existingTaskAndResultAuthorityRemainInTheApp() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         String protocol = source("SelfRun3Protocol.java");

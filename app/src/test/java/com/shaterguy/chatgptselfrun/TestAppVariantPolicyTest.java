@@ -13,8 +13,8 @@ public final class TestAppVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 4001004"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.4-dev1'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002004"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.4-dev2'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
@@ -41,7 +41,7 @@ public final class TestAppVariantPolicyTest {
 
     @Test public void v4DevWorkflowBuildsUpgradeableFormalDevAndSeparateTestPackage() throws Exception {
         String workflow = read(".github/workflows/build-selfrun-v4-dev.yml", "../.github/workflows/build-selfrun-v4-dev.yml");
-        assertTrue(workflow.contains("      - 'selfrun-v4/v4.0.4-dev1'"));
+        assertTrue(workflow.contains("      - 'selfrun-v4/v4.0.4-dev2'"));
         assertTrue(workflow.contains(":app:assembleRelease"));
         assertTrue(workflow.contains(":app:assembleQaApp"));
         assertTrue(workflow.contains(":app:assembleQaAppAndroidTest"));
@@ -49,8 +49,8 @@ public final class TestAppVariantPolicyTest {
         assertTrue(workflow.contains("tools/sign_test.sh"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.test"));
-        assertTrue(workflow.contains("SelfRun-Drive-v4.0.4-dev1.apk"));
-        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.4-dev1.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-v4.0.4-dev2.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.4-dev2.apk"));
         assertTrue(workflow.contains("drive-v4.0.3"));
         assertTrue(workflow.contains("BASE_VERSION_NAME=4.0.3"));
         assertTrue(workflow.contains("bash tools/verify_selfrun3_release_emulator.sh"));

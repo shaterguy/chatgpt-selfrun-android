@@ -58,6 +58,8 @@ final class SelfRun4DriveWebAdapter {
     private String controlFileId = "";
     private long controlEpoch;
     private String lastControlPublishedKey = "";
+    private boolean registryRefreshPending;
+    private String registryRefreshRequest = "";
 
     SelfRun4DriveWebAdapter(Context context, SelfRun3WebAdapter.Listener listener) {
         this.context = context.getApplicationContext();
@@ -230,7 +232,48 @@ final class SelfRun4DriveWebAdapter {
         state = next;
         closed = false;
         if (newRequest) preparationAttempt = 0L;
-        beginAttempt();
+        if (next.requestId().equals(registryRefreshRequest)) {
+            beginAttempt();
+            return;
+        }
+        refreshRegistryForCurrentRequest();
+    }
+
+    private void refreshRegistryForCurrentRequest() {
+        requireMain();
+        if (state == null || closed || registryRefreshPending) return;
+        registryRefreshPending = true;
+        String refreshRequest = state.requestId();
+        trace("PROFILE_REGISTRY_REFRESH",
+                "status=refreshing;task=" + state.taskId()
+                        + ";turn=" + state.turnId()
+                        + ";request=" + refreshRequest);
+        ProfileRegistrySync.refresh(context, result -> {
+            registryRefreshPending = false;
+            if (closed || state == null) return;
+            if (!refreshRequest.equals(state.requestId())) {
+                refreshRegistryForCurrentRequest();
+                return;
+            }
+            boolean usable = SelfRunStore.MODE_WORK.equals(state.config().optString("mode"))
+                    ? result.workUsable : result.chatUsable;
+            if (!usable) {
+                trace("PROFILE_REGISTRY_REFRESH",
+                        "status=unavailable;task=" + state.taskId()
+                                + ";turn=" + state.turnId()
+                                + ";request=" + refreshRequest);
+                fail("PROFILE_REGISTRY_UNAVAILABLE");
+                return;
+            }
+            registryRefreshRequest = refreshRequest;
+            trace("PROFILE_REGISTRY_REFRESH",
+                    "status=ready;task=" + state.taskId()
+                            + ";turn=" + state.turnId()
+                            + ";request=" + refreshRequest
+                            + ";chatUpdated=" + result.chatUpdated
+                            + ";workUpdated=" + result.workUpdated);
+            beginAttempt();
+        });
     }
 
     private void beginAttempt() {
@@ -411,9 +454,13 @@ final class SelfRun4DriveWebAdapter {
     }
 
     private static JSONArray profileOperations(SelfRun3Engine.State snapshot) {
-        String mode = snapshot.config().optString("mode");
-        String model = snapshot.config().optString("model");
-        String reasoning = snapshot.config().optString("reasoning");
+        return profileOperationsForDispatch(
+                snapshot.config().optString("mode"),
+                snapshot.config().optString("model"),
+                snapshot.config().optString("reasoning"));
+    }
+
+    static JSONArray profileOperationsForDispatch(String mode, String model, String reasoning) {
         ProfileRegistry.Profile profile;
         if (SelfRunStore.MODE_WORK.equals(mode)) {
             profile = ProfileRegistry.resolveWork(model, reasoning);

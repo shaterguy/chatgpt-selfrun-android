@@ -19,7 +19,7 @@ public final class ProfileRegistryTransferTest {
     }
 
     @Test public void diagnosticExportPreservesCanonicalSchemaAndFingerprint() throws Exception {
-        String raw = ProfileRegistry.exportChatJson("4.0.4-dev1");
+        String raw = ProfileRegistry.exportChatJson("4.0.4-dev2");
         org.json.JSONObject root = new org.json.JSONObject(raw);
         assertEquals(ProfileRegistry.CHAT_EXPORT_SCHEMA, root.getString("schema"));
         assertEquals(ProfileRegistry.SCHEMA_VERSION, root.getInt("registrySchemaVersion"));
