@@ -319,21 +319,7 @@ public final class ProfileRegistryActivity extends Activity {
     }
 
     private void readImport(Uri uri, ProfileRegistry.Mode mode) {
-        try {
-            String json = readUtf8Bounded(uri);
-            ProfileRegistry.ImportResult result = ProfileRegistry.importJson(mode, json);
-            syncRegistryToWeb();
-            renderRegistry();
-            new AlertDialog.Builder(this)
-                    .setTitle(modeLabel(mode) + " 등록 조합 가져오기 완료")
-                    .setMessage("새로 등록: " + result.added + "개\n중복 건너뜀: " + result.skipped + "개")
-                    .setPositiveButton("확인", null)
-                    .show();
-        } catch (Exception error) {
-            String message = error.getMessage();
-            if (message == null || message.isEmpty()) message = "파일을 안전하게 해석하지 못했습니다.";
-            Toast.makeText(this, modeLabel(mode) + " 조합 가져오기 실패 · " + message, Toast.LENGTH_LONG).show();
-        }
+        Toast.makeText(this, "이 화면에서는 Drive 기준 모델 조합만 사용합니다.", Toast.LENGTH_SHORT).show();
     }
 
     private String readUtf8Bounded(Uri uri) throws Exception {
