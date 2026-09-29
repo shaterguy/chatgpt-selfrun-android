@@ -20,7 +20,13 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** Durable, capture-backed source of truth for Chat and Work request profiles. */
+/**
+ * Canonical CHAT/WORK request-profile registry.
+ *
+ * Active profiles come only from the latest accepted Drive canonical snapshots.
+ * The app never synthesizes or merges a fixed candidate list. Accepted snapshots
+ * are persisted as last-known-good (LKG) data and survive refresh failures.
+ */
 final class ProfileRegistry {
     static final String SCHEMA = "selfrun-profile-registry-v1";
     static final int SCHEMA_VERSION = 1;
@@ -34,16 +40,23 @@ final class ProfileRegistry {
             new LinkedHashSet<>(CONTROL_PATH_ORDER));
 
     private static final String PREFS = "selfrun_drive_profile_registry";
-    private static final String KEY_STATE = "state";
+    private static final String KEY_CHAT_RAW = "chat_raw";
+    private static final String KEY_CHAT_VERSION = "chat_version";
+    private static final String KEY_CHAT_MODIFIED = "chat_modified";
+    private static final String KEY_WORK_RAW = "work_raw";
+    private static final String KEY_WORK_VERSION = "work_version";
+    private static final String KEY_WORK_MODIFIED = "work_modified";
     private static final Pattern SIGNAL_TOKEN = Pattern.compile("[a-z0-9][a-z0-9._:-]{0,79}");
+    private static final Pattern FINGERPRINT = Pattern.compile("[0-9a-f]{64}");
     private static final Set<String> RESERVED_TOKENS = Set.of(
             "body", "none", "null", "true", "false", "keep", "chat", "work",
             "model", "reasoning", "recovery_id", "next_input_b64url", "self_run_turn_completed");
-    private static final Set<String> EXPORT_ROOT_KEYS = Set.of(
+    private static final Set<String> ROOT_KEYS = Set.of(
             "schema", "registrySchemaVersion", "appVersion", "profiles");
-    private static final Set<String> EXPORT_PROFILE_KEYS = Set.of(
+    private static final Set<String> PROFILE_KEYS = Set.of(
             "signal", "request", "operations", "fingerprint", "builtIn");
-    private static final Set<String> EXPORT_SIGNAL_KEYS = Set.of("model", "reasoning");
+    private static final Set<String> CHAT_SIGNAL_KEYS = Set.of("reasoning");
+    private static final Set<String> WORK_SIGNAL_KEYS = Set.of("model", "reasoning");
 
     enum Mode { CHAT, WORK }
     enum OperationKind { SET, REMOVE }
@@ -54,9 +67,7 @@ final class ProfileRegistry {
         final String value;
 
         private Operation(OperationKind kind, String path, String value) {
-            if (!CONTROL_PATHS.contains(path)) {
-                throw new IllegalArgumentException("non-allowlisted control path: " + path);
-            }
+            if (!CONTROL_PATHS.contains(path)) throw new IllegalArgumentException("non-allowlisted control path: " + path);
             this.kind = Objects.requireNonNull(kind, "kind");
             this.path = path;
             this.value = value;
@@ -73,13 +84,9 @@ final class ProfileRegistry {
 
         JSONObject toJson() {
             JSONObject out = new JSONObject();
-            try {
-                out.put("op", kind.name());
-                out.put("path", path);
-                if (kind == OperationKind.SET) out.put("value", value);
-            } catch (Exception error) {
-                throw new IllegalStateException("operation serialization failed", error);
-            }
+            out.put("op", kind.name());
+            out.put("path", path);
+            if (kind == OperationKind.SET) out.put("value", value);
             return out;
         }
     }
@@ -91,112 +98,85 @@ final class ProfileRegistry {
         final List<Operation> operations;
         final String fingerprint;
         final boolean builtIn;
-        final String presentationLabel;
 
         private Profile(Mode mode, String signalModel, String signalReasoning,
-                        List<Operation> operations, boolean builtIn, String presentationLabel) {
+                        List<Operation> operations, boolean builtIn) {
             this.mode = Objects.requireNonNull(mode, "mode");
             this.signalModel = signalModel == null ? "" : signalModel;
             this.signalReasoning = Objects.requireNonNull(signalReasoning, "signalReasoning");
             this.operations = Collections.unmodifiableList(canonicalOperations(operations));
             this.fingerprint = fingerprint(mode, this.operations);
             this.builtIn = builtIn;
-            this.presentationLabel = presentationLabel == null ? "" : presentationLabel;
             validateProfileShape(this);
         }
 
         String requestValue(String path) { return ProfileRegistry.requestValue(operations, path); }
         boolean requestHas(String path) { return ProfileRegistry.requestHas(operations, path); }
+
         String displayLabel() {
-            String reasoningLabel = presentationLabel.isEmpty() ? signalReasoning : presentationLabel;
-            if (mode == Mode.CHAT) return reasoningLabel;
-            String modelLabel = titleSignalToken(signalModel);
-            return modelLabel.isEmpty() ? reasoningLabel : modelLabel + " · " + reasoningLabel;
+            if (mode == Mode.CHAT) return titleSignalToken(signalReasoning);
+            return titleSignalToken(signalModel) + " · " + titleSignalToken(signalReasoning);
         }
+
         String actualCombination() {
             return requestValue("model") + " / "
                     + (requestHas("thinking_effort") ? requestValue("thinking_effort") : "필드 없음");
-        }
-
-        JSONObject toStorageJson() {
-            JSONObject out = new JSONObject();
-            try {
-                out.put("mode", mode.name());
-                out.put("signalModel", signalModel);
-                out.put("signalReasoning", signalReasoning);
-                out.put("fingerprint", fingerprint);
-                JSONArray ops = new JSONArray();
-                for (Operation operation : operations) ops.put(operation.toJson());
-                out.put("operations", ops);
-            } catch (Exception error) {
-                throw new IllegalStateException("profile serialization failed", error);
-            }
-            return out;
         }
 
         JSONObject toRuntimeJson() {
-            JSONObject out = toStorageJson();
-            try { out.put("builtIn", builtIn); }
-            catch (Exception error) { throw new IllegalStateException("runtime profile serialization failed", error); }
+            JSONObject out = new JSONObject();
+            out.put("mode", mode.name());
+            out.put("signalModel", signalModel);
+            out.put("signalReasoning", signalReasoning);
+            out.put("fingerprint", fingerprint);
+            JSONArray ops = new JSONArray();
+            for (Operation operation : operations) ops.put(operation.toJson());
+            out.put("operations", ops);
+            out.put("builtIn", builtIn);
             return out;
         }
     }
 
-    static final class CapturedProfile {
-        final Mode mode;
-        final List<Operation> operations;
-        final String fingerprint;
+    static final class SnapshotInfo {
+        final String driveVersion;
+        final String modifiedTime;
+        final String appVersion;
+        final int count;
 
-        private CapturedProfile(Mode mode, List<Operation> operations) {
-            this.mode = Objects.requireNonNull(mode, "mode");
-            this.operations = Collections.unmodifiableList(canonicalOperations(operations));
-            this.fingerprint = fingerprint(mode, this.operations);
-            if (ProfileRegistry.requestValue(this.operations, "model").isEmpty()) {
-                throw new IllegalArgumentException("captured model missing");
-            }
-        }
-
-        String requestValue(String path) { return ProfileRegistry.requestValue(operations, path); }
-        boolean requestHas(String path) { return ProfileRegistry.requestHas(operations, path); }
-        String actualCombination() {
-            return requestValue("model") + " / "
-                    + (requestHas("thinking_effort") ? requestValue("thinking_effort") : "필드 없음");
+        SnapshotInfo(String driveVersion, String modifiedTime, String appVersion, int count) {
+            this.driveVersion = driveVersion == null ? "" : driveVersion;
+            this.modifiedTime = modifiedTime == null ? "" : modifiedTime;
+            this.appVersion = appVersion == null ? "" : appVersion;
+            this.count = Math.max(0, count);
         }
     }
 
-    static final class RegisterResult {
-        static final String ADDED = "ADDED";
-        static final String DUPLICATE_PROFILE = "DUPLICATE_PROFILE";
-        final String status;
-        final Profile profile;
-        RegisterResult(String status, Profile profile) { this.status = status; this.profile = profile; }
-    }
-
-    static final class ImportResult {
-        final Mode mode;
-        final int added;
-        final int skipped;
-        ImportResult(Mode mode, int added, int skipped) {
-            this.mode = mode;
-            this.added = Math.max(0, added);
-            this.skipped = Math.max(0, skipped);
+    private static final class ParsedSnapshot {
+        final List<Profile> profiles;
+        final String appVersion;
+        ParsedSnapshot(List<Profile> profiles, String appVersion) {
+            this.profiles = Collections.unmodifiableList(new ArrayList<>(profiles));
+            this.appVersion = appVersion == null ? "" : appVersion;
         }
     }
 
     private static final class State {
         final List<Profile> profiles;
-        final List<Profile> userProfiles;
-        final Set<String> tombstones;
-        State(List<Profile> profiles, List<Profile> userProfiles, Set<String> tombstones) {
+        final SnapshotInfo chat;
+        final SnapshotInfo work;
+
+        State(List<Profile> profiles, SnapshotInfo chat, SnapshotInfo work) {
             this.profiles = Collections.unmodifiableList(new ArrayList<>(profiles));
-            this.userProfiles = Collections.unmodifiableList(new ArrayList<>(userProfiles));
-            this.tombstones = Collections.unmodifiableSet(new LinkedHashSet<>(tombstones));
+            this.chat = chat;
+            this.work = work;
         }
     }
 
     private static volatile SharedPreferences preferences;
-    private static volatile State state = defaults(Set.of(), List.of());
+    private static volatile State state = new State(List.of(),
+            new SnapshotInfo("", "", "", 0), new SnapshotInfo("", "", "", 0));
     private static volatile boolean storageHealthy = true;
+    private static volatile String lastRefreshError = "";
 
     private ProfileRegistry() {}
 
@@ -212,6 +192,15 @@ final class ProfileRegistry {
     }
 
     static boolean storageHealthy() { return storageHealthy; }
+    static String lastRefreshError() { return lastRefreshError; }
+    static void markRefreshSuccess() { lastRefreshError = ""; }
+    static void markRefreshFailure(Throwable error) {
+        String message = error == null ? "registry refresh failed" : String.valueOf(error.getMessage());
+        if (message == null || message.trim().isEmpty()) message = error == null ? "registry refresh failed" : error.getClass().getSimpleName();
+        lastRefreshError = message;
+    }
+
+    static SnapshotInfo snapshotInfo(Mode mode) { return mode == Mode.CHAT ? state.chat : state.work; }
     static List<Profile> listChat() { return list(Mode.CHAT); }
     static List<Profile> listWork() { return list(Mode.WORK); }
 
@@ -260,111 +249,41 @@ final class ProfileRegistry {
         return null;
     }
 
-    static CapturedProfile parseCaptured(String raw) {
-        try {
-            JSONObject root = new JSONObject(raw == null ? "" : raw);
-            Mode mode = Mode.valueOf(root.getString("mode").toUpperCase(Locale.ROOT));
-            JSONArray operations = root.getJSONArray("operations");
-            ArrayList<Operation> parsed = parseOperations(operations);
-            return new CapturedProfile(mode, parsed);
-        } catch (RuntimeException error) {
-            throw error;
-        } catch (Exception error) {
-            throw new IllegalArgumentException("invalid captured profile", error);
+    static synchronized boolean acceptCanonicalSnapshot(Mode mode, String raw,
+                                                        String driveVersion, String modifiedTime) {
+        Objects.requireNonNull(mode, "mode");
+        if (raw == null || raw.isEmpty()) throw new IllegalArgumentException("canonical registry is empty");
+        if (raw.length() > MAX_IMPORT_JSON_CHARS) throw new IllegalArgumentException("canonical registry is too large");
+        ParsedSnapshot parsed = parseCanonicalSnapshot(mode, raw);
+        if (parsed.profiles.isEmpty()) throw new IllegalArgumentException("canonical registry returned zero profiles");
+
+        ArrayList<Profile> combined = new ArrayList<>();
+        for (Profile profile : state.profiles) if (profile.mode != mode) combined.add(profile);
+        for (Profile profile : parsed.profiles) {
+            validateStoredSignalCompatibility(combined, profile);
+            combined.add(profile);
         }
-    }
+        SnapshotInfo info = new SnapshotInfo(driveVersion, modifiedTime, parsed.appVersion, parsed.profiles.size());
+        SnapshotInfo chat = mode == Mode.CHAT ? info : state.chat;
+        SnapshotInfo work = mode == Mode.WORK ? info : state.work;
 
-    static synchronized RegisterResult registerCaptured(CapturedProfile captured,
-                                                        String signalModel, String signalReasoning) {
-        Objects.requireNonNull(captured, "captured");
-        Profile duplicate = findByFingerprint(captured.mode, captured.fingerprint);
-        if (duplicate != null) return new RegisterResult(RegisterResult.DUPLICATE_PROFILE, duplicate);
-
-        String reasoning = canonicalSignalToken(signalReasoning);
-        String model = captured.mode == Mode.WORK ? canonicalSignalToken(signalModel) : "";
-        validateSignalCompatibility(captured, model, reasoning);
-        Profile profile = new Profile(captured.mode, model, reasoning, captured.operations, false, "");
-
-        ArrayList<Profile> users = new ArrayList<>(state.userProfiles);
-        users.removeIf(existing -> existing.fingerprint.equals(profile.fingerprint));
-        users.add(profile);
-        State next = defaults(state.tombstones, users);
-        if (!persistLocked(next.userProfiles, next.tombstones)) {
-            throw new IllegalStateException("profile registry persistence failed");
+        SharedPreferences prefs = preferences;
+        if (prefs != null) {
+            SharedPreferences.Editor editor = prefs.edit();
+            if (mode == Mode.CHAT) {
+                editor.putString(KEY_CHAT_RAW, raw);
+                editor.putString(KEY_CHAT_VERSION, info.driveVersion);
+                editor.putString(KEY_CHAT_MODIFIED, info.modifiedTime);
+            } else {
+                editor.putString(KEY_WORK_RAW, raw);
+                editor.putString(KEY_WORK_VERSION, info.driveVersion);
+                editor.putString(KEY_WORK_MODIFIED, info.modifiedTime);
+            }
+            if (!editor.commit()) throw new IllegalStateException("canonical registry cache commit failed");
         }
-        state = next;
+        state = new State(combined, chat, work);
         storageHealthy = true;
-        return new RegisterResult(RegisterResult.ADDED, profile);
-    }
-
-    static synchronized ImportResult importJson(Mode expectedMode, String raw) {
-        Objects.requireNonNull(expectedMode, "expectedMode");
-        if (raw == null || raw.isEmpty()) throw new IllegalArgumentException("가져오기 파일이 비어 있습니다.");
-        if (raw.length() > MAX_IMPORT_JSON_CHARS) throw new IllegalArgumentException("가져오기 파일 크기 제한을 초과했습니다.");
-        try {
-            JSONObject root = new JSONObject(raw);
-            requireOnlyKeys(root, EXPORT_ROOT_KEYS, "root");
-            String expectedSchema = exportSchema(expectedMode);
-            if (!expectedSchema.equals(root.getString("schema"))) {
-                throw new IllegalArgumentException("선택한 영역과 조합 파일 형식이 일치하지 않습니다.");
-            }
-            if (root.getInt("registrySchemaVersion") != SCHEMA_VERSION) {
-                throw new IllegalArgumentException("지원하지 않는 Registry schema 버전입니다.");
-            }
-            if (root.has("appVersion")) {
-                String appVersion = root.getString("appVersion");
-                if (appVersion.length() > 128) throw new IllegalArgumentException("appVersion 값이 너무 깁니다.");
-            }
-            JSONArray profiles = root.getJSONArray("profiles");
-            if (profiles.length() > MAX_IMPORT_PROFILES) {
-                throw new IllegalArgumentException("가져오기 profile 개수 제한을 초과했습니다.");
-            }
-
-            ArrayList<Profile> combined = new ArrayList<>(state.profiles);
-            ArrayList<Profile> users = new ArrayList<>(state.userProfiles);
-            int added = 0, skipped = 0;
-            for (int i = 0; i < profiles.length(); i++) {
-                Profile candidate = parseImportedProfile(profiles.getJSONObject(i), expectedMode);
-                if (findByFingerprint(combined, expectedMode, candidate.fingerprint) != null) {
-                    skipped++;
-                    continue;
-                }
-                validateStoredSignalCompatibility(combined, candidate);
-                combined.add(candidate);
-                users.add(candidate);
-                added++;
-            }
-
-            State next = defaults(state.tombstones, users);
-            if (!persistLocked(next.userProfiles, next.tombstones)) {
-                throw new IllegalStateException("profile registry import persistence failed");
-            }
-            state = next;
-            storageHealthy = true;
-            return new ImportResult(expectedMode, added, skipped);
-        } catch (IllegalArgumentException | IllegalStateException error) {
-            throw error;
-        } catch (Exception error) {
-            throw new IllegalArgumentException("조합 파일을 안전하게 해석하지 못했습니다.", error);
-        }
-    }
-
-    static synchronized boolean delete(String fingerprint) {
-        Profile existing = null;
-        for (Profile profile : state.profiles) {
-            if (profile.fingerprint.equals(fingerprint)) { existing = profile; break; }
-        }
-        if (existing == null) return false;
-
-        String deletingFingerprint = existing.fingerprint;
-        ArrayList<Profile> users = new ArrayList<>(state.userProfiles);
-        users.removeIf(profile -> profile.fingerprint.equals(deletingFingerprint));
-        LinkedHashSet<String> tombstones = new LinkedHashSet<>(state.tombstones);
-        if (existing.builtIn || builtInFingerprint(deletingFingerprint)) tombstones.add(deletingFingerprint);
-        State next = defaults(tombstones, users);
-        if (!persistLocked(next.userProfiles, next.tombstones)) return false;
-        state = next;
-        storageHealthy = true;
+        lastRefreshError = "";
         return true;
     }
 
@@ -374,43 +293,43 @@ final class ProfileRegistry {
         return out.toString();
     }
 
-    static String exportChatJson(String appVersion) { return exportJson(Mode.CHAT, appVersion); }
-    static String exportWorkJson(String appVersion) { return exportJson(Mode.WORK, appVersion); }
+    static String exportChatJson(String ignoredAppVersion) { return exportJson(Mode.CHAT); }
+    static String exportWorkJson(String ignoredAppVersion) { return exportJson(Mode.WORK); }
 
-    private static String exportJson(Mode mode, String appVersion) {
+    private static String exportJson(Mode mode) {
         JSONObject root = new JSONObject();
+        root.put("schema", exportSchema(mode));
+        root.put("registrySchemaVersion", SCHEMA_VERSION);
+        root.put("appVersion", snapshotInfo(mode).appVersion);
         JSONArray profiles = new JSONArray();
-        try {
-            root.put("schema", exportSchema(mode));
-            root.put("registrySchemaVersion", SCHEMA_VERSION);
-            root.put("appVersion", appVersion == null ? "" : appVersion);
-            for (Profile profile : list(mode)) {
-                JSONObject item = new JSONObject(), signal = new JSONObject(), request = new JSONObject();
-                if (mode == Mode.WORK) signal.put("model", profile.signalModel);
-                signal.put("reasoning", profile.signalReasoning);
-                item.put("signal", signal);
-                for (Operation operation : profile.operations) {
-                    if (operation.kind == OperationKind.SET) request.put(operation.path, operation.value);
-                }
-                item.put("request", request);
-                JSONArray operations = new JSONArray();
-                for (Operation operation : profile.operations) operations.put(operation.toJson());
-                item.put("operations", operations);
-                item.put("fingerprint", profile.fingerprint);
-                item.put("builtIn", profile.builtIn);
-                profiles.put(item);
-            }
-            root.put("profiles", profiles);
-            return root.toString(2);
-        } catch (Exception error) {
-            throw new IllegalStateException((mode == Mode.CHAT ? "Chat" : "Work") + " registry export failed", error);
+        for (Profile profile : list(mode)) profiles.put(toCanonicalJson(profile));
+        root.put("profiles", profiles);
+        return root.toString(2);
+    }
+
+    private static JSONObject toCanonicalJson(Profile profile) {
+        JSONObject item = new JSONObject();
+        JSONObject signal = new JSONObject();
+        if (profile.mode == Mode.WORK) signal.put("model", profile.signalModel);
+        signal.put("reasoning", profile.signalReasoning);
+        item.put("signal", signal);
+        JSONObject request = new JSONObject();
+        JSONArray operations = new JSONArray();
+        for (Operation operation : profile.operations) {
+            operations.put(operation.toJson());
+            if (operation.kind == OperationKind.SET) request.put(operation.path, operation.value);
         }
+        item.put("request", request);
+        item.put("operations", operations);
+        item.put("fingerprint", profile.fingerprint);
+        item.put("builtIn", profile.builtIn);
+        return item;
     }
 
     static String canonicalSignalToken(String value) {
         String token = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
         if (!SIGNAL_TOKEN.matcher(token).matches() || RESERVED_TOKENS.contains(token)) {
-            throw new IllegalArgumentException("신호명은 소문자 영숫자로 시작하고 영숫자 . _ : - 만 80자 이내로 사용할 수 있습니다.");
+            throw new IllegalArgumentException("invalid signal token");
         }
         return token;
     }
@@ -426,69 +345,101 @@ final class ProfileRegistry {
         return value.substring(0, 1).toUpperCase(Locale.ROOT) + value.substring(1);
     }
 
-    private static Profile parseImportedProfile(JSONObject item, Mode mode) throws Exception {
-        requireOnlyKeys(item, EXPORT_PROFILE_KEYS, "profile");
+    private static ParsedSnapshot parseCanonicalSnapshot(Mode mode, String raw) {
+        try {
+            JSONObject root = new JSONObject(raw);
+            requireExactKeys(root, ROOT_KEYS, "root");
+            if (!exportSchema(mode).equals(root.getString("schema"))) throw new IllegalArgumentException("registry mode/schema mismatch");
+            if (root.getInt("registrySchemaVersion") != SCHEMA_VERSION) throw new IllegalArgumentException("unsupported registry schema version");
+            String appVersion = root.getString("appVersion");
+            if (appVersion.length() > 128) throw new IllegalArgumentException("appVersion too long");
+            JSONArray profiles = root.getJSONArray("profiles");
+            if (profiles.length() > MAX_IMPORT_PROFILES) throw new IllegalArgumentException("profile count exceeds limit");
+            ArrayList<Profile> parsed = new ArrayList<>();
+            for (int i = 0; i < profiles.length(); i++) {
+                Profile profile = parseCanonicalProfile(profiles.getJSONObject(i), mode);
+                if (findByFingerprint(parsed, mode, profile.fingerprint) != null) throw new IllegalArgumentException("duplicate fingerprint");
+                validateStoredSignalCompatibility(parsed, profile);
+                parsed.add(profile);
+            }
+            return new ParsedSnapshot(parsed, appVersion);
+        } catch (IllegalArgumentException | IllegalStateException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalArgumentException("invalid canonical registry", error);
+        }
+    }
+
+    private static Profile parseCanonicalProfile(JSONObject item, Mode mode) throws Exception {
+        requireExactKeys(item, PROFILE_KEYS, "profile");
         JSONObject signal = item.getJSONObject("signal");
-        requireOnlyKeys(signal, EXPORT_SIGNAL_KEYS, "signal");
+        requireExactKeys(signal, mode == Mode.CHAT ? CHAT_SIGNAL_KEYS : WORK_SIGNAL_KEYS, "signal");
         String reasoning = canonicalSignalToken(signal.getString("reasoning"));
-        String model;
-        if (mode == Mode.WORK) model = canonicalSignalToken(signal.getString("model"));
-        else {
-            model = "";
-            if (signal.has("model") && !signal.getString("model").isEmpty()) {
-                throw new IllegalArgumentException("Chat 조합에는 model 신호를 지정할 수 없습니다.");
+        String model = mode == Mode.WORK ? canonicalSignalToken(signal.getString("model")) : "";
+        ArrayList<Operation> operations = parseOperations(item.getJSONArray("operations"));
+        validateExportRequest(item.getJSONObject("request"), operations);
+        boolean builtIn = item.getBoolean("builtIn");
+        String incomingFingerprint = item.getString("fingerprint");
+        if (!FINGERPRINT.matcher(incomingFingerprint).matches()) throw new IllegalArgumentException("invalid fingerprint");
+        Profile profile = new Profile(mode, model, reasoning, operations, builtIn);
+        if (!profile.fingerprint.equals(incomingFingerprint)) throw new IllegalArgumentException("fingerprint mismatch");
+        String requestModel = profile.requestValue("model");
+        if (mode == Mode.CHAT) {
+            if (requestModel.endsWith("-wm")) throw new IllegalArgumentException("Work model leaked into Chat registry");
+            if (profile.requestHas("conversation_origin") || profile.requestHas("service_tier")) {
+                throw new IllegalArgumentException("Chat registry contains Work-only request fields");
+            }
+        } else {
+            if (!requestModel.endsWith("-wm")) throw new IllegalArgumentException("Work registry requires *-wm model");
+            if (!"tpp".equals(profile.requestValue("conversation_origin"))) {
+                throw new IllegalArgumentException("Work registry requires conversation_origin=tpp");
             }
         }
-        ArrayList<Operation> operations = parseOperations(item.getJSONArray("operations"));
-        validateExportRequest(item, operations);
-        if (item.has("fingerprint")) {
-            String ignoredFingerprint = item.getString("fingerprint");
-            if (ignoredFingerprint.length() > 128) throw new IllegalArgumentException("fingerprint 값이 너무 깁니다.");
-        }
-        if (item.has("builtIn")) item.getBoolean("builtIn");
-        return new Profile(mode, model, reasoning, operations, false, "");
+        return profile;
     }
 
     private static ArrayList<Operation> parseOperations(JSONArray operations) throws Exception {
-        if (operations.length() != CONTROL_PATH_ORDER.size()) {
-            throw new IllegalArgumentException("absolute profile operation 개수가 올바르지 않습니다.");
-        }
+        if (operations.length() != CONTROL_PATH_ORDER.size()) throw new IllegalArgumentException("absolute profile operation count mismatch");
         ArrayList<Operation> parsed = new ArrayList<>();
         for (int i = 0; i < operations.length(); i++) {
             JSONObject operation = operations.getJSONObject(i);
-            requireOnlyKeys(operation, Set.of("op", "path", "value"), "operation");
             String kind = operation.getString("op").toUpperCase(Locale.ROOT);
             String path = operation.getString("path");
-            if (OperationKind.SET.name().equals(kind)) parsed.add(Operation.set(path, operation.getString("value")));
-            else if (OperationKind.REMOVE.name().equals(kind)) {
-                if (operation.has("value")) throw new IllegalArgumentException("REMOVE operation에는 value를 둘 수 없습니다.");
+            if (OperationKind.SET.name().equals(kind)) {
+                requireExactKeys(operation, Set.of("op", "path", "value"), "operation");
+                parsed.add(Operation.set(path, operation.getString("value")));
+            } else if (OperationKind.REMOVE.name().equals(kind)) {
+                requireExactKeys(operation, Set.of("op", "path"), "operation");
                 parsed.add(Operation.remove(path));
             } else throw new IllegalArgumentException("unknown operation");
         }
         return parsed;
     }
 
-    private static void validateExportRequest(JSONObject item, List<Operation> operations) throws Exception {
-        if (!item.has("request")) return;
-        JSONObject request = item.getJSONObject("request");
+    private static void validateExportRequest(JSONObject request, List<Operation> operations) throws Exception {
         requireOnlyKeys(request, CONTROL_PATHS, "request");
         for (Operation operation : operations) {
             if (operation.kind == OperationKind.SET) {
-                if (!request.has(operation.path)
-                        || !operation.value.equals(request.getString(operation.path))) {
-                    throw new IllegalArgumentException("request와 operations가 일치하지 않습니다.");
+                if (!request.has(operation.path) || !operation.value.equals(request.getString(operation.path))) {
+                    throw new IllegalArgumentException("request/operations mismatch");
                 }
             } else if (request.has(operation.path)) {
-                throw new IllegalArgumentException("REMOVE operation의 request 값이 남아 있습니다.");
+                throw new IllegalArgumentException("REMOVE path remains in request");
             }
         }
+    }
+
+    private static void requireExactKeys(JSONObject object, Set<String> expected, String label) {
+        if (object.length() != expected.size()) throw new IllegalArgumentException(label + " field count mismatch");
+        requireOnlyKeys(object, expected, label);
+        for (String key : expected) if (!object.has(key)) throw new IllegalArgumentException(label + " missing field: " + key);
     }
 
     private static void requireOnlyKeys(JSONObject object, Set<String> allowed, String label) {
         Iterator<String> keys = object.keys();
         while (keys.hasNext()) {
             String key = keys.next();
-            if (!allowed.contains(key)) throw new IllegalArgumentException(label + "에 허용되지 않은 field가 있습니다: " + key);
+            if (!allowed.contains(key)) throw new IllegalArgumentException(label + " contains unsupported field: " + key);
         }
     }
 
@@ -496,102 +447,31 @@ final class ProfileRegistry {
         return mode == Mode.CHAT ? CHAT_EXPORT_SCHEMA : WORK_EXPORT_SCHEMA;
     }
 
-    private static void validateSignalCompatibility(CapturedProfile captured, String model, String reasoning) {
-        String requestModel = captured.requestValue("model");
-        String effortKey = operationIdentity(captured.operations, "thinking_effort");
-        for (Profile profile : state.profiles) {
-            if (profile.mode != captured.mode) continue;
-            if (captured.mode == Mode.CHAT) {
-                if (profile.signalReasoning.equals(reasoning)) throw new IllegalArgumentException("이미 사용 중인 Chat 추론 신호명입니다.");
-            } else {
-                if (profile.signalModel.equals(model) && profile.signalReasoning.equals(reasoning)) {
-                    throw new IllegalArgumentException("이미 사용 중인 Work MODEL/REASONING 신호 조합입니다.");
-                }
-                if (profile.signalModel.equals(model) && !profile.requestValue("model").equals(requestModel)) {
-                    throw new IllegalArgumentException("동일한 모델 신호명이 다른 실제 request model에 이미 연결되어 있습니다.");
-                }
-                if (profile.signalReasoning.equals(reasoning)
-                        && !operationIdentity(profile.operations, "thinking_effort").equals(effortKey)) {
-                    throw new IllegalArgumentException("동일한 추론 신호명이 다른 thinking_effort 동작에 이미 연결되어 있습니다.");
-                }
-            }
-        }
-    }
-
-    private static String operationIdentity(List<Operation> operations, String path) {
-        for (Operation operation : operations) {
-            if (operation.path.equals(path)) return operation.kind.name() + ":" + (operation.value == null ? "" : operation.value);
-        }
-        return "MISSING";
-    }
-
     private static void loadLocked() {
         SharedPreferences prefs = preferences;
         if (prefs == null) return;
-        String raw = prefs.getString(KEY_STATE, "");
-        if (raw == null || raw.isEmpty()) { state = defaults(Set.of(), List.of()); storageHealthy = true; return; }
+        ArrayList<Profile> combined = new ArrayList<>();
+        SnapshotInfo chat = loadCachedMode(prefs, Mode.CHAT, combined);
+        SnapshotInfo work = loadCachedMode(prefs, Mode.WORK, combined);
+        state = new State(combined, chat, work);
+    }
+
+    private static SnapshotInfo loadCachedMode(SharedPreferences prefs, Mode mode, List<Profile> combined) {
+        String raw = prefs.getString(mode == Mode.CHAT ? KEY_CHAT_RAW : KEY_WORK_RAW, "");
+        String version = prefs.getString(mode == Mode.CHAT ? KEY_CHAT_VERSION : KEY_WORK_VERSION, "");
+        String modified = prefs.getString(mode == Mode.CHAT ? KEY_CHAT_MODIFIED : KEY_WORK_MODIFIED, "");
+        if (raw == null || raw.isEmpty()) return new SnapshotInfo(version, modified, "", 0);
         try {
-            JSONObject root = new JSONObject(raw);
-            if (!SCHEMA.equals(root.getString("schema")) || root.getInt("schemaVersion") != SCHEMA_VERSION) {
-                throw new IllegalArgumentException("unsupported registry schema");
+            ParsedSnapshot parsed = parseCanonicalSnapshot(mode, raw);
+            for (Profile profile : parsed.profiles) {
+                validateStoredSignalCompatibility(combined, profile);
+                combined.add(profile);
             }
-            LinkedHashSet<String> tombstones = new LinkedHashSet<>();
-            JSONArray tombstoneArray = root.optJSONArray("tombstones");
-            if (tombstoneArray != null) {
-                for (int i = 0; i < tombstoneArray.length(); i++) {
-                    String value = tombstoneArray.getString(i);
-                    if (!value.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("invalid tombstone");
-                    tombstones.add(value);
-                }
-            }
-            ArrayList<Profile> users = new ArrayList<>();
-            JSONArray profiles = root.optJSONArray("profiles");
-            if (profiles != null) for (int i = 0; i < profiles.length(); i++) users.add(parseStoredProfile(profiles.getJSONObject(i)));
-            state = defaults(tombstones, users);
-            storageHealthy = true;
-        } catch (Exception error) {
-            state = new State(List.of(), List.of(), Set.of());
+            return new SnapshotInfo(version, modified, parsed.appVersion, parsed.profiles.size());
+        } catch (RuntimeException invalid) {
             storageHealthy = false;
+            return new SnapshotInfo("", "", "", 0);
         }
-    }
-
-    private static Profile parseStoredProfile(JSONObject item) throws Exception {
-        Mode mode = Mode.valueOf(item.getString("mode"));
-        String model = mode == Mode.WORK ? canonicalSignalToken(item.getString("signalModel")) : "";
-        String reasoning = canonicalSignalToken(item.getString("signalReasoning"));
-        ArrayList<Operation> parsed = parseOperations(item.getJSONArray("operations"));
-        Profile profile = new Profile(mode, model, reasoning, parsed, false, "");
-        if (!profile.fingerprint.equals(item.getString("fingerprint"))) throw new IllegalArgumentException("stored fingerprint mismatch");
-        return profile;
-    }
-
-    private static boolean persistLocked(List<Profile> users, Set<String> tombstones) {
-        SharedPreferences prefs = preferences;
-        if (prefs == null) return true;
-        JSONObject root = new JSONObject();
-        try {
-            root.put("schema", SCHEMA); root.put("schemaVersion", SCHEMA_VERSION);
-            JSONArray profiles = new JSONArray();
-            for (Profile profile : users) profiles.put(profile.toStorageJson());
-            root.put("profiles", profiles);
-            JSONArray deleted = new JSONArray();
-            for (String fingerprint : tombstones) deleted.put(fingerprint);
-            root.put("tombstones", deleted);
-        } catch (Exception error) { return false; }
-        return prefs.edit().putString(KEY_STATE, root.toString()).commit();
-    }
-
-    private static State defaults(Set<String> tombstones, List<Profile> users) {
-        ArrayList<Profile> all = new ArrayList<>();
-        for (Profile profile : builtIns()) if (!tombstones.contains(profile.fingerprint)) all.add(profile);
-        for (Profile profile : users) {
-            if (findByFingerprint(all, profile.mode, profile.fingerprint) != null) {
-                throw new IllegalArgumentException("duplicate stored profile fingerprint");
-            }
-            validateStoredSignalCompatibility(all, profile);
-            all.add(profile);
-        }
-        return new State(all, users, tombstones);
     }
 
     private static void validateStoredSignalCompatibility(List<Profile> existing, Profile profile) {
@@ -614,38 +494,17 @@ final class ProfileRegistry {
         }
     }
 
-    private static boolean builtInFingerprint(String fingerprint) {
-        for (Profile profile : builtIns()) if (profile.fingerprint.equals(fingerprint)) return true;
-        return false;
+    private static String operationIdentity(List<Operation> operations, String path) {
+        for (Operation operation : operations) {
+            if (operation.path.equals(path)) return operation.kind.name() + ":" + (operation.value == null ? "" : operation.value);
+        }
+        return "MISSING";
     }
 
     private static Profile findByFingerprint(List<Profile> profiles, Mode mode, String fingerprint) {
         for (Profile profile : profiles) if (profile.mode == mode && profile.fingerprint.equals(fingerprint)) return profile;
         return null;
     }
-
-    private static List<Profile> builtIns() {
-        ArrayList<Profile> out = new ArrayList<>();
-        out.add(profile(Mode.CHAT, "", "instant", "Instant", set("model", "gpt-5-6"), remove("thinking_effort"), remove("conversation_origin"), remove("service_tier")));
-        out.add(profile(Mode.CHAT, "", "medium", "Medium", set("model", "gpt-5-6-thinking"), set("thinking_effort", "standard"), remove("conversation_origin"), remove("service_tier")));
-        out.add(profile(Mode.CHAT, "", "high", "High", set("model", "gpt-5-6-thinking"), set("thinking_effort", "extended"), remove("conversation_origin"), remove("service_tier")));
-        out.add(profile(Mode.CHAT, "", "xhigh", "Extra High", set("model", "gpt-5-6-thinking"), set("thinking_effort", "max"), remove("conversation_origin"), remove("service_tier")));
-        addWork(out, "sol", "high", "gpt-5.6-sol-wm", "extended"); addWork(out, "sol", "xhigh", "gpt-5.6-sol-wm", "xhigh");
-        addWork(out, "sol", "max", "gpt-5.6-sol-wm", "max"); addWork(out, "sol", "ultra", "gpt-5.6-sol-wm", "ultra");
-        addWork(out, "terra", "high", "gpt-5.6-terra-wm", "extended"); addWork(out, "terra", "xhigh", "gpt-5.6-terra-wm", "xhigh");
-        addWork(out, "terra", "max", "gpt-5.6-terra-wm", "max"); addWork(out, "luna", "max", "gpt-5.6-luna-wm", "max");
-        return out;
-    }
-
-    private static void addWork(List<Profile> out, String modelSignal, String reasoningSignal, String requestModel, String effort) {
-        out.add(profile(Mode.WORK, modelSignal, reasoningSignal, "", set("model", requestModel), set("thinking_effort", effort), set("conversation_origin", "tpp"), set("service_tier", "standard")));
-    }
-
-    private static Profile profile(Mode mode, String model, String reasoning, String label, Operation... operations) {
-        return new Profile(mode, model, reasoning, List.of(operations), true, label);
-    }
-    private static Operation set(String path, String value) { return Operation.set(path, value); }
-    private static Operation remove(String path) { return Operation.remove(path); }
 
     private static List<Operation> canonicalOperations(List<Operation> operations) {
         if (operations == null) throw new IllegalArgumentException("operations required");
@@ -680,13 +539,16 @@ final class ProfileRegistry {
             StringBuilder out = new StringBuilder(64);
             for (byte value : digest) out.append(String.format(Locale.ROOT, "%02x", value & 0xff));
             return out.toString();
-        } catch (Exception error) { throw new IllegalStateException("SHA-256 unavailable", error); }
+        } catch (Exception error) {
+            throw new IllegalStateException("SHA-256 unavailable", error);
+        }
     }
 
     private static String requestValue(List<Operation> operations, String path) {
         for (Operation operation : operations) if (operation.path.equals(path) && operation.kind == OperationKind.SET) return operation.value;
         return "";
     }
+
     private static boolean requestHas(List<Operation> operations, String path) {
         for (Operation operation : operations) if (operation.path.equals(path)) return operation.kind == OperationKind.SET;
         return false;
@@ -694,7 +556,8 @@ final class ProfileRegistry {
 
     static synchronized void resetForTests() {
         preferences = null;
-        state = defaults(Set.of(), List.of());
+        state = new State(List.of(), new SnapshotInfo("", "", "", 0), new SnapshotInfo("", "", "", 0));
         storageHealthy = true;
+        lastRefreshError = "";
     }
 }
