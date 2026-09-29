@@ -1014,6 +1014,32 @@ export class DriveDispatchController {
         }),
         onActivity: async (activity) => {
           if (!this.#isActive(active)) return;
+          if (
+            activity.progressDetected
+            && activity.status !== 'STALLED'
+            && activity.status !== 'PAGE_ERROR'
+            && clean(active.body?.server_status) === 'RECOVERY_SENT'
+          ) {
+            const now = Date.now();
+            active.serverStatus = 'STARTED';
+            active.body = {
+              ...active.body,
+              server_status: 'STARTED',
+              server_error: '',
+              updated_at_ms: now,
+            };
+            await this.#syncActiveSummary();
+            try {
+              await transport.write(active.path, active.body);
+              active.publishPending = false;
+            } catch {
+              active.publishPending = true;
+            }
+            await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_PROGRESS_RESUMED', {
+              recovery_count: active.recoveryCount,
+              cursor: cursorDetails(activity),
+            });
+          }
           await this.stateStore.patchIfCurrent(
             active.generation,
             this.stateStore.snapshot().lastSignalId,

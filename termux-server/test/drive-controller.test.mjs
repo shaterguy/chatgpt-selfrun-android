@@ -320,13 +320,15 @@ function stalledActivity(overrides = {}) {
 }
 
 async function startStalledResume({ resultText, resultError, snapshot,
-  activity = stalledActivity(), controlState = 'RUNNING', allowUnknownControlRecovery = false }) {
+  activity = stalledActivity(), followupActivity = null, controlState = 'RUNNING',
+  allowUnknownControlRecovery = false }) {
   let sendCalls = 0;
   let resumeSendCalls = 0;
   let monitorStarted = false;
   let snapshotCalls = 0;
   let resultReadCalls = 0;
   let lastPrompt = null;
+  let followupAction = null;
   let resolveActivity;
   const activityDone = new Promise((resolve) => { resolveActivity = resolve; });
   const browser = {
@@ -339,6 +341,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
     monitor: async ({ onActivity }) => {
       monitorStarted = true;
       const action = await onActivity(activity);
+      if (followupActivity) followupAction = await onActivity(followupActivity);
       resolveActivity(action);
       return new Promise(() => {});
     },
@@ -389,6 +392,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
     snapshotCalls: () => snapshotCalls,
     resultReadCalls: () => resultReadCalls,
     lastPrompt: () => lastPrompt,
+    followupAction: () => followupAction,
     writes,
     events: stateStore.events,
   };
@@ -583,6 +587,37 @@ test('liveness recovery sends continuation only when Result is not committed and
   );
   assert.equal(decision?.details.reset_liveness, false);
   assert.equal(run.events.some(({ event }) => event === 'LIVENESS_RECOVERY_SENT'), true);
+});
+
+test('recovery status returns to STARTED when conversation progress is detected after continuation', async () => {
+  const current = stalledActivity();
+  const resumed = stalledActivity({
+    status: 'RUNNING',
+    userCount: 2,
+    userTextLength: 36,
+    userMessageId: 'data-testid:conversation-turn-3',
+    progressDetected: true,
+    lastActivityAt: new Date().toISOString(),
+  });
+  const run = await startStalledResume({
+    resultText: '{"committed":false}',
+    snapshot: current,
+    activity: current,
+    followupActivity: resumed,
+  });
+  const statuses = run.writes.map(({ body }) => body.server_status);
+  const recoverySentIndex = statuses.lastIndexOf('RECOVERY_SENT');
+  const restartedIndex = statuses.findIndex(
+    (status, index) => index > recoverySentIndex && status === 'STARTED',
+  );
+  assert.ok(recoverySentIndex >= 0);
+  assert.ok(restartedIndex > recoverySentIndex);
+  assert.equal(run.controller.active.body.server_status, 'STARTED');
+  assert.equal(run.controller.active.serverStatus, 'STARTED');
+  assert.equal(
+    run.events.some(({ event }) => event === 'LIVENESS_RECOVERY_PROGRESS_RESUMED'),
+    true,
+  );
 });
 
 test('browser monitor does not treat Stop button visibility changes as liveness activity', async () => {

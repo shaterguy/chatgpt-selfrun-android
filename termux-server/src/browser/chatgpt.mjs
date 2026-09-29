@@ -637,15 +637,17 @@ export class ChatGptBrowser {
         lastActivityAt = Date.now();
         stalled = false;
       }
-      const changed =
-        probe.url !== previous.url ||
-        probe.paused !== previous.paused ||
+      const progressDetected =
         probe.assistantCount !== previous.assistantCount ||
         probe.assistantTextLength !== previous.assistantTextLength ||
         probe.assistantMessageId !== previous.assistantMessageId ||
         probe.userCount !== previous.userCount ||
         probe.userTextLength !== previous.userTextLength ||
         probe.userMessageId !== previous.userMessageId;
+      const changed =
+        probe.url !== previous.url ||
+        probe.paused !== previous.paused ||
+        progressDetected;
 
       if (changed) {
         lastActivityAt = Date.now();
@@ -703,6 +705,7 @@ export class ChatGptBrowser {
           responseIdle,
           verificationRetry,
           responseVerificationRetry,
+          progressDetected,
         });
         if (action?.complete) {
           return {
