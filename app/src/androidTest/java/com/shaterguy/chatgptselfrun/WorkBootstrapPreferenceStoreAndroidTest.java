@@ -25,15 +25,12 @@ public final class WorkBootstrapPreferenceStoreAndroidTest {
     @Before public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(REGISTRY_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
-        ProfileRegistry.resetForTests();
-        ProfileRegistry.initialize(context);
+        CanonicalProfileAndroidTestFixtures.install(context);
     }
 
     @After public void tearDown() {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(REGISTRY_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
-        ProfileRegistry.resetForTests();
+        CanonicalProfileAndroidTestFixtures.clear(context);
     }
 
     @Test public void firstLoadUsesCurrentCanonicalRegistryOnly() {
