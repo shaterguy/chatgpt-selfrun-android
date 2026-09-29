@@ -543,3 +543,43 @@ test('watcher creates a durable retry for RUNNING errored dispatch missing retry
     Date.now = realNow;
   }
 });
+
+
+test('watcher stops the current scan when dispatch ownership is lost during a Drive read', async () => {
+  let owner = true;
+  let resumeCalls = 0;
+  const now = Date.now();
+  const transport = {
+    list: async () => [{
+      path: 'ownership-race.json',
+      modTime: '2026-09-29T00:00:00Z',
+      size: 100,
+    }],
+    read: async () => {
+      owner = false;
+      return {
+        schema: 'selfrun-server-dispatch-v1',
+        client_status: 'SEND_REQUESTED',
+        server_status: 'STARTED',
+        created_at_ms: now,
+        updated_at_ms: now,
+      };
+    },
+  };
+  const controller = {
+    active: null,
+    resume: async () => { resumeCalls += 1; },
+    prepare: async () => {},
+    send: async () => {},
+    cancel: async () => {},
+  };
+  const watcher = new DriveDispatchWatcher({
+    transport,
+    controller,
+    config: { drivePollMs: 5000, dispatchFreshMs: 600000, dispatchRecoveryMs: 7200000 },
+    canDispatch: () => owner,
+  });
+
+  await watcher.scanOnce();
+  assert.equal(resumeCalls, 0);
+});

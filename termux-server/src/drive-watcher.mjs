@@ -114,6 +114,7 @@ export class DriveDispatchWatcher {
   async scanOnce() {
     if (!this.canDispatch()) return;
     const files = await this.transport.list();
+    if (!this.canDispatch()) return;
     const filesByPath = new Map(files.map((file) => [String(file.path || ''), file]));
     for (const path of this.resumeRetryAt.keys()) {
       if (!filesByPath.has(path)) this.resumeRetryAt.delete(path);
@@ -128,6 +129,7 @@ export class DriveDispatchWatcher {
       return String(a.modTime || '').localeCompare(String(b.modTime || ''));
     });
     for (const file of orderedFiles) {
+      if (!this.canDispatch()) return;
       const fingerprint = `${file.modTime}|${file.size}`;
       const pathActive = typeof this.controller.getActive === 'function'
         ? this.controller.getActive(file.path)
@@ -143,6 +145,7 @@ export class DriveDispatchWatcher {
       } catch {
         continue;
       }
+      if (!this.canDispatch()) return;
 
       if (body?.schema === 'selfrun-task-control-v1') {
         const taskId = clean(body.task_id);
