@@ -458,7 +458,7 @@ export class ChatGptBrowser {
     }
   }
 
-  async #submitWithProfile({ session, profileOperations, signal }) {
+  async #submitWithProfile({ session, profileOperations, signal, waitForMessagePost = false }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
 
     const sendReadyStarted = Date.now();
@@ -507,7 +507,9 @@ export class ChatGptBrowser {
           requestId: params.requestId,
           postData: Buffer.from(patched, 'utf8').toString('base64'),
         });
-        if (!settled) {
+        const initializationRequest = new URL(request.url).pathname.toLowerCase().replace(/\/+$/, '')
+          === '/backend-api/conversation/init';
+        if (!settled && (!waitForMessagePost || !initializationRequest)) {
           settled = true;
           resolveCanonical({ url: request.url });
         }
@@ -598,23 +600,8 @@ export class ChatGptBrowser {
       throw new Error(`Continuation staging failed: ${staged?.status || 'unknown'}`);
     }
 
-    const sendReadyStarted = Date.now();
-    let sendReady = null;
-    while (Date.now() - sendReadyStarted < 5000) {
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
-      sendReady = await evaluate(session, sendReadyExpression());
-      if (sendReady?.ready) break;
-      await delay(150, signal);
-    }
-    if (!sendReady?.ready) {
-      throw new Error(`Continuation send control not ready: ${sendReady?.status || 'unknown'}`);
-    }
-
     const beforeSubmit = await evaluate(session, probeExpression());
-    const sent = await evaluate(session, submitExpression());
-    if (sent?.status !== 'SUBMITTED') {
-      throw new Error(`Continuation send failed: ${sent?.status || 'unknown'}`);
-    }
+    await this.#submitWithProfile({ session, profileOperations, signal, waitForMessagePost: true });
 
     const accepted = await this.#waitFor(session, (p) => {
       if (conversationId(p.url) !== expectedId) return false;
@@ -627,7 +614,6 @@ export class ChatGptBrowser {
       label: 'continuation acceptance',
     });
 
-    void profileOperations;
     return accepted;
   }
 

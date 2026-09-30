@@ -784,22 +784,29 @@ test('continuation acceptance ignores a pre-existing Stop button', async () => {
   const values = [
     probe,
     { status: 'READY' },
-    { ready: true, status: 'SEND_FOUND' },
     probe,
+    { ready: true, status: 'SEND_FOUND' },
     { status: 'SUBMITTED' },
     probe,
     { ...probe, userCount: 2, userTextLength: 20,
       userMessageId: 'data-testid:conversation-turn-2' },
   ];
+  let pausedHandler = null;
   const session = {
+    on(method, handler) { pausedHandler = handler; return () => { pausedHandler = null; }; },
     call: async (method) => {
+      if (method === 'Fetch.enable' || method === 'Fetch.disable' || method === 'Fetch.continueRequest') return {};
       assert.equal(method, 'Runtime.evaluate');
       const value = values[evaluateCalls];
       evaluateCalls += 1;
+      if (value?.status === 'SUBMITTED') {
+        await pausedHandler({ requestId: 'continuation-stop', request: {
+          url: 'https://chatgpt.com/backend-api/conversation', method: 'POST', postData: '{}' } });
+      }
       return { result: { value } };
     },
   };
-  const browser = new ChatGptBrowser(null, {});
+  const browser = new ChatGptBrowser(null, { navigationTimeoutMs: 1000 });
   const accepted = await browser.sendContinuation({
     session,
     prompt: '현재 턴에 할당된 잔여작업이 있으면 계속 수행해',
