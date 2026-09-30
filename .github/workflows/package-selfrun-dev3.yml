@@ -1,0 +1,70 @@
+name: Package SelfRun 4.0.4 dev3
+on:
+  push:
+    branches:
+      - 'selfrun-v4/v4.0.4-dev3'
+permissions:
+  contents: read
+concurrency:
+  group: selfrun-dev3-package
+  cancel-in-progress: true
+jobs:
+  package-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
+      SELFRUN_FIREBASE_APPLICATION_ID: ${{ secrets.SELFRUN_FIREBASE_APPLICATION_ID }}
+      SELFRUN_FIREBASE_PROJECT_ID: ${{ secrets.SELFRUN_FIREBASE_PROJECT_ID }}
+      SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+      - name: Verify dev identity and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq "selfRunDriveVersionName = '4.0.4-dev3'" app/build.gradle
+          grep -Fq "selfRunDriveVersionCode = 4002005" app/build.gradle
+          bash tools/verify_selfrun_firebase_config_env.sh
+          gradle --build-cache --no-daemon --console=plain :app:verifyDriveVariantIdentity :app:assembleQaApp
+      - name: Prepare existing signing dependencies
+        run: python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Sign and verify dev package
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          umask 077
+          PASS_FILE="$RUNNER_TEMP/selfrun-dev3-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          mkdir -p release-output
+          "$BT/zipalign" -p -f 4 app/build/outputs/apk/qaApp/app-qaApp-unsigned.apk "$RUNNER_TEMP/selfrun-dev3-aligned.apk"
+          APK="release-output/SelfRun-Drive-v4.0.4-dev3.apk"
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh "$RUNNER_TEMP/selfrun-dev3-aligned.apk" "$PASS_FILE" "$APK" > release-output/signature.txt
+          "$BT/aapt" dump badging "$APK" > release-output/package.txt
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" release-output/package.txt
+          grep -Fq "versionCode='4002005'" release-output/package.txt
+          grep -Fq "versionName='4.0.4-dev3'" release-output/package.txt
+          sha256sum "$APK" > release-output/SHA256SUMS.txt
+          printf 'source_sha=%s\npackage=com.shaterguy.chatgptselfrun.drive.test\nversion=4.0.4-dev3\nversion_code=4002005\n' "$GITHUB_SHA" > release-output/build-identity.txt
+      - uses: actions/upload-artifact@b0c5669a5e8d6e0d2fbe0f26118772afd5a7b4a3
+        with:
+          name: selfrun-drive-dev3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-output/
+          if-no-files-found: error
