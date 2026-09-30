@@ -40,7 +40,8 @@ jobs:
           bash tools/verify_selfrun_firebase_config_env.sh
           gradle --build-cache --no-daemon --console=plain :app:verifyDriveVariantIdentity :app:assembleQaApp
       - name: Prepare existing signing dependencies
-        run: python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r tools/signing-requirements-linux-x86_64-py312.txt
+        run: |
+          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r tools/signing-requirements-linux-x86_64-py312.txt
       - name: Sign and verify dev package
         shell: bash
         env:
