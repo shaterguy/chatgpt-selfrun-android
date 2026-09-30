@@ -1,0 +1,158 @@
+name: Verify Published SelfRun 4.0.6 Upgrades
+run-name: Verify published SelfRun 4.0.6 upgrade matrix
+'on':
+  push:
+    branches:
+    - verification/v4.0.6-upgrade-matrix
+    paths:
+    - tools/verify_selfrun4_formal_upgrade_emulator.sh
+    - .github/workflows/verify-selfrun-v406-upgrades.yml
+  workflow_dispatch: null
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify-published-upgrades:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
+      SELFRUN_FIREBASE_APPLICATION_ID: ${{ secrets.SELFRUN_FIREBASE_APPLICATION_ID }}
+      SELFRUN_FIREBASE_PROJECT_ID: ${{ secrets.SELFRUN_FIREBASE_PROJECT_ID }}
+      SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        fetch-depth: 0
+    - name: Resolve exact published 4.0.6 APK and source
+      shell: bash
+      run: 'set -euo pipefail
+
+        SOURCE=513a507806ad4c39a85194013f2fbdb31366db8d
+
+        git diff --exit-code "$SOURCE" -- app build.gradle settings.gradle gradle.properties tools/sign_release.sh tools/derive_signing_identity.py
+        tools/signing-requirements-linux-x86_64-py312.txt
+
+        mkdir -p current
+
+        gh release download drive-v4.0.6 --repo "$GITHUB_REPOSITORY" --pattern ''chatgpt-selfrun-drive-v4.0.6.apk'' --pattern
+        SHA256SUMS.txt --dir current
+
+        echo ''8bf1a36671b4d50af1adbf66e5b4211983847477bc06244e41442d834cd26de9  current/chatgpt-selfrun-drive-v4.0.6.apk''
+        | sha256sum -c -
+
+        printf ''%s\n'' "$SOURCE" > current/SOURCE_COMMIT.txt
+
+        '
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        cmdline-tools-version: '11076708'
+        log-accepted-android-sdk-licenses: 'false'
+        packages: platform-tools platforms;android-36 build-tools;36.0.0
+    - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+      with:
+        gradle-version: 9.5.0
+        cache-read-only: true
+    - name: Bind formal instrumentation to the exact submission APK
+      shell: bash
+      env:
+        SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+      run: "set -euo pipefail\nFORMAL=\"$(find current -type f -name 'chatgpt-selfrun-drive-v4.0.6.apk' -print -quit)\"\n\
+        test -s \"$FORMAL\"\n[[ \"$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)\" == '513a507806ad4c39a85194013f2fbdb31366db8d'\
+        \ ]]\ngrep -F \"$(sha256sum \"$FORMAL\" | awk '{print $1}')\" current/SHA256SUMS.txt >/dev/null\nsed -i \"s/testBuildType\
+        \ 'qaApp'/testBuildType 'release'/\" app/build.gradle\ngrep -Fq \"testBuildType 'release'\" app/build.gradle\ngradle\
+        \ --build-cache --no-daemon --console=plain --stacktrace \\\n  :app:compileReleaseAndroidTestJavaWithJavac :app:assembleReleaseAndroidTest\n\
+        RAW=\"$(find app/build/outputs/apk/androidTest -type f -name '*.apk' -print -quit)\"\ntest -s \"$RAW\"\nBT=\"$ANDROID_HOME/build-tools/36.0.0\"\
+        \n\"$BT/zipalign\" -p -f 4 \"$RAW\" current/formal-androidTest-aligned.apk\nPASS_FILE=\"$RUNNER_TEMP/selfrun-v406-formal-fcm-pass\"\
+        \ntrap 'rm -f \"$PASS_FILE\"' EXIT\numask 077\nprintf '%s' \"$SIGNING_PASSPHRASE\" > \"$PASS_FILE\"\nAPKSIGNER=\"\
+        $BT/apksigner\" bash tools/sign_release.sh current/formal-androidTest-aligned.apk \"$PASS_FILE\" current/formal-androidTest.apk\
+        \ > current/FORMAL_ANDROIDTEST_APKSIGNER_VERIFY.txt\n\"$BT/apksigner\" verify --verbose --print-certs current/formal-androidTest.apk\
+        \ > current/FORMAL_ANDROIDTEST_CERT.txt\ngrep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe'\
+        \ current/FORMAL_ANDROIDTEST_CERT.txt\nFORMAL_BADGING=\"$($BT/aapt dump badging \"$FORMAL\")\"\nTEST_BADGING=\"$($BT/aapt\
+        \ dump badging current/formal-androidTest.apk)\"\ngrep -Fq \"package: name='com.shaterguy.chatgptselfrun.drive'\"\
+        \ <<<\"$FORMAL_BADGING\"\ngrep -Fq \"versionCode='4002006'\" <<<\"$FORMAL_BADGING\"\ngrep -Fq \"versionName='4.0.6'\"\
+        \ <<<\"$FORMAL_BADGING\"\ngrep -Fq \"package: name='com.shaterguy.chatgptselfrun.drive.test'\" <<<\"$TEST_BADGING\"\
+        \ncp \"$FORMAL\" current/formal.apk\n"
+    - name: Resolve published upgrade baselines
+      shell: bash
+      run: 'set -euo pipefail
+
+        mkdir -p stable legacy-dev2
+
+        gh release download drive-v4.0.3 --repo "$GITHUB_REPOSITORY" --pattern ''chatgpt-selfrun-drive-v4.0.3.apk'' --dir
+        stable
+
+        gh release download drive-v4.0.5 --repo "$GITHUB_REPOSITORY" --pattern ''chatgpt-selfrun-drive-v4.0.5.apk'' --dir
+        stable
+
+        echo ''4ecf855d666ef62c9c21ae750810eaba1dcd735a8b82f0611fe67965296778f8  stable/chatgpt-selfrun-drive-v4.0.3.apk''
+        | sha256sum -c -
+
+        echo ''d65be07a260abad5387ed066bbca91ab9b0c1580eaa3c0d9ea3250013850cc2b  stable/chatgpt-selfrun-drive-v4.0.5.apk''
+        | sha256sum -c -
+
+        gh run download 36647841421 --repo "$GITHUB_REPOSITORY" --name selfrun-v4-404-dev2-36647841421-1 --dir legacy-dev2
+
+        SOURCE="$(find legacy-dev2 -type f -name SOURCE_COMMIT.txt -print -quit)"
+
+        SUM="$(find legacy-dev2 -type f -name SHA256SUMS.txt -print -quit)"
+
+        [[ "$(tr -d ''[:space:]'' < "$SOURCE")" == ''63bea8516d4ac76c479c937a9cb8a3bab82d1e4e'' ]]
+
+        LEGACY="$(find legacy-dev2 -type f -name ''SelfRun-Drive-v4.0.4-dev2.apk'' -print -quit)"
+
+        test -s "$LEGACY"
+
+        grep -F "$(sha256sum "$LEGACY" | awk ''{print $1}'')" "$SUM" >/dev/null
+
+        if [[ "$LEGACY" != ''legacy-dev2/SelfRun-Drive-v4.0.4-dev2.apk'' ]]; then cp "$LEGACY" legacy-dev2/SelfRun-Drive-v4.0.4-dev2.apk;
+        fi
+
+        '
+    - name: Enable hardware acceleration
+      shell: bash
+      run: 'set -euo pipefail
+
+        test -c /dev/kvm
+
+        sudo chmod 0666 /dev/kvm
+
+        '
+    - name: Verify all three published-APK upgrade paths
+      uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+      with:
+        api-level: 35
+        target: google_apis_playstore
+        arch: x86_64
+        profile: pixel_6
+        emulator-boot-timeout: 600
+        emulator-options: -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim -camera-back
+          none -camera-front none -memory 2048
+        disable-animations: true
+        script: bash tools/verify_selfrun4_formal_upgrade_emulator.sh
+    - name: Upload published-APK upgrade evidence
+      if: ${{ always() }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: selfrun-v406-upgrades-${{ github.run_id }}-${{ github.run_attempt }}
+        path: 'selfrun-v406-formal-upgrade-evidence.txt
+
+          current/upgrade-seed.txt
+
+          current/upgrade-verify.txt
+
+          current/FORMAL_ANDROIDTEST_CERT.txt
+
+          current/FORMAL_ANDROIDTEST_APKSIGNER_VERIFY.txt
+
+          '
+        if-no-files-found: warn
+        retention-days: 30

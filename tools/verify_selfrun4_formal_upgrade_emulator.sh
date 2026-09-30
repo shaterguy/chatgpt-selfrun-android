@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# ADB must not consume baseline records from the loop input.
+adb() { command adb "$@" </dev/null; }
 # This harness only runs on disposable CI emulators, never a user's phone/tablet.
 [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == '1' ]] || { echo 'Disposable emulator required' >&2; exit 1; }
 FORMAL=com.shaterguy.chatgptselfrun.drive
@@ -22,7 +24,8 @@ verify_identity() {
 }
 verify_identity "$CANDIDATE" 4002006 4.0.6
 : > selfrun-v406-formal-upgrade-evidence.txt
-while IFS='|' read -r name code apk; do
+passed=0
+while IFS='|' read -r name code apk <&3; do
   verify_identity "$apk" "$code" "$name"
   (( 4002006 > code ))
   adb uninstall "$FORMAL.test" >/dev/null 2>&1 || true
@@ -41,9 +44,11 @@ while IFS='|' read -r name code apk; do
   adb shell am instrument -w -r -e class "$CLASS#verifyUpgradeState" "$INSTRUMENTATION" | tee current/upgrade-verify.txt
   grep -Fq 'OK (1 test)' current/upgrade-verify.txt
   printf 'UPGRADE_PASS baseline=%s code=%s target=4.0.6 targetCode=4002006 uid=%s data=preferences,runtime-setting,webview-cookie\n' "$name" "$code" "$before_uid" | tee -a selfrun-v406-formal-upgrade-evidence.txt
-done <<'BASELINES'
+  passed=$((passed + 1))
+done 3<<'BASELINES'
 4.0.3|4001003|stable/chatgpt-selfrun-drive-v4.0.3.apk
 4.0.4-dev2|4002004|legacy-dev2/SelfRun-Drive-v4.0.4-dev2.apk
 4.0.5|4001005|stable/chatgpt-selfrun-drive-v4.0.5.apk
 BASELINES
-
+[[ "$passed" -eq 3 ]]
+echo 'ALL_THREE_FORMAL_UPGRADES_PASSED' | tee -a selfrun-v406-formal-upgrade-evidence.txt
