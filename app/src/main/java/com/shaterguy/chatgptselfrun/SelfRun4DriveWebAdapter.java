@@ -94,9 +94,9 @@ final class SelfRun4DriveWebAdapter {
         publishControlState(state, control, reason);
     }
 
-    void publishControlStateConfirmed(String control, String reason, ControlWriteCallback callback) {
+    void publishControlStateConfirmed(SelfRun3Engine.State snapshot, String control, String reason,
+                                      ControlWriteCallback callback) {
         requireMain();
-        SelfRun3Engine.State snapshot = state;
         if (snapshot == null || io.isShutdown()) {
             callback.onFailure(new IllegalStateException("TASK_CONTROL_UNAVAILABLE"));
             return;

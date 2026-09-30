@@ -36,7 +36,7 @@ public final class SelfRun4TaskControlPolicyTest {
         assertOrdered(coordinator, "web.publishControlState(\"RESUME_REQUESTED\", \"USER_RESUME\")", "SelfRun3Engine.Kind.RESUME");
         int stop = coordinator.indexOf("private void stop()");
         int stopQuiesce = coordinator.indexOf("web.quiesce();", stop);
-        int confirmedStop = coordinator.indexOf("web.publishControlStateConfirmed(\"STOPPED\", \"USER_STOP\"", stop);
+        int confirmedStop = coordinator.indexOf("web.publishControlStateConfirmed(snapshot, \"STOPPED\", \"USER_STOP\"", stop);
         int retry = coordinator.indexOf("main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);", confirmedStop);
         int finalize = coordinator.indexOf("finalizeConfirmedStop(task, expectedEpoch);", confirmedStop);
         assertTrue(stop >= 0 && stopQuiesce > stop && confirmedStop > stopQuiesce);

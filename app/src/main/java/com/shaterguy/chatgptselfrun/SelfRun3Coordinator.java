@@ -1497,21 +1497,35 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         releaseWakeLock();
         int expectedEpoch = epoch;
         String task = store.runId();
-        web.publishControlStateConfirmed("STOPPED", "USER_STOP",
-                new SelfRun4DriveWebAdapter.ControlWriteCallback() {
-                    @Override public void onConfirmed() {
-                        onStopControlResult(task, expectedEpoch, null);
-                    }
-                    @Override public void onFailure(Throwable error) {
-                        onStopControlResult(task, expectedEpoch, error);
-                    }
-                });
+        store.setStatus("중지 처리 중");
+        io.execute(() -> {
+            SelfRun3Engine.State snapshot;
+            try {
+                snapshot = ledger.load(task);
+            } catch (Throwable error) {
+                main.post(() -> onStopControlResult(task, expectedEpoch, error));
+                return;
+            }
+            main.post(() -> {
+                if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+                web.publishControlStateConfirmed(snapshot, "STOPPED", "USER_STOP",
+                        new SelfRun4DriveWebAdapter.ControlWriteCallback() {
+                            @Override public void onConfirmed() {
+                                onStopControlResult(task, expectedEpoch, null);
+                            }
+                            @Override public void onFailure(Throwable error) {
+                                onStopControlResult(task, expectedEpoch, error);
+                            }
+                        });
+            });
+        });
     }
 
     private void onStopControlResult(String task, int expectedEpoch, Throwable error) {
         requireMain();
         if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
         if (error != null) {
+            store.setStatus("중지 요청 재시도 중");
             log.record(store, "V3_STOP_CONTROL_RETRY", "error=" + error.getClass().getSimpleName());
             main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);
             return;
