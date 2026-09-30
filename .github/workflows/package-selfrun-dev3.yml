@@ -63,7 +63,7 @@ jobs:
           grep -Fq "versionName='4.0.4-dev3'" release-output/package.txt
           sha256sum "$APK" > release-output/SHA256SUMS.txt
           printf 'source_sha=%s\npackage=com.shaterguy.chatgptselfrun.drive.test\nversion=4.0.4-dev3\nversion_code=4002005\n' "$GITHUB_SHA" > release-output/build-identity.txt
-      - uses: actions/upload-artifact@b0c5669a5e8d6e0d2fbe0f26118772afd5a7b4a3
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: selfrun-drive-dev3-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-output/
