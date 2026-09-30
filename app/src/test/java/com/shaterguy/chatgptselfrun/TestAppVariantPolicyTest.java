@@ -13,8 +13,8 @@ public final class TestAppVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 4001005"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.5'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002006"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.6'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
@@ -77,6 +77,17 @@ public final class TestAppVariantPolicyTest {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("play-services-auth:21.6.0"));
         assertFalse(gradle.contains("play-services-auth:21.6.1-dev"));
+    }
+
+    @Test public void formalVersionAdvancesEveryDistributedStablePackage() throws Exception {
+        String gradle = read("app/build.gradle", "build.gradle");
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("def selfRunDriveVersionCode = ([0-9]+)").matcher(gradle);
+        assertTrue("active versionCode declaration", matcher.find());
+        int candidateCode = Integer.parseInt(matcher.group(1));
+        assertTrue("must update published 4.0.3", candidateCode > 4001003);
+        assertTrue("must update legacy stable-package 4.0.4-dev2 without data loss", candidateCode > 4002004);
+        assertTrue("must update published 4.0.5", candidateCode > 4001005);
     }
 
     private static String read(String first, String second) throws Exception {

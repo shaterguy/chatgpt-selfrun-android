@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 4001005
-def selfRunDriveVersionName = '4.0.5'
+def selfRunDriveVersionCode = 4002006
+def selfRunDriveVersionName = '4.0.6'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^(?:3|4)\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
@@ -150,7 +150,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         if (android.defaultConfig.versionCode != selfRunDriveVersionCode
                 || android.defaultConfig.versionName != selfRunDriveVersionName) throw new GradleException('SelfRun Drive version identity mismatch')
         if (!(selfRunDriveVersionName ==~ selfRun3VersionPattern)) throw new GradleException('SelfRun version must be 3.x.y/4.x.y with optional devN or rcN suffix')
-        if (selfRunDriveVersionCode <= 2020048) throw new GradleException('SelfRun 3 versionCode must advance the historical stable lineage')
+        if (selfRunDriveVersionCode <= 4002004) throw new GradleException('SelfRun versionCode must exceed the legacy stable-package 4.0.4-dev2 build (4002004)')
         if (android.testBuildType != 'qaApp') throw new GradleException('SelfRun 3 instrumentation must target the qaApp TEST lineage')
         def testType = android.buildTypes.getByName('qaApp')
         if (testType.applicationIdSuffix != '.test') throw new GradleException('SelfRun Drive TEST applicationId suffix must remain .test')

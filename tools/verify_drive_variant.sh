@@ -49,7 +49,7 @@ TEST_SIGN=tools/sign_test.sh
 VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' "$BUILD" | head -1)"
 VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUILD" | head -1)"
 [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
-[[ "$VERSION_CODE" -gt 2020048 ]]
+[[ "$VERSION_CODE" -gt 4002004 ]]
 [[ "$VERSION_NAME" =~ ^(3|4)\.[0-9]+\.[0-9]+(-(dev|rc)[0-9]+)?$ ]]
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
