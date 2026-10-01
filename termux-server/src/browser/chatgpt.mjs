@@ -689,6 +689,33 @@ export class ChatGptBrowser {
       (!!probe.userMessageId&&probe.userMessageId!==intent.baseline?.userMessageId));
     if(conversationId(probe.url)&&(evidence.idMatch||(advanced&&evidence.lastTextMatch)))
       return {state:'CONFIRMED',probe,messageId:intent.message_id||probe.userMessageId};
+    // ChatGPT may materialize a newly-created conversation in a different page target while
+    // leaving the original project target on /project. For an initial POST with no canonical
+    // owner yet, accept another target only when a reload-persistent exact turn id and prompt
+    // text both match the intercepted POST.
+    if(!conversationUrl&&intent.message_id&&this.chromium?.listExistingTargets) {
+      const targets=await this.chromium.listExistingTargets();
+      for(const target of targets||[]) {
+        if(target?.type!=='page'||!target?.webSocketDebuggerUrl)continue;
+        let candidate;
+        try {
+          candidate=await this.chromium.connectTarget(target);
+          let candidateProbe=await evaluate(candidate,probeExpression());
+          if(!conversationId(candidateProbe.url))continue;
+          await candidate.call('Page.reload',{ignoreCache:true});
+          candidateProbe=await this.#waitFor(candidate,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')
+            &&p.composer&&!!conversationId(p.url)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'cross-target submission readback'});
+          if(candidateProbe.loginPage||!conversationId(candidateProbe.url))continue;
+          const candidateEvidence=await evaluate(candidate,expression);
+          if(candidateEvidence.idMatch&&candidateEvidence.lastTextMatch)
+            return {state:'CONFIRMED',probe:candidateProbe,messageId:intent.message_id};
+        } catch(error) {
+          if(signal?.aborted)throw error;
+        } finally {
+          try {candidate?.close();} catch {}
+        }
+      }
+    }
     // A request released to ChatGPT may arrive later; a quiet page alone cannot prove absence.
     if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!advanced&&!probe.streaming&&probe.readyState==='complete'&&probe.composer)
       return {state:'ABSENT',probe};

@@ -58,6 +58,35 @@ test('persisted data-turn-key matching intercepted message id confirms accepted 
   assert.equal(r.messageId,'recovery-turn-id');
 });
 
+test('initial POST can be confirmed from a reload-persistent matching conversation in another target',async()=>{
+  let primaryReloaded=false,candidateReloaded=false,candidateClosed=false;
+  const primaryProbe=()=>({url:'https://chatgpt.com/g/project/project',composer:true,readyState:'complete',streaming:false,
+    userCount:0,userMessageId:null});
+  const candidateProbe=()=>({url:'https://chatgpt.com/c/new-owned',composer:true,readyState:'complete',streaming:false,
+    userCount:1,userMessageId:'fallback:user'});
+  const makeSession=(kind)=>({
+    close(){if(kind==='candidate')candidateClosed=true;},
+    async call(method,params={}){
+      if(method==='Page.reload'){if(kind==='primary')primaryReloaded=true;else candidateReloaded=true;return {};}
+      assert.equal(method,'Runtime.evaluate');
+      const expr=params.expression;
+      if(expr.includes('const matched='))return {result:{value:kind==='candidate'&&candidateReloaded
+        ?{idMatch:true,lastTextMatch:true}:{idMatch:false,lastTextMatch:false}}};
+      return {result:{value:kind==='candidate'?candidateProbe():primaryProbe()}};
+    },
+  });
+  const primary=makeSession('primary'),candidate=makeSession('candidate');
+  const chromium={
+    listExistingTargets:async()=>[{id:'candidate',type:'page',webSocketDebuggerUrl:'ws://candidate'}],
+    connectTarget:async()=>candidate,
+  };
+  const browser=new ChatGptBrowser(chromium,{navigationTimeoutMs:100});
+  const r=await browser.readSubmission({session:primary,prompt:'repair prompt',conversationUrl:'',
+    intent:{message_id:'exact-turn-id',baseline:{userCount:0,userMessageId:null}}});
+  assert.equal(primaryReloaded,true);assert.equal(candidateReloaded,true);assert.equal(candidateClosed,true);
+  assert.equal(r.state,'CONFIRMED');assert.equal(r.messageId,'exact-turn-id');assert.equal(r.probe.url,'https://chatgpt.com/c/new-owned');
+});
+
 test('held intercepted request is explicitly aborted before absence can be returned',async()=>{
   const f=fixture({held:true});let unblock;const held=new Promise(resolve=>{unblock=resolve;});
   let error;
