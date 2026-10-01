@@ -38,6 +38,25 @@ public final class SelfRun4DriveDispatchPolicyTest {
         assertFalse(adapter.contains("SELFRUN_PUSH_GATEWAY_URL"));
     }
 
+    @Test public void directServerStartClaimsSendBeforeConversationCallbacks() throws Exception {
+        String adapter = source("SelfRun4DriveWebAdapter.java");
+        int handler = adapter.indexOf("private void handleRemote");
+        int reconcile = adapter.indexOf("V4_SERVER_DIRECT_START_RECONCILE", handler);
+        int prepared = adapter.indexOf("listener.onPrepared", reconcile);
+        int reconcileReturn = adapter.indexOf("return;", prepared);
+        int conversation = adapter.indexOf("listener.onConversation", prepared);
+        assertTrue(handler >= 0 && reconcile > handler);
+        assertTrue(prepared > reconcile && reconcileReturn > prepared);
+        assertTrue(conversation > reconcileReturn);
+
+        int submit = adapter.indexOf("void submit(SelfRun3Engine.State claimed)");
+        int alreadyStarted = adapter.indexOf("serverConversationReady(remoteStatus)", submit);
+        int reconciled = adapter.indexOf("V4_SERVER_SEND_CLAIM_RECONCILED", alreadyStarted);
+        int write = adapter.indexOf("api.writeServerDispatchFile", submit);
+        assertTrue(submit >= 0 && alreadyStarted > submit);
+        assertTrue(reconciled > alreadyStarted && write > reconciled);
+    }
+
     @Test public void everyV4RequestRefreshesCanonicalRegistryBeforeDispatch() throws Exception {
         String adapter = source("SelfRun4DriveWebAdapter.java");
         assertTrue(adapter.contains("private boolean registryRefreshPending;"));
