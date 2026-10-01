@@ -119,6 +119,23 @@ test('higher dispatch attempt preserves logical request and canonical ownership'
  const f=fixture();await f.existing();f.body.dispatch_attempt=2;await f.ingest();
  assert.equal(f.record().dispatch_attempt,2);assert.equal(f.resumes,1);assert.equal(f.sends,0);
 });
+test('higher dispatch attempt immediately projects canonical server status',async()=>{
+ const f=fixture();await f.existing();
+ f.body.dispatch_attempt=2;f.body.server_status='PENDING';
+ f.rows.set(f.path,structuredClone(f.body));
+ await f.controller.ingestDurable(f.path,f.body,f.transport);
+ assert.equal(f.rows.get(f.path).server_status,'STARTED');
+});
+
+test('completed request reprojects COMPLETED onto a later client attempt immediately',async()=>{
+ const f=fixture();await f.existing();f.result(true);await f.observe({});
+ assert.equal(f.record().state,'COMPLETED');
+ f.body.dispatch_attempt=2;f.body.server_status='PENDING';
+ f.rows.set(f.path,structuredClone(f.body));
+ await f.controller.ingestDurable(f.path,f.body,f.transport);
+ assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
+});
+
 test('standby fences existing callbacks without changing canonical conversation',async()=>{
  const f=fixture();await f.existing();const observer=f.observations.at(-1);
  await f.controller.quiesceForStandby();const before=f.record();
