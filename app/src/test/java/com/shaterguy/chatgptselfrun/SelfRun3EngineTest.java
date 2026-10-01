@@ -24,6 +24,49 @@ public final class SelfRun3EngineTest {
         assertFalse(after.flag("dispatchObserved"));
     }
 
+    @Test public void canonicalServerStartWithoutClaimReconcilesReadyTurn() {
+        SelfRun3Engine.State ready = readyState();
+        JSONObject p = request(ready);
+        SelfRun3Engine.put(p, "source", "canonical_post");
+        SelfRun3Engine.put(p, "protocolStage", "turn_request");
+        SelfRun3Engine.put(p, "atElapsed", 123L);
+        SelfRun3Engine.put(p, "atWall", 456L);
+        SelfRun3Engine.put(p, "bootCount", 1);
+
+        SelfRun3Engine.State waiting = reduce(ready, "direct-server-start",
+                SelfRun3Engine.Kind.STARTED, p);
+
+        assertEquals(SelfRun3Engine.Stage.WAITING, waiting.stage());
+        assertTrue(waiting.flag("sendClaimed"));
+        assertTrue(waiting.flag("dispatchObserved"));
+        assertTrue(waiting.flag("accepted"));
+        assertTrue(waiting.flag("startRecoveredWithoutClaim"));
+        assertEquals(456L, waiting.time("submittedAt"));
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(waiting));
+    }
+
+    @Test public void nonCanonicalStartWithoutClaimCannotAdvanceReadyTurn() {
+        SelfRun3Engine.State ready = readyState();
+        JSONObject p = request(ready);
+        SelfRun3Engine.State after = reduce(ready, "unproven-start",
+                SelfRun3Engine.Kind.STARTED, p);
+
+        assertSame(ready, after);
+        assertEquals(SelfRun3Engine.Stage.READY, after.stage());
+        assertFalse(after.flag("sendClaimed"));
+        assertFalse(after.flag("dispatchObserved"));
+    }
+
+    @Test public void acceptedWithoutClaimCannotAdvanceReadyTurn() {
+        SelfRun3Engine.State ready = readyState();
+        SelfRun3Engine.State after = reduce(ready, "accepted-without-claim",
+                SelfRun3Engine.Kind.ACCEPTED, request(ready));
+
+        assertSame(ready, after);
+        assertEquals(SelfRun3Engine.Stage.READY, after.stage());
+        assertFalse(after.flag("sendClaimed"));
+    }
+
     @Test public void positiveNoDispatchProofReopensSamePreparedTurn() {
         SelfRun3Engine.State claimed = claimedState();
         JSONObject p = request(claimed); SelfRun3Engine.put(p, "status", "SEND_DISABLED");
