@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 
-function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
+function fixture({evaluateTimeout=false,held=false,optimistic=false,persistedTurnKey=false}={}) {
   let handler,releaseHook;const failures=[];let reloaded=false,continued=0;
   const probe=()=>({url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',streaming:false,
     userCount:optimistic&&!reloaded?2:1,userMessageId:optimistic&&!reloaded?'new-message':'old-message'});
@@ -15,7 +15,10 @@ function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
       if(method==='Fetch.continueRequest'){continued++;return {};}
       assert.equal(method,'Runtime.evaluate');
       const s=params.expression;
-      if(s.includes('const matched='))return {result:{value:{idMatch:optimistic&&!reloaded,lastTextMatch:optimistic&&!reloaded}}};
+      if(s.includes('const matched=')){
+        if(persistedTurnKey)assert.match(s,/data-turn-key/);
+        return {result:{value:{idMatch:(optimistic&&!reloaded)||(persistedTurnKey&&reloaded),lastTextMatch:optimistic&&!reloaded}}};
+      }
       if(s.includes('send.click()')) {
         if(held)void handler({requestId:'paused-post',request:{method:'POST',url:'https://chatgpt.com/backend-api/f/conversation',
           postData:JSON.stringify({conversation_id:'owned',messages:[{id:'new-message',author:{role:'user'}}]})}});
@@ -46,6 +49,15 @@ test('optimistic user bubble disappears after reload and is not accepted',async(
     intent:{message_id:'new-message',baseline:{userCount:1,userMessageId:'old-message'}}});
   assert.equal(r.state,'UNKNOWN');
 });
+test('persisted data-turn-key matching intercepted message id confirms accepted POST after reload',async()=>{
+  const f=fixture({persistedTurnKey:true});
+  const r=await f.browser.readSubmission({session:f.session,prompt:'현재 턴에 할당된 잔여작업이 있으면 계속 수행해',
+    conversationUrl:'https://chatgpt.com/c/owned',
+    intent:{message_id:'recovery-turn-id',baseline:{userCount:1,userMessageId:'old-message'}}});
+  assert.equal(r.state,'CONFIRMED');
+  assert.equal(r.messageId,'recovery-turn-id');
+});
+
 test('held intercepted request is explicitly aborted before absence can be returned',async()=>{
   const f=fixture({held:true});let unblock;const held=new Promise(resolve=>{unblock=resolve;});
   let error;

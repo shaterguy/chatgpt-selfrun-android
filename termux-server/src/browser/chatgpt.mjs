@@ -679,7 +679,7 @@ export class ChatGptBrowser {
       'const users=[...document.querySelectorAll(\'[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"],[data-content-search-unit-key$=":user"]\')];'+
       'const matched=users.map(e=>{let found=false;'+
       'for(let n=e,depth=0;n&&depth<6;n=n.parentElement,depth++){'+
-      'const ids=["data-message-id","data-chatgpt-search-unit-key","data-content-search-unit-key"].map(k=>String(n.getAttribute?.(k)||""));'+
+      'const ids=["data-message-id","data-chatgpt-search-unit-key","data-content-search-unit-key","data-turn-key"].map(k=>String(n.getAttribute?.(k)||""));'+
       'if(id&&ids.some(v=>v===id||v===id+":user"))found=true;}'+
       'const same=String(e.innerText||e.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
       'return {idMatch:matched.some(m=>m.found),lastTextMatch:matched.at(-1)?.same||false};})()';
