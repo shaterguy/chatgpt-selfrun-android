@@ -3,7 +3,7 @@ name: Build SelfRun 4 Dev
 on:
   push:
     branches:
-      - 'selfrun-v4/v4.0.4-dev2'
+      - 'selfrun-v4/v4.0.7-dev1'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_ARTIFACT: selfrun-v4-404-dev2-${{ github.run_id }}-${{ github.run_attempt }}
+  BUILD_ARTIFACT: selfrun-v4-407-dev1-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   build-dev:
@@ -45,14 +45,14 @@ jobs:
           gradle-version: '9.5.0'
           cache-read-only: false
 
-      - name: Resolve 4.0.4-dev2 identities
+      - name: Resolve 4.0.7-dev1 identities
         shell: bash
         run: |
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '4.0.4-dev2' ]]
-          [[ "$VERSION_CODE" == '4002004' ]]
+          [[ "$VERSION_NAME" == '4.0.7-dev1' ]]
+          [[ "$VERSION_CODE" == '4002007' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
           grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
@@ -153,7 +153,7 @@ jobs:
           printf 'package=com.shaterguy.chatgptselfrun.drive\nversionName=%s\nversionCode=%s\ncertificateSha256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe\n' \
             "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
 
-      - name: Prepare 4.0.3 upgrade baseline
+      - name: Prepare 4.0.6 upgrade baseline
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,18 +164,18 @@ jobs:
           cp "release-output/SelfRun-Drive-TEST-v${VERSION_NAME}.apk" current/test.apk
           cp "release-output/SelfRun-Drive-TEST-v${VERSION_NAME}-androidTest.apk" current/androidTest.apk
           [[ "$(tr -d '[:space:]' < release-output/SOURCE_COMMIT.txt)" == "$GITHUB_SHA" ]]
-          gh release download drive-v4.0.3 --repo "$GITHUB_REPOSITORY" \
-            --pattern 'chatgpt-selfrun-drive-v4.0.3.apk' --dir stable
-          test -s stable/chatgpt-selfrun-drive-v4.0.3.apk
-          echo '4ecf855d666ef62c9c21ae750810eaba1dcd735a8b82f0611fe67965296778f8  stable/chatgpt-selfrun-drive-v4.0.3.apk' | sha256sum -c -
+          gh release download drive-v4.0.6 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chatgpt-selfrun-drive-v4.0.6.apk' --dir stable
+          test -s stable/chatgpt-selfrun-drive-v4.0.6.apk
+          echo '8bf1a36671b4d50af1adbf66e5b4211983847477bc06244e41442d834cd26de9  stable/chatgpt-selfrun-drive-v4.0.6.apk' | sha256sum -c -
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v4.0.3.apk > stable/STABLE_CERT.txt
+          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v4.0.6.apk > stable/STABLE_CERT.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable/STABLE_CERT.txt
-          STABLE_BADGING="$($BT/aapt dump badging stable/chatgpt-selfrun-drive-v4.0.3.apk)"
+          STABLE_BADGING="$($BT/aapt dump badging stable/chatgpt-selfrun-drive-v4.0.6.apk)"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$STABLE_BADGING"
-          grep -Fq "versionCode='4001003'" <<<"$STABLE_BADGING"
-          grep -Fq "versionName='4.0.3'" <<<"$STABLE_BADGING"
-          printf 'BASE_VERSION_NAME=4.0.3\nBASE_VERSION_CODE=4001003\nFORMAL_VERSION_NAME=%s\nFORMAL_VERSION_CODE=%s\n' \
+          grep -Fq "versionCode='4002006'" <<<"$STABLE_BADGING"
+          grep -Fq "versionName='4.0.6'" <<<"$STABLE_BADGING"
+          printf 'BASE_VERSION_NAME=4.0.6\nBASE_VERSION_CODE=4002006\nFORMAL_VERSION_NAME=%s\nFORMAL_VERSION_CODE=%s\n' \
             "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Enable hardware acceleration
@@ -185,7 +185,7 @@ jobs:
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
 
-      - name: Verify 4.0.3 to 4.0.4-dev2 update and TEST co-install
+      - name: Verify 4.0.6 to 4.0.7-dev1 update and TEST co-install
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 36
@@ -199,15 +199,15 @@ jobs:
           disable-animations: true
           script: bash tools/verify_selfrun3_release_emulator.sh
 
-      - name: Upload SelfRun 4.0.4-dev2 DEV and TEST APKs
+      - name: Upload SelfRun 4.0.7-dev1 DEV and TEST APKs
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: |
-            release-output/SelfRun-Drive-v4.0.4-dev2.apk
-            release-output/SelfRun-Drive-TEST-v4.0.4-dev2.apk
-            release-output/SelfRun-Drive-TEST-v4.0.4-dev2-androidTest.apk
+            release-output/SelfRun-Drive-v4.0.7-dev1.apk
+            release-output/SelfRun-Drive-TEST-v4.0.7-dev1.apk
+            release-output/SelfRun-Drive-TEST-v4.0.7-dev1-androidTest.apk
             release-output/SHA256SUMS.txt
             release-output/TEST_SHA256SUMS.txt
             release-output/*APKSIGNER_VERIFY.txt
