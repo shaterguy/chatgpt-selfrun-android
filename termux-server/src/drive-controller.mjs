@@ -101,6 +101,14 @@ export class DriveDispatchController {
   }
   async ingestDurable(path,body,transport) {
     const r=await this.#ingestRecord(path,body);
+    const projected=projection(r);
+    if(transport&&projected.server_status!==body.server_status) {
+      try {await this.repository.flushCurrent(transport,r.key);}
+      catch(error) {
+        console.error(JSON.stringify({event:'DRIVE_PROJECTION_FLUSH_ERROR',key:r.key,
+          error:String(error?.message||error).slice(0,300)}));
+      }
+    }
     this.#scheduleAdvance(r.key,transport);
     return r;
   }
