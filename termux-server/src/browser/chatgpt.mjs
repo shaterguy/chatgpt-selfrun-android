@@ -1,3 +1,11 @@
+export function normalizeProgressText(value) {
+  return String(value || '')
+    .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi, ' ')
+    .replace(/(?:Worked|Working|Thought|Thinking)\s+for\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h)(?:\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h))*/gi, ' ')
+    .replace(/(?:You said:|ChatGPT said:)/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
 const RUNTIME_EVALUATE_TIMEOUT_MS = 5000;
 const SUBMIT_POST_GRACE_MS = 5000;
 
@@ -132,11 +140,7 @@ function probeExpression() {
       }
       return null;
     };
-    const normalizeProgressText=value=>String(value||'')
-      .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi,' ')
-      .replace(/(?:Worked|Thought|Thinking)\s+for\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h)(?:\s+\d+(?:\.\d+)?\s*(?:s|m|h))*/gi,' ')
-      .replace(/(?:You said:|ChatGPT said:)/gi,' ')
-      .replace(/\s+/g,' ').trim();
+    const normalizeProgressText=${normalizeProgressText.toString()};
     const fingerprint=value=>{
       const input=String(value||'');
       if(!input)return '';
