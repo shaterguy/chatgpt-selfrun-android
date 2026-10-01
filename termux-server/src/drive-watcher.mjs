@@ -1,4 +1,11 @@
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const fingerprint=file=>file.modTime+'|'+file.size;
+const recent=(file,cutoff)=>{
+  const raw=String(file.modTime||'');
+  if(!/^\d{4}-\d{2}-\d{2}T/.test(raw))return true;
+  const ms=Date.parse(raw);
+  return !Number.isFinite(ms)||ms>=cutoff;
+};
 export class DriveDispatchWatcher {
   constructor({transport,controller,config,canDispatch=null}) {
     Object.assign(this,{transport,controller,config});
@@ -17,29 +24,41 @@ export class DriveDispatchWatcher {
     if(this.scanning||!this.canDispatch())return;
     this.scanning=true;
     try {
-      const files=await this.transport.list();
-      const controls=files.filter(f=>f.path.startsWith('__SELFRUN_CONTROL__'));
-      const dispatches=files.filter(f=>f.path.startsWith('__SELFRUN_DISPATCH__'));
-      for(const file of controls) {
+      const cutoff=Date.now()-Math.max(0,Number(this.config.dispatchRecoveryMs||7200000));
+      const files=(await this.transport.list()).filter(file=>recent(file,cutoff));
+      const listedControls=new Map(files.filter(f=>f.path.startsWith('__SELFRUN_CONTROL__')).map(f=>[f.path,f]));
+      for(const file of files) {
         if(!this.canDispatch())return;
-        const fingerprint=file.modTime+'|'+file.size;
-        if(this.seen.get(file.path)===fingerprint)continue;
+        const fp=fingerprint(file);
+        if(this.seen.get(file.path)===fp)continue;
+        if(file.path.startsWith('__SELFRUN_CONTROL__')) {
+          const body=await this.transport.read(file.path);
+          await this.controller.control(file.path,body,this.transport);
+          this.seen.set(file.path,fp);
+          continue;
+        }
+        if(!file.path.startsWith('__SELFRUN_DISPATCH__'))continue;
         const body=await this.transport.read(file.path);
-        await this.controller.control(file.path,body,this.transport);
-        this.seen.set(file.path,fingerprint);
-      }
-      for(const file of dispatches) {
         if(!this.canDispatch())return;
-        const fingerprint=file.modTime+'|'+file.size;
-        if(this.seen.get(file.path)===fingerprint)continue;
-        const body=await this.transport.read(file.path);
-        if(!this.canDispatch())return;
-        if(body.schema!=='selfrun-server-dispatch-v1')continue;
-        const control=this.controller.controlForTask(body.task_id);
-        // A durable request can be reconciled while stopped; it cannot produce browser side effects.
-        if(!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id)continue;
+        if(body.schema!=='selfrun-server-dispatch-v1'){this.seen.set(file.path,fp);continue;}
+        const controlPath='__SELFRUN_CONTROL__'+body.task_id+'.json';
+        let control=this.controller.controlForTask(body.task_id);
+        const controlFile=listedControls.get(controlPath);
+        const controlFp=controlFile?fingerprint(controlFile):null;
+        const controlListedUnseen=controlFile&&this.seen.get(controlPath)!==controlFp;
+        const identityMismatch=!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id;
+        if(controlListedUnseen||identityMismatch) {
+          const latest=await this.transport.read(controlPath);
+          await this.controller.control(controlPath,latest,this.transport);
+          if(controlFile)this.seen.set(controlPath,controlFp);
+          control=this.controller.controlForTask(body.task_id);
+        }
+        if(!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id) {
+          this.seen.set(file.path,fp);
+          continue;
+        }
         await this.controller.ingest(file.path,body,this.transport);
-        this.seen.set(file.path,fingerprint);
+        this.seen.set(file.path,fp);
       }
       if(this.canDispatch())await this.controller.tick(this.transport);
     } finally {this.scanning=false;}

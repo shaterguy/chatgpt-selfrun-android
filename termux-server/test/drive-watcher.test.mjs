@@ -30,3 +30,27 @@ test('unchanged folder still ticks durable pending work',async()=>{
  const w=new DriveDispatchWatcher({transport:{list:async()=>[]},controller,config:{}});
  await w.scanOnce();await w.scanOnce();assert.equal(ticks,2);
 });
+
+test('watcher ignores Drive entries older than the recovery window',async()=>{
+ let reads=0,ticks=0;
+ const old=new Date(Date.now()-3*60*60*1000).toISOString();
+ const transport={list:async()=>[
+   {path:'__SELFRUN_CONTROL__OLD.json',modTime:old,size:10},
+   {path:'__SELFRUN_DISPATCH__OLD.json',modTime:old,size:20},
+ ],read:async()=>{reads++;throw new Error('old entry should not be read');}};
+ const controller={tick:async()=>{ticks++;},control:async()=>{},ingest:async()=>{},controlForTask:()=>null};
+ const w=new DriveDispatchWatcher({transport,controller,config:{dispatchRecoveryMs:2*60*60*1000}});
+ await w.scanOnce();assert.equal(reads,0);assert.equal(ticks,1);
+});
+test('newest dispatch can load its control directly before ingestion',async()=>{
+ const f=fixture();
+ const original=f.transport.list;
+ f.transport.list=async()=>{
+   const rows=await original();
+   return rows.sort((a,b)=>b.path.startsWith('__SELFRUN_DISPATCH__')?1:-1);
+ };
+ const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{dispatchRecoveryMs:7200000}});
+ await w.scanOnce();
+ assert.equal(f.prepares,1);
+ assert.equal(f.controller.controlForTask(f.body.task_id).request_id,f.body.request_id);
+});

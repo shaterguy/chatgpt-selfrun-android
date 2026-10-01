@@ -73,7 +73,7 @@ export class DriveDispatchTransport {
       this.ids.set(name, String(file.id || ''));
       out.push({ path: name, modTime: String(file.modifiedTime || ''), size: Number(file.size || 0) });
     }
-    return out.sort((a, b) => a.modTime.localeCompare(b.modTime));
+    return out.sort((a, b) => b.modTime.localeCompare(a.modTime));
   }
 
   async #id(relativePath) {

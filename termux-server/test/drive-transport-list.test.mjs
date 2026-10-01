@@ -20,8 +20,8 @@ test('Drive dispatch listing requests newest modified files first', async () => 
     const rows = await transport.list();
     assert.equal(new URL(observedUrl).searchParams.get('orderBy'),'modifiedTime desc');
     assert.deepEqual(rows.map(r=>r.path),[
-      '__SELFRUN_CONTROL__A.json',
-      '__SELFRUN_DISPATCH__A.json'
+      '__SELFRUN_DISPATCH__A.json',
+      '__SELFRUN_CONTROL__A.json'
     ]);
   } finally {
     globalThis.fetch = originalFetch;
