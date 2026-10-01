@@ -510,13 +510,18 @@ final class SelfRun4DriveWebAdapter {
             listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
         }
         String url = body.optString("conversation_url", "");
-        boolean conversationReady = "STARTED".equals(serverStatus)
-                || "COMPLETED".equals(serverStatus)
-                || "RECOVERY_SENDING".equals(serverStatus)
-                || "RECOVERY_SENT".equals(serverStatus)
-                || "PAGE_ERROR".equals(serverStatus);
-        if (conversationReady && SelfRun3WebAdapter.trusted(url)
-                && !SelfRunScript.conversationId(url).isEmpty()) {
+        boolean conversationReady = serverConversationReady(serverStatus);
+        boolean validConversation = conversationReady && SelfRun3WebAdapter.trusted(url)
+                && !SelfRunScript.conversationId(url).isEmpty();
+        if (validConversation && !preparedNotified
+                && state.stage() == SelfRun3Engine.Stage.READY) {
+            preparedNotified = true;
+            trace("V4_SERVER_DIRECT_START_RECONCILE", "turn=" + state.turn()
+                    + ";attempt=" + preparationAttempt + ";status=" + serverStatus);
+            listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
+            return;
+        }
+        if (validConversation) {
             if (!started) {
                 started = true;
                 listener.onConversation(state.taskId(), state.turnId(), url);
@@ -542,6 +547,13 @@ final class SelfRun4DriveWebAdapter {
         state = claimed;
         if (submitRequested) return;
         submitRequested = true;
+        String remoteStatus = dispatchBody == null ? "" : dispatchBody.optString("server_status", "");
+        if (serverConversationReady(remoteStatus)) {
+            trace("V4_SERVER_SEND_CLAIM_RECONCILED", "turn=" + state.turn()
+                    + ";attempt=" + preparationAttempt + ";status=" + remoteStatus);
+            poll(generation, state.requestId());
+            return;
+        }
         String token = accessToken;
         String fileId = dispatchFileId;
         JSONObject body;
@@ -568,6 +580,14 @@ final class SelfRun4DriveWebAdapter {
                 });
             }
         });
+    }
+
+    private static boolean serverConversationReady(String serverStatus) {
+        return "STARTED".equals(serverStatus)
+                || "COMPLETED".equals(serverStatus)
+                || "RECOVERY_SENDING".equals(serverStatus)
+                || "RECOVERY_SENT".equals(serverStatus)
+                || "PAGE_ERROR".equals(serverStatus);
     }
 
     void detach() {
