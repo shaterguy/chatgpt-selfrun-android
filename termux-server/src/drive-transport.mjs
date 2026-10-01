@@ -57,7 +57,7 @@ export class DriveDispatchTransport {
       spaces: 'drive',
       fields: 'files(id,name,modifiedTime,size,mimeType,parents)',
       pageSize: '1000',
-      orderBy: 'modifiedTime',
+      orderBy: 'modifiedTime desc',
     });
     const response = await this.#fetch(url);
     const text = await response.text();

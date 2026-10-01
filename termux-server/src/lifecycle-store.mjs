@@ -33,7 +33,7 @@ export class LifecycleStore {
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
       active.length?'RUNNING':latest?.state==='COMPLETED'?'COMPLETED':latest?.state==='STOPPED'?'STOPPED':'IDLE';
     await this.store.patch({lifecycle:next,status,activeCount:active.length,
-      activeDispatches:records.filter(r=>!['COMPLETED','CANCELLED'].includes(r.state)).map(r=>({
+      activeDispatches:active.map(r=>({
         path:r.path,task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,dispatch_attempt:r.dispatch_attempt,
         ...Object.fromEntries(Object.entries(projection(r)).filter(([k])=>['server_status','lifecycle_state','lifecycle_revision','server_generation','browser_generation','conversation_url','recovery_count','server_error','server_control_state','server_control_epoch'].includes(k)))})),
       conversationUrl:latest?.conversation_url||null,lastError:latest?.error?.message||null,
