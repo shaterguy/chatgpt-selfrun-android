@@ -14,7 +14,7 @@ public final class SelfRunServerCandidatePolicyTest {
     @Test public void currentCandidateIdentityAndExplicitServerGateArePinned() throws Exception {
         String gradle = text(resolve("app/build.gradle", "build.gradle"));
         assertTrue(gradle.contains("selfRunDriveVersionCode = 4002007"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.6'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.7-dev1'"));
         assertTrue(gradle.contains("SELFRUN_SERVER_FEATURES_ENABLED"));
         assertTrue(gradle.contains("def selfRunServerFeaturesEnabled = true"));
         assertTrue(gradle.contains("selfRunServerChecks"));
