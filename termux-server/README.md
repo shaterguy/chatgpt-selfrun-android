@@ -8,9 +8,9 @@ SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, 
 
 1. 앱이 기존 Task 폴더에 `__SELFRUN_DISPATCH__*.json` 파일을 생성합니다.
 2. 서버가 Google Drive를 24시간 감시해 새 dispatch를 발견합니다.
-3. 서버가 Headless Chromium에서 대상 프로젝트의 새 대화 준비를 끝내고 같은 파일을 `READY_TO_SUBMIT`으로 갱신합니다.
-4. 앱은 기존 CLAIM_SEND 상태전이 후 같은 파일을 `SEND_REQUESTED`로 갱신합니다.
-5. 서버가 프롬프트를 전송하고 canonical conversation POST와 URL을 확인한 뒤 `STARTED`와 `conversation_url`을 기록합니다.
+3. 서버가 Headless Chromium에서 대상 프로젝트의 새 대화 준비를 끝내면 Task Control의 `RUNNING`과 앱의 `CREATE_REQUESTED`를 실행 권한으로 삼아 같은 lifecycle에서 즉시 POST까지 수행합니다.
+4. `SEND_REQUESTED`는 구버전 앱과의 호환 입력으로 허용하지만 서버 진행의 필수 선행조건은 아닙니다.
+5. 서버가 canonical conversation POST와 URL을 확인한 뒤 `STARTED`와 `conversation_url`을 기록합니다.
 6. 앱은 URL을 기존 ledger의 `conversationUrl` resource로 고정하고 기존 Result/Vercel 흐름으로 전환합니다.
 
 따라서 앱의 기존 90초 대화방 준비 watchdog, 5초 재시도, Result 판정, REPAIR/후속 TURN/DONE 판정, Vercel/FCM 알림은 유지됩니다.
@@ -19,8 +19,8 @@ SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, 
 
 앱 → 서버:
 
-- `CREATE_REQUESTED`: 대화 준비 요청
-- `SEND_REQUESTED`: 기존 앱의 CLAIM_SEND 완료 후 실제 전송 요청
+- `CREATE_REQUESTED`: 대화 준비와 실제 전송을 포함한 서버 실행 요청
+- `SEND_REQUESTED`: 구버전 앱 호환용 명시적 전송 요청
 - `CANCELLED`: 90초 timeout, pause, stop 등으로 현재 시도 폐기
 
 서버 → 앱:

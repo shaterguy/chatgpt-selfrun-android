@@ -8,18 +8,17 @@ import { keyFor, transition } from '../src/lifecycle.mjs';
 import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 import { fixture, MemoryStore, deferred } from './helpers/lifecycle-fixture.mjs';
 
-test('01 new conversation claim -> POST -> progress -> exact Result commit',async()=>{
-  const f=fixture();await f.ingest();assert.equal(f.sends,0);assert.equal(f.record().state,'PREPARED');
-  f.body.client_status='SEND_REQUESTED';await f.ingest();assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
+test('01 new conversation request -> server-owned POST -> progress -> exact Result commit',async()=>{
+  const f=fixture();await f.ingest();assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
   await f.observe({responseTextLength:1000});f.result(true);await f.observe({});
   assert.equal(f.record().state,'COMPLETED');assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
 });
 test('02 initial POST accepted but timed out is read back without duplicate',async()=>{
-  const f=fixture();f.mode='accepted-timeout';await f.ingest();f.body.client_status='SEND_REQUESTED';await f.ingest();
+  const f=fixture();f.mode='accepted-timeout';await f.ingest();
   assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
 });
 test('03 proven absent POST gets exactly one retry after readback',async()=>{
-  const f=fixture();f.mode='absent';await f.ingest();f.body.client_status='SEND_REQUESTED';await f.ingest();
+  const f=fixture();f.mode='absent';await f.ingest();
   assert.equal(f.sends,2);assert.equal(f.record().intent.sends,2);assert.ok(f.readbacks>=2);
 });
 test('04 existing conversation attach does not send continuation',async()=>{
@@ -56,7 +55,7 @@ test('11 Result commits during recovery before SEND',async()=>{
 });
 test('12 STOP during POST fences late completion',async()=>{
   const f=fixture();const gate=deferred(),entered=deferred();f.onSubmit=async()=>{entered.resolve();await gate.promise;};
-  await f.ingest();f.body.client_status='SEND_REQUESTED';const sending=f.ingest();await entered.promise;
+  const sending=f.ingest();await entered.promise;
   await f.stop();gate.resolve();await sending;
   assert.equal(f.record().state,'STOPPED');assert.equal(f.sends,1);
 });
@@ -82,9 +81,8 @@ test('16 old browser callback cannot overwrite a new generation',async()=>{
 test('17 duplicate concurrent scans do not duplicate prepare or submission',async()=>{
   const f=fixture();const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
   await Promise.all([watcher.scanOnce(),watcher.scanOnce()]);
-  for(let i=0;i<8&&f.prepares===0;i++)await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(f.prepares,1);
-  f.body.client_status='SEND_REQUESTED';await Promise.all([f.ingest(),f.ingest()]);assert.equal(f.sends,1);
+  for(let i=0;i<16&&(f.prepares===0||f.sends===0);i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 test('18 pending event and Drive projection replay from canonical state after restart',async()=>{
   const f=fixture();await f.existing();f.writeFail=true;

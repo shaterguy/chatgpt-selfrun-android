@@ -181,7 +181,7 @@ export class DriveDispatchController {
       if(r.intent.outcome==='ABSENT')await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
       else await this.#reconcile(key,transport);return;
     }
-    if(r.body.client_status==='SEND_REQUESTED'&&r.state==='PREPARED') {
+    if(r.state==='PREPARED'&&['CREATE_REQUESTED','SEND_REQUESTED'].includes(r.body.client_status)) {
       const directives=await this.#directives();
       const prompt=appendTurnStartDirective(r.body.prompt,directives.turnStartDirective);
       await this.#post(key,transport,'initial',prompt);return;

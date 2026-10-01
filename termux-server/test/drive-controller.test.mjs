@@ -3,9 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keyFor } from '../src/lifecycle.mjs';
 import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
-test('claim boundary persists preparation without posting',async()=>{
- const f=fixture();await f.ingest();assert.equal(f.record().state,'PREPARED');assert.equal(f.sends,0);
- f.body.client_status='SEND_REQUESTED';await f.ingest();assert.equal(f.sends,1);
+test('CREATE_REQUESTED is sufficient authority for server-owned prepare and submit',async()=>{
+ const f=fixture();await f.ingest();
+ assert.equal(f.sends,1);
+ assert.equal(f.record().state,'OBSERVING');
+ assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
 test('missing or unknown Task control cannot attach even with legacy bypass configured',async()=>{
  for(const state of ['UNKNOWN','PAUSED','STOPPED','DONE']) {
