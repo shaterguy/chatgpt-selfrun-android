@@ -284,6 +284,15 @@ export class DriveDispatchController {
     return String(error?.message || error) === 'CDP command timeout: Runtime.evaluate';
   }
 
+  #browserSessionUnavailable(error) {
+    const message = String(error?.message || error);
+    return message === 'CDP websocket closed'
+      || message === 'CDP websocket is not open'
+      || message === 'CDP websocket connection failed'
+      || message === 'CDP websocket connect timeout'
+      || /(?:target|session).*closed|no target with given id/i.test(message);
+  }
+
   async #inspectPreparedTargetConversation(active, graceMs = 1500) {
     const targetId = clean(active?.target?.id);
     const chromium = this.browser?.chromium;
@@ -1335,7 +1344,29 @@ export class DriveDispatchController {
                   });
                   return { resetLiveness: true };
                 }
-                throw error;
+                if (this.#browserSessionUnavailable(error)) throw error;
+
+                active.recoveryCount = Math.max(0, active.recoveryCount - 1);
+                active.body = {
+                  ...active.body,
+                  server_status: 'STARTED',
+                  server_error: '',
+                  recovery_count: active.recoveryCount,
+                  updated_at_ms: Date.now(),
+                };
+                try {
+                  await this.#syncActiveSummary();
+                  await transport.write(active.path, active.body);
+                  active.publishPending = false;
+                } catch {
+                  active.publishPending = true;
+                }
+                await this.#recordLivenessEvent(active, 'LIVENESS_RECOVERY_DECISION', {
+                  decision: 'DEFER_SEND_ERROR',
+                  reset_liveness: true,
+                  error: message,
+                });
+                return { resetLiveness: true };
               }
               active.body = {
                 ...active.body,

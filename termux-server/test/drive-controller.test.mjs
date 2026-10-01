@@ -395,7 +395,7 @@ function stalledActivity(overrides = {}) {
 
 async function startStalledResume({ resultText, resultError, snapshot,
   activity = stalledActivity(), followupActivity = null, controlState = 'RUNNING',
-  allowUnknownControlRecovery = false }) {
+  allowUnknownControlRecovery = false, sendError = null }) {
   let sendCalls = 0;
   let resumeSendCalls = 0;
   let monitorStarted = false;
@@ -403,13 +403,15 @@ async function startStalledResume({ resultText, resultError, snapshot,
   let resultReadCalls = 0;
   let lastPrompt = null;
   let followupAction = null;
+  let sessionCloseCalls = 0;
+  let targetCloseCalls = 0;
   let resolveActivity;
   const activityDone = new Promise((resolve) => { resolveActivity = resolve; });
   const browser = {
-    chromium: { closeTarget: async () => true },
+    chromium: { closeTarget: async () => { targetCloseCalls += 1; return true; } },
     resume: async () => ({
       target: { id: 'target-stalled' },
-      session: { close() {} },
+      session: { close() { sessionCloseCalls += 1; } },
       baseline: { assistantCount: 0, assistantTextLength: 0 },
     }),
     monitor: async ({ onActivity }) => {
@@ -425,8 +427,12 @@ async function startStalledResume({ resultText, resultError, snapshot,
       return snapshot;
     },
     sendContinuation: async ({ prompt }) => {
-      if (monitorStarted) sendCalls += 1;
-      else resumeSendCalls += 1;
+      if (monitorStarted) {
+        sendCalls += 1;
+        if (sendError) throw sendError;
+      } else {
+        resumeSendCalls += 1;
+      }
       lastPrompt = prompt;
     },
   };
@@ -467,6 +473,8 @@ async function startStalledResume({ resultText, resultError, snapshot,
     resultReadCalls: () => resultReadCalls,
     lastPrompt: () => lastPrompt,
     followupAction: () => followupAction,
+    sessionCloseCalls: () => sessionCloseCalls,
+    targetCloseCalls: () => targetCloseCalls,
     writes,
     events: stateStore.events,
   };
@@ -661,6 +669,30 @@ test('liveness recovery sends continuation only when Result is not committed and
   );
   assert.equal(decision?.details.reset_liveness, false);
   assert.equal(run.events.some(({ event }) => event === 'LIVENESS_RECOVERY_SENT'), true);
+});
+
+test('liveness recovery send failure keeps the current browser session attached', async () => {
+  const current = stalledActivity();
+  const run = await startStalledResume({
+    resultText: '{"committed":false}',
+    snapshot: current,
+    activity: current,
+    sendError: new Error('Canonical conversation POST timeout'),
+  });
+  assert.equal(run.action?.resetLiveness, true);
+  assert.equal(run.sendCalls(), 1);
+  assert.equal(run.sessionCloseCalls(), 0);
+  assert.equal(run.targetCloseCalls(), 0);
+  assert.ok(run.controller.getActive('job/stalled.json'));
+  assert.equal(run.writes.some(({ body }) => body.server_status === 'ERROR'), false);
+  assert.equal(run.writes.some(({ body }) => body.server_status === 'STARTED'
+    && body.recovery_count === 0), true);
+  const decision = run.events.find(
+    ({ event, details }) => event === 'LIVENESS_RECOVERY_DECISION'
+      && details.decision === 'DEFER_SEND_ERROR',
+  );
+  assert.equal(decision?.details.reset_liveness, true);
+  assert.match(decision?.details.error, /Canonical conversation POST timeout/);
 });
 
 test('recovery status returns to STARTED when conversation progress is detected after continuation', async () => {
