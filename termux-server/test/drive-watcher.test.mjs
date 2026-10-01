@@ -19,6 +19,14 @@ test('watcher skips dispatches outside current control identity',async()=>{
  await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();
  assert.equal(f.prepares,0);assert.equal(f.record(),null);
 });
+
+test('watcher retries a dispatch when its matching control revision appears later',async()=>{
+ const f=fixture();const expected=f.body.request_id;f.control.request_id='older-request';
+ const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{dispatchRecoveryMs:7200000}});
+ await w.scanOnce();assert.equal(f.prepares,0);
+ f.control.request_id=expected;f.control.control_epoch+=1;
+ await w.scanOnce();assert.equal(f.prepares,1);
+});
 test('watcher stops before ingestion when cluster ownership is lost during read',async()=>{
  const f=fixture();let active=true;const read=f.transport.read;
  f.transport.read=async p=>{const value=await read(p);if(p===f.path)active=false;return value;};

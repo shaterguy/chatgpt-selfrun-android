@@ -33,7 +33,7 @@ export class DriveDispatchTransport {
     const access = await this.#token();
     const response = await fetch(url, {
       ...init,
-      signal:init.signal||AbortSignal.timeout(30000),
+      signal:init.signal||AbortSignal.timeout(Math.max(1000, Number(this.config.driveRequestTimeoutMs || 10000))),
       headers: { ...(init.headers || {}), authorization: 'Bearer ' + access },
     });
     if (response.status === 401 && retry) {
@@ -49,31 +49,46 @@ export class DriveDispatchTransport {
     return response;
   }
 
-  async list() {
-    const q = "'" + this.folderId + "' in parents and trashed=false and "
-      + "(name contains '__SELFRUN_DISPATCH__' or name contains '__SELFRUN_CONTROL__')";
-    const url = API + '/files?' + new URLSearchParams({
-      q,
-      spaces: 'drive',
-      fields: 'files(id,name,modifiedTime,size,mimeType,parents)',
-      pageSize: '1000',
-      orderBy: 'modifiedTime desc',
-    });
-    const response = await this.#fetch(url);
-    const text = await response.text();
-    if (!response.ok) throw new Error('Drive list HTTP ' + response.status + ': ' + text.slice(0, 500));
-    const body = JSON.parse(text || '{}');
-    const files = Array.isArray(body.files) ? body.files : [];
-    const out = [];
-    for (const file of files) {
-      const name = String(file.name || '');
-      const supported = name.startsWith('__SELFRUN_DISPATCH__')
-        || name.startsWith('__SELFRUN_CONTROL__');
-      if (!supported || !name.endsWith('.json')) continue;
-      this.ids.set(name, String(file.id || ''));
-      out.push({ path: name, modTime: String(file.modifiedTime || ''), size: Number(file.size || 0) });
+  async list(options = {}) {
+    const modifiedAfterMs = Number(options.modifiedAfterMs || 0);
+    const clauses = [
+      "'" + this.folderId + "' in parents",
+      'trashed=false',
+      "(name contains '__SELFRUN_DISPATCH__' or name contains '__SELFRUN_CONTROL__')",
+    ];
+    if (Number.isFinite(modifiedAfterMs) && modifiedAfterMs > 0) {
+      clauses.push("modifiedTime > '" + new Date(modifiedAfterMs).toISOString() + "'");
     }
-    return out.sort((a, b) => b.modTime.localeCompare(a.modTime));
+    const q = clauses.join(' and ');
+    const byName = new Map();
+    this.ids.clear();
+    let pageToken = '';
+    do {
+      const params = new URLSearchParams({
+        q,
+        spaces: 'drive',
+        fields: 'nextPageToken,files(id,name,modifiedTime,size,mimeType,parents)',
+        pageSize: '1000',
+        orderBy: 'modifiedTime desc',
+      });
+      if (pageToken) params.set('pageToken', pageToken);
+      const response = await this.#fetch(API + '/files?' + params);
+      const text = await response.text();
+      if (!response.ok) throw new Error('Drive list HTTP ' + response.status + ': ' + text.slice(0, 500));
+      const body = JSON.parse(text || '{}');
+      const files = Array.isArray(body.files) ? body.files : [];
+      for (const file of files) {
+        const name = String(file.name || '');
+        const supported = name.startsWith('__SELFRUN_DISPATCH__')
+          || name.startsWith('__SELFRUN_CONTROL__');
+        if (!supported || !name.endsWith('.json') || byName.has(name)) continue;
+        const row = { path: name, modTime: String(file.modifiedTime || ''), size: Number(file.size || 0) };
+        this.ids.set(name, String(file.id || ''));
+        byName.set(name, row);
+      }
+      pageToken = String(body.nextPageToken || '');
+    } while (pageToken);
+    return [...byName.values()].sort((a, b) => b.modTime.localeCompare(a.modTime));
   }
 
   async #id(relativePath) {
@@ -82,7 +97,7 @@ export class DriveDispatchTransport {
     if (cached) return cached;
     const esc = name.replace(/'/g, "\\'");
     const q = "'" + this.folderId + "' in parents and trashed=false and name='" + esc + "'";
-    const url = API + '/files?' + new URLSearchParams({ q, spaces: 'drive', fields: 'files(id,name)', pageSize: '10' });
+    const url = API + '/files?' + new URLSearchParams({ q, spaces: 'drive', fields: 'files(id,name,modifiedTime)', pageSize: '10', orderBy: 'modifiedTime desc' });
     const response = await this.#fetch(url);
     const text = await response.text();
     if (!response.ok) throw new Error('Drive resolve HTTP ' + response.status + ': ' + text.slice(0, 500));

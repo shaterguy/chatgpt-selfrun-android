@@ -23,6 +23,15 @@ export function detectPageErrorText(body) {
   return match ? match[0] : null;
 }
 
+export function responseStreamingEvidence(probe) {
+  let pathname = '';
+  try { pathname = new URL(String(probe?.url || ''), 'https://chatgpt.com').pathname; } catch {}
+  const canonical = /\/c\/[^/]+/.test(pathname);
+  const hasResponseEvidence = canonical || Number(probe?.userCount || 0) > 0
+    || Number(probe?.assistantCount || 0) > 0 || Boolean(probe?.responseTurnId);
+  return Boolean(probe?.stopButtonVisible) && hasResponseEvidence;
+}
+
 export function conversationStateReady(probe) {
   const userMessageId = String(probe?.userMessageId || '').trim();
   const assistantMessageId = String(probe?.assistantMessageId || '').trim();
@@ -113,7 +122,9 @@ async function installDecorativeAnimationPause(session) {
 
 function probeExpression() {
   const errorPattern = JSON.stringify(PAGE_ERROR_PATTERN);
+  const streamingEvidence = responseStreamingEvidence.toString();
   return `(() => {
+    const responseStreamingEvidence=(${streamingEvidence});
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
     const buttons=[...document.querySelectorAll('button')].filter(visible);
     const selectors=['textarea#prompt-textarea','textarea[data-testid="prompt-textarea"]',
@@ -193,7 +204,7 @@ function probeExpression() {
       readyState:document.readyState,
       loginPage:(()=>{const p=String(location.pathname||'').toLowerCase();return p==='/auth'||p.startsWith('/auth/')||p==='/login'||p.startsWith('/login/');})(),
       composer:!!composer,
-      streaming:stopButtonVisible,
+      streaming:responseStreamingEvidence({stopButtonVisible,url:location.href,userCount:users.length,assistantCount:assistants.length,responseTurnId}),
       stopButtonVisible,
       paused,
       assistantCount:assistants.length,

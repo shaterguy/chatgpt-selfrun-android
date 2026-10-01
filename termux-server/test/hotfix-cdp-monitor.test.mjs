@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DriveDispatchController } from '../src/drive-controller.mjs';
-import { ChatGptBrowser, conversationResumeReady, conversationStateReady, detectPageErrorText } from '../src/browser/chatgpt.mjs';
+import { ChatGptBrowser, conversationResumeReady, conversationStateReady, detectPageErrorText, responseStreamingEvidence } from '../src/browser/chatgpt.mjs';
 
 class MemoryStateStore {
   constructor() {
@@ -60,6 +60,13 @@ function dispatch(overrides = {}) {
   };
 }
 
+
+test('empty project landing stop button is not response streaming evidence', () => {
+  assert.equal(responseStreamingEvidence({url:'https://chatgpt.com/g/example/project',stopButtonVisible:true,userCount:0,assistantCount:0,responseTurnId:null}),false);
+  assert.equal(responseStreamingEvidence({url:'https://chatgpt.com/c/owned',stopButtonVisible:true,userCount:0,assistantCount:0,responseTurnId:null}),true);
+  assert.equal(responseStreamingEvidence({url:'https://chatgpt.com/g/example/project',stopButtonVisible:true,userCount:1,assistantCount:0,responseTurnId:null}),true);
+  assert.equal(responseStreamingEvidence({url:'https://chatgpt.com/g/example/project',stopButtonVisible:false,userCount:1,assistantCount:1,responseTurnId:'turn-1'}),false);
+});
 test('resume readiness requires only a stable user message identity and composer', () => {
   assert.equal(conversationResumeReady({ composer: true, userMessageId: 'user-1' }), true);
   assert.equal(conversationResumeReady({ composer: true, userMessageId: 'user-1', streaming: false, assistantMessageId: null }), true);

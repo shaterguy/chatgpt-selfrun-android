@@ -25,7 +25,7 @@ export class DriveDispatchWatcher {
     this.scanning=true;
     try {
       const cutoff=Date.now()-Math.max(0,Number(this.config.dispatchRecoveryMs||7200000));
-      const files=(await this.transport.list()).filter(file=>recent(file,cutoff));
+      const files=(await this.transport.list({modifiedAfterMs:cutoff})).filter(file=>recent(file,cutoff));
       const listedControls=new Map(files.filter(f=>f.path.startsWith('__SELFRUN_CONTROL__')).map(f=>[f.path,f]));
       for(const file of files) {
         if(!this.canDispatch())return;
@@ -54,7 +54,7 @@ export class DriveDispatchWatcher {
           control=this.controller.controlForTask(body.task_id);
         }
         if(!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id) {
-          this.seen.set(file.path,fp);
+          // Drive may expose the dispatch before the matching control revision. Retry on the next scan.
           continue;
         }
         await this.controller.ingest(file.path,body,this.transport);

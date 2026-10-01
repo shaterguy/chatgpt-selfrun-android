@@ -6,7 +6,7 @@ const home = os.homedir();
 const dataDir = process.env.SELFRUN_SERVER_DATA_DIR || path.join(home, '.selfrun-server');
 
 export const config = Object.freeze({
-  version: '4.0.0-dev2',
+  version: '4.0.0-dev3',
   host: process.env.SELFRUN_SERVER_HOST || '127.0.0.1',
   port: Number(process.env.SELFRUN_SERVER_PORT || 17831),
   dataDir,
@@ -28,6 +28,7 @@ export const config = Object.freeze({
   probeIntervalMs: Number(process.env.SELFRUN_PROBE_INTERVAL_MS || 60000),
   stallAfterMs: Number(process.env.SELFRUN_STALL_AFTER_MS || 600000),
   drivePollMs: Number(process.env.SELFRUN_DRIVE_POLL_MS || 1000),
+  driveRequestTimeoutMs: Number(process.env.SELFRUN_DRIVE_REQUEST_TIMEOUT_MS || 10000),
   preparedPollMs: Number(process.env.SELFRUN_PREPARED_POLL_MS || 1000),
   driveRunsPath: process.env.SELFRUN_DRIVE_RUNS_PATH || 'selfrun-drive:GPT/Self Run/Runs',
   driveRunsFolderId: process.env.SELFRUN_DRIVE_RUNS_FOLDER_ID || '1LaIjBACRA4bgTblTOHOki5OF39Cyxi4c',

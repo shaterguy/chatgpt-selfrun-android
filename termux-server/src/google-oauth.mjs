@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+
+const refreshByTokenFile = new Map();
 
 export class GoogleOAuthTokenProvider {
   constructor(config) {
     this.config = config;
-    this.refreshing = null;
   }
 
   async #readJson(file) {
@@ -40,9 +42,14 @@ export class GoogleOAuthTokenProvider {
   }
 
   async #refresh(token) {
-    if (this.refreshing) return this.refreshing;
-    this.refreshing = this.#doRefresh(token).finally(() => { this.refreshing = null; });
-    return this.refreshing;
+    const key = String(this.config.driveAuthTokenFile || '');
+    const existing = refreshByTokenFile.get(key);
+    if (existing) return existing;
+    const pending = this.#doRefresh(token).finally(() => {
+      if (refreshByTokenFile.get(key) === pending) refreshByTokenFile.delete(key);
+    });
+    refreshByTokenFile.set(key, pending);
+    return pending;
   }
 
   async #doRefresh(token) {
@@ -54,10 +61,12 @@ export class GoogleOAuthTokenProvider {
       grant_type: 'refresh_token',
     });
     if (client.client_secret) params.set('client_secret', client.client_secret);
+    const timeoutMs = Math.max(1000, Number(this.config.driveRequestTimeoutMs || 10000));
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: params,
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || !body.access_token) {
@@ -70,7 +79,7 @@ export class GoogleOAuthTokenProvider {
       scope: body.scope || token.scope || '',
       expires_at_ms: Date.now() + Number(body.expires_in || 3600) * 1000,
     };
-    const temp = this.config.driveAuthTokenFile + '.tmp-' + process.pid;
+    const temp = this.config.driveAuthTokenFile + '.tmp-' + process.pid + '-' + randomUUID();
     await fs.writeFile(temp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
     await fs.rename(temp, this.config.driveAuthTokenFile);
     return next;
