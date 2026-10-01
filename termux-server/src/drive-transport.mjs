@@ -2,7 +2,8 @@ import { GoogleOAuthTokenProvider } from './google-oauth.mjs';
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const API = 'https://www.googleapis.com/drive/v3';
-const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
+const VERSION_API = 'https://www.googleapis.com/drive/v2';
+const UPLOAD = 'https://www.googleapis.com/upload/drive/v2';
 
 function safeName(value) {
   const text = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -15,6 +16,7 @@ export class DriveDispatchTransport {
     this.config = config;
     this.folderId = config.driveRunsFolderId;
     this.ids = new Map();
+    this.etags = new WeakMap();
     this.blockedUntil = 0;
     this.auth = new GoogleOAuthTokenProvider(config);
   }
@@ -31,6 +33,7 @@ export class DriveDispatchTransport {
     const access = await this.#token();
     const response = await fetch(url, {
       ...init,
+      signal:init.signal||AbortSignal.timeout(30000),
       headers: { ...(init.headers || {}), authorization: 'Bearer ' + access },
     });
     if (response.status === 401 && retry) {
@@ -90,24 +93,40 @@ export class DriveDispatchTransport {
     return exact.id;
   }
 
+  async #version(id) {
+    const response=await this.#fetch(VERSION_API+'/files/'+encodeURIComponent(id)+'?fields=id,etag,version');
+    if(!response.ok)throw new Error('Drive version HTTP '+response.status);
+    const metadata=await response.json();
+    if(!metadata.etag)throw new Error('Drive version missing ETag');
+    return metadata.etag;
+  }
   async read(relativePath) {
-    const id = await this.#id(relativePath);
-    const response = await this.#fetch(API + '/files/' + encodeURIComponent(id) + '?alt=media');
-    const raw = await response.text();
-    if (!response.ok) throw new Error('Drive read HTTP ' + response.status + ': ' + raw.slice(0, 500));
-    if (Buffer.byteLength(raw, 'utf8') > MAX_JSON_BYTES) throw new Error('dispatch JSON too large');
-    const body = JSON.parse(raw);
-    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Drive dispatch body must be an object');
-    return body;
+    const id=await this.#id(relativePath);
+    // Bind the body to an unchanged file version; media responses omit ETags.
+    for(let attempt=0;attempt<3;attempt++) {
+      const before=await this.#version(id);
+      const response=await this.#fetch(API+'/files/'+encodeURIComponent(id)+'?alt=media');
+      const raw=await response.text();
+      if(!response.ok)throw new Error('Drive read HTTP '+response.status);
+      if(Buffer.byteLength(raw,'utf8')>MAX_JSON_BYTES)throw new Error('dispatch JSON too large');
+      const after=await this.#version(id);
+      if(before!==after)continue;
+      const body=JSON.parse(raw);
+      if(!body||typeof body!=='object'||Array.isArray(body))throw new Error('Drive dispatch body must be an object');
+      this.etags.set(body,after);return body;
+    }
+    throw new Error('Drive read revision changed repeatedly');
   }
 
-  async write(relativePath, body) {
+  async write(relativePath, body, options={}) {
     const id = await this.#id(relativePath);
+    const expected=options.expected?this.etags.get(options.expected):null;
+    if(options.expected&&!expected)throw new Error('Drive conditional publication requires an ETag');
     const data = JSON.stringify(body, null, 2) + '\n';
     if (Buffer.byteLength(data, 'utf8') > MAX_JSON_BYTES) throw new Error('dispatch JSON too large');
     const response = await this.#fetch(
       UPLOAD + '/files/' + encodeURIComponent(id) + '?uploadType=media',
-      { method: 'PATCH', headers: { 'content-type': 'application/json; charset=utf-8' }, body: data },
+      { method: 'PUT', headers: { 'content-type': 'application/json; charset=utf-8',...(expected?{'if-match':expected}:{}) }, body: data },
     );
     const text = await response.text();
     if (!response.ok) throw new Error('Drive write HTTP ' + response.status + ': ' + text.slice(0, 500));

@@ -1,3 +1,11 @@
+export function normalizeProgressText(value) {
+  return String(value || '')
+    .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi, ' ')
+    .replace(/(?:Worked|Working|Thought|Thinking)\s+for\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h)(?:\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h))*/gi, ' ')
+    .replace(/(?:You said:|ChatGPT said:)/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
 const RUNTIME_EVALUATE_TIMEOUT_MS = 5000;
 const SUBMIT_POST_GRACE_MS = 5000;
 
@@ -132,11 +140,7 @@ function probeExpression() {
       }
       return null;
     };
-    const normalizeProgressText=value=>String(value||'')
-      .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi,' ')
-      .replace(/(?:Worked|Thought|Thinking)\s+for\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|s|m|h)(?:\s+\d+(?:\.\d+)?\s*(?:s|m|h))*/gi,' ')
-      .replace(/(?:You said:|ChatGPT said:)/gi,' ')
-      .replace(/\s+/g,' ').trim();
+    const normalizeProgressText=${normalizeProgressText.toString()};
     const fingerprint=value=>{
       const input=String(value||'');
       if(!input)return '';
@@ -337,6 +341,9 @@ export class ChatGptBrowser {
       try {
         last = await evaluate(session, probeExpression());
       } catch (error) {
+        if(/websocket.*closed|websocket.*not open|ECONNREFUSED/i.test(String(error?.message||error))) {
+          error.code='BROWSER_DEAD';throw error;
+        }
         last = { probeError: String(error?.message || error) };
         await delay(250, signal);
         continue;
@@ -346,6 +353,7 @@ export class ChatGptBrowser {
     }
     const error = new Error(`Timed out waiting for ${label}`);
     error.lastProbe = last;
+    error.code=last?.probeError?'ATTACH_FAILED':'CONVERSATION_LOAD_FAILED';
     throw error;
   }
 
@@ -371,7 +379,8 @@ export class ChatGptBrowser {
       await delay(700, signal);
       probe = await evaluate(session, probeExpression());
     }
-    return this.#waitFor(session, (p) => p.composer, {
+    if(conversationId(probe.url))throw Object.assign(new Error('new conversation could not be established'),{code:'NEW_CONVERSATION_REQUIRED'});
+    return this.#waitFor(session, (p) => p.composer&&!conversationId(p.url), {
       timeoutMs: this.config.navigationTimeoutMs,
       signal,
       label: 'ChatGPT composer',
@@ -417,7 +426,9 @@ export class ChatGptBrowser {
     const expectedId = conversationId(conversationUrl);
     if (!expectedId) throw new Error('canonical conversation URL unavailable for resume');
 
-    const target = await this.chromium.createTarget(conversationUrl);
+    const targets=await this.chromium.listExistingTargets();
+    const existing=targets?.find(t=>t.type==='page'&&conversationId(t.url)===expectedId);
+    const target = existing || await this.chromium.createTarget(conversationUrl);
     const session = await this.chromium.connectTarget(target);
     await session.call('Page.enable');
     await session.call('Runtime.enable');
@@ -428,7 +439,7 @@ export class ChatGptBrowser {
       const probe = await this.#waitFor(session, (p) => p.loginPage
         || ((p.readyState === 'complete' || p.readyState === 'interactive')
           && conversationId(p.url) === expectedId
-          && conversationResumeReady(p)), {
+          && conversationResumeReady(p)) || !!p.errorText, {
         timeoutMs: this.config.navigationTimeoutMs,
         signal,
         label: 'existing conversation',
@@ -438,6 +449,7 @@ export class ChatGptBrowser {
         error.code = 'AUTH_REQUIRED';
         throw error;
       }
+      if(probe.errorText)throw Object.assign(new Error('conversation load failed'),{code:'CONVERSATION_LOAD_FAILED'});
       return {
         target,
         session,
@@ -453,12 +465,12 @@ export class ChatGptBrowser {
       };
     } catch (error) {
       session.close();
-      await this.chromium.closeTarget(target.id);
+      if(!existing) await this.chromium.closeTarget(target.id);
       throw error;
     }
   }
 
-  async #submitWithProfile({ session, profileOperations, signal, waitForMessagePost = false }) {
+  async #submitWithProfile({ session, profileOperations, signal, waitForMessagePost = false, guard = () => true, onRequest = null, conversationUrl = '' }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
 
     const sendReadyStarted = Date.now();
@@ -482,6 +494,10 @@ export class ChatGptBrowser {
     });
 
     let settled = false;
+    let released = false;
+    const pausedRequests=new Map();
+    let pendingError=null;
+    let closed = false;
     let resolveCanonical;
     let rejectCanonical;
     const canonical = new Promise((resolve, reject) => {
@@ -502,13 +518,23 @@ export class ChatGptBrowser {
         } catch {
           throw new Error('Conversation request body is not valid JSON');
         }
+        if(closed||signal?.aborted||!guard()) throw new Error('stale canonical POST callback');
+        const expected=conversationId(conversationUrl);
+        if(expected&&body.conversation_id&&body.conversation_id!==expected) throw new Error('POST conversation ownership mismatch');
+        const initializationRequest = new URL(request.url).pathname.toLowerCase().replace(/\/+$/, '') === '/backend-api/conversation/init';
+        const entry={messageRequest:!initializationRequest,continued:false,cancelled:false};
+        pausedRequests.set(params.requestId,entry);
+        const message=(body.messages||[]).find(m=>m.author?.role==='user');
+        if(message) await onRequest?.({message_id:message.id||null,released:true});
+        if(closed||signal?.aborted||!guard()) throw new Error('stale canonical POST callback');
         const patched = JSON.stringify(applyProfileOperations(body, profileOperations));
+        entry.continued=true;
+        if(entry.messageRequest)released=true;
         await session.call('Fetch.continueRequest', {
           requestId: params.requestId,
           postData: Buffer.from(patched, 'utf8').toString('base64'),
         });
-        const initializationRequest = new URL(request.url).pathname.toLowerCase().replace(/\/+$/, '')
-          === '/backend-api/conversation/init';
+
         if (!settled && (!waitForMessagePost || !initializationRequest)) {
           settled = true;
           resolveCanonical({ url: request.url });
@@ -519,6 +545,7 @@ export class ChatGptBrowser {
             requestId: params.requestId,
             errorReason: 'Aborted',
           });
+          const entry=pausedRequests.get(params.requestId);if(entry&&!entry.continued)entry.cancelled=true;
         } catch {}
         if (!settled) {
           settled = true;
@@ -573,14 +600,23 @@ export class ChatGptBrowser {
         signal,
         label: 'canonical conversation URL',
       });
+    } catch(error) {
+      pendingError=error;
+      throw error;
     } finally {
+      closed=true;
+      for(const [id,entry] of pausedRequests)if(!entry.continued&&!entry.cancelled) {
+        try {await session.call('Fetch.failRequest',{requestId:id,errorReason:'Aborted'});entry.cancelled=true;}catch{}
+      }
+      if(pendingError) {
+        const proven=!released&&[...pausedRequests.values()].some(e=>e.messageRequest&&e.cancelled)
+          &&[...pausedRequests.values()].every(e=>!e.messageRequest||e.cancelled);
+        pendingError.released=released;
+        pendingError.absenceProof=proven?'INTERCEPTED_REQUEST_ABORTED':null;
+      }
       off();
       try { await session.call('Fetch.disable'); } catch {}
     }
-  }
-
-  async submitPrepared({ session, profileOperations, signal }) {
-    return this.#submitWithProfile({ session, profileOperations, signal });
   }
 
   async livenessSnapshot({ session, signal }) {
@@ -588,57 +624,74 @@ export class ChatGptBrowser {
     return evaluate(session, probeExpression());
   }
 
-  async sendContinuation({ session, prompt, profileOperations, signal }) {
-    if (signal?.aborted) throw signal.reason || new Error('aborted');
-
-    const beforeStage = await evaluate(session, probeExpression());
-    const expectedId = conversationId(beforeStage.url);
-    if (!expectedId) throw new Error('existing conversation URL unavailable');
-
-    const staged = await evaluate(session, inputExpression(prompt));
-    if (staged?.status !== 'READY') {
-      throw new Error(`Continuation staging failed: ${staged?.status || 'unknown'}`);
-    }
-
-    const beforeSubmit = await evaluate(session, probeExpression());
-    await this.#submitWithProfile({ session, profileOperations, signal, waitForMessagePost: true });
-
-    const accepted = await this.#waitFor(session, (p) => {
-      if (conversationId(p.url) !== expectedId) return false;
-      return p.userCount > beforeSubmit.userCount
-        || p.userTextLength > beforeSubmit.userTextLength
-        || (!!p.userMessageId && p.userMessageId !== beforeSubmit.userMessageId);
-    }, {
-      timeoutMs: 10000,
-      signal,
-      label: 'continuation acceptance',
-    });
-
-    return accepted;
+  async attachTarget({targetId,signal}) {
+    const targets=await this.chromium.listExistingTargets();
+    const target=targets?.find(t=>t.id===targetId&&t.type==='page');
+    if(!target)throw Object.assign(new Error('original submission target unavailable'),{code:'ATTACH_FAILED'});
+    const session=await this.chromium.connectTarget(target);
+    if(signal?.aborted){session.close();throw signal.reason;}
+    return {target,session,baseline:await evaluate(session,probeExpression())};
   }
 
-  async dispatch({ projectUrl, prompt, profileOperations = [], signal, onTransition }) {
-    const prepared = await this.prepare({ projectUrl, prompt, signal });
-    await onTransition?.('STAGED', {
-      targetId: prepared.target.id,
-      pageUrl: (await evaluate(prepared.session, probeExpression())).url,
-    });
+  async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest}) {
+    if(signal?.aborted||!guard())throw new Error('stale submission');
+    const probe=await evaluate(session,probeExpression());
+    if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
+      throw new Error('submission conversation ownership mismatch');
+    if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
+    const staged=await evaluate(session,inputExpression(prompt));
+    if(staged?.status!=='READY')throw new Error('submission composer not ready');
+    if(signal?.aborted||!guard())throw new Error('stale submission');
+    return this.#submitWithProfile({session,profileOperations,signal,guard,onRequest,conversationUrl,waitForMessagePost:true});
+  }
+
+  async readSubmission({session,intent,prompt,conversationUrl,signal}) {
+    if(signal?.aborted)throw signal.reason;
+    let probe=await evaluate(session,probeExpression());
+    const expectedId=conversationId(conversationUrl)||conversationId(probe.url);
+    if(conversationUrl&&conversationId(probe.url)!==expectedId)return {state:'UNKNOWN',probe};
+    // Optimistic DOM bubbles do not prove server acceptance. Reload the canonical page before classifying.
     try {
-      const probe = await this.submitPrepared({
-        session: prepared.session,
-        profileOperations,
-        signal,
-      });
-      await onTransition?.('SENT', {
-        targetId: prepared.target.id,
-        pageUrl: probe.url,
-      });
-      return prepared;
-    } catch (error) {
-      prepared.session.close();
-      await this.chromium.closeTarget(prepared.target.id);
-      throw error;
-    }
+      await session.call('Page.reload',{ignoreCache:true});
+      probe=await this.#waitFor(session,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')&&p.composer
+        &&(!expectedId||conversationId(p.url)===expectedId)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'submission readback'});
+      if(probe.loginPage)return {state:'UNKNOWN',probe};
+    }catch(error){if(signal?.aborted)throw error;return {state:'UNKNOWN',probe};}
+    if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
+      return {state:'UNKNOWN',probe};
+    const expected=JSON.stringify(String(prompt).replace(/\s+/g,' ').trim());
+    const messageId=JSON.stringify(intent.message_id||'');
+    const expression='(() => {const expected='+expected+', id='+messageId+';'+
+      'const users=[...document.querySelectorAll(\'[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"],[data-content-search-unit-key$=":user"]\')];'+
+      'const matched=users.map(e=>{let found=false;'+
+      'for(let n=e,depth=0;n&&depth<6;n=n.parentElement,depth++){'+
+      'const ids=["data-message-id","data-chatgpt-search-unit-key","data-content-search-unit-key"].map(k=>String(n.getAttribute?.(k)||""));'+
+      'if(id&&ids.some(v=>v===id||v===id+":user"))found=true;}'+
+      'const same=String(e.innerText||e.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
+      'return {idMatch:matched.some(m=>m.found),lastTextMatch:matched.at(-1)?.same||false};})()';
+    const evidence=await evaluate(session,expression);
+    const hasBaseline=Number.isFinite(intent.baseline?.userCount)||!!intent.baseline?.userMessageId;
+    const advanced=hasBaseline&&(Number(probe.userCount)>Number(intent.baseline?.userCount||0)||
+      (!!probe.userMessageId&&probe.userMessageId!==intent.baseline?.userMessageId));
+    if(conversationId(probe.url)&&(evidence.idMatch||(advanced&&evidence.lastTextMatch)))
+      return {state:'CONFIRMED',probe,messageId:intent.message_id||probe.userMessageId};
+    // A request released to ChatGPT may arrive later; a quiet page alone cannot prove absence.
+    if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!advanced&&!probe.streaming&&probe.readyState==='complete'&&probe.composer)
+      return {state:'ABSENT',probe};
+    return {state:'UNKNOWN',probe};
+  }
+
+  async quiesce({session,conversationUrl,signal,guard}) {
+    const before=await evaluate(session,probeExpression());
+    if(conversationId(before.url)!==conversationId(conversationUrl))throw new Error('quiesce conversation mismatch');
+    if(!before.streaming&&!before.stopButtonVisible)return before;
+    if(signal?.aborted||!guard())throw new Error('stale stream cleanup');
+    await evaluate(session,'(() => {'+
+      'const buttons=[...document.querySelectorAll("button")].filter(e=>e.isConnected&&e.offsetParent!==null);'+
+      'const stop=buttons.find(b=>b.dataset.testid==="stop-button"||/stop|중지/i.test((b.getAttribute("aria-label")||"")+" "+(b.title||"")));'+
+      'if(stop)stop.click();return !!stop;})()');
+    return this.#waitFor(session,p=>!p.streaming&&!p.stopButtonVisible,{
+      timeoutMs:this.config.navigationTimeoutMs,signal,label:'stuck stream cleanup'});
   }
 
   async monitor({ session, baseline, signal, onActivity, livenessGate }) {
@@ -725,7 +778,7 @@ export class ChatGptBrowser {
       const verificationRetry = status === 'STALLED'
         && nextStalledVerificationAt > 0
         && Date.now() >= nextStalledVerificationAt;
-      if (changed || status !== lastReportedStatus || pageError || verificationRetry) {
+      { // Every observation permits Result reconciliation even when UI telemetry is stale.
         const action = await onActivity?.({
           status,
           pageUrl: probe.url,
