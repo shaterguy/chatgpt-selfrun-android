@@ -158,20 +158,6 @@ export class DriveDispatchController {
     r=this.repository.get(key);
     if(r.state==='BLOCKED'&&r.blocked_epoch===r.control_epoch)return;
     if(r.retry_at>Date.now())return;
-    const turnNumber=Number(r.turn_id.match(/:turn:(\d+)$/)?.[1]);
-    if(turnNumber>1&&!r.body.previous_result_document_id) {
-      await this.#move(key,'BLOCKED','PREDECESSOR_DOCUMENT_REQUIRED',{blocked_epoch:r.control_epoch,
-        error:{code:'PREDECESSOR_DOCUMENT_REQUIRED',message:'successor requires exact predecessor Result document'}});
-      await this.repository.flush(transport);return;
-    }
-    if(r.body.previous_result_document_id) {
-      const previous=await readResult(transport,r,r.body.previous_result_document_id,true);
-      if(previous.state!=='COMMITTED') {
-        if(r.state!=='BLOCKED') await this.#move(key,'BLOCKED','PREDECESSOR_NOT_COMMITTED',{
-          error:{code:'PREDECESSOR_NOT_COMMITTED',message:'predecessor Result exact readback required'},blocked_epoch:null,retry_at:Date.now()+15000});
-        await this.repository.flush(transport);return;
-      }
-    }
     let a=this.sessions.get(key);
     if(!a) {
       if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!r.conversation_url) {

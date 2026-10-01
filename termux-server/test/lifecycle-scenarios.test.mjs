@@ -67,11 +67,10 @@ test('14 stale STOP epoch cannot affect resumed request',async()=>{
   const f=fixture();await f.existing();await f.stop();const stale={...f.control};await f.resume();
   await f.controller.control(null,stale,f.transport);assert.equal(f.record().control_state,'RUNNING');
 });
-test('15 predecessor exact commit gates successor preparation',async()=>{
-  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;f.result(false,'RESULT-1',2);f.body.previous_result_document_id='PREVIOUS';f.result(false,'PREVIOUS',1);await f.ingest();
-  assert.equal(f.prepares,0);f.result(true,'PREVIOUS',1);
-  await f.controller.repository.move(keyFor(f.body),'BLOCKED','test retry ready',{retry_at:0});
-  await f.controller.tick(f.transport);assert.equal(f.prepares,1);
+test('15 current RUNNING successor executes without server-side predecessor interpretation',async()=>{
+  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;
+  f.result(false,'RESULT-1',2);f.body.previous_result_document_id='PREVIOUS';f.result(false,'PREVIOUS',1);
+  await f.ingest();assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
 });
 test('16 old browser callback cannot overwrite a new generation',async()=>{
   const f=fixture();await f.existing();const old=f.observations.at(-1);await f.stop();await f.resume();
@@ -142,11 +141,11 @@ test('directive changes cannot change an already durable uncertain input',async(
   f.browser.readSubmission=async args=>{readPrompt=args.prompt;return original(args);};
   await f.controller.tick(f.transport);assert.equal(readPrompt,prompt);assert.equal(f.sends,1);
 });
-test('a committed non-predecessor Result cannot unlock a successor',async()=>{
+test('predecessor metadata is opaque to the server transport',async()=>{
   const f=fixture();f.body.turn_id='SAFE-TEST:turn:4';f.body.request_id='SAFE-TEST:turn:4-request';
   f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;
-  f.result(false,'RESULT-1',4);f.result(true,'WRONG-PREVIOUS',1);f.body.previous_result_document_id='WRONG-PREVIOUS';
-  await f.ingest();assert.equal(f.prepares,0);assert.equal(f.record().error.code,'PREDECESSOR_NOT_COMMITTED');
+  f.result(false,'RESULT-1',4);f.body.previous_result_document_id='WRONG-PREVIOUS';
+  await f.ingest();assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
 });
 test('Drive publishing preserves current client claim and prompt fields',async()=>{
   const f=fixture();await f.existing();
@@ -216,10 +215,10 @@ test('control-first stopped ingestion publishes the stopped canonical record',as
  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,13);
  assert.equal(f.rows.get(f.path).server_control_state,'STOPPED');assert.equal(f.sends,0);assert.equal(f.resumes,0);
 });
-test('successor without predecessor document cannot prepare',async()=>{
+test('successor without predecessor metadata still executes when current control authorizes it',async()=>{
  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';
- f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;f.result(false,'RESULT-1',2);
- await f.ingest();assert.equal(f.prepares,0);assert.equal(f.record().error.code,'PREDECESSOR_DOCUMENT_REQUIRED');
+ f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;f.result(false,'RESULT-1',2);f.body.previous_result_document_id='';
+ await f.ingest();assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
 });
 for(const stage of ['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT','RECOVERY_POST','POST_PENDING','POST_UNCERTAIN','RECONCILING']) {
  test('cold restart restores intermediate '+stage,async()=>{

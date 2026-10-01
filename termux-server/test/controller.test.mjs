@@ -22,9 +22,10 @@ test('HTTP duplicate signal and process reconstruction preserve one logical inpu
  f.http=new SelfRunController({lifecycle:f.controller,transport:new SignalDispatchTransport(f.transport,f.store),stateStore:f.store,config:{}});
  assert.equal((await f.http.accept(f.signal())).duplicate,true);assert.equal(f.sends,1);
 });
-test('HTTP successor requires predecessor exact committed Result',async()=>{
- const f=setup();await f.http.accept(f.signal());f.result(false,'RESULT-2',2);
- await f.http.accept(f.signal(2));assert.equal(f.prepares,1);
+test('HTTP NEXT forwards predecessor metadata as opaque prompt data',()=>{
+ const f=setup();const signal=normalizeSignal(f.signal(2),{});
+ const prompt=buildPrompt(signal);
+ assert.match(prompt,/PREVIOUS_RESULT_DOCUMENT_ID=RESULT-1/);
 });
 test('HTTP unscoped STOP is rejected',async()=>{
  const f=setup();await f.http.accept(f.signal());

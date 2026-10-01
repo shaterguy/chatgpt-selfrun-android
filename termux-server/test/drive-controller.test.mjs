@@ -41,6 +41,17 @@ test('initial POST does not wait for unrelated full projection backlog',async()=
  assert.equal(f.sends,1);
  assert.equal(f.record().state,'OBSERVING');
 });
+test('repair metadata is opaque and current RUNNING dispatch executes unchanged',async()=>{
+ const f=fixture();
+ f.body.turn_id='SAFE-TEST:turn:3';f.body.request_id='SAFE-TEST:turn:3-request';
+ f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;
+ f.body.previous_result_document_id='OLDER-RESULT';
+ f.body.prompt+='REPAIR_TARGET_DOCUMENT_ID=TARGET-RESULT\nREPAIR_REASON=RESULT_ROUTING_INVALID\n';
+ f.result(false,'RESULT-1',3);
+ await f.ingest();
+ assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
+});
+
 test('missing or unknown Task control cannot attach even with legacy bypass configured',async()=>{
  for(const state of ['UNKNOWN','PAUSED','STOPPED','DONE']) {
   const f=fixture();f.control.state=state;f.controller.config.allowUnknownControlRecovery=true;
