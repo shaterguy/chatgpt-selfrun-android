@@ -183,10 +183,19 @@ final class SelfRun3Engine {
                 }
             }
             case STARTED, ACCEPTED -> {
-                if (!s.flag("sendClaimed")) return original;
-                if(e.kind==Kind.STARTED && !v.has("canonicalPostConfirmedElapsed")
+                boolean canonicalStart = e.kind==Kind.STARTED
                         && "canonical_post".equals(p.optString("source"))
-                        && "turn_request".equals(p.optString("protocolStage"))
+                        && "turn_request".equals(p.optString("protocolStage"));
+                if (!s.flag("sendClaimed")) {
+                    if(stage!=Stage.READY || !canonicalStart) return original;
+                    // The server can create and submit the conversation before READY_TO_SUBMIT is
+                    // observed by the app. An exact canonical STARTED callback is authoritative
+                    // positive-send evidence, so reconcile the durable claim instead of redispatching.
+                    put(v,"sendClaimed",true);
+                    put(v,"submittedAt",p.optLong("atWall",System.currentTimeMillis()));
+                    put(v,"startRecoveredWithoutClaim",true);
+                }
+                if(canonicalStart && !v.has("canonicalPostConfirmedElapsed")
                         && p.has("atElapsed") && p.has("atWall") && p.has("bootCount")
                         && p.optLong("atElapsed",-1L)>=0L && p.optLong("atWall",-1L)>0L
                         && p.optInt("bootCount",-1)>=0) {
@@ -195,9 +204,7 @@ final class SelfRun3Engine {
                     put(v,"canonicalPostBootCount",p.optInt("bootCount"));
                 }
                 put(v,"dispatchObserved",true); put(v,"accepted",true);
-                if(e.kind==Kind.STARTED && SelfRun3SuccessorTransitionPolicy.armed(s)
-                        && "canonical_post".equals(p.optString("source"))
-                        && "turn_request".equals(p.optString("protocolStage"))) {
+                if(canonicalStart && SelfRun3SuccessorTransitionPolicy.armed(s)) {
                     JSONObject transition=s.successorTransition();
                     put(transition,"active",false); put(transition,"stage","CANONICAL_CONFIRMED");
                     put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
