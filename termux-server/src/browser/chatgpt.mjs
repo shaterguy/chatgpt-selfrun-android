@@ -647,6 +647,43 @@ export class ChatGptBrowser {
     return {target,session,baseline:await evaluate(session,probeExpression())};
   }
 
+  async findSubmissionAcrossTargets({intent,prompt,signal}) {
+    if(signal?.aborted)throw signal.reason;
+    if(!intent?.message_id||!this.chromium?.listExistingTargets)return {state:'UNKNOWN'};
+    const expected=JSON.stringify(String(prompt).replace(/\s+/g,' ').trim());
+    const messageId=JSON.stringify(intent.message_id||'');
+    const expression='(() => {const expected='+expected+', id='+messageId+';'+
+      'const users=[...document.querySelectorAll(\'[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"],[data-content-search-unit-key$=":user"]\')];'+
+      'const matched=users.map(e=>{let found=false;'+
+      'for(let n=e,depth=0;n&&depth<6;n=n.parentElement,depth++){'+
+      'const ids=["data-message-id","data-chatgpt-search-unit-key","data-content-search-unit-key","data-turn-key"].map(k=>String(n.getAttribute?.(k)||""));'+
+      'if(id&&ids.some(v=>v===id||v===id+":user"))found=true;}'+
+      'const same=String(e.innerText||e.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
+      'return {idMatch:matched.some(m=>m.found),lastTextMatch:matched.at(-1)?.same||false};})()';
+    const targets=await this.chromium.listExistingTargets();
+    for(const target of targets||[]) {
+      if(target?.type!=='page'||!target?.webSocketDebuggerUrl)continue;
+      let candidate;
+      try {
+        candidate=await this.chromium.connectTarget(target);
+        let probe=await evaluate(candidate,probeExpression());
+        if(!conversationId(probe.url))continue;
+        await candidate.call('Page.reload',{ignoreCache:true});
+        probe=await this.#waitFor(candidate,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')
+          &&p.composer&&!!conversationId(p.url)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'cross-target submission recovery'});
+        if(probe.loginPage||!conversationId(probe.url))continue;
+        const evidence=await evaluate(candidate,expression);
+        if(evidence.idMatch&&evidence.lastTextMatch)
+          return {state:'CONFIRMED',probe,messageId:intent.message_id};
+      } catch(error) {
+        if(signal?.aborted)throw error;
+      } finally {
+        try {candidate?.close();} catch {}
+      }
+    }
+    return {state:'UNKNOWN'};
+  }
+
   async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest}) {
     if(signal?.aborted||!guard())throw new Error('stale submission');
     const probe=await evaluate(session,probeExpression());
@@ -693,28 +730,9 @@ export class ChatGptBrowser {
     // leaving the original project target on /project. For an initial POST with no canonical
     // owner yet, accept another target only when a reload-persistent exact turn id and prompt
     // text both match the intercepted POST.
-    if(!conversationUrl&&intent.message_id&&this.chromium?.listExistingTargets) {
-      const targets=await this.chromium.listExistingTargets();
-      for(const target of targets||[]) {
-        if(target?.type!=='page'||!target?.webSocketDebuggerUrl)continue;
-        let candidate;
-        try {
-          candidate=await this.chromium.connectTarget(target);
-          let candidateProbe=await evaluate(candidate,probeExpression());
-          if(!conversationId(candidateProbe.url))continue;
-          await candidate.call('Page.reload',{ignoreCache:true});
-          candidateProbe=await this.#waitFor(candidate,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')
-            &&p.composer&&!!conversationId(p.url)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'cross-target submission readback'});
-          if(candidateProbe.loginPage||!conversationId(candidateProbe.url))continue;
-          const candidateEvidence=await evaluate(candidate,expression);
-          if(candidateEvidence.idMatch&&candidateEvidence.lastTextMatch)
-            return {state:'CONFIRMED',probe:candidateProbe,messageId:intent.message_id};
-        } catch(error) {
-          if(signal?.aborted)throw error;
-        } finally {
-          try {candidate?.close();} catch {}
-        }
-      }
+    if(!conversationUrl&&intent.message_id) {
+      const crossTarget=await this.findSubmissionAcrossTargets({intent,prompt,signal});
+      if(crossTarget.state==='CONFIRMED')return crossTarget;
     }
     // A request released to ChatGPT may arrive later; a quiet page alone cannot prove absence.
     if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!advanced&&!probe.streaming&&probe.readyState==='complete'&&probe.composer)

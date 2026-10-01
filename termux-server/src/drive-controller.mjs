@@ -161,12 +161,32 @@ export class DriveDispatchController {
     let a=this.sessions.get(key);
     if(!a) {
       if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!r.conversation_url) {
-        // Initial POST may have created a conversation. Never open a replacement.
-        if(!r.target_id) {
-          await this.#move(key,'BLOCKED','INITIAL_POST_IDENTITY_UNCERTAIN',{blocked_epoch:r.control_epoch,error:{code:'POST_IDENTITY_UNCERTAIN',message:'original target/conversation readback required'}});
-          await this.repository.flush(transport);return;
+        // Initial POST may have materialized in another Chromium target. Recover by exact
+        // reload-persistent POST identity before depending on the original project target.
+        if(r.intent.outcome!=='ABSENT'&&r.intent.message_id&&this.browser.findSubmissionAcrossTargets) {
+          const proofToken=this.repository.token(key);
+          const recovered=await this.browser.findSubmissionAcrossTargets({intent:r.intent,prompt:r.intent.prompt});
+          if(this.repository.current(key,proofToken)&&recovered?.state==='CONFIRMED') {
+            const url=canonicalUrl(recovered.probe?.url);
+            if(url) {
+              await this.#move(key,r.state,'POST_CROSS_TARGET_CONFIRMED',{
+                intent:{...r.intent,outcome:'CONFIRMED',message_id:recovered.messageId||r.intent.message_id},
+                conversation_url:url,cursor:cursor(recovered.probe),last_progress_at:Date.now(),error:null,
+              },proofToken);
+              await this.repository.flushCurrent(transport,key);
+              r=this.repository.get(key);
+              a=await this.#open(key,transport,'attach');
+            }
+          }
         }
-        a=await this.#open(key,transport,'target');
+        if(!a) {
+          r=this.repository.get(key);
+          if(!r.target_id) {
+            await this.#move(key,'BLOCKED','INITIAL_POST_IDENTITY_UNCERTAIN',{blocked_epoch:r.control_epoch,error:{code:'POST_IDENTITY_UNCERTAIN',message:'original target/conversation readback required'}});
+            await this.repository.flush(transport);return;
+          }
+          a=await this.#open(key,transport,'target');
+        }
       } else a=await this.#open(key,transport,r.conversation_url?'attach':'prepare');
       if(!a)return;
     }

@@ -52,6 +52,26 @@ test('repair metadata is opaque and current RUNNING dispatch executes unchanged'
  assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
 });
 
+test('restart recovers uncertain initial POST from another conversation target before original target attach',async()=>{
+ const f=fixture();f.mode='unknown';await f.ingest();
+ assert.equal(f.record().state,'POST_UNCERTAIN');assert.equal(f.record().intent?.message_id,'message-1');
+ let crossReads=0,targetAttaches=0;
+ f.probe={...f.probe,url:'https://chatgpt.com/c/recovered-cross-target',streaming:false,stopButtonVisible:false,
+   userCount:2,userMessageId:'message-1',responseTurnId:'message-1',responseTextLength:0,responseFingerprint:''};
+ f.browser.findSubmissionAcrossTargets=async({intent,prompt})=>{
+   crossReads++;assert.equal(intent.message_id,'message-1');assert.equal(prompt,f.record().intent.prompt);
+   return {state:'CONFIRMED',messageId:'message-1',probe:{...f.probe}};
+ };
+ f.browser.attachTarget=async()=>{targetAttaches++;throw Object.assign(new Error('old target gone'),{code:'ATTACH_FAILED'});};
+ f.controller=f.recreate();
+ await f.controller.tick(f.transport);
+ assert.equal(crossReads,1);assert.equal(targetAttaches,0);
+ assert.equal(f.record().conversation_url,'https://chatgpt.com/c/recovered-cross-target');
+ assert.equal(f.record().intent?.outcome,'CONFIRMED');
+ assert.equal(f.record().state,'OBSERVING');
+ assert.equal(f.resumes,1);
+});
+
 test('missing or unknown Task control cannot attach even with legacy bypass configured',async()=>{
  for(const state of ['UNKNOWN','PAUSED','STOPPED','DONE']) {
   const f=fixture();f.control.state=state;f.controller.config.allowUnknownControlRecovery=true;

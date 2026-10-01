@@ -87,6 +87,27 @@ test('initial POST can be confirmed from a reload-persistent matching conversati
   assert.equal(r.state,'CONFIRMED');assert.equal(r.messageId,'exact-turn-id');assert.equal(r.probe.url,'https://chatgpt.com/c/new-owned');
 });
 
+test('cross-target finder confirms accepted POST without any original project session',async()=>{
+  let reloaded=false,closed=false;
+  const candidate={
+    close(){closed=true;},
+    async call(method,params={}){
+      if(method==='Page.reload'){reloaded=true;return {};}
+      assert.equal(method,'Runtime.evaluate');
+      if(params.expression.includes('const matched='))return {result:{value:{idMatch:reloaded,lastTextMatch:reloaded}}};
+      return {result:{value:{url:'https://chatgpt.com/c/orphan-recovered',composer:true,readyState:'complete',streaming:false,
+        userCount:1,userMessageId:'fallback:user'}}};
+    },
+  };
+  const chromium={listExistingTargets:async()=>[{id:'orphan',type:'page',webSocketDebuggerUrl:'ws://orphan'}],
+    connectTarget:async()=>candidate};
+  const browser=new ChatGptBrowser(chromium,{navigationTimeoutMs:100});
+  const r=await browser.findSubmissionAcrossTargets({prompt:'orphan prompt',
+    intent:{message_id:'orphan-turn-id',baseline:{userCount:0,userMessageId:null}}});
+  assert.equal(reloaded,true);assert.equal(closed,true);assert.equal(r.state,'CONFIRMED');
+  assert.equal(r.messageId,'orphan-turn-id');assert.equal(r.probe.url,'https://chatgpt.com/c/orphan-recovered');
+});
+
 test('held intercepted request is explicitly aborted before absence can be returned',async()=>{
   const f=fixture({held:true});let unblock;const held=new Promise(resolve=>{unblock=resolve;});
   let error;
