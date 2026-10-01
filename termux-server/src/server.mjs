@@ -4,6 +4,7 @@ import { config } from './config.mjs';
 import { StateStore, ensureToken } from './state-store.mjs';
 import { ChromiumManager } from './browser/cdp.mjs';
 import { ChatGptBrowser } from './browser/chatgpt.mjs';
+import { SignalDispatchTransport } from './signal-transport.mjs';
 import { SelfRunController } from './controller.mjs';
 import { DriveDispatchTransport } from './drive-transport.mjs';
 import { DriveDispatchController } from './drive-controller.mjs';
@@ -14,36 +15,20 @@ import { PromptDirectiveStore, PROMPT_DIRECTIVES_SCHEMA } from './prompt-directi
 const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
 await stateStore.init();
-await stateStore.patch({
-  status: 'IDLE',
-  activeSignal: null,
-  activeTargetId: null,
-  conversationUrl: null,
-  acceptedAt: null,
-  lastActivityAt: null,
-  lastSignalId: null,
-  lastError: null,
-  activeCount: 0,
-  activeDispatches: [],
-}, 'SERVER_RUNTIME_RESET');
 const token = await ensureToken(config);
 const chromium = new ChromiumManager(config);
 const browser = new ChatGptBrowser(chromium, config);
 const promptDirectives = new PromptDirectiveStore(config);
-const controller = new SelfRunController({
-  browser,
-  stateStore,
-  config,
-  promptDirectives,
-});
-await controller.initialize();
-const driveTransport = new DriveDispatchTransport(config);
+const driveTransport = new SignalDispatchTransport(new DriveDispatchTransport(config),stateStore);
 const driveController = new DriveDispatchController({
   browser,
   stateStore,
   config,
   promptDirectives,
+  canDispatch:()=>cluster.canDispatch(),
 });
+const controller = new SelfRunController({lifecycle:driveController,transport:driveTransport,stateStore,config});
+await controller.initialize();
 const cluster = new SelfRunClusterCoordinator({
   stateStore,
   config,
@@ -123,6 +108,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/signals') {
+      if(!cluster.canDispatch())return json(res,409,{error:'server_not_active'});
       const body = await readJson(req);
       const result = await controller.accept(body);
       return json(res, 202, result);

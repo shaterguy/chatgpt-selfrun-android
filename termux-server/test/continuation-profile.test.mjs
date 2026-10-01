@@ -70,21 +70,20 @@ const operations = [
 test('continuation POST applies designated model and reasoning while preserving conversation', async () => {
   const f = fixture();
   const browser = new ChatGptBrowser(null, { navigationTimeoutMs: 1000 });
-  const accepted = await browser.sendContinuation({ session: f.session, prompt: 'continue', profileOperations: operations });
+  const accepted = await browser.submitIntent({ session: f.session, prompt: 'continue', profileOperations: operations, conversationUrl:'https://chatgpt.com/c/existing-profile', guard:()=>true, intent:{id:'synthetic-intent'} });
   assert.equal(f.payloads.length, 1);
   assert.equal(f.payloads[0].model, 'gpt-5-6-thinking');
   assert.equal(f.payloads[0].requested_default_model, 'gpt-5-6-thinking');
   assert.equal(f.payloads[0].thinking_effort, 'max');
   assert.equal(f.payloads[0].conversation_id, 'existing-profile');
   assert.equal(f.payloads[0].messages[0].id, 'user-2');
-  assert.equal(accepted.userCount, 2);
   assert.equal(f.submitted, 1);
   assert.equal(f.handler, null);
 });
 test('continuation invalid POST is aborted instead of sent with default profile', async () => {
   const f = fixture({ malformed: true });
   const browser = new ChatGptBrowser(null, { navigationTimeoutMs: 1000 });
-  await assert.rejects(browser.sendContinuation({ session: f.session, prompt: 'continue', profileOperations: operations }), /not valid JSON/);
+  await assert.rejects(browser.submitIntent({ session: f.session, prompt: 'continue', profileOperations: operations, conversationUrl:'https://chatgpt.com/c/existing-profile', guard:()=>true, intent:{id:'synthetic-intent'} }), /not valid JSON/);
   assert.deepEqual(f.failures, ['continuation-post']);
   assert.equal(f.payloads.length, 0);
   assert.equal(f.handler, null);
@@ -92,7 +91,7 @@ test('continuation invalid POST is aborted instead of sent with default profile'
 test('continuation accepts intercepted POST after evaluate timeout without duplicate submission', async () => {
   const f = fixture({ submitTimeout: true });
   const browser = new ChatGptBrowser(null, { navigationTimeoutMs: 1000 });
-  await browser.sendContinuation({ session: f.session, prompt: 'continue', profileOperations: operations });
+  await browser.submitIntent({ session: f.session, prompt: 'continue', profileOperations: operations, conversationUrl:'https://chatgpt.com/c/existing-profile', guard:()=>true, intent:{id:'synthetic-intent'} });
   assert.equal(f.payloads[0].thinking_effort, 'max');
   assert.equal(f.submitted, 1);
 });
@@ -100,7 +99,7 @@ test('continuation accepts intercepted POST after evaluate timeout without dupli
 test('continuation keeps profile interception until message POST following initialization', async () => {
   const f = fixture({ initFirst: true });
   const browser = new ChatGptBrowser(null, { navigationTimeoutMs: 1000 });
-  await browser.sendContinuation({ session: f.session, prompt: 'continue', profileOperations: operations });
+  await browser.submitIntent({ session: f.session, prompt: 'continue', profileOperations: operations, conversationUrl:'https://chatgpt.com/c/existing-profile', guard:()=>true, intent:{id:'synthetic-intent'} });
   assert.equal(f.payloads.length, 1);
   assert.equal(f.payloads[0].model, 'gpt-5-6-thinking');
   assert.equal(f.payloads[0].thinking_effort, 'max');
