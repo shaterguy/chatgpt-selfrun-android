@@ -111,6 +111,10 @@ async function installDecorativeAnimationPause(session) {
   await evaluate(session, DECORATIVE_ANIMATION_PAUSE_SOURCE);
 }
 
+export function effectiveStopButtonVisible({ rawStopButtonVisible, inConversation, userCount, assistantCount, responseTurnId }) {
+  return Boolean(rawStopButtonVisible && (inConversation || userCount > 0 || assistantCount > 0 || responseTurnId));
+}
+
 function probeExpression() {
   const errorPattern = JSON.stringify(PAGE_ERROR_PATTERN);
   return `(() => {
@@ -121,7 +125,7 @@ function probeExpression() {
       'main form [contenteditable="true"]'];
     let composer=null;
     for(const selector of selectors){composer=[...document.querySelectorAll(selector)].find(visible);if(composer)break;}
-    const stopButtonVisible=buttons.some(b=>b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
+    const rawStopButtonVisible=buttons.some(b=>b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
     const paused=buttons.some(b=>/resume|continue generating|재개|계속 생성/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')+' '+(b.innerText||'')));
     const assistants=[...document.querySelectorAll('[data-message-author-role="assistant"],[data-chatgpt-search-unit-key$=":assistant"],[data-content-search-unit-key$=":assistant"]')];
     const last=assistants.length?assistants[assistants.length-1]:null;
@@ -151,6 +155,16 @@ function probeExpression() {
     const turns=[...document.querySelectorAll('main [data-turn-key]')];
     const responseTurn=turns.length?turns[turns.length-1]:null;
     const responseTurnId=String(responseTurn?.getAttribute?.('data-turn-key')||'').trim()||null;
+    const pathParts=location.pathname.split('/').filter(Boolean);
+    const inConversation=pathParts.includes('c')&&pathParts.indexOf('c')+1<pathParts.length;
+    const effectiveStopButtonVisible=${effectiveStopButtonVisible.toString()};
+    const stopButtonVisible=effectiveStopButtonVisible({
+      rawStopButtonVisible,
+      inConversation,
+      userCount:users.length,
+      assistantCount:assistants.length,
+      responseTurnId,
+    });
     let responseText='';
     if(responseTurn){
       const excludedSelector=[

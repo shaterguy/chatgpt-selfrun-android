@@ -9,7 +9,7 @@ const recent=(file,cutoff)=>{
 export class DriveDispatchWatcher {
   constructor({transport,controller,config,canDispatch=null}) {
     Object.assign(this,{transport,controller,config});
-    this.canDispatch=canDispatch||(()=>true);this.running=false;this.scanning=false;this.seen=new Map();
+    this.canDispatch=canDispatch||(()=>true);this.running=false;this.scanning=false;this.ticking=false;this.seen=new Map();
   }
   async start() {
     if(this.running)return;this.running=true;
@@ -33,7 +33,7 @@ export class DriveDispatchWatcher {
         if(this.seen.get(file.path)===fp)continue;
         if(file.path.startsWith('__SELFRUN_CONTROL__')) {
           const body=await this.transport.read(file.path);
-          await this.controller.control(file.path,body,this.transport);
+          await (this.controller.controlDurable?.(file.path,body)??this.controller.control(file.path,body,this.transport));
           this.seen.set(file.path,fp);
           continue;
         }
@@ -49,7 +49,7 @@ export class DriveDispatchWatcher {
         const identityMismatch=!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id;
         if(controlListedUnseen||identityMismatch) {
           const latest=await this.transport.read(controlPath);
-          await this.controller.control(controlPath,latest,this.transport);
+          await (this.controller.controlDurable?.(controlPath,latest)??this.controller.control(controlPath,latest,this.transport));
           if(controlFile)this.seen.set(controlPath,controlFp);
           control=this.controller.controlForTask(body.task_id);
         }
@@ -57,10 +57,15 @@ export class DriveDispatchWatcher {
           this.seen.set(file.path,fp);
           continue;
         }
-        await this.controller.ingest(file.path,body,this.transport);
+        await (this.controller.ingestDurable?.(file.path,body,this.transport)??this.controller.ingest(file.path,body,this.transport));
         this.seen.set(file.path,fp);
       }
-      if(this.canDispatch())await this.controller.tick(this.transport);
+      if(this.canDispatch()&&!this.ticking) {
+        this.ticking=true;
+        void this.controller.tick(this.transport).catch(error=>{
+          console.error(JSON.stringify({event:'DRIVE_WATCH_TICK_ERROR',error:String(error?.message||error).slice(0,300)}));
+        }).finally(()=>{this.ticking=false;});
+      }
     } finally {this.scanning=false;}
   }
 }

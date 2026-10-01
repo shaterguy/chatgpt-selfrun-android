@@ -81,7 +81,9 @@ test('16 old browser callback cannot overwrite a new generation',async()=>{
 });
 test('17 duplicate concurrent scans do not duplicate prepare or submission',async()=>{
   const f=fixture();const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
-  await Promise.all([watcher.scanOnce(),watcher.scanOnce()]);assert.equal(f.prepares,1);
+  await Promise.all([watcher.scanOnce(),watcher.scanOnce()]);
+  for(let i=0;i<8&&f.prepares===0;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.prepares,1);
   f.body.client_status='SEND_REQUESTED';await Promise.all([f.ingest(),f.ingest()]);assert.equal(f.sends,1);
 });
 test('18 pending event and Drive projection replay from canonical state after restart',async()=>{

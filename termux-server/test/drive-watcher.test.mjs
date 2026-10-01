@@ -9,10 +9,12 @@ test('watcher ingests control before dispatch regardless of listing order',async
  await w.scanOnce();assert.equal(f.record().state,'STOPPED');assert.equal(f.prepares,0);
 });
 test('watcher retries failed ingestion without marking the file seen',async()=>{
- const f=fixture();let once=true;const ingest=f.controller.ingest.bind(f.controller);
- f.controller.ingest=async(...args)=>{if(once){once=false;throw new Error('temporary');}return ingest(...args);};
+ const f=fixture();let once=true;const ingest=f.controller.ingestDurable.bind(f.controller);
+ f.controller.ingestDurable=async(...args)=>{if(once){once=false;throw new Error('temporary');}return ingest(...args);};
  const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
- await assert.rejects(w.scanOnce(),/temporary/);await w.scanOnce();assert.equal(f.prepares,1);
+ await assert.rejects(w.scanOnce(),/temporary/);await w.scanOnce();
+ for(let i=0;i<8&&f.prepares===0;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.prepares,1);
 });
 test('watcher skips dispatches outside current control identity',async()=>{
  const f=fixture();f.control.request_id='other';
@@ -51,6 +53,7 @@ test('newest dispatch can load its control directly before ingestion',async()=>{
  };
  const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{dispatchRecoveryMs:7200000}});
  await w.scanOnce();
+ for(let i=0;i<8&&f.prepares===0;i++)await new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.prepares,1);
  assert.equal(f.controller.controlForTask(f.body.task_id).request_id,f.body.request_id);
 });

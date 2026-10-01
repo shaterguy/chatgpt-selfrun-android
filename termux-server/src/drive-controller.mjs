@@ -31,6 +31,13 @@ export class DriveDispatchController {
     this.operations.set(key,p);
     return p.finally(()=>{if(this.operations.get(key)===p)this.operations.delete(key);});
   }
+  #scheduleAdvance(key,transport) {
+    if(this.operations.has(key))return false;
+    void this.#serial(key,()=>this.#advance(key,transport)).catch(error=>{
+      console.error(JSON.stringify({event:'DRIVE_DISPATCH_ADVANCE_ERROR',key,error:String(error?.message||error).slice(0,300)}));
+    });
+    return true;
+  }
   async #move(key,state,reason,patch={},token=null) {
     return this.repository.move(key,state,reason,patch,token);
   }
@@ -45,18 +52,26 @@ export class DriveDispatchController {
       await this.#move(key,latest.state,'CONTROL_RECONCILED',{control_epoch:c.control_epoch,control_state:c.state});
     return !terminal(this.repository.get(key));
   }
-  async control(_path,c,transport) {
+  async #applyControl(c) {
     if(c?.schema!=='selfrun-task-control-v1'||!c.task_id||!Number.isSafeInteger(c.control_epoch)||c.control_epoch<1)
       throw new Error('invalid task control');
     const old=this.repository.control(c.task_id);
-    if(old&&c.control_epoch<old.control_epoch) return;
+    if(old&&c.control_epoch<old.control_epoch) return false;
     if(old&&c.control_epoch===old.control_epoch) {
-      await this.repository.applyControl(c);return;
+      await this.repository.applyControl(c);return false;
     }
     // Abort immediately; persistence/network queues must not postpone STOP's browser fence.
     for(const r of this.repository.records()) if(r.task_id===c.task_id) this.#detach(r.key);
     await this.repository.applyControl(c);
-    if(transport) await this.repository.flush(transport);
+    return true;
+  }
+  async control(_path,c,transport) {
+    const changed=await this.#applyControl(c);
+    if(changed&&transport) await this.repository.flush(transport);
+    return changed;
+  }
+  async controlDurable(_path,c) {
+    return this.#applyControl(c);
   }
   #detach(key) {
     const a=this.sessions.get(key);
@@ -74,12 +89,20 @@ export class DriveDispatchController {
     return this.promptDirectives?.current?this.promptDirectives.current():
       {turnStartDirective:this.config.turnStartDirective,turnContinueDirective:this.config.recoveryPrompt};
   }
-  async ingest(path,body,transport) {
+  async #ingestRecord(path,body) {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(body?.schema!=='selfrun-server-dispatch-v1')throw new Error('invalid dispatch schema');
     if(!Array.isArray(body.profile_operations)||!body.prompt||!body.project_url)throw new Error('invalid dispatch payload');
-    const r=await this.repository.ingest(path,body);
+    return this.repository.ingest(path,body);
+  }
+  async ingest(path,body,transport) {
+    const r=await this.#ingestRecord(path,body);
     return this.#serial(r.key,()=>this.#advance(r.key,transport));
+  }
+  async ingestDurable(path,body,transport) {
+    const r=await this.#ingestRecord(path,body);
+    this.#scheduleAdvance(r.key,transport);
+    return r;
   }
   prepare(path,body,transport) {return this.ingest(path,body,transport);}
   send(path,body,transport) {return this.ingest(path,body,transport);}
