@@ -45,7 +45,7 @@ export class DriveDispatchController {
     const r=this.repository.get(key);
     if(!r||this.standby||!this.canDispatch()) return false;
     const c=await transport.read('__SELFRUN_CONTROL__'+r.task_id+'.json');
-    await this.control(null,c,transport);
+    await this.controlDurable(null,c);
     const latest=this.repository.get(key);
     if(c.state!=='RUNNING'||c.task_id!==r.task_id||c.turn_id!==r.turn_id||c.request_id!==r.request_id) return false;
     if(latest.control_epoch!==c.control_epoch||latest.control_state!==c.state)
@@ -239,7 +239,6 @@ export class DriveDispatchController {
       await this.#move(key,uncertain?'POST_UNCERTAIN':mode==='prepare'?'PREPARED':'OBSERVING','BROWSER_ATTACHED',
         {target_id:attached.target.id,attach_attempts:0,error:null,resume_recovery_stage:recoveryStage},token);
       if(recoveryStage&&!uncertain) await this.#move(key,'STALLED','RESTORE_RECOVERY_STAGE',{recovery_stage:recoveryStage},token);
-      await this.repository.flush(transport);
       return pending;
     } catch(error) {
       if(!guard())return null;
@@ -348,8 +347,8 @@ export class DriveDispatchController {
       {intent,recovery_count:r.recovery_count+(kind==='recovery'&&!retry?1:0),error:null,
         ...(kind==='recovery'?{last_recovered_response:responseKey(r.cursor),last_recovery_epoch:r.control_epoch}:{})},a.token);
     if(!r)return;
-    await this.repository.flush(transport);
-    // Final authority read immediately before the side effect, after all durable writes.
+    await this.repository.flushCurrent(transport,key);
+    // Final authority read immediately before the side effect, after the current request's durable Drive projection.
     if(await this.#result(key,transport,a.token)!=='NOT_COMMITTED'||!await this.#fresh(key,transport)||!a.guard())return;
     try {
       await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
@@ -387,7 +386,7 @@ export class DriveDispatchController {
         intent:{...r.intent,outcome:'CONFIRMED',message_id:outcome.messageId||r.intent.message_id},
         ...(r.intent.kind==='recovery'?{last_recovered_response:responseKey(outcome.probe),last_recovery_epoch:r.control_epoch}:{}),
         conversation_url:url,cursor:cursor(outcome.probe),last_progress_at:Date.now(),error:null},a.token);
-      await this.repository.flush(transport);this.#monitor(key,transport);
+      await this.repository.flushCurrent(transport,key);this.#monitor(key,transport);
     } else if(outcome.state==='ABSENT'&&r.intent.sends<2) {
       await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...r.intent,outcome:'ABSENT'}},a.token);
       await this.#post(key,transport,r.intent.kind,prompt,true);

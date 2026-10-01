@@ -34,6 +34,13 @@ test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
  assert.equal(f.sends,0);
  assert.equal(f.record().state,'CANCELLED');
 });
+test('initial POST does not wait for unrelated full projection backlog',async()=>{
+ const f=fixture();
+ f.controller.repository.flush=async()=>{throw new Error('unexpected full projection flush');};
+ await f.ingest();
+ assert.equal(f.sends,1);
+ assert.equal(f.record().state,'OBSERVING');
+});
 test('missing or unknown Task control cannot attach even with legacy bypass configured',async()=>{
  for(const state of ['UNKNOWN','PAUSED','STOPPED','DONE']) {
   const f=fixture();f.control.state=state;f.controller.config.allowUnknownControlRecovery=true;
