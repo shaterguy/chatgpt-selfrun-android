@@ -139,9 +139,17 @@ export class DriveDispatchController {
   async #advance(key,transport) {
     let r=this.repository.get(key);
     if(this.repository.integrityFaults.has(key))throw new Error('current state is behind committed audit revision; reconciliation required');
+    const control=this.repository.control(r.task_id);
+    const controlRunning=control?.state==='RUNNING'&&control.turn_id===r.turn_id&&control.request_id===r.request_id;
+    const attemptCancelled=['CANCELLED','SUPERSEDED'].includes(r.body.client_status);
+    if(r.state==='CANCELLED'&&controlRunning) {
+      r=await this.#move(key,r.conversation_url?'ATTACHING':'PREPARING','CONTROL_RUNNING_RECOVERS_CLIENT_CANCELLED',{
+        run_generation:r.run_generation+1,error:null,blocked_epoch:null,retry_at:0,
+      });
+    }
     if(terminal(r))return;
     if(r.state==='COMMITTED'){await this.#move(key,'COMPLETED','RESTORE_COMMITTED_RESULT');await this.repository.flush(transport);return;}
-    if(['CANCELLED','SUPERSEDED'].includes(r.body.client_status)) {
+    if(attemptCancelled&&!controlRunning) {
       this.#detach(key);
       await this.#move(key,'CANCELLED','CLIENT_CANCELLED');await this.repository.flush(transport);return;
     }
@@ -181,7 +189,8 @@ export class DriveDispatchController {
       if(r.intent.outcome==='ABSENT')await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
       else await this.#reconcile(key,transport);return;
     }
-    if(r.state==='PREPARED'&&['CREATE_REQUESTED','SEND_REQUESTED'].includes(r.body.client_status)) {
+    if(r.state==='PREPARED'&&(['CREATE_REQUESTED','SEND_REQUESTED'].includes(r.body.client_status)
+        || (attemptCancelled&&controlRunning))) {
       const directives=await this.#directives();
       const prompt=appendTurnStartDirective(r.body.prompt,directives.turnStartDirective);
       await this.#post(key,transport,'initial',prompt);return;

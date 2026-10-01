@@ -9,6 +9,31 @@ test('CREATE_REQUESTED is sufficient authority for server-owned prepare and subm
  assert.equal(f.record().state,'OBSERVING');
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
+test('matching RUNNING Task Control recovers an attempt-level client cancellation',async()=>{
+ const f=fixture();
+ await f.controller.controlDurable(null,f.control);
+ f.body.client_status='CANCELLED';
+ f.rows.set(f.path,structuredClone(f.body));
+ const seeded=await f.controller.repository.ingest(f.path,f.body);
+ await f.controller.repository.move(seeded.key,'CANCELLED','test attempt timeout');
+ await f.controller.tick(f.transport);
+ assert.equal(f.sends,1);
+ assert.equal(f.record().state,'OBSERVING');
+ assert.equal(f.record().intent?.outcome,'CONFIRMED');
+});
+test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
+ const f=fixture();
+ f.control={...f.control,state:'STOPPED',control_epoch:2};
+ await f.controller.controlDurable(null,f.control);
+ f.body.client_status='CANCELLED';
+ f.rows.set(f.path,structuredClone(f.body));
+ const seeded=await f.controller.repository.ingest(f.path,f.body);
+ if(f.controller.repository.get(seeded.key).state!=='CANCELLED')
+   await f.controller.repository.move(seeded.key,'CANCELLED','test user stop');
+ await f.controller.tick(f.transport);
+ assert.equal(f.sends,0);
+ assert.equal(f.record().state,'CANCELLED');
+});
 test('missing or unknown Task control cannot attach even with legacy bypass configured',async()=>{
  for(const state of ['UNKNOWN','PAUSED','STOPPED','DONE']) {
   const f=fixture();f.control.state=state;f.controller.config.allowUnknownControlRecovery=true;

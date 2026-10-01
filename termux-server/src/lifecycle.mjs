@@ -22,7 +22,7 @@ export const STATES = Object.freeze({
   STOPPED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED'],
   PAUSED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED'],
   BLOCKED: ['OBSERVING','ATTACHING','PREPARING','RECONCILING','POST_UNCERTAIN'],
-  CANCELLED: [],
+  CANCELLED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED'],
 });
 export const keyFor = b => JSON.stringify([b.task_id,b.turn_id,b.request_id]);
 export const digest = value => createHash('sha256').update(String(value)).digest('hex');
