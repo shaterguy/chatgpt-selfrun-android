@@ -198,6 +198,83 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
   }
 });
 
+test('browser monitor ignores user DOM identity churn as response liveness', async () => {
+  const originalNow = Date.now;
+  let now = 1000;
+  let evaluateCalls = 0;
+  let stalledCalls = 0;
+  let forcePageError = false;
+  const stableResponse = {
+    url: 'https://chatgpt.com/c/user-churn',
+    composer: true,
+    streaming: false,
+    stopButtonVisible: false,
+    paused: false,
+    assistantCount: 0,
+    assistantTextLength: 0,
+    assistantMessageId: null,
+    responseTurnId: 'response-stable',
+    responseTextLength: 717,
+    responseFingerprint: 'stable-response',
+    errorText: null,
+  };
+  const session = {
+    call: async (method) => {
+      assert.equal(method, 'Runtime.evaluate');
+      evaluateCalls += 1;
+      now += 6;
+      if (forcePageError || evaluateCalls >= 7) {
+        return { result: { value: {
+          ...stableResponse,
+          composer: false,
+          responseTurnId: null,
+          responseTextLength: 0,
+          responseFingerprint: '',
+          userCount: 0,
+          userTextLength: 0,
+          userMessageId: null,
+        } } };
+      }
+      const odd = evaluateCalls % 2 === 1;
+      return { result: { value: {
+        ...stableResponse,
+        userCount: odd ? 2 : 4,
+        userTextLength: odd ? 600 : 26,
+        userMessageId: odd ? 'fallback-turn-0:0:user' : 'fallback-turn-1:0:user',
+      } } };
+    },
+  };
+  Date.now = () => now;
+  try {
+    const browser = new ChatGptBrowser(null, {
+      stallAfterMs: 10,
+      probeIntervalMs: 1,
+      conversationStateGraceMs: 0,
+    });
+    const result = await browser.monitor({
+      session,
+      baseline: {
+        ...stableResponse,
+        userCount: 2,
+        userTextLength: 600,
+        userMessageId: 'fallback-turn-0:0:user',
+      },
+      livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
+      onActivity: async (activity) => {
+        if (activity.status === 'STALLED') {
+          stalledCalls += 1;
+          forcePageError = true;
+          return { resetLiveness: true };
+        }
+      },
+    });
+    assert.equal(stalledCalls, 1);
+    assert.equal(result.status, 'PAGE_ERROR');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('browser monitor schedules stalled verification retries without resetting real activity time', async () => {
   let evaluateCalls = 0;
   let stalledCalls = 0;

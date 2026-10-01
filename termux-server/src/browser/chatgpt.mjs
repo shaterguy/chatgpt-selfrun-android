@@ -832,10 +832,7 @@ export class ChatGptBrowser {
         probe.assistantMessageId !== previous.assistantMessageId ||
         probe.responseTurnId !== previous.responseTurnId ||
         probe.responseTextLength !== previous.responseTextLength ||
-        probe.responseFingerprint !== previous.responseFingerprint ||
-        probe.userCount !== previous.userCount ||
-        probe.userTextLength !== previous.userTextLength ||
-        probe.userMessageId !== previous.userMessageId;
+        probe.responseFingerprint !== previous.responseFingerprint;
       const changed =
         probe.url !== previous.url ||
         probe.paused !== previous.paused ||
