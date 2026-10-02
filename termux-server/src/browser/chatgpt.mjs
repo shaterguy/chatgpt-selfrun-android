@@ -639,6 +639,7 @@ export class ChatGptBrowser {
     let clickReleased=false;
     try {
       try {
+        if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');
         const submitted=await evaluate(session,submitExpression());
         if(submitted?.status!=='SUBMITTED')throw new Error(`Composer send failed: ${submitted?.status||'unknown'}`);
         clickReleased=true;
