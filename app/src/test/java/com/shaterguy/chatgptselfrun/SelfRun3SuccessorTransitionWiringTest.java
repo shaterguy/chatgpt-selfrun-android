@@ -88,7 +88,7 @@ public final class SelfRun3SuccessorTransitionWiringTest {
         String engine = source("SelfRun3Engine.java");
         String web = source("SelfRun3WebAdapter.java");
 
-        assertTrue(engine.contains("case DISPATCHING -> s.resource(\"conversationUrl\").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;"));
+        assertTrue(engine.contains("case DISPATCHING -> onDeviceSendClaimed(s) ? Action.WAIT"));
         assertTrue(engine.contains("put(transition,\"active\",false); put(transition,\"stage\",\"CANONICAL_CONFIRMED\")"));
         assertTrue(web.contains("if (web == null || state == null || !dispatchConfirmed || conversationCaptured) return;"));
         assertTrue(web.contains("listener.onConversation(state.taskId(), state.turnId(), canonical);"));
