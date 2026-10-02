@@ -10,7 +10,7 @@ test('CREATE_REQUESTED is sufficient authority for server-owned prepare and subm
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
 test('initial conversation waits for the first assistant response before sending one plain 작업 시작 follow-up',async()=>{
- const f=fixture({startFollowupEnabled:true,startFollowupDelayMs:0,startFollowupRetryMs:1});
+ const f=fixture({startFollowupEnabled:true,startFollowupDelayMs:0,startFollowupRetryMs:100});
  Object.assign(f.probe,{
    streaming:false,stopButtonVisible:false,paused:false,
    assistantCount:0,assistantTextLength:0,assistantMessageId:null,
@@ -27,7 +27,7 @@ test('initial conversation waits for the first assistant response before sending
    assistantCount:1,assistantTextLength:900,assistantMessageId:'a1',
    responseTextLength:850,responseFingerprint:'first-response',
  });
- await new Promise(resolve=>setTimeout(resolve,25));
+ await new Promise(resolve=>setTimeout(resolve,150));
  assert.equal(f.sends,2);
  assert.equal(f.sent[1].prompt,'작업 시작');
  assert.equal(f.sent[1].kind,'start');
