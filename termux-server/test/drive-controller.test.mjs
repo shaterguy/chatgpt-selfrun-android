@@ -45,6 +45,36 @@ test('initial conversation waits for the first assistant response before sending
  assert.equal(f.record().state,'COMPLETED');
  assert.equal(f.sends,2);
 });
+test('same RUNNING control epoch refresh does not abort an in-flight start follow-up',async()=>{
+ const f=fixture({startFollowupEnabled:true,startFollowupDelayMs:0,startFollowupRetryMs:100});
+ Object.assign(f.probe,{
+   streaming:false,stopButtonVisible:false,paused:false,
+   assistantCount:0,assistantTextLength:0,assistantMessageId:null,
+   responseTextLength:0,responseFingerprint:'',
+ });
+ const entered=deferred(),release=deferred();
+ f.onSubmit=async args=>{
+   if(args.kind!=='start')return;
+   entered.resolve();
+   await release.promise;
+ };
+ await f.ingest();
+ Object.assign(f.probe,{
+   assistantCount:1,assistantTextLength:568,assistantMessageId:'a1',
+   responseTextLength:551,responseFingerprint:'first-response',
+ });
+ await entered.promise;
+ f.control={...f.control,state:'RUNNING',control_epoch:2};
+ await f.controller.control(null,f.control,f.transport);
+ assert.equal(f.record().control_state,'RUNNING');
+ assert.equal(f.record().control_epoch,2);
+ release.resolve();
+ await new Promise(resolve=>setTimeout(resolve,50));
+ assert.equal(f.sends,2);
+ assert.equal(f.sent[1].prompt,'작업 시작');
+ assert.equal(f.record().intent?.outcome,'CONFIRMED');
+ assert.equal(f.record().start_followup_state,'SENT');
+});
 test('matching RUNNING Task Control recovers an attempt-level client cancellation',async()=>{
  const f=fixture();
  await f.controller.controlDurable(null,f.control);
