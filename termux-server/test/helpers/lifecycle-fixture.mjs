@@ -19,7 +19,7 @@ function fixture(options={}) {
   const f={sends:0,prepares:0,resumes:0,quiesces:0,readbacks:0,store:options.store||new MemoryStore(),observations:[],sent:[]};
   f.body={schema:'selfrun-server-dispatch-v1',task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',request_id:'SAFE-TEST:turn:1-request',
     dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'test input',profile_operations:[],
-    result_document_id:'RESULT-1',client_status:'CREATE_REQUESTED',server_status:'PENDING',server_control_epoch:1};
+    result_document_id:'RESULT-1',client_status:'SEND_REQUESTED',server_status:'PENDING',server_control_epoch:1};
   f.path='__SELFRUN_DISPATCH__test.json';
   f.control={schema:'selfrun-task-control-v1',task_id:f.body.task_id,turn_id:f.body.turn_id,request_id:f.body.request_id,state:'RUNNING',control_epoch:1};
   f.docs=new Map();

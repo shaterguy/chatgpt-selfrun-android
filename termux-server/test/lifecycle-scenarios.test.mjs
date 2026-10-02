@@ -8,10 +8,11 @@ import { keyFor, transition } from '../src/lifecycle.mjs';
 import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 import { fixture, MemoryStore, deferred } from './helpers/lifecycle-fixture.mjs';
 
-test('01 new conversation request -> server-owned POST -> progress -> exact Result commit',async()=>{
+test('01 confirmed POST and Result commit retain observation until the app moves on',async()=>{
   const f=fixture();await f.ingest();assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
   await f.observe({responseTextLength:1000});f.result(true);await f.observe({});
-  assert.equal(f.record().state,'COMPLETED');assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
+  assert.notEqual(f.record().state,'COMPLETED');assert.equal(f.record().result_state,'COMMITTED');
+  assert.equal(f.observations.at(-1).signal.aborted,false);
 });
 test('02 initial POST accepted but timed out is read back without duplicate',async()=>{
   const f=fixture();f.mode='accepted-timeout';await f.ingest();
@@ -49,9 +50,10 @@ test('10 recovery POST timeout accepted readback prevents duplicate',async()=>{
   const f=fixture();f.mode='accepted-timeout';await f.existing();await f.stall();await f.controller.tick(f.transport);
   assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
 });
-test('11 Result commits during recovery before SEND',async()=>{
+test('11 Result commit during recovery suppresses SEND without ending observation',async()=>{
   const f=fixture();f.onQuiesce=()=>f.result(true);await f.existing();await f.stall();
-  assert.equal(f.sends,0);assert.equal(f.record().state,'COMPLETED');
+  assert.equal(f.sends,0);assert.notEqual(f.record().state,'COMPLETED');
+  assert.equal(f.record().result_state,'COMMITTED');assert.equal(f.observations.at(-1).signal.aborted,false);
 });
 test('12 STOP during POST fences late completion',async()=>{
   const f=fixture();const gate=deferred(),entered=deferred();f.onSubmit=async()=>{entered.resolve();await gate.promise;};
@@ -67,11 +69,11 @@ test('14 stale STOP epoch cannot affect resumed request',async()=>{
   const f=fixture();await f.existing();await f.stop();const stale={...f.control};await f.resume();
   await f.controller.control(null,stale,f.transport);assert.equal(f.record().control_state,'RUNNING');
 });
-test('15 predecessor exact commit gates successor preparation',async()=>{
-  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;f.result(false,'RESULT-1',2);f.body.previous_result_document_id='PREVIOUS';f.result(false,'PREVIOUS',1);await f.ingest();
-  assert.equal(f.prepares,0);f.result(true,'PREVIOUS',1);
-  await f.controller.repository.move(keyFor(f.body),'BLOCKED','test retry ready',{retry_at:0});
-  await f.controller.tick(f.transport);assert.equal(f.prepares,1);
+test('15 app successor executes without a predecessor Result business gate',async()=>{
+  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';
+  f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;
+  f.body.previous_result_document_id='PREVIOUS';f.result(false,'PREVIOUS',1);await f.ingest();
+  assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 test('16 old browser callback cannot overwrite a new generation',async()=>{
   const f=fixture();await f.existing();const old=f.observations.at(-1);await f.stop();await f.resume();
@@ -142,11 +144,11 @@ test('directive changes cannot change an already durable uncertain input',async(
   f.browser.readSubmission=async args=>{readPrompt=args.prompt;return original(args);};
   await f.controller.tick(f.transport);assert.equal(readPrompt,prompt);assert.equal(f.sends,1);
 });
-test('a committed non-predecessor Result cannot unlock a successor',async()=>{
+test('predecessor Result metadata is opaque for app-authorized submission',async()=>{
   const f=fixture();f.body.turn_id='SAFE-TEST:turn:4';f.body.request_id='SAFE-TEST:turn:4-request';
   f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;
-  f.result(false,'RESULT-1',4);f.result(true,'WRONG-PREVIOUS',1);f.body.previous_result_document_id='WRONG-PREVIOUS';
-  await f.ingest();assert.equal(f.prepares,0);assert.equal(f.record().error.code,'PREDECESSOR_NOT_COMMITTED');
+  f.result(true,'WRONG-PREVIOUS',1);f.body.previous_result_document_id='WRONG-PREVIOUS';
+  await f.ingest();assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 test('Drive publishing preserves current client claim and prompt fields',async()=>{
   const f=fixture();await f.existing();
@@ -194,7 +196,7 @@ test('legacy event recovery count and uncertain POST override stale dispatch wit
       request_id:'SAFE-TEST:turn:1-request',recovery_count:1,error:'Canonical conversation POST timeout'}})+'\n');
     const f=fixture({store});f.control.state='STOPPED';f.control.control_epoch=13;await f.existing();
     assert.equal(f.record().state,'STOPPED');assert.equal(f.record().recovery_count,1);assert.equal(f.record().intent.outcome,'UNKNOWN');
-    assert.equal(f.sends,0);assert.equal(f.resumes,0);
+    assert.equal(f.sends,0);assert.equal(f.resumes,1);assert.equal(f.quiesces,1);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('audit newer than restored canonical state is quarantined before browser work',async()=>{
@@ -216,10 +218,10 @@ test('control-first stopped ingestion publishes the stopped canonical record',as
  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,13);
  assert.equal(f.rows.get(f.path).server_control_state,'STOPPED');assert.equal(f.sends,0);assert.equal(f.resumes,0);
 });
-test('successor without predecessor document cannot prepare',async()=>{
+test('successor without predecessor document prepares from the app request',async()=>{
  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';
- f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;f.result(false,'RESULT-1',2);
- await f.ingest();assert.equal(f.prepares,0);assert.equal(f.record().error.code,'PREDECESSOR_DOCUMENT_REQUIRED');
+ f.control.turn_id=f.body.turn_id;f.control.request_id=f.body.request_id;
+ await f.ingest();assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 for(const stage of ['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT','RECOVERY_POST','POST_PENDING','POST_UNCERTAIN','RECONCILING']) {
  test('cold restart restores intermediate '+stage,async()=>{

@@ -14,6 +14,13 @@ export class LifecycleStore {
     this.initPromise=(async()=>{
       this.history=await readLifecycleHistory(this.store.config?.eventsFile);
       this.legacyPrompt=prompt;
+      const next=structuredClone(this.data);let restored=false;
+      for(const r of Object.values(next.requests))if(['COMMITTED','COMPLETED'].includes(r.state)&&r.conversation_url) {
+        // Previous releases treated a Result commit as observer termination.
+        // Restore observation only; the persisted conversation is never submitted again.
+        r.state='ATTACHING';r.submission_confirmed=true;r.response_status='UNKNOWN';restored=true;
+      }
+      if(restored)await this.save(next);
       for(const r of this.records())if((this.history.audits.get(r.key)||0)>r.revision)this.integrityFaults.add(r.key);
     })();
     return this.initPromise;
@@ -51,7 +58,12 @@ export class LifecycleStore {
         const next=structuredClone(this.data);
         const r=next.requests[key];
         r.path=path;
+        const newerAttempt=body.dispatch_attempt>r.dispatch_attempt;
         r.dispatch_attempt=body.dispatch_attempt;
+        if(newerAttempt&&r.state==='CANCELLED'&&!['CANCELLED','SUPERSEDED'].includes(body.client_status)) {
+          r.state=r.intent&&r.intent.outcome!=='CONFIRMED'?'POST_UNCERTAIN':r.conversation_url?'ATTACHING':'PREPARING';
+          r.run_generation+=1;r.error=null;r.blocked_epoch=null;r.retry_at=0;
+        }
         // The client owns the claim and prompt; server fields come exclusively from this record.
         if(r.intent&&(r.body.prompt!==body.prompt||JSON.stringify(r.body.profile_operations)!==JSON.stringify(body.profile_operations)))
           throw new Error('accepted request input/profile is immutable');
@@ -145,7 +157,7 @@ export class LifecycleStore {
     if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
     const serverKeys=['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation','browser_generation',
       'conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome','server_error','server_error_class',
-      'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','updated_at_ms'];
+      'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
     const body={...remote};
     for(const k of serverKeys)body[k]=item.body[k];
     await transport.write(item.path,body,{expected:remote});
@@ -171,7 +183,7 @@ export class LifecycleStore {
         if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
         const serverKeys=['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation','browser_generation',
           'conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome','server_error','server_error_class',
-          'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','updated_at_ms'];
+          'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
         const body={...remote};
         for(const k of serverKeys)body[k]=item.body[k];
         await transport.write(item.path,body,{expected:remote});

@@ -7,16 +7,16 @@ import { humanizeSelfRunPrompt, appendTurnStartDirective } from '../src/prompt-d
 async function send(f) { f.body.client_status='SEND_REQUESTED'; await f.ingest(); }
 
 test('execution: formal app preparation waits for SEND_REQUESTED',async()=>{
-  const f=fixture(); await f.ingest();
+  const f=fixture(); f.body.client_status='CREATE_REQUESTED'; await f.ingest();
   assert.equal(f.prepares,1); assert.equal(f.sends,0);
   assert.equal(f.rows.get(f.path).server_status,'READY_TO_SUBMIT');
   await send(f); assert.equal(f.sends,1); assert.equal(f.rows.get(f.path).server_status,'STARTED');
 });
-test('execution: Result documents are never read to authorize submission or observation',async()=>{
+test('execution: Result documents are never read to authorize initial submission',async()=>{
   const f=fixture(); let reads=0;
   f.transport.readGoogleDocText=async()=>{reads++;throw new Error('must remain app-owned');};
   await send(f); assert.equal(f.sends,1);
-  await f.observe({}); assert.equal(reads,0);
+  assert.equal(reads,0);
 });
 test('execution: predecessor metadata and opaque turn IDs do not gate app SEND_REQUESTED',async()=>{
   const f=fixture();
@@ -65,13 +65,18 @@ test('execution: response idle and Result commit leave the observer alive',async
   assert.notEqual(f.record().state,'COMPLETED');
   assert.equal(f.rows.get(f.path).response_status,'COMPLETED');
 });
-test('execution: ten-minute stagnation nudge does not consult Result',async()=>{
-  const f=fixture(); await f.existing(); f.controller.config.stallAfterMs=600000;
-  let reads=0; f.transport.readGoogleDocText=async()=>{reads++;throw new Error('app-owned');};
-  await f.observe({});
-  await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:Date.now()-600001});
-  await f.observe({status:'STALLED'});
-  assert.equal(f.sends,1); assert.equal(f.sent[0].prompt,'continue test'); assert.equal(reads,0);
+test('execution: ten-minute nudge retains Result suppression while observer stays alive',async()=>{
+  for(const result of ['open','committed','unreadable']) {
+    const f=fixture(); await f.existing(); f.controller.config.stallAfterMs=600000;
+    if(result==='committed')f.result(true);
+    if(result==='unreadable')f.docs.set('RESULT-1','unreadable');
+    await f.observe({});
+    await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:Date.now()-600001});
+    await f.observe({status:'STALLED'});
+    assert.equal(f.sends,result==='open'?1:0);
+    if(result==='open')assert.equal(f.sent[0].prompt,'continue test');
+    assert.equal(f.observations.at(-1).signal.aborted,false);
+  }
 });
 test('execution: STOP quiesces the owned conversation and fences late callbacks',async()=>{
   const f=fixture(); await f.existing(); const observer=f.observations.at(-1);

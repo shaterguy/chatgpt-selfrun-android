@@ -48,13 +48,16 @@ export class DriveDispatchWatcher {
         const controlListedUnseen=controlFile&&this.seen.get(controlPath)!==controlFp;
         const identityMismatch=!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id;
         if(controlListedUnseen||identityMismatch) {
-          const latest=await this.transport.read(controlPath);
-          await (this.controller.controlDurable?.(controlPath,latest)??this.controller.control(controlPath,latest,this.transport));
+          let latest;
+          try {latest=await this.transport.read(controlPath);} catch(error) {
+            console.error(JSON.stringify({event:'CONTROL_READ_UNAVAILABLE',path:controlPath,error:String(error?.message||error).slice(0,300)}));
+          }
+          if(latest)await (this.controller.controlDurable?.(controlPath,latest)??this.controller.control(controlPath,latest,this.transport));
           if(controlFile)this.seen.set(controlPath,controlFp);
           control=this.controller.controlForTask(body.task_id);
         }
-        if(!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id) {
-          this.seen.set(file.path,fp);
+        if(control&&control.state!=='UNKNOWN'&&(control.turn_id!==body.turn_id||control.request_id!==body.request_id)) {
+          // Keep it eligible for a later control update; IDs route app signals only.
           continue;
         }
         await (this.controller.ingestDurable?.(file.path,body,this.transport)??this.controller.ingest(file.path,body,this.transport));

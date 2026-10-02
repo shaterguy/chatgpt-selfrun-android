@@ -3,11 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keyFor } from '../src/lifecycle.mjs';
 import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
-test('CREATE_REQUESTED is sufficient authority for server-owned prepare and submit',async()=>{
- const f=fixture();await f.ingest();
- assert.equal(f.sends,1);
- assert.equal(f.record().state,'OBSERVING');
- assert.equal(f.record().intent?.outcome,'CONFIRMED');
+test('CREATE_REQUESTED prepares without bypassing the app send handshake',async()=>{
+ const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
+ assert.equal(f.sends,0);assert.equal(f.record().state,'PREPARED');
+ assert.equal(f.rows.get(f.path).server_status,'READY_TO_SUBMIT');
+ f.body.client_status='SEND_REQUESTED';await f.ingest();
+ assert.equal(f.sends,1);assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
 test('canonical conversation URL is projected before later submission uncertainty',async()=>{
  const f=fixture();
@@ -17,7 +18,7 @@ test('canonical conversation URL is projected before later submission uncertaint
  assert.equal(f.sends,1);
  assert.equal(f.record().conversation_url,'https://chatgpt.com/c/test-owned');
  assert.equal(f.rows.get(f.path).conversation_url,'https://chatgpt.com/c/test-owned');
- assert.equal(f.rows.get(f.path).server_status,'RECOVERY_SENDING');
+ assert.equal(f.rows.get(f.path).server_status,'PENDING');
  assert.equal(f.record().state,'POST_UNCERTAIN');
 });
 test('initial conversation sends exactly one prompt and has no automatic follow-up',async()=>{
@@ -27,17 +28,10 @@ test('initial conversation sends exactly one prompt and has no automatic follow-
  assert.equal(f.sends,1);
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
-test('matching RUNNING Task Control recovers an attempt-level client cancellation',async()=>{
- const f=fixture();
- await f.controller.controlDurable(null,f.control);
- f.body.client_status='CANCELLED';
- f.rows.set(f.path,structuredClone(f.body));
- const seeded=await f.controller.repository.ingest(f.path,f.body);
- await f.controller.repository.move(seeded.key,'CANCELLED','test attempt timeout');
- await f.controller.tick(f.transport);
- assert.equal(f.sends,1);
- assert.equal(f.record().state,'OBSERVING');
- assert.equal(f.record().intent?.outcome,'CONFIRMED');
+test('matching RUNNING Task Control cannot revive an app-cancelled attempt',async()=>{
+ const f=fixture();await f.controller.controlDurable(null,f.control);
+ f.body.client_status='CANCELLED';await f.ingest();await f.controller.tick(f.transport);
+ assert.equal(f.sends,0);assert.equal(f.prepares,0);assert.equal(f.record().state,'CANCELLED');
 });
 test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
  const f=fixture();
@@ -59,15 +53,16 @@ test('initial POST does not wait for unrelated full projection backlog',async()=
  assert.equal(f.sends,1);
  assert.equal(f.record().state,'OBSERVING');
 });
-test('missing or unknown Task control cannot attach even with legacy bypass configured',async()=>{
- for(const state of ['UNKNOWN','PAUSED','STOPPED','DONE']) {
-  const f=fixture();f.control.state=state;f.controller.config.allowUnknownControlRecovery=true;
-  await f.existing();assert.equal(f.resumes,0);assert.equal(f.sends,0);
+test('explicit app pause stop and done controls still fence execution',async()=>{
+ for(const state of ['PAUSED','STOPPED','DONE']) {
+  const f=fixture();f.control.state=state;await f.existing();
+  assert.equal(f.sends,0);assert.equal(f.record().control_state,state);
+  assert.equal(f.resumes,state==='STOPPED'?1:0);
  }
 });
-test('Result committed is authoritative even with stopped or stale browser state',async()=>{
+test('app STOP is authoritative even when Result is committed',async()=>{
  const f=fixture();f.control.state='STOPPED';f.result(true);await f.existing();
- assert.equal(f.record().state,'COMPLETED');assert.equal(f.resumes,0);
+ assert.equal(f.record().state,'STOPPED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
 });
 test('paused generation requires explicit continuation and sends nothing',async()=>{
  const f=fixture();f.probe.paused=true;await f.existing();await f.stall();

@@ -50,8 +50,6 @@ export function classifyAttach(error) {
 }
 export function initialRecord(path,body,now=Date.now()) {
   for(const k of ['task_id','turn_id','request_id']) if(!body[k]) throw new Error('dispatch '+k+' required');
-  const turn=Number(String(body.turn_id).slice(String(body.task_id).length+6));
-  if(!String(body.turn_id).startsWith(body.task_id+':turn:')||!Number.isSafeInteger(turn)||turn<1)throw new Error('invalid turn identity');
   if(body.conversation_url&&!canonicalUrl(body.conversation_url))throw new Error('invalid canonical conversation URL');
   if(!Number.isSafeInteger(body.dispatch_attempt)||body.dispatch_attempt<1) throw new Error('dispatch attempt invalid');
   if(body.lifecycle_record?.schema===1) {
@@ -66,9 +64,10 @@ export function initialRecord(path,body,now=Date.now()) {
   const state=STATES[imported]?imported:url?'ATTACHING':body.server_status==='READY_TO_SUBMIT'?'PREPARED':'DISCOVERED';
   return {key:keyFor(body),path,body:structuredClone(body),task_id:body.task_id,turn_id:body.turn_id,request_id:body.request_id,
     dispatch_attempt:body.dispatch_attempt,state,revision:0,run_generation:0,browser_generation:0,control_epoch:Number(body.server_control_epoch||0),
-    control_state:body.server_control_state||'UNKNOWN',conversation_url:url,conversation_id:url.split('/c/')[1]||null,
+    control_state:body.server_control_state&&body.server_control_state!=='UNKNOWN'?body.server_control_state:'RUNNING',conversation_url:url,conversation_id:url.split('/c/')[1]||null,
     recovery_count:Number(body.recovery_count||0),attach_attempts:Number(body.resume_retry_count||0),failure_epoch:Number(body.server_control_epoch||0),retry_at:0,
     intent:null,cursor:null,last_progress_at:now,result_state:'UNKNOWN',error:null,
+    submission_confirmed:!!url&&['STARTED','COMPLETED','RUNNING','STALLED','RECOVERY_SENT'].includes(body.server_status),response_status:'UNKNOWN',
     created_at:now,updated_at:now};
 }
 export function transition(record,next,reason,patch={},now=Date.now()) {
@@ -95,15 +94,19 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
 }
 export function projection(r) {
   const statuses={PREPARED:'READY_TO_SUBMIT',COMMITTED:'COMPLETED',COMPLETED:'COMPLETED',CANCELLED:'CANCELLED',
-    BLOCKED:'ERROR',RECOVERY_POST:'RECOVERY_SENDING',POST_UNCERTAIN:'RECOVERY_SENDING',RECONCILING:'RECOVERY_SENDING'};
+    STOPPED:'CANCELLED',PAUSED:'CANCELLED',BLOCKED:'ERROR'};
+  const confirmed=r.submission_confirmed||r.intent?.outcome==='CONFIRMED';
+  const pendingInitial=r.intent?.kind==='initial'&&r.intent.outcome!=='CONFIRMED';
+  const status=pendingInitial&&!['STOPPED','PAUSED','CANCELLED','BLOCKED'].includes(r.state)?'PENDING':
+    statuses[r.state]||(confirmed&&r.conversation_url?'STARTED':'PENDING');
   const {body,...durable}=r;
-  return {...r.body,lifecycle_record:{schema:1,...durable},server_status:statuses[r.state]||(r.conversation_url?'STARTED':'PENDING'),lifecycle_state:r.state,
+  return {...r.body,lifecycle_record:{schema:1,...durable},server_status:status,lifecycle_state:r.state,
     lifecycle_revision:r.revision,server_generation:r.server_generation||0,request_generation:r.run_generation,browser_generation:r.browser_generation,
     conversation_url:r.conversation_url,recovery_count:r.recovery_count,recovery_attempt_id:r.intent?.kind==='recovery'?r.intent.id:null,
     post_correlation:r.intent?.id||null,post_outcome:r.intent?.outcome||null,server_error:r.error?.message||'',
     server_error_class:r.error?.code||null,server_control_state:r.control_state,server_control_epoch:r.control_epoch,
     resume_retry_count:r.attach_attempts,resume_retry_at_ms:r.retry_at||0,result_state:r.result_state,
-    response_cursor:r.cursor,updated_at_ms:r.updated_at};
+    response_cursor:r.cursor,response_status:r.response_status||'UNKNOWN',stop_status:r.stop_status||null,updated_at_ms:r.updated_at};
 }
 export function newIntent(record,kind,prompt,baseline) {
   return {id:randomUUID(),kind,prompt:String(prompt),hash:digest(prompt),baseline:structuredClone(baseline||{}),outcome:'PENDING',
