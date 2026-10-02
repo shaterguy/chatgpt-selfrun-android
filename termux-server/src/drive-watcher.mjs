@@ -44,8 +44,8 @@ export class DriveDispatchWatcher {
         let deferred=this.deferred.get(file.path);
         if(deferred?.fp!==fp){this.deferred.delete(file.path);deferred=null;}
         if(deferred&&deferred.controlFp===fingerprint(listedControls.get(deferred.controlPath))
-          &&deferred.controlToken===controlToken(this.controller.controlForTask(deferred.body.task_id)))continue;
-        const body=deferred?structuredClone(deferred.body):await this.transport.read(file.path);
+          &&deferred.controlToken===controlToken(this.controller.controlForTask(deferred.taskId)))continue;
+        const body=await this.transport.read(file.path);
         if(!this.canDispatch())return;
         if(body.schema!=='selfrun-server-dispatch-v1'){this.seen.set(file.path,fp);continue;}
         const controlPath='__SELFRUN_CONTROL__'+body.task_id+'.json';
@@ -65,7 +65,7 @@ export class DriveDispatchWatcher {
         }
         if(control&&control.state!=='UNKNOWN'&&(control.turn_id!==body.turn_id||control.request_id!==body.request_id)) {
           // Reconsider either signal when it changes, without rereading unchanged historical files on every poll.
-          this.deferred.set(file.path,{fp,body:structuredClone(body),controlPath,controlFp,controlToken:controlToken(control)});
+          this.deferred.set(file.path,{fp,taskId:body.task_id,controlPath,controlFp,controlToken:controlToken(control)});
           continue;
         }
         this.deferred.delete(file.path);

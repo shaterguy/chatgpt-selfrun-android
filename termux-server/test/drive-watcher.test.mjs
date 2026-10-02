@@ -92,13 +92,13 @@ test('unchanged deferred dispatch does not repeat serial Drive body and control 
  assert.equal(f.ingested.length,0);
 });
 
-test('changed app control reconsiders an unchanged deferred dispatch without rereading its body',async()=>{
+test('changed app control rereads and reconsiders an unchanged deferred dispatch',async()=>{
  const f=deferredWatcherFixture();await f.watcher.scanOnce();
  f.changeControl({turn_id:'old-turn',request_id:'old-request',control_epoch:3});
  await f.watcher.scanOnce();
  assert.equal(f.ingested.length,1);
  assert.equal(f.ingested[0].request_id,'old-request');
- assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,1);
+ assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,2);
 });
 
 test('changed deferred dispatch is read and evaluated against current control',async()=>{
@@ -115,5 +115,5 @@ test('control reconciled outside the watcher reconsiders cached deferred identit
  f.changeCachedControl({turn_id:'old-turn',request_id:'old-request',control_epoch:3});
  await f.watcher.scanOnce();
  assert.equal(f.ingested.length,1);
- assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,1);
+ assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,2);
 });
