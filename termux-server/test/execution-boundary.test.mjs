@@ -165,3 +165,14 @@ test('execution: unreadable TaskControl fails closed instead of assuming absence
   await assert.rejects(f.ingest(),/control transport temporarily unavailable/);
   assert.equal(f.sends,0);
 });
+
+test('execution: app attempt cancellation cannot suppress current STOP cleanup retry',async()=>{
+  const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
+  f.body.client_status='CANCELLED';await f.ingest();
+  f.browser.quiesce=async()=>{throw new Error('temporary stop failure');};
+  await f.stop();assert.equal(f.record().stop_status,'UNCONFIRMED');
+  f.browser.quiesce=quiesce;
+  await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
+  await f.controller.tick(f.transport);
+  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+});

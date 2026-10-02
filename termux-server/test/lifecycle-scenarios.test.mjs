@@ -216,7 +216,8 @@ test('control-first stopped ingestion publishes the stopped canonical record',as
  await f.controller.control(null,f.control,f.transport);
  await f.existing();await f.controller.flush(f.transport);
  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,13);
- assert.equal(f.rows.get(f.path).server_control_state,'STOPPED');assert.equal(f.sends,0);assert.equal(f.resumes,0);
+ assert.equal(f.rows.get(f.path).server_control_state,'STOPPED');assert.equal(f.sends,0);
+ assert.equal(f.resumes,1);assert.equal(f.quiesces,1);assert.equal(f.record().stop_status,'CONFIRMED');
 });
 test('successor without predecessor document prepares from the app request',async()=>{
  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';
