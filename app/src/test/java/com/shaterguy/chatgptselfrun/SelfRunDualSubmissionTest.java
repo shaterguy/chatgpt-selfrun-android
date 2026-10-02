@@ -130,6 +130,27 @@ public final class SelfRunDualSubmissionTest {
         assertTrue(coordinator.contains("!stopRequested"));
     }
 
+    @Test public void outgoingPostEvidenceSurvivesRestartBeforeConversationUrl() throws Exception {
+        SelfRun3Engine.State claimed = event(ready("ON_DEVICE"), SelfRun3Engine.Kind.CLAIM_SEND, new JSONObject());
+        JSONObject observed = new JSONObject();
+        SelfRun3Engine.put(observed, "requestId", claimed.requestId());
+        SelfRun3Engine.State sent = event(claimed, SelfRun3Engine.Kind.DISPATCH_OBSERVED, observed);
+        SelfRun3Engine.State restored = new SelfRun3Engine.State(new JSONObject(sent.json().toString()));
+        assertTrue(restored.flag("dispatchObserved"));
+        assertFalse(restored.flag("accepted"));
+        assertEquals("", restored.resource("conversationUrl"));
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(restored));
+        SelfRun3Engine.State stopped = event(restored, SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = event(stopped, SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertEquals(restored.requestId(), resumed.requestId());
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
+    }
+
+    @Test public void serverRecoveryStillPreparesItsExistingDispatchWithoutUrl() {
+        SelfRun3Engine.State claimed = event(ready("SERVER"), SelfRun3Engine.Kind.CLAIM_SEND, new JSONObject());
+        assertEquals(SelfRun3Engine.Action.PREPARE_WEB, SelfRun3Engine.nextAction(claimed));
+    }
+
     static SelfRun3Engine.State ready(String mode) {
         JSONObject config = new JSONObject();
         SelfRun3Engine.put(config, "taskMode", "CHAT");

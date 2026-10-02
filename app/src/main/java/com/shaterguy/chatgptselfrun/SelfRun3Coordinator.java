@@ -58,6 +58,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private String completedTaskNotification = "";
 
     private volatile boolean destroyed;
+    private volatile boolean stopRequested;
     private volatile int epoch;
     private int serverGeneration;
     private boolean authorizationInFlight;
@@ -94,6 +95,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     void onStoppedResumeAuthorized(String token) {
         requireMain();
+        stopRequested = false;
         setAccessToken(token);
         web.restoreAccessToken(token);
     }
@@ -904,7 +906,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private static boolean waitEligible(SelfRun3Engine.State state) {
         if (state == null || state.terminal() || state.flag("superseded")) return false;
         return (state.stage() == SelfRun3Engine.Stage.DISPATCHING
-                && !state.resource("conversationUrl").isEmpty())
+                && (!state.resource("conversationUrl").isEmpty() || SelfRun3Engine.onDeviceSendClaimed(state)))
                 || state.stage() == SelfRun3Engine.Stage.WAITING
                 || state.stage() == SelfRun3Engine.Stage.WAITING_USER_INTERVENTION
                 || (state.stage() == SelfRun3Engine.Stage.RECONCILING && !state.hasResult());
@@ -1092,16 +1094,19 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     @Override public void onPrepared(String task, String turn, String request) {
+        if (!canRun()) return;
         int expectedEpoch = epoch;
         io.execute(() -> {
             try {
+                if (!validEpoch(expectedEpoch) || !canRun()) return;
                 SelfRun3Engine.State before = ledger.loadExecution(task, turn);
                 if (!callbackMatches(before, task, turn, request) || before.stage() != SelfRun3Engine.Stage.READY) return;
                 JSONObject payload = new JSONObject(); SelfRun3Engine.put(payload, "at", System.currentTimeMillis());
                 SelfRun3Engine.State claimed = ledger.apply(event(before,
                         request + ":claim:" + UUID.randomUUID(), SelfRun3Engine.Kind.CLAIM_SEND, payload));
                 main.post(() -> {
-                    if (!validEpoch(expectedEpoch) || !SelfRun3PowerPolicy.maySend(claimed.execution(turn))) return;
+                    if (!validEpoch(expectedEpoch) || !canRun()
+                            || !SelfRun3PowerPolicy.maySend(claimed.execution(turn))) return;
                     syncProjection(claimed);
                     web.submit(claimed.execution(turn));
                 });
@@ -1114,6 +1119,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     @Override public void onDispatched(String task, String turn, String request) {
         // A click is not proof of acceptance. The persisted send claim already enables Drive readback.
         log.record(store, "V3_DISPATCH", "turn=" + turn + ";request=" + request);
+    }
+
+    @Override public void onDispatchObserved(String task, String turn, String request) {
+        recordCallback(task, turn, request, request + ":dispatch-observed",
+                SelfRun3Engine.Kind.DISPATCH_OBSERVED, requestPayload(request));
     }
 
     @Override public void onStarted(String task, String turn, String request) {
@@ -1417,6 +1427,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void pause(String reason) {
         requireMain();
         if (store.runId().isEmpty() || destroyed || !ownsCurrentRun()) return;
+        store.setPaused(true);
         epoch++;
         cancelServerWaitState();
         if (scheduledNext != null) main.removeCallbacks(scheduledNext);
@@ -1482,6 +1493,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void stop() {
         requireMain();
         if (store.runId().isEmpty() || !ownsCurrentRun()) return;
+        stopRequested = true;
         epoch++;
         cancelServerWaitState();
         main.removeCallbacksAndMessages(null);
@@ -1669,7 +1681,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     private boolean operationPermitted() {
-        return !destroyed && store.active() && !store.paused() && !store.userStopped() && ownsCurrentRun();
+        return !destroyed && !stopRequested && store.active() && !store.paused() && !store.userStopped() && ownsCurrentRun();
     }
 
     private boolean canRun() { return operationPermitted(); }

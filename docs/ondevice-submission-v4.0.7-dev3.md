@@ -27,3 +27,10 @@ The ON_DEVICE setting submits each prompt through the phone's existing v3 WebVie
 
 ## Boundaries
 Mode changes affect newly prepared requests, never switch an existing in-flight request to a second submission path. No new authentication, permission, sharing, device execution, or live test conversation is authorized by this change. User-device login and live-site acceptance are post-delivery checks, not a substitute for automated checks.
+
+## Activation safety corrections
+Independent source review found that the dormant v3 transport could retry an uncertain submission after a missing URL, and a late registry refresh could resume after cancellation. The new candidate records outgoing POST evidence separately from URL/STARTED, treats an ON_DEVICE send claim as uncertain rather than safe to resend, includes that request in shared completion waiting, fences registry callbacks by cancellation generation, destroys the phone WebView on cancellation, and blocks local work immediately while STOP is being confirmed.
+
+The original four feature assertions failed on unchanged 0a909837 in run 37006687521. Nine feature checks then passed while four activation-safety assertions failed on 2af5e7b in run 37008325052. The final build must pass both sets and the complete JVM suite.
+
+The focused Android runtime covers real v3 one-shot submission, URL-first disposal, shared completion policy, settings persistence/restart, ledger/Result/STOP mechanics, and TEST upgrade/co-install. Historical preparation-timeout tests that assert a 1-second operator timeout conflict with the existing current 90-second minimum; they are not silently treated as current acceptance evidence. No authenticated live phone or live conversation is exercised.

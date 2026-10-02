@@ -30,6 +30,7 @@ final class SelfRun3WebAdapter {
         void onUnsent(String task, String turn, String request, String status);
         void onFailure(String task, String turn, String request, String code);
         void onDispatched(String task, String turn, String request);
+        default void onDispatchObserved(String task, String turn, String request) { }
     }
 
     private static final Set<String> DEFINITE_UNSENT = Set.of(
@@ -55,7 +56,7 @@ final class SelfRun3WebAdapter {
     private SelfRun3Engine.State state;
     private boolean preparing, loading, closed, dispatchConfirmed, submitIssued, conversationCaptured, registryRefreshPending;
     private String registryRefreshRequest = "";
-    private int step, evaluation, generation;
+    private int step, evaluation, generation, registryGeneration;
     private long preparationAttempt, prepareStarted, prepareTimeoutMs;
 
     SelfRun3WebAdapter(Context context, Listener listener) {
@@ -81,6 +82,7 @@ final class SelfRun3WebAdapter {
                 || !"canonical_post".equals(event.optString("source"))
                 || a.dispatchConfirmed || !s.flag("sendClaimed")) return false;
         a.dispatchConfirmed = true;
+        a.listener.onDispatchObserved(s.taskId(), s.turnId(), s.requestId());
         SelfRun3RuntimeTestBridge.recordCanonicalPostConfirmation(s);
         a.captureProfilePostDiagnostics();
         a.captureConversation();
@@ -94,7 +96,9 @@ final class SelfRun3WebAdapter {
             if (registryRefreshPending) return;
             registryRefreshPending = true;
             String refreshRequest = s.requestId();
+            int expectedRegistryGeneration = registryGeneration;
             ProfileRegistrySync.refresh(context, result -> {
+                if (expectedRegistryGeneration != registryGeneration) return;
                 registryRefreshPending = false;
                 if (closed || state == null || !refreshRequest.equals(state.requestId())) return;
                 boolean usable = "WORK".equals(state.config().optString("mode"))
@@ -502,10 +506,18 @@ final class SelfRun3WebAdapter {
     void detach() { requireMain(); if (host != null) host.detachOutput(); }
 
     void quiesce() {
+        registryGeneration++;
+        registryRefreshPending = false;
         preparing = false;
         evaluation++;
         handler.removeCallbacksAndMessages(null);
         detach();
+    }
+
+    void cancel() {
+        requireMain();
+        quiesce();
+        disposeHost();
     }
 
     boolean disposeForConfirmedResultWait(SelfRun3Engine.State persisted) {
@@ -531,6 +543,8 @@ final class SelfRun3WebAdapter {
     void close() {
         requireMain();
         closed = true;
+        registryGeneration++;
+        registryRefreshPending = false;
         preparing = false;
         evaluation++;
         handler.removeCallbacksAndMessages(null);

@@ -15,7 +15,7 @@ final class SelfRun3Engine {
     static final String RESULT_SCHEMA = "selfrun-turn-result-v3";
     enum Stage { SETUP, PREPARING, READY, DISPATCHING, WAITING, RECONCILING,
         WAITING_USER_INTERVENTION, BRANCH_COMPLETE, PAUSED, DONE, STOPPED }
-    enum Kind { RESOURCE, DOCUMENT_CREATE_STATE, SETUP_DONE, TURN_READY, CLAIM_SEND, STARTED, ACCEPTED, UNSENT, ENDED,
+    enum Kind { RESOURCE, DOCUMENT_CREATE_STATE, SETUP_DONE, TURN_READY, CLAIM_SEND, DISPATCH_OBSERVED, STARTED, ACCEPTED, UNSENT, ENDED,
         RESULT_BASELINE, RESULT_MUTATED, RESULT, COMMIT, RECONCILE, REPAIR, SUCCESSOR_TIMEOUT, PAUSE, RESUME, RESUME_STOPPED, STOP, ERROR }
     enum Action { SETUP, PREPARE_TURN, PREPARE_WEB, WAIT, READ_RESULT, CHECK_RECEIPT, COMMIT, NONE }
     private static final Set<String> GLOBAL = Set.of("executions", "history", "maxTurn", "lastConsumedInputRevision", "taskPaused", "taskStopped", "taskMode", "stopEventId", "stoppedResumeOperation");
@@ -107,7 +107,7 @@ final class SelfRun3Engine {
         if(s.flag("superseded") && e.kind!=Kind.RESOURCE) return original;
         if(s.terminal() && e.kind!=Kind.RESOURCE) return original;
         JSONObject v=s.json(), p=e.payload; Stage stage=Stage.valueOf(s.text("stage"));
-        if(Set.of(Kind.STARTED,Kind.ACCEPTED,Kind.UNSENT,Kind.ENDED).contains(e.kind)
+        if(Set.of(Kind.DISPATCH_OBSERVED,Kind.STARTED,Kind.ACCEPTED,Kind.UNSENT,Kind.ENDED).contains(e.kind)
                 && !s.requestId().equals(p.optString("requestId"))) return original;
         switch(e.kind) {
             case RESOURCE -> {
@@ -184,6 +184,10 @@ final class SelfRun3Engine {
                     JSONObject transition=s.successorTransition(); put(transition,"stage","REQUEST_CLAIMED");
                     put(v,SelfRun3SuccessorTransitionPolicy.KEY,transition);
                 }
+            }
+            case DISPATCH_OBSERVED -> {
+                if(!s.flag("sendClaimed") || stage!=Stage.DISPATCHING) return original;
+                put(v,"dispatchObserved",true);
             }
             case STARTED, ACCEPTED -> {
                 boolean canonicalStart = e.kind==Kind.STARTED
@@ -343,7 +347,8 @@ final class SelfRun3Engine {
             case SETUP -> Action.SETUP;
             case PREPARING -> Action.PREPARE_TURN;
             case READY -> Action.PREPARE_WEB;
-            case DISPATCHING -> s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;
+            case DISPATCHING -> onDeviceSendClaimed(s) ? Action.WAIT
+                    : s.resource("conversationUrl").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;
             case WAITING, WAITING_USER_INTERVENTION -> Action.WAIT;
             case RECONCILING -> s.hasResult() ? Action.COMMIT : Action.READ_RESULT;
             default -> Action.NONE;
@@ -410,13 +415,18 @@ final class SelfRun3Engine {
     private static boolean resumeWaitsForPinnedResult(State s) {
         String stage=s.text("stage");
         return !s.resource("resultDocumentId").isEmpty()
-                && (("DISPATCHING".equals(stage) && !s.resource("conversationUrl").isEmpty())
+                && (("DISPATCHING".equals(stage) && (!s.resource("conversationUrl").isEmpty()
+                || (onDeviceSendClaimed(s) && s.flag("dispatchObserved"))))
                 || "WAITING".equals(stage)
                 || ("RECONCILING".equals(stage) && !s.hasResult()));
     }
+    static boolean onDeviceSendClaimed(State s) {
+        return s != null && "ON_DEVICE".equals(s.text("submissionMode")) && s.flag("sendClaimed");
+    }
     static List<State> waitingExecutions(State s) {
         ArrayList<State> out=new ArrayList<>();
-        for(State x:s.executions()) if((x.stage()==Stage.DISPATCHING && !x.resource("conversationUrl").isEmpty())
+        for(State x:s.executions()) if((x.stage()==Stage.DISPATCHING
+                && (!x.resource("conversationUrl").isEmpty() || onDeviceSendClaimed(x)))
                 || Set.of(Stage.WAITING,Stage.WAITING_USER_INTERVENTION).contains(x.stage())
                 || (x.stage()==Stage.RECONCILING && !x.hasResult())) out.add(x);
         return out;

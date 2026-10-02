@@ -55,7 +55,7 @@ final class SelfRunSubmissionAdapter {
     }
 
     void quiesce() {
-        onDevice.quiesce();
+        onDevice.cancel();
         server.quiesce();
     }
 

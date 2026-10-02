@@ -39,7 +39,7 @@ public final class SelfRun3WebViewWaitLifecycleTest {
         assertFalse(server.contains("web.prepare("));
         assertFalse(server.contains("ensureWeb("));
         assertTrue(engine.contains("case WAITING, WAITING_USER_INTERVENTION -> Action.WAIT"));
-        assertTrue(engine.contains("case DISPATCHING -> s.resource(\"conversationUrl\").isEmpty() ? Action.PREPARE_WEB : Action.WAIT"));
+        assertTrue(engine.contains("case DISPATCHING -> onDeviceSendClaimed(s) ? Action.WAIT"));
         assertTrue(coordinator.contains("drive.observeResult(token, current)"));
     }
 
