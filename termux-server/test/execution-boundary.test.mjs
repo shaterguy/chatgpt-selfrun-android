@@ -140,3 +140,26 @@ test('execution: imported legacy Result-terminal state resumes only observation 
   await f.controller.ingest(f.path,body,f.transport);
   assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,1);
 });
+
+test('execution: durable cancellation fences a POST waiting on publication',async()=>{
+  const f=fixture(),entered=deferred(),gate=deferred();
+  const flush=f.controller.repository.flushCurrent.bind(f.controller.repository);let held=false;
+  f.controller.repository.flushCurrent=async(...args)=>{
+    if(!held&&f.record()?.state==='POST_PENDING'){held=true;entered.resolve();await gate.promise;}
+    return flush(...args);
+  };
+  const posting=f.ingest();await entered.promise;
+  f.body.client_status='CANCELLED';f.rows.set(f.path,structuredClone(f.body));
+  await f.controller.ingestDurable(f.path,f.body,f.transport);
+  gate.resolve();await posting;
+  assert.equal(f.sends,0);assert.equal(f.record().state,'CANCELLED');
+});
+test('execution: unreadable TaskControl fails closed instead of assuming absence',async()=>{
+  const f=fixture(),read=f.transport.read;
+  f.transport.read=async name=>{
+    if(name.startsWith('__SELFRUN_CONTROL__'))throw new Error('control transport temporarily unavailable');
+    return read(name);
+  };
+  await assert.rejects(f.ingest(),/control transport temporarily unavailable/);
+  assert.equal(f.sends,0);
+});
