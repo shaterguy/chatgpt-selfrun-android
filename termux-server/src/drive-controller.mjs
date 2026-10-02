@@ -92,6 +92,11 @@ export class DriveDispatchController {
     };
     try {
       if(!record.conversation_url||!guard())return;
+      if(attached&&!session) {
+        // The original attach is still pending. Fence now; its late callback owns cleanup.
+        await this.#move(record.key,'STOPPED','APP_STOP_PENDING_ATTACHMENT',{stop_status:'PENDING'});
+        return;
+      }
       if(!session) {
         const resumed=await this.browser.resume({conversationUrl:record.conversation_url,signal:new AbortController().signal});
         session=resumed.session;
@@ -244,7 +249,13 @@ export class DriveDispatchController {
       } else if(mode==='target') {
         attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal});
       } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal});
-      if(!guard()){attached.session.close();return null;}
+      if(!guard()) {
+        const control=this.repository.control(r.task_id);
+        if(control?.state==='STOPPED'&&control.request_id===r.request_id&&control.turn_id===r.turn_id)
+          await this.#stopOwned(r,attached,control);
+        else attached.session.close();
+        return null;
+      }
       Object.assign(pending,attached,{guard});
       await this.#move(key,uncertain?'POST_UNCERTAIN':mode==='prepare'?'PREPARED':'OBSERVING','BROWSER_ATTACHED',
         {target_id:attached.target.id,attach_attempts:0,error:null,resume_recovery_stage:recoveryStage},token);
