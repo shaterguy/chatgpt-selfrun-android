@@ -50,7 +50,7 @@ export class DriveDispatchWatcher {
         if(controlListedUnseen||identityMismatch) {
           let latest;
           try {latest=await this.transport.read(controlPath);} catch(error) {
-            console.error(JSON.stringify({event:'CONTROL_READ_UNAVAILABLE',path:controlPath,error:String(error?.message||error).slice(0,300)}));
+            if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;
           }
           if(latest)await (this.controller.controlDurable?.(controlPath,latest)??this.controller.control(controlPath,latest,this.transport));
           if(controlFile)this.seen.set(controlPath,controlFp);

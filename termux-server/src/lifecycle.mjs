@@ -22,7 +22,7 @@ export const STATES = Object.freeze({
   STOPPED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED'],
   PAUSED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED'],
   BLOCKED: ['OBSERVING','ATTACHING','PREPARING','RECONCILING','POST_UNCERTAIN'],
-  CANCELLED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED'],
+  CANCELLED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED','STOPPED'],
 });
 export const keyFor = b => JSON.stringify([b.task_id,b.turn_id,b.request_id]);
 export const digest = value => createHash('sha256').update(String(value)).digest('hex');
@@ -47,6 +47,17 @@ export function classifyAttach(error) {
   if(/not found|no longer available|inaccessible/i.test(s)) return 'CONVERSATION_UNAVAILABLE';
   if(/existing conversation|load.*conversation|page error/i.test(s)) return 'CONVERSATION_LOAD_FAILED';
   return 'ATTACH_FAILED';
+}
+export function restoreObserver(record,control) {
+  if(!['COMMITTED','COMPLETED'].includes(record.state)||!record.conversation_url)return record;
+  const r={...record,state:'ATTACHING',submission_confirmed:true,response_status:'UNKNOWN'};
+  if(control&&control.control_epoch>=r.control_epoch) {
+    r.control_epoch=control.control_epoch;r.control_state=control.state;
+    const matching=control.request_id===r.request_id&&control.turn_id===r.turn_id;
+    if(['STOPPED','DONE'].includes(control.state))r.state='STOPPED';
+    else if(control.state!=='RUNNING'||!matching)r.state='PAUSED';
+  }
+  return r;
 }
 export function initialRecord(path,body,now=Date.now()) {
   for(const k of ['task_id','turn_id','request_id']) if(!body[k]) throw new Error('dispatch '+k+' required');

@@ -13,7 +13,7 @@ export class DriveDispatchController {
   constructor({browser,stateStore,config,promptDirectives=null,canDispatch=()=>true}) {
     this.canDispatch=canDispatch;this.browser=browser;this.stateStore=stateStore;this.config=config;this.promptDirectives=promptDirectives;
     this.repository=new LifecycleStore(stateStore);
-    this.sessions=new Map();this.operations=new Map();this.standby=false;
+    this.sessions=new Map();this.operations=new Map();this.stopOperations=new Map();this.standby=false;
     this.serverGeneration=Date.now();
   }
   get active() {return this.activeDispatches().at(-1)||null;}
@@ -48,12 +48,12 @@ export class DriveDispatchController {
     let c;
     try {c=await transport.read('__SELFRUN_CONTROL__'+r.task_id+'.json');}
     catch(error) {
-      // The app dispatch is the request. Retain any known STOP/PAUSE fence.
-      console.error(JSON.stringify({event:'CONTROL_READ_UNAVAILABLE',key,error:String(error?.message||error).slice(0,300)}));
+      // Known absence differs from an unreadable control that may contain STOP.
+      if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;
     }
     if(c&&controlStates.has(c.state))await this.controlDurable(null,c);
     const latest=this.repository.get(key);
-    if(c&&controlStates.has(c.state)&&c.state==='RUNNING'&&(c.turn_id!==r.turn_id||c.request_id!==r.request_id))return false;
+    if(c&&controlStates.has(c.state)&&(c.state!=='RUNNING'||c.turn_id!==r.turn_id||c.request_id!==r.request_id))return false;
     return !terminal(latest)&&latest.control_state==='RUNNING';
   }
   async #applyControl(c) {
@@ -84,14 +84,22 @@ export class DriveDispatchController {
     return true;
   }
   async #stopOwned(record,attached,control) {
+    const pending=this.stopOperations.get(record.key);
+    if(pending)return pending;
+    const work=this.#performStop(record,attached,control);
+    this.stopOperations.set(record.key,work);
+    try {return await work;} finally {if(this.stopOperations.get(record.key)===work)this.stopOperations.delete(record.key);}
+  }
+  async #performStop(record,attached,control) {
     let session=attached?.session;
     const guard=()=>{
       const latest=this.repository.control(record.task_id);
-      return latest?.state==='STOPPED'&&latest.control_epoch===control.control_epoch
+      return !this.standby&&this.canDispatch()&&latest?.state==='STOPPED'&&latest.control_epoch===control.control_epoch
         &&latest.request_id===control.request_id&&latest.turn_id===control.turn_id;
     };
     try {
       if(!record.conversation_url||!guard())return;
+      await this.#move(record.key,'STOPPED','APP_STOP_CLEANUP_PENDING',{stop_status:'PENDING',stop_control_epoch:control.control_epoch});
       if(attached&&!session) {
         // The original attach is still pending. Fence now; its late callback owns cleanup.
         await this.#move(record.key,'STOPPED','APP_STOP_PENDING_ATTACHMENT',{stop_status:'PENDING'});
@@ -103,9 +111,9 @@ export class DriveDispatchController {
       }
       if(!guard())return;
       await this.browser.quiesce({session,conversationUrl:record.conversation_url,signal:new AbortController().signal,guard});
-      if(guard())await this.#move(record.key,'STOPPED','APP_STOP_CONFIRMED',{stop_status:'CONFIRMED',error:null});
+      if(guard())await this.#move(record.key,'STOPPED','APP_STOP_CONFIRMED',{stop_status:'CONFIRMED',stop_retry_at:0,error:null});
     } catch(error) {
-      if(guard())await this.#move(record.key,'STOPPED','APP_STOP_UNCONFIRMED',{stop_status:'UNCONFIRMED',error:errorInfo(error,'STOP_UNCONFIRMED')});
+      if(guard())await this.#move(record.key,'STOPPED','APP_STOP_UNCONFIRMED',{stop_status:'UNCONFIRMED',stop_retry_at:Date.now()+Number(this.config.resumeRetryMs??30000),error:errorInfo(error,'STOP_UNCONFIRMED')});
     } finally {session?.close();}
   }
   async control(_path,c,transport) {
@@ -136,7 +144,9 @@ export class DriveDispatchController {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(body?.schema!=='selfrun-server-dispatch-v1')throw new Error('invalid dispatch schema');
     if(!Array.isArray(body.profile_operations)||!body.prompt||!body.project_url)throw new Error('invalid dispatch payload');
-    return this.repository.ingest(path,body);
+    const record=await this.repository.ingest(path,body);
+    if(['CANCELLED','SUPERSEDED'].includes(record.body.client_status))this.#detach(record.key);
+    return record;
   }
   async ingest(path,body,transport) {
     const r=await this.#ingestRecord(path,body);
@@ -184,7 +194,13 @@ export class DriveDispatchController {
       await this.repository.flushCurrent(transport,key);return;
     }
     if(terminal(r))return;
-    if(!await this.#fresh(key,transport))return;
+    if(!await this.#fresh(key,transport)) {
+      const current=this.repository.get(key),control=this.repository.control(current.task_id);
+      if(current.state==='STOPPED'&&control?.state==='STOPPED'&&control.request_id===current.request_id
+          &&control.turn_id===current.turn_id&&current.stop_status!=='CONFIRMED'&&Number(current.stop_retry_at||0)<=Date.now())
+        await this.#stopOwned(current,null,control);
+      await this.repository.flushCurrent(transport,key);return;
+    }
     r=this.repository.get(key);
     if(r.state==='BLOCKED'&&r.blocked_epoch===r.control_epoch)return;
     if(r.retry_at>Date.now())return;

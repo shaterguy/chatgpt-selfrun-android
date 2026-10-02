@@ -88,7 +88,7 @@ export class DriveDispatchTransport {
     if (!response.ok) throw new Error('Drive resolve HTTP ' + response.status + ': ' + text.slice(0, 500));
     const files = JSON.parse(text || '{}').files || [];
     const exact = files.find((f) => f.name === name);
-    if (!exact?.id) throw new Error('Drive dispatch file not found: ' + name);
+    if (!exact?.id) throw Object.assign(new Error('Drive dispatch file not found: ' + name),{code:'DRIVE_FILE_NOT_FOUND'});
     this.ids.set(name, exact.id);
     return exact.id;
   }

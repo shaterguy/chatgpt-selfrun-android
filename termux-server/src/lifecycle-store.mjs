@@ -1,5 +1,5 @@
 import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
-import { audit, canonicalUrl, initialRecord, keyFor, projection, transition } from './lifecycle.mjs';
+import { audit, canonicalUrl, initialRecord, keyFor, projection, transition, restoreObserver } from './lifecycle.mjs';
 
 // A single durable snapshot owns both current records and the publication outboxes.
 // Audit/Drive writes are projections; neither can make an uncommitted transition authoritative.
@@ -15,10 +15,9 @@ export class LifecycleStore {
       this.history=await readLifecycleHistory(this.store.config?.eventsFile);
       this.legacyPrompt=prompt;
       const next=structuredClone(this.data);let restored=false;
-      for(const r of Object.values(next.requests))if(['COMMITTED','COMPLETED'].includes(r.state)&&r.conversation_url) {
-        // Previous releases treated a Result commit as observer termination.
-        // Restore observation only; the persisted conversation is never submitted again.
-        r.state='ATTACHING';r.submission_confirmed=true;r.response_status='UNKNOWN';restored=true;
+      for(const [key,record] of Object.entries(next.requests)) {
+        const value=restoreObserver(record,next.controls[record.task_id]);
+        if(value!==record){next.requests[key]=value;restored=true;}
       }
       if(restored)await this.save(next);
       for(const r of this.records())if((this.history.audits.get(r.key)||0)>r.revision)this.integrityFaults.add(r.key);
@@ -56,7 +55,7 @@ export class LifecycleStore {
       if(old) {
         if(body.dispatch_attempt<old.dispatch_attempt) return structuredClone(old);
         const next=structuredClone(this.data);
-        const r=next.requests[key];
+        let r=next.requests[key];
         r.path=path;
         const newerAttempt=body.dispatch_attempt>r.dispatch_attempt;
         r.dispatch_attempt=body.dispatch_attempt;
@@ -68,11 +67,16 @@ export class LifecycleStore {
         if(r.intent&&(r.body.prompt!==body.prompt||JSON.stringify(r.body.profile_operations)!==JSON.stringify(body.profile_operations)))
           throw new Error('accepted request input/profile is immutable');
         r.body={...r.body,...body};
+        if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&r.state!=='CANCELLED') {
+          const previous=r.state;
+          r=transition(r,'CANCELLED','CLIENT_CANCELLED_INGRESS',{run_generation:r.run_generation+1});
+          next.requests[key]=r;next.events.push(audit(r,previous,r.reason));
+        }
         next.outbox[key]={revision:r.revision,path,body:projection(r)};
         await this.save(next);
         return structuredClone(r);
       }
-      const next=structuredClone(this.data);let r=migrateLegacy(initialRecord(path,body),this.history,this.legacyPrompt||'');
+      const next=structuredClone(this.data);let r=restoreObserver(migrateLegacy(initialRecord(path,body),this.history,this.legacyPrompt||''),next.controls[body.task_id]);
       const control=next.controls[r.task_id];
       if(control&&control.control_epoch>=r.control_epoch&&!['COMMITTED','COMPLETED','CANCELLED'].includes(r.state)) {
         const matching=control.turn_id===r.turn_id&&control.request_id===r.request_id;
@@ -130,7 +134,8 @@ export class LifecycleStore {
       const sameRunningIdentity=prior&&prior.state==='RUNNING'&&c.state==='RUNNING'
         &&prior.turn_id===c.turn_id&&prior.request_id===c.request_id;
       for(const [key,old] of Object.entries(next.requests)) {
-        if(old.task_id!==c.task_id||['COMMITTED','COMPLETED','CANCELLED'].includes(old.state)) continue;
+        if(old.task_id!==c.task_id||['COMMITTED','COMPLETED'].includes(old.state)
+          ||(old.state==='CANCELLED'&&!(c.state==='STOPPED'&&old.request_id===c.request_id&&old.turn_id===c.turn_id)))continue;
         const matching=old.request_id===c.request_id&&old.turn_id===c.turn_id;
         let state=old.state;
         if(c.state==='STOPPED'||c.state==='DONE') state='STOPPED';
@@ -139,6 +144,7 @@ export class LifecycleStore {
         const r=transition(old,state,'CONTROL_'+c.state,{
           control_epoch:c.control_epoch,control_state:c.state,
           run_generation:preserveGeneration?old.run_generation:old.run_generation+1,
+          ...(c.state==='STOPPED'&&matching?{stop_status:'PENDING',stop_control_epoch:c.control_epoch,stop_retry_at:0}:{}),
         });
         next.requests[key]=r;next.events.push(audit(r,old.state,r.reason));
         next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};

@@ -120,7 +120,9 @@ test('execution: an unconfirmed STOP retries without resubmitting',async()=>{
   const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
   f.browser.quiesce=async()=>{throw new Error('temporary stop transport error');};
   await f.stop();assert.equal(f.record().stop_status,'UNCONFIRMED');
-  f.browser.quiesce=quiesce;await f.controller.tick(f.transport);
+  f.browser.quiesce=quiesce;
+  await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
+  await f.controller.tick(f.transport);
   assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
 });
 test('execution: migration does not reactivate an observer after authoritative DONE',async()=>{
