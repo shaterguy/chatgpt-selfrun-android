@@ -15,8 +15,8 @@ class Element {
   this.text=spec.text==='$PROMPT'?prompt:(spec.text||'');this.removed=false;
   this.children=(spec.children||[]).map(child=>new Element(child,prompt,this));
  }
- get textContent(){return [this.text,...this.children.filter(n=>!n.removed).map(n=>n.textContent)].filter(Boolean).join(' ');}
- get innerText(){return this.textContent;}
+ get textContent(){return [this.text,...this.children.filter(n=>!n.removed).map(n=>n.textContent)].join('');}
+ get innerText(){return [this.text,...this.children.filter(n=>!n.removed).map(n=>n.innerText)].filter(Boolean).join(' ');}
  getAttribute(name){return this.attrs[name]??null;}
  get id(){return this.attrs.id||'';}
  cloneNode(){return new Element(this.toSpec(),'');}
