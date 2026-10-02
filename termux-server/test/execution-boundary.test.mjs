@@ -97,3 +97,46 @@ test('execution: next app request ends the preceding observer without interpreti
   assert.equal(observer.signal.aborted,true); assert.equal(f.sends,0);
   assert.equal(f.rows.get(nextPath).server_status,'READY_TO_SUBMIT');
 });
+
+test('execution: STOP survives abort-aware pending attach and retries owned cleanup',async()=>{
+  const f=fixture(),entered=deferred();const resume=f.browser.resume;
+  f.browser.resume=async({signal})=>{
+    entered.resolve();
+    await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('attach aborted')),{once:true}));
+  };
+  const opening=f.existing();await entered.promise;await f.stop();await opening;
+  f.browser.resume=resume;await f.controller.tick(f.transport);
+  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+});
+test('execution: persisted STOP cleanup is restored after the control transaction crash gap',async()=>{
+  const f=fixture();await f.existing();
+  f.control={...f.control,state:'STOPPED',control_epoch:2};
+  await f.controller.repository.applyControl(f.control);
+  await f.controller.quiesceForStandby();f.controller=f.recreate();
+  await f.controller.tick(f.transport);
+  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+});
+test('execution: an unconfirmed STOP retries without resubmitting',async()=>{
+  const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
+  f.browser.quiesce=async()=>{throw new Error('temporary stop transport error');};
+  await f.stop();assert.equal(f.record().stop_status,'UNCONFIRMED');
+  f.browser.quiesce=quiesce;await f.controller.tick(f.transport);
+  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+});
+test('execution: migration does not reactivate an observer after authoritative DONE',async()=>{
+  const f=fixture();await f.existing();await f.controller.quiesceForStandby();
+  const snapshot=f.store.snapshot(),r=snapshot.lifecycle.requests[keyFor(f.body)];
+  r.state='COMPLETED';r.control_state='RUNNING';r.result_state='COMMITTED';
+  f.control={...f.control,state:'DONE',control_epoch:2};snapshot.lifecycle.controls[f.body.task_id]=f.control;
+  await f.store.patch(snapshot);f.controller=f.recreate();await f.controller.tick(f.transport);
+  assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,0);
+});
+test('execution: imported legacy Result-terminal state resumes only observation under RUNNING',async()=>{
+  const f=fixture();await f.existing();await f.controller.quiesceForStandby();
+  const body=structuredClone(f.rows.get(f.path));body.lifecycle_record.state='COMPLETED';
+  body.lifecycle_record.result_state='COMMITTED';body.lifecycle_state='COMPLETED';
+  const {MemoryStore}=await import('./helpers/lifecycle-fixture.mjs');
+  f.store=new MemoryStore();f.controller=f.recreate();f.rows.set(f.path,body);
+  await f.controller.ingest(f.path,body,f.transport);
+  assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,1);
+});
