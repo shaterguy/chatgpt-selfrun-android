@@ -98,7 +98,10 @@ export class LifecycleStore {
   }
   matches(key,t) {
     const r=this.data.requests[key];
-    return !!r&&r.run_generation===t.run&&r.control_epoch===t.epoch&&r.browser_generation===t.browser;
+    // control_epoch can advance for a RUNNING metadata refresh of the same logical
+    // request. run_generation is the execution fence; browser_generation fences
+    // stale CDP sessions.
+    return !!r&&r.run_generation===t.run&&r.browser_generation===t.browser;
   }
   current(key,t) {
     const r=this.data.requests[key];
@@ -115,13 +118,19 @@ export class LifecycleStore {
       }
       const next=structuredClone(this.data);
       next.controls[c.task_id]=structuredClone(c);
+      const sameRunningIdentity=prior&&prior.state==='RUNNING'&&c.state==='RUNNING'
+        &&prior.turn_id===c.turn_id&&prior.request_id===c.request_id;
       for(const [key,old] of Object.entries(next.requests)) {
         if(old.task_id!==c.task_id||['COMMITTED','COMPLETED','CANCELLED'].includes(old.state)) continue;
         const matching=old.request_id===c.request_id&&old.turn_id===c.turn_id;
         let state=old.state;
         if(c.state==='STOPPED'||c.state==='DONE') state='STOPPED';
         else if(c.state!=='RUNNING'||!matching) state='PAUSED';
-        const r=transition(old,state,'CONTROL_'+c.state,{control_epoch:c.control_epoch,control_state:c.state,run_generation:old.run_generation+1});
+        const preserveGeneration=sameRunningIdentity&&matching&&old.control_state==='RUNNING';
+        const r=transition(old,state,'CONTROL_'+c.state,{
+          control_epoch:c.control_epoch,control_state:c.state,
+          run_generation:preserveGeneration?old.run_generation:old.run_generation+1,
+        });
         next.requests[key]=r;next.events.push(audit(r,old.state,r.reason));
         next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
       }
