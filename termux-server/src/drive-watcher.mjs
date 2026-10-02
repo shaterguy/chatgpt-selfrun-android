@@ -1,5 +1,6 @@
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const fingerprint=file=>file.modTime+'|'+file.size;
+const fingerprint=file=>file?file.modTime+'|'+file.size:null;
+const controlToken=control=>JSON.stringify(control?[control.task_id,control.turn_id,control.request_id,control.state,control.control_epoch]:null);
 const recent=(file,cutoff)=>{
   const raw=String(file.modTime||'');
   if(!/^\d{4}-\d{2}-\d{2}T/.test(raw))return true;
@@ -9,7 +10,7 @@ const recent=(file,cutoff)=>{
 export class DriveDispatchWatcher {
   constructor({transport,controller,config,canDispatch=null}) {
     Object.assign(this,{transport,controller,config});
-    this.canDispatch=canDispatch||(()=>true);this.running=false;this.scanning=false;this.ticking=false;this.seen=new Map();
+    this.canDispatch=canDispatch||(()=>true);this.running=false;this.scanning=false;this.ticking=false;this.seen=new Map();this.deferred=new Map();
   }
   async start() {
     if(this.running)return;this.running=true;
@@ -27,6 +28,8 @@ export class DriveDispatchWatcher {
       const cutoff=Date.now()-Math.max(0,Number(this.config.dispatchRecoveryMs||7200000));
       const files=(await this.transport.list()).filter(file=>recent(file,cutoff));
       const listedControls=new Map(files.filter(f=>f.path.startsWith('__SELFRUN_CONTROL__')).map(f=>[f.path,f]));
+      const present=new Set(files.map(f=>f.path));
+      for(const path of this.deferred.keys())if(!present.has(path))this.deferred.delete(path);
       for(const file of files) {
         if(!this.canDispatch())return;
         const fp=fingerprint(file);
@@ -38,7 +41,11 @@ export class DriveDispatchWatcher {
           continue;
         }
         if(!file.path.startsWith('__SELFRUN_DISPATCH__'))continue;
-        const body=await this.transport.read(file.path);
+        let deferred=this.deferred.get(file.path);
+        if(deferred?.fp!==fp){this.deferred.delete(file.path);deferred=null;}
+        if(deferred&&deferred.controlFp===fingerprint(listedControls.get(deferred.controlPath))
+          &&deferred.controlToken===controlToken(this.controller.controlForTask(deferred.body.task_id)))continue;
+        const body=deferred?structuredClone(deferred.body):await this.transport.read(file.path);
         if(!this.canDispatch())return;
         if(body.schema!=='selfrun-server-dispatch-v1'){this.seen.set(file.path,fp);continue;}
         const controlPath='__SELFRUN_CONTROL__'+body.task_id+'.json';
@@ -57,9 +64,11 @@ export class DriveDispatchWatcher {
           control=this.controller.controlForTask(body.task_id);
         }
         if(control&&control.state!=='UNKNOWN'&&(control.turn_id!==body.turn_id||control.request_id!==body.request_id)) {
-          // Keep it eligible for a later control update; IDs route app signals only.
+          // Reconsider either signal when it changes, without rereading unchanged historical files on every poll.
+          this.deferred.set(file.path,{fp,body:structuredClone(body),controlPath,controlFp,controlToken:controlToken(control)});
           continue;
         }
+        this.deferred.delete(file.path);
         await (this.controller.ingestDurable?.(file.path,body,this.transport)??this.controller.ingest(file.path,body,this.transport));
         this.seen.set(file.path,fp);
       }
