@@ -1,4 +1,4 @@
-import { appendTurnStartDirective } from './prompt-directives.mjs';
+import { appendTurnStartDirective, humanizeSelfRunPrompt } from './prompt-directives.mjs';
 import { LifecycleStore } from './lifecycle-store.mjs';
 import { canonicalUrl, classifyAttach, cursor, digest, keyFor, newIntent, projection, sameCursor } from './lifecycle.mjs';
 import { readResult } from './result-reconciler.mjs';
@@ -7,7 +7,6 @@ const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','V
 const responseKey=p=>{const value=cursor(p);delete value.streaming;return JSON.stringify(value);};
 const terminal = r => ['COMPLETED','CANCELLED'].includes(r.state);
 const errorInfo = (error,code) => ({code:code||error?.code||'BROWSER_ERROR',message:String(error?.message||error).slice(0,300)});
-const START_FOLLOWUP_PROMPT='작업 시작';
 
 export class DriveDispatchController {
   constructor({browser,stateStore,config,promptDirectives=null,canDispatch=()=>true}) {
@@ -63,8 +62,7 @@ export class DriveDispatchController {
     }
     const sameRunningIdentity=old&&old.state==='RUNNING'&&c.state==='RUNNING'
       &&old.turn_id===c.turn_id&&old.request_id===c.request_id;
-    // A RUNNING metadata/epoch refresh for the same logical request must not abort
-    // an in-flight browser POST. STOP/PAUSE/DONE or identity changes still fence immediately.
+    // Same-request RUNNING refreshes update metadata only; they must not abort an in-flight browser operation.
     if(!sameRunningIdentity)
       for(const r of this.repository.records()) if(r.task_id===c.task_id) this.#detach(r.key);
     await this.repository.applyControl(c);
@@ -81,7 +79,6 @@ export class DriveDispatchController {
   #detach(key) {
     const a=this.sessions.get(key);
     if(!a)return;
-    if(a.startFollowupTimer){clearTimeout(a.startFollowupTimer);a.startFollowupTimer=null;}
     a.abort.abort(new Error('lifecycle ownership changed'));
     a.session?.close();
     this.sessions.delete(key);
@@ -94,20 +91,6 @@ export class DriveDispatchController {
   async #directives() {
     return this.promptDirectives?.current?this.promptDirectives.current():
       {turnStartDirective:this.config.turnStartDirective,turnContinueDirective:this.config.recoveryPrompt};
-  }
-  #startFollowupEnabled() {return this.config.startFollowupEnabled!==false;}
-  #startFollowupDelayMs() {
-    const value=Number(this.config.startFollowupDelayMs);
-    return Number.isFinite(value)&&value>=0?value:5000;
-  }
-  #startFollowupRetryMs() {
-    const value=Number(this.config.startFollowupRetryMs);
-    return Number.isFinite(value)&&value>=100?value:1000;
-  }
-  #initialAssistantResponseObserved(probe) {
-    return !!String(probe?.assistantMessageId||'').trim()
-      || Number(probe?.assistantTextLength||0)>0
-      || Number(probe?.responseTextLength||0)>0;
   }
   async #ingestRecord(path,body) {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
@@ -145,11 +128,6 @@ export class DriveDispatchController {
     if(this.standby||!this.canDispatch())return 'UNAVAILABLE';
     const r=this.repository.get(key), result=await readResult(transport,r);
     if(this.standby||!this.canDispatch())return 'UNAVAILABLE';
-    if(result.state==='COMMITTED'&&['PENDING','SENT'].includes(r.start_followup_state)) {
-      if(!r.early_result_committed)
-        await this.#move(key,r.state,'RESULT_DEFERRED_START_FOLLOWUP',{early_result_committed:true},token);
-      return 'NOT_COMMITTED';
-    }
     if(token&&!this.repository.current(key,token))return result.state;
     if(result.state==='COMMITTED'&&!terminal(this.repository.get(key))) {
       await this.#move(key,'COMMITTED','RESULT_EXACT_READBACK',{result_state:'COMMITTED',error:null});
@@ -210,7 +188,6 @@ export class DriveDispatchController {
       if(!a)return;
     }
     r=this.repository.get(key);
-    if(r.start_followup_state==='PENDING')this.#scheduleStartFollowup(key,transport);
     if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)) {
       if(r.intent.outcome==='ABSENT')await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
       else await this.#reconcile(key,transport);return;
@@ -218,7 +195,7 @@ export class DriveDispatchController {
     if(r.state==='PREPARED'&&(['CREATE_REQUESTED','SEND_REQUESTED'].includes(r.body.client_status)
         || (attemptCancelled&&controlRunning))) {
       const directives=await this.#directives();
-      const prompt=appendTurnStartDirective(r.body.prompt,directives.turnStartDirective);
+      const prompt=appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective);
       await this.#post(key,transport,'initial',prompt);return;
     }
     if(recoveryStates.has(r.state)||r.state==='STALLED') {
@@ -248,7 +225,7 @@ export class DriveDispatchController {
       attach_attempts:r.failure_epoch===r.control_epoch?r.attach_attempts:0,retry_at:0,error:null},beforeOpen);
     if(!r)return null;
     const token=this.repository.token(key),abort=new AbortController();
-    const pending={abort,token,session:null,target:null,monitoring:false,startFollowupTimer:null};
+    const pending={abort,token,session:null,target:null,monitoring:false};
     this.sessions.set(key,pending);
     const guard=()=>this.sessions.get(key)===pending&&!abort.signal.aborted&&this.repository.current(key,token)&&!this.standby&&this.canDispatch();
     try {
@@ -256,7 +233,7 @@ export class DriveDispatchController {
       if(mode==='prepare') {
         const directives=await this.#directives();
         attached=await this.browser.prepare({projectUrl:r.body.project_url,
-          prompt:appendTurnStartDirective(r.body.prompt,directives.turnStartDirective),signal:abort.signal});
+          prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal});
       } else if(mode==='target') {
         attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal});
       } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal});
@@ -276,36 +253,6 @@ export class DriveDispatchController {
       await this.repository.flush(transport);
       return null;
     }
-  }
-  #scheduleStartFollowup(key,transport,overrideDelay=null) {
-    if(!this.#startFollowupEnabled())return;
-    const a=this.sessions.get(key),r=this.repository.get(key);
-    if(!a?.guard?.()||r?.start_followup_state!=='PENDING'||a.startFollowupTimer)return;
-    const delay=overrideDelay===null
-      ?Math.max(0,Number(r.start_followup_due_at||0)-Date.now())
-      :Math.max(0,Number(overrideDelay||0));
-    a.startFollowupTimer=setTimeout(()=>{
-      a.startFollowupTimer=null;
-      void this.#serial(key,()=>this.#tryStartFollowup(key,transport,a.token)).catch(error=>{
-        console.error(JSON.stringify({event:'START_FOLLOWUP_ERROR',key,error:String(error?.message||error).slice(0,300)}));
-      });
-    },delay);
-    a.startFollowupTimer.unref?.();
-  }
-  async #tryStartFollowup(key,transport,token) {
-    const a=this.sessions.get(key),r=this.repository.get(key);
-    if(!a?.guard?.()||!this.repository.current(key,token)||r?.start_followup_state!=='PENDING')return;
-    const due=Number(r.start_followup_due_at||0);
-    if(due>Date.now()){this.#scheduleStartFollowup(key,transport);return;}
-    if(!await this.#fresh(key,transport)||!a.guard())return;
-    const probe=await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal});
-    if(!a.guard())return;
-    if(!this.#initialAssistantResponseObserved(probe)
-        ||probe.streaming||probe.stopButtonVisible||probe.paused) {
-      this.#scheduleStartFollowup(key,transport,this.#startFollowupRetryMs());
-      return;
-    }
-    await this.#post(key,transport,'start',START_FOLLOWUP_PROMPT);
   }
   #monitor(key,transport) {
     const a=this.sessions.get(key);
@@ -341,25 +288,10 @@ export class DriveDispatchController {
     const changed=!r.cursor||!sameCursor(r.cursor,p);
     if(r.state==='BLOCKED'&&!changed)return;
     if(changed) {
-      const startFollowupActive=r.start_followup_state==='SENT';
-      const startFollowupComplete=startFollowupActive&&!p.streaming&&!p.stopButtonVisible&&!p.paused;
-      await this.#move(key,startFollowupComplete?'WAIT_RESULT':'OBSERVING',
-        startFollowupComplete?'START_FOLLOWUP_RESPONSE_COMPLETE':'RESPONSE_PROGRESS',{
-          cursor:cursor(p),last_progress_at:Date.now(),error:null,
-          ...(startFollowupActive?{start_followup_response_started:true}:{}),
-          ...(startFollowupComplete?{start_followup_state:'DONE',start_followup_completed_at:Date.now()}:{}),
-        },token);
-      await this.repository.flush(transport);
-      if(startFollowupComplete)await this.#result(key,transport,token);
-      return;
-    }
-    if(r.start_followup_state==='SENT'&&r.start_followup_response_started
-        &&!p.streaming&&!p.stopButtonVisible&&!p.paused) {
-      await this.#move(key,'WAIT_RESULT','START_FOLLOWUP_RESPONSE_COMPLETE',{
-        start_followup_state:'DONE',start_followup_completed_at:Date.now(),
+      await this.#move(key,'OBSERVING','RESPONSE_PROGRESS',{
+        cursor:cursor(p),last_progress_at:Date.now(),error:null,
       },token);
       await this.repository.flush(transport);
-      await this.#result(key,transport,token);
       return;
     }
     const stalled=Date.now()-r.last_progress_at>=Number(this.config.stallAfterMs||600000);
@@ -408,8 +340,7 @@ export class DriveDispatchController {
   }
   async #post(key,transport,kind,prompt,retry=false) {
     if(!prompt)throw new Error('configured input required');
-    const bypassResult=kind==='start';
-    if(!bypassResult&&await this.#result(key,transport)!=='NOT_COMMITTED')return;
+    if(await this.#result(key,transport)!=='NOT_COMMITTED')return;
     if(!await this.#fresh(key,transport))return;
     const a=this.sessions.get(key);
     if(!a?.guard())return;
@@ -424,11 +355,11 @@ export class DriveDispatchController {
     if(!r)return;
     await this.repository.flushCurrent(transport,key);
     // Final authority read immediately before the side effect, after the current request's durable Drive projection.
-    if((!bypassResult&&await this.#result(key,transport,a.token)!=='NOT_COMMITTED')
+    if(await this.#result(key,transport,a.token)!=='NOT_COMMITTED'
         ||!await this.#fresh(key,transport)||!a.guard())return;
     try {
-      await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
-        profileOperations:kind==='start'?[]:r.body.profile_operations,signal:a.abort.signal,guard:a.guard,
+      const submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
+        profileOperations:r.body.profile_operations,signal:a.abort.signal,guard:a.guard,
         onRequest:async evidence=>{
           if(!a.guard())throw new Error('stale POST callback');
           const current=this.repository.get(key);
@@ -436,6 +367,14 @@ export class DriveDispatchController {
           await this.#move(key,current.state,'POST_REQUEST_IDENTIFIED',{intent:{...current.intent,...evidence}},a.token);
           if(!a.guard())throw new Error('stale POST callback');
         }});
+      const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
+      if(submittedUrl&&a.guard()) {
+        const current=this.repository.get(key);
+        if(!current.conversation_url) {
+          await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:submittedUrl},a.token);
+          await this.repository.flushCurrent(transport,key);
+        }
+      }
     } catch(error) {
       if(a.guard())await this.#move(key,'POST_UNCERTAIN','POST_OUTCOME_UNCERTAIN',
         {intent:{...this.repository.get(key).intent,outcome:'UNKNOWN',absence_proof:error.absenceProof||null,released:!!error.released},error:errorInfo(error,'POST_UNCERTAIN')},a.token);
@@ -459,22 +398,11 @@ export class DriveDispatchController {
       const url=canonicalUrl(outcome.probe?.url);
       if(!url)throw new Error('confirmed input lacks canonical conversation');
       const intentKind=r.intent.kind,now=Date.now();
-      const startPatch=intentKind==='initial'&&this.#startFollowupEnabled()?{
-        start_followup_state:'PENDING',
-        start_followup_due_at:Number(r.intent.created_at||now)+this.#startFollowupDelayMs(),
-        start_followup_response_started:false,
-        early_result_committed:false,
-      }:intentKind==='start'?{
-        start_followup_state:'SENT',
-        start_followup_sent_at:now,
-        start_followup_response_started:false,
-      }:{};
       await this.#move(key,'OBSERVING','POST_USER_MESSAGE_CONFIRMED',{
         intent:{...r.intent,outcome:'CONFIRMED',message_id:outcome.messageId||r.intent.message_id},
         ...(intentKind==='recovery'?{last_recovered_response:responseKey(outcome.probe),last_recovery_epoch:r.control_epoch}:{}),
-        ...startPatch,conversation_url:url,cursor:cursor(outcome.probe),last_progress_at:now,error:null},a.token);
+        conversation_url:url,cursor:cursor(outcome.probe),last_progress_at:now,error:null},a.token);
       await this.repository.flushCurrent(transport,key);
-      if(intentKind==='initial')this.#scheduleStartFollowup(key,transport);
       this.#monitor(key,transport);
     } else if(outcome.state==='ABSENT'&&r.intent.sends<2) {
       await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...r.intent,outcome:'ABSENT'}},a.token);

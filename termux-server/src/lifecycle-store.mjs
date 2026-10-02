@@ -98,9 +98,6 @@ export class LifecycleStore {
   }
   matches(key,t) {
     const r=this.data.requests[key];
-    // control_epoch can advance for a RUNNING metadata refresh of the same logical
-    // request. run_generation is the execution fence; browser_generation fences
-    // stale CDP sessions.
     return !!r&&r.run_generation===t.run&&r.browser_generation===t.browser;
   }
   current(key,t) {

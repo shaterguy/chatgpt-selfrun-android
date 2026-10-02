@@ -64,10 +64,7 @@ function fixture(options={}) {
     },
     monitor:async args=>{f.observations.push(args);await new Promise(resolve=>args.signal.addEventListener('abort',resolve,{once:true}));return {status:'ABORTED'};},
   };
-  const config={maxAttachAttempts:3,resumeRetryMs:1,stallAfterMs:1,recoveryPrompt:'continue test',
-    startFollowupEnabled:options.startFollowupEnabled??false,
-    startFollowupDelayMs:options.startFollowupDelayMs??5000,
-    startFollowupRetryMs:options.startFollowupRetryMs??1000};
+  const config={maxAttachAttempts:3,resumeRetryMs:1,stallAfterMs:1,recoveryPrompt:'continue test'};
   f.recreate=()=>new DriveDispatchController({browser:f.browser,stateStore:f.store,config});
   f.controller=f.recreate();
   f.record=()=>f.controller.repository.get(keyFor(f.body));

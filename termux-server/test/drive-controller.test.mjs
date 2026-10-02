@@ -9,71 +9,12 @@ test('CREATE_REQUESTED is sufficient authority for server-owned prepare and subm
  assert.equal(f.record().state,'OBSERVING');
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
-test('initial conversation waits for the first assistant response before sending one plain 작업 시작 follow-up',async()=>{
- const f=fixture({startFollowupEnabled:true,startFollowupDelayMs:0,startFollowupRetryMs:100});
- Object.assign(f.probe,{
-   streaming:false,stopButtonVisible:false,paused:false,
-   assistantCount:0,assistantTextLength:0,assistantMessageId:null,
-   responseTextLength:0,responseFingerprint:'',
- });
- await f.ingest();
+test('initial conversation sends exactly one prompt and has no automatic follow-up',async()=>{
+ const f=fixture();await f.ingest();
  assert.equal(f.sends,1);
- assert.equal(f.record().start_followup_state,'PENDING');
- f.result(true);
- await new Promise(resolve=>setTimeout(resolve,25));
- assert.equal(f.sends,1,'follow-up must not race ahead of the first assistant response');
- assert.equal(f.record().start_followup_state,'PENDING');
- Object.assign(f.probe,{
-   assistantCount:1,assistantTextLength:900,assistantMessageId:'a1',
-   responseTextLength:850,responseFingerprint:'first-response',
- });
- await new Promise(resolve=>setTimeout(resolve,150));
- assert.equal(f.sends,2);
- assert.equal(f.sent[1].prompt,'작업 시작');
- assert.equal(f.sent[1].kind,'start');
- assert.deepEqual(f.sent[1].profileOperations,[]);
- assert.equal(f.record().start_followup_state,'SENT');
- assert.notEqual(f.record().state,'COMPLETED');
- await new Promise(resolve=>setTimeout(resolve,5));
- assert.equal(f.sends,2);
- Object.assign(f.probe,{
-   assistantCount:2,assistantTextLength:2000,assistantMessageId:'a2',
-   responseTurnId:'response-2',responseTextLength:2000,responseFingerprint:'after-start',
- });
- await f.observe({streaming:false,stopButtonVisible:false,paused:false,status:'COMPLETED'});
- assert.equal(f.record().start_followup_state,'DONE');
- assert.equal(f.record().state,'COMPLETED');
- assert.equal(f.sends,2);
-});
-test('same RUNNING control epoch refresh does not abort an in-flight start follow-up',async()=>{
- const f=fixture({startFollowupEnabled:true,startFollowupDelayMs:0,startFollowupRetryMs:100});
- Object.assign(f.probe,{
-   streaming:false,stopButtonVisible:false,paused:false,
-   assistantCount:0,assistantTextLength:0,assistantMessageId:null,
-   responseTextLength:0,responseFingerprint:'',
- });
- const entered=deferred(),release=deferred();
- f.onSubmit=async args=>{
-   if(args.kind!=='start')return;
-   entered.resolve();
-   await release.promise;
- };
- await f.ingest();
- Object.assign(f.probe,{
-   assistantCount:1,assistantTextLength:568,assistantMessageId:'a1',
-   responseTextLength:551,responseFingerprint:'first-response',
- });
- await entered.promise;
- f.control={...f.control,state:'RUNNING',control_epoch:2};
- await f.controller.control(null,f.control,f.transport);
- assert.equal(f.record().control_state,'RUNNING');
- assert.equal(f.record().control_epoch,2);
- release.resolve();
  await new Promise(resolve=>setTimeout(resolve,50));
- assert.equal(f.sends,2);
- assert.equal(f.sent[1].prompt,'작업 시작');
+ assert.equal(f.sends,1);
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
- assert.equal(f.record().start_followup_state,'SENT');
 });
 test('matching RUNNING Task Control recovers an attempt-level client cancellation',async()=>{
  const f=fixture();

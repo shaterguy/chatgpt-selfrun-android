@@ -250,22 +250,18 @@ function inputExpression(prompt) {
     let composer=null;
     for(const selector of selectors){composer=[...document.querySelectorAll(selector)].find(visible);if(composer)break;}
     if(!composer)return {status:'NO_COMPOSER'};
+    const norm=s=>String(s??'').replace(/[\\u200B-\\u200D\\uFEFF]/g,'').replace(/\\u00a0/g,' ').replace(/\\r\\n?/g,'\\n').replace(/[\\u2028\\u2029]/g,'\\n').trim();
+    const canonical=s=>norm(s).replace(/[ \\t]+/g,' ').replace(/ *\\n+ */g,'\\n');
     const expected=${expected};
+    const raw=()=>('value'in composer?composer.value:(composer.innerText||composer.textContent||''));
+    const same=()=>canonical(raw())===canonical(expected);
+    const fire=(type,inputType,data)=>{try{return composer.dispatchEvent(new InputEvent(type,{bubbles:true,cancelable:type==='beforeinput',inputType,data}));}catch(_){return composer.dispatchEvent(new Event(type,{bubbles:true,cancelable:type==='beforeinput'}));}};
+    const selectAll=()=>{composer.focus();const selection=window.getSelection();if(!selection)return false;const range=document.createRange();range.selectNodeContents(composer);selection.removeAllRanges();selection.addRange(range);return true;};
+    const nativeSet=value=>{const proto=Object.getPrototypeOf(composer);const own=Object.getOwnPropertyDescriptor(proto,'value');const base=typeof HTMLTextAreaElement!=='undefined'?Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value'):null;const setter=own?.set||base?.set;if(setter)setter.call(composer,value);else composer.value=value;fire('input','insertText',value);composer.dispatchEvent(new Event('change',{bubbles:true}));};
+    const execInsert=()=>{selectAll();try{document.execCommand('delete',false,null);}catch(_){}try{document.execCommand('insertText',false,expected);}catch(_){}};
     composer.focus();
-    if('value' in composer){
-      const proto=Object.getPrototypeOf(composer);
-      const own=Object.getOwnPropertyDescriptor(proto,'value');
-      const base=typeof HTMLTextAreaElement!=='undefined'?Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value'):null;
-      const setter=own?.set||base?.set;
-      if(setter)setter.call(composer,expected);else composer.value=expected;
-      composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:expected}));
-      composer.dispatchEvent(new Event('change',{bubbles:true}));
-    }else{
-      composer.replaceChildren(document.createTextNode(expected));
-      composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:expected}));
-    }
-    const raw=('value' in composer)?composer.value:(composer.innerText||composer.textContent||'');
-    return {status:raw===expected?'READY':'MISMATCH',length:String(raw).length};
+    if('value'in composer)nativeSet(expected);else execInsert();
+    return {status:same()?'READY':'MISMATCH',length:String(raw()).length};
   })()`;
 }
 
@@ -306,39 +302,116 @@ function submitExpression() {
   })()`;
 }
 
-function isConversationRequest(url, method) {
-  if (String(method || '').toUpperCase() !== 'POST') return false;
-  try {
-    const path = new URL(url).pathname.toLowerCase().replace(/\/+$/, '');
-    return path === '/backend-api/conversation'
-      || path === '/backend-api/f/conversation'
-      || path === '/backend-api/conversation/init';
-  } catch {
-    return false;
+
+export const REQUEST_PROFILE_ENGINE_VERSION='selfrun-request-profile-engine-v1';
+const REQUEST_PROFILE_CONTROL=Object.freeze(['model','thinking_effort','conversation_origin','service_tier']);
+
+export function normalizeProfileOperations(operations=[]) {
+  if(!Array.isArray(operations)||operations.length!==REQUEST_PROFILE_CONTROL.length)
+    throw new Error('Profile operation set is incomplete');
+  const seen=new Set(),out=[];
+  for(const operation of operations) {
+    const path=String(operation?.path||''),op=String(operation?.op||'').toUpperCase();
+    if(!REQUEST_PROFILE_CONTROL.includes(path)||seen.has(path))throw new Error('Profile operation is not allowlisted');
+    seen.add(path);
+    if(op==='SET') {
+      const value=String(operation?.value??'');
+      if(!value||value.length>128)throw new Error('Profile operation value is invalid');
+      out.push(['set',path,value]);
+    } else if(op==='REMOVE') out.push(['remove',path]);
+    else throw new Error('Unknown profile operation');
   }
+  if(seen.size!==REQUEST_PROFILE_CONTROL.length)throw new Error('Profile operation set is incomplete');
+  return out;
 }
 
-function applyProfileOperations(body, operations = []) {
-  const out = { ...body };
-  const allowed = new Set(['model', 'thinking_effort', 'conversation_origin', 'service_tier']);
-  for (const operation of operations) {
-    const path = String(operation?.path || '');
-    const op = String(operation?.op || '').toUpperCase();
-    if (!allowed.has(path)) throw new Error('Profile operation is not allowlisted');
-    if (op === 'SET') {
-      const value = String(operation.value ?? '');
-      out[path] = value;
-      if (path === 'model' && Object.prototype.hasOwnProperty.call(out, 'requested_default_model')) {
-        out.requested_default_model = value;
+export function requestProfileDocumentStartSource() {
+  const version=JSON.stringify(REQUEST_PROFILE_ENGINE_VERSION);
+  return `(()=>{
+    if(window.__selfrunRequestProfileEngine?.version===${version})return true;
+    const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
+    const state={operations:null,last:{ok:false,reason:'not_configured'}};
+    const norm=value=>String(value??'').trim().toLowerCase();
+    const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,100)};throw new Error('REQUEST_PROFILE:'+state.last.reason);};
+    const validateOps=operations=>{
+      if(!Array.isArray(operations)||operations.length!==CONTROL.length)fail('operation_count_invalid');
+      const seen=new Set(),out=[];
+      for(const raw of operations){
+        if(!Array.isArray(raw)||(raw.length!==2&&raw.length!==3))fail('operation_shape_invalid');
+        const kind=norm(raw[0]),path=String(raw[1]??'');
+        if(!CONTROL.includes(path)||seen.has(path))fail('control_allowlist_violation');
+        seen.add(path);
+        if(kind==='set'){
+          if(raw.length!==3||typeof raw[2]!=='string'||raw[2].length<1||raw[2].length>128)fail('control_value_invalid');
+          out.push(['set',path,raw[2]]);
+        }else if(kind==='remove'){
+          if(raw.length!==2)fail('remove_value_forbidden');
+          out.push(['remove',path]);
+        }else fail('unknown_operation');
       }
-    } else if (op === 'REMOVE') {
-      delete out[path];
-      if (path === 'model' && Object.prototype.hasOwnProperty.call(out, 'requested_default_model')) {
-        delete out.requested_default_model;
-      }
-    } else throw new Error('Unknown profile operation');
-  }
-  return out;
+      if(seen.size!==CONTROL.length)fail('operation_set_incomplete');
+      return out;
+    };
+    const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
+    const conversationRoute=url=>{try{
+      const path=new URL(url,location.href).pathname.toLowerCase().replace(/\\/+$/,'');
+      return path==='/backend-api/conversation'||path==='/backend-api/f/conversation';
+    }catch(_){return false;}};
+    const strip=object=>{const copy={...object};for(const key of CONTROL)delete copy[key];return copy;};
+    const patchObject=(body,url)=>{
+      if(!conversationRoute(url))fail('conversation_route_not_allowed');
+      if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))fail('unknown_conversation_schema');
+      if(!state.operations)fail('target_not_ready');
+      const before=JSON.stringify(strip(body)),output={...body};
+      for(const [kind,path,value] of state.operations){if(kind==='set')output[path]=value;else delete output[path];}
+      if(JSON.stringify(strip(output))!==before)fail('data_plane_changed');
+      state.last={ok:true,reason:'patched'};
+      return output;
+    };
+    const patchText=(url,method,text)=>{
+      if(norm(method)!=='post'||!sameOrigin(url)||!conversationRoute(url))return null;
+      if(typeof text!=='string')fail('non_text_conversation_body');
+      let body;try{body=JSON.parse(text);}catch(_){fail('invalid_conversation_json');}
+      return JSON.stringify(patchObject(body,url));
+    };
+    const nativeFetch=window.fetch.bind(window);
+    const fetchProbe=(input,init)=>{try{
+      const requestInput=typeof Request!=='undefined'&&input instanceof Request;
+      const url=requestInput?input.url:String(input??'');
+      const method=init&&init.method!==undefined?init.method:(requestInput?input.method:'GET');
+      return{url,method,eligible:norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url)};
+    }catch(_){return{url:'',method:'',eligible:false};}};
+    window.fetch=async function(input,init){
+      const probe=fetchProbe(input,init);
+      if(!probe.eligible)return nativeFetch(input,init);
+      let request;try{const source=typeof Request!=='undefined'&&input instanceof Request?input.clone():input;request=new Request(source,init);}catch(_){fail('request_construction_failed');}
+      let text;try{text=await request.clone().text();}catch(_){fail('request_body_unreadable');}
+      const patched=patchText(request.url,request.method,text);
+      if(patched===null)fail('target_patch_not_applied');
+      try{return nativeFetch(new Request(request,{body:patched}));}catch(_){fail('patched_request_construction_failed');}
+    };
+    const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send,metadata=new WeakMap();
+    XMLHttpRequest.prototype.open=function(method,url,...rest){metadata.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
+    XMLHttpRequest.prototype.send=function(body){const request=metadata.get(this)||{method:'',url:''};const patched=patchText(request.url,request.method,body);return nativeSend.call(this,patched===null?body:patched);};
+    window.__selfrunRequestProfileEngine={
+      version:${version},
+      configure:operations=>{state.operations=validateOps(operations);state.last={ok:true,reason:'target_ready'};return true;},
+      diagnostics:()=>({...state.last})
+    };
+    return true;
+  })()`;
+}
+
+function configureRequestProfileExpression(operations) {
+  const normalized=JSON.stringify(normalizeProfileOperations(operations));
+  const version=JSON.stringify(REQUEST_PROFILE_ENGINE_VERSION);
+  return `(()=>{const engine=window.__selfrunRequestProfileEngine;if(!engine||engine.version!==${version}||typeof engine.configure!=='function')throw new Error('REQUEST_PROFILE_ENGINE_UNAVAILABLE');engine.configure(${normalized});return engine.diagnostics?.()||{ok:true};})()`;
+}
+
+async function installRequestProfileEngine(session) {
+  const source=requestProfileDocumentStartSource();
+  await session.call('Page.addScriptToEvaluateOnNewDocument',{source});
+  await evaluate(session,source);
 }
 
 export class ChatGptBrowser {
@@ -408,6 +481,7 @@ export class ChatGptBrowser {
     await session.call('Runtime.enable');
     await session.call('Network.enable');
     await installDecorativeAnimationPause(session);
+    await installRequestProfileEngine(session);
 
     try {
       const before = await this.#prepareNewChat(session, projectUrl, signal);
@@ -448,6 +522,7 @@ export class ChatGptBrowser {
     await session.call('Runtime.enable');
     await session.call('Network.enable');
     await installDecorativeAnimationPause(session);
+    await installRequestProfileEngine(session);
 
     try {
       const probe = await this.#waitFor(session, (p) => p.loginPage
@@ -484,8 +559,10 @@ export class ChatGptBrowser {
     }
   }
 
-  async #submitWithProfile({ session, profileOperations, signal, waitForMessagePost = false, guard = () => true, onRequest = null, conversationUrl = '' }) {
+  async #submitWithProfile({ session, profileOperations, signal, guard = () => true, conversationUrl = '', baseline = {} }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
+    await evaluate(session, requestProfileDocumentStartSource());
+    await evaluate(session, configureRequestProfileExpression(profileOperations));
 
     const sendReadyStarted = Date.now();
     let sendReady = null;
@@ -496,140 +573,35 @@ export class ChatGptBrowser {
       await delay(150, signal);
     }
     if (!sendReady?.ready) {
-      throw new Error(`Composer send control not ready: ${sendReady?.status || 'unknown'}`);
+      const error=new Error(`Composer send control not ready: ${sendReady?.status || 'unknown'}`);
+      error.released=false;
+      throw error;
     }
 
-    await session.call('Fetch.enable', {
-      patterns: [
-        { urlPattern: 'https://chatgpt.com/backend-api/conversation', requestStage: 'Request' },
-        { urlPattern: 'https://chatgpt.com/backend-api/f/conversation', requestStage: 'Request' },
-        { urlPattern: 'https://chatgpt.com/backend-api/conversation/init', requestStage: 'Request' },
-      ],
-    });
-
-    let settled = false;
-    let released = false;
-    const pausedRequests=new Map();
-    let pendingError=null;
-    let closed = false;
-    let resolveCanonical;
-    let rejectCanonical;
-    const canonical = new Promise((resolve, reject) => {
-      resolveCanonical = resolve;
-      rejectCanonical = reject;
-    });
-
-    const off = session.on('Fetch.requestPaused', async (params) => {
-      const request = params.request || {};
-      try {
-        if (!isConversationRequest(request.url, request.method)) {
-          await session.call('Fetch.continueRequest', { requestId: params.requestId });
-          return;
-        }
-        let body;
-        try {
-          body = JSON.parse(String(request.postData || ''));
-        } catch {
-          throw new Error('Conversation request body is not valid JSON');
-        }
-        if(closed||signal?.aborted||!guard()) throw new Error('stale canonical POST callback');
-        const expected=conversationId(conversationUrl);
-        if(expected&&body.conversation_id&&body.conversation_id!==expected) throw new Error('POST conversation ownership mismatch');
-        const initializationRequest = new URL(request.url).pathname.toLowerCase().replace(/\/+$/, '') === '/backend-api/conversation/init';
-        const entry={messageRequest:!initializationRequest,continued:false,cancelled:false};
-        pausedRequests.set(params.requestId,entry);
-        const message=(body.messages||[]).find(m=>m.author?.role==='user');
-        if(message) await onRequest?.({message_id:message.id||null,released:true});
-        if(closed||signal?.aborted||!guard()) throw new Error('stale canonical POST callback');
-        const patched = JSON.stringify(applyProfileOperations(body, profileOperations));
-        entry.continued=true;
-        if(entry.messageRequest)released=true;
-        await session.call('Fetch.continueRequest', {
-          requestId: params.requestId,
-          postData: Buffer.from(patched, 'utf8').toString('base64'),
-        });
-
-        if (!settled && (!waitForMessagePost || !initializationRequest)) {
-          settled = true;
-          resolveCanonical({ url: request.url });
-        }
-      } catch (error) {
-        try {
-          await session.call('Fetch.failRequest', {
-            requestId: params.requestId,
-            errorReason: 'Aborted',
-          });
-          const entry=pausedRequests.get(params.requestId);if(entry&&!entry.continued)entry.cancelled=true;
-        } catch {}
-        if (!settled) {
-          settled = true;
-          rejectCanonical(error);
-        }
-      }
-    });
-
+    let clickReleased=false;
     try {
-      const submitOutcome = evaluate(session, submitExpression()).then(
-        (value) => ({ type: 'evaluate', value }),
-        (error) => ({ type: 'evaluate-error', error }),
-      );
-      const canonicalOutcome = canonical.then(
-        (value) => ({ type: 'canonical', value }),
-        (error) => ({ type: 'canonical-error', error }),
-      );
-      const first = await Promise.race([submitOutcome, canonicalOutcome]);
-      let uncertainSubmitError = null;
-      if (first.type === 'evaluate') {
-        if (first.value?.status !== 'SUBMITTED') {
-          throw new Error(`Composer send failed: ${first.value?.status || 'unknown'}`);
-        }
-      } else if (first.type === 'evaluate-error') {
-        if (!runtimeEvaluateTimedOut(first.error)) throw first.error;
-        uncertainSubmitError = first.error;
-      } else if (first.type === 'canonical-error') {
-        throw first.error;
+      try {
+        const submitted=await evaluate(session,submitExpression());
+        if(submitted?.status!=='SUBMITTED')throw new Error(`Composer send failed: ${submitted?.status||'unknown'}`);
+        clickReleased=true;
+      } catch(error) {
+        if(!runtimeEvaluateTimedOut(error))throw error;
+        clickReleased=true;
       }
-
-      if (first.type !== 'canonical') {
-        const canonicalTimeoutMs = uncertainSubmitError ? SUBMIT_POST_GRACE_MS : 10000;
-        const timeout = new Promise((_, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error('Canonical conversation POST timeout')),
-            canonicalTimeoutMs,
-          );
-          canonical.finally(() => clearTimeout(timer)).catch(() => {});
-        });
-        try {
-          await Promise.race([canonical, timeout]);
-        } catch (error) {
-          if (uncertainSubmitError
-              && String(error?.message || error) === 'Canonical conversation POST timeout') {
-            throw uncertainSubmitError;
-          }
-          throw error;
-        }
-      }
-      return await this.#waitFor(session, (p) => !!conversationId(p.url), {
-        timeoutMs: this.config.navigationTimeoutMs,
-        signal,
-        label: 'canonical conversation URL',
-      });
+      if(signal?.aborted||!guard())throw new Error('stale submission');
+      const expected=conversationId(conversationUrl);
+      const baselineCount=Number(baseline?.userCount||0);
+      const baselineId=String(baseline?.userMessageId||'');
+      return await this.#waitFor(session,p=>{
+        const current=conversationId(p.url);
+        if(expected ? current!==expected : !current)return false;
+        const countAdvanced=Number(p.userCount||0)>baselineCount;
+        const id=String(p.userMessageId||'');
+        return countAdvanced||(!baselineId&&!!id)||(!!baselineId&&!!id&&id!==baselineId);
+      },{timeoutMs:this.config.navigationTimeoutMs,signal,label:'submitted user message'});
     } catch(error) {
-      pendingError=error;
+      if(clickReleased)error.released=true;
       throw error;
-    } finally {
-      closed=true;
-      for(const [id,entry] of pausedRequests)if(!entry.continued&&!entry.cancelled) {
-        try {await session.call('Fetch.failRequest',{requestId:id,errorReason:'Aborted'});entry.cancelled=true;}catch{}
-      }
-      if(pendingError) {
-        const proven=!released&&[...pausedRequests.values()].some(e=>e.messageRequest&&e.cancelled)
-          &&[...pausedRequests.values()].every(e=>!e.messageRequest||e.cancelled);
-        pendingError.released=released;
-        pendingError.absenceProof=proven?'INTERCEPTED_REQUEST_ABORTED':null;
-      }
-      off();
-      try { await session.call('Fetch.disable'); } catch {}
     }
   }
 
@@ -643,6 +615,9 @@ export class ChatGptBrowser {
     const target=targets?.find(t=>t.id===targetId&&t.type==='page');
     if(!target)throw Object.assign(new Error('original submission target unavailable'),{code:'ATTACH_FAILED'});
     const session=await this.chromium.connectTarget(target);
+    await session.call('Page.enable');
+    await session.call('Runtime.enable');
+    await installRequestProfileEngine(session);
     if(signal?.aborted){session.close();throw signal.reason;}
     return {target,session,baseline:await evaluate(session,probeExpression())};
   }
@@ -656,7 +631,7 @@ export class ChatGptBrowser {
     const staged=await evaluate(session,inputExpression(prompt));
     if(staged?.status!=='READY')throw new Error('submission composer not ready');
     if(signal?.aborted||!guard())throw new Error('stale submission');
-    return this.#submitWithProfile({session,profileOperations,signal,guard,onRequest,conversationUrl,waitForMessagePost:true});
+    return this.#submitWithProfile({session,profileOperations,signal,guard,conversationUrl,baseline:intent?.baseline||{}});
   }
 
   async readSubmission({session,intent,prompt,conversationUrl,signal}) {

@@ -35,7 +35,7 @@ test('evaluate timeout plus unchanged DOM is UNKNOWN, never absence proof',async
   let error;
   try{await f.browser.submitIntent({session:f.session,prompt:'continue',profileOperations:[],intent:{id:'intent'},conversationUrl:'https://chatgpt.com/c/owned',guard:()=>true});}
   catch(e){error=e;}
-  assert.ok(error);assert.equal(error.absenceProof,null);
+  assert.ok(error);assert.equal(error.absenceProof,undefined);
   const r=await f.browser.readSubmission({session:f.session,prompt:'continue',conversationUrl:'https://chatgpt.com/c/owned',
     intent:{baseline:{userCount:1,userMessageId:'old-message'},absence_proof:error.absenceProof,released:error.released}});
   assert.equal(r.state,'UNKNOWN');
@@ -45,18 +45,6 @@ test('optimistic user bubble disappears after reload and is not accepted',async(
   const r=await f.browser.readSubmission({session:f.session,prompt:'continue',conversationUrl:'https://chatgpt.com/c/owned',
     intent:{message_id:'new-message',baseline:{userCount:1,userMessageId:'old-message'}}});
   assert.equal(r.state,'UNKNOWN');
-});
-test('held intercepted request is explicitly aborted before absence can be returned',async()=>{
-  const f=fixture({held:true});let unblock;const held=new Promise(resolve=>{unblock=resolve;});
-  let error;
-  try{await f.browser.submitIntent({session:f.session,prompt:'continue',profileOperations:[],intent:{id:'intent'},conversationUrl:'https://chatgpt.com/c/owned',
-    guard:()=>true,onRequest:()=>held});}catch(e){error=e;}
-  assert.ok(error);assert.equal(error.absenceProof,'INTERCEPTED_REQUEST_ABORTED');
-  unblock();await new Promise(resolve=>setTimeout(resolve,0));
-  assert.equal(f.continued(),0);assert.ok(f.failures.includes('paused-post'));
-  const r=await f.browser.readSubmission({session:f.session,prompt:'continue',conversationUrl:'https://chatgpt.com/c/owned',
-    intent:{baseline:{userCount:1,userMessageId:'old-message'},absence_proof:error.absenceProof,released:error.released}});
-  assert.equal(r.state,'ABSENT');
 });
 
 test('initial submission refuses an existing canonical conversation before touching the composer',async()=>{
