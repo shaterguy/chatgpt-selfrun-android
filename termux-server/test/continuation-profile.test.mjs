@@ -96,3 +96,28 @@ test('ChatGptBrowser submission uses UI click and never enables CDP Fetch interc
   assert.equal(calls.includes('Fetch.continueRequest'),false);
   assert.equal(calls.includes('Fetch.failRequest'),false);
 });
+
+for(const cancellation of ['signal','guard'])test('browser final send fence after awaited readiness: '+cancellation,async()=>{
+  let release,enteredResolve,submitted=0,allowed=true;
+  const entered=new Promise(resolve=>{enteredResolve=resolve;});
+  const ready=new Promise(resolve=>{release=resolve;});
+  const abort=new AbortController();
+  const probe={url:'https://chatgpt.com/c/existing-profile',composer:true,streaming:false,userCount:1,userMessageId:'u1'};
+  const session={async call(method,params={}){
+    assert.equal(method,'Runtime.evaluate');
+    const expression=params.expression||'';
+    if(expression.includes("status:send?'SEND_FOUND'")){enteredResolve();await ready;return {result:{value:{ready:true,status:'SEND_FOUND'}}};}
+    if(expression.includes('send.focus?.();send.click()')){submitted++;return {result:{value:{status:'SUBMITTED'}}};}
+    if(expression.includes("return {status:same()?'READY':'MISMATCH'"))return {result:{value:{status:'READY'}}};
+    if(expression.includes('__selfrunRequestProfileEngine'))return {result:{value:true}};
+    return {result:{value:probe}};
+  }};
+  const browser=new ChatGptBrowser(null,{navigationTimeoutMs:100});
+  const posting=browser.submitIntent({session,prompt:'continue',profileOperations:operations,
+    conversationUrl:probe.url,guard:()=>allowed,signal:abort.signal,intent:{baseline:probe}});
+  await entered;
+  if(cancellation==='signal')abort.abort(new Error('cancelled'));else allowed=false;
+  release();
+  await assert.rejects(posting,/cancelled|stale|aborted/);
+  assert.equal(submitted,0);
+});

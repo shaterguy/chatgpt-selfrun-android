@@ -44,7 +44,7 @@ test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
    await f.controller.repository.move(seeded.key,'CANCELLED','test user stop');
  await f.controller.tick(f.transport);
  assert.equal(f.sends,0);
- assert.equal(f.record().state,'CANCELLED');
+ assert.equal(f.record().state,'STOPPED');assert.equal(f.record().stop_status,'CONFIRMED');
 });
 test('initial POST does not wait for unrelated full projection backlog',async()=>{
  const f=fixture();
