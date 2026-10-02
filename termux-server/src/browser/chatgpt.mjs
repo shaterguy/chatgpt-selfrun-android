@@ -542,10 +542,6 @@ export class ChatGptBrowser {
     try {
       const before = await this.#prepareNewChat(session, projectUrl, signal);
       if (signal?.aborted) throw signal.reason || new Error('aborted');
-      const staged = await evaluate(session, inputExpression(prompt));
-      if (staged?.status !== 'READY') {
-        throw new Error(`Composer staging failed: ${staged?.status || 'unknown'}`);
-      }
       return {
         target,
         session,
@@ -616,10 +612,8 @@ export class ChatGptBrowser {
     }
   }
 
-  async #submitWithProfile({ session, profileOperations, signal, guard = () => true, conversationUrl = '', baseline = {} }) {
+  async #submitWithProfile({ session, prompt, signal, guard = () => true, conversationUrl = '', baseline = {}, onConversation = null }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
-    await evaluate(session, requestProfileDocumentStartSource());
-    await evaluate(session, configureRequestProfileExpression(profileOperations));
 
     const sendReadyStarted = Date.now();
     let sendReady = null;
@@ -627,6 +621,13 @@ export class ChatGptBrowser {
       if (signal?.aborted) throw signal.reason || new Error('aborted');
       sendReady = await evaluate(session, sendReadyExpression());
       if (sendReady?.ready) break;
+      if (sendReady?.status==='NO_COMPOSER'||sendReady?.status==='NO_SEND') {
+        const restaged=await evaluate(session,inputExpression(prompt));
+        if(restaged?.status==='READY') {
+          sendReady=await evaluate(session,sendReadyExpression());
+          if(sendReady?.ready) break;
+        }
+      }
       await delay(150, signal);
     }
     if (!sendReady?.ready) {
@@ -647,8 +648,17 @@ export class ChatGptBrowser {
       }
       if(signal?.aborted||!guard())throw new Error('stale submission');
       const expected=conversationId(conversationUrl);
+      const routeProbe=await this.#waitFor(session,p=>{
+        const current=conversationId(p.url);
+        return expected ? current===expected : !!current;
+      },{timeoutMs:this.config.navigationTimeoutMs,signal,label:'canonical conversation URL'});
+      if(onConversation)await onConversation({url:routeProbe.url,probe:routeProbe});
+      if(signal?.aborted||!guard())throw new Error('stale submission');
       const baselineCount=Number(baseline?.userCount||0);
       const baselineId=String(baseline?.userMessageId||'');
+      if(Number(routeProbe.userCount||0)>baselineCount
+          ||(!baselineId&&!!routeProbe.userMessageId)
+          ||(!!baselineId&&!!routeProbe.userMessageId&&routeProbe.userMessageId!==baselineId))return routeProbe;
       return await this.#waitFor(session,p=>{
         const current=conversationId(p.url);
         if(expected ? current!==expected : !current)return false;
@@ -680,16 +690,18 @@ export class ChatGptBrowser {
     return {target,session,baseline:await evaluate(session,probeExpression())};
   }
 
-  async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest}) {
+  async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest,onConversation}) {
     if(signal?.aborted||!guard())throw new Error('stale submission');
     const probe=await evaluate(session,probeExpression());
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
       throw new Error('submission conversation ownership mismatch');
     if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
+    await evaluate(session,requestProfileDocumentStartSource());
+    await evaluate(session,configureRequestProfileExpression(profileOperations));
     const staged=await evaluate(session,inputExpression(prompt));
     if(staged?.status!=='READY')throw new Error('submission composer not ready');
     if(signal?.aborted||!guard())throw new Error('stale submission');
-    return this.#submitWithProfile({session,profileOperations,signal,guard,conversationUrl,baseline:intent?.baseline||{}});
+    return this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
   }
 
   async readSubmission({session,intent,prompt,conversationUrl,signal}) {

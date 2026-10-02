@@ -48,6 +48,7 @@ function fixture(options={}) {
       f.sends++;
       f.sent.push({prompt:args.prompt,kind:args.kind,profileOperations:structuredClone(args.profileOperations||[])});
       await args.onRequest({message_id:'message-'+f.sends,released:f.mode!=='absent'});
+      if(f.publishConversationBeforeOutcome)await args.onConversation?.({url:f.probe.url,probe:{...f.probe}});
       await f.onSubmit?.(args);
       if(f.mode==='absent'&&f.sends===1)throw Object.assign(new Error('Canonical conversation POST timeout'),{released:false,absenceProof:'INTERCEPTED_REQUEST_ABORTED'});
       if(f.mode==='unknown')throw Object.assign(new Error('Canonical conversation POST timeout'),{released:true});

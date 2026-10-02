@@ -366,6 +366,19 @@ export class DriveDispatchController {
           if(current.intent?.id!==intent.id)throw new Error('submission identity changed');
           await this.#move(key,current.state,'POST_REQUEST_IDENTIFIED',{intent:{...current.intent,...evidence}},a.token);
           if(!a.guard())throw new Error('stale POST callback');
+        },
+        onConversation:async evidence=>{
+          if(!a.guard())throw new Error('stale conversation callback');
+          const url=canonicalUrl(evidence?.url||evidence?.probe?.url);
+          if(!url)throw new Error('canonical conversation callback missing URL');
+          const current=this.repository.get(key);
+          if(current.intent?.id!==intent.id)throw new Error('submission identity changed');
+          if(!current.conversation_url) {
+            await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:url},a.token);
+            try{await this.repository.flushCurrent(transport,key);}catch(error){
+              console.error(JSON.stringify({event:'CONVERSATION_URL_PROJECTION_PENDING',key,url,error:String(error?.message||error).slice(0,300)}));
+            }
+          }
         }});
       const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
       if(submittedUrl&&a.guard()) {

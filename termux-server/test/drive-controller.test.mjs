@@ -9,6 +9,17 @@ test('CREATE_REQUESTED is sufficient authority for server-owned prepare and subm
  assert.equal(f.record().state,'OBSERVING');
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
+test('canonical conversation URL is projected before later submission uncertainty',async()=>{
+ const f=fixture();
+ f.publishConversationBeforeOutcome=true;
+ f.mode='unknown';
+ await f.ingest();
+ assert.equal(f.sends,1);
+ assert.equal(f.record().conversation_url,'https://chatgpt.com/c/test-owned');
+ assert.equal(f.rows.get(f.path).conversation_url,'https://chatgpt.com/c/test-owned');
+ assert.equal(f.rows.get(f.path).server_status,'RECOVERY_SENDING');
+ assert.equal(f.record().state,'POST_UNCERTAIN');
+});
 test('initial conversation sends exactly one prompt and has no automatic follow-up',async()=>{
  const f=fixture();await f.ingest();
  assert.equal(f.sends,1);
