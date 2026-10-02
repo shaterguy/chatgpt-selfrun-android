@@ -8,6 +8,8 @@ import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.json.JSONObject;
 import org.junit.Test;
+import org.junit.Before;
+import org.junit.After;
 import org.junit.runner.RunWith;
 import java.lang.reflect.Proxy;
 import java.util.UUID;
@@ -18,6 +20,9 @@ import static org.junit.Assert.*;
 public final class SelfRun3ResultRoutingAndroidTest {
     private static final String INPUT_PREFS="selfrun_drive_user_next_input";
     private final Context context=ApplicationProvider.getApplicationContext();
+
+    @Before public void installProfiles() { CanonicalProfileAndroidTestFixtures.install(context); }
+    @After public void clearProfiles() { CanonicalProfileAndroidTestFixtures.clear(context); }
 
     @Test public void repairPersistsOriginalResultAndInputAcrossLedgerRecreation() throws Exception {
         Fixture f=new Fixture(true);

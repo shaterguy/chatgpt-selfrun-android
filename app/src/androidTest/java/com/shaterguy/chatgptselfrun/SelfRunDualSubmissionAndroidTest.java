@@ -20,6 +20,7 @@ import static org.junit.Assert.*;
 public final class SelfRunDualSubmissionAndroidTest {
     @Test public void onDeviceSubmitsOnceCapturesUrlAndDestroysWebViewWithoutResultWait() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
+        CanonicalProfileAndroidTestFixtures.install(context);
         String task = "dual-submission-runtime";
         String turn = task + ":turn:2";
         JSONObject config = new JSONObject();
@@ -27,7 +28,7 @@ public final class SelfRunDualSubmissionAndroidTest {
         SelfRun3Engine.put(config, "taskMode", "CHAT");
         SelfRun3Engine.put(config, "projectUrl", "https://chatgpt.com/");
         SelfRun3Engine.put(config, "model", "");
-        SelfRun3Engine.put(config, "reasoning", "keep");
+        SelfRun3Engine.put(config, "reasoning", "medium");
         JSONObject raw = SelfRun3Engine.create(task, turn, config).json();
         SelfRun3Engine.put(raw, "turn", 2);
         SelfRun3Engine.put(raw, "maxTurn", 2);
@@ -103,6 +104,7 @@ public final class SelfRunDualSubmissionAndroidTest {
                 if (selected.get() != null) selected.get().close();
             });
             SelfRun3RuntimeTestBridge.clear();
+            CanonicalProfileAndroidTestFixtures.clear(context);
         }
     }
 
