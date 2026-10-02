@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 
 export const PROMPT_DIRECTIVES_SCHEMA = 'selfrun-prompt-directives-v1';
 export const DEFAULT_TURN_START_DIRECTIVE =
-  '필요한 도구가 바로 보이지 않더라도 현재 제공된 도구를 확인해서 계속 진행해. 도구가 없다고 단정한 채 끝내지 말고, 이번 턴의 실제 작업과 결과 문서 확정까지 마친 뒤 답변해.';
+  '필요한 도구가 바로 보이지 않더라도 현재 제공된 도구를 확인해서 계속 진행해. ChatGPT 메모리, 저장된 개인화 정보, 과거 대화에서 가져온 기억이나 사용자 정보는 사용하지 말고, 현재 턴에 지정된 문서와 현재 입력에 명시된 내용만 기준으로 작업해. 도구가 없다고 단정한 채 끝내지 말고, 이번 턴의 실제 작업과 결과 문서 확정까지 마친 뒤 답변해.';
 export const DEFAULT_TURN_CONTINUE_DIRECTIVE =
   '현재 턴에 할당된 잔여작업이 있으면 계속 수행해';
 
