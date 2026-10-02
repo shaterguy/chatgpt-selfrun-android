@@ -40,7 +40,7 @@ export function humanizeSelfRunPrompt(prompt) {
   if(fields.get('SELF_RUN_SKILL_DOCUMENT_ID'))docs.push(`SelfRun 운영문서 ${fields.get('SELF_RUN_SKILL_DOCUMENT_ID')}`);
   if(fields.get('REQUIREMENT_DOCUMENT_ID'))docs.push(`요구사항 문서 ${fields.get('REQUIREMENT_DOCUMENT_ID')}`);
   if(fields.get('RESULT_DOCUMENT_ID'))docs.push(`이번 결과 문서 ${fields.get('RESULT_DOCUMENT_ID')}`);
-  if(docs.length)out.push(`먼저 ${docs.join(', ')}를 읽고 현재 상태와 phase를 확인해.`);
+  if(docs.length)out.push(`먼저 ${docs.join(', ')}를 Google Drive에서 지금 새로 읽고 현재 상태와 phase를 확인해. 이 대화나 이전 실행에서 캐시된 문서 내용은 사용하지 마.`);
   if(fields.get('PREVIOUS_RESULT_DOCUMENT_ID'))out.push(`이전 결과 문서는 ${fields.get('PREVIOUS_RESULT_DOCUMENT_ID')}야.`);
   if(fields.get('PARALLEL_GROUP_ID'))out.push(`이 턴은 병렬 작업 그룹 ${fields.get('PARALLEL_GROUP_ID')}에 속해.`);
   if(fields.get('BRANCH_ID'))out.push(`병렬 분기 ${fields.get('BRANCH_ID')}의 목표는 ${fields.get('BRANCH_OBJECTIVE')||'현재 분기 목표'}야.`);
