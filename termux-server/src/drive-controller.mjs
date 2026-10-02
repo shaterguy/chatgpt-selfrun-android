@@ -61,8 +61,12 @@ export class DriveDispatchController {
     if(old&&c.control_epoch===old.control_epoch) {
       await this.repository.applyControl(c);return false;
     }
-    // Abort immediately; persistence/network queues must not postpone STOP's browser fence.
-    for(const r of this.repository.records()) if(r.task_id===c.task_id) this.#detach(r.key);
+    const sameRunningIdentity=old&&old.state==='RUNNING'&&c.state==='RUNNING'
+      &&old.turn_id===c.turn_id&&old.request_id===c.request_id;
+    // A RUNNING metadata/epoch refresh for the same logical request must not abort
+    // an in-flight browser POST. STOP/PAUSE/DONE or identity changes still fence immediately.
+    if(!sameRunningIdentity)
+      for(const r of this.repository.records()) if(r.task_id===c.task_id) this.#detach(r.key);
     await this.repository.applyControl(c);
     return true;
   }
