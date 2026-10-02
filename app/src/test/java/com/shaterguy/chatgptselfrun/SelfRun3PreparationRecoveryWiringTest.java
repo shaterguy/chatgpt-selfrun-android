@@ -82,8 +82,8 @@ public final class SelfRun3PreparationRecoveryWiringTest {
 
     @Test public void unboundDispatchReentersConversationCreationInsteadOfDrivePolling() throws Exception {
         String engine = source("SelfRun3Engine.java");
-        assertTrue(engine.contains("case DISPATCHING -> s.resource(\"conversationUrl\").isEmpty() ? Action.PREPARE_WEB : Action.WAIT;"));
-        assertTrue(engine.contains("x.stage()==Stage.DISPATCHING && !x.resource(\"conversationUrl\").isEmpty()"));
+        assertTrue(engine.contains("case DISPATCHING -> onDeviceSendClaimed(s) ? Action.WAIT"));
+        assertTrue(engine.contains("!x.resource(\"conversationUrl\").isEmpty() || onDeviceSendClaimed(x)"));
     }
 
     @Test public void provenUnsentRetryKeepsLogicalIdentityAndCanClaimAgain() {
