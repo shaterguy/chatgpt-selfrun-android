@@ -115,3 +115,13 @@ test('STOP and cancellation of terminal history remain idempotent without browse
     assert.equal(f.store.snapshot().activeCount,0);
   }
 });
+
+test('server startup recomputes terminal summaries before cluster publication',async()=>{
+  const {SelfRunController}=await import('../src/controller.mjs');
+  const {f,record}=await terminalFixture('COMPLETED',{activeCount:7});
+  const controller=new SelfRunController({lifecycle:f.controller,transport:f.transport,stateStore:f.store,config:{}});
+  await controller.initialize();
+  assert.equal(f.store.snapshot().activeCount,0);
+  assert.deepEqual(f.record(),record);
+  assert.equal(f.resumes,0);assert.equal(f.sends,0);
+});

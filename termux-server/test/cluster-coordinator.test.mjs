@@ -173,3 +173,27 @@ test('shutdown publishes zero active executions without erasing recoverable reco
   assert.equal(published.role,'STANDBY');assert.equal(published.active_count,0);
   assert.equal(stateStore.snapshot().activeCount,3);
 });
+
+test('real standby quiesce stops sessions while preserving observation for a later claim',async()=>{
+  const {fixture}=await import('./helpers/lifecycle-fixture.mjs');
+  const f=fixture();await f.existing();f.result(true);await f.observe({});
+  let now=1_800_000_000_000;
+  const transport=new FakeTransport([{server_name:'Galaxy-Tab-S11-Ultra',server_priority:1,
+    role:'ACTIVE',active_count:1,status:'RUNNING',updated_at:new Date(now).toISOString()}]);
+  const cluster=new SelfRunClusterCoordinator({stateStore:f.store,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:0,now:()=>now,
+    onRoleChange:async({role})=>{if(role==='STANDBY')await f.controller.quiesceForStandby();}});
+  cluster.role='ACTIVE';cluster.claimReadyAt=now;
+  f.controller.canDispatch=()=>cluster.canDispatch();
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role,'STANDBY');
+  assert.equal(f.controller.sessions.size,0);
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
+  assert.equal(f.store.snapshot().activeCount,1);
+  assert.equal(f.record().result_state,'COMMITTED');
+  transport.states=[];now+=1;await cluster.refresh();await f.controller.tick(f.transport);
+  assert.equal(cluster.canDispatch(),true);
+  assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.resumes,2);assert.equal(f.sends,0);
+  await f.controller.quiesceForStandby();
+});
