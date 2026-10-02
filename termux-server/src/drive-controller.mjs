@@ -100,6 +100,11 @@ export class DriveDispatchController {
     const value=Number(this.config.startFollowupRetryMs);
     return Number.isFinite(value)&&value>=100?value:1000;
   }
+  #initialAssistantResponseObserved(probe) {
+    return !!String(probe?.assistantMessageId||'').trim()
+      || Number(probe?.assistantTextLength||0)>0
+      || Number(probe?.responseTextLength||0)>0;
+  }
   async #ingestRecord(path,body) {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(body?.schema!=='selfrun-server-dispatch-v1')throw new Error('invalid dispatch schema');
@@ -291,7 +296,8 @@ export class DriveDispatchController {
     if(!await this.#fresh(key,transport)||!a.guard())return;
     const probe=await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal});
     if(!a.guard())return;
-    if(probe.streaming||probe.stopButtonVisible||probe.paused) {
+    if(!this.#initialAssistantResponseObserved(probe)
+        ||probe.streaming||probe.stopButtonVisible||probe.paused) {
       this.#scheduleStartFollowup(key,transport,this.#startFollowupRetryMs());
       return;
     }
