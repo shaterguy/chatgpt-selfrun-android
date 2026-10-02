@@ -176,3 +176,21 @@ test('execution: app attempt cancellation cannot suppress current STOP cleanup r
   await f.controller.tick(f.transport);
   assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
 });
+
+test('execution: STOP recovers a released initial input before its URL callback',async()=>{
+  const f=fixture(),entered=deferred(),gate=deferred();
+  f.onSubmit=async()=>{entered.resolve();await gate.promise;};
+  const posting=f.ingest();await entered.promise;
+  assert.equal(f.record().conversation_url,'');
+  await f.stop();gate.resolve();await posting;
+  await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
+  await f.controller.tick(f.transport);
+  assert.equal(f.record().conversation_url,f.probe.url);
+  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);
+  assert.equal(f.sends,1);assert.equal(f.prepares,1);
+});
+test('execution: STOP without provable submitted URL is explicitly unconfirmed',async()=>{
+  const f=fixture();f.mode='unknown';await f.ingest();await f.stop();
+  assert.equal(f.record().stop_status,'UNCONFIRMED');
+  assert.equal(f.quiesces,0);assert.equal(f.sends,1);assert.equal(f.prepares,1);
+});
