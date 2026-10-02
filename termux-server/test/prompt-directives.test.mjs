@@ -32,6 +32,13 @@ test('turn start directive is appended as a plain natural sentence',()=>{
   const prompt=appendTurnStartDirective('SelfRun 작업을 진행해.','실질 작업을 수행해');
   assert.equal(prompt,'SelfRun 작업을 진행해.\n\n실질 작업을 수행해');
 });
+test('default turn start directive forbids memory and saved personalization',async()=>{
+  const store=new PromptDirectiveStore({});
+  const current=await store.current();
+  assert.match(current.turnStartDirective,/ChatGPT 메모리/);
+  assert.match(current.turnStartDirective,/저장된 개인화 정보/);
+  assert.match(current.turnStartDirective,/과거 대화에서 가져온 기억이나 사용자 정보는 사용하지 말고/);
+});
 test('prompt directives reload from disk without restart and keep last valid config on malformed writes', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'selfrun-prompt-directives-'));
   const file = path.join(dir, 'prompt-directives.json');
