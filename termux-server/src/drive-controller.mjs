@@ -6,7 +6,7 @@ import { readResult } from './result-reconciler.mjs';
 const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT']);
 const controlStates=new Set(['RUNNING','PAUSED','WAITING_USER_INTERVENTION','STOPPED','DONE','RESUME_REQUESTED','RESUME_STOPPED_REQUESTED']);
 const responseKey=p=>{const value=cursor(p);delete value.streaming;return JSON.stringify(value);};
-const terminal = r => ['COMPLETED','CANCELLED'].includes(r.state);
+const terminal = r => ['COMMITTED','COMPLETED','CANCELLED'].includes(r.state);
 const errorInfo = (error,code) => ({code:code||error?.code||'BROWSER_ERROR',message:String(error?.message||error).slice(0,300)});
 
 export class DriveDispatchController {
@@ -15,6 +15,9 @@ export class DriveDispatchController {
     this.repository=new LifecycleStore(stateStore);
     this.sessions=new Map();this.operations=new Map();this.stopOperations=new Map();this.standby=false;
     this.serverGeneration=Date.now();
+  }
+  async initialize() {
+    await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
   }
   get active() {return this.activeDispatches().at(-1)||null;}
   getActive(path) {return this.activeDispatches().find(a=>a.path===path)||null;}
@@ -70,7 +73,7 @@ export class DriveDispatchController {
     // Same-request RUNNING refreshes update metadata only; they must not abort an in-flight browser operation.
     const stopping=[];
     if(!sameRunningIdentity) {
-      for(const r of this.repository.records()) if(r.task_id===c.task_id) {
+      for(const r of this.repository.records()) if(r.task_id===c.task_id&&!['COMMITTED','COMPLETED'].includes(r.state)) {
         const a=this.sessions.get(r.key);
         if(c.state==='STOPPED'&&r.request_id===c.request_id&&r.turn_id===c.turn_id) {
           a?.abort.abort(new Error('app STOP'));
@@ -211,6 +214,7 @@ export class DriveDispatchController {
   async #advance(key,transport) {
     let r=this.repository.get(key);
     if(this.repository.integrityFaults.has(key))throw new Error('current state is behind committed audit revision; reconciliation required');
+    if(['COMMITTED','COMPLETED'].includes(r.state))return;
     const attemptCancelled=['CANCELLED','SUPERSEDED'].includes(r.body.client_status);
     if(attemptCancelled) {
       this.#detach(key);

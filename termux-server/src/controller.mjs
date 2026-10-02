@@ -76,7 +76,8 @@ export class SelfRunController {
     this.tail=Promise.resolve();
   }
   async initialize() {
-    // Startup restoration is performed by the common watcher/lifecycle; no runtime reset.
+    // Derive summaries before the cluster publishes its first heartbeat; no browser work.
+    await this.lifecycle.initialize();
   }
   accept(raw) {
     const signal=normalizeSignal(raw,this.config);

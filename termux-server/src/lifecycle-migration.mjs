@@ -32,7 +32,7 @@ export function migrateLegacy(record,history,prompt) {
   const old=history.legacy.get(record.key);
   if(!old)return record;
   record.recovery_count=Math.max(record.recovery_count,old.recovery_count);
-  if(old.unknown_post&&!record.intent) {
+  if(old.unknown_post&&!record.intent&&!['COMMITTED','COMPLETED'].includes(record.state)) {
     record.intent={...newIntent(record,'recovery',prompt,old.baseline||{}),outcome:'UNKNOWN',sends:1,legacy:true,released:true};
     record.state='POST_UNCERTAIN';
     record.error={code:'LEGACY_POST_UNCERTAIN',message:old.error};

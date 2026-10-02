@@ -1,5 +1,5 @@
 import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
-import { audit, canonicalUrl, initialRecord, keyFor, projection, transition, restoreObserver } from './lifecycle.mjs';
+import { audit, canonicalUrl, initialRecord, keyFor, projection, transition } from './lifecycle.mjs';
 
 // A single durable snapshot owns both current records and the publication outboxes.
 // Audit/Drive writes are projections; neither can make an uncommitted transition authoritative.
@@ -14,12 +14,8 @@ export class LifecycleStore {
     this.initPromise=(async()=>{
       this.history=await readLifecycleHistory(this.store.config?.eventsFile);
       this.legacyPrompt=prompt;
-      const next=structuredClone(this.data);let restored=false;
-      for(const [key,record] of Object.entries(next.requests)) {
-        const value=restoreObserver(record,next.controls[record.task_id]);
-        if(value!==record){next.requests[key]=value;restored=true;}
-      }
-      if(restored)await this.save(next);
+      // Rebuild derived summaries without turning finalized history into live work.
+      await this.serial(()=>this.save(structuredClone(this.data)));
       for(const r of this.records())if((this.history.audits.get(r.key)||0)>r.revision)this.integrityFaults.add(r.key);
     })();
     return this.initPromise;
@@ -34,7 +30,7 @@ export class LifecycleStore {
   control(task) {return structuredClone(this.data.controls[task]||null);}
   async save(next) {
     const records=Object.values(next.requests);
-    const active=records.filter(r=>r.control_state==='RUNNING'&&!['COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
+    const active=records.filter(r=>r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
     const latest=records.toSorted((a,b)=>b.updated_at-a.updated_at)[0];
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
       active.length?'RUNNING':latest?.state==='COMPLETED'?'COMPLETED':latest?.state==='STOPPED'?'STOPPED':'IDLE';
@@ -67,7 +63,7 @@ export class LifecycleStore {
         if(r.intent&&(r.body.prompt!==body.prompt||JSON.stringify(r.body.profile_operations)!==JSON.stringify(body.profile_operations)))
           throw new Error('accepted request input/profile is immutable');
         r.body={...r.body,...body};
-        if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&r.state!=='CANCELLED') {
+        if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&!['COMMITTED','COMPLETED','CANCELLED'].includes(r.state)) {
           const previous=r.state;
           r=transition(r,'CANCELLED','CLIENT_CANCELLED_INGRESS',{run_generation:r.run_generation+1});
           next.requests[key]=r;next.events.push(audit(r,previous,r.reason));
@@ -76,7 +72,7 @@ export class LifecycleStore {
         await this.save(next);
         return structuredClone(r);
       }
-      const next=structuredClone(this.data);let r=restoreObserver(migrateLegacy(initialRecord(path,body),this.history,this.legacyPrompt||''),next.controls[body.task_id]);
+      const next=structuredClone(this.data);let r=migrateLegacy(initialRecord(path,body),this.history,this.legacyPrompt||'');
       const control=next.controls[r.task_id];
       if(control&&control.control_epoch>=r.control_epoch&&!['COMMITTED','COMPLETED','CANCELLED'].includes(r.state)) {
         const matching=control.turn_id===r.turn_id&&control.request_id===r.request_id;
