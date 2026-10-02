@@ -27,12 +27,12 @@ jobs:
         with:
           gradle-version: '9.5.0'
           cache-read-only: false
-      - name: RED - prove requested contract is absent from exact baseline
+      - name: RED - reproduce activation safety gaps and verify core implementation
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(git rev-parse HEAD:app/src/main)" == 'ed6bac84e885d66d0ce922b36fcb235874b2d265' ]]
-          [[ "$(git rev-parse HEAD:app/build.gradle)" == 'c6a31e34cb24a5be54f709b59486ad13394a0f49' ]]
+          [[ "$(git rev-parse HEAD:app/src/main)" == '0c642663d1ff56a6f606f8ccd8401743688c7d63' ]]
+          [[ "$(git rev-parse HEAD:app/build.gradle)" == '847be918eb98682787a9ff2a46fcccf0027127aa' ]]
           if gradle --build-cache --no-daemon --console=plain :app:testQaAppUnitTest --tests com.shaterguy.chatgptselfrun.SelfRunDualSubmissionTest; then
             echo 'Unexpected GREEN on the unmodified product baseline' >&2
             exit 1
@@ -41,13 +41,14 @@ jobs:
           import pathlib, xml.etree.ElementTree as ET
           p = pathlib.Path('app/build/test-results/testQaAppUnitTest/TEST-com.shaterguy.chatgptselfrun.SelfRunDualSubmissionTest.xml')
           root = ET.parse(p).getroot()
-          expected = {'onDeviceUsesTheSameVercelCompletionWaitAsServer', 'readyEventPersistsSubmissionChoiceBeforeAnySend', 'completionAndSettingsAreSeparatedFromSubmissionTransport', 'bothSubmissionModesHaveExplicitSettingsDescriptions'}
+          expected = {'uncertainOnDeviceSendNeverSelectsASecondWebSubmission', 'uncertainOnDeviceSendStillReceivesSharedCompletionSignals', 'cancelledRegistryRefreshCannotRevivePhoneSubmission', 'stopIntentImmediatelyFencesLocalOperations'}
           failures = {t.attrib['name'] for t in root.findall('testcase') if t.find('failure') is not None}
           assert failures == expected, (failures, expected)
           assert not root.findall('.//error')
           for t in root.findall('testcase'):
+              if t.find('failure') is None: continue
               assert t.find('failure').attrib.get('type') in ('java.lang.AssertionError', 'org.junit.ComparisonFailure')
-          print('RED_CONFIRMED: four requested-contract assertions fail on baseline 0a909837; no compile/runtime errors')
+          print('RED_CONFIRMED: four safety regressions fail on candidate 2af5e7b; nine core contract checks pass')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: ${{ always() }}

@@ -106,6 +106,30 @@ public final class SelfRunDualSubmissionTest {
         assertTrue(web.contains("disposeHost();"));
     }
 
+    @Test public void uncertainOnDeviceSendNeverSelectsASecondWebSubmission() {
+        SelfRun3Engine.State sending = event(ready("ON_DEVICE"),
+                SelfRun3Engine.Kind.CLAIM_SEND, new JSONObject());
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(sending));
+    }
+
+    @Test public void uncertainOnDeviceSendStillReceivesSharedCompletionSignals() {
+        SelfRun3Engine.State sending = event(ready("ON_DEVICE"),
+                SelfRun3Engine.Kind.CLAIM_SEND, new JSONObject());
+        assertEquals(1, SelfRun3Engine.waitingExecutions(sending).size());
+    }
+
+    @Test public void cancelledRegistryRefreshCannotRevivePhoneSubmission() throws Exception {
+        String web = source("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("registryGeneration"));
+        assertTrue(web.contains("expectedRegistryGeneration != registryGeneration"));
+    }
+
+    @Test public void stopIntentImmediatelyFencesLocalOperations() throws Exception {
+        String coordinator = source("SelfRun3Coordinator.java");
+        assertTrue(coordinator.contains("stopRequested = true;"));
+        assertTrue(coordinator.contains("!stopRequested"));
+    }
+
     static SelfRun3Engine.State ready(String mode) {
         JSONObject config = new JSONObject();
         SelfRun3Engine.put(config, "taskMode", "CHAT");
