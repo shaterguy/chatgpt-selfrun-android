@@ -31,7 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(git rev-parse HEAD^)" == '0a90983736db71e26742933ae267b3ce3034c40d' ]]
+          [[ "$(git rev-parse HEAD:app/src/main)" == 'ed6bac84e885d66d0ce922b36fcb235874b2d265' ]]
+          [[ "$(git rev-parse HEAD:app/build.gradle)" == 'c6a31e34cb24a5be54f709b59486ad13394a0f49' ]]
           if gradle --build-cache --no-daemon --console=plain :app:testQaAppUnitTest --tests com.shaterguy.chatgptselfrun.SelfRunDualSubmissionTest; then
             echo 'Unexpected GREEN on the unmodified product baseline' >&2
             exit 1
