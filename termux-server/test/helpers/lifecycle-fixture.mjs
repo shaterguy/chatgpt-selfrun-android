@@ -16,7 +16,7 @@ class MemoryStore {
 }
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function fixture(options={}) {
-  const f={sends:0,prepares:0,resumes:0,quiesces:0,readbacks:0,store:options.store||new MemoryStore(),observations:[]};
+  const f={sends:0,prepares:0,resumes:0,quiesces:0,readbacks:0,store:options.store||new MemoryStore(),observations:[],sent:[]};
   f.body={schema:'selfrun-server-dispatch-v1',task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',request_id:'SAFE-TEST:turn:1-request',
     dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'test input',profile_operations:[],
     result_document_id:'RESULT-1',client_status:'CREATE_REQUESTED',server_status:'PENDING',server_control_epoch:1};
@@ -46,6 +46,7 @@ function fixture(options={}) {
     quiesce:async()=>{f.quiesces++;f.probe.streaming=false;f.probe.stopButtonVisible=false;await f.onQuiesce?.();},
     submitIntent:async args=>{
       f.sends++;
+      f.sent.push({prompt:args.prompt,kind:args.kind,profileOperations:structuredClone(args.profileOperations||[])});
       await args.onRequest({message_id:'message-'+f.sends,released:f.mode!=='absent'});
       await f.onSubmit?.(args);
       if(f.mode==='absent'&&f.sends===1)throw Object.assign(new Error('Canonical conversation POST timeout'),{released:false,absenceProof:'INTERCEPTED_REQUEST_ABORTED'});
@@ -63,7 +64,10 @@ function fixture(options={}) {
     },
     monitor:async args=>{f.observations.push(args);await new Promise(resolve=>args.signal.addEventListener('abort',resolve,{once:true}));return {status:'ABORTED'};},
   };
-  const config={maxAttachAttempts:3,resumeRetryMs:1,stallAfterMs:1,recoveryPrompt:'continue test'};
+  const config={maxAttachAttempts:3,resumeRetryMs:1,stallAfterMs:1,recoveryPrompt:'continue test',
+    startFollowupEnabled:options.startFollowupEnabled??false,
+    startFollowupDelayMs:options.startFollowupDelayMs??5000,
+    startFollowupRetryMs:options.startFollowupRetryMs??1000};
   f.recreate=()=>new DriveDispatchController({browser:f.browser,stateStore:f.store,config});
   f.controller=f.recreate();
   f.record=()=>f.controller.repository.get(keyFor(f.body));

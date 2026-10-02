@@ -8,8 +8,8 @@ export const STATES = Object.freeze({
   POST_PENDING: ['ATTACHING','POST_UNCERTAIN','OBSERVING','BLOCKED'],
   POST_UNCERTAIN: ['RECONCILING','POST_PENDING','RECOVERY_POST','ATTACHING','BLOCKED'],
   RECONCILING: ['ATTACHING','POST_UNCERTAIN','POST_PENDING','RECOVERY_POST','OBSERVING','BLOCKED'],
-  OBSERVING: ['STALLED','WAIT_RESULT','ATTACHING','BLOCKED'],
-  WAIT_RESULT: ['OBSERVING','STALLED','ATTACHING','BLOCKED'],
+  OBSERVING: ['STALLED','WAIT_RESULT','RECOVERY_POST','ATTACHING','BLOCKED'],
+  WAIT_RESULT: ['OBSERVING','STALLED','RECOVERY_POST','ATTACHING','BLOCKED'],
   STALLED: ['VERIFY_RESULT','OBSERVING','ATTACHING','BLOCKED'],
   VERIFY_RESULT: ['ATTACHING','VERIFY_CONVERSATION','BLOCKED'],
   VERIFY_CONVERSATION: ['VERIFY_CURSOR','ATTACHING','BLOCKED'],
@@ -68,7 +68,9 @@ export function initialRecord(path,body,now=Date.now()) {
     dispatch_attempt:body.dispatch_attempt,state,revision:0,run_generation:0,browser_generation:0,control_epoch:Number(body.server_control_epoch||0),
     control_state:body.server_control_state||'UNKNOWN',conversation_url:url,conversation_id:url.split('/c/')[1]||null,
     recovery_count:Number(body.recovery_count||0),attach_attempts:Number(body.resume_retry_count||0),failure_epoch:Number(body.server_control_epoch||0),retry_at:0,
-    intent:null,cursor:null,last_progress_at:now,result_state:'UNKNOWN',error:null,created_at:now,updated_at:now};
+    intent:null,cursor:null,last_progress_at:now,result_state:'UNKNOWN',error:null,
+    start_followup_state:'NONE',start_followup_due_at:0,start_followup_response_started:false,early_result_committed:false,
+    created_at:now,updated_at:now};
 }
 export function transition(record,next,reason,patch={},now=Date.now()) {
   if(!STATES[next]) throw new Error('unknown lifecycle state '+next);
