@@ -111,6 +111,61 @@ async function installDecorativeAnimationPause(session) {
   await evaluate(session, DECORATIVE_ANIMATION_PAUSE_SOURCE);
 }
 
+function androidWebViewUserAgent(config) {
+  const android=String(config?.browserAndroidVersion||'17').trim()||'17';
+  const model=String(config?.browserAndroidModel||'Android').trim()||'Android';
+  const build=String(config?.browserAndroidBuildId||'UNKNOWN').trim()||'UNKNOWN';
+  const chrome=String(config?.browserAndroidChromeVersion||'149.0.7827.155').trim()||'149.0.7827.155';
+  return String(config?.browserAndroidUserAgent||'').trim()
+    || `Mozilla/5.0 (Linux; Android ${android}; ${model} Build/${build}; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/${chrome} Mobile Safari/537.36`;
+}
+
+export async function applyBrowserClientProfile(session, config = {}) {
+  const mode=String(config?.browserClientProfile||'native').trim().toLowerCase();
+  if(mode!=='android-webview')return {mode:'native'};
+
+  const chrome=String(config?.browserAndroidChromeVersion||'149.0.7827.155').trim()||'149.0.7827.155';
+  const major=chrome.split('.')[0]||'149';
+  const model=String(config?.browserAndroidModel||'Android').trim()||'Android';
+  const platformVersion=String(config?.browserAndroidPlatformVersion||config?.browserAndroidVersion||'17.0.0').trim()||'17.0.0';
+  const width=Math.max(320,Number(config?.browserAndroidWidth||412));
+  const height=Math.max(480,Number(config?.browserAndroidHeight||915));
+  const deviceScaleFactor=Math.max(1,Number(config?.browserAndroidDeviceScaleFactor||3));
+  const acceptLanguage=String(config?.browserAndroidAcceptLanguage||'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7');
+
+  await session.call('Emulation.setUserAgentOverride',{
+    userAgent:androidWebViewUserAgent(config),
+    acceptLanguage,
+    platform:'Android',
+    userAgentMetadata:{
+      brands:[
+        {brand:'Chromium',version:major},
+        {brand:'Google Chrome',version:major},
+        {brand:'Not_A Brand',version:'99'},
+      ],
+      fullVersionList:[
+        {brand:'Chromium',version:chrome},
+        {brand:'Google Chrome',version:chrome},
+        {brand:'Not_A Brand',version:'99.0.0.0'},
+      ],
+      platform:'Android',
+      platformVersion,
+      architecture:'',
+      model,
+      mobile:true,
+      bitness:'',
+      wow64:false,
+    },
+  });
+  await session.call('Emulation.setDeviceMetricsOverride',{
+    width,height,deviceScaleFactor,mobile:true,
+    screenWidth:width,screenHeight:height,
+    screenOrientation:{type:'portraitPrimary',angle:0},
+  });
+  await session.call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
+  return {mode:'android-webview',width,height,deviceScaleFactor,model,platformVersion,userAgent:androidWebViewUserAgent(config)};
+}
+
 export function effectiveStopButtonVisible({ rawStopButtonVisible, inConversation, userCount, assistantCount, responseTurnId }) {
   return Boolean(rawStopButtonVisible && (inConversation || userCount > 0 || assistantCount > 0 || responseTurnId));
 }
@@ -480,6 +535,7 @@ export class ChatGptBrowser {
     await session.call('Page.enable');
     await session.call('Runtime.enable');
     await session.call('Network.enable');
+    await applyBrowserClientProfile(session,this.config);
     await installDecorativeAnimationPause(session);
     await installRequestProfileEngine(session);
 
@@ -521,6 +577,7 @@ export class ChatGptBrowser {
     await session.call('Page.enable');
     await session.call('Runtime.enable');
     await session.call('Network.enable');
+    await applyBrowserClientProfile(session,this.config);
     await installDecorativeAnimationPause(session);
     await installRequestProfileEngine(session);
 
@@ -617,6 +674,7 @@ export class ChatGptBrowser {
     const session=await this.chromium.connectTarget(target);
     await session.call('Page.enable');
     await session.call('Runtime.enable');
+    await applyBrowserClientProfile(session,this.config);
     await installRequestProfileEngine(session);
     if(signal?.aborted){session.close();throw signal.reason;}
     return {target,session,baseline:await evaluate(session,probeExpression())};
