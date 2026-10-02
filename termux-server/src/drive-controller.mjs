@@ -190,7 +190,18 @@ export class DriveDispatchController {
     const attemptCancelled=['CANCELLED','SUPERSEDED'].includes(r.body.client_status);
     if(attemptCancelled) {
       this.#detach(key);
-      if(r.state!=='CANCELLED')await this.#move(key,'CANCELLED','CLIENT_CANCELLED');
+      const priorControl=this.repository.control(r.task_id);
+      if(priorControl?.state==='STOPPED'&&priorControl.request_id===r.request_id&&priorControl.turn_id===r.turn_id) {
+        // Cancelling input does not cancel the app's separate request to stop generation.
+        await this.#fresh(key,transport);
+        const current=this.repository.get(key),control=this.repository.control(r.task_id);
+        if(control?.state==='STOPPED'&&control.request_id===r.request_id&&control.turn_id===r.turn_id) {
+          if(current.stop_status!=='CONFIRMED'&&Number(current.stop_retry_at||0)<=Date.now())
+            await this.#stopOwned(current,null,control);
+          await this.repository.flushCurrent(transport,key);return;
+        }
+      }
+      if(this.repository.get(key).state!=='CANCELLED')await this.#move(key,'CANCELLED','CLIENT_CANCELLED');
       await this.repository.flushCurrent(transport,key);return;
     }
     if(terminal(r))return;
