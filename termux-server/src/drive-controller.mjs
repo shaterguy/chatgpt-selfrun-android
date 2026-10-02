@@ -98,12 +98,36 @@ export class DriveDispatchController {
         &&latest.request_id===control.request_id&&latest.turn_id===control.turn_id;
     };
     try {
-      if(!record.conversation_url||!guard())return;
+      if(!guard())return;
       await this.#move(record.key,'STOPPED','APP_STOP_CLEANUP_PENDING',{stop_status:'PENDING',stop_control_epoch:control.control_epoch});
       if(attached&&!session) {
         // The original attach is still pending. Fence now; its late callback owns cleanup.
         await this.#move(record.key,'STOPPED','APP_STOP_PENDING_ATTACHMENT',{stop_status:'PENDING'});
         return;
+      }
+      if(!record.conversation_url) {
+        if(!record.intent) {
+          // No durable send was started; fencing preparation is sufficient.
+          if(guard())await this.#move(record.key,'STOPPED','APP_STOP_BEFORE_SUBMISSION',{stop_status:'CONFIRMED',stop_retry_at:0,error:null});
+          return;
+        }
+        if(!record.target_id)throw new Error('original submission target is unavailable for STOP readback');
+        if(!session) {
+          const target=await this.browser.attachTarget({targetId:record.target_id,signal:new AbortController().signal});
+          session=target.session;
+        }
+        if(!guard())return;
+        const outcome=await this.browser.readSubmission({session,intent:record.intent,prompt:record.intent.prompt,
+          conversationUrl:'',signal:new AbortController().signal});
+        if(!guard())return;
+        if(outcome.state==='ABSENT') {
+          await this.#move(record.key,'STOPPED','APP_STOP_SUBMISSION_ABSENT',{stop_status:'CONFIRMED',stop_retry_at:0,error:null});
+          return;
+        }
+        const url=canonicalUrl(outcome.probe?.url);
+        if(outcome.state!=='CONFIRMED'||!url)throw new Error('submitted conversation URL remains unconfirmed for STOP');
+        record=await this.#move(record.key,'STOPPED','APP_STOP_SUBMISSION_LOCATED',{
+          conversation_url:url,submission_confirmed:true,intent:{...record.intent,outcome:'CONFIRMED',message_id:outcome.messageId||record.intent.message_id}});
       }
       if(!session) {
         const resumed=await this.browser.resume({conversationUrl:record.conversation_url,signal:new AbortController().signal});
