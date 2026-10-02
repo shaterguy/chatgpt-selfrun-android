@@ -18,6 +18,8 @@ test('SelfRun machine envelope is rendered as a natural user instruction',()=>{
   assert.match(text,/SelfRun 운영문서 skill-doc/);
   assert.match(text,/요구사항 문서 requirement-doc/);
   assert.match(text,/이번 결과 문서 result-doc/);
+  assert.match(text,/Google Drive에서 지금 새로 읽고/);
+  assert.match(text,/캐시된 문서 내용은 사용하지 마/);
   assert.match(text,/이전 결과 문서는 previous-doc/);
   assert.match(text,/추가 지시는 다음과 같아/);
   assert.match(text,/파일도 확인해/);
