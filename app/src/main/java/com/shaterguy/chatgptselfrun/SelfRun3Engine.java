@@ -155,6 +155,9 @@ final class SelfRun3Engine {
             case TURN_READY -> {
                 require(stage==Stage.PREPARING && !s.resource("resultDocumentId").isEmpty(),"turn resources required");
                 require(!p.optString("prompt").isEmpty(),"prompt required");
+                String submissionMode=p.optString("submissionMode","SERVER");
+                require(Set.of("ON_DEVICE","SERVER").contains(submissionMode),"valid submission mode required");
+                put(v,"submissionMode",submissionMode);
                 put(v,"prompt",p.optString("prompt")); put(v,"inputText",p.optString("inputText"));
                 put(v,"inputRevision",p.optLong("inputRevision",-1)); put(v,"stage","READY");
                 if(SelfRun3SuccessorTransitionPolicy.armed(s)) {
@@ -384,7 +387,7 @@ final class SelfRun3Engine {
                         if(s.json().has(k)) put(attempt,k,s.json().opt(k));
                     put(attempt,"conversationUrl",s.resource("conversationUrl")); attempts.put(attempt);
                     put(v,"stoppedAttempts",attempts);
-                    for(String k:new String[]{"prompt","result","submittedAt","conversationId","repairAttempt",
+                    for(String k:new String[]{"submissionMode","prompt","result","submittedAt","conversationId","repairAttempt",
                             "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount",
                             "resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved",
                             "resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall"}) v.remove(k);
@@ -462,7 +465,7 @@ final class SelfRun3Engine {
         JSONObject config=s.config();
         // Repair reuses the actual source execution, independent of broken next-profile hints.
         if(!"REPAIR".equals(kind)) applyProfile(config,profile,s.taskMode());
-        for(String k:new String[]{"prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
+        for(String k:new String[]{"submissionMode","prompt","result","inputText","inputRevision","nextInput","submittedAt","error","repairAttempt","pauseReason","conversationId","intervention",
                 "parallelGroupId","branchId","branchDepth","branchObjective","mutationBoundary","branchPlan","mergeProfile","mergePhase","mergedFrom","repairTargetDocumentId","interventionRequested","branchInputRevision","branchInputText","superseded","repairBranch","legacyContract",
                 "canonicalPostConfirmedElapsed","canonicalPostConfirmedAtWall","canonicalPostBootCount","resultSeedDocumentId","resultSeedFingerprint","resultBodyMutationObserved","resultBodyMutationFingerprint","resultBodyMutationObservedElapsed","resultBodyMutationBootCount","resultBodyMutationObservedAtWall","documentCreateStates","stoppedRestart","stoppedResumeWait","stoppedAttempts","repairProblems","repairReason","repairSourceInputRevision",SelfRun3SuccessorTransitionPolicy.KEY}) v.remove(k);
         resources.remove("resultDocumentId"); resources.remove("resultCreateIntent"); resources.remove("conversationUrl");

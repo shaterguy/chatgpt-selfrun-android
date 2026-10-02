@@ -42,6 +42,70 @@ public final class SelfRunDualSubmissionTest {
         assertTrue(settings.contains("다음"));
     }
 
+    @Test public void legacyRequestsRetainServerTransportAfterUpgrade() {
+        JSONObject raw = ready("SERVER").json();
+        raw.remove("submissionMode");
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER,
+                SelfRunSubmissionAdapter.mode(new SelfRun3Engine.State(raw)));
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE,
+                SelfRunSubmissionAdapter.mode(ready("ON_DEVICE")));
+    }
+
+    @Test public void stoppedUnsubmittedRequestChoosesCurrentModeWhenPreparedAgain() {
+        SelfRun3Engine.State first = ready("ON_DEVICE");
+        SelfRun3Engine.State stopped = event(first, SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = event(stopped, SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertEquals("", resumed.text("submissionMode"));
+        assertEquals(SelfRun3Engine.Stage.PREPARING, resumed.stage());
+        JSONObject payload = new JSONObject();
+        SelfRun3Engine.put(payload, "prompt", "next fixture");
+        SelfRun3Engine.put(payload, "submissionMode", "SERVER");
+        SelfRun3Engine.State second = event(resumed, SelfRun3Engine.Kind.TURN_READY, payload);
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.SERVER, SelfRunSubmissionAdapter.mode(second));
+        assertNotEquals(first.requestId(), second.requestId());
+    }
+
+    @Test public void stoppedAcceptedRequestKeepsItsModeAndNeverResubmits() {
+        SelfRun3Engine.State first = ready("ON_DEVICE");
+        JSONObject started = new JSONObject();
+        SelfRun3Engine.put(started, "requestId", first.requestId());
+        SelfRun3Engine.put(started, "source", "canonical_post");
+        SelfRun3Engine.put(started, "protocolStage", "turn_request");
+        SelfRun3Engine.State waiting = event(first, SelfRun3Engine.Kind.STARTED, started);
+        SelfRun3Engine.State stopped = event(waiting, SelfRun3Engine.Kind.STOP, new JSONObject());
+        SelfRun3Engine.State resumed = event(stopped, SelfRun3Engine.Kind.RESUME_STOPPED, new JSONObject());
+        assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, SelfRunSubmissionAdapter.mode(resumed));
+        assertEquals(first.requestId(), resumed.requestId());
+        assertEquals(SelfRun3Engine.Action.WAIT, SelfRun3Engine.nextAction(resumed));
+    }
+
+    @Test public void modeChangeDoesNotCancelCompletionDeliveryOrActiveSubmission() throws Exception {
+        String c = source("SelfRun3Coordinator.java");
+        String change = c.substring(c.indexOf("private void onWorkModeChanged()"),
+                c.indexOf("private enum DriveStep"));
+        assertFalse(change.contains("clearAll"));
+        assertFalse(change.contains("serverRegisteredTurns.clear"));
+        assertFalse(change.contains("web.quiesce"));
+        assertTrue(change.contains("scheduleNext(0L)"));
+    }
+
+    @Test public void phoneTransportRetainsV3OneShotDispatchAndDisposalContract() throws Exception {
+        String adapter = source("SelfRunSubmissionAdapter.java");
+        assertTrue(adapter.contains("onDevice.prepare(state)"));
+        assertTrue(adapter.contains("onDevice.submit(state)"));
+        assertTrue(adapter.contains("server.prepare(state)"));
+        assertTrue(adapter.contains("server.submit(state)"));
+        assertTrue(adapter.contains("onDevice.disposeForConfirmedResultWait(state)"));
+        String dispatch = source("SelfRun3DispatchScript.java");
+        assertFalse(dispatch.contains("response.clone"));
+        assertFalse(dispatch.contains("getReader"));
+        assertFalse(dispatch.contains("MutationObserver"));
+        String web = source("SelfRun3WebAdapter.java");
+        assertTrue(web.contains("conversationCaptured = true"));
+        assertTrue(web.contains("listener.onConversation"));
+        assertTrue(web.contains("disposeHost();"));
+    }
+
     static SelfRun3Engine.State ready(String mode) {
         JSONObject config = new JSONObject();
         SelfRun3Engine.put(config, "taskMode", "CHAT");

@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def selfRunDriveVersionCode = 4002008
-def selfRunDriveVersionName = '4.0.7-dev2'
+def selfRunDriveVersionCode = 4002009
+def selfRunDriveVersionName = '4.0.7-dev3'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^(?:3|4)\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
@@ -168,7 +168,7 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
                 || service.contains('SelfRunRolloverCoordinator') || service.contains('PHASE_POST_PROTOCOL_DRIVE_SYNC')) throw new GradleException('SelfRunService must be the V3 foreground shell')
         ['SelfRun3Engine.java', 'SelfRun3Ledger.java', 'SelfRun3Coordinator.java',
          'SelfRun3Protocol.java', 'SelfRun3DriveAdapter.java', 'SelfRun3DriveLookup.java',
-         'SelfRun3WebAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
+         'SelfRun3WebAdapter.java', 'SelfRunSubmissionAdapter.java', 'SelfRun3BootstrapTransport.java', 'SelfRun3DispatchScript.java',
          'SelfRun3PowerPolicy.java', 'SelfRun3RunMarker.java', 'SelfRun3UserInput.java',
          'SelfRun3StrictJson.java', 'SelfRun3ResultWatchdog.java', 'SelfRun3ResultDocumentPolicy.java',
          'SelfRun3ResultDocumentReader.java', 'SelfRun3DriveTokenPolicy.java', 'SelfRun3RuntimeSettings.java',
@@ -183,9 +183,8 @@ def verifyDriveVariantIdentity = tasks.register('verifyDriveVariantIdentity') {
         def engine = new File(src, 'SelfRun3Engine.java').getText('UTF-8')
         def coordinator = new File(src, 'SelfRun3Coordinator.java').getText('UTF-8')
         if (selfRunDriveVersionName.startsWith('4.')
-                && (!coordinator.contains('new SelfRun4DriveWebAdapter(service, this)')
-                || coordinator.contains('new SelfRun3WebAdapter(service, this)'))) {
-            throw new GradleException('SelfRun 4 must delegate browser execution through Drive')
+                && !coordinator.contains('new SelfRunSubmissionAdapter(service, this)')) {
+            throw new GradleException('SelfRun 4 must select submission transport independently from completion')
         }
         def ledger = new File(src, 'SelfRun3Ledger.java').getText('UTF-8')
         def protocol = new File(src, 'SelfRun3Protocol.java').getText('UTF-8')

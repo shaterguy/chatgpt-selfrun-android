@@ -9,11 +9,11 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class SelfRun4DriveDispatchPolicyTest {
-    @Test public void coordinatorDelegatesOnlyBrowserExecutionToDriveServer() throws Exception {
+    @Test public void coordinatorSelectsBrowserSubmissionWithoutReplacingTheServerAdapter() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
         String adapter = source("SelfRun4DriveWebAdapter.java");
-        assertTrue(coordinator.contains("private final SelfRun4DriveWebAdapter web;"));
-        assertTrue(coordinator.contains("web = new SelfRun4DriveWebAdapter(service, this);"));
+        assertTrue(coordinator.contains("private final SelfRunSubmissionAdapter web;"));
+        assertTrue(coordinator.contains("web = new SelfRunSubmissionAdapter(service, this);"));
         assertFalse(coordinator.contains("web = new SelfRun3WebAdapter(service, this);"));
         assertTrue(adapter.contains("runtimeSettings.webPreparationMs()"));
         assertTrue(adapter.contains("WEB_PREPARATION_TIMEOUT"));

@@ -2,7 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import android.content.Context;
 
-/** Explicit opt-in boundary for the dormant SERVER transport stack. */
+/** Build capability for completion signaling shared by both submission modes. */
 final class SelfRunServerFeaturePolicy {
     private SelfRunServerFeaturePolicy() { }
 
@@ -11,8 +11,7 @@ final class SelfRunServerFeaturePolicy {
     }
 
     static boolean enabled(Context context) {
-        if (!buildEnabled() || context == null) return false;
-        return serverPathEnabled(true, new SelfRun3RuntimeSettings(context).workMode());
+        return buildEnabled() && context != null;
     }
 
     static boolean useServerPush(Context context, boolean localFallback) {

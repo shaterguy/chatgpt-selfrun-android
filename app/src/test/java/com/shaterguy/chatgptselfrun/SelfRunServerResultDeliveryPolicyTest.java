@@ -125,11 +125,11 @@ public final class SelfRunServerResultDeliveryPolicyTest {
         assertTrue(worker.contains("ACTION_SERVER_RESULT_RECHECK"));
     }
 
-    @Test public void serviceRoutesBoundedRecheckWithoutChangingOnDevicePolling() throws Exception {
+    @Test public void serviceRoutesBoundedRecheckForBothSubmissionModes() throws Exception {
         String service = source("SelfRunService.java");
         assertTrue(service.contains("ACTION_SERVER_RESULT_RECHECK"));
         assertTrue(service.contains("coordinator.onServerResultRecheck(turnId, attempt)"));
-        assertFalse(SelfRunServerWaitPolicy.useServerPush(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, false));
+        assertTrue(SelfRunServerWaitPolicy.useServerPush(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, false));
     }
 
     @Test public void vercelContractKeepsReceivedNonTerminalAndProcessedTerminal() throws Exception {

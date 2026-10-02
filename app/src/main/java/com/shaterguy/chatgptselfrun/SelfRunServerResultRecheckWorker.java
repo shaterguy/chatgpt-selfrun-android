@@ -17,7 +17,7 @@ import androidx.work.WorkerParameters;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-/** Durable, bounded follow-up reads for SERVER results that were signaled before committed=true. */
+/** Durable, bounded follow-up reads for shared Vercel results that were signaled before committed=true. */
 public final class SelfRunServerResultRecheckWorker extends Worker {
     private static final String PREFS = BuildConfig.APPLICATION_ID + ".selfrun-server-result-recheck";
     private static final String KEY_TURN_ID = "turnId";
@@ -117,10 +117,8 @@ public final class SelfRunServerResultRecheckWorker extends Worker {
         if (!isCurrent(app, turnId, attempt)) return Result.success();
 
         SelfRunStore store = new SelfRunStore(app);
-        SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(app);
         if (!SelfRunServerFeaturePolicy.enabled(app)
-                || !store.active() || store.paused() || store.userStopped()
-                || settings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+                || !store.active() || store.paused() || store.userStopped()) {
             clear(app, turnId);
             return Result.success();
         }

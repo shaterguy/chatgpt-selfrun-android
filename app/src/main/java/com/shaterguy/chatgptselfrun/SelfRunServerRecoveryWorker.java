@@ -14,7 +14,7 @@ import androidx.work.WorkerParameters;
 
 import java.util.concurrent.TimeUnit;
 
-/** Slow correctness watchdog for SERVER mode; it never replaces event-driven FCM delivery. */
+/** Slow correctness watchdog for shared Vercel completion; it never replaces event-driven FCM delivery. */
 public final class SelfRunServerRecoveryWorker extends Worker {
     private static final String UNIQUE_WORK = "selfrun-server-recovery";
 
@@ -48,10 +48,8 @@ public final class SelfRunServerRecoveryWorker extends Worker {
     @NonNull @Override public Result doWork() {
         Context app = getApplicationContext();
         SelfRunStore store = new SelfRunStore(app);
-        SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(app);
         if (!SelfRunServerFeaturePolicy.enabled(app)
-                || !store.active() || store.paused() || store.userStopped()
-                || settings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+                || !store.active() || store.paused() || store.userStopped()) {
             return Result.success();
         }
         try {

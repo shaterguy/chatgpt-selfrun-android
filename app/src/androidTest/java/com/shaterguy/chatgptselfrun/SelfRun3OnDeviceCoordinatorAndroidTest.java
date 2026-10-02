@@ -36,10 +36,10 @@ public final class SelfRun3OnDeviceCoordinatorAndroidTest {
         assertTrue(SelfRunServerFeaturePolicy.enabled(context));
     }
 
-    @Test public void normalOnDeviceModeUsesLocalPollingPolicy() {
+    @Test public void onDeviceSubmissionUsesSharedVercelCompletionPolicy() {
         SelfRun3RuntimeSettings settings = new SelfRun3RuntimeSettings(context);
         assertEquals(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, settings.workMode());
-        assertFalse(SelfRunServerFeaturePolicy.enabled(context));
-        assertFalse(SelfRunServerWaitPolicy.useServerPush(settings.workMode(), false));
+        assertTrue(SelfRunServerFeaturePolicy.enabled(context));
+        assertTrue(SelfRunServerWaitPolicy.useServerPush(settings.workMode(), false));
     }
 }

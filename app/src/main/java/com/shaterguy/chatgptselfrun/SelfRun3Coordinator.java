@@ -42,7 +42,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private final SelfRunRunLog log;
     private final SelfRun3Ledger ledger;
     private final SelfRun3DriveAdapter drive;
-    private final SelfRun4DriveWebAdapter web;
+    private final SelfRunSubmissionAdapter web;
     private final SelfRun3RuntimeSettings runtimeSettings;
     private final SelfRunServerWatch serverWatch;
     private final SharedPreferences runtimePrefs;
@@ -74,7 +74,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         this.log = log;
         ledger = new SelfRun3Ledger(service);
         drive = new SelfRun3DriveAdapter(service, store, ledger, this::operationPermitted);
-        web = new SelfRun4DriveWebAdapter(service, this);
+        web = new SelfRunSubmissionAdapter(service, this);
         runtimeSettings = new SelfRun3RuntimeSettings(service);
         serverWatch = new SelfRunServerWatch(service);
         runtimePrefs = service.getSharedPreferences(SelfRun3RuntimeSettings.PREFS, Context.MODE_PRIVATE);
@@ -119,7 +119,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     void onPushResult(SelfRunPushEvent push) {
         requireMain();
         if (push == null || !SelfRunServerFeaturePolicy.enabled(service)) return;
-        if (!canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) return;
+        if (!canRun()) return;
         int expectedEpoch = epoch;
         String installationId;
         try {
@@ -162,7 +162,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     void onServerRecovery() {
         requireMain();
         if (!SelfRunServerFeaturePolicy.enabled(service)
-                || !canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+                || !canRun()) {
             SelfRunServerRecoveryWorker.cancel(service);
             return;
         }
@@ -198,7 +198,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (turnId == null || turnId.isEmpty() || attempt < 0) return;
         if (!SelfRunServerFeaturePolicy.enabled(service)
-                || !canRun() || runtimeSettings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER) {
+                || !canRun()) {
             SelfRunServerResultRecheckWorker.clear(service, turnId);
             return;
         }
@@ -532,8 +532,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private boolean validServerRegistration(int expectedEpoch, int expectedGeneration) {
         return validEpoch(expectedEpoch) && expectedGeneration == serverGeneration && canRun()
-                && SelfRunServerFeaturePolicy.enabled(service)
-                && runtimeSettings.workMode() == SelfRun3RuntimeSettings.WorkMode.SERVER;
+                && SelfRunServerFeaturePolicy.enabled(service);
     }
 
     private void activateServerFallback(SelfRun3Engine.State state, String reason) {
@@ -549,15 +548,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     private void onWorkModeChanged() {
         requireMain();
         if (destroyed) return;
-        serverGeneration++;
-        serverRegistrationInFlight = false;
-        serverRegisteredTurns.clear();
-        serverFallbackTurns.clear();
-        recoveryQueue.clear();
-        recoveryCycleInFlight = false;
-        nextResultPoll.clear();
-        SelfRunServerResultRecheckWorker.clearAll(service);
-        SelfRunServerRecoveryWorker.cancel(service);
+        // An already prepared request owns its persisted submission mode. Vercel
+        // watches and pending completion delivery are shared and must not reset.
         if (canRun()) scheduleNext(0L);
     }
 
@@ -662,6 +654,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                         }
                         JSONObject payload = new JSONObject();
                         SelfRun3Engine.put(payload, "prompt", SelfRun3Protocol.prompt(after, inputText));
+                        SelfRun3Engine.put(payload, "submissionMode", runtimeSettings.workMode().name());
                         SelfRun3Engine.put(payload, "inputText", inputText);
                         SelfRun3Engine.put(payload, "inputRevision", inputRevision);
                         after = ledger.apply(event(after, after.requestId() + ":turn-ready",

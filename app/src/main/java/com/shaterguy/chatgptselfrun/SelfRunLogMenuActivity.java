@@ -61,8 +61,8 @@ public final class SelfRunLogMenuActivity extends Activity {
         page.addView(Ui.setting(this, R.drawable.ic_settings, "작업 모드",
                 workModeLabel(runtimeSettings.workMode()), v -> editWorkMode()));
         page.addView(Ui.muted(this,
-                "온디바이스가 기본·권장입니다. 필요하면 SERVER를 선택해 Drive 변경 알림 기반으로 실행할 수 있습니다."));
-        page.addView(Ui.section(this, "SelfRun 3 시간 설정"));
+                "온디바이스는 휴대폰 WebView에서 제출하고 대화 주소를 저장한 뒤 WebView를 닫습니다. 서버는 현재 4버전 방식으로 제출·감시합니다. 완료 알림은 두 방식 모두 Vercel을 사용하며, 변경한 방식은 다음 새 요청부터 적용됩니다."));
+        page.addView(Ui.section(this, "실행 시간 설정"));
         page.addView(Ui.setting(this, R.drawable.ic_settings, "Result 자동 복구 대기",
                 runtimeSettings.resultRepairMinutes() + "분",
                 v -> editPositiveSetting("Result 자동 복구 대기", "분", runtimeSettings.resultRepairMinutes(),
@@ -73,7 +73,7 @@ public final class SelfRunLogMenuActivity extends Activity {
                 v -> editPositiveSetting("다음 턴 전환 지연 알림", "분", runtimeSettings.stallAlertMinutes(),
                         runtimeSettings::saveStallAlertMinutes)));
         page.addView(Ui.divider(this));
-        page.addView(Ui.setting(this, R.drawable.ic_settings, "Result 확인 간격",
+        page.addView(Ui.setting(this, R.drawable.ic_settings, "완료 알림 복구 확인 간격",
                 runtimeSettings.resultPollSeconds() + "초",
                 v -> editPositiveSetting("Result 확인 간격", "초", runtimeSettings.resultPollSeconds(),
                         runtimeSettings::saveResultPollSeconds)));

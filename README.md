@@ -1,6 +1,6 @@
-# SelfRun 3
+# SelfRun Drive
 
-SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 현재 활성 개발 계보는 V3 하나뿐이며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
+SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 작업 상태는 기존 V3 원장을 유지하며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
 현재 정식 버전은 SelfRun Drive 4.0.6 / versionCode 4002006입니다. 4.0.5의 기능을 유지하면서 정식 패키지로 배포됐던 4.0.4-dev2에서도 앱 삭제 없이 업데이트할 수 있도록 설치 버전 번호를 바로잡았습니다. 정식 applicationId와 서명 계보는 유지됩니다. 최신 정식 Release는 [drive-v4.0.6](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.6)입니다.
 
@@ -17,9 +17,9 @@ SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 �
 
 - `SelfRun3Engine`: Task → logical Turn → physical Request의 상태 전이를 정의합니다.
 - `SelfRun3Ledger`: 작업 스냅샷, 이벤트, 턴 결과를 SQLite 원장에 기록합니다.
-- `SelfRun3Coordinator`: 원장을 기준으로 Drive 준비, ChatGPT 전송, 응답 관측, 결과 reconciliation을 조정합니다.
+- `SelfRun3Coordinator`: 원장을 기준으로 Drive 준비, ChatGPT 전송, 제출 확인, Vercel 완료 신호 수신과 결과 반영을 조정합니다.
 - `SelfRun3DriveAdapter`: 요구사항·첨부·턴별 결과 문서를 고정 ID로 관리합니다.
-- `SelfRun3WebAdapter`: 앱 전용 WebView에서 CHAT/WORK 프로필 적용, 제출, 응답 protocol 관측을 수행합니다.
+- `SelfRun3WebAdapter`: 온디바이스 선택 시 앱 전용 WebView에서 CHAT/WORK 프로필 적용과 제출만 수행하고, 제출 확인과 대화 주소 저장 후 WebView를 파괴합니다. 응답을 읽거나 감시하지 않습니다.
 - `SelfRunStore`: V3 원장의 사용자 화면 projection, Drive base binding, 첨부 URI 소유권만 보관합니다.
 
 앱의 authoritative execution state는 `SelfRun3Ledger`에 있으며 `SelfRunStore`는 별도의 구형 실행 상태머신이 아닙니다.
@@ -63,19 +63,21 @@ SelfRun Drive 3.3.1부터 committed Result가 수락되면 successor 전환 상�
 
 ## ChatGPT 실행
 
-CHAT과 WORK 두 모드를 지원합니다. 앱은 사용자 선택 profile을 적용한 후 App-private WebView에서 요청을 제출하고 response protocol을 관측합니다. `TurnProtocolLogBridge`는 V3 WebAdapter가 소유한 WebView 이벤트만 수용하며 V3가 아닌 protocol ownership은 거부합니다.
+CHAT과 WORK 두 모드를 지원합니다. ON_DEVICE는 v3 방식으로 휴대폰 WebView에서 사용자 선택 profile을 적용하고 요청을 제출합니다. outgoing canonical POST와 대화 주소만 확인하며, 저장이 끝나면 WebView를 파괴합니다. SERVER는 현재 v4 Drive-to-Termux 방식으로 제출하고 서버가 응답을 감시합니다. `TurnProtocolLogBridge`는 V3 WebAdapter가 소유한 WebView 이벤트만 수용하며 V3가 아닌 protocol ownership은 거부합니다.
 
-정상 대기 중에는 짧은 주기 DOM polling을 사용하지 않습니다. UI 조작은 제출·프로필 적용·필요한 복구 구간으로 제한하고, 대기 상태는 protocol callback과 제한된 reconciliation으로 진행합니다.
+온디바이스의 제출 후 응답 본문·완료 여부·화면 상태는 관찰하지 않습니다. 다음 턴은 새 WebView에서 새 요청을 제출합니다. 완료 신호 수신과 Result 무결성 검사는 WebView 없이 공통 경로에서 처리합니다.
 
-## Result 대기 작업 모드
+## 제출 방식과 공통 완료 신호
 
-현재 정식 빌드는 `ON_DEVICE`와 `SERVER` 두 Result 대기 경로를 모두 제공합니다. `ON_DEVICE`가 기본·권장값이며 새 설치, 저장값 누락·손상·알 수 없는 값은 ON_DEVICE로 해석합니다. 3.2.6에서 저장된 `SERVER` 값은 최초 실행에서 다른 설정·Drive binding·원장을 지우지 않고 1회 ON_DEVICE로 전환되지만, 이후 설정 화면에서 SERVER를 다시 수동 선택할 수 있습니다.
+개발 후보 `4.0.7-dev3`의 설정에서 `ON_DEVICE`와 `SERVER`는 제출 방식을 선택합니다. 기존 저장된 선택값과 기본 ON_DEVICE는 유지합니다.
 
-- `ON_DEVICE`: 기존 `resultPollMs()` 기반 Result polling이 기본 경로입니다. PENDING Result는 유지하고, 현재 task/turn/result-document identity가 일치하는 `committed:true` Result만 소비하여 다음 논리 턴으로 진행합니다.
-- `SERVER`: 일반 정식 빌드에서 활성화된 선택 경로이며 설정 화면에서 `서버를 통해 실행`으로 선택할 수 있습니다. 서버 watch, FCM, ACK/outbox와 recovery worker를 사용하되 ON_DEVICE의 기본·권장 지위는 유지합니다.
-- 개발용 SERVER 전용 검증은 필요할 때 `-PselfRunServerChecks=true`로 명시적으로 실행합니다. 이 옵션은 일반 candidate/core CI의 기본값이 아닙니다.
+- `ON_DEVICE`: 휴대폰 WebView에서 v3 방식으로 프롬프트를 제출하고 대화 주소를 확보·저장하면 WebView를 파괴합니다. 응답 감시는 하지 않습니다.
+- `SERVER`: 현재 v4 서버가 Drive 요청을 받아 제출하고 응답을 감시합니다.
+- 완료 신호는 두 방식 모두 현재 Vercel watch → FCM → 앱의 고정 Result 확인 경로를 사용합니다. 신호 누락·읽기 실패에 대한 기존 제한된 재확인·복구 정책은 유지합니다.
+- 제출 방식은 새 요청을 준비할 때 원장에 저장합니다. 설정 변경과 프로세스 재시작이 이미 준비·제출 중인 요청을 다른 경로로 다시 보내지 않습니다. 업그레이드 전 준비된 요청은 기존 SERVER 경로를 유지합니다.
+- 서버 경로를 포함한 전체 JVM 검증은 `-PselfRunServerChecks=true`로 실행합니다.
 
-Firebase public configuration과 Gateway endpoint는 SERVER 실행·검증 경로에서 사용하며 환경변수 또는 Gradle property로 주입합니다. 일반 ON_DEVICE core compile/test/build는 이 값들에 의존하지 않습니다.
+두 방식의 공통 완료 알림에 필요한 Firebase public configuration과 Gateway endpoint는 기존 환경변수 또는 Gradle property를 그대로 사용합니다. Vercel 자격증명·설정은 이 기능에서 변경하지 않습니다.
 
 ```text
 SELFRUN_FIREBASE_API_KEY
@@ -85,7 +87,7 @@ SELFRUN_FIREBASE_SENDER_ID
 SELFRUN_PUSH_GATEWAY_URL
 ```
 
-Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`는 SERVER 실행 경로의 Firebase Cloud Messaging 발송에 사용하는 서버 자격증명이며 Git이나 APK에 포함하지 않습니다.
+Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`는 두 제출 방식의 공통 Firebase Cloud Messaging 발송에 사용하는 서버 자격증명이며 Git이나 APK에 포함하지 않습니다.
 
 ## 앱 화면
 
@@ -93,13 +95,13 @@ Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_
 
 - 실행: 현재 Task, mode/profile, V3 phase, 추가 지시, 일시정지/재개/중지, 로그를 표시합니다.
 - 기록: 완료·중단된 작업의 V3 projection과 health 진단을 표시합니다.
-- 설정: Drive base folder, profile registry, Web UI calibration, Result 대기 작업 모드를 관리합니다.
+- 설정: Drive base folder, profile registry, Web UI calibration, 제출 방식을 관리합니다.
 
 추가 지시는 `runId + text + revision`으로 저장하고 V3가 실제로 소비한 revision만 지웁니다. 구형 continuation lock/retry 상태는 사용하지 않습니다.
 
 ## 빌드와 검증
 
-Candidate 검증은 `.github/workflows/build-selfrun-v3-candidate.yml`에서 수행합니다.
+현재 후보 검증은 `.github/workflows/selfrun-dual-submission.yml`에서 수행합니다.
 
 1. `command-bridge` Node dependency 설치, test, TypeScript typecheck
 2. V3-only static policy와 전체 test-source compile

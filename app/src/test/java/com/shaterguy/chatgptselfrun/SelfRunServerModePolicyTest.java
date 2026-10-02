@@ -11,10 +11,10 @@ import static org.junit.Assert.*;
 
 @Category(ServerOnly.class)
 public final class SelfRunServerModePolicyTest {
-    @Test public void serverModeUsesPushUnlessThatExecutionFellBackLocally() {
+    @Test public void bothSubmissionModesUsePushUnlessThatExecutionFellBackLocally() {
         assertTrue(SelfRunServerWaitPolicy.useServerPush(SelfRun3RuntimeSettings.WorkMode.SERVER, false));
         assertFalse(SelfRunServerWaitPolicy.useServerPush(SelfRun3RuntimeSettings.WorkMode.SERVER, true));
-        assertFalse(SelfRunServerWaitPolicy.useServerPush(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, false));
+        assertTrue(SelfRunServerWaitPolicy.useServerPush(SelfRun3RuntimeSettings.WorkMode.ON_DEVICE, false));
     }
 
     @Test public void recoveryWatchdogUsesWorkManagerMinimumFifteenMinutePeriod() {
@@ -39,12 +39,12 @@ public final class SelfRunServerModePolicyTest {
         assertTrue(coordinator.contains("SelfRunPushAckOutbox.AckState.PROCESSED"));
     }
 
-    @Test public void recoveryWorkerIsPeriodicAndOnlyWakesActiveServerRuns() throws Exception {
+    @Test public void recoveryWorkerIsPeriodicAndOnlyWakesActiveRuns() throws Exception {
         String worker = source("SelfRunServerRecoveryWorker.java");
         assertTrue(worker.contains("PeriodicWorkRequest"));
         assertTrue(worker.contains("15, TimeUnit.MINUTES"));
         assertTrue(worker.contains("ACTION_SERVER_RECOVERY"));
-        assertTrue(worker.contains("WorkMode.SERVER"));
+        assertFalse(worker.contains("settings.workMode() != SelfRun3RuntimeSettings.WorkMode.SERVER"));
         assertTrue(worker.contains("store.active()"));
         assertTrue(worker.contains("store.paused()"));
         assertTrue(worker.contains("store.userStopped()"));

@@ -10,7 +10,7 @@ final class SelfRunServerWaitPolicy {
     private SelfRunServerWaitPolicy() { }
 
     static boolean useServerPush(SelfRun3RuntimeSettings.WorkMode mode, boolean localFallback) {
-        return mode == SelfRun3RuntimeSettings.WorkMode.SERVER && !localFallback;
+        return mode != null && !localFallback;
     }
 
     static long serverResultRecheckDelayMs(int attempt) {

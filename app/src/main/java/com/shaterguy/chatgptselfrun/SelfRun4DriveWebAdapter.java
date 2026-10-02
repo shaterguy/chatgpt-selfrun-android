@@ -146,7 +146,7 @@ final class SelfRun4DriveWebAdapter {
         }
     }
 
-    private void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
+    void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
         if (snapshot == null || accessToken.isEmpty() || io.isShutdown()) return;
         String token = accessToken;
         try {
