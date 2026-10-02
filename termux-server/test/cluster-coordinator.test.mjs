@@ -139,3 +139,37 @@ test('losing ACTIVE ownership quiesces local work before publishing STANDBY stat
   assert.equal(callback?.role, 'STANDBY');
   assert.equal(transport.writes.get('__SELFRUN_SERVER__Galaxy-S25.json')?.active_count, 0);
 });
+
+test('standby publishes zero active executions while retaining recoverable local records',async()=>{
+  const now=1_800_000_000_000,stateStore=store(3,'RUNNING');
+  const transport=new FakeTransport([{server_name:'Galaxy-Tab-S11-Ultra',server_priority:1,
+    role:'ACTIVE',active_count:1,status:'RUNNING',updated_at:new Date(now).toISOString()}]);
+  const cluster=new SelfRunClusterCoordinator({stateStore,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:0,now:()=>now});
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role,'STANDBY');
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
+  assert.equal(stateStore.snapshot().activeCount,3);
+});
+test('candidate publishes zero until an active claim is ready without discarding failover work',async()=>{
+  let now=1_800_000_000_000;
+  const stateStore=store(3,'RUNNING'),transport=new FakeTransport();
+  const cluster=new SelfRunClusterCoordinator({stateStore,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:100,now:()=>now});
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role,'CANDIDATE');
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
+  now+=101;await cluster.refresh();
+  assert.equal(cluster.canDispatch(),true);
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,3);
+  assert.equal(stateStore.snapshot().activeCount,3);
+});
+test('shutdown publishes zero active executions without erasing recoverable records',async()=>{
+  const now=1_800_000_000_000,stateStore=store(3,'RUNNING'),transport=new FakeTransport();
+  const cluster=new SelfRunClusterCoordinator({stateStore,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:0,now:()=>now});
+  await cluster.refresh();await cluster.close();
+  const published=transport.writes.get(cluster.memberFileName());
+  assert.equal(published.role,'STANDBY');assert.equal(published.active_count,0);
+  assert.equal(stateStore.snapshot().activeCount,3);
+});

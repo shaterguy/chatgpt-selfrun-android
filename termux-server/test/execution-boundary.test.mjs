@@ -133,14 +133,15 @@ test('execution: migration does not reactivate an observer after authoritative D
   await f.store.patch(snapshot);f.controller=f.recreate();await f.controller.tick(f.transport);
   assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,0);
 });
-test('execution: imported legacy Result-terminal state resumes only observation under RUNNING',async()=>{
+test('execution: imported legacy terminal state stays finished under cached RUNNING',async()=>{
   const f=fixture();await f.existing();await f.controller.quiesceForStandby();
   const body=structuredClone(f.rows.get(f.path));body.lifecycle_record.state='COMPLETED';
   body.lifecycle_record.result_state='COMMITTED';body.lifecycle_state='COMPLETED';
   const {MemoryStore}=await import('./helpers/lifecycle-fixture.mjs');
   f.store=new MemoryStore();f.controller=f.recreate();f.rows.set(f.path,body);
   await f.controller.ingest(f.path,body,f.transport);
-  assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,0);
+  assert.equal(f.record().state,'COMPLETED');assert.equal(f.store.snapshot().activeCount,0);
 });
 
 test('execution: durable cancellation fences a POST waiting on publication',async()=>{
