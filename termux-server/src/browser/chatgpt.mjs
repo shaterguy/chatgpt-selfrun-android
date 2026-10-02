@@ -721,13 +721,16 @@ export class ChatGptBrowser {
       return {state:'UNKNOWN',probe};
     const expected=JSON.stringify(String(prompt).replace(/\s+/g,' ').trim());
     const messageId=JSON.stringify(intent.message_id||'');
+    // User wrappers also contain collapse controls. Compare complete user content on a detached clone.
     const expression='(() => {const expected='+expected+', id='+messageId+';'+
       'const users=[...document.querySelectorAll(\'[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"],[data-content-search-unit-key$=":user"]\')];'+
       'const matched=users.map(e=>{let found=false;'+
       'for(let n=e,depth=0;n&&depth<6;n=n.parentElement,depth++){'+
       'const ids=["data-message-id","data-chatgpt-search-unit-key","data-content-search-unit-key"].map(k=>String(n.getAttribute?.(k)||""));'+
       'if(id&&ids.some(v=>v===id||v===id+":user"))found=true;}'+
-      'const same=String(e.innerText||e.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
+      'const content=e.cloneNode(true);'+
+      'content.querySelectorAll(\'button,[role="button"],[aria-hidden="true"],svg\').forEach(n=>n.remove());'+
+      'const same=String(content.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
       'return {idMatch:matched.some(m=>m.found),lastTextMatch:matched.at(-1)?.same||false};})()';
     const evidence=await evaluate(session,expression);
     const hasBaseline=Number.isFinite(intent.baseline?.userCount)||!!intent.baseline?.userMessageId;
