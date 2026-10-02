@@ -9,14 +9,24 @@ test('CREATE_REQUESTED is sufficient authority for server-owned prepare and subm
  assert.equal(f.record().state,'OBSERVING');
  assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
-test('initial conversation sends one plain 작업 시작 follow-up and defers early committed Result until that response completes',async()=>{
+test('initial conversation waits for the first assistant response before sending one plain 작업 시작 follow-up',async()=>{
  const f=fixture({startFollowupEnabled:true,startFollowupDelayMs:0,startFollowupRetryMs:1});
+ Object.assign(f.probe,{
+   streaming:false,stopButtonVisible:false,paused:false,
+   assistantCount:0,assistantTextLength:0,assistantMessageId:null,
+   responseTextLength:0,responseFingerprint:'',
+ });
  await f.ingest();
  assert.equal(f.sends,1);
  assert.equal(f.record().start_followup_state,'PENDING');
  f.result(true);
- f.probe.streaming=false;
- f.probe.stopButtonVisible=false;
+ await new Promise(resolve=>setTimeout(resolve,25));
+ assert.equal(f.sends,1,'follow-up must not race ahead of the first assistant response');
+ assert.equal(f.record().start_followup_state,'PENDING');
+ Object.assign(f.probe,{
+   assistantCount:1,assistantTextLength:900,assistantMessageId:'a1',
+   responseTextLength:850,responseFingerprint:'first-response',
+ });
  await new Promise(resolve=>setTimeout(resolve,25));
  assert.equal(f.sends,2);
  assert.equal(f.sent[1].prompt,'작업 시작');
@@ -26,12 +36,10 @@ test('initial conversation sends one plain 작업 시작 follow-up and defers ea
  assert.notEqual(f.record().state,'COMPLETED');
  await new Promise(resolve=>setTimeout(resolve,5));
  assert.equal(f.sends,2);
- f.probe.assistantCount=2;
- f.probe.assistantTextLength=2000;
- f.probe.assistantMessageId='a2';
- f.probe.responseTurnId='response-2';
- f.probe.responseTextLength=2000;
- f.probe.responseFingerprint='after-start';
+ Object.assign(f.probe,{
+   assistantCount:2,assistantTextLength:2000,assistantMessageId:'a2',
+   responseTurnId:'response-2',responseTextLength:2000,responseFingerprint:'after-start',
+ });
  await f.observe({streaming:false,stopButtonVisible:false,paused:false,status:'COMPLETED'});
  assert.equal(f.record().start_followup_state,'DONE');
  assert.equal(f.record().state,'COMPLETED');
