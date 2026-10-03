@@ -41,9 +41,10 @@ test('execution: server prompt rewriting remains the submitted immutable payload
   assert.equal(f.record().intent.prompt,f.sent[0].prompt);
 });
 test('execution: cancelled attempt is not revived by unchanged RUNNING control',async()=>{
-  const f=fixture(); f.body.client_status='CANCELLED'; await f.ingest();
+  const f=fixture(); f.body.client_status='CREATE_REQUESTED'; await f.ingest();
+  f.body.client_status='CANCELLED'; await f.ingest();
   await f.controller.tick(f.transport);
-  assert.equal(f.sends,0); assert.equal(f.prepares,0); assert.equal(f.record().state,'CANCELLED');
+  assert.equal(f.sends,0); assert.equal(f.prepares,1); assert.equal(f.record().state,'CANCELLED');
   f.body.dispatch_attempt=2; f.path='__SELFRUN_DISPATCH__retry.json';
   f.body.client_status='CREATE_REQUESTED'; await f.ingest();
   assert.equal(f.sends,0); assert.equal(f.record().state,'PREPARED');
@@ -98,7 +99,7 @@ test('execution: next app request ends the preceding observer without interpreti
   assert.equal(f.rows.get(nextPath).server_status,'READY_TO_SUBMIT');
 });
 
-test('execution: STOP survives abort-aware pending attach and retries owned cleanup',async()=>{
+test('execution: STOP fences abort-aware pending attach without reopening for cleanup',async()=>{
   const f=fixture(),entered=deferred();const resume=f.browser.resume;
   f.browser.resume=async({signal})=>{
     entered.resolve();
@@ -106,24 +107,27 @@ test('execution: STOP survives abort-aware pending attach and retries owned clea
   };
   const opening=f.existing();await entered.promise;await f.stop();await opening;
   f.browser.resume=resume;await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.deepEqual(f.controller.repository.records(),[]);
 });
-test('execution: persisted STOP cleanup is restored after the control transaction crash gap',async()=>{
+test('execution: persisted STOP remains inert after the control transaction crash gap',async()=>{
   const f=fixture();await f.existing();
   f.control={...f.control,state:'STOPPED',control_epoch:2};
   await f.controller.repository.applyControl(f.control);
   await f.controller.quiesceForStandby();f.controller=f.recreate();
   await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.deepEqual(f.controller.repository.records(),[]);
 });
-test('execution: an unconfirmed STOP retries without resubmitting',async()=>{
+test('execution: an unconfirmed STOP stays inert without resubmitting',async()=>{
   const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
   f.browser.quiesce=async()=>{throw new Error('temporary stop transport error');};
   await f.stop();assert.equal(f.record().stop_status,'UNCONFIRMED');
   f.browser.quiesce=quiesce;
   await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
   await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.deepEqual(f.controller.repository.records(),[]);
 });
 test('execution: migration does not reactivate an observer after authoritative DONE',async()=>{
   const f=fixture();await f.existing();await f.controller.quiesceForStandby();
@@ -167,7 +171,7 @@ test('execution: unreadable TaskControl fails closed instead of assuming absence
   assert.equal(f.sends,0);
 });
 
-test('execution: app attempt cancellation cannot suppress current STOP cleanup retry',async()=>{
+test('execution: app cancellation followed by STOP never reopens a released observer',async()=>{
   const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
   f.body.client_status='CANCELLED';await f.ingest();
   f.browser.quiesce=async()=>{throw new Error('temporary stop failure');};
@@ -175,10 +179,11 @@ test('execution: app attempt cancellation cannot suppress current STOP cleanup r
   f.browser.quiesce=quiesce;
   await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
   await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.deepEqual(f.controller.repository.records(),[]);
 });
 
-test('execution: STOP recovers a released initial input before its URL callback',async()=>{
+test('execution: STOP with unknown URL fences a released input without historical retry',async()=>{
   const f=fixture(),entered=deferred(),gate=deferred();
   f.onSubmit=async()=>{entered.resolve();await gate.promise;};
   const posting=f.ingest();await entered.promise;
@@ -186,8 +191,9 @@ test('execution: STOP recovers a released initial input before its URL callback'
   await f.stop();gate.resolve();await posting;
   await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
   await f.controller.tick(f.transport);
-  assert.equal(f.record().conversation_url,f.probe.url);
-  assert.equal(f.record().stop_status,'CONFIRMED');assert.equal(f.quiesces,1);
+  assert.equal(f.record().conversation_url,undefined);
+  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);
+  assert.deepEqual(f.controller.repository.records(),[]);
   assert.equal(f.sends,1);assert.equal(f.prepares,1);
 });
 test('execution: STOP without provable submitted URL is explicitly unconfirmed',async()=>{

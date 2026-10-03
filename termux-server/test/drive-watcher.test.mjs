@@ -88,7 +88,7 @@ function deferredWatcherFixture() {
 test('unchanged deferred dispatch does not repeat serial Drive body and control reads',async()=>{
  const f=deferredWatcherFixture();
  await f.watcher.scanOnce();await f.watcher.scanOnce();await f.watcher.scanOnce();
- assert.deepEqual(f.reads,[f.dispatchPath,f.controlPath]);
+ assert.deepEqual(f.reads,[f.controlPath,f.dispatchPath]);
  assert.equal(f.ingested.length,0);
 });
 

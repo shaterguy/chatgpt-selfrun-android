@@ -78,7 +78,7 @@ function fixture(options={}) {
     await f.observe({status:'STALLED'});
   };
   f.stop=async()=>{f.control={...f.control,state:'STOPPED',control_epoch:f.control.control_epoch+1};await f.controller.control(null,f.control,f.transport);};
-  f.resume=async()=>{f.control={...f.control,state:'RUNNING',control_epoch:f.control.control_epoch+1};await f.controller.control(null,f.control,f.transport);await f.controller.tick(f.transport);};
+  f.resume=async()=>{f.control={...f.control,state:'RUNNING',control_epoch:f.control.control_epoch+1,conversation_url:f.probe.url};await f.controller.control(null,f.control,f.transport);await f.controller.tick(f.transport);};
   return f;
 }
 

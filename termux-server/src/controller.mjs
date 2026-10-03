@@ -93,11 +93,12 @@ export class SelfRunController {
       const task=cleanString(raw.task_id),turn=cleanString(raw.turn_id),request=cleanString(raw.request_id),epoch=Number(raw.control_epoch);
       if(!task||!turn||!request||!Number.isSafeInteger(epoch)||epoch<1)
         throw new Error('HTTP control requires task_id, turn_id, request_id and control_epoch');
-      if(this.lifecycle.repository.records().some(r=>r.task_id===task&&r.body.server_ingress!=='HTTP'))throw new Error('task is owned by Drive ingress');
+      if(this.lifecycle.repository.ownedByOtherIngress(task,'HTTP'))throw new Error('task is owned by Drive ingress');
       const prior=this.lifecycle.controlForTask(task);
       if(!prior||prior.turn_id!==turn||prior.request_id!==request||epoch<=prior.control_epoch)
         throw new Error('stale or unscoped HTTP control');
       const control={schema:'selfrun-task-control-v1',task_id:task,turn_id:turn,request_id:request,
+        ...(signal.type==='RESUME'?{conversation_url:cleanString(raw.conversation_url)}:{}),
         control_epoch:epoch,state:signal.type==='STOP'?'STOPPED':signal.type==='RESUME'?'RUNNING':'PAUSED',updated_at_ms:Date.now()};
       const path='__SELFRUN_CONTROL__'+task+'.json';
       await this.transport.setControl(signal.signalId,path,control);
@@ -107,7 +108,7 @@ export class SelfRunController {
     }
     const e=signal.envelope,task=e.TASK_ID,request=e.REQUEST_ID;
     const records=this.lifecycle.repository.records().filter(r=>r.task_id===task);
-    if(records.some(r=>r.body.server_ingress!=='HTTP'))throw new Error('task is owned by Drive ingress');
+    if(this.lifecycle.repository.ownedByOtherIngress(task,'HTTP'))throw new Error('task is owned by Drive ingress');
     const existing=records.find(r=>r.request_id===request);
     const prior=this.lifecycle.controlForTask(task);
     if(existing&&prior?.state!=='RUNNING')throw new Error('explicit higher-epoch task RESUME required');

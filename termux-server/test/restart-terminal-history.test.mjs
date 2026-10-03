@@ -60,7 +60,8 @@ test('restart recomputes a stale active summary without changing terminal record
   await f.controller.tick(f.transport);
   assert.equal(f.store.snapshot().activeCount,0);
   assert.deepEqual(f.store.snapshot().activeDispatches,[]);
-  assert.deepEqual(f.record(),record);
+  assert.equal(f.record().key,record.key);assert.equal(f.record().revision,record.revision);
+  assert.equal(f.record().body,undefined);assert.deepEqual(f.controller.repository.records(),[]);
 });
 test('a nonterminal observer with committed Result resumes observation across restart',async()=>{
   const f=fixture();await f.existing();f.result(true);await f.observe({});
@@ -122,6 +123,7 @@ test('server startup recomputes terminal summaries before cluster publication',a
   const controller=new SelfRunController({lifecycle:f.controller,transport:f.transport,stateStore:f.store,config:{}});
   await controller.initialize();
   assert.equal(f.store.snapshot().activeCount,0);
-  assert.deepEqual(f.record(),record);
+  assert.equal(f.record().key,record.key);assert.equal(f.record().revision,record.revision);
+  assert.equal(f.record().body,undefined);assert.deepEqual(f.controller.repository.records(),[]);
   assert.equal(f.resumes,0);assert.equal(f.sends,0);
 });

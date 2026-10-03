@@ -44,7 +44,8 @@ test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
    await f.controller.repository.move(seeded.key,'CANCELLED','test user stop');
  await f.controller.tick(f.transport);
  assert.equal(f.sends,0);
- assert.equal(f.record().state,'STOPPED');assert.equal(f.record().stop_status,'CONFIRMED');
+ assert.equal(f.record().state,'STOPPED');assert.equal(f.record().stop_status,'UNCONFIRMED');
+ assert.deepEqual(f.controller.repository.records(),[]);assert.equal(f.quiesces,0);
 });
 test('initial POST does not wait for unrelated full projection backlog',async()=>{
  const f=fixture();
@@ -57,12 +58,12 @@ test('explicit app pause stop and done controls still fence execution',async()=>
  for(const state of ['PAUSED','STOPPED','DONE']) {
   const f=fixture();f.control.state=state;await f.existing();
   assert.equal(f.sends,0);assert.equal(f.record().control_state,state);
-  assert.equal(f.resumes,state==='STOPPED'?1:0);
+  assert.equal(f.resumes,0);
  }
 });
 test('app STOP is authoritative even when Result is committed',async()=>{
  const f=fixture();f.control.state='STOPPED';f.result(true);await f.existing();
- assert.equal(f.record().state,'STOPPED');assert.equal(f.quiesces,1);assert.equal(f.sends,0);
+ assert.equal(f.record().state,'STOPPED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
 });
 test('paused generation requires explicit continuation and sends nothing',async()=>{
  const f=fixture();f.probe.paused=true;await f.existing();await f.stall();

@@ -187,7 +187,7 @@ test('Drive durable record can restore without previous process memory',async()=
   assert.equal(f.record().intent.id,id);assert.equal(f.sends,1);
 });
 
-test('legacy event recovery count and uncertain POST override stale dispatch without releasing STOP',async()=>{
+test('legacy uncertain POST does not preserve executable state after STOP',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'selfrun-migrate-'));
   try {
     const config={dataDir:dir,stateFile:path.join(dir,'state.json'),eventsFile:path.join(dir,'events.jsonl')};
@@ -195,8 +195,9 @@ test('legacy event recovery count and uncertain POST override stale dispatch wit
     await fs.writeFile(config.eventsFile,JSON.stringify({event:'LIVENESS_RECOVERY_DECISION',details:{task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',
       request_id:'SAFE-TEST:turn:1-request',recovery_count:1,error:'Canonical conversation POST timeout'}})+'\n');
     const f=fixture({store});f.control.state='STOPPED';f.control.control_epoch=13;await f.existing();
-    assert.equal(f.record().state,'STOPPED');assert.equal(f.record().recovery_count,1);assert.equal(f.record().intent.outcome,'UNKNOWN');
-    assert.equal(f.sends,0);assert.equal(f.resumes,1);assert.equal(f.quiesces,1);
+    assert.equal(f.record().state,'STOPPED');assert.equal(f.record().recovery_count,undefined);assert.equal(f.record().intent,undefined);
+    assert.equal(f.sends,0);assert.equal(f.resumes,0);assert.equal(f.quiesces,0);
+    assert.deepEqual(f.controller.repository.records(),[]);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('audit newer than restored canonical state is quarantined before browser work',async()=>{
@@ -211,13 +212,14 @@ test('audit newer than restored canonical state is quarantined before browser wo
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 
-test('control-first stopped ingestion publishes the stopped canonical record',async()=>{
+test('control-first stopped ingestion retires without a projection echo',async()=>{
  const f=fixture();f.control.state='STOPPED';f.control.control_epoch=13;
  await f.controller.control(null,f.control,f.transport);
  await f.existing();await f.controller.flush(f.transport);
  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,13);
- assert.equal(f.rows.get(f.path).server_control_state,'STOPPED');assert.equal(f.sends,0);
- assert.equal(f.resumes,1);assert.equal(f.quiesces,1);assert.equal(f.record().stop_status,'CONFIRMED');
+ assert.equal(f.rows.get(f.path).server_control_state,undefined);assert.equal(f.sends,0);
+ assert.equal(f.resumes,0);assert.equal(f.quiesces,0);assert.equal(f.record().stop_status,'UNCONFIRMED');
+ assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
 });
 test('successor without predecessor document prepares from the app request',async()=>{
  const f=fixture();f.body.turn_id='SAFE-TEST:turn:2';f.body.request_id='SAFE-TEST:turn:2-request';

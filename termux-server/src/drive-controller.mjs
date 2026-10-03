@@ -6,7 +6,7 @@ import { readResult } from './result-reconciler.mjs';
 const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT']);
 const controlStates=new Set(['RUNNING','PAUSED','WAITING_USER_INTERVENTION','STOPPED','DONE','RESUME_REQUESTED','RESUME_STOPPED_REQUESTED']);
 const responseKey=p=>{const value=cursor(p);delete value.streaming;return JSON.stringify(value);};
-const terminal = r => ['COMMITTED','COMPLETED','CANCELLED'].includes(r.state);
+const terminal = r => !r||r.retired||['COMMITTED','COMPLETED','CANCELLED','STOPPED'].includes(r.state);
 const errorInfo = (error,code) => ({code:code||error?.code||'BROWSER_ERROR',message:String(error?.message||error).slice(0,300)});
 
 export class DriveDispatchController {
@@ -27,6 +27,7 @@ export class DriveDispatchController {
       publishPending:false,session:this.sessions.get(r.key)?.session,target:this.sessions.get(r.key)?.target,
     }));
   }
+  retiredPath(path) {return Object.values(this.repository.data.retired).some(r=>r.path===path);}
   controlForTask(taskId) {return this.repository.control(taskId);}
   async flush(transport) {await this.repository.flush(transport);}
   #serial(key,fn) {
@@ -54,19 +55,20 @@ export class DriveDispatchController {
       // Known absence differs from an unreadable control that may contain STOP.
       if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;
     }
-    if(c&&controlStates.has(c.state))await this.controlDurable(null,c);
+    if(c&&controlStates.has(c.state))await this.controlDurable(null,c,transport);
     const latest=this.repository.get(key);
     if(c&&controlStates.has(c.state)&&(c.state!=='RUNNING'||c.turn_id!==r.turn_id||c.request_id!==r.request_id))return false;
     return !terminal(latest)&&latest.control_state==='RUNNING';
   }
-  async #applyControl(c) {
+  async #applyControl(c,transport) {
     if(!c||!controlStates.has(c.state))return false;
     if(c.schema!=='selfrun-task-control-v1'||!c.task_id||!Number.isSafeInteger(c.control_epoch)||c.control_epoch<1)
       throw new Error('invalid task control');
     const old=this.repository.control(c.task_id);
     if(old&&c.control_epoch<old.control_epoch) return false;
     if(old&&c.control_epoch===old.control_epoch) {
-      await this.repository.applyControl(c);return false;
+      await this.repository.applyControl(c);
+      await this.#restoreRetiredControl(old,transport);return false;
     }
     const sameRunningIdentity=old&&old.state==='RUNNING'&&c.state==='RUNNING'
       &&old.turn_id===c.turn_id&&old.request_id===c.request_id;
@@ -84,72 +86,75 @@ export class DriveDispatchController {
     }
     await this.repository.applyControl(c);
     for(const item of stopping)await this.#stopOwned(item.r,item.a,c);
+    await this.#restoreRetiredControl(c,transport);
     return true;
+  }
+  async #restoreRetiredControl(c,transport,body=null) {
+    const marker=this.repository.get(keyFor(c));
+    if(transport&&c.state==='RUNNING'&&canonicalUrl(c.conversation_url)&&marker?.retired&&c.control_epoch>marker.control_epoch
+      &&marker.resume_rejected_epoch!==c.control_epoch) {
+      body??=await transport.read(marker.path);
+      try {return await this.repository.restoreFromControl(c,body);}
+      catch(error) {
+        if(error.code!=='RESUME_REJECTED')throw error;
+        await this.repository.recordResumeRejection(marker.key,c.control_epoch,error.reason);
+      }
+    }
+    return null;
   }
   async #stopOwned(record,attached,control) {
     const pending=this.stopOperations.get(record.key);
-    if(pending)return pending;
-    const work=this.#performStop(record,attached,control);
-    this.stopOperations.set(record.key,work);
-    try {return await work;} finally {if(this.stopOperations.get(record.key)===work)this.stopOperations.delete(record.key);}
+    if(pending) {
+      if(attached?.session&&attached.session!==pending.session) {
+        await pending.work;
+        // Dispose the session returned by the original pending attach; never reopen.
+        return this.#performStop(record,attached,control);
+      }
+      return pending.work;
+    }
+    const entry={work:this.#performStop(record,attached,control),session:attached?.session};
+    this.stopOperations.set(record.key,entry);
+    try {return await entry.work;} finally {if(this.stopOperations.get(record.key)===entry)this.stopOperations.delete(record.key);}
   }
   async #performStop(record,attached,control) {
-    let session=attached?.session;
+    const session=attached?.session;
     const guard=()=>{
-      const latest=this.repository.control(record.task_id);
-      return !this.standby&&this.canDispatch()&&latest?.state==='STOPPED'&&latest.control_epoch===control.control_epoch
-        &&latest.request_id===control.request_id&&latest.turn_id===control.turn_id;
+      const latest=this.repository.control(record.task_id),marker=this.repository.get(record.key);
+      return !this.standby&&this.canDispatch()&&marker?.retired&&latest?.state==='STOPPED'
+        &&latest.control_epoch===control.control_epoch&&latest.request_id===control.request_id&&latest.turn_id===control.turn_id;
     };
     try {
       if(!guard())return;
-      await this.#move(record.key,'STOPPED','APP_STOP_CLEANUP_PENDING',{stop_status:'PENDING',stop_control_epoch:control.control_epoch});
-      if(attached&&!session) {
-        // The original attach is still pending. Fence now; its late callback owns cleanup.
-        await this.#move(record.key,'STOPPED','APP_STOP_PENDING_ATTACHMENT',{stop_status:'PENDING'});
+      if(!session) {
+        // STOP may fence a pending attachment, but never opens a historical target.
+        await this.repository.recordStopOutcome(record.key,control.control_epoch,
+          record.intent||record.conversation_url?'UNCONFIRMED':'CONFIRMED');
         return;
       }
-      if(!record.conversation_url) {
-        if(!record.intent) {
-          // No durable send was started; fencing preparation is sufficient.
-          if(guard())await this.#move(record.key,'STOPPED','APP_STOP_BEFORE_SUBMISSION',{stop_status:'CONFIRMED',stop_retry_at:0,error:null});
-          return;
-        }
-        if(!record.target_id)throw new Error('original submission target is unavailable for STOP readback');
-        if(!session) {
-          const target=await this.browser.attachTarget({targetId:record.target_id,signal:new AbortController().signal});
-          session=target.session;
-        }
-        if(!guard())return;
+      let url=record.conversation_url;
+      if(!url&&record.intent) {
         const outcome=await this.browser.readSubmission({session,intent:record.intent,prompt:record.intent.prompt,
           conversationUrl:'',signal:new AbortController().signal});
         if(!guard())return;
         if(outcome.state==='ABSENT') {
-          await this.#move(record.key,'STOPPED','APP_STOP_SUBMISSION_ABSENT',{stop_status:'CONFIRMED',stop_retry_at:0,error:null});
-          return;
+          await this.repository.recordStopOutcome(record.key,control.control_epoch,'CONFIRMED');return;
         }
-        const url=canonicalUrl(outcome.probe?.url);
-        if(outcome.state!=='CONFIRMED'||!url)throw new Error('submitted conversation URL remains unconfirmed for STOP');
-        record=await this.#move(record.key,'STOPPED','APP_STOP_SUBMISSION_LOCATED',{
-          conversation_url:url,submission_confirmed:true,intent:{...record.intent,outcome:'CONFIRMED',message_id:outcome.messageId||record.intent.message_id}});
+        url=outcome.state==='CONFIRMED'?canonicalUrl(outcome.probe?.url):'';
+        if(!url)throw new Error('submitted conversation URL remains unconfirmed for STOP');
       }
-      if(!session) {
-        const resumed=await this.browser.resume({conversationUrl:record.conversation_url,signal:new AbortController().signal});
-        session=resumed.session;
-      }
-      if(!guard())return;
-      await this.browser.quiesce({session,conversationUrl:record.conversation_url,signal:new AbortController().signal,guard});
-      if(guard())await this.#move(record.key,'STOPPED','APP_STOP_CONFIRMED',{stop_status:'CONFIRMED',stop_retry_at:0,error:null});
-    } catch(error) {
-      if(guard())await this.#move(record.key,'STOPPED','APP_STOP_UNCONFIRMED',{stop_status:'UNCONFIRMED',stop_retry_at:Date.now()+Number(this.config.resumeRetryMs??30000),error:errorInfo(error,'STOP_UNCONFIRMED')});
+      if(url)await this.browser.quiesce({session,conversationUrl:url,signal:new AbortController().signal,guard});
+      if(guard())await this.repository.recordStopOutcome(record.key,control.control_epoch,'CONFIRMED');
+    } catch {
+      if(guard())await this.repository.recordStopOutcome(record.key,control.control_epoch,'UNCONFIRMED');
     } finally {session?.close();}
   }
   async control(_path,c,transport) {
-    const changed=await this.#applyControl(c);
+    const changed=await this.#applyControl(c,transport);
     if(changed&&transport) await this.repository.flush(transport);
     return changed;
   }
-  async controlDurable(_path,c) {
-    return this.#applyControl(c);
+  async controlDurable(_path,c,transport) {
+    return this.#applyControl(c,transport);
   }
   #detach(key) {
     const a=this.sessions.get(key);
@@ -167,21 +172,25 @@ export class DriveDispatchController {
     return this.promptDirectives?.current?this.promptDirectives.current():
       {turnStartDirective:this.config.turnStartDirective,turnContinueDirective:this.config.recoveryPrompt};
   }
-  async #ingestRecord(path,body) {
+  async #ingestRecord(path,body,transport) {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(body?.schema!=='selfrun-server-dispatch-v1')throw new Error('invalid dispatch schema');
     if(!Array.isArray(body.profile_operations)||!body.prompt||!body.project_url)throw new Error('invalid dispatch payload');
-    const record=await this.repository.ingest(path,body);
-    if(['CANCELLED','SUPERSEDED'].includes(record.body.client_status))this.#detach(record.key);
+    let record=await this.repository.ingest(path,body);
+    const control=this.repository.control(record.task_id);
+    if(record.retired&&control?.state==='RUNNING'&&control.control_epoch>record.control_epoch&&canonicalUrl(control.conversation_url))
+      record=await this.#restoreRetiredControl(control,transport,body)||record;
+    if(record.retired||['CANCELLED','SUPERSEDED'].includes(record.body?.client_status))this.#detach(record.key);
     return record;
   }
   async ingest(path,body,transport) {
-    const r=await this.#ingestRecord(path,body);
+    const r=await this.#ingestRecord(path,body,transport);
+    if(r.retired)return r;
     return this.#serial(r.key,()=>this.#advance(r.key,transport));
   }
   async ingestDurable(path,body,transport) {
-    const r=await this.#ingestRecord(path,body);
-    this.#scheduleAdvance(r.key,transport);
+    const r=await this.#ingestRecord(path,body,transport);
+    if(!r.retired)this.#scheduleAdvance(r.key,transport);
     return r;
   }
   prepare(path,body,transport) {return this.ingest(path,body,transport);}
@@ -214,30 +223,8 @@ export class DriveDispatchController {
   async #advance(key,transport) {
     let r=this.repository.get(key);
     if(this.repository.integrityFaults.has(key))throw new Error('current state is behind committed audit revision; reconciliation required');
-    if(['COMMITTED','COMPLETED'].includes(r.state))return;
-    const attemptCancelled=['CANCELLED','SUPERSEDED'].includes(r.body.client_status);
-    if(attemptCancelled) {
-      this.#detach(key);
-      const priorControl=this.repository.control(r.task_id);
-      if(priorControl?.state==='STOPPED'&&priorControl.request_id===r.request_id&&priorControl.turn_id===r.turn_id) {
-        // Cancelling input does not cancel the app's separate request to stop generation.
-        await this.#fresh(key,transport);
-        const current=this.repository.get(key),control=this.repository.control(r.task_id);
-        if(control?.state==='STOPPED'&&control.request_id===r.request_id&&control.turn_id===r.turn_id) {
-          if(current.stop_status!=='CONFIRMED'&&Number(current.stop_retry_at||0)<=Date.now())
-            await this.#stopOwned(current,null,control);
-          await this.repository.flushCurrent(transport,key);return;
-        }
-      }
-      if(this.repository.get(key).state!=='CANCELLED')await this.#move(key,'CANCELLED','CLIENT_CANCELLED');
-      await this.repository.flushCurrent(transport,key);return;
-    }
     if(terminal(r))return;
     if(!await this.#fresh(key,transport)) {
-      const current=this.repository.get(key),control=this.repository.control(current.task_id);
-      if(current.state==='STOPPED'&&control?.state==='STOPPED'&&control.request_id===current.request_id
-          &&control.turn_id===current.turn_id&&current.stop_status!=='CONFIRMED'&&Number(current.stop_retry_at||0)<=Date.now())
-        await this.#stopOwned(current,null,control);
       await this.repository.flushCurrent(transport,key);return;
     }
     r=this.repository.get(key);
@@ -291,7 +278,9 @@ export class DriveDispatchController {
       run_generation:r.run_generation+1,browser_generation:r.browser_generation+1,server_generation:this.serverGeneration,
       attach_attempts:r.failure_epoch===r.control_epoch?r.attach_attempts:0,retry_at:0,error:null},beforeOpen);
     if(!r)return null;
-    const token=this.repository.token(key),abort=new AbortController();
+    const token=this.repository.token(key);
+    if(!token||!this.repository.current(key,token))return null;
+    const abort=new AbortController();
     const pending={abort,token,session:null,target:null,monitoring:false};
     this.sessions.set(key,pending);
     const guard=()=>this.sessions.get(key)===pending&&!abort.signal.aborted&&this.repository.current(key,token)&&!this.standby&&this.canDispatch();
@@ -317,7 +306,11 @@ export class DriveDispatchController {
       if(recoveryStage&&!uncertain) await this.#move(key,'STALLED','RESTORE_RECOVERY_STAGE',{recovery_stage:recoveryStage},token);
       return pending;
     } catch(error) {
-      if(!guard())return null;
+      if(!guard()){
+        const control=this.repository.control(r.task_id);
+        if(control?.state==='STOPPED')await this.repository.recordStopOutcome(key,control.control_epoch,'UNCONFIRMED');
+        return null;
+      }
       const code=classifyAttach(error),attempts=r.attach_attempts+1;
       const blocked=['AUTH_REQUIRED','CONVERSATION_UNAVAILABLE'].includes(code)||attempts>=budget;
       this.#detach(key);
