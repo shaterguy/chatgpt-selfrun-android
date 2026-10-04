@@ -176,7 +176,7 @@ test('shutdown publishes zero active executions without erasing recoverable reco
 
 test('real standby quiesce stops sessions while preserving observation for a later claim',async()=>{
   const {fixture}=await import('./helpers/lifecycle-fixture.mjs');
-  const f=fixture();await f.existing();f.result(true);await f.observe({});
+  const f=fixture();await f.existing();f.result(false);await f.observe({});
   let now=1_800_000_000_000;
   const transport=new FakeTransport([{server_name:'Galaxy-Tab-S11-Ultra',server_priority:1,
     role:'ACTIVE',active_count:1,status:'RUNNING',updated_at:new Date(now).toISOString()}]);
@@ -190,7 +190,7 @@ test('real standby quiesce stops sessions while preserving observation for a lat
   assert.equal(f.controller.sessions.size,0);
   assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
   assert.equal(f.store.snapshot().activeCount,1);
-  assert.equal(f.record().result_state,'COMMITTED');
+  assert.equal(f.record().result_state,'NOT_COMMITTED');
   transport.states=[];now+=1;await cluster.refresh();await f.controller.tick(f.transport);
   assert.equal(cluster.canDispatch(),true);
   assert.equal(f.controller.sessions.size,1);

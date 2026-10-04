@@ -1,5 +1,5 @@
 import { canonicalUrl, digest, keyFor } from './lifecycle.mjs';
-// Terminal identities prevent replay; they contain no browser, prompt or retry state.
+// Terminal identities prevent replay; target cleanup lives in a separate inert outbox.
 export const retiredState=r=>['STOPPED','CANCELLED','COMMITTED','COMPLETED'].includes(r?.state);
 export const serverFields=new Set(['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation',
   'request_generation','browser_generation','conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome',
@@ -9,11 +9,24 @@ export const appInput=body=>Object.fromEntries(Object.entries(body).filter(([key
 const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?
   Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])):value;
 export const inputFingerprint=body=>JSON.stringify(stable(appInput(body)));
+export function queueTargetCleanup(data,record,targetId=record.target_id) {
+  if(!targetId||record.target_owned!==true)return;
+  data.browserCleanup??={};
+  data.browserCleanup[targetId]={target_id:targetId,key:record.key,task_id:record.task_id,
+    turn_id:record.turn_id,request_id:record.request_id,control_epoch:record.control_epoch,
+    conversation_digest:record.conversation_digest||(record.conversation_url?digest(canonicalUrl(record.conversation_url)):null)};
+}
 export function retireRecord(data,record) {
+  queueTargetCleanup(data,record);
+  if(record.reason==='RESULT_COMMITTED_TERMINAL') {
+    data.completionOutbox??={};
+    data.completionOutbox[record.key]=Object.fromEntries(
+      ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at'].map(k=>[k,record[k]]));
+  }
   const marker=Object.fromEntries(['key','path','task_id','turn_id','request_id','dispatch_attempt','state','revision',
     'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status'].map(k=>[k,record[k]]));
   if(record.conversation_url)marker.conversation_digest=digest(canonicalUrl(record.conversation_url));
-  if(marker.state==='STOPPED')marker.stop_status=marker.stop_status==='CONFIRMED'?'CONFIRMED':'UNCONFIRMED';
+  if(marker.state==='STOPPED')marker.stop_status=['CONFIRMED','NOT_REQUESTED'].includes(marker.stop_status)?marker.stop_status:'UNCONFIRMED';
   marker.server_ingress=record.body?.server_ingress||record.server_ingress||'DRIVE';
   marker.never_submitted=record.never_submitted===true;
   marker.retired=true;

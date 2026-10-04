@@ -8,11 +8,11 @@ import { keyFor, transition } from '../src/lifecycle.mjs';
 import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 import { fixture, MemoryStore, deferred } from './helpers/lifecycle-fixture.mjs';
 
-test('01 confirmed POST and Result commit retain observation until the app moves on',async()=>{
+test('01 confirmed POST and exact Result commit retire observation',async()=>{
   const f=fixture();await f.ingest();assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
   await f.observe({responseTextLength:1000});f.result(true);await f.observe({});
-  assert.notEqual(f.record().state,'COMPLETED');assert.equal(f.record().result_state,'COMMITTED');
-  assert.equal(f.observations.at(-1).signal.aborted,false);
+  assert.equal(f.record().state,'COMMITTED');assert.equal(f.record().retired,true);
+  assert.equal(f.observations.at(-1).signal.aborted,true);
 });
 test('02 initial POST accepted but timed out is read back without duplicate',async()=>{
   const f=fixture();f.mode='accepted-timeout';await f.ingest();
@@ -25,7 +25,7 @@ test('03 proven absent POST gets exactly one retry after readback',async()=>{
 test('04 existing conversation attach does not send continuation',async()=>{
   const f=fixture();await f.existing();assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.record().conversation_url,f.probe.url);
 });
-test('05 attach failure retains conversation and classified bounded retry',async()=>{
+test('05 attach failure retains conversation and classified paced retry',async()=>{
   const f=fixture();f.attachError=Object.assign(new Error('attach pending'),{code:'ATTACH_FAILED'});await f.existing();
   assert.equal(f.record().error.code,'ATTACH_FAILED');assert.equal(f.record().conversation_url,f.probe.url);assert.equal(f.prepares,0);
 });
@@ -50,10 +50,10 @@ test('10 recovery POST timeout accepted readback prevents duplicate',async()=>{
   const f=fixture();f.mode='accepted-timeout';await f.existing();await f.stall();await f.controller.tick(f.transport);
   assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
 });
-test('11 Result commit during recovery suppresses SEND without ending observation',async()=>{
+test('11 Result commit during recovery suppresses SEND and retires observation',async()=>{
   const f=fixture();f.onQuiesce=()=>f.result(true);await f.existing();await f.stall();
-  assert.equal(f.sends,0);assert.notEqual(f.record().state,'COMPLETED');
-  assert.equal(f.record().result_state,'COMMITTED');assert.equal(f.observations.at(-1).signal.aborted,false);
+  assert.equal(f.sends,0);assert.equal(f.record().state,'COMMITTED');
+  assert.equal(f.record().retired,true);assert.equal(f.observations.at(-1).signal.aborted,true);
 });
 test('12 STOP during POST fences late completion',async()=>{
   const f=fixture();const gate=deferred(),entered=deferred();f.onSubmit=async()=>{entered.resolve();await gate.promise;};
@@ -96,17 +96,17 @@ test('18 pending event and Drive projection replay from canonical state after re
   assert.equal(f.rows.get(f.path).lifecycle_state,'STALLED');
   assert.equal(f.rows.get(f.path).lifecycle_revision,f.record().revision);
 });
-test('19 existing conversation timeout cannot reach retry count 45',async()=>{
+test('19 existing conversation timeout keeps retrying beyond the former cap',async()=>{
   const f=fixture();f.attachError=new Error('Timed out waiting for existing conversation');await f.existing();
   for(let i=0;i<6;i++){
     await f.controller.repository.move(keyFor(f.body),'BLOCKED','test elapsed backoff',{retry_at:0});
     await f.controller.tick(f.transport);
   }
-  assert.equal(f.resumes,3);assert.equal(f.record().state,'BLOCKED');assert.equal(f.record().error.code,'CONVERSATION_LOAD_FAILED');
+  assert.equal(f.resumes,7);assert.equal(f.record().blocked_epoch,null);assert.equal(f.record().state,'BLOCKED');assert.equal(f.record().error.code,'CONVERSATION_LOAD_FAILED');
 });
 test('20 stalled canonical POST timeout stays uncertain with monotonic recovery count',async()=>{
   const f=fixture();f.mode='unknown';await f.existing();await f.stall();
-  assert.equal(f.record().state,'POST_UNCERTAIN');assert.equal(f.record().recovery_count,1);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().intent.outcome,'UNKNOWN');assert.equal(f.record().recovery_count,1);
   await f.controller.tick(f.transport);assert.equal(f.sends,1);
   assert.match(f.rows.get(f.path).server_error,/POST timeout/);
 });
@@ -133,7 +133,9 @@ test('recovery read failure resumes its durable verification stage',async()=>{
   await f.controller.repository.move(keyFor(f.body),'VERIFY_RESULT','test result read failed',{result_state:'UNAVAILABLE'});
   f.docs.set('RESULT-1','invalid');
   await f.controller.tick(f.transport);assert.equal(f.sends,0);
-  f.result(false);await f.controller.tick(f.transport);assert.equal(f.sends,1);
+  f.result(false);
+  await f.controller.repository.move(keyFor(f.body),f.record().state,'test retry deadline elapsed',{retry_at:0,result_retry_at:0});
+  await f.controller.tick(f.transport);assert.equal(f.sends,1);
 });
 test('directive changes cannot change an already durable uncertain input',async()=>{
   const f=fixture();f.mode='unknown';await f.existing();await f.stall();
@@ -218,7 +220,7 @@ test('control-first stopped ingestion retires without a projection echo',async()
  await f.existing();await f.controller.flush(f.transport);
  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,13);
  assert.equal(f.rows.get(f.path).server_control_state,undefined);assert.equal(f.sends,0);
- assert.equal(f.resumes,0);assert.equal(f.quiesces,0);assert.equal(f.record().stop_status,'UNCONFIRMED');
+ assert.equal(f.resumes,0);assert.equal(f.quiesces,0);assert.equal(f.record().stop_status,'NOT_REQUESTED');
  assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
 });
 test('successor without predecessor document prepares from the app request',async()=>{
@@ -239,19 +241,24 @@ for(const stage of ['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURS
   await f.controller.quiesceForStandby();
  });
 }
-test('legacy unknown input confirmed by readback fences subsequent same-cursor recovery across restart',async()=>{
- const f=fixture();f.mode='unknown';await f.existing();await f.stall();
- const snapshot=f.store.snapshot(),record=snapshot.lifecycle.requests[keyFor(f.body)];
- delete record.last_recovered_response;delete record.last_recovery_epoch;
- await f.controller.quiesceForStandby();await f.store.patch(snapshot);
- f.sentId=record.intent.message_id;f.controller=f.recreate();await f.controller.tick(f.transport);
- assert.equal(f.record().intent.outcome,'CONFIRMED');
- await f.controller.quiesceForStandby();f.controller=f.recreate();await f.controller.tick(f.transport);
- if(f.record().state!=='BLOCKED')await f.observe({status:'STALLED'});
- assert.equal(f.sends,1);assert.equal(f.record().error.code,'RECOVERY_NO_PROGRESS');
+test('legacy recovery confirmed by readback keeps the same interval deadline across restart',async()=>{
+ const originalNow=Date.now;let now=1700000000000;Date.now=()=>now;
+ const f=fixture();f.controller.config.stallAfterMs=600000;f.mode='unknown';
+ try {
+  await f.existing();await f.observe({});now+=600000;await f.observe({status:'STALLED'});
+  const snapshot=f.store.snapshot(),record=snapshot.lifecycle.requests[keyFor(f.body)];
+  delete record.last_recovered_response;delete record.last_recovery_epoch;delete record.last_nudge_attempt_at;
+  await f.controller.quiesceForStandby();await f.store.patch(snapshot);
+  f.sentId=record.intent.message_id;f.controller=f.recreate();await f.controller.tick(f.transport);
+  assert.equal(f.record().intent.outcome,'CONFIRMED');
+  await f.controller.quiesceForStandby();f.controller=f.recreate();await f.controller.tick(f.transport);
+  now+=599999;await f.observe({status:'STALLED'});assert.equal(f.sends,1);
+  now+=1;await f.observe({status:'STALLED'});assert.equal(f.sends,2);
+  assert.notEqual(f.record().intent.id,record.intent.id);assert.notEqual(f.record().state,'BLOCKED');
+ } finally {await f.controller.quiesceForStandby();Date.now=originalNow;}
 });
 
-for(const kind of ['initial','recovery'])test('cold restart after proven absence retries same '+kind+' intent once',async()=>{
+for(const kind of ['initial','recovery'])test('cold restart after proven absence preserves '+kind+' retry policy',async()=>{
  const f=fixture();f.mode='unknown';
  if(kind==='initial'){await f.ingest();f.body.client_status='SEND_REQUESTED';await f.ingest();}
  else{await f.existing();await f.stall();}
@@ -260,5 +267,7 @@ for(const kind of ['initial','recovery'])test('cold restart after proven absence
  record.intent={...record.intent,outcome:'ABSENT',absence_proof:'INTERCEPTED_REQUEST_ABORTED',released:false};
  if(kind==='initial'){record.conversation_url='';record.conversation_id=null;}
  await f.store.patch(snapshot);f.mode='success';f.controller=f.recreate();await f.controller.tick(f.transport);
- assert.equal(f.record().intent.id,id);assert.equal(f.sends,2);assert.equal(f.record().intent.outcome,'CONFIRMED');
+ assert.equal(f.record().intent.id,id);
+ assert.equal(f.sends,kind==='initial'?2:1);
+ assert.equal(f.record().intent.outcome,kind==='initial'?'CONFIRMED':'ABSENT');
 });

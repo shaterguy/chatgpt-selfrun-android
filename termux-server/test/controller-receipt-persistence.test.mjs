@@ -194,7 +194,7 @@ test('leadership loss during receipt persistence prevents confirmed success', as
   assert.notEqual(f.record().submission_confirmed, true);
 });
 
-test('STOP readback has a live STOP guard and rejects newly discovered receipt metadata', async () => {
+test('APP STOP does not request new receipt metadata', async () => {
   const f = fixture(); f.mode = 'unknown';
   await f.ingest();
   let stopArgs;
@@ -204,11 +204,9 @@ test('STOP readback has a live STOP guard and rejects newly discovered receipt m
     return confirmed(f);
   };
   await f.stop();
-  assert.equal(typeof stopArgs?.guard, 'function');
-  assert.equal(stopArgs.guard(), true);
-  assert.equal(typeof stopArgs.onRequest, 'function');
+  assert.equal(stopArgs, undefined);
   assert.equal(f.record().state, 'STOPPED');
-  assert.equal(f.record().stop_status, 'UNCONFIRMED');
+  assert.equal(f.record().stop_status, 'NOT_REQUESTED');
   assert.equal(f.quiesces, 0);
   assert.equal(f.controller.repository.records().length, 0);
 });
@@ -238,7 +236,7 @@ for (const crash of ['before', 'after']) {
   });
 }
 
-test('STOP may reuse exactly the receipt already durable before retirement', async () => {
+test('APP STOP does not reread even an already durable receipt', async () => {
   const f = fixture(); f.mode = 'unknown'; let saved;
   f.browser.readSubmission = async ({intent, onRequest}) => {
     saved = evidence(intent);
@@ -254,29 +252,18 @@ test('STOP may reuse exactly the receipt already durable before retirement', asy
     return confirmed(f);
   };
   await f.stop();
-  assert.equal(reused, true);
-  assert.equal(f.record().stop_status, 'CONFIRMED');
-  assert.equal(f.quiesces, 1);
+  assert.equal(reused, false);
+  assert.equal(f.record().stop_status, 'NOT_REQUESTED');
+  assert.equal(f.quiesces, 0);
   assert.equal(f.controller.repository.records().length, 0);
 });
 
-test('successor control fences a pending STOP receipt callback and quiesce', async () => {
-  const f = fixture(); f.mode = 'unknown';
-  await f.ingest();
-  const entered = deferred(), release = deferred(); let stopArgs;
-  f.browser.readSubmission = async args => {
-    stopArgs = args; entered.resolve(); await release.promise;
-    return confirmed(f);
-  };
-  const stopping = f.stop();
-  await entered.promise;
-  assert.equal(stopArgs.guard(), true);
-  f.control = {...f.control, state: 'RUNNING', control_epoch: 3, turn_id: 'SAFE-TEST:turn:2', request_id: 'successor'};
-  await f.controller.controlDurable(null, f.control, f.transport);
-  assert.equal(stopArgs.guard(), false);
-  await assert.rejects(stopArgs.onRequest(evidence(stopArgs.intent)), /stale STOP/);
-  release.resolve(); await stopping;
-  assert.equal(f.quiesces, 0);
-  assert.equal(f.record().stop_status, 'UNCONFIRMED');
-  assert.equal(f.controller.repository.records().length, 0);
+test('STOP finishes without waiting for receipt I/O and successor control remains available', async () => {
+  const f=fixture();f.mode='unknown';await f.ingest();let reads=0;
+  f.browser.readSubmission=async()=>{reads++;return new Promise(()=>{});};
+  await f.stop();
+  f.control={...f.control,state:'RUNNING',control_epoch:3,turn_id:'SAFE-TEST:turn:2',request_id:'successor'};
+  await f.controller.controlDurable(null,f.control,f.transport);
+  assert.equal(reads,0);assert.equal(f.quiesces,0);
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.controller.repository.records().length,0);
 });

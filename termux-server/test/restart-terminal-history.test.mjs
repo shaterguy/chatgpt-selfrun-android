@@ -63,15 +63,15 @@ test('restart recomputes a stale active summary without changing terminal record
   assert.equal(f.record().key,record.key);assert.equal(f.record().revision,record.revision);
   assert.equal(f.record().body,undefined);assert.deepEqual(f.controller.repository.records(),[]);
 });
-test('a nonterminal observer with committed Result resumes observation across restart',async()=>{
+test('a verified committed Result remains consumed across restart',async()=>{
   const f=fixture();await f.existing();f.result(true);await f.observe({});
-  assert.equal(f.record().result_state,'COMMITTED');
-  assert.notEqual(f.record().state,'COMPLETED');
+  assert.equal(f.record().state,'COMMITTED');
+  assert.equal(f.record().retired,true);
   await f.controller.quiesceForStandby();f.controller=f.recreate();
   await f.controller.tick(f.transport);
-  assert.equal(f.resumes,2);assert.equal(f.sends,0);
-  assert.equal(f.controller.sessions.size,1);
-  assert.equal(f.store.snapshot().activeCount,1);
+  assert.equal(f.resumes,1);assert.equal(f.sends,0);
+  assert.equal(f.controller.sessions.size,0);
+  assert.equal(f.store.snapshot().activeCount,0);
   await f.controller.quiesceForStandby();
 });
 test('a fresh app request can prepare without reviving its historical predecessor',async()=>{

@@ -60,15 +60,15 @@ function dispatch(overrides = {}) {
   };
 }
 
-test('resume readiness requires only a stable user message identity and composer', () => {
+test('composer readiness does not require a DOM user message identity', () => {
   assert.equal(conversationResumeReady({ composer: true, userMessageId: 'user-1' }), true);
   assert.equal(conversationResumeReady({ composer: true, userMessageId: 'user-1', streaming: false, assistantMessageId: null }), true);
   assert.equal(conversationResumeReady({ composer: true, userMessageId: 'user-1', errorText: 'Could not load this ChatGPT conversation' }), true);
   assert.equal(conversationResumeReady({ composer: false, userMessageId: 'user-1' }), false);
-  assert.equal(conversationResumeReady({ composer: true, userMessageId: null }), false);
+  assert.equal(conversationResumeReady({ composer: true, userMessageId: null }), true);
 });
 
-test('structural conversation readiness requires stable message identity and response state', () => {
+test('structural conversation readiness uses response state independently of user identity', () => {
   assert.equal(conversationStateReady({
     userMessageId: 'user-1', assistantMessageId: 'assistant-1', streaming: false, paused: false,
   }), true);
@@ -80,35 +80,17 @@ test('structural conversation readiness requires stable message identity and res
   }), false);
   assert.equal(conversationStateReady({
     userMessageId: null, assistantMessageId: 'assistant-1', streaming: false, paused: false,
-  }), false);
+  }), true);
 });
 
-test('browser monitor reports structural failure when neither resume nor response structure is available', async () => {
-  let calls = 0;
-  const session = {
-    call: async (method) => {
-      assert.equal(method, 'Runtime.evaluate');
-      calls += 1;
-      return { result: { value: {
-        url: 'https://chatgpt.com/c/structural-failure',
-        composer: false, streaming: false, stopButtonVisible: false, paused: false,
-        assistantCount: 0, assistantTextLength: 0, assistantMessageId: null,
-        userCount: 0, userTextLength: 0, userMessageId: null,
-        errorText: null,
-      } } };
-    },
-  };
-  const browser = new ChatGptBrowser(null, {
-    stallAfterMs: 600000, probeIntervalMs: 0, conversationStateGraceMs: 0,
-  });
-  const result = await browser.monitor({
-    session,
-    baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 2, userTextLength: 100 },
-    livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
-  });
-  assert.equal(result.status, 'PAGE_ERROR');
-  assert.equal(result.probe.errorText, 'Conversation state unavailable');
-  assert.equal(calls, 1);
+test('browser monitor keeps observing a live page with missing conversation DOM',async()=>{
+ let calls=0;const abort=new AbortController(),statuses=[];
+ const session={call:async()=>{calls++;return {result:{value:{url:'https://chatgpt.com/c/structural-failure',composer:false,
+  streaming:false,assistantCount:0,userCount:0,userMessageId:null,errorText:null}}};}};
+ const browser=new ChatGptBrowser(null,{stallAfterMs:600000,probeIntervalMs:0,conversationStateGraceMs:0});
+ await assert.rejects(browser.monitor({session,signal:abort.signal,livenessGate:()=>({state:'RUNNING',epoch:1}),
+  onActivity:async a=>{statuses.push(a.status);if(calls===2)abort.abort(Error('test complete'));}}),/test complete/);
+ assert.deepEqual(statuses,['OBSERVATION_UNKNOWN','OBSERVATION_UNKNOWN']);
 });
 
 test('browser monitor ignores visible page error text while usable and does not complete on response idle', async () => {

@@ -42,8 +42,11 @@ test('HTTP STOP preempts an in-flight POST before POST promise completes',async(
 });
 test('HTTP stale epoch cannot stop resumed execution',async()=>{
  const f=setup();await f.http.accept(f.signal());
+ const fresh=structuredClone(f.record().body),path=f.record().path;
  const base={task_id:f.body.task_id,turn_id:f.body.turn_id,request_id:f.body.request_id};
  await f.http.accept({...base,signalId:'stop',type:'STOP',control_epoch:2});
+ // STOP discarded the cached input; an explicit resume needs fresh app metadata.
+ f.rows.set(path,fresh);
  await f.http.accept({...base,signalId:'resume',type:'RESUME',control_epoch:3,conversation_url:f.probe.url});
  await assert.rejects(f.http.accept({...base,signalId:'late-stop',type:'STOP',control_epoch:2}),/stale/);
  assert.equal(f.record().control_state,'RUNNING');assert.equal(f.sends,1);

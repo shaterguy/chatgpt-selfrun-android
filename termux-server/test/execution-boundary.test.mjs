@@ -58,31 +58,31 @@ test('execution: early canonical URL is not a verified STARTED receipt',async()=
   assert.equal(f.rows.get(f.path).server_status,'PENDING');
   await f.controller.tick(f.transport); assert.equal(f.sends,1);
 });
-test('execution: response idle and Result commit leave the observer alive',async()=>{
+test('execution: exact Result commit retires observation while response idle alone does not',async()=>{
   const f=fixture(); await f.existing(); f.result(true);
   const observer=f.observations.at(-1);
   await f.observe({streaming:false,stopButtonVisible:false,status:'COMPLETED'});
-  assert.equal(observer.signal.aborted,false); assert.equal(f.controller.sessions.size,1);
-  assert.notEqual(f.record().state,'COMPLETED');
-  assert.equal(f.rows.get(f.path).response_status,'COMPLETED');
+  assert.equal(observer.signal.aborted,true); assert.equal(f.controller.sessions.size,0);
+  assert.equal(f.record().state,'COMMITTED');
+  await f.controller.flush(f.transport);assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
 });
-test('execution: ten-minute nudge retains Result suppression while observer stays alive',async()=>{
+test('execution: ten-minute nudge requires uncommitted Result and committed identity stays consumed',async()=>{
   for(const result of ['open','committed','unreadable']) {
     const f=fixture(); await f.existing(); f.controller.config.stallAfterMs=600000;
     if(result==='committed')f.result(true);
     if(result==='unreadable')f.docs.set('RESULT-1','unreadable');
     await f.observe({});
-    await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:Date.now()-600001});
+    if(result!=='committed')await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:Date.now()-600001});
     await f.observe({status:'STALLED'});
     assert.equal(f.sends,result==='open'?1:0);
     if(result==='open')assert.equal(f.sent[0].prompt,'continue test');
-    assert.equal(f.observations.at(-1).signal.aborted,false);
+    assert.equal(f.observations.at(-1).signal.aborted,result==='committed');
   }
 });
-test('execution: STOP quiesces the owned conversation and fences late callbacks',async()=>{
+test('execution: STOP disposes local ownership and fences late callbacks without remote UI',async()=>{
   const f=fixture(); await f.existing(); const observer=f.observations.at(-1);
   await f.stop();
-  assert.equal(f.quiesces,1); assert.equal(observer.signal.aborted,true);
+  assert.equal(f.quiesces,0); assert.equal(observer.signal.aborted,true);
   const before=f.record().revision;
   await observer.onActivity({...f.probe,responseTextLength:99999});
   assert.equal(f.record().revision,before); assert.equal(f.sends,0);
@@ -107,7 +107,7 @@ test('execution: STOP fences abort-aware pending attach without reopening for cl
   };
   const opening=f.existing();await entered.promise;await f.stop();await opening;
   f.browser.resume=resume;await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
   assert.deepEqual(f.controller.repository.records(),[]);
 });
 test('execution: persisted STOP remains inert after the control transaction crash gap',async()=>{
@@ -116,17 +116,17 @@ test('execution: persisted STOP remains inert after the control transaction cras
   await f.controller.repository.applyControl(f.control);
   await f.controller.quiesceForStandby();f.controller=f.recreate();
   await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
   assert.deepEqual(f.controller.repository.records(),[]);
 });
-test('execution: an unconfirmed STOP stays inert without resubmitting',async()=>{
+test('execution: local-only STOP stays inert without remote retry or resubmission',async()=>{
   const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
   f.browser.quiesce=async()=>{throw new Error('temporary stop transport error');};
-  await f.stop();assert.equal(f.record().stop_status,'UNCONFIRMED');
+  await f.stop();assert.equal(f.record().stop_status,'NOT_REQUESTED');
   f.browser.quiesce=quiesce;
   await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
   await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
   assert.deepEqual(f.controller.repository.records(),[]);
 });
 test('execution: migration does not reactivate an observer after authoritative DONE',async()=>{
@@ -175,11 +175,11 @@ test('execution: app cancellation followed by STOP never reopens a released obse
   const f=fixture();await f.existing();const quiesce=f.browser.quiesce;
   f.body.client_status='CANCELLED';await f.ingest();
   f.browser.quiesce=async()=>{throw new Error('temporary stop failure');};
-  await f.stop();assert.equal(f.record().stop_status,'UNCONFIRMED');
+  await f.stop();assert.equal(f.record().stop_status,'NOT_REQUESTED');
   f.browser.quiesce=quiesce;
   await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
   await f.controller.tick(f.transport);
-  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
   assert.deepEqual(f.controller.repository.records(),[]);
 });
 
@@ -192,12 +192,12 @@ test('execution: STOP with unknown URL fences a released input without historica
   await f.controller.repository.move(keyFor(f.body),'STOPPED','retry elapsed',{stop_retry_at:0});
   await f.controller.tick(f.transport);
   assert.equal(f.record().conversation_url,undefined);
-  assert.equal(f.record().stop_status,'UNCONFIRMED');assert.equal(f.quiesces,0);
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.quiesces,0);
   assert.deepEqual(f.controller.repository.records(),[]);
   assert.equal(f.sends,1);assert.equal(f.prepares,1);
 });
-test('execution: STOP without provable submitted URL is explicitly unconfirmed',async()=>{
+test('execution: STOP without a submitted URL still performs no receipt reconciliation',async()=>{
   const f=fixture();f.mode='unknown';await f.ingest();await f.stop();
-  assert.equal(f.record().stop_status,'UNCONFIRMED');
+  assert.equal(f.record().stop_status,'NOT_REQUESTED');
   assert.equal(f.quiesces,0);assert.equal(f.sends,1);assert.equal(f.prepares,1);
 });

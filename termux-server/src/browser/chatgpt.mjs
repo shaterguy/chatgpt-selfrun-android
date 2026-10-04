@@ -1,4 +1,4 @@
-import { cursor } from '../lifecycle.mjs';
+import { canonicalUrl, cursor } from '../lifecycle.mjs';
 
 export function normalizeProgressText(value) {
   return String(value || '')
@@ -26,16 +26,14 @@ export function detectPageErrorText(body) {
 }
 
 export function conversationStateReady(probe) {
-  const userMessageId = String(probe?.userMessageId || '').trim();
   const assistantMessageId = String(probe?.assistantMessageId || '').trim();
   const hasResponseState = !!probe?.streaming || !!probe?.paused || !!assistantMessageId
     || Number(probe?.responseTextLength || 0) > 0;
-  return !!userMessageId && hasResponseState;
+  return hasResponseState;
 }
 
 export function conversationResumeReady(probe) {
-  const userMessageId = String(probe?.userMessageId || '').trim();
-  return !!probe?.composer && !!userMessageId;
+  return !!probe?.composer;
 }
 
 const delay = (ms, signal) => new Promise((resolve, reject) => {
@@ -729,17 +727,19 @@ export class ChatGptBrowser {
     });
   }
 
-  async prepare({ projectUrl, prompt, signal }) {
+  async prepare({ projectUrl, prompt, signal, onTarget, guard=()=>true }) {
     const target = await this.chromium.createTarget('about:blank');
-    const session = await this.chromium.connectTarget(target);
-    await session.call('Page.enable');
-    await session.call('Runtime.enable');
-    await session.call('Network.enable');
-    await applyBrowserClientProfile(session,this.config);
-    await installDecorativeAnimationPause(session);
-    await installRequestProfileEngine(session);
-
+    let session;
     try {
+      await onTarget?.(target);
+      if(signal?.aborted)throw signal.reason||new Error('aborted');
+      session = await this.chromium.connectTarget(target);
+      await session.call('Page.enable');
+      await session.call('Runtime.enable');
+      await session.call('Network.enable');
+      await applyBrowserClientProfile(session,this.config);
+      await installDecorativeAnimationPause(session);
+      await installRequestProfileEngine(session);
       const before = await this.#prepareNewChat(session, projectUrl, signal);
       if (signal?.aborted) throw signal.reason || new Error('aborted');
       return {
@@ -756,32 +756,33 @@ export class ChatGptBrowser {
         },
       };
     } catch (error) {
-      session.close();
-      await this.chromium.closeTarget(target.id);
+      session?.close();
+      await this.chromium.closeTarget(target.id,{guard});
       throw error;
     }
   }
 
-  async resume({ conversationUrl, signal }) {
-    const expectedId = conversationId(conversationUrl);
-    if (!expectedId) throw new Error('canonical conversation URL unavailable for resume');
+  async resume({ conversationUrl, signal, onTarget, guard=()=>true }) {
+    const expectedUrl = canonicalUrl(conversationUrl);
+    if (!expectedUrl) throw new Error('canonical conversation URL unavailable for resume');
 
     const targets=await this.chromium.listExistingTargets();
-    const existing=targets?.find(t=>t.type==='page'&&conversationId(t.url)===expectedId);
+    const existing=targets?.find(t=>t.type==='page'&&!this.chromium.targetClosing?.(t.id)&&canonicalUrl(t.url)===expectedUrl);
     const target = existing || await this.chromium.createTarget(conversationUrl);
-    const session = await this.chromium.connectTarget(target);
-    await session.call('Page.enable');
-    await session.call('Runtime.enable');
-    await session.call('Network.enable');
-    await applyBrowserClientProfile(session,this.config);
-    await installDecorativeAnimationPause(session);
-    await installRequestProfileEngine(session);
-
+    let session;
     try {
+      await onTarget?.(target);
+      if(signal?.aborted)throw signal.reason||new Error('aborted');
+      session = await this.chromium.connectTarget(target);
+      await session.call('Page.enable');
+      await session.call('Runtime.enable');
+      await session.call('Network.enable');
+      await applyBrowserClientProfile(session,this.config);
+      await installDecorativeAnimationPause(session);
+      await installRequestProfileEngine(session);
       const probe = await this.#waitFor(session, (p) => p.loginPage
         || ((p.readyState === 'complete' || p.readyState === 'interactive')
-          && conversationId(p.url) === expectedId
-          && conversationResumeReady(p)) || !!p.errorText, {
+          && canonicalUrl(p.url) === expectedUrl) || !!p.errorText, {
         timeoutMs: this.config.navigationTimeoutMs,
         signal,
         label: 'existing conversation',
@@ -806,8 +807,8 @@ export class ChatGptBrowser {
         },
       };
     } catch (error) {
-      session.close();
-      if(!existing) await this.chromium.closeTarget(target.id);
+      session?.close();
+      if(!existing) await this.chromium.closeTarget(target.id,{guard});
       throw error;
     }
   }
@@ -869,10 +870,12 @@ export class ChatGptBrowser {
     return evaluate(session, probeExpression());
   }
 
-  async attachTarget({targetId,signal}) {
+  async attachTarget({targetId,signal,onTarget}) {
     const targets=await this.chromium.listExistingTargets();
-    const target=targets?.find(t=>t.id===targetId&&t.type==='page');
+    const target=targets?.find(t=>t.id===targetId&&t.type==='page'&&!this.chromium.targetClosing?.(t.id));
     if(!target)throw Object.assign(new Error('original submission target unavailable'),{code:'ATTACH_FAILED'});
+    await onTarget?.(target);
+    if(signal?.aborted)throw signal.reason||new Error('aborted');
     const session=await this.chromium.connectTarget(target);
     await session.call('Page.enable');
     await session.call('Runtime.enable');
@@ -1048,9 +1051,9 @@ export class ChatGptBrowser {
         && Date.now() - lastActivityAt >= this.config.stallAfterMs;
       if (isStalled) stalled = true;
 
-      const structuralError = conversationStateUnavailable ? 'Conversation state unavailable' : null;
-      const pageError = conversationAvailable ? null : (probe.errorText || structuralError);
-      let status = 'RUNNING';
+      // A live page with temporarily missing DOM is not a lost target.
+      const pageError = probe.loginPage ? 'ChatGPT browser profile requires sign-in' : conversationAvailable ? null : probe.errorText;
+      let status = conversationStateUnavailable ? 'OBSERVATION_UNKNOWN' : 'RUNNING';
       if (pageError) status = 'PAGE_ERROR';
       else if (stalled) status = 'STALLED';
 

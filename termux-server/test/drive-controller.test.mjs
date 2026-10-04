@@ -44,7 +44,7 @@ test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
    await f.controller.repository.move(seeded.key,'CANCELLED','test user stop');
  await f.controller.tick(f.transport);
  assert.equal(f.sends,0);
- assert.equal(f.record().state,'STOPPED');assert.equal(f.record().stop_status,'UNCONFIRMED');
+ assert.equal(f.record().state,'STOPPED');assert.equal(f.record().stop_status,'NOT_REQUESTED');
  assert.deepEqual(f.controller.repository.records(),[]);assert.equal(f.quiesces,0);
 });
 test('initial POST does not wait for unrelated full projection backlog',async()=>{
@@ -65,9 +65,9 @@ test('app STOP is authoritative even when Result is committed',async()=>{
  const f=fixture();f.control.state='STOPPED';f.result(true);await f.existing();
  assert.equal(f.record().state,'STOPPED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
 });
-test('paused generation requires explicit continuation and sends nothing',async()=>{
+test('UI paused generation does not override an active app control',async()=>{
  const f=fixture();f.probe.paused=true;await f.existing();await f.stall();
- assert.equal(f.record().error.code,'GENERATION_PAUSED');assert.equal(f.sends,0);
+ assert.equal(f.record().error,null);assert.equal(f.sends,1);
 });
 test('cursor advancement during stall verification prevents recovery',async()=>{
  const f=fixture();await f.existing();await f.observe({});
@@ -80,7 +80,9 @@ test('Result lookup failure retains stall time and recovery stage',async()=>{
  await f.controller.repository.move(keyFor(f.body),'STALLED','elapsed',{last_progress_at:123});
  f.docs.set('RESULT-1','invalid');await f.controller.tick(f.transport);
  assert.equal(f.record().last_progress_at,123);assert.equal(f.sends,0);
- f.result(false);await f.controller.tick(f.transport);assert.equal(f.sends,1);
+ f.result(false);
+ await f.controller.repository.move(keyFor(f.body),f.record().state,'test retry deadline elapsed',{retry_at:0,result_retry_at:0});
+ await f.controller.tick(f.transport);assert.equal(f.sends,1);
 });
 test('readback unknown keeps ownership and never opens a fresh conversation',async()=>{
  const f=fixture();f.mode='unknown';await f.existing();await f.stall();
@@ -138,6 +140,7 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
         return { result: { value: {
           ...baseProbe,
           composer: false,
+          errorText: 'Could not load this ChatGPT conversation',
           userCount: 0,
           userTextLength: 0,
           userMessageId: null,
@@ -207,6 +210,7 @@ test('browser monitor schedules stalled verification retries without resetting r
         return { result: { value: {
           ...baseProbe,
           composer: false,
+          errorText: 'Could not load this ChatGPT conversation',
           userCount: 0,
           userTextLength: 0,
           userMessageId: null,

@@ -109,7 +109,7 @@ test('legacy combined user-response wrapper keeps thinking progress before assis
 });
 
 
-test('unchanged pre-answer thinking and minute clock labels recover once at ten minutes',async()=>{
+test('unchanged pre-answer thinking and minute clock labels recover once per ten-minute interval',async()=>{
   const originalNow=Date.now;let now=1000000;Date.now=()=>now;
   const dom=fixture({bubble:false,turnAttribute:null});dom.main.append(el('button',{'data-testid':'stop-button'}));
   const clock=el('span',{},'Thinking for 0 minutes');dom.response.append(clock);
@@ -123,8 +123,9 @@ test('unchanged pre-answer thinking and minute clock labels recover once at ten 
     }
     now+=60000;dom.setText(clock,'Thinking for 10 minutes');f.probe=await dom.probe();await f.observe({status:'RUNNING'});
     assert.equal(f.sends,1);assert.equal(f.quiesces,1);assert.equal(f.sent[0].prompt,'configured thinking continuation');assert.equal(f.sent[0].kind,'recovery');assert.equal(f.prepares,0);
-    for(let minute=1;minute<=10;minute++){now+=60000;await f.observe({status:'RUNNING'});}
-    assert.equal(f.sends,1,'unchanged confirmed recovery must not send again');
+    for(let minute=1;minute<=9;minute++){now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);}
+    now+=60000;await f.observe({status:'RUNNING'});
+    assert.equal(f.sends,2,'a fresh ten-minute quiet interval permits one new recovery');
   }finally{await f.controller.quiesceForStandby();Date.now=originalNow;}
 });
 

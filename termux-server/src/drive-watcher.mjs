@@ -2,12 +2,6 @@ import { inputFingerprint } from './retired-requests.mjs';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const fingerprint=file=>file?file.modTime+'|'+file.size:null;
 const controlToken=control=>JSON.stringify(control?[control.task_id,control.turn_id,control.request_id,control.state,control.control_epoch]:null);
-const recent=(file,cutoff)=>{
-  const raw=String(file.modTime||'');
-  if(!/^\d{4}-\d{2}-\d{2}T/.test(raw))return true;
-  const ms=Date.parse(raw);
-  return !Number.isFinite(ms)||ms>=cutoff;
-};
 export class DriveDispatchWatcher {
   constructor({transport,controller,config,canDispatch=null}) {
     Object.assign(this,{transport,controller,config});
@@ -26,8 +20,8 @@ export class DriveDispatchWatcher {
     if(this.scanning||!this.canDispatch())return;
     this.scanning=true;
     try {
-      const cutoff=Date.now()-Math.max(0,Number(this.config.dispatchRecoveryMs||7200000));
-      const files=(await this.transport.list()).filter(file=>recent(file,cutoff));
+      // App controls and retired identities decide eligibility; file age does not.
+      const files=await this.transport.list();
       const listedControls=new Map(files.filter(f=>f.path.startsWith('__SELFRUN_CONTROL__')).map(f=>[f.path,f]));
       const present=new Set(files.map(f=>f.path));
       for(const path of this.deferred.keys())if(!present.has(path))this.deferred.delete(path);

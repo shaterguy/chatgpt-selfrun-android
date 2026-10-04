@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -98,21 +100,91 @@ export class ChromiumManager {
     this.config = config;
     this.child = null;
     this.recycling = null;
+    this.lifecycleQueue = Promise.resolve();
+    this.closingTargets = new Set();
+    this.lifecycleGuards = {};
     this.baseUrl = `http://127.0.0.1:${config.browserPort}`;
     this.activityDir = config.browserActivityDir;
     this.activityWrites = new Map();
+    this.ownershipFile = path.join(config.dataDir, `chromium-ownership-${config.browserPort}.json`);
+    this.ownership = this.#readOwnership();
     this.idleSweepRunning = false;
     try { fs.mkdirSync(this.activityDir, { recursive: true }); } catch {}
     const sweepMs = Math.max(10000, Number(config.browserTargetSweepMs || 60000));
     this.idleSweepTimer = setInterval(() => {
       if (this.idleSweepRunning) return;
       this.idleSweepRunning = true;
-      void this.closeIdleTargets().catch(() => {}).finally(() => {
-        this.idleSweepRunning = false;
-      });
+      void this.closeIdleTargets().catch(() => {}).finally(() => { this.idleSweepRunning = false; });
     }, sweepMs);
     this.idleSweepTimer.unref?.();
   }
+
+  #emptyOwnership() {
+    return {
+      schema: 'selfrun-chromium-ownership-v1', port: Number(this.config.browserPort),
+      profile: this.config.browserProfile, browserKey: null, process: null, targets: {},
+    };
+  }
+
+  #readOwnership() {
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.ownershipFile, 'utf8'));
+      if (saved.schema === 'selfrun-chromium-ownership-v1'
+          && saved.port === Number(this.config.browserPort) && saved.profile === this.config.browserProfile
+          && saved.targets && typeof saved.targets === 'object' && !Array.isArray(saved.targets)) return saved;
+    } catch {}
+    return this.#emptyOwnership();
+  }
+
+  #saveOwnership() {
+    fs.mkdirSync(this.config.dataDir, { recursive: true });
+    const temporary = `${this.ownershipFile}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(this.ownership), { mode: 0o600 });
+      fs.renameSync(temporary, this.ownershipFile);
+    } finally { try { fs.unlinkSync(temporary); } catch {} }
+  }
+
+  #serialize(operation) {
+    const result = this.lifecycleQueue.then(operation, operation);
+    this.lifecycleQueue = result.catch(() => {});
+    return result;
+  }
+
+  // Synchronous guards keep the final ownership/epoch check in the same turn
+  // as sending a close request or process signal. Async guards fail closed.
+  #allowed(guard, ...args) {
+    try { return !guard || guard(...args) === true; } catch { return false; }
+  }
+
+  setLifecycleGuards({ canCloseTarget, canRelease } = {}) {
+    this.lifecycleGuards = { canCloseTarget, canRelease };
+  }
+
+  #useVersion(version) {
+    const browserKey = typeof version?.webSocketDebuggerUrl === 'string' ? version.webSocketDebuggerUrl : null;
+    if (browserKey !== this.ownership.browserKey) {
+      this.ownership = { ...this.#emptyOwnership(), browserKey };
+      this.closingTargets.clear();
+      this.#saveOwnership();
+    }
+    return browserKey;
+  }
+
+  #recordTarget(target, startupUrl = null) {
+    if (!target?.id || !this.ownership.browserKey) return;
+    this.touchTarget(target.id, true);
+    this.ownership.targets[String(target.id)] = { created: true, browserKey: this.ownership.browserKey, startupUrl };
+    this.#saveOwnership();
+  }
+
+  isOwnedTarget(targetId) {
+    const proof = this.ownership.targets[String(targetId || '')];
+    return proof?.created === true && Boolean(this.ownership.browserKey)
+      && proof.browserKey === this.ownership.browserKey;
+  }
+
+  targetClosing(targetId) { return this.closingTargets.has(String(targetId || '')); }
 
   #activityPath(targetId) {
     const safe = String(targetId || '').replace(/[^A-Za-z0-9._-]/g, '_');
@@ -121,11 +193,15 @@ export class ChromiumManager {
 
   touchTarget(targetId, force = false) {
     const id = String(targetId || '');
+    // Any use consumes the startup exception even if the page stays blank.
+    if (this.ownership.targets[id]?.startupUrl) {
+      this.ownership.targets[id].startupUrl = null;
+      this.#saveOwnership();
+    }
     const file = this.#activityPath(id);
     if (!file) return;
     const now = Date.now();
-    const previous = Number(this.activityWrites.get(id) || 0);
-    if (!force && now - previous < 30000) return;
+    if (!force && now - Number(this.activityWrites.get(id) || 0) < 30000) return;
     try {
       fs.mkdirSync(this.activityDir, { recursive: true });
       const fd = fs.openSync(file, 'a');
@@ -140,8 +216,11 @@ export class ChromiumManager {
     const id = String(targetId || '');
     const file = this.#activityPath(id);
     this.activityWrites.delete(id);
-    if (!file) return;
-    try { fs.unlinkSync(file); } catch {}
+    if (Object.hasOwn(this.ownership.targets, id)) {
+      delete this.ownership.targets[id];
+      this.#saveOwnership();
+    }
+    if (file) { try { fs.unlinkSync(file); } catch {} }
   }
 
   isTargetIdle(targetId, idleMs = this.config.browserTargetIdleMs) {
@@ -149,12 +228,8 @@ export class ChromiumManager {
     const file = this.#activityPath(id);
     const limit = Math.max(0, Number(idleMs || 0));
     if (!file || !limit) return false;
-    try {
-      return Date.now() - fs.statSync(file).mtimeMs >= limit;
-    } catch {
-      this.touchTarget(id, true);
-      return false;
-    }
+    try { return Date.now() - fs.statSync(file).mtimeMs >= limit; }
+    catch { this.touchTarget(id, true); return false; }
   }
 
   async hasRecentlyActiveTargets(windowMs = this.config.browserTargetIdleMs) {
@@ -162,11 +237,7 @@ export class ChromiumManager {
     if (!limit) return false;
     const targets = await this.listExistingTargets();
     if (!Array.isArray(targets)) return false;
-    for (const target of targets) {
-      if (String(target?.type || '') !== 'page' || !target?.id) continue;
-      if (!this.isTargetIdle(target.id, limit)) return true;
-    }
-    return false;
+    return targets.some((target) => target?.type === 'page' && target.id && !this.isTargetIdle(target.id, limit));
   }
 
   async closeIdleTargets() {
@@ -176,48 +247,67 @@ export class ChromiumManager {
     if (!Array.isArray(targets)) return { closed: [] };
     const closed = [];
     for (const target of targets) {
-      if (String(target?.type || '') !== 'page' || !target?.id) continue;
-      if (!this.isTargetIdle(target.id, idleMs)) continue;
-      if (!this.isTargetIdle(target.id, idleMs)) continue;
-      if (await this.closeTarget(target.id)) closed.push(String(target.id));
+      if (target?.type !== 'page' || !this.isOwnedTarget(target.id) || !this.isTargetIdle(target.id, idleMs)) continue;
+      const result = await this.closeOwnedTarget(target.id, { guard: () => this.isTargetIdle(target.id, idleMs) });
+      if (result.closed) closed.push(String(target.id));
     }
-    if (closed.length) {
-      const remaining = await this.listExistingTargets();
-      const pages = Array.isArray(remaining)
-        ? remaining.filter((target) => String(target?.type || '') === 'page')
-        : [];
-      if (pages.length === 0) await this.recycle('idle_targets_exhausted').catch(() => {});
-    }
+    if (closed.length) await this.releaseIfUnused().catch(() => {});
     return { closed };
   }
 
-  #processRows() {
-    const rows = [];
-    let entries = [];
-    try { entries = fs.readdirSync('/proc'); } catch { return rows; }
-    for (const entry of entries) {
-      if (!/^\d+$/.test(entry)) continue;
-      const pid = Number(entry);
-      try {
-        const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`)
-          .toString()
-          .replaceAll('\0', ' ')
-          .trim();
-        const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').trim().split(/\s+/);
-        const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
-        const rssKb = Number(status.match(/^VmRSS:\s*(\d+)/m)?.[1] || 0);
-        rows.push({ pid, ppid: Number(stat[3] || 0), rssKb, cmdline });
-      } catch {}
-    }
-    return rows;
+  #processIdentity(pid) {
+    try {
+      const rawStat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      // comm may contain spaces/parentheses; after the last ')' come fields 3+.
+      const stat = rawStat.slice(rawStat.lastIndexOf(')') + 2).trim().split(/\s+/);
+      const args = fs.readFileSync(`/proc/${pid}/cmdline`).toString().split('\0').filter(Boolean);
+      const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+      return {
+        pid: Number(pid), ppid: Number(stat[1]), state: stat[0], startTime: stat[19], args,
+        rssKb: Number(status.match(/^VmRSS:\s*(\d+)/m)?.[1] || 0),
+      };
+    } catch { return null; }
   }
 
-  #rootPid(rows = this.#processRows()) {
-    if (this.child?.pid && rows.some((row) => row.pid === this.child.pid)) return this.child.pid;
-    const portMarker = `--remote-debugging-port=${this.config.browserPort}`;
-    return rows.find((row) => row.cmdline.includes('/lib/chromium/chrome')
-      && row.cmdline.includes(portMarker)
-      && !row.cmdline.includes('--type='))?.pid || null;
+  #processRows() {
+    try { return fs.readdirSync('/proc').filter((entry) => /^\d+$/.test(entry))
+      .map((entry) => this.#processIdentity(Number(entry))).filter(Boolean); }
+    catch { return []; }
+  }
+
+  #bootId() {
+    try { return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); }
+    catch { return null; }
+  }
+
+  #matchesProcess(proof, row = this.#processIdentity(proof?.pid)) {
+    return Boolean(proof && row && row.state !== 'Z' && row.state !== 'X'
+      && String(row.startTime) === String(proof.startTime));
+  }
+
+  #processExited(proof) {
+    try {
+      const raw = fs.readFileSync(`/proc/${proof.pid}/stat`, 'utf8');
+      const stat = raw.slice(raw.lastIndexOf(')') + 2).trim().split(/\s+/);
+      return (Boolean(stat[19]) && String(stat[19]) !== String(proof.startTime))
+        || stat[0] === 'Z' || stat[0] === 'X';
+    } catch (error) {
+      // An unreadable process is unknown, never evidence that it exited.
+      return error?.code === 'ENOENT' || error?.code === 'ESRCH';
+    }
+  }
+
+  #ownedProcess() {
+    const proof = this.ownership.process;
+    if (!proof?.bootId || proof.bootId !== this.#bootId()
+        || proof.port !== Number(this.config.browserPort) || proof.profile !== this.config.browserProfile
+        || proof.browserKey !== this.ownership.browserKey) return null;
+    const row = this.#processIdentity(proof.pid);
+    if (!this.#matchesProcess(proof, row)
+        || !row.args.includes(`--remote-debugging-port=${proof.port}`)
+        || !row.args.includes(`--user-data-dir=${proof.profile}`)
+        || row.args.some((arg) => arg.startsWith('--type='))) return null;
+    return row;
   }
 
   #treeRows(rows, rootPid) {
@@ -227,10 +317,7 @@ export class ChromiumManager {
     while (changed) {
       changed = false;
       for (const row of rows) {
-        if (ids.has(row.ppid) && !ids.has(row.pid)) {
-          ids.add(row.pid);
-          changed = true;
-        }
+        if (ids.has(row.ppid) && !ids.has(row.pid)) { ids.add(row.pid); changed = true; }
       }
     }
     return rows.filter((row) => ids.has(row.pid));
@@ -238,62 +325,17 @@ export class ChromiumManager {
 
   async listExistingTargets() {
     try {
-      const response = await fetch(this.baseUrl + '/json/list', {
-        signal: AbortSignal.timeout(1500),
-      });
+      const response = await fetch(this.baseUrl + '/json/list', { signal: AbortSignal.timeout(1500) });
       if (!response.ok) return null;
-      return response.json();
-    } catch {
-      return null;
-    }
+      return await response.json();
+    } catch { return null; }
   }
 
   async residentSetMb() {
-    const rows = this.#processRows();
-    const rootPid = this.#rootPid(rows);
-    if (!rootPid) return null;
-    const rssKb = this.#treeRows(rows, rootPid).reduce((sum, row) => sum + row.rssKb, 0);
+    const root = this.#ownedProcess();
+    if (!root) return null;
+    const rssKb = this.#treeRows(this.#processRows(), root.pid).reduce((sum, row) => sum + row.rssKb, 0);
     return Math.round((rssKb / 1024) * 10) / 10;
-  }
-
-  async recycle(reason = 'manual') {
-    if (this.recycling) return this.recycling;
-    this.recycling = (async () => {
-      const rows = this.#processRows();
-      const rootPid = this.#rootPid(rows);
-      const rssMb = rootPid
-        ? Math.round((this.#treeRows(rows, rootPid).reduce((sum, row) => sum + row.rssKb, 0) / 1024) * 10) / 10
-        : null;
-      if (!rootPid) {
-        this.child = null;
-        return { recycled: false, reason, rssMb, rootPid: null };
-      }
-
-      try { process.kill(rootPid, 'SIGTERM'); } catch {}
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        if (!fs.existsSync(`/proc/${rootPid}`)) break;
-        await delay(100);
-      }
-      if (fs.existsSync(`/proc/${rootPid}`)) {
-        try { process.kill(rootPid, 'SIGKILL'); } catch {}
-      }
-
-      const profileMarker = `${this.config.browserProfile}/Crash Reports`;
-      for (const row of this.#processRows()) {
-        if (!row.cmdline.includes('chrome_crashpad_handler')
-            || !row.cmdline.includes(profileMarker)) continue;
-        try { process.kill(row.pid, 'SIGTERM'); } catch {}
-      }
-
-      this.child = null;
-      return { recycled: true, reason, rssMb, rootPid };
-    })();
-
-    try {
-      return await this.recycling;
-    } finally {
-      this.recycling = null;
-    }
   }
 
   async #version() {
@@ -302,77 +344,224 @@ export class ChromiumManager {
     return response.json();
   }
 
-  async ensureStarted() {
-    if (this.recycling) await this.recycling;
+  async #closeOwnedTarget(targetId, { guard, lifecycle = 'target' } = {}) {
+    const id = String(targetId || '');
+    const allowed = (target) => this.#allowed(guard, target) && (lifecycle === 'release'
+      ? this.#allowed(this.lifecycleGuards.canRelease)
+      : lifecycle === 'caller' || this.#allowed(this.lifecycleGuards.canCloseTarget, id, target));
+    const skip = (reason) => ({ closed: false, absent: false, reason });
+    if (!allowed()) return skip('guard_rejected');
+    if (!this.isOwnedTarget(id)) return skip('unowned_target');
+    const browserKey = this.ownership.browserKey;
+    const targets = await this.listExistingTargets();
+    if (!allowed()) return skip('guard_rejected');
+    if (!Array.isArray(targets)) return skip('targets_unavailable');
+    const observed = targets.find((target) => String(target?.id || '') === id);
+    if (!allowed(observed)) return skip('guard_rejected');
+    let version;
+    try { version = await this.#version(); } catch { return skip('browser_unavailable'); }
+    if (!allowed()) return skip('guard_rejected');
+    if (this.#useVersion(version) !== browserKey || !this.isOwnedTarget(id)) return skip('browser_changed');
+    if (!observed) {
+      this.forgetTarget(id);
+      this.closingTargets.delete(id);
+      return { closed: false, absent: true, reason: 'already_absent' };
+    }
+    if (!allowed(observed)) return skip('guard_rejected');
+    this.closingTargets.add(id);
     try {
-      return await this.#version();
-    } catch {}
+      const response = await fetch(this.baseUrl + '/json/close/' + encodeURIComponent(id), {
+        signal: AbortSignal.timeout(1500),
+      });
+      if (!response.ok) return skip('close_failed');
+      this.forgetTarget(id);
+      return { closed: true, absent: false, reason: 'closed' };
+    } catch { return skip('close_failed'); }
+  }
 
+  closeOwnedTarget(targetId, { guard } = {}) {
+    return this.#serialize(() => this.#closeOwnedTarget(targetId, { guard }));
+  }
+
+  // Failure cleanup using the legacy API is also ownership constrained.
+  async closeTarget(targetId, { guard } = {}) {
+    const result = await this.#serialize(() => this.#closeOwnedTarget(targetId, {
+      guard, lifecycle: typeof guard === 'function' ? 'caller' : 'target',
+    }));
+    return result.closed || result.absent;
+  }
+
+  async #releaseIfUnused({ guard } = {}) {
+    const allowed = () => this.#allowed(guard) && this.#allowed(this.lifecycleGuards.canRelease);
+    const skip = (reason) => ({ released: false, reason });
+    if (!allowed()) return skip('guard_rejected');
+    if (!this.#ownedProcess()) return skip('unowned_process');
+    let version;
+    try { version = await this.#version(); } catch { return skip('browser_unavailable'); }
+    if (!allowed()) return skip('guard_rejected');
+    this.#useVersion(version);
+    if (!this.#ownedProcess()) return skip('unowned_process');
+    let targets = await this.listExistingTargets();
+    if (!allowed()) return skip('guard_rejected');
+    if (!Array.isArray(targets)) return skip('targets_unavailable');
+    // All targets block release except our untouched nonce-proven startup page.
+    // A restored/manual about:blank page is never enough evidence of ownership.
+    for (const target of targets) {
+      const proof = this.ownership.targets[String(target?.id || '')];
+      if (!this.isOwnedTarget(target?.id) || !proof.startupUrl
+          || target.type !== 'page' || target.url !== proof.startupUrl) return skip('targets_in_use');
+    }
+    for (const target of targets) {
+      const startupUrl = this.ownership.targets[target.id]?.startupUrl;
+      const result = await this.#closeOwnedTarget(target.id, {
+        lifecycle: 'release',
+        guard: (observed) => allowed() && this.ownership.targets[target.id]?.startupUrl === startupUrl
+          && (!observed || observed.url === startupUrl),
+      });
+      if (!result.closed && !result.absent) return skip(result.reason);
+    }
+    targets = await this.listExistingTargets();
+    if (!allowed()) return skip('guard_rejected');
+    if (!Array.isArray(targets) || targets.length !== 0) return skip('targets_in_use');
+    const root = this.#ownedProcess();
+    if (!root) return skip('unowned_process');
+    const tree = this.#treeRows(this.#processRows(), root.pid);
+    if (!tree.some((row) => row.pid === root.pid)) tree.push(root);
+    const ownedChild = this.child?.pid === root.pid ? this.child : null;
+    const childExited = () => !ownedChild || ownedChild.exitCode !== null || ownedChild.signalCode !== null;
+    const rssMb = Math.round((tree.reduce((sum, row) => sum + row.rssKb, 0) / 1024) * 10) / 10;
+    if (!allowed() || !this.#ownedProcess()) return skip('guard_rejected');
+    // Persist quarantine before sending the first signal, so even a server
+    // restart or an unkillable process cannot hand a dying browser to demand.
+    this.ownership.process.terminating = true;
+    this.#saveOwnership();
+    try { process.kill(root.pid, 'SIGTERM'); } catch { return skip('signal_failed'); }
+    // Once shutdown is committed, hold the lifecycle queue through the exit
+    // outcome even if new work changes the guard. That demand must start after
+    // release, never attach to this dying browser. Escalation is limited to the
+    // exact captured PID/starttime tree, not a port/profile/name match.
+    // Signal success itself is not release success.
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (tree.every((row) => this.#processExited(row))) break;
+      await delay(100);
+    }
+    for (const row of tree) {
+      if (!this.#matchesProcess(row)) continue;
+      try { process.kill(row.pid, 'SIGKILL'); } catch {}
+    }
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (tree.every((row) => this.#processExited(row)) && childExited()) {
+        this.child = null;
+        this.ownership = this.#emptyOwnership();
+        this.#saveOwnership();
+        this.closingTargets.clear();
+        return { released: true, reason: 'unused', rootPid: root.pid, rssMb };
+      }
+      await delay(100);
+    }
+    return { released: false, reason: 'process_still_running', rootPid: root.pid, rssMb };
+  }
+
+  releaseIfUnused(options = {}) {
+    const release = this.#serialize(() => this.#releaseIfUnused(options));
+    this.recycling = release;
+    void release.finally(() => { if (this.recycling === release) this.recycling = null; }).catch(() => {});
+    return release;
+  }
+
+  async recycle(reason = 'manual') {
+    const result = await this.releaseIfUnused();
+    return { ...result, recycled: result.released, reason };
+  }
+
+  async #ensureStarted() {
+    const terminating = this.ownership.process;
+    if (terminating?.terminating) {
+      if (!this.#processExited(terminating)) {
+        throw new Error('BROWSER_TERMINATING: owned Chromium shutdown is not confirmed');
+      }
+      this.ownership = this.#emptyOwnership();
+      this.#saveOwnership();
+      if (this.child?.pid === terminating.pid) this.child = null;
+    }
+    try {
+      const version = await this.#version();
+      this.#useVersion(version);
+      return version;
+    } catch {}
     await fsPromises.mkdir(this.config.dataDir, { recursive: true });
     const out = fs.openSync(this.config.browserLogFile, 'a');
+    const startupUrl = `about:blank#selfrun-startup-${randomUUID()}`;
     const args = [
-      '--headless=new',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--remote-allow-origins=*',
+      '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+      '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*',
       '--remote-debugging-address=127.0.0.1',
       `--remote-debugging-port=${this.config.browserPort}`,
-      `--user-data-dir=${this.config.browserProfile}`,
-      'about:blank',
+      `--user-data-dir=${this.config.browserProfile}`, startupUrl,
     ];
-    this.child = spawn(this.config.chromiumCommand, args, {
-      detached: false,
-      stdio: ['ignore', out, out],
-      env: process.env,
-    });
+    let child;
+    try {
+      child = spawn(this.config.chromiumCommand, args, {
+        detached: false, stdio: ['ignore', out, out], env: process.env,
+      });
+    } finally { fs.closeSync(out); }
+    this.child = child;
+    let spawnError = null;
+    child.once('error', (error) => { spawnError = error; });
     let lastError = null;
     for (let attempt = 0; attempt < 80; attempt += 1) {
-      if (this.child.exitCode !== null) {
-        throw new Error(`Chromium exited before DevTools became ready: ${this.child.exitCode}`);
+      if (spawnError) throw spawnError;
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(`Chromium exited before DevTools became ready: ${child.exitCode ?? child.signalCode}`);
       }
       try {
-        return await this.#version();
-      } catch (error) {
-        lastError = error;
-        await delay(250);
-      }
+        const version = await this.#version();
+        const browserKey = this.#useVersion(version);
+        const root = this.#processIdentity(child.pid);
+        const bootId = this.#bootId();
+        if (browserKey && bootId && root?.args.includes(`--remote-debugging-port=${this.config.browserPort}`)
+            && root.args.includes(`--user-data-dir=${this.config.browserProfile}`)
+            && root.args.includes(startupUrl) && !root.args.some((arg) => arg.startsWith('--type='))) {
+          this.ownership.process = {
+            pid: root.pid, startTime: root.startTime, bootId, browserKey,
+            port: Number(this.config.browserPort), profile: this.config.browserProfile,
+          };
+          this.#saveOwnership();
+          const targets = await this.listExistingTargets();
+          const startup = targets?.filter((target) => target.type === 'page' && target.url === startupUrl);
+          if (startup?.length === 1) this.#recordTarget(startup[0], startupUrl);
+        }
+        return version;
+      } catch (error) { lastError = error; await delay(250); }
     }
     throw new Error('Chromium DevTools did not become ready', { cause: lastError });
   }
 
-  async listTargets() {
-    await this.ensureStarted();
-    const response = await fetch(this.baseUrl + '/json/list');
-    if (!response.ok) throw new Error(`Unable to list Chromium targets: ${response.status}`);
-    return response.json();
+  ensureStarted() { return this.#serialize(() => this.#ensureStarted()); }
+
+  listTargets() {
+    return this.#serialize(async () => {
+      await this.#ensureStarted();
+      const response = await fetch(this.baseUrl + '/json/list');
+      if (!response.ok) throw new Error(`Unable to list Chromium targets: ${response.status}`);
+      return response.json();
+    });
   }
 
-  async createTarget(url = 'about:blank') {
-    await this.ensureStarted();
-    const endpoint = this.baseUrl + '/json/new?' + encodeURIComponent(url);
-    const response = await fetch(endpoint, { method: 'PUT' });
-    if (!response.ok) throw new Error(`Unable to create Chromium target: ${response.status}`);
-    const target = await response.json();
-    this.touchTarget(target?.id, true);
-    return target;
-  }
-
-  async closeTarget(targetId) {
-    if (!targetId) return false;
-    try {
-      const response = await fetch(this.baseUrl + '/json/close/' + encodeURIComponent(targetId));
-      if (response.ok) this.forgetTarget(targetId);
-      return response.ok;
-    } catch {
-      return false;
-    }
+  createTarget(url = 'about:blank') {
+    return this.#serialize(async () => {
+      await this.#ensureStarted();
+      const response = await fetch(this.baseUrl + '/json/new?' + encodeURIComponent(url), { method: 'PUT' });
+      if (!response.ok) throw new Error(`Unable to create Chromium target: ${response.status}`);
+      const target = await response.json();
+      this.#recordTarget(target);
+      return target;
+    });
   }
 
   async connectTarget(target) {
     if (!target?.webSocketDebuggerUrl) throw new Error('Target has no DevTools websocket URL');
+    if (this.targetClosing(target.id)) throw new Error('Target is closing');
     this.touchTarget(target.id, true);
     return new CdpSession(target.webSocketDebuggerUrl, () => this.touchTarget(target.id)).connect();
   }
@@ -381,10 +570,8 @@ export class ChromiumManager {
     const version = await this.ensureStarted();
     const targets = await this.listTargets();
     return {
-      ready: true,
-      browser: version.Browser || null,
-      protocolVersion: version['Protocol-Version'] || null,
-      targets: targets.length,
+      ready: true, browser: version.Browser || null,
+      protocolVersion: version['Protocol-Version'] || null, targets: targets.length,
     };
   }
 }

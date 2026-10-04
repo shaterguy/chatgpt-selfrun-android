@@ -9,10 +9,10 @@ The executable allowed edges are in src/lifecycle.mjs.
 - Attachment: ATTACHING -> OBSERVING, without sending a continuation.
 - Submission: POST_PENDING or RECOVERY_POST -> POST_UNCERTAIN -> RECONCILING -> OBSERVING.
 - Recovery: STALLED -> VERIFY_RESULT -> VERIFY_CONVERSATION -> VERIFY_CURSOR -> QUIESCING when needed -> VERIFY_INPUT -> RECOVERY_POST.
-- Response completion: response_status telemetry while the observer remains active. App successor/control signals end or suspend observation.
+- Response completion: idle response_status alone keeps observation active. Exact current Result committed:true retires as COMMITTED and ends observation; app control can also suspend or stop it.
 - Control and failures: STOPPED, PAUSED, BLOCKED or CANCELLED retain identity and durable recovery stage.
 
-The app owns Result, phase, Handoff and successor decisions. Initial submission never reads current/predecessor Result documents and IDs are opaque correlation values. During monitoring, the existing strict Result readback remains a nudge-suppression safeguard: committed or unreadable Result prevents automatic progress input, but never ends observation. Cursor changes measure progress; polling and heartbeats do not.
+The app owns Result, phase, Handoff and successor decisions. Initial submission never reads current/predecessor Result documents and IDs are opaque correlation values. During monitoring, strict exact Result readback makes committed:true final authority for the current request: retire it, end observation and close its proven owned target. An unreadable Result suppresses progress input without claiming completion. Consumed identities never reattach or reread Result, including after restart or an old same-identity RUNNING refresh. Cursor changes measure progress; polling and heartbeats do not.
 
 ## Visible generation progress
 The progress cursor includes visible thinking, work and tool output before a final
@@ -45,19 +45,40 @@ fallback after the newest user are synthetic compatibility cases, pending live
 verification. Tests evaluate the exact production probe expression and exercise
 the actual controller with no final answer: unchanged minute samples/timers do
 not count as progress, real tool changes reset the deadline, and ten unchanged
-minutes trigger one configured recovery. Navigation, input dispatch and app
+minutes trigger one configured recovery attempt per interval. Navigation, input dispatch and app
 authority are unchanged.
 
 ## Submission safety
-A durable intent stores immutable input/hash, baseline, correlation and send count before the browser side effect. UNKNOWN is reconciled and never blindly resent. Readback observes the existing page without reloading or navigation. A passive, bounded clone reader correlates the exact outgoing user message with a recognized semantic response marker or assistant-message event and canonical conversation; the minimal receipt is durably recorded before confirmation. An optimistic DOM bubble, POST observation, or HTTP 200 alone is insufficient. Missing, ambiguous, stale, unsupported, or conflicting receipts remain UNKNOWN. ABSENT requires prior proven cancellation before transport release, never a quiet DOM or timeout. At most one resend reuses that intent. ABSENT, UNKNOWN and all recovery checkpoints survive restart. A confirmed recovery without new response progress cannot create another recovery input.
+A durable intent stores immutable input/hash, baseline, correlation and send count before the browser side effect. Initial submission UNKNOWN is reconciled and never blindly resent. Readback observes the existing page without reloading or navigation. A passive, bounded clone reader correlates the exact outgoing user message with a recognized semantic response marker or assistant-message event and canonical conversation; the minimal receipt is durably recorded before confirmation. An optimistic DOM bubble, POST observation, or HTTP 200 alone is insufficient. Missing, ambiguous, stale, unsupported, or conflicting receipts remain UNKNOWN. ABSENT requires prior proven cancellation before transport release, never a quiet DOM or timeout. For initial submission, at most one proven-absent resend reuses that intent. ABSENT, UNKNOWN and all recovery checkpoints survive restart.
+
+Generic recovery nudges use a different, explicitly approved policy: before the first recovery UI step, including stream quiesce, `last_nudge_attempt_at` is persisted locally and projected to Drive. If the attempt reaches input submission, its unique intent/receipt generation is persisted before that input. Quiesce or input-preparation failure still consumes the full attempt window. The clock is renewed when each UI phase finishes, before receipt reconciliation; slow UI work cannot leave an expired deadline. Streaming-only telemetry never resets actual response-progress time. The next attempt requires a full configured quiet window (default 600000 ms) after the later of actual response progress and the last nudge attempt. Browser STALLED labels, repeated polling, restart, and delayed ACK/readback cannot bypass or renew that deadline. A late receipt for an older intent cannot overwrite its successor. UNKNOWN, PENDING, and proven-absent recovery attempts remain observable and allow one fresh intent after the next quiet window; they never immediately resend. This may produce a rare duplicate generic continuation, as accepted by the user. Initial prompt duplicate protection, Result/control checks, and STOP/WAITING boundaries remain unchanged. Legacy one-shot RECOVERY_NO_PROGRESS blocks resume this interval policy. While app control stays active, attach/auth/load failures retry with pacing instead of a lifetime attempt cap, and transient observation/input errors retain the current page. Result transport/schema failures retain a classified error and retry deadline; they never claim committed proof. Initial uncertain-submission and ownership conflicts remain fenced.
 
 ## Control and compatibility
-Drive dispatch/control schemas remain compatible with additive lifecycle fields. Legacy events import monotonic recovery count and uncertain submission evidence. Newer audit revisions than the snapshot quarantine execution. STOP fences pending browser callbacks immediately and quiesces only the owned conversation; stop_status distinguishes confirmed and unconfirmed browser stopping. Higher epochs resume exact identity. CANCELLED/SUPERSEDED is per-attempt authority, not overridden by unchanged RUNNING control. HTTP ingress now uses the same lifecycle and requires scoped task/turn/request/control_epoch for control commands; unscoped legacy HTTP control fails closed.
+Drive dispatch/control schemas remain compatible with additive lifecycle fields. Legacy events import monotonic recovery count and uncertain submission evidence. Newer audit revisions than the snapshot quarantine execution. APP STOP fences pending browser callbacks immediately, disposes the local CDP session and closes the proven owned target directly. It never reads submission receipts or invokes generation-stop UI; stop_status NOT_REQUESTED makes no remote-generation stop claim. Higher epochs resume exact identity. CANCELLED/SUPERSEDED is per-attempt authority, not overridden by unchanged RUNNING control. HTTP ingress now uses the same lifecycle and requires scoped task/turn/request/control_epoch for control commands; unscoped legacy HTTP control fails closed. STOP atomically purges only matching old HTTP dispatch/control cache entries, preserves minimal signal dedupe and newer pending inputs, and retries this purge after restart. Consumed completion caches remain available for final status publication. Fresh explicit resume metadata is read from the app rather than a stopped cache.
 
 The watcher only ingests and ticks. It owns no separate resume policy. Browser submission helpers that bypassed durable intent have been removed. HTTP control ingestion is separate from long-running POST execution so STOP can preempt it.
 
+### User intervention turn boundary
+
+USER_ACTION_REQUIRED and USER_ACTION_RESOLVED do not change the completion rule:
+a strictly verified current Result with committed:true consumes that identity.
+Its monitor/session and proven owned tab are retired immediately, including when
+the app has not yet sent WAITING or DONE. Later edits to that consumed Result,
+old-identity RUNNING epochs, dispatch attempts and reimports cannot revive it.
+An unreadable Result without committed proof remains nonterminal and cannot nudge.
+
+Only an app-provided new turn/request/Result starts resumed work through the normal
+CREATE_REQUESTED / SEND_REQUESTED handshake. The server creates no successor and
+never sends a continuation into the consumed intervention conversation. WAITING
+or a generation/Result-identity change while readback is pending fences its callback.
+
+A small completion-only outbox publishes server_status COMPLETED and lifecycle_state
+COMMITTED without retaining the prompt or POST intent. Publication failures remain
+retryable independently of browser cleanup; a superseded remote identity is never
+overwritten. Publication retries never reread the consumed Result.
+
 ## Regression migration
-Old assertions making Result/predecessor business state control initial submission or terminate the observer are replaced. Technical no-duplicate, restart, ownership, pause and ten-minute liveness safeguards remain. CREATE_REQUESTED prepares, READY_TO_SUBMIT awaits SEND_REQUESTED, and STARTED requires confirmed submission. Browser readiness, response structure, profile interception and transient CDP monitoring tests remain. Controller/watchdog fixtures now provide strict Result documents, current dispatch reads and the explicit submitIntent/readSubmission boundary.
+Initial submission still follows app authorization without predecessor business gating. During observation, exact committed:true is now an explicit terminal boundary. Technical no-duplicate, restart, ownership, pause and ten-minute liveness safeguards remain. CREATE_REQUESTED prepares, READY_TO_SUBMIT awaits SEND_REQUESTED, and STARTED requires confirmed submission. Browser readiness, response structure, profile interception and transient CDP monitoring tests remain. Controller/watchdog fixtures now provide strict Result documents, current dispatch reads and the explicit submitIntent/readSubmission boundary.
 Numbered lifecycle scenario tests cover the required creation, timeout, resume, reconnect, restart, stall, recovery, control and successor paths. Additional tests cover every intermediate restart state, cold ABSENT retry, immutable input, audit mismatch, snapshot failure, slow publication, and callback fencing. Regression probes use the same file against old and new source.
 Real authenticated headless smoke and deployment readback remain independent release gates; unit success alone is insufficient.
 
@@ -72,13 +93,40 @@ stop outcome and a conversation digest to reject mismatched explicit resumes.
 Only a positive `never_submitted` marker allows an app's newer dispatch attempt;
 unknown or previously sent input cannot restart from attempt changes alone.
 
-STOP fences callbacks immediately and makes one best-effort stop on a currently
-owned browser session. A late session from the already in-flight attach can be
-quiesced under that same STOP epoch. No historical target/conversation is opened
-for cleanup. UNCONFIRMED is an inert outcome, never a retry queue. PAUSED is not
-retired. RUNNING observer restart and the existing liveness intervals are unchanged.
+APP STOP fences callbacks and directly tears down the local session/proven owned
+tab. A late in-flight attachment is also disposed without receipt readback or remote
+UI actions. No historical target/conversation is opened. stop_status NOT_REQUESTED
+means remote generation stopping was not attempted; the remote ChatGPT generation
+may continue. PAUSED is not retired. Stream quiesce for an authorized ten-minute
+recovery nudge remains separate and unchanged.
 
-To resume a retired identity, the app must provide a newer RUNNING control epoch
+### Owned browser resource release
+
+Terminal retirement additionally writes `lifecycle.browserCleanup`, a separate
+cleanup-only outbox containing the exact target ID, request identity, epoch and
+conversation digest. It contains no prompt, POST intent or executable task state.
+Only a target created by SelfRun and still covered by durable browser-instance
+creation proof can be closed. Merely attaching to or touching a matching manual
+tab never establishes creation ownership. Older retired markers without that
+proof are left untouched; a matching conversation digest alone is insufficient.
+
+STOP/DONE and cancellation schedule immediate cleanup independently of ingestion.
+The final close guard protects newer controls, accepted pending HTTP work and
+active target/conversation reuse. Delayed browser attachment cannot resurrect
+retired requests. A failed close remains durable and is retried after restart or
+on the bounded cleanup retry interval, without opening a page or retrying STOP.
+PAUSED, standby, and uncommitted RUNNING/WAIT_RESULT observers retain their tabs
+when an answer merely looks idle. Verified Result commit triggers the same owned
+resource cleanup as terminal app control.
+
+The browser can exit only when active/pending work and other browser usage are
+absent and its exact spawned process identity is proven. Cleanup never starts
+Chromium; new demand is serialized against process release. The SelfRun server,
+worker and supervisor remain alive. This closes local browser tabs/processes;
+it never deletes ChatGPT conversation history or browser profiles.
+
+COMMITTED/COMPLETED identities are permanently consumed and cannot resume.
+To resume a stopped or cancelled identity, the app must provide a newer RUNNING control epoch
 and its canonical conversation URL. The server reads that marker's dispatch path
 for app metadata, validates the identity/digest, and starts an attach-only observer.
 Old lifecycle/POST intent and old cancellation projections are not replayed.

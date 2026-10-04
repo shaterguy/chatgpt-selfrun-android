@@ -11,25 +11,25 @@ function countIo(f) {
  f.transport.read=async(...args)=>{calls.reads++;return read(...args);};
  f.transport.write=async(...args)=>{calls.writes++;return write(...args);};return calls;
 }
-test('retired STOP performs one owned stop then leaves no execution or publication work',async()=>{
+test('retired STOP disposes local ownership then leaves no execution or publication work',async()=>{
  const f=fixture();await f.existing();const observer=f.observations.at(-1);
  await f.stop();const io=countIo(f);
  for(let i=0;i<3;i++)await f.controller.tick(f.transport);
  assert.deepEqual(active(f),[]);assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
- assert.equal(f.quiesces,1);assert.equal(f.resumes,1);assert.deepEqual(io,{reads:0,writes:0});
+ assert.equal(f.quiesces,0);assert.equal(f.resumes,1);assert.deepEqual(io,{reads:0,writes:0});
  assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
  const snapshot=f.store.snapshot();await observer.onActivity({...f.probe,responseTextLength:99999});
  assert.deepEqual(f.store.snapshot(),snapshot);
  const marker=f.store.snapshot().lifecycle.retired[keyFor(f.body)];
- assert.equal(marker.state,'STOPPED');assert.equal(marker.stop_status,'CONFIRMED');
+ assert.equal(marker.state,'STOPPED');assert.equal(marker.stop_status,'NOT_REQUESTED');
  for(const field of ['body','prompt','conversation_url','intent','cursor','target_id'])assert.equal(marker[field],undefined);
 });
-test('failed STOP is inert across ticks and process restart without reopening a conversation',async()=>{
+test('APP STOP never invokes remote generation stop across ticks or restart',async()=>{
  const f=fixture();await f.existing();let attempts=0;f.browser.quiesce=async()=>{attempts++;throw Error('closed target');};
  await f.stop();f.controller=f.recreate();const io=countIo(f);
  await f.controller.tick(f.transport);await f.controller.tick(f.transport);
- assert.equal(attempts,1);assert.equal(f.resumes,1);assert.deepEqual(active(f),[]);
- assert.deepEqual(io,{reads:0,writes:0});assert.equal(f.record().stop_status,'UNCONFIRMED');
+ assert.equal(attempts,0);assert.equal(f.resumes,1);assert.deepEqual(active(f),[]);
+ assert.deepEqual(io,{reads:0,writes:0});assert.equal(f.record().stop_status,'NOT_REQUESTED');
 });
 test('cold historical STOP import has no readback, browser, outbox or active request',async()=>{
  const f=fixture();await f.existing();await f.stop();
@@ -161,7 +161,7 @@ test('late owned attachment is disposed when it arrives during the STOP outcome 
  f.controller.repository.recordStopOutcome=async(...args)=>{if(!held){held=true;outcomeEntered.resolve();await outcomeGate.promise;}return recordOutcome(...args);};
  const attaching=f.existing();await opening.promise;const stopping=f.stop();await outcomeEntered.promise;
  attachGate.resolve();await idle();outcomeGate.resolve();await stopping;await attaching;
- assert.equal(closed,1);assert.equal(f.quiesces,1);assert.equal(f.controller.sessions.size,0);
+ assert.equal(closed,1);assert.equal(f.quiesces,0);assert.equal(f.controller.sessions.size,0);
  assert.deepEqual(active(f),[]);assert.equal(f.sends,0);
 });
 test('cold cancelled input cannot infer never-submitted from missing fields or old legacy uncertainty',async()=>{
@@ -171,7 +171,7 @@ test('cold cancelled input cannot infer never-submitted from missing fields or o
  await f.ingest();assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.deepEqual(active(f),[]);
 });
 test('cold import consumes a newer explicit app resume without raising the old retirement epoch',async()=>{
- for(const state of ['STOPPED','CANCELLED','COMPLETED']){
+ for(const state of ['STOPPED','CANCELLED']){
   const f=fixture();await f.existing();const body=structuredClone(f.rows.get(f.path));await f.controller.quiesceForStandby();
   body.lifecycle_record.state=state;body.lifecycle_record.control_epoch=2;body.lifecycle_record.control_state='STOPPED';
   body.lifecycle_state=state;body.server_control_epoch=2;body.server_control_state='STOPPED';body.client_status='CANCELLED';

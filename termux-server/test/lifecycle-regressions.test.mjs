@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DriveDispatchController } from '../src/drive-controller.mjs';
+import { keyFor } from '../src/lifecycle.mjs';
 import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 
 function control(overrides = {}) {
@@ -131,6 +132,7 @@ async function startStalledResume({ resultText, resultError, snapshot,
     monitor: async ({ onActivity }) => {
       monitorStarted = true;
       await onActivity(activity);
+      await controller.repository.move(keyFor(dispatch()),'OBSERVING','test ten minutes elapsed',{last_progress_at:Date.now()-600000});
       const action = await onActivity(activity);
       if (followupActivity) followupAction = await onActivity(followupActivity);
       resolveActivity(action);
@@ -208,7 +210,9 @@ test('regression: POST timeout preserves uncertain recovery intent and count', a
   const run=await startStalledResume({resultText:'{"committed":false}',snapshot:cursor,activity:cursor,sendError:new Error('Canonical conversation POST timeout')});
   const last=run.writes.at(-1).body;
   assert.equal(last.recovery_count,1);
-  assert.equal(last.lifecycle_state,'POST_UNCERTAIN');
+  assert.equal(last.lifecycle_state,'OBSERVING');
+  assert.equal(last.post_outcome,'UNKNOWN');
+  assert.ok(last.lifecycle_record.last_nudge_attempt_at);
   assert.match(last.server_error,/POST timeout/);
 });
 test('regression: attaching existing conversation does not send an independent continuation', async () => {
