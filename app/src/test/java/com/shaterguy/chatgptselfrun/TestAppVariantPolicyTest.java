@@ -14,7 +14,7 @@ public final class TestAppVariantPolicyTest {
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
         assertTrue(gradle.contains("selfRunDriveVersionCode = 4002009"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.7-dev3'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.7'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
