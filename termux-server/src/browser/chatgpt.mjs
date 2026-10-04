@@ -1,3 +1,5 @@
+import { cursor } from '../lifecycle.mjs';
+
 export function normalizeProgressText(value) {
   return String(value || '')
     .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi, ' ')
@@ -209,9 +211,36 @@ function probeExpression() {
       for(let i=0;i<input.length;i+=1){hash^=input.charCodeAt(i);hash=Math.imul(hash,16777619);}
       return (hash>>>0).toString(16).padStart(8,'0');
     };
-    const turns=[...document.querySelectorAll('main [data-turn-key]')];
-    const responseTurn=turns.length?turns[turns.length-1]:null;
-    const responseTurnId=String(responseTurn?.getAttribute?.('data-turn-key')||'').trim()||null;
+    const legacyTurns=[...document.querySelectorAll('main [data-turn-key]')];
+    const sections=[...document.querySelectorAll('main section[data-turn-id][data-testid^="conversation-turn"]')];
+    const follows=(node,other)=>!!node&&!!(other?.compareDocumentPosition?.(node)&4);
+    const newest=nodes=>nodes.reduce((prior,node)=>!prior||follows(node,prior)?node:prior,null);
+    const contains=(root,node)=>!!root?.contains?.(node);
+    const userSection=section=>String(section.getAttribute('data-turn')||'').toLowerCase()==='user'
+      ||users.some(user=>contains(section,user));
+    const userSections=sections.filter(userSection);
+    // A pending user section can precede its message bubble. Do not revive the
+    // preceding assistant when deciding which response belongs to this input.
+    const latestUser=newest([...users,...userSections])||lastUser;
+    const eligible=turn=>{
+      if(String(turn.getAttribute('data-turn')||'').toLowerCase()==='user')return false;
+      if(sections.includes(turn)&&userSection(turn))return false;
+      if(!latestUser)return legacyTurns.includes(turn)
+        ||String(turn.getAttribute('data-turn')||'').toLowerCase()==='assistant'
+        ||assistants.some(assistant=>contains(turn,assistant));
+      if(follows(turn,latestUser))return true;
+      // Older wrappers can contain the user and thinking before an assistant
+      // bubble appears. The text walker below still excludes every user node.
+      return legacyTurns.includes(turn)&&contains(turn,latestUser);
+    };
+    const responseTurn=newest([...new Set([...legacyTurns,...sections])].filter(eligible));
+    const responseRoot=responseTurn||((!latestUser||follows(last,latestUser))
+      &&!sections.some(section=>userSection(section)&&contains(section,last))?last:null);
+    const responseAssistants=assistants.filter(assistant=>contains(responseRoot,assistant)
+      &&!userSections.some(section=>contains(section,assistant)));
+    const responseAssistant=responseAssistants.length?responseAssistants[responseAssistants.length-1]:null;
+    const responseTurnId=String(responseTurn?.getAttribute?.('data-turn-key')
+      ||responseTurn?.getAttribute?.('data-turn-id')||'').trim()||null;
     const pathParts=location.pathname.split('/').filter(Boolean);
     const inConversation=pathParts.includes('c')&&pathParts.indexOf('c')+1<pathParts.length;
     const effectiveStopButtonVisible=${effectiveStopButtonVisible.toString()};
@@ -223,7 +252,7 @@ function probeExpression() {
       responseTurnId,
     });
     let responseText='';
-    if(responseTurn){
+    if(responseRoot){
       const excludedSelector=[
         '[data-user-message-bubble]',
         '[data-message-author-role="user"]',
@@ -233,18 +262,18 @@ function probeExpression() {
         '[data-markdown-copy="exclude"]','[aria-hidden="true"]','.sr-only'
       ].join(',');
       const parts=[];
-      const walker=document.createTreeWalker(responseTurn,NodeFilter.SHOW_TEXT);
+      const walker=document.createTreeWalker(responseRoot,NodeFilter.SHOW_TEXT);
       while(walker.nextNode()){
         const node=walker.currentNode;
         const parent=node.parentElement;
-        if(!parent||parent.closest(excludedSelector))continue;
+        if(!parent||parent.closest(excludedSelector)||userSections.some(section=>contains(section,parent)))continue;
         const button=parent.closest('button');
         if(button){
           const label=String(button.getAttribute('aria-label')||button.title||button.innerText||'');
           if(/copy|good response|bad response|share|regenerate|retry|more|복사|공유|다시 생성|재시도|더보기/i.test(label))continue;
         }
         let hidden=false;
-        for(let el=parent;el&&el!==responseTurn.parentElement;el=el.parentElement){
+        for(let el=parent;el&&el!==responseRoot.parentElement;el=el.parentElement){
           const style=getComputedStyle(el);
           if(style.display==='none'||style.visibility==='hidden'||style.opacity==='0'){hidden=true;break;}
         }
@@ -270,6 +299,9 @@ function probeExpression() {
       assistantCount:assistants.length,
       assistantTextLength:String(last?.innerText||last?.textContent||'').length,
       assistantMessageId:messageId(last),
+      responseAssistantCount:responseAssistants.length,
+      responseAssistantTextLength:normalizeProgressText(responseAssistant?.innerText||responseAssistant?.textContent||'').length,
+      responseAssistantMessageId:messageId(responseAssistant),
       responseTurnId,
       responseTextLength,
       responseFingerprint,
@@ -980,10 +1012,11 @@ export class ChatGptBrowser {
         lastActivityAt = Date.now();
         stalled = false;
       }
+      const observedCursor=cursor(probe),previousCursor=cursor(previous);
       const progressDetected =
-        probe.assistantCount !== previous.assistantCount ||
-        probe.assistantTextLength !== previous.assistantTextLength ||
-        probe.assistantMessageId !== previous.assistantMessageId ||
+        observedCursor.assistantCount !== previousCursor.assistantCount ||
+        observedCursor.assistantTextLength !== previousCursor.assistantTextLength ||
+        observedCursor.assistantMessageId !== previousCursor.assistantMessageId ||
         probe.responseTurnId !== previous.responseTurnId ||
         probe.responseTextLength !== previous.responseTextLength ||
         probe.responseFingerprint !== previous.responseFingerprint ||
@@ -1034,6 +1067,9 @@ export class ChatGptBrowser {
           assistantCount: probe.assistantCount,
           assistantTextLength: probe.assistantTextLength,
           assistantMessageId: probe.assistantMessageId,
+          responseAssistantCount: probe.responseAssistantCount,
+          responseAssistantTextLength: probe.responseAssistantTextLength,
+          responseAssistantMessageId: probe.responseAssistantMessageId,
           responseTurnId: probe.responseTurnId,
           responseTextLength: probe.responseTextLength,
           responseFingerprint: probe.responseFingerprint,
