@@ -20,11 +20,11 @@ verify_identity() {
   cert="$($BT/apksigner verify --verbose --print-certs "$apk")"
   grep -Fqi "$CERT" <<<"$cert"
 }
-verify_identity "$CANDIDATE" 4002006 4.0.6
-: > selfrun-v406-formal-upgrade-evidence.txt
+verify_identity "$CANDIDATE" 4002009 4.0.7
+: > selfrun-v407-formal-upgrade-evidence.txt
 while IFS='|' read -r name code apk; do
   verify_identity "$apk" "$code" "$name"
-  (( 4002006 > code ))
+  (( 4002009 > code ))
   adb uninstall "$FORMAL.test" >/dev/null 2>&1 || true
   adb uninstall "$FORMAL" >/dev/null 2>&1 || true
   adb install --no-incremental "$apk" >/dev/null
@@ -36,14 +36,14 @@ while IFS='|' read -r name code apk; do
   adb shell am force-stop "$FORMAL"
   # Normal replacement only: no downgrade flag and no data clearing between seed and verify.
   adb install -r --no-incremental "$CANDIDATE" >/dev/null
-  [[ "$(version_code)" == '4002006' ]]
+  [[ "$(version_code)" == '4002009' ]]
   [[ "$(uid)" == "$before_uid" ]]
   adb shell am instrument -w -r -e class "$CLASS#verifyUpgradeState" "$INSTRUMENTATION" | tee current/upgrade-verify.txt
   grep -Fq 'OK (1 test)' current/upgrade-verify.txt
-  printf 'UPGRADE_PASS baseline=%s code=%s target=4.0.6 targetCode=4002006 uid=%s data=preferences,runtime-setting,webview-cookie\n' "$name" "$code" "$before_uid" | tee -a selfrun-v406-formal-upgrade-evidence.txt
+  printf 'UPGRADE_PASS baseline=%s code=%s target=4.0.7 targetCode=4002009 uid=%s data=preferences,runtime-setting,webview-cookie\n' "$name" "$code" "$before_uid" | tee -a selfrun-v407-formal-upgrade-evidence.txt
 done <<'BASELINES'
 4.0.3|4001003|stable/chatgpt-selfrun-drive-v4.0.3.apk
 4.0.4-dev2|4002004|legacy-dev2/SelfRun-Drive-v4.0.4-dev2.apk
-4.0.5|4001005|stable/chatgpt-selfrun-drive-v4.0.5.apk
+4.0.5|4001005|stable/chatgpt-selfrun-drive-v4.0.5.apk\n4.0.6|4002006|stable/chatgpt-selfrun-drive-v4.0.6.apk
 BASELINES
 
