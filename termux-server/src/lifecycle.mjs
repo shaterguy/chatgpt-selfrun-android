@@ -36,7 +36,16 @@ export function canonicalUrl(value) {
   } catch {return '';}
 }
 export function cursor(p={}) {
-  return Object.fromEntries(['assistantCount','assistantTextLength','assistantMessageId','responseTurnId','responseTextLength','responseFingerprint','streaming'].map(k=>[k,p[k]??null]));
+  // Raw assistant telemetry remains global for submission/baseline compatibility.
+  // New probes supply current-response metrics; old probes and durable cursors
+  // keep their existing representation. An explicit scoped null must override an
+  // older assistant identity, while an absent/undefined scoped field falls back.
+  const progress={...p};
+  for(const key of ['assistantCount','assistantTextLength','assistantMessageId']) {
+    const scoped='response'+key[0].toUpperCase()+key.slice(1);
+    if(p[scoped]!==undefined)progress[key]=p[scoped];
+  }
+  return Object.fromEntries(['assistantCount','assistantTextLength','assistantMessageId','responseTurnId','responseTextLength','responseFingerprint','streaming'].map(k=>[k,progress[k]??null]));
 }
 export const sameCursor=(a,b)=>JSON.stringify(cursor(a))===JSON.stringify(cursor(b));
 export function classifyAttach(error) {
