@@ -3,14 +3,14 @@ plugins {
 }
 
 def selfRunDriveVersionCode = 4002009
-def selfRunDriveVersionName = '4.0.7-dev3'
+def selfRunDriveVersionName = '4.0.7'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^(?:3|4)\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/
 
 // Promotion provenance for the exact verified source candidate; the active formal identity is defined above.
-// verified source candidate: selfRunDriveVersionCode = 4001003
-// verified source candidate: selfRunDriveVersionName = '4.0.3'
+// verified source candidate: selfRunDriveVersionCode = 4002009
+// verified source candidate: selfRunDriveVersionName = '4.0.7-dev3'
 
 def configValue = { String name, String fallback ->
     def value = System.getenv(name)
