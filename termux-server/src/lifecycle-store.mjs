@@ -153,6 +153,41 @@ export class LifecycleStore {
     return this.matches(key,t)&&r.control_state==='RUNNING'
       &&!['STOPPED','PAUSED','COMMITTED','COMPLETED','CANCELLED'].includes(r.state);
   }
+  displacedResultCandidate(key) {
+    const r=this.data.requests[key],c=r&&this.data.controls[r.task_id];
+    return !!r&&r.state==='PAUSED'&&!!(r.conversation_url||r.target_id||r.intent)
+      &&!!c&&!['STOPPED','DONE'].includes(c.state)&&keyFor(c)!==key;
+  }
+  async beginDisplacedResult(key,retryMs) {
+    return this.serial(async()=>{
+      if(!this.displacedResultCandidate(key))return null;
+      const old=this.data.requests[key],now=Date.now();
+      if(old.result_retirement_retry_at>now)return null;
+      // Persist pacing before any remote read; restart cannot turn this into a busy loop.
+      const r=transition(old,old.state,'DISPLACED_RESULT_CHECK',{
+        result_retirement_retry_at:now+Math.max(1000,Number(retryMs)||30000)},now);
+      const next=structuredClone(this.data);next.requests[key]=r;
+      next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
+      await this.save(next);return structuredClone(r);
+    });
+  }
+  async settleDisplacedResult(key,fence,result) {
+    return this.serial(async()=>{
+      // This lane can only consume an exact displaced identity; it never restores execution.
+      if(!this.displacedResultCandidate(key)||!this.matches(key,fence))return null;
+      const old=this.data.requests[key],committed=result.state==='COMMITTED';
+      if(!committed&&result.state===old.result_state)return null;
+      const patch={result_state:result.state,
+        ...(result.state==='UNAVAILABLE'?{error:{code:result.code,message:result.message}}:
+          old.error?.code?.startsWith('RESULT_')?{error:null}:{})};
+      const r=transition(old,committed?'COMMITTED':old.state,
+        committed?'RESULT_COMMITTED_TERMINAL':'DISPLACED_RESULT_OBSERVED',patch);
+      const next=structuredClone(this.data);next.requests[key]=r;
+      if(committed)retireRecord(next,r);
+      else next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
+      await this.save(next);return structuredClone(next.retired[key]||r);
+    });
+  }
   async restoreFromControl(c,body) {
     return this.serial(async()=>{
       const key=keyFor(c),marker=this.data.retired[key],control=this.data.controls[c.task_id];

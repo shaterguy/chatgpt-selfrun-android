@@ -20,18 +20,24 @@ export class TerminalBrowserCleanup {
     if(target&&entry.conversation_digest&&digest(canonicalUrl(target.url))!==entry.conversation_digest)return false;
     const data=this.repository.data,marker=data.retired[entry.key],control=data.controls[entry.task_id];
     if(!retiredState(marker)||JSON.stringify(data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
-    if(control&&control.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(control.state)
-      &&!(consumed(marker)&&keyFor(control)===marker.key))return false;
+    const conflicts=body=>body.target_id===entry.target_id||body.lifecycle_record?.target_id===entry.target_id
+      ||(entry.conversation_digest&&body.conversation_url
+        &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest);
+    if(consumed(marker)) {
+      // A successor owns its own resources, not every target belonging to this task.
+      for(const c of Object.values(data.controls))if(!['STOPPED','DONE'].includes(c.state)
+        &&!consumed(this.repository.get(keyFor(c)))&&conflicts(c))return false;
+    } else if(control&&control.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(control.state))return false;
     // HTTP acceptance is durable before the lifecycle control catches up.
     for(const body of Object.values(this.stateStore.snapshot().httpIngress?.files||{})) {
       if(body.schema==='selfrun-task-control-v1') {
-        if(body.task_id===entry.task_id&&body.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(body.state)
-          &&!(consumed(marker)&&keyFor(body)===marker.key))return false;
+        if(consumed(marker)) {
+          if(!['STOPPED','DONE'].includes(body.state)&&!consumed(this.repository.get(keyFor(body)))&&conflicts(body))return false;
+        } else if(body.task_id===entry.task_id&&body.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(body.state))return false;
       } else {
         const owner=this.repository.get(keyFor(body));
         const pending=!retiredState(owner)||(!consumed(owner)&&Number(body.dispatch_attempt)>Number(owner.dispatch_attempt));
-        if(pending&&(body.task_id===entry.task_id||(entry.conversation_digest&&body.conversation_url
-          &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest)))return false;
+        if(pending&&(conflicts(body)||(!consumed(marker)&&body.task_id===entry.task_id)))return false;
       }
     }
     return !this.repository.records().some(r=>!retiredState(r)&&(r.target_id===entry.target_id

@@ -153,10 +153,26 @@ test('persisted exact spawned process proof supports release after a server rest
   const { manager, config, managers } = await makeManager(t);
   await manager.ensureStarted();
   const child = manager.child;
+  const exited = once(child, 'exit');
   const restored = new ChromiumManager(config);
   managers.push(restored);
   const result = await restored.releaseIfUnused({ guard: () => true });
   assert.equal(result.released, true);
+  // The restored manager has no child handle. A terminated zombie may await the
+  // original fixture owner's event-loop reap, but release must never report a live process.
+  try {
+    const raw = fs.readFileSync(`/proc/${child.pid}/stat`, 'utf8');
+    const state = raw.slice(raw.lastIndexOf(')') + 2).trim().split(/\s+/)[0];
+    assert.ok(['Z', 'X'].includes(state), `Released process is still live: ${state}`);
+  } catch (error) {
+    if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error;
+  }
+  let reapTimer;
+  try {
+    await Promise.race([exited, new Promise((_, reject) => {
+      reapTimer = setTimeout(() => reject(new Error('Fixture child was not reaped within 2 seconds')), 2000);
+    })]);
+  } finally { clearTimeout(reapTimer); }
   assert.equal(fs.existsSync(`/proc/${child.pid}`), false);
 });
 

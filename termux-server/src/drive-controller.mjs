@@ -17,7 +17,7 @@ export class DriveDispatchController {
   constructor({browser,stateStore,config,promptDirectives=null,canDispatch=()=>true}) {
     this.canDispatch=canDispatch;this.browser=browser;this.stateStore=stateStore;this.config=config;this.promptDirectives=promptDirectives;
     this.repository=new LifecycleStore(stateStore);
-    this.sessions=new Map();this.operations=new Map();this.standby=false;
+    this.sessions=new Map();this.operations=new Map();this.resultRetirements=new Map();this.standby=false;
     this.serverGeneration=Date.now();
     this.browserCleanup=new TerminalBrowserCleanup({repository:this.repository,chromium:browser.chromium,stateStore,
       available:()=>!this.standby&&this.canDispatch(),busy:()=>this.sessions.size>0||this.operations.size>0});
@@ -96,6 +96,7 @@ export class DriveDispatchController {
       }
     }
     await this.repository.applyControl(c);
+    for(const r of this.repository.records())if(r.task_id===c.task_id)this.#scheduleDisplacedResult(r.key,transport);
     for(const item of stopping)await this.#disposeStoppedAttachment(item.r,item.a,c);
     if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
     await this.#restoreRetiredControl(c,transport);
@@ -182,6 +183,7 @@ export class DriveDispatchController {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(!this.canDispatch()){await this.quiesceForStandby();return;}
     this.standby=false;
+    for(const r of this.repository.records())this.#scheduleDisplacedResult(r.key,transport);
     await transport?.purgeStopped?.();
     await this.repository.flush(transport);
     for(const r of this.repository.records()) {
@@ -189,6 +191,27 @@ export class DriveDispatchController {
       await this.#serial(r.key,()=>this.#advance(r.key,transport));
     }
     await this.cleanupTerminalResources({force:false});
+  }
+  #scheduleDisplacedResult(key,transport) {
+    if(!transport||this.standby||!this.canDispatch()||this.resultRetirements.has(key)
+      ||this.repository.integrityFaults.has(key)||!this.repository.displacedResultCandidate(key))return false;
+    // Separate from browser operations and intake: a slow old Result cannot gate the app's next turn.
+    const operation=(async()=>{
+      const r=await this.repository.beginDisplacedResult(key,this.config.resultRetryMs);
+      if(!r||this.standby||!this.canDispatch())return;
+      const fence={run:r.run_generation,browser:r.browser_generation,
+        result_document_id:r.body.result_document_id,dispatch_attempt:r.dispatch_attempt};
+      const result=await readResult(transport,r);
+      if(this.standby||!this.canDispatch())return;
+      const settled=await this.repository.settleDisplacedResult(key,fence,result);
+      if(settled?.state==='COMMITTED') {
+        this.#detach(key);void this.cleanupTerminalResources();
+        void this.repository.flush(transport).catch(error=>console.error(JSON.stringify({
+          event:'COMPLETION_PROJECTION_PENDING',key,error:String(error?.message||error).slice(0,300)})));
+      }
+    })().catch(error=>console.error(JSON.stringify({event:'DISPLACED_RESULT_RETRY_PENDING',key,
+      error:String(error?.message||error).slice(0,300)}))).finally(()=>this.resultRetirements.delete(key));
+    this.resultRetirements.set(key,operation);return true;
   }
   async #result(key,transport,token=null) {
     if(this.standby||!this.canDispatch())return 'UNAVAILABLE';
@@ -228,6 +251,7 @@ export class DriveDispatchController {
     if(this.repository.integrityFaults.has(key))throw new Error('current state is behind committed audit revision; reconciliation required');
     if(terminal(r))return;
     if(!await this.#fresh(key,transport)) {
+      this.#scheduleDisplacedResult(key,transport);
       await this.repository.flushCurrent(transport,key);return;
     }
     r=this.repository.get(key);
