@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 const APPROVED_IDLE_HOME_URL = 'https://chatgpt.com/';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const QUERY_DIAGNOSTIC_TTL_MS = 60000;
+const QUERY_DIAGNOSTIC_LIMIT = 32;
 
 export class CdpSession {
   constructor(wsUrl, onActivity = null) {
@@ -17,6 +19,46 @@ export class CdpSession {
     this.seq = 0;
     this.pending = new Map();
     this.listeners = new Map();
+    this.diagnosticId = randomUUID();
+    this.timedOutQueries = new Map();
+    this.lastInboundAt = null;
+    this.inboundFrames = 0;
+    this.inboundReplies = 0;
+  }
+
+  #diagnostic(event, details) {
+    // Metadata only: never include websocket URLs, request params or reply bodies.
+    try { console.warn(JSON.stringify({ at: new Date().toISOString(), event,
+      session_id: this.diagnosticId, method: 'Runtime.evaluate', ...details })); } catch {}
+  }
+
+  #forgetTimedOutQuery(id) {
+    const retained = this.timedOutQueries.get(id);
+    if (retained) clearTimeout(retained.timer);
+    this.timedOutQueries.delete(id);
+  }
+
+  #clearQueryDiagnostics() {
+    for (const id of this.timedOutQueries.keys()) this.#forgetTimedOutQuery(id);
+  }
+
+  #queryTimeout(id, startedAt, timeoutMs, framesAtStart, repliesAtStart) {
+    const now = performance.now();
+    const details = { command_id: id, timeout_ms: timeoutMs,
+      elapsed_ms: Math.max(0, Math.round(now - startedAt)),
+      socket_state: this.socket?.readyState ?? -1, pending_count: this.pending.size,
+      last_inbound_age_ms: this.lastInboundAt === null ? null : Math.max(0, Math.round(now - this.lastInboundAt)),
+      inbound_frames_since_send: this.inboundFrames - framesAtStart,
+      inbound_replies_since_send: this.inboundReplies - repliesAtStart };
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      while (this.timedOutQueries.size >= QUERY_DIAGNOSTIC_LIMIT)
+        this.#forgetTimedOutQuery(this.timedOutQueries.keys().next().value);
+      const timer = setTimeout(() => this.#forgetTimedOutQuery(id), QUERY_DIAGNOSTIC_TTL_MS);
+      timer.unref?.();
+      this.timedOutQueries.set(id, { startedAt, timedOutAt: now, timer });
+    }
+    this.#diagnostic('CDP_QUERY_TIMEOUT', details);
+    return details;
   }
 
   touch() {
@@ -40,6 +82,7 @@ export class CdpSession {
     this.touch();
     socket.addEventListener('message', (event) => this.#onMessage(event.data));
     socket.addEventListener('close', () => {
+      this.#clearQueryDiagnostics();
       for (const { reject } of this.pending.values()) reject(new Error('CDP websocket closed'));
       this.pending.clear();
     });
@@ -47,10 +90,24 @@ export class CdpSession {
   }
 
   #onMessage(raw) {
+    this.lastInboundAt = performance.now();
+    this.inboundFrames += 1;
     const message = JSON.parse(raw);
     if (message.id) {
+      this.inboundReplies += 1;
       const pending = this.pending.get(message.id);
-      if (!pending) return;
+      if (!pending) {
+        const retained = this.timedOutQueries.get(message.id);
+        if (retained) {
+          this.#forgetTimedOutQuery(message.id);
+          if (this.lastInboundAt - retained.timedOutAt >= QUERY_DIAGNOSTIC_TTL_MS) return;
+          this.#diagnostic('CDP_QUERY_LATE_REPLY', { command_id: message.id,
+            elapsed_ms: Math.max(0, Math.round(this.lastInboundAt - retained.startedAt)),
+            after_timeout_ms: Math.max(0, Math.round(this.lastInboundAt - retained.timedOutAt)),
+            protocol_error: Boolean(message.error) });
+        }
+        return;
+      }
       this.pending.delete(message.id);
       if (message.error) pending.reject(new Error(message.error.message || 'CDP command failed'));
       else pending.resolve(message.result || {});
@@ -74,10 +131,14 @@ export class CdpSession {
     const id = ++this.seq;
     const payload = JSON.stringify({ id, method, params });
     const timeoutMs = Math.max(250, Number(options.timeoutMs || 20000));
+    const startedAt = performance.now(), framesAtStart = this.inboundFrames, repliesAtStart = this.inboundReplies;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`CDP command timeout: ${method}`));
+        const error = new Error(`CDP command timeout: ${method}`);
+        if (method === 'Runtime.evaluate')
+          error.cdpDiagnostics = this.#queryTimeout(id, startedAt, timeoutMs, framesAtStart, repliesAtStart);
+        reject(error);
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => {
@@ -94,6 +155,7 @@ export class CdpSession {
   }
 
   close() {
+    this.#clearQueryDiagnostics();
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) this.socket.close();
   }
 }
