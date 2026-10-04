@@ -106,6 +106,7 @@ export class ChromiumManager {
     this.baseUrl = `http://127.0.0.1:${config.browserPort}`;
     this.activityDir = config.browserActivityDir;
     this.activityWrites = new Map();
+    this.targetUseEpoch = 0;
     this.ownershipFile = path.join(config.dataDir, `chromium-ownership-${config.browserPort}.json`);
     this.ownership = this.#readOwnership();
     this.idleSweepRunning = false;
@@ -193,6 +194,7 @@ export class ChromiumManager {
 
   touchTarget(targetId, force = false) {
     const id = String(targetId || '');
+    this.targetUseEpoch += 1; // Use is evidence even if the activity-file write fails.
     // Any use consumes the startup exception even if the page stays blank.
     if (this.ownership.targets[id]?.startupUrl) {
       this.ownership.targets[id].startupUrl = null;
@@ -323,9 +325,9 @@ export class ChromiumManager {
     return rows.filter((row) => ids.has(row.pid));
   }
 
-  async listExistingTargets() {
+  async listExistingTargets(timeoutMs = 1500) {
     try {
-      const response = await fetch(this.baseUrl + '/json/list', { signal: AbortSignal.timeout(1500) });
+      const response = await fetch(this.baseUrl + '/json/list', { signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) return null;
       return await response.json();
     } catch { return null; }
@@ -338,8 +340,8 @@ export class ChromiumManager {
     return Math.round((rssKb / 1024) * 10) / 10;
   }
 
-  async #version() {
-    const response = await fetch(this.baseUrl + '/json/version', { signal: AbortSignal.timeout(1500) });
+  async #version(timeoutMs = 1500) {
+    const response = await fetch(this.baseUrl + '/json/version', { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) throw new Error(`Chromium probe failed: ${response.status}`);
     return response.json();
   }
@@ -474,6 +476,35 @@ export class ChromiumManager {
     return { ...result, recycled: result.released, reason };
   }
 
+  async #captureStartupTarget(startupUrl, useEpoch) {
+    // The launch lease is still held: callers cannot create/receive task tabs
+    // until this bounded window ends. Never infer ownership from a generic
+    // blank/new-tab URL, and never revisit this window on attach or cleanup.
+    const proof = this.ownership.process;
+    const deadline = performance.now() + 1500;
+    const remaining = () => Math.max(1, Math.ceil(deadline - performance.now()));
+    const sameProcess = () => this.targetUseEpoch === useEpoch
+      && this.ownership.process === proof && Boolean(this.#ownedProcess());
+    while (performance.now() < deadline && sameProcess()) {
+      const targets = await this.listExistingTargets(remaining());
+      if (!sameProcess() || !Array.isArray(targets) || performance.now() >= deadline) return;
+      let version;
+      try { version = await this.#version(remaining()); } catch { return; }
+      if (this.#useVersion(version) !== proof.browserKey || !sameProcess()
+          || performance.now() >= deadline) return;
+      if (targets.length) {
+        const target = targets[0];
+        // Any unrelated/mixed target set or concurrent use makes provenance
+        // ambiguous. Do not wait for it to disappear and adopt a later page.
+        if (targets.length !== 1 || target?.type !== 'page' || target.url !== startupUrl
+            || !target.id || this.activityWrites.has(String(target.id))) return;
+        this.#recordTarget(target, startupUrl);
+        return;
+      }
+      await delay(Math.min(100, remaining()));
+    }
+  }
+
   async #ensureStarted() {
     const terminating = this.ownership.process;
     if (terminating?.terminating) {
@@ -492,9 +523,10 @@ export class ChromiumManager {
     await fsPromises.mkdir(this.config.dataDir, { recursive: true });
     const out = fs.openSync(this.config.browserLogFile, 'a');
     const startupUrl = `about:blank#selfrun-startup-${randomUUID()}`;
+    const startupUseEpoch = this.targetUseEpoch;
     const args = [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-      '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*',
+      '--no-first-run', '--no-default-browser-check', '--no-startup-window', '--remote-allow-origins=*',
       '--remote-debugging-address=127.0.0.1',
       `--remote-debugging-port=${this.config.browserPort}`,
       `--user-data-dir=${this.config.browserProfile}`, startupUrl,
@@ -527,9 +559,7 @@ export class ChromiumManager {
             port: Number(this.config.browserPort), profile: this.config.browserProfile,
           };
           this.#saveOwnership();
-          const targets = await this.listExistingTargets();
-          const startup = targets?.filter((target) => target.type === 'page' && target.url === startupUrl);
-          if (startup?.length === 1) this.#recordTarget(startup[0], startupUrl);
+          await this.#captureStartupTarget(startupUrl, startupUseEpoch);
         }
         return version;
       } catch (error) { lastError = error; await delay(250); }

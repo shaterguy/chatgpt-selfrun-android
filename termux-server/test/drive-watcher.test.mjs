@@ -8,11 +8,12 @@ test('watcher ingests control before dispatch regardless of listing order',async
  const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
  await w.scanOnce();assert.equal(f.record().state,'STOPPED');assert.equal(f.prepares,0);
 });
-test('watcher retries failed ingestion without marking the file seen',async()=>{
+test('watcher retries failed ingestion without marking the file seen',async t=>{
+ t.mock.timers.enable({apis:['Date']});
  const f=fixture();let once=true;const ingest=f.controller.ingestDurable.bind(f.controller);
  f.controller.ingestDurable=async(...args)=>{if(once){once=false;throw new Error('temporary');}return ingest(...args);};
  const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
- await assert.rejects(w.scanOnce(),/temporary/);await w.scanOnce();
+ await assert.rejects(w.scanOnce(),/temporary/);t.mock.timers.tick(1000);await w.scanOnce();
  for(let i=0;i<8&&f.prepares===0;i++)await new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.prepares,1);
 });
@@ -85,7 +86,7 @@ function deferredWatcherFixture() {
 test('unchanged deferred dispatch does not repeat serial Drive body and control reads',async()=>{
  const f=deferredWatcherFixture();
  await f.watcher.scanOnce();await f.watcher.scanOnce();await f.watcher.scanOnce();
- assert.deepEqual(f.reads,[f.controlPath,f.dispatchPath]);
+ assert.deepEqual(f.reads,[f.dispatchPath,f.controlPath]);
  assert.equal(f.ingested.length,0);
 });
 

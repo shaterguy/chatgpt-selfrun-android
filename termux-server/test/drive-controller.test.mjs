@@ -18,8 +18,10 @@ test('canonical conversation URL is projected before later submission uncertaint
  assert.equal(f.sends,1);
  assert.equal(f.record().conversation_url,'https://chatgpt.com/c/test-owned');
  assert.equal(f.rows.get(f.path).conversation_url,'https://chatgpt.com/c/test-owned');
- assert.equal(f.rows.get(f.path).server_status,'PENDING');
- assert.equal(f.record().state,'POST_UNCERTAIN');
+ assert.equal(f.rows.get(f.path).server_status,'STARTED');
+ assert.equal(f.record().state,'OBSERVING');
+ assert.equal(f.record().intent.outcome,'UNKNOWN');
+ assert.equal(f.record().submission_confirmed,false);
 });
 test('initial conversation sends exactly one prompt and has no automatic follow-up',async()=>{
  const f=fixture();await f.ingest();

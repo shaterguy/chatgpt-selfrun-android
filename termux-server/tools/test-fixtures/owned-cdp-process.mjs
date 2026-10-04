@@ -14,15 +14,20 @@ let counter = 0;
 const targets = new Map();
 for (const target of settings.targets || []) targets.set(target.id, target);
 const startupUrl = args.at(-1);
-if (startupUrl?.startsWith('about:blank')) {
-  targets.set('startup', { id: 'startup', type: 'page', url: startupUrl });
-}
+let listCount = 0;
+fs.writeFileSync(`${profile}/launch-args.json`, JSON.stringify(args));
+const initialTarget = startupUrl?.startsWith('about:blank') && !settings.skipStartup
+  && !(settings.honorNoStartupWindow && args.includes('--no-startup-window'))
+  ? { id: 'startup', type: 'page', url: settings.startupUrl || startupUrl } : null;
+if (initialTarget && !settings.startupAfterLists) targets.set(initialTarget.id, initialTarget);
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1');
   response.setHeader('Content-Type', 'application/json');
   const send = (value) => response.end(JSON.stringify(value));
   if (url.pathname === '/json/version') return send({ Browser: 'fixture', webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/${browserKey}` });
   if (url.pathname === '/json/list') {
+    listCount += 1;
+    if (initialTarget && listCount === settings.startupAfterLists) targets.set(initialTarget.id, initialTarget);
     if (settings.listDelayMs) await new Promise((resolve) => setTimeout(resolve, settings.listDelayMs));
     return send([...targets.values()]);
   }

@@ -415,3 +415,169 @@ test('verified committed Result closes real owned fixture process and a genuinel
   assert.notEqual(manager.child?.pid,first.pid);assert.equal(f.resumes,2);assert.equal(f.sends,0);
   assert.equal(f.controller.repository.get(oldKey).retired,true);assert.equal(f.record().state,'OBSERVING');
 });
+
+
+test('late nonce startup is captured before the newly launched browser is exposed', async (t) => {
+  const { manager } = await makeManager(t, { startupAfterLists: 3 });
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), true);
+  const child = manager.child;
+  assert.equal((await manager.releaseIfUnused()).released, true);
+  assert.equal(fs.existsSync(`/proc/${child.pid}`), false);
+});
+
+test('launch suppresses automatic startup windows and zero-page browser remains usable', async (t) => {
+  const { manager, config } = await makeManager(t, { honorNoStartupWindow: true });
+  await manager.ensureStarted();
+  const args = JSON.parse(fs.readFileSync(path.join(config.browserProfile, 'launch-args.json'), 'utf8'));
+  assert.equal(args.includes('--no-startup-window'), true);
+  assert.deepEqual(await manager.listExistingTargets(), []);
+  const target = await manager.createTarget('https://example.test/new-request');
+  assert.equal(manager.isOwnedTarget(target.id), true);
+  assert.deepEqual((await manager.listExistingTargets()).map((item) => item.id), [target.id]);
+  await manager.closeOwnedTarget(target.id);
+  assert.equal((await manager.releaseIfUnused()).released, true);
+});
+
+test('startup capture never adopts a sole unexpected newtab from a new process', async (t) => {
+  const { manager } = await makeManager(t, { startupUrl: 'chrome://newtab/' });
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.equal((await manager.listExistingTargets()).length, 1);
+});
+
+test('startup capture never adopts a sole restored plain blank', async (t) => {
+  const { manager } = await makeManager(t, { startupUrl: 'about:blank' });
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.equal((await manager.listExistingTargets()).length, 1);
+});
+
+test('startup capture does not adopt an existing browser sole newtab', async (t) => {
+  const { manager, config, children } = await makeManager(t, { startupUrl: 'chrome://newtab/' });
+  const child = await externalBrowser(config, children);
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.equal(fs.existsSync(`/proc/${child.pid}`), true);
+});
+
+test('startup capture preserves unrelated pages alongside a fresh newtab', async (t) => {
+  const { manager } = await makeManager(t, {
+    startupUrl: 'chrome://newtab/',
+    targets: [{ id: 'manual', type: 'page', url: 'https://example.test/manual' }],
+  });
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal(manager.isOwnedTarget('manual'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.equal((await manager.listExistingTargets()).length, 2);
+});
+
+test('a manual newtab added after launch never receives the bootstrap release exception', async (t) => {
+  const { manager } = await makeManager(t);
+  await manager.ensureStarted();
+  const response = await fetch(`${manager.baseUrl}/json/new?${encodeURIComponent('chrome://newtab/')}`, { method: 'PUT' });
+  const manual = await response.json();
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget(manual.id), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.equal((await manager.listExistingTargets()).some((target) => target.id === manual.id), true);
+});
+
+
+test('startup capture cannot resurrect an exception after concurrent target use', async (t) => {
+  const { manager } = await makeManager(t);
+  const list = manager.listExistingTargets.bind(manager);
+  manager.listExistingTargets = async (...args) => {
+    const targets = await list(...args);
+    if (targets.some((target) => target.id === 'startup')) manager.touchTarget('startup');
+    return targets;
+  };
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+});
+
+test('expired bootstrap window is never reopened by a later ensure or cleanup', async (t) => {
+  const { manager, config } = await makeManager(t, { skipStartup: true });
+  await manager.ensureStarted();
+  const startupUrl = JSON.parse(fs.readFileSync(path.join(config.browserProfile, 'launch-args.json'), 'utf8')).at(-1);
+  const response = await fetch(`${manager.baseUrl}/json/new?${encodeURIComponent(startupUrl)}`, { method: 'PUT' });
+  const late = await response.json();
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget(late.id), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+});
+
+
+test('startup capture fails closed if the owned process identity changes during listing', async (t) => {
+  const { manager } = await makeManager(t);
+  const list = manager.listExistingTargets.bind(manager);
+  manager.listExistingTargets = async (...args) => {
+    const targets = await list(...args);
+    manager.ownership.process.startTime = 'invalidated';
+    return targets;
+  };
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+});
+
+test('startup capture fails closed if the browser instance changes during listing', async (t) => {
+  const { manager } = await makeManager(t);
+  const list = manager.listExistingTargets.bind(manager);
+  let changed = false;
+  manager.listExistingTargets = async (...args) => {
+    const targets = await list(...args);
+    changed = true;
+    return targets;
+  };
+  const fetchOriginal = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const response = await fetchOriginal(url, options);
+    if (changed && String(url).endsWith('/json/version')) {
+      const version = await response.json();
+      return Response.json({ ...version, webSocketDebuggerUrl: `${version.webSocketDebuggerUrl}-changed` });
+    }
+    return response;
+  });
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+});
+
+test('startup capture never retries past an unrelated initial target set', async (t) => {
+  const { manager } = await makeManager(t, {
+    startupAfterLists: 2,
+    targets: [{ id: 'unrelated', type: 'service_worker', url: 'https://example.test/worker' }],
+  });
+  await manager.ensureStarted();
+  await fetch(`${manager.baseUrl}/json/close/unrelated`);
+  await manager.listExistingTargets();
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+});
+
+test('concurrent use still prevents startup ownership when its activity-file write fails', async (t) => {
+  const { manager, config } = await makeManager(t);
+  const open = fs.openSync.bind(fs);
+  t.mock.method(fs, 'openSync', (file, ...args) => {
+    if (String(file).startsWith(config.browserActivityDir + path.sep)) {
+      throw Object.assign(new Error('Activity path temporarily unwritable'), { code: 'EACCES' });
+    }
+    return open(file, ...args);
+  });
+  const list = manager.listExistingTargets.bind(manager);
+  manager.listExistingTargets = async (...args) => {
+    const targets = await list(...args);
+    if (targets.some((target) => target.id === 'startup')) manager.touchTarget('startup');
+    return targets;
+  };
+  await manager.ensureStarted();
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+});

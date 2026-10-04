@@ -10,7 +10,7 @@ SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, 
 2. 서버가 Google Drive를 24시간 감시해 새 dispatch를 발견합니다.
 3. 서버는 앱의 `CREATE_REQUESTED`를 받아 새 대화를 준비하고 `READY_TO_SUBMIT`을 기록합니다.
 4. 기존 앱과의 호환을 위해 앱의 `SEND_REQUESTED`를 받은 뒤 실제 입력을 전송합니다. 현재/이전 Result, phase, Handoff는 전송 자격 조건으로 검사하지 않습니다.
-5. 대화 URL은 발견 즉시 기록하되, 사용자 입력이 실제 반영됐다는 readback 이후에만 `STARTED`를 기록합니다. 불확실한 초기 전송은 `PENDING`으로 남기며 같은 입력을 무작정 다시 보내지 않습니다.
+5. 소유한 대화의 canonical URL은 발견 즉시 `STARTED`와 함께 앱에 전달하고 현재 페이지 감시를 시작합니다. 입력 ACK가 없어도 감시를 계속하며, 실제 수신 여부는 `post_outcome=UNKNOWN`으로 별도 보존합니다. 같은 초기 입력을 다시 보내거나 새 대화를 만들지 않습니다.
 6. 앱은 URL을 기존 ledger의 `conversationUrl` resource로 고정하고 기존 Result/Vercel 흐름으로 전환합니다.
 
 따라서 앱의 기존 90초 대화방 준비 watchdog, 5초 재시도, Result 판정, REPAIR/후속 TURN/DONE 판정, Vercel/FCM 알림은 유지됩니다.

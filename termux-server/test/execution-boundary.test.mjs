@@ -50,12 +50,13 @@ test('execution: cancelled attempt is not revived by unchanged RUNNING control',
   assert.equal(f.sends,0); assert.equal(f.record().state,'PREPARED');
   await send(f); assert.equal(f.sends,1);
 });
-test('execution: early canonical URL is not a verified STARTED receipt',async()=>{
+test('execution: early canonical URL is STARTED without inventing a verified receipt',async()=>{
   const f=fixture(); f.publishConversationBeforeOutcome=true; f.mode='unknown';
   await send(f);
   assert.equal(f.rows.get(f.path).conversation_url,f.probe.url);
   assert.equal(f.record().intent.outcome,'UNKNOWN');
-  assert.equal(f.rows.get(f.path).server_status,'PENDING');
+  assert.equal(f.rows.get(f.path).server_status,'STARTED');
+  assert.equal(f.record().submission_confirmed,false);
   await f.controller.tick(f.transport); assert.equal(f.sends,1);
 });
 test('execution: exact Result commit retires observation while response idle alone does not',async()=>{

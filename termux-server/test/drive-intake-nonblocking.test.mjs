@@ -50,7 +50,9 @@ test('watcher consumes durable control and dispatch without awaiting lifecycle t
   };
   const watcher=new DriveDispatchWatcher({transport,controller,config:{dispatchRecoveryMs:7200000}});
   await watcher.scanOnce();
-  assert.deepEqual(calls.slice(0,2),['control','dispatch']);
+  assert.deepEqual(calls.filter(call=>call!=='tick'),['control','dispatch']);
+  assert.equal(calls.filter(call=>call==='tick').length,1);
+  assert.equal(watcher.ticking,true,'intake completes while the independent tick remains blocked');
   assert.equal(watcher.scanning,false);
   tickGate.resolve();
   await new Promise(resolve=>setImmediate(resolve));

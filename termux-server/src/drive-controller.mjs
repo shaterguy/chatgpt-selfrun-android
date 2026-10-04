@@ -256,10 +256,10 @@ export class DriveDispatchController {
       if(!a)return;
     }
     r=this.repository.get(key);
-    if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)) {
+    if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!recoveryStates.has(r.state)) {
       try {
         if(r.intent.kind!=='recovery') {
-          if(r.intent.outcome==='ABSENT')await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
+          if(r.intent.outcome==='ABSENT'&&!r.conversation_url)await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
           else await this.#reconcile(key,transport);
           return;
         }
@@ -361,15 +361,18 @@ export class DriveDispatchController {
   }
   #monitor(key,transport) {
     const a=this.sessions.get(key);
-    if(!a||a.monitoring)return;
+    if(!a?.guard?.()||a.monitoring||!canonicalUrl(this.repository.get(key)?.conversation_url))return;
     a.monitoring=true;
     const r=this.repository.get(key);
     void this.browser.monitor({session:a.session,baseline:r.cursor||a.baseline,signal:a.abort.signal,
       livenessGate:()=>({state:this.repository.get(key)?.control_state,epoch:this.repository.get(key)?.control_epoch}),
-      onActivity:activity=>this.#serial(key,async()=>{
-        try{return await this.#observe(key,transport,activity,a.token);}
-        catch(error){await this.#observationFailure(key,transport,error,a);}
-      }),
+      onActivity:activity=>{
+        const sampledCursor=this.repository.get(key)?.cursor;
+        return this.#serial(key,async()=>{
+          try{return await this.#observe(key,transport,activity,a.token,sampledCursor);}
+          catch(error){await this.#observationFailure(key,transport,error,a);}
+        });
+      },
     }).then(async result=>{
       if(!a.guard())return;
       if(result?.status==='PAGE_ERROR')throw Object.assign(new Error('conversation load failed'),{code:'CONVERSATION_LOAD_FAILED'});
@@ -377,7 +380,7 @@ export class DriveDispatchController {
       await this.#observationFailure(key,transport,error,a,true);
     })).catch(()=>{});
   }
-  async #observe(key,transport,p,token) {
+  async #observe(key,transport,p,token,sampledCursor) {
     if(this.standby||!this.sessions.get(key)?.guard?.()||!this.repository.current(key,token))return;
     if(this.repository.get(key).retry_at>Date.now())return;
     const result=await this.#result(key,transport,token);
@@ -388,10 +391,15 @@ export class DriveDispatchController {
       await this.#move(key,'BLOCKED','CONVERSATION_OWNERSHIP_MISMATCH',{blocked_epoch:r.control_epoch,error:{code:'IDENTITY_MISMATCH',message:'observed conversation differs from canonical owner'}},token);
       this.#detach(key);return;
     }
-    if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)) {
+    // A queued monitor sample predates any readback that changed the durable cursor.
+    if(r.cursor&&(!sampledCursor||!sameCursor(sampledCursor,r.cursor)))return;
+    if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!recoveryStates.has(r.state)) {
+      const before=r.cursor;
       await this.#reconcile(key,transport);
-      if(r.intent.kind!=='recovery'||!this.repository.current(key,token))return;
+      if(!this.repository.current(key,token)||!this.repository.get(key)?.conversation_url)return;
       r=this.repository.get(key);
+      // Readback samples after this callback's probe; never replay older telemetry over it.
+      if(r.cursor&&(!before||!sameCursor(before,r.cursor)))return;
     }
     const changed=!r.cursor||!sameCursor(r.cursor,p);
     const progressed=!r.cursor||responseKey(r.cursor)!==responseKey(p);
@@ -530,6 +538,7 @@ export class DriveDispatchController {
               console.error(JSON.stringify({event:'CONVERSATION_URL_PROJECTION_PENDING',key,url,error:String(error?.message||error).slice(0,300)}));
             }
           }
+          this.#monitor(key,transport);
         }});
       const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
       if(submittedUrl&&a.guard()) {
@@ -538,6 +547,7 @@ export class DriveDispatchController {
           await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:submittedUrl},a.token);
           await this.repository.flushCurrent(transport,key);
         }
+        this.#monitor(key,transport);
       }
     } catch(error) {
       if(a.guard())await this.#move(key,'POST_UNCERTAIN','POST_OUTCOME_UNCERTAIN',
@@ -560,6 +570,8 @@ export class DriveDispatchController {
   async #reconcile(key,transport) {
     const a=this.sessions.get(key),r=this.repository.get(key);
     if(!a?.guard()||!r.intent)return;
+    // Receipt evidence is diagnostic once this request owns a canonical conversation.
+    if(r.conversation_url)this.#monitor(key,transport);
     // Verify the submission itself, never a business Result document.
     if(!a.guard())return;
     await this.#move(key,'RECONCILING','POST_READBACK',{},a.token);
@@ -580,20 +592,20 @@ export class DriveDispatchController {
         intent:{...latest.intent,outcome:'CONFIRMED',message_id:outcome.messageId||latest.intent.message_id},
         ...(intentKind==='recovery'?{last_recovered_response:responseKey(outcome.probe),last_recovery_epoch:r.control_epoch}:{}),
         conversation_url:url,submission_confirmed:true,response_status:'RUNNING',cursor:cursor(outcome.probe),
-        ...((intentKind!=='recovery'||responseKey(latest.cursor)!==responseKey(outcome.probe))?{last_progress_at:now}:{}),error:null},a.token);
+        ...((!latest.cursor||responseKey(latest.cursor)!==responseKey(outcome.probe))?{last_progress_at:now}:{}),error:null},a.token);
       await this.repository.flushCurrent(transport,key);
       this.#monitor(key,transport);
-    } else if(outcome.state==='ABSENT'&&r.intent.kind!=='recovery'&&r.intent.sends<2) {
+    } else if(outcome.state==='ABSENT'&&r.intent.kind!=='recovery'&&!latest.conversation_url&&r.intent.sends<2) {
       await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...latest.intent,outcome:'ABSENT'}},a.token);
       await this.#post(key,transport,r.intent.kind,prompt,true);
     } else {
       // Generic recovery input may be attempted again after its durable quiet window, even without an ACK.
-      const recovery=r.intent.kind==='recovery';
-      await this.#move(key,recovery?'OBSERVING':'POST_UNCERTAIN','POST_READBACK_UNKNOWN',
+      const recovery=r.intent.kind==='recovery',observe=!!latest.conversation_url;
+      await this.#move(key,observe?'OBSERVING':'POST_UNCERTAIN','POST_READBACK_UNKNOWN',
         {intent:{...latest.intent,outcome:recovery&&outcome.state==='ABSENT'?'ABSENT':'UNKNOWN'},
         error:latest.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},a.token);
       await this.repository.flush(transport);
-      if(recovery)this.#monitor(key,transport);
+      if(observe)this.#monitor(key,transport);
     }
   }
 }

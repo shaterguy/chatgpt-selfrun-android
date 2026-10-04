@@ -104,10 +104,8 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
 export function projection(r) {
   const statuses={PREPARED:'READY_TO_SUBMIT',COMMITTED:'COMPLETED',COMPLETED:'COMPLETED',CANCELLED:'CANCELLED',
     STOPPED:'CANCELLED',PAUSED:'CANCELLED',BLOCKED:'ERROR'};
-  const confirmed=r.submission_confirmed||r.intent?.outcome==='CONFIRMED';
-  const pendingInitial=r.intent?.kind==='initial'&&r.intent.outcome!=='CONFIRMED';
-  const status=pendingInitial&&!['STOPPED','PAUSED','CANCELLED','BLOCKED'].includes(r.state)?'PENDING':
-    statuses[r.state]||(confirmed&&r.conversation_url?'STARTED':'PENDING');
+  // STARTED releases the owned URL to the app; post_outcome retains receipt truth.
+  const status=statuses[r.state]||(canonicalUrl(r.conversation_url)?'STARTED':'PENDING');
   const {body,...durable}=r;
   return {...r.body,lifecycle_record:{schema:1,...durable},server_status:status,lifecycle_state:r.state,
     lifecycle_revision:r.revision,server_generation:r.server_generation||0,request_generation:r.run_generation,browser_generation:r.browser_generation,
