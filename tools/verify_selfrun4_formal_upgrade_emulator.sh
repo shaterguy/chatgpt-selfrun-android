@@ -44,6 +44,7 @@ while IFS='|' read -r name code apk; do
 done <<'BASELINES'
 4.0.3|4001003|stable/chatgpt-selfrun-drive-v4.0.3.apk
 4.0.4-dev2|4002004|legacy-dev2/SelfRun-Drive-v4.0.4-dev2.apk
-4.0.5|4001005|stable/chatgpt-selfrun-drive-v4.0.5.apk\n4.0.6|4002006|stable/chatgpt-selfrun-drive-v4.0.6.apk
+4.0.5|4001005|stable/chatgpt-selfrun-drive-v4.0.5.apk
+4.0.6|4002006|stable/chatgpt-selfrun-drive-v4.0.6.apk
 BASELINES
 
