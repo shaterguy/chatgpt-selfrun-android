@@ -14,6 +14,40 @@ The executable allowed edges are in src/lifecycle.mjs.
 
 The app owns Result, phase, Handoff and successor decisions. Initial submission never reads current/predecessor Result documents and IDs are opaque correlation values. During monitoring, the existing strict Result readback remains a nudge-suppression safeguard: committed or unreadable Result prevents automatic progress input, but never ends observation. Cursor changes measure progress; polling and heartbeats do not.
 
+## Visible generation progress
+The progress cursor includes visible thinking, work and tool output before a final
+assistant answer exists. The probe accepts legacy `main [data-turn-key]` wrappers
+and current `main section[data-turn-id][data-testid^="conversation-turn"]`
+wrappers. It follows the newest user input, excludes explicit/descendant user
+sections, and uses an identified assistant node only as a wrapper-free fallback.
+The existing text walker excludes user input, hidden content and UI controls.
+Content fingerprints detect same-length changes; elapsed-time labels are removed
+from response text and the current-response assistant text length. The original
+global `assistantCount`, `assistantTextLength` and `assistantMessageId` telemetry
+remains unchanged for submission/baseline compatibility. Additive
+`responseAssistantCount`, `responseAssistantTextLength` and
+`responseAssistantMessageId` fields describe only the selected current response.
+`lifecycle.cursor` maps those scoped values into its existing assistant cursor
+keys, and the browser monitor compares that same effective cursor. Missing or
+undefined scoped fields retain legacy behavior; an explicit scoped null means
+there is no current assistant identity. Stored cursor assistant metrics therefore
+refer to current-response progress, while raw probe fields remain global.
+Expanding an older response cannot reset the current thinking deadline. Polling
+does not reset the ten-minute no-progress interval or bypass Result/control checks.
+
+The October 4 read-only runtime diagnostic observed current SECTION attribute
+names (`data-turn-id`, `data-turn-id-container`, `data-testid`, `data-turn`) and
+zero `data-turn-key` matches. An existing 221-character assistant bubble was
+missed by the old response-text collector. This establishes a selector mismatch,
+not the exact structure of an earlier active thinking phase. Literal `data-turn`
+values were not captured. Bubble-free thinking/tool wrappers and the positional
+fallback after the newest user are synthetic compatibility cases, pending live
+verification. Tests evaluate the exact production probe expression and exercise
+the actual controller with no final answer: unchanged minute samples/timers do
+not count as progress, real tool changes reset the deadline, and ten unchanged
+minutes trigger one configured recovery. Navigation, input dispatch and app
+authority are unchanged.
+
 ## Submission safety
 A durable intent stores immutable input/hash, baseline, correlation and send count before the browser side effect. UNKNOWN is reconciled and never blindly resent. Readback observes the existing page without reloading or navigation. A passive, bounded clone reader correlates the exact outgoing user message with a recognized semantic response marker or assistant-message event and canonical conversation; the minimal receipt is durably recorded before confirmation. An optimistic DOM bubble, POST observation, or HTTP 200 alone is insufficient. Missing, ambiguous, stale, unsupported, or conflicting receipts remain UNKNOWN. ABSENT requires prior proven cancellation before transport release, never a quiet DOM or timeout. At most one resend reuses that intent. ABSENT, UNKNOWN and all recovery checkpoints survive restart. A confirmed recovery without new response progress cannot create another recovery input.
 
