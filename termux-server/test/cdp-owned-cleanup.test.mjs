@@ -868,3 +868,45 @@ test('restored empty home-fenced process waits for a synchronous lifecycle guard
   restored.setLifecycleGuards({ canRelease: () => true });
   assert.equal((await restored.releaseIfUnused()).released, true);
 });
+
+test('accepted close is pending while the owned target is still present', async (t) => {
+  const { manager } = await makeManager(t, { closeKeepsTarget: true });
+  const target = await manager.createTarget('https://example.test/still-present');
+  const outcome = await manager.closeOwnedTarget(target.id);
+  assert.deepEqual(outcome, { closed: false, absent: false, reason: 'target_still_present' });
+  assert.equal(manager.isOwnedTarget(target.id), true);
+  assert.equal((await manager.listExistingTargets()).some((row) => row.id === target.id), true);
+});
+
+test('accepted close without readable absence evidence remains pending and owned', async (t) => {
+  const { manager } = await makeManager(t, { listUnavailableAfterClose: true });
+  const target = await manager.createTarget('https://example.test/unverified');
+  const outcome = await manager.closeOwnedTarget(target.id);
+  assert.deepEqual(outcome, { closed: false, absent: false, reason: 'close_unverified' });
+  assert.equal(manager.isOwnedTarget(target.id), true);
+});
+
+test('failed close response preserves the owned target for a later cleanup attempt', async (t) => {
+  const { manager } = await makeManager(t, { closeFails: true });
+  const target = await manager.createTarget('https://example.test/close-failed');
+  const outcome = await manager.closeOwnedTarget(target.id);
+  assert.deepEqual(outcome, { closed: false, absent: false, reason: 'close_failed' });
+  assert.equal(manager.isOwnedTarget(target.id), true);
+  assert.equal((await manager.listExistingTargets()).some((row) => row.id === target.id), true);
+});
+
+test('verified absence reports an authorized close even if lifecycle advances after its side effect', async (t) => {
+  const { manager } = await makeManager(t);
+  const target = await manager.createTarget('https://example.test/finished');
+  const list = manager.listExistingTargets.bind(manager);
+  let current = true;
+  manager.listExistingTargets = async () => {
+    const targets = await list();
+    if (Array.isArray(targets) && !targets.some((row) => row.id === target.id)) current = false;
+    return targets;
+  };
+  const outcome = await manager.closeOwnedTarget(target.id, { guard: () => current });
+  assert.deepEqual(outcome, { closed: true, absent: false, reason: 'closed' });
+  assert.equal(current, false);
+  assert.equal(manager.isOwnedTarget(target.id), false);
+});

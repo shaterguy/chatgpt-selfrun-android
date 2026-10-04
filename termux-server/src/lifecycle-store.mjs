@@ -177,14 +177,14 @@ export class LifecycleStore {
       // This lane can only consume an exact displaced identity; it never restores execution.
       if(!this.displacedResultCandidate(key)||!this.matches(key,fence))return null;
       const old=this.data.requests[key],committed=result.state==='COMMITTED';
-      if(!committed&&result.state===old.result_state)return null;
-      const patch={result_state:result.state,
+      if(!committed&&result.state===old.result_state&&result.code===old.error?.code)return null;
+      const patch={result_state:result.state,...(committed?{result_recovery:result.recovery||null}:{}),
         ...(result.state==='UNAVAILABLE'?{error:{code:result.code,message:result.message}}:
           old.error?.code?.startsWith('RESULT_')?{error:null}:{})};
       const r=transition(old,committed?'COMMITTED':old.state,
         committed?'RESULT_COMMITTED_TERMINAL':'DISPLACED_RESULT_OBSERVED',patch);
       const next=structuredClone(this.data);next.requests[key]=r;
-      if(committed)retireRecord(next,r);
+      if(committed){next.events.push(audit(r,old.state,r.reason));retireRecord(next,r);}
       else next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
       await this.save(next);return structuredClone(next.retired[key]||r);
     });
@@ -219,10 +219,17 @@ export class LifecycleStore {
       await this.save(next);return true;
     });
   }
-  async clearTargetCleanup(entry) {
+  async recordTargetCleanup(entry,outcome) {
     return this.serial(async()=>{
-      if(JSON.stringify(this.data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return;
-      const next=structuredClone(this.data);delete next.browserCleanup[entry.target_id];await this.save(next);
+      if(JSON.stringify(this.data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
+      const next=structuredClone(this.data);
+      const observed={target_id:entry.target_id,status:outcome.status,
+        observed_at_ms:outcome.observed_at_ms,reason:outcome.reason,
+        ...(outcome.error?{error:String(outcome.error).slice(0,300)}:{})};
+      next.browserCleanupOutcomes??={};next.browserCleanupOutcomes[entry.target_id]=observed;
+      if(next.retired[entry.key])next.retired[entry.key].browser_cleanup=observed;
+      if(['CLOSED','ABSENT'].includes(outcome.status))delete next.browserCleanup[entry.target_id];
+      await this.save(next);return true;
     });
   }
   async recordResumeRejection(key,epoch,reason) {
@@ -330,7 +337,7 @@ export class LifecycleStore {
           &&Number(remote.dispatch_attempt)===Number(item.dispatch_attempt);
         if(same) {
           const body={...remote,server_status:'COMPLETED',lifecycle_state:'COMMITTED',result_state:'COMMITTED',
-            lifecycle_revision:item.revision,updated_at_ms:item.updated_at};
+            lifecycle_revision:item.revision,updated_at_ms:item.updated_at,server_error:'',server_error_class:null};
           // Do not leave an older executable lifecycle snapshot in a final projection.
           delete body.lifecycle_record;
           await transport.write(item.path,body,{expected:remote});

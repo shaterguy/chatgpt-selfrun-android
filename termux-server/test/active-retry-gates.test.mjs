@@ -85,7 +85,7 @@ for(const probe of [
  await assert.rejects(f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'}));
 });
 
-for(const [kind,code] of [['missing','RESULT_UNAVAILABLE'],['unreadable','RESULT_READ_FAILED'],['malformed','RESULT_READBACK_INVALID']])test('Result '+kind+' surfaces a safe error and waits between retries',async()=>{
+for(const [kind,code] of [['missing','RESULT_UNAVAILABLE'],['unreadable','RESULT_READ_FAILED'],['malformed','RESULT_JSON_INVALID']])test('Result '+kind+' surfaces a safe error and waits between retries',async()=>{
  const f=fixture();await f.existing();await f.observe({});
  let reads=0,writes=0;
  const read=f.transport.readGoogleDocText,write=f.transport.write;
@@ -112,7 +112,7 @@ test('malformed Result reason differs from transport failure and committed proof
  const f=fixture();await f.existing();f.result(true);
  let reads=0;const raw=f.docs.get('RESULT-1');
  const result=await readResult({readGoogleDocText:async()=>++reads===1?raw:raw+' '},f.record());
- assert.equal(reads,2);assert.equal(result.code,'RESULT_READBACK_INVALID');assert.equal(result.state,'UNAVAILABLE');
+ assert.equal(reads,2);assert.equal(result.code,'RESULT_READBACK_CHANGED');assert.equal(result.state,'UNAVAILABLE');
 });
 
 test('canonical live resume attaches for observation even while composer is absent',async()=>{
@@ -204,7 +204,7 @@ test('Result failure at final pre-send check durably defers only a never-called 
  f.transport.write=async(name,body)=>{await write(name,body);if(invalidate&&body.lifecycle_record?.reason==='SUBMISSION_INTENT_DURABLE')f.docs.set('RESULT-1','invalid');};
  now+=window;await f.observe({status:'STALLED'});assert.equal(f.sends,0);assert.equal(f.record().intent.outcome,'ABSENT');
  assert.equal(f.record().intent.absence_proof,'NOT_SUBMITTED_RESULT_GATE');
- assert.equal(f.record().state,'POST_UNCERTAIN');assert.equal(f.record().error.code,'RESULT_READBACK_INVALID');
+ assert.equal(f.record().state,'POST_UNCERTAIN');assert.equal(f.record().error.code,'RESULT_JSON_INVALID');
  for(let i=0;i<3;i++) {
   now+=30000;f.result(false);await f.controller.tick(f.transport);await f.observe({status:'STALLED'});
   assert.equal(f.sends,0);assert.equal(f.record().intent.outcome,'ABSENT');assert.equal(f.record().intent.sends,0);

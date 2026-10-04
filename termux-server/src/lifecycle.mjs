@@ -98,7 +98,7 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
     if(['DISCOVERED','PREPARING','PREPARED'].includes(next)) throw new Error('owned conversation cannot be recreated');
   }
   if(['POST_PENDING','RECOVERY_POST','POST_UNCERTAIN','RECONCILING'].includes(next)&&!r.intent) throw new Error('submission state requires durable intent');
-  if(next==='COMMITTED'||next==='COMPLETED') r.result_state='COMMITTED';
+  if(next==='COMMITTED'||next==='COMPLETED') {r.result_state='COMMITTED';r.error=null;}
   return r;
 }
 export function projection(r) {
@@ -125,5 +125,5 @@ export function audit(record,previous,reason) {
     server_generation:record.server_generation||0,request_generation:record.run_generation,browser_generation:record.browser_generation,conversation_id:record.conversation_id,
     previous_state:previous,new_state:record.state,revision:record.revision,reason,result_state:record.result_state,
     cursor:record.cursor,post_correlation:record.intent?.id||null,recovery_attempt:record.recovery_count,
-    control_epoch:record.control_epoch,error_class:record.error?.code||null};
+    control_epoch:record.control_epoch,error_class:record.error?.code||null,result_recovery:record.result_recovery||null};
 }

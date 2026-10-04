@@ -194,3 +194,61 @@ test('idle-home release guard preserves a newer app generation before any reques
   f.controller.repository.data.controls[f.body.task_id] = { ...f.control, turn_id: 'NEXT-TURN', request_id: 'NEXT-REQUEST', state: 'RUNNING', control_epoch: 3 };
   assert.equal(f.lifecycleGuards.canRelease(), false);
 });
+
+test('committed lifecycle retains separate successful owned-target cleanup evidence after queue removal', async () => {
+  const f=ownedFixture();await f.existing();const started=Date.now();
+  f.result(true);await f.observe({});await f.clean();
+  assert.equal(f.record().state,'COMMITTED');
+  const outcome=f.record().browser_cleanup;
+  assert.equal(outcome?.status,'CLOSED');
+  assert.equal(outcome.target_id,'target-owned');
+  assert.equal(outcome.reason,'closed');
+  assert.ok(outcome.observed_at_ms>=started);
+  assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
+  assert.deepEqual(f.store.snapshot().lifecycle.browserCleanupOutcomes['target-owned'],outcome);
+  f.controller=f.recreate();await f.controller.initialize();
+  assert.deepEqual(f.record().browser_cleanup,outcome);
+});
+
+test('committed lifecycle does not imply tab closure when owned cleanup remains pending', async () => {
+  const f=ownedFixture();await f.existing();f.closeFails=true;
+  f.result(true);await f.observe({});await f.clean();
+  assert.equal(f.record().state,'COMMITTED');
+  assert.equal(f.record().browser_cleanup?.status,'PENDING');
+  assert.equal(f.record().browser_cleanup.reason,'unavailable');
+  assert.equal(f.record().browser_cleanup.target_id,'target-owned');
+  assert.equal(f.pages.has('target-owned'),true);
+  assert.ok(f.store.snapshot().lifecycle.browserCleanup['target-owned']);
+  f.closeFails=false;await f.clean();
+  assert.equal(f.record().browser_cleanup.status,'CLOSED');
+  assert.equal(f.pages.size,0);
+});
+
+test('already absent cleanup evidence is distinct from an observed close', async () => {
+  const f=ownedFixture();await f.existing();f.pages.delete('target-owned');
+  await f.stop();await f.clean();
+  assert.equal(f.record().browser_cleanup?.status,'ABSENT');
+  assert.equal(f.record().browser_cleanup.reason,'already_absent');
+  assert.equal(f.record().browser_cleanup.target_id,'target-owned');
+  assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
+});
+
+test('cleanup exception records pending target and reason without changing terminal lifecycle', async () => {
+  const f=ownedFixture();await f.existing();
+  f.beforeClose=async()=>{throw new Error('test CDP outage');};
+  await f.stop();await f.clean();
+  assert.equal(f.record().state,'STOPPED');
+  assert.equal(f.record().browser_cleanup?.status,'PENDING');
+  assert.equal(f.record().browser_cleanup.reason,'close_error');
+  assert.equal(f.record().browser_cleanup.error,'test CDP outage');
+  assert.equal(f.record().browser_cleanup.target_id,'target-owned');
+  assert.ok(f.store.snapshot().lifecycle.browserCleanup['target-owned']);
+});
+
+test('repurposed target retains pending guard evidence rather than closure success', async () => {
+  const f=ownedFixture();await f.existing();f.targetUrl='https://example.test/manual-browsing';
+  await f.stop();await f.clean();
+  assert.equal(f.record().browser_cleanup?.status,'PENDING');
+  assert.equal(f.record().browser_cleanup.reason,'guard');
+  assert.equal(f.pages.has('target-owned'),true);
+});

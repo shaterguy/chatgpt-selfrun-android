@@ -442,6 +442,14 @@ export class ChromiumManager {
         signal: AbortSignal.timeout(1500),
       });
       if (!response.ok) return skip('close_failed');
+      // A successful close response only acknowledges the command. Preserve the
+      // existing cleanup retry and ownership proof until absence is observed.
+      const remaining = await this.listExistingTargets();
+      if (!Array.isArray(remaining)) return skip('close_unverified');
+      let observedVersion;
+      try { observedVersion = await this.#version(); } catch { return skip('close_unverified'); }
+      if (this.#useVersion(observedVersion) !== browserKey || !this.isOwnedTarget(id)) return skip('browser_changed');
+      if (remaining.some((target) => String(target?.id || '') === id)) return skip('target_still_present');
       this.forgetTarget(id);
       return { closed: true, absent: false, reason: 'closed' };
     } catch { return skip('close_failed'); }

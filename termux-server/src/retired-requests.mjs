@@ -24,7 +24,7 @@ export function retireRecord(data,record) {
       ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at'].map(k=>[k,record[k]]));
   }
   const marker=Object.fromEntries(['key','path','task_id','turn_id','request_id','dispatch_attempt','state','revision',
-    'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status'].map(k=>[k,record[k]]));
+    'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status','result_recovery'].map(k=>[k,record[k]]));
   if(record.conversation_url)marker.conversation_digest=digest(canonicalUrl(record.conversation_url));
   if(marker.state==='STOPPED')marker.stop_status=['CONFIRMED','NOT_REQUESTED'].includes(marker.stop_status)?marker.stop_status:'UNCONFIRMED';
   marker.server_ingress=record.body?.server_ingress||record.server_ingress||'DRIVE';
@@ -32,7 +32,7 @@ export function retireRecord(data,record) {
   marker.retired=true;
   data.retired??={};data.retired[record.key]=marker;
   delete data.requests[record.key];delete data.outbox[record.key];
-  data.events=data.events.filter(event=>event.task_id!==record.task_id||event.turn_id!==record.turn_id||event.request_id!==record.request_id);
+  if(!['COMMITTED','COMPLETED'].includes(record.state))data.events=data.events.filter(event=>event.task_id!==record.task_id||event.turn_id!==record.turn_id||event.request_id!==record.request_id);
   return marker;
 }
 // Offline operator operation only. The caller must quarantine the original state/events first.

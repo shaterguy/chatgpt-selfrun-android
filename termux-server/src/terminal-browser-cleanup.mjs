@@ -66,9 +66,17 @@ export class TerminalBrowserCleanup {
       do {
         this.requested=false;
         for(const entry of Object.values(this.repository.data.browserCleanup)) {
-          if(!this.canClose(entry))continue;
-          const result=await this.chromium.closeOwnedTarget(entry.target_id,{guard:target=>this.canClose(entry,target)});
-          if(result?.closed||result?.absent)await this.repository.clearTargetCleanup(entry);
+          let result;
+          if(!this.canClose(entry))result={reason:'guard_rejected'};
+          else try {
+            result=await this.chromium.closeOwnedTarget(entry.target_id,{guard:target=>this.canClose(entry,target)});
+          } catch(error) {
+            result={reason:'close_error',error:String(error?.message||error).slice(0,300)};
+          }
+          const status=result?.closed===true?'CLOSED':result?.absent===true?'ABSENT':'PENDING';
+          await this.repository.recordTargetCleanup(entry,{status,observed_at_ms:Date.now(),
+            reason:String(result?.reason||(status==='CLOSED'?'closed':status==='ABSENT'?'already_absent':'close_unconfirmed')).slice(0,300),
+            ...(result?.error?{error:result.error}:{})});
         }
         if(this.canRelease())await this.chromium.releaseIfUnused?.({guard:()=>this.canRelease()});
       } while(this.requested);

@@ -225,7 +225,7 @@ export class DriveDispatchController {
     if(this.standby||!this.canDispatch()||!this.repository.current(key,fence))return 'UNAVAILABLE';
     if(result.state==='COMMITTED') {
       // Exact current Result commit is final authority; this identity is consumed.
-      const committed=await this.#move(key,'COMMITTED','RESULT_COMMITTED_TERMINAL',{},fence);
+      const committed=await this.#move(key,'COMMITTED','RESULT_COMMITTED_TERMINAL',{result_recovery:result.recovery||null},fence);
       if(committed) {
         this.#detach(key);
         void this.cleanupTerminalResources();
