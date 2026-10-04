@@ -7,7 +7,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import { ChromiumManager } from '../src/browser/cdp.mjs';
+import { ChromiumManager, CdpSession } from '../src/browser/cdp.mjs';
 
 const fixture = fileURLToPath(new URL('../tools/test-fixtures/owned-cdp-process.mjs', import.meta.url));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -596,4 +596,275 @@ test('concurrent use still prevents startup ownership when its activity-file wri
   await manager.ensureStarted();
   assert.equal(manager.isOwnedTarget('startup'), false);
   assert.equal((await manager.releaseIfUnused()).released, false);
+});
+
+
+// The fake process supplies real PID/birth/profile/port proof. These protocol
+// doubles model only browser-context lookup and instance-bound target commands.
+function approvedHomeProtocol(t, manager, options = {}) {
+  const calls = [], closed = [], ownershipAtClose = [];
+  t.mock.method(CdpSession.prototype, 'connect', async function () {
+    calls.push({ method: 'connect', url: this.wsUrl });
+    await options.onConnect?.(this);
+    return this;
+  });
+  t.mock.method(CdpSession.prototype, 'call', async function (method, params = {}) {
+    calls.push({ method, params });
+    if (method === 'Target.getBrowserContexts') {
+      await options.onContexts?.();
+      return options.contexts ?? { browserContextIds: [], defaultBrowserContextId: 'default-context' };
+    }
+    if (method === 'Target.getTargetInfo') {
+      const target = (await manager.listExistingTargets()).find(target => target.id === params.targetId);
+      if (!target) throw new Error('Target not found');
+      const targetInfo = { targetId: target.id, type: target.type, url: target.url,
+        browserContextId: 'default-context', attached: false, ...options.targetInfo };
+      await options.onTargetInfo?.(targetInfo);
+      return { targetInfo };
+    }
+    if (method === 'Target.getTargets') {
+      return { targetInfos: (await manager.listExistingTargets()).map(target => ({ ...target, targetId: target.id })) };
+    }
+    if (method === 'Target.closeTarget') {
+      ownershipAtClose.push(manager.isOwnedTarget(params.targetId));
+      await fetch(manager.baseUrl + '/json/close/' + params.targetId);
+      closed.push(params.targetId);
+      return { success: true };
+    }
+    throw new Error('Unexpected protocol command: ' + method);
+  });
+  manager.setLifecycleGuards({ canRelease: () => true, canCloseTarget: () => false });
+  return { calls, closed, ownershipAtClose };
+}
+
+const homeSettings = { startupUrl: 'https://chatgpt.com/' };
+
+test('approved idle homepage closes under process proof without fabricating target creation', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const child = manager.child, protocol = approvedHomeProtocol(t, manager);
+  assert.equal(manager.isOwnedTarget('startup'), false);
+  assert.equal((await manager.releaseIfUnused()).released, true);
+  assert.deepEqual(protocol.closed, ['startup']);
+  assert.deepEqual(protocol.ownershipAtClose, [false]);
+  assert.equal(fs.existsSync(`/proc/${child.pid}`), false);
+});
+
+test('approved idle homepage remains eligible after manager restart with exact durable process proof', async t => {
+  const { manager, config, managers } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const restored = new ChromiumManager(config); managers.push(restored);
+  const protocol = approvedHomeProtocol(t, restored);
+  assert.equal(restored.isOwnedTarget('startup'), false);
+  assert.equal((await restored.releaseIfUnused()).released, true);
+  assert.deepEqual(protocol.closed, ['startup']);
+});
+
+test('periodic idle cleanup releases approved home-only browser without an owned-target outbox', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager);
+  await manager.closeIdleTargets();
+  assert.deepEqual(protocol.closed, ['startup']);
+  assert.equal(await manager.listExistingTargets(), null);
+});
+
+for (const url of ['https://chatgpt.com', 'https://chatgpt.com/?q=manual', 'https://chatgpt.com/#manual',
+  'https://chatgpt.com/c/manual', 'https://chatgpt.com/g/project', 'https://chat.openai.com/', 'about:blank']) {
+  test('approved-home exception does not broaden exact URL scope: ' + url, async t => {
+    const { manager } = await makeManager(t, { startupUrl: url });
+    await manager.ensureStarted();
+    const protocol = approvedHomeProtocol(t, manager);
+    assert.equal((await manager.releaseIfUnused()).released, false);
+    assert.deepEqual(protocol.closed, []);
+    assert.equal((await manager.listExistingTargets()).length, 1);
+  });
+}
+
+test('approved home remains untouched in an unproven external browser with matching profile and port', async t => {
+  const { manager, config, children } = await makeManager(t, homeSettings);
+  await externalBrowser(config, children); await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, []);
+});
+
+test('approved home requires an installed synchronous idle lifecycle guard', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager);
+  for (const canRelease of [undefined, () => false, async () => true]) {
+    manager.setLifecycleGuards({ canRelease });
+    assert.equal((await manager.releaseIfUnused({ guard: () => true })).released, false);
+  }
+  assert.deepEqual(protocol.closed, []);
+});
+
+for (const targetInfo of [{ browserContextId: 'other-context' }, { browserContextId: 'unknown-context' },
+  { browserContextId: undefined }, { attached: true }, { type: 'service_worker' }, { targetId: 'reused-id' },
+  { url: 'https://chatgpt.com/c/new-generation' }, { url: 'https://example.test/manual' }]) {
+  test('approved-home final target check preserves changed or other-context target: ' + JSON.stringify(targetInfo), async t => {
+    const { manager } = await makeManager(t, homeSettings);
+    await manager.ensureStarted();
+    const protocol = approvedHomeProtocol(t, manager, { targetInfo });
+    assert.equal((await manager.releaseIfUnused()).released, false);
+    assert.deepEqual(protocol.closed, []);
+    assert.equal((await manager.listExistingTargets()).length, 1);
+  });
+}
+
+test('approved-home cleanup preserves unknown default browser context instead of assuming ownership', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager, { contexts: { browserContextIds: [] } });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, []);
+});
+
+for (const field of ['pid', 'startTime', 'bootId', 'port', 'profile', 'browserKey']) {
+  test('approved-home close revalidates process ' + field + ' after target read', async t => {
+    const { manager } = await makeManager(t, homeSettings);
+    await manager.ensureStarted();
+    const protocol = approvedHomeProtocol(t, manager, { onTargetInfo() { manager.ownership.process[field] = 'changed'; } });
+    assert.equal((await manager.releaseIfUnused()).released, false);
+    assert.deepEqual(protocol.closed, []);
+    assert.equal((await manager.listExistingTargets()).length, 1);
+  });
+}
+
+for (const phase of ['onConnect', 'onContexts', 'onTargetInfo']) {
+  test('approved-home close preserves newly pending app work during ' + phase, async t => {
+    const { manager } = await makeManager(t, homeSettings);
+    await manager.ensureStarted();
+    let idle = true;
+    const protocol = approvedHomeProtocol(t, manager, { [phase]() { idle = false; } });
+    manager.setLifecycleGuards({ canRelease: () => idle });
+    assert.equal((await manager.releaseIfUnused()).released, false);
+    assert.deepEqual(protocol.closed, []);
+  });
+}
+
+test('approved-home close preserves concurrent target reuse even without an activity-file write', async t => {
+  const { manager, config } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const open = fs.openSync.bind(fs);
+  t.mock.method(fs, 'openSync', (file, ...args) => {
+    if (String(file).startsWith(config.browserActivityDir + path.sep)) throw new Error('activity write unavailable');
+    return open(file, ...args);
+  });
+  const protocol = approvedHomeProtocol(t, manager, { onTargetInfo() { manager.touchTarget('startup'); } });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, []);
+});
+
+test('approved-home cleanup preserves a changed browser-instance key before any close command', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager);
+  const fetchOriginal = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const response = await fetchOriginal(url, options);
+    if (String(url).endsWith('/json/version')) {
+      const version = await response.json();
+      return Response.json({ ...version, webSocketDebuggerUrl: version.webSocketDebuggerUrl + '-changed' });
+    }
+    return response;
+  });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, []);
+});
+
+test('approved-home release preserves an empty other browser context', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager, {
+    contexts: { browserContextIds: ['empty-other-context'], defaultBrowserContextId: 'default-context' },
+  });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, []);
+  assert.equal(fs.existsSync(`/proc/${manager.child.pid}`), true);
+});
+
+test('approved-home release preserves a context created after the home is closed', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const contexts = { browserContextIds: [], defaultBrowserContextId: 'default-context' };
+  const protocol = approvedHomeProtocol(t, manager, { contexts });
+  const list = manager.listExistingTargets.bind(manager);
+  manager.listExistingTargets = async (...args) => {
+    const targets = await list(...args);
+    if (!targets.length) contexts.browserContextIds.push('new-empty-context');
+    return targets;
+  };
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, ['startup']);
+  assert.equal(fs.existsSync(`/proc/${manager.child.pid}`), true);
+});
+
+
+test('approved-home context preservation survives later empty-target sweeps and manager restart', async t => {
+  const { manager, config, managers } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const contexts = { browserContextIds: [], defaultBrowserContextId: 'default-context' };
+  const protocol = approvedHomeProtocol(t, manager, { contexts });
+  const list = manager.listExistingTargets.bind(manager);
+  manager.listExistingTargets = async (...args) => {
+    const targets = await list(...args);
+    if (!targets.length) contexts.browserContextIds = ['new-empty-context'];
+    return targets;
+  };
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, ['startup']);
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  const restored = new ChromiumManager(config); managers.push(restored);
+  approvedHomeProtocol(t, restored, { contexts });
+  assert.equal((await restored.releaseIfUnused()).released, false);
+  assert.equal(fs.existsSync(`/proc/${manager.child.pid}`), true);
+  contexts.browserContextIds = [];
+  assert.equal((await restored.releaseIfUnused()).released, true);
+});
+
+
+test('approved-home release preserves a manual target created during final context lookup', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  let contextReads = 0;
+  const protocol = approvedHomeProtocol(t, manager, { async onContexts() {
+    if (++contextReads === 2) await fetch(manager.baseUrl + '/json/new?' + encodeURIComponent('https://example.test/manual'), { method: 'PUT' });
+  } });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, ['startup']);
+  assert.equal(fs.existsSync(`/proc/${manager.child.pid}`), true);
+  assert.equal((await manager.listExistingTargets())[0].url, 'https://example.test/manual');
+});
+
+test('approved-home close stops if the durable context fence cannot be saved', async t => {
+  const { manager } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  const protocol = approvedHomeProtocol(t, manager);
+  const rename = fs.renameSync.bind(fs);
+  t.mock.method(fs, 'renameSync', (...args) => {
+    if (args[1] === manager.ownershipFile) throw new Error('fence persistence unavailable');
+    return rename(...args);
+  });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, []);
+  assert.equal((await manager.listExistingTargets()).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(manager.ownershipFile, 'utf8')).process.idleHomeContext, undefined);
+});
+
+test('restored empty home-fenced process waits for a synchronous lifecycle guard', async t => {
+  const { manager, config, managers } = await makeManager(t, homeSettings);
+  await manager.ensureStarted();
+  let reads = 0, idle = true;
+  const protocol = approvedHomeProtocol(t, manager, { onContexts() { if (++reads === 2) idle = false; } });
+  manager.setLifecycleGuards({ canRelease: () => idle });
+  assert.equal((await manager.releaseIfUnused()).released, false);
+  assert.deepEqual(protocol.closed, ['startup']);
+  const restored = new ChromiumManager(config); managers.push(restored);
+  assert.equal((await restored.releaseIfUnused({ guard: () => true })).released, false);
+  restored.setLifecycleGuards({ canRelease: async () => true });
+  assert.equal((await restored.releaseIfUnused()).released, false);
+  restored.setLifecycleGuards({ canRelease: () => true });
+  assert.equal((await restored.releaseIfUnused()).released, true);
 });

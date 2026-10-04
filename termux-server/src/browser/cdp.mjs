@@ -4,6 +4,9 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+// Explicit operator-approved exception; never general target creation proof.
+const APPROVED_IDLE_HOME_URL = 'https://chatgpt.com/';
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class CdpSession {
@@ -253,7 +256,8 @@ export class ChromiumManager {
       const result = await this.closeOwnedTarget(target.id, { guard: () => this.isTargetIdle(target.id, idleMs) });
       if (result.closed) closed.push(String(target.id));
     }
-    if (closed.length) await this.releaseIfUnused().catch(() => {});
+    // Home-only idle browsers have no created-target cleanup entry to trigger release.
+    await this.releaseIfUnused().catch(() => {});
     return { closed };
   }
 
@@ -393,8 +397,75 @@ export class ChromiumManager {
     return result.closed || result.absent;
   }
 
+  async #closeApprovedHomeTarget(target, { guard, processProof, useEpoch }) {
+    const id = String(target?.id || '');
+    const skip = reason => ({ closed: false, absent: false, reason });
+    const allowed = () => typeof this.lifecycleGuards.canRelease === 'function'
+      && this.#allowed(guard) && this.#allowed(this.lifecycleGuards.canRelease)
+      && this.targetUseEpoch === useEpoch && this.ownership.process === processProof
+      && Boolean(this.#ownedProcess());
+    if (!id || target.type !== 'page' || target.url !== APPROVED_IDLE_HOME_URL || !allowed()) {
+      return skip('home_guard_rejected');
+    }
+    // The browser-instance websocket binds the final read and close to this
+    // generation even if the debugging port is replaced. No page is attached,
+    // navigated, or recorded as created by this manager.
+    const session = new CdpSession(processProof.browserKey);
+    try {
+      await session.connect();
+      if (!allowed()) return skip('home_guard_rejected');
+      const contexts = await session.call('Target.getBrowserContexts', {}, { timeoutMs: 1500 });
+      if (!allowed()) return skip('home_guard_rejected');
+      // A context omitted by getBrowserContexts is not positive default-context
+      // proof (the returned array covers protocol-created contexts only).
+      const defaultContext = contexts.defaultBrowserContextId;
+      if (typeof defaultContext !== 'string' || !defaultContext
+          || !Array.isArray(contexts.browserContextIds)
+          || contexts.browserContextIds.length !== 0) return skip('home_context_unproven');
+      const version = await this.#version();
+      if (this.#useVersion(version) !== processProof.browserKey || !allowed()) return skip('browser_changed');
+      const { targetInfo: current } = await session.call('Target.getTargetInfo', { targetId: id }, { timeoutMs: 1500 });
+      // Last awaited read is the exact target's current URL/context. Revalidate
+      // process birth/boot/profile/port plus app state/use synchronously before close.
+      if (!allowed() || current?.targetId !== id || current.type !== 'page'
+          || current.url !== APPROVED_IDLE_HOME_URL || current.browserContextId !== defaultContext
+          || current.attached !== false || current.subtype) return skip('home_guard_rejected');
+      // Keep this context fence across uncertain closes, empty-target retries and
+      // restart. It is release protection, never target-created ownership.
+      this.ownership.process.idleHomeContext = defaultContext;
+      this.#saveOwnership();
+      this.closingTargets.add(id);
+      const result = await session.call('Target.closeTarget', { targetId: id }, { timeoutMs: 1500 });
+      if (result.success !== true) return skip('close_failed');
+      this.forgetTarget(id);
+      return { closed: true, absent: false, reason: 'approved_idle_home' };
+    } catch { return skip('home_close_unavailable'); }
+    finally { session.close(); }
+  }
+
+  async #idleHomeReleaseAllowed(processProof, allowed) {
+    const same = () => typeof this.lifecycleGuards.canRelease === 'function'
+      && allowed() && this.ownership.process === processProof && Boolean(this.#ownedProcess());
+    if (!same()) return false;
+    const session = new CdpSession(processProof.browserKey);
+    try {
+      await session.connect();
+      if (!same()) return false;
+      const contexts = await session.call('Target.getBrowserContexts', {}, { timeoutMs: 1500 });
+      if (!same() || contexts.defaultBrowserContextId !== processProof.idleHomeContext
+          || !Array.isArray(contexts.browserContextIds) || contexts.browserContextIds.length !== 0) return false;
+      // A page may have appeared while the context read was pending. Recheck the
+      // empty target set on the same proven browser instance before signaling it.
+      const { targetInfos } = await session.call('Target.getTargets', {}, { timeoutMs: 1500 });
+      return same() && Array.isArray(targetInfos) && targetInfos.length === 0;
+    } catch { return false; }
+    finally { session.close(); }
+  }
+
   async #releaseIfUnused({ guard } = {}) {
-    const allowed = () => this.#allowed(guard) && this.#allowed(this.lifecycleGuards.canRelease);
+    const useEpoch = this.targetUseEpoch;
+    const allowed = () => this.#allowed(guard) && this.#allowed(this.lifecycleGuards.canRelease)
+      && this.targetUseEpoch === useEpoch;
     const skip = (reason) => ({ released: false, reason });
     if (!allowed()) return skip('guard_rejected');
     if (!this.#ownedProcess()) return skip('unowned_process');
@@ -406,14 +477,20 @@ export class ChromiumManager {
     let targets = await this.listExistingTargets();
     if (!allowed()) return skip('guard_rejected');
     if (!Array.isArray(targets)) return skip('targets_unavailable');
-    // All targets block release except our untouched nonce-proven startup page.
-    // A restored/manual about:blank page is never enough evidence of ownership.
+    // Permit only nonce-proven untouched startup pages or the exact approved
+    // idle home. Other manual pages, conversations and non-page uses still block.
+    const processProof = this.ownership.process;
     for (const target of targets) {
       const proof = this.ownership.targets[String(target?.id || '')];
-      if (!this.isOwnedTarget(target?.id) || !proof.startupUrl
-          || target.type !== 'page' || target.url !== proof.startupUrl) return skip('targets_in_use');
+      const startup = this.isOwnedTarget(target?.id) && proof.startupUrl && target.url === proof.startupUrl;
+      if (target?.type !== 'page' || (!startup && target.url !== APPROVED_IDLE_HOME_URL)) return skip('targets_in_use');
     }
     for (const target of targets) {
+      if (target.url === APPROVED_IDLE_HOME_URL) {
+        const result = await this.#closeApprovedHomeTarget(target, { guard: allowed, processProof, useEpoch });
+        if (!result.closed) return skip(result.reason);
+        continue;
+      }
       const startupUrl = this.ownership.targets[target.id]?.startupUrl;
       const result = await this.#closeOwnedTarget(target.id, {
         lifecycle: 'release',
@@ -425,6 +502,9 @@ export class ChromiumManager {
     targets = await this.listExistingTargets();
     if (!allowed()) return skip('guard_rejected');
     if (!Array.isArray(targets) || targets.length !== 0) return skip('targets_in_use');
+    if (processProof?.idleHomeContext && !await this.#idleHomeReleaseAllowed(processProof, allowed)) {
+      return skip('home_release_unproven');
+    }
     const root = this.#ownedProcess();
     if (!root) return skip('unowned_process');
     const tree = this.#treeRows(this.#processRows(), root.pid);

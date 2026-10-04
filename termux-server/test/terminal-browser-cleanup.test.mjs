@@ -147,3 +147,50 @@ test('periodic idle sweep receives lifecycle guards that preserve live and pause
   assert.equal(f.lifecycleGuards.canRelease(),false);
   await f.controller.quiesceForStandby();assert.equal(f.lifecycleGuards.canCloseTarget('target-owned'),false);
 });
+
+for (const state of ['STOPPED', 'CANCELLED', 'COMMITTED', 'COMPLETED']) {
+  test('idle release ignores inert ' + state + ' metadata without erasing historical HTTP files', async () => {
+    const f = ownedFixture(); await f.existing(); await f.stop(); await f.clean();
+    const marker = f.controller.repository.data.retired[keyFor(f.body)]; marker.state = state;
+    const historicalControl = { ...f.control, state: 'RUNNING', control_epoch: 1 };
+    f.controller.repository.data.controls[f.body.task_id] = historicalControl;
+    const files = { dispatch: { ...f.body, updated_at_ms: Date.now(), server_status: 'RUNNING' }, control: historicalControl };
+    await f.store.patch({ httpIngress: { files, signals: {} } });
+    assert.equal(f.lifecycleGuards.canRelease(), true);
+    assert.deepEqual(f.store.snapshot().httpIngress.files, files);
+  });
+}
+
+for (const state of ['COMMITTED', 'COMPLETED']) {
+  test('consumed ' + state + ' identity remains idle despite old-identity RUNNING refresh and dispatch retry', async () => {
+    const f = ownedFixture(); await f.existing(); await f.stop(); await f.clean();
+    f.controller.repository.data.retired[keyFor(f.body)].state = state;
+    const historicalControl = { ...f.control, state: 'RUNNING', control_epoch: 20 };
+    f.controller.repository.data.controls[f.body.task_id] = historicalControl;
+    await f.store.patch({ httpIngress: { files: { control: historicalControl, dispatch: { ...f.body, dispatch_attempt: 20 } } } });
+    assert.equal(f.lifecycleGuards.canRelease(), true);
+  });
+}
+
+for (const kind of ['new-task', 'new-request', 'new-turn', 'new-dispatch-attempt', 'new-control-epoch', 'new-paused-control']) {
+  test('idle-home release guard still preserves fresh pending HTTP ' + kind, async () => {
+    const f = ownedFixture(); await f.existing(); await f.stop(); await f.clean();
+    let pending = { ...f.body };
+    if (kind === 'new-task') Object.assign(pending, { task_id: 'PENDING', turn_id: 'PENDING:1', request_id: 'PENDING:req' });
+    if (kind === 'new-request') pending.request_id += '-next';
+    if (kind === 'new-turn') pending.turn_id += '-next';
+    if (kind === 'new-dispatch-attempt') pending.dispatch_attempt += 1;
+    if (kind === 'new-control-epoch' || kind === 'new-paused-control') {
+      pending = { ...f.control, control_epoch: f.control.control_epoch + 1, state: kind === 'new-paused-control' ? 'PAUSED' : 'RUNNING' };
+    }
+    await f.store.patch({ httpIngress: { files: { pending }, signals: {} } });
+    assert.equal(f.lifecycleGuards.canRelease(), false);
+    assert.deepEqual(f.store.snapshot().httpIngress.files.pending, pending);
+  });
+}
+
+test('idle-home release guard preserves a newer app generation before any request is ingested', async () => {
+  const f = ownedFixture(); await f.existing(); await f.stop(); await f.clean();
+  f.controller.repository.data.controls[f.body.task_id] = { ...f.control, turn_id: 'NEXT-TURN', request_id: 'NEXT-REQUEST', state: 'RUNNING', control_epoch: 3 };
+  assert.equal(f.lifecycleGuards.canRelease(), false);
+});
