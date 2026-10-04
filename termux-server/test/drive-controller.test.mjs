@@ -71,11 +71,10 @@ test('UI paused generation does not override an active app control',async()=>{
  const f=fixture();f.probe.paused=true;await f.existing();await f.stall();
  assert.equal(f.record().error,null);assert.equal(f.sends,1);
 });
-test('cursor advancement during stall verification prevents recovery',async()=>{
+test('detected cursor advancement restarts the quiet deadline before recovery',async()=>{
  const f=fixture();await f.existing();await f.observe({});
- f.browser.livenessSnapshot=async()=>({...f.probe,responseTextLength:2000});
  await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:0});
- await f.observe({status:'STALLED'});assert.equal(f.sends,0);assert.equal(f.record().state,'OBSERVING');
+ await f.observe({status:'STALLED',responseTextLength:2000});assert.equal(f.sends,0);assert.equal(f.record().state,'OBSERVING');
 });
 test('Result lookup failure retains stall time and recovery stage',async()=>{
  const f=fixture();await f.existing();await f.observe({});

@@ -10,6 +10,7 @@ export class LifecycleStore {
     this.data=structuredClone(stateStore.snapshot().lifecycle||{schema:1,requests:{},controls:{},events:[],outbox:{}});
     this.data.retired??={};this.data.browserCleanup??={};this.data.completionOutbox??={};
     this.tail=Promise.resolve();this.history={legacy:new Map(),audits:new Map()};this.integrityFaults=new Set();
+    this.publications=new Map();
   }
   async initialize(prompt) {
     if(this.initPromise)return this.initPromise;
@@ -281,24 +282,33 @@ export class LifecycleStore {
   }
   async flushCurrent(transport,key) {
     if(!transport)return;
-    const item=this.data.outbox[key];
-    if(!item)return;
-    const remote=await transport.read(item.path);
-    if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision)return;
-    if(remote?.request_id!==item.body.request_id||remote?.turn_id!==item.body.turn_id||remote?.task_id!==item.body.task_id)
-      throw new Error('Drive projection identity conflict');
-    if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
-    const serverKeys=['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation','browser_generation',
-      'conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome','server_error','server_error_class',
-      'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
-    const body={...remote};
-    for(const k of serverKeys)body[k]=item.body[k];
-    await transport.write(item.path,body,{expected:remote});
-    await this.serial(async()=>{
-      const next=structuredClone(this.data);
-      if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];
-      await this.save(next);
+    const pending=this.data.outbox[key];
+    if(!pending)return;
+    return this.#publish(pending.path,async()=>{
+      const item=this.data.outbox[key];
+      if(!item)return;
+      const remote=await transport.read(item.path);
+      if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision)return;
+      if(remote?.request_id!==item.body.request_id||remote?.turn_id!==item.body.turn_id||remote?.task_id!==item.body.task_id)
+        throw new Error('Drive projection identity conflict');
+      if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
+      const serverKeys=['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation','browser_generation',
+        'conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome','server_error','server_error_class',
+        'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
+      const body={...remote};
+      for(const k of serverKeys)body[k]=item.body[k];
+      await transport.write(item.path,body,{expected:remote});
+      await this.serial(async()=>{
+        const next=structuredClone(this.data);
+        if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];
+        await this.save(next);
+      });
     });
+  }
+  #publish(path,operation) {
+    const prior=this.publications.get(path)||Promise.resolve();
+    const p=prior.then(operation,operation);this.publications.set(path,p);
+    return p.finally(()=>{if(this.publications.get(path)===p)this.publications.delete(path);});
   }
   async flush(transport) {
     const publish=async()=>{
@@ -312,9 +322,10 @@ export class LifecycleStore {
       if(!transport)return;
       for(const [key,item] of Object.entries(this.data.completionOutbox)) {
         try {
+        await this.#publish(item.path,async()=>{
         const remote=await transport.read(item.path);
-        if(this.data.completionOutbox[key]?.revision!==item.revision)continue;
-        if(!['COMMITTED','COMPLETED'].includes(this.data.retired[key]?.state))continue;
+        if(this.data.completionOutbox[key]?.revision!==item.revision)return;
+        if(!['COMMITTED','COMPLETED'].includes(this.data.retired[key]?.state))return;
         const same=remote?.request_id===item.request_id&&remote?.turn_id===item.turn_id&&remote?.task_id===item.task_id
           &&Number(remote.dispatch_attempt)===Number(item.dispatch_attempt);
         if(same) {
@@ -331,27 +342,12 @@ export class LifecycleStore {
           if(next.completionOutbox[key]?.revision===item.revision)delete next.completionOutbox[key];
           await this.save(next);
         });
+        });
         } catch(error) {
           console.error(JSON.stringify({event:'COMPLETION_PROJECTION_PENDING',key,error:String(error?.message||error).slice(0,300)}));
         }
       }
-      for(const [key,item] of Object.entries(this.data.outbox)) {
-        const remote=await transport.read(item.path);
-        if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision)continue;
-        if(remote?.request_id!==item.body.request_id||remote?.turn_id!==item.body.turn_id||remote?.task_id!==item.body.task_id)throw new Error('Drive projection identity conflict');
-        if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
-        const serverKeys=['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation','browser_generation',
-          'conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome','server_error','server_error_class',
-          'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
-        const body={...remote};
-        for(const k of serverKeys)body[k]=item.body[k];
-        await transport.write(item.path,body,{expected:remote});
-        await this.serial(async()=>{
-          const next=structuredClone(this.data);
-          if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];
-          await this.save(next);
-        });
-      }
+      for(const key of Object.keys(this.data.outbox))await this.flushCurrent(transport,key);
     };
     const p=(this.flushTail||Promise.resolve()).then(publish,publish);
     this.flushTail=p.catch(()=>{});

@@ -140,7 +140,10 @@ test('missing composer keeps current target and retries input availability at a 
  for(let i=0;i<3;i++){await f.controller.tick(f.transport);await f.observe({status:'STALLED'});}
  assert.equal(f.resumes,1);assert.equal(f.prepares,0);assert.equal(observer.signal.aborted,false);
  assert.equal(f.record().revision,revision);
- f.probe[missing]=true;await elapsed(f);await f.controller.tick(f.transport);
+ f.probe[missing]=true;await elapsed(f);
+ await f.controller.repository.move(keyFor(f.body),f.record().state,'test input attempt window elapsed',
+  {last_nudge_attempt_at:Date.now()-f.controller.config.stallAfterMs});
+ await f.controller.tick(f.transport);
  assert.equal(f.sends,1);assert.equal(f.resumes,1);
 });
 
@@ -153,7 +156,7 @@ test('monitor activity callback failure retains session and reports callback err
   observed.resolve();await new Promise(resolve=>args.signal.addEventListener('abort',resolve,{once:true}));
  };
  await f.existing();
- f.browser.livenessSnapshot=async()=>{throw Error('UI observation callback unavailable');};
+ f.browser.recoveryInputSnapshot=async()=>{throw Error('UI input lookup unavailable');};
  await f.controller.repository.move(keyFor(f.body),'STALLED','test stalled',{last_progress_at:0,cursor:cursor(f.probe)});
  start.resolve();await observed.promise;
  assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,1);

@@ -2,26 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
 
-test('real response progress in the final recovery baseline defers input for a full quiet window',async t=>{
+test('detected response progress renews the deadline without requiring another baseline read',async t=>{
   const WINDOW=600000;let now=1000000;
   t.mock.method(Date,'now',()=>now);
   const f=fixture();f.controller.config.stallAfterMs=WINDOW;
   f.probe.streaming=false;f.probe.stopButtonVisible=false;
   t.after(()=>f.controller.quiesceForStandby());
   await f.existing();await f.observe({});
-  let snapshots=0;
-  f.browser.livenessSnapshot=async()=>{
-    if(++snapshots===2){
-      now+=540000;
-      f.probe.responseFingerprint='actual-progress-during-attempt';
-    }
-    return {...f.probe};
-  };
-  now+=WINDOW;const attemptAt=now;
+  f.browser.livenessSnapshot=async()=>{throw Error('response observation unavailable');};
+  now+=540000;
+  f.probe.responseFingerprint='actual-observed-progress';
   await f.observe({status:'STALLED'});
-  assert.equal(f.sends,0,'new response progress cancels this recovery submission');
+  assert.equal(f.sends,0,'detected response progress renews the quiet window');
   assert.equal(f.record().last_progress_at,now);
-  assert.equal(f.record().last_nudge_attempt_at,attemptAt);
+  assert.equal(f.record().last_nudge_attempt_at,undefined);
   assert.equal(f.record().cursor.responseFingerprint,f.probe.responseFingerprint);
   now+=WINDOW-1;await f.observe({status:'STALLED'});
   assert.equal(f.sends,0);
@@ -39,8 +33,8 @@ for(const boundary of ['setup','submit-success','submit-unknown'])test(
     await f.existing();await f.observe({});
     if(boundary==='setup') {
       let snapshots=0;
-      f.browser.livenessSnapshot=async()=>{
-        if(++snapshots===2)now+=WINDOW+60000;
+      f.browser.recoveryInputSnapshot=async()=>{
+        if(++snapshots===1)now+=WINDOW+60000;
         return {...f.probe};
       };
     } else {
@@ -83,7 +77,7 @@ for(const outcome of ['success','quiesce-failure','snapshot-failure'])test(
       return {...f.probe};
     };
     now+=WINDOW;await f.observe({status:'STALLED'}).catch(()=>{});
-    const finishedAt=now,initialSends=outcome==='success'?1:0;
+    const finishedAt=now,initialSends=outcome==='quiesce-failure'?0:1;
     assert.equal(quiesces,1);assert.equal(f.sends,initialSends);
     assert.equal(f.record().last_nudge_attempt_at,finishedAt);
     now+=30000;await f.observe({status:'STALLED'}).catch(()=>{});
@@ -104,7 +98,7 @@ test('streaming-only recovery verification uses fresh UI state without resetting
   t.after(()=>f.controller.quiesceForStandby());
   await f.existing();await f.observe({});
   const progressAt=f.record().last_progress_at;
-  f.browser.livenessSnapshot=async()=>({...f.probe,streaming:f.quiesces===0});
+  f.browser.recoveryInputSnapshot=async()=>({...f.probe,streaming:f.quiesces===0});
   now+=WINDOW;await f.observe({status:'STALLED'});
   assert.equal(f.record().last_progress_at,progressAt,'streaming telemetry is not response text progress');
   assert.equal(f.quiesces,1,'fresh streaming state still selects recovery quiesce');

@@ -67,6 +67,19 @@ function runtimeEvaluateTimedOut(error) {
   return String(error?.message || error) === 'CDP command timeout: Runtime.evaluate';
 }
 
+function recoveryInputExpression() {
+  return `(() => {
+    const visible=e=>e.isConnected&&e.offsetParent!==null;
+    const selectors=['textarea#prompt-textarea','textarea[data-testid="prompt-textarea"]',
+      'div#prompt-textarea[contenteditable="true"]','main form [contenteditable="true"][data-lexical-editor="true"]',
+      'main form [contenteditable="true"]'];
+    const composer=selectors.some(selector=>[...document.querySelectorAll(selector)].some(visible));
+    const stopButtonVisible=[...document.querySelectorAll('button')].filter(visible).some(b=>
+      b.dataset.testid==='stop-button'||/stop|중지/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')));
+    return {url:location.href,composer,streaming:stopButtonVisible,stopButtonVisible};
+  })()`;
+}
+
 function conversationId(url) {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
@@ -870,6 +883,11 @@ export class ChatGptBrowser {
     return evaluate(session, probeExpression());
   }
 
+  async recoveryInputSnapshot({ session, signal }) {
+    if (signal?.aborted) throw signal.reason || new Error('aborted');
+    return evaluate(session, recoveryInputExpression());
+  }
+
   async attachTarget({targetId,signal,onTarget}) {
     const targets=await this.chromium.listExistingTargets();
     const target=targets?.find(t=>t.id===targetId&&t.type==='page'&&!this.chromium.targetClosing?.(t.id));
@@ -887,7 +905,7 @@ export class ChatGptBrowser {
 
   async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest,onConversation}) {
     if(signal?.aborted||!guard())throw new Error('stale submission');
-    const probe=await evaluate(session,probeExpression());
+    const probe=await evaluate(session,kind==='recovery'?recoveryInputExpression():probeExpression());
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
       throw new Error('submission conversation ownership mismatch');
     if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
@@ -963,7 +981,7 @@ export class ChatGptBrowser {
   }
 
   async quiesce({session,conversationUrl,signal,guard}) {
-    const before=await evaluate(session,probeExpression());
+    const before=await this.recoveryInputSnapshot({session,signal});
     if(conversationId(before.url)!==conversationId(conversationUrl))throw new Error('quiesce conversation mismatch');
     if(!before.streaming&&!before.stopButtonVisible)return before;
     if(signal?.aborted||!guard())throw new Error('stale stream cleanup');
@@ -971,8 +989,15 @@ export class ChatGptBrowser {
       'const buttons=[...document.querySelectorAll("button")].filter(e=>e.isConnected&&e.offsetParent!==null);'+
       'const stop=buttons.find(b=>b.dataset.testid==="stop-button"||/stop|중지/i.test((b.getAttribute("aria-label")||"")+" "+(b.title||"")));'+
       'if(stop)stop.click();return !!stop;})()');
-    return this.#waitFor(session,p=>!p.streaming&&!p.stopButtonVisible,{
-      timeoutMs:this.config.navigationTimeoutMs,signal,label:'stuck stream cleanup'});
+    const started=Date.now();
+    do {
+      if(signal?.aborted||!guard())throw signal?.reason||new Error('stale stream cleanup');
+      const current=await this.recoveryInputSnapshot({session,signal});
+      if(conversationId(current.url)!==conversationId(conversationUrl))throw new Error('quiesce conversation mismatch');
+      if(!current.streaming&&!current.stopButtonVisible)return current;
+      await delay(250,signal);
+    } while(Date.now()-started<this.config.navigationTimeoutMs);
+    throw new Error('Timed out waiting for stuck stream cleanup');
   }
 
   async monitor({ session, baseline, signal, onActivity, livenessGate }) {

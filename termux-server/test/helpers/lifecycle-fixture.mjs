@@ -43,6 +43,7 @@ function fixture(options={}) {
     resume:async()=>{f.resumes++;if(f.attachError)throw f.attachError;return {target:{id:'target-owned'},session:session(),baseline:{...f.probe}};},
     attachTarget:async()=>({target:{id:'target-new'},session:session(),baseline:{...f.probe}}),
     livenessSnapshot:async()=>({...f.probe}),
+    recoveryInputSnapshot:async()=>({...f.probe}),
     quiesce:async()=>{f.quiesces++;f.probe.streaming=false;f.probe.stopButtonVisible=false;await f.onQuiesce?.();},
     submitIntent:async args=>{
       f.sends++;
@@ -65,16 +66,18 @@ function fixture(options={}) {
     },
     monitor:async args=>{f.observations.push(args);await new Promise(resolve=>args.signal.addEventListener('abort',resolve,{once:true}));return {status:'ABORTED'};},
   };
-  const config={maxAttachAttempts:3,resumeRetryMs:1,stallAfterMs:1,recoveryPrompt:'continue test'};
+  const config={maxAttachAttempts:3,resumeRetryMs:1,stallAfterMs:600000,recoveryPrompt:'continue test'};
   f.recreate=()=>new DriveDispatchController({browser:f.browser,stateStore:f.store,config});
   f.controller=f.recreate();
   f.record=()=>f.controller.repository.get(keyFor(f.body));
-  f.ingest=async()=>{f.rows.set(f.path,structuredClone(f.body));await f.controller.ingest(f.path,f.body,f.transport);};
+  // Drain ready background receipt applications, without waiting for a pending browser read.
+  f.settle=async()=>{await new Promise(resolve=>setImmediate(resolve));await Promise.all([...f.controller.operations.values()]);};
+  f.ingest=async()=>{f.rows.set(f.path,structuredClone(f.body));await f.controller.ingest(f.path,f.body,f.transport);await f.settle();};
   f.existing=async()=>{Object.assign(f.body,{conversation_url:f.probe.url,client_status:'SEND_REQUESTED',server_status:'STARTED'});await f.ingest();};
-  f.observe=async overrides=>{const a=f.observations.at(-1);assert.ok(a,'monitor attached');await a.onActivity({...f.probe,...overrides});};
+  f.observe=async overrides=>{const a=f.observations.at(-1);assert.ok(a,'monitor attached');await a.onActivity({...f.probe,...overrides});await f.settle();};
   f.stall=async()=>{
     await f.observe({});
-    await f.controller.repository.move(keyFor(f.body),'OBSERVING','test elapsed time',{last_progress_at:Date.now()-1000});
+    await f.controller.repository.move(keyFor(f.body),'OBSERVING','test elapsed time',{last_progress_at:Date.now()-f.controller.config.stallAfterMs});
     await f.observe({status:'STALLED'});
   };
   f.stop=async()=>{f.control={...f.control,state:'STOPPED',control_epoch:f.control.control_epoch+1};await f.controller.control(null,f.control,f.transport);};

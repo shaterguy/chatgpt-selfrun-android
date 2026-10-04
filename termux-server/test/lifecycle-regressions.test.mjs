@@ -143,6 +143,10 @@ async function startStalledResume({ resultText, resultError, snapshot,
       if (snapshot instanceof Error) throw snapshot;
       return snapshot;
     },
+    recoveryInputSnapshot: async () => {
+      if (snapshot instanceof Error) throw snapshot;
+      return snapshot;
+    },
     quiesce:async()=>{snapshot.streaming=false;snapshot.stopButtonVisible=false;return snapshot;},
     submitIntent:async({prompt,onRequest})=>{
       await onRequest({message_id:'recovery-input',released:true});
@@ -188,6 +192,8 @@ async function startStalledResume({ resultText, resultError, snapshot,
     result_document_id: 'RESULT-DOC',
   }), transportWithControl(transport, controller));
   const action = await activityDone;
+  await new Promise(resolve=>setImmediate(resolve));
+  await Promise.all([...controller.operations.values()]);
   return {
     action,
     controller,

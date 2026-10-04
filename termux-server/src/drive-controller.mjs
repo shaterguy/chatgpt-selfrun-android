@@ -266,6 +266,18 @@ export class DriveDispatchController {
       }
       return;
     }
+    // The server tick owns the quiet deadline independently of page observation.
+    // A pending/failed probe, receipt readback, or observation retry cannot reset it.
+    const attached=this.sessions.get(key);
+    if(attached?.guard?.()&&r.conversation_url&&this.#nudgeDue(r)) {
+      if(r.result_retry_at>Date.now())return;
+      try {
+        if(r.state!=='STALLED')await this.#move(key,'STALLED','PROGRESS_DEADLINE_REACHED',{},attached.token);
+        await this.#recover(key,transport,r.cursor||{},attached.token);
+      } catch(error){await this.#observationFailure(key,transport,error,attached);}
+      if(attached.guard())this.#monitor(key,transport);
+      await this.repository.flushCurrent(transport,key);return;
+    }
     if(r.retry_at>Date.now())return;
     let a=this.sessions.get(key);
     if(!a) {
@@ -391,6 +403,7 @@ export class DriveDispatchController {
     void this.browser.monitor({session:a.session,baseline:r.cursor||a.baseline,signal:a.abort.signal,
       livenessGate:()=>({state:this.repository.get(key)?.control_state,epoch:this.repository.get(key)?.control_epoch}),
       onActivity:activity=>{
+        a.observationSequence=(a.observationSequence||0)+1;
         const sampledCursor=this.repository.get(key)?.cursor;
         return this.#serial(key,async()=>{
           try{return await this.#observe(key,transport,activity,a.token,sampledCursor);}
@@ -453,46 +466,39 @@ export class DriveDispatchController {
     if(!await this.#fresh(key,transport)||!this.repository.current(key,token))return;
     const a=this.sessions.get(key);
     await this.#move(key,'VERIFY_CONVERSATION','RECOVERY_CONVERSATION_CHECK',{},token);
-    let current=await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal});
-    if(!a.guard())return;
     const r=this.repository.get(key);
-    if(canonicalUrl(current.url)!==r.conversation_url)throw new Error('recovery conversation mismatch');
-    await this.#move(key,'VERIFY_CURSOR','RECOVERY_CURSOR_CHECK',{},token);
-    if(responseKey(p)!==responseKey(current)) {
-      await this.#move(key,'OBSERVING','CURSOR_CHANGED',{cursor:cursor(current),last_progress_at:Date.now()},token);return;
-    }
-    // Claim/project this recovery attempt before its first UI side effect, including quiesce.
-    let attemptAt=Date.now();
+    // Claim the attempt before accessing the page. Only the input controls are
+    // needed here; full response inspection must never gate a due continuation.
+    const attemptAt=Date.now();
     if(!await this.#move(key,'VERIFY_CURSOR','RECOVERY_ATTEMPT_STARTED',{last_nudge_attempt_at:attemptAt},token))return;
     await this.repository.flushCurrent(transport,key);
     if(!await this.#fresh(key,transport)||!this.repository.current(key,token))return;
-    if(current.streaming||current.stopButtonVisible) {
-      await this.#move(key,'QUIESCING','STUCK_STREAM_QUIESCE',{},token);
-      if(await this.#result(key,transport,token)!=='NOT_COMMITTED'||!a.guard())return;
-      try {
-        await this.browser.quiesce({session:a.session,conversationUrl:r.conversation_url,signal:a.abort.signal,guard:a.guard});
-        current=await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal});
-        if(current.streaming||current.stopButtonVisible)throw new Error('stream did not quiesce');
-      } finally {
-        if(a.guard()&&this.repository.get(key)?.last_nudge_attempt_at===attemptAt) {
-          const finishedAt=Date.now();
-          const saved=await this.#move(key,this.repository.get(key).state,'RECOVERY_UI_ATTEMPT_FINISHED',
-            {last_nudge_attempt_at:finishedAt},token);
-          if(saved)attemptAt=finishedAt;
-          await this.repository.flushCurrent(transport,key);
-        }
+    try {
+      let current=await this.browser.recoveryInputSnapshot({session:a.session,signal:a.abort.signal});
+      if(!a.guard())return;
+      if(canonicalUrl(current.url)!==r.conversation_url)throw new Error('recovery conversation mismatch');
+      if(current.streaming||current.stopButtonVisible) {
+        await this.#move(key,'QUIESCING','STUCK_STREAM_QUIESCE',{},token);
+        if(await this.#result(key,transport,token)!=='NOT_COMMITTED'||!a.guard())return;
+        current=await this.browser.quiesce({session:a.session,conversationUrl:r.conversation_url,signal:a.abort.signal,guard:a.guard})||current;
+      }
+      if(!a.guard())return;
+      await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT_CHECK',{},token);
+      if(current.composer===false) {
+        await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT_UNAVAILABLE',{
+          error:{code:'COMPOSER_UNAVAILABLE',message:'Conversation input is unavailable; observing the current page until retry'},
+          retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)},token);
+        await this.repository.flushCurrent(transport,key);return;
+      }
+      const directives=await this.#directives();
+      await this.#post(key,transport,'recovery',directives.turnContinueDirective||this.config.recoveryPrompt,false,attemptAt);
+    } finally {
+      if(a.guard()&&this.repository.get(key)?.last_nudge_attempt_at===attemptAt) {
+        await this.#move(key,this.repository.get(key).state,'RECOVERY_UI_ATTEMPT_FINISHED',
+          {last_nudge_attempt_at:Date.now()},token);
+        await this.repository.flushCurrent(transport,key);
       }
     }
-    if(!a.guard())return;
-    await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT_CHECK',{},token);
-    if(current.composer===false) {
-      await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT_UNAVAILABLE',{
-        error:{code:'COMPOSER_UNAVAILABLE',message:'Conversation input is unavailable; observing the current page until retry'},
-        retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)},token);
-      await this.repository.flushCurrent(transport,key);return;
-    }
-    const directives=await this.#directives();
-    await this.#post(key,transport,'recovery',directives.turnContinueDirective||this.config.recoveryPrompt,false,attemptAt);
   }
   #requestCallback(key,a,intent) {
     return async evidence=>{
@@ -516,13 +522,9 @@ export class DriveDispatchController {
     const a=this.sessions.get(key);
     if(!a?.guard())return;
     let r=this.repository.get(key);
-    let intent=retry?r.intent:newIntent(r,kind,prompt,await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal}));
+    let intent=retry?r.intent:newIntent(r,kind,prompt,kind==='recovery'?r.cursor:
+      await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal}));
     if(!a.guard())return;
-    if(kind==='recovery'&&responseKey(r.cursor)!==responseKey(intent.baseline)) {
-      await this.#move(key,'OBSERVING','RECOVERY_BASELINE_PROGRESS',{
-        cursor:cursor(intent.baseline),last_progress_at:Date.now(),error:null},a.token);
-      await this.repository.flushCurrent(transport,key);return;
-    }
     if(retry&&(intent.outcome!=='ABSENT'||intent.sends>=2))return;
     intent={...intent,...(retry?{receipt:null,message_id:null,released:false,absence_proof:null,transport_settled:false}:{}),
       sends:intent.sends+1,outcome:'PENDING',
@@ -594,6 +596,7 @@ export class DriveDispatchController {
   async #reconcile(key,transport) {
     const a=this.sessions.get(key),r=this.repository.get(key);
     if(!a?.guard()||!r.intent)return;
+    if(r.conversation_url&&sameIntent(a.reconciling?.intent,r.intent))return;
     // Receipt evidence is diagnostic once this request owns a canonical conversation.
     if(r.conversation_url)this.#monitor(key,transport);
     // Verify the submission itself, never a business Result document.
@@ -603,31 +606,52 @@ export class DriveDispatchController {
     if(typeof prompt!=='string'||digest(prompt)!==r.intent.hash)throw new Error('durable submission input hash mismatch');
     const neverCalled=r.intent.kind==='recovery'&&r.intent.outcome==='ABSENT'
       &&r.intent.absence_proof==='NOT_SUBMITTED_RESULT_GATE';
-    const outcome=neverCalled?{state:'ABSENT'}:await this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,
-      signal:a.abort.signal,guard:a.guard,onRequest:this.#requestCallback(key,a,r.intent)});
+    let observationSequence=a.observationSequence||0;
+    const read=()=>{observationSequence=a.observationSequence||0;return neverCalled?{state:'ABSENT'}:this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,
+      signal:a.abort.signal,guard:()=>a.guard()&&sameIntent(this.repository.get(key)?.intent,r.intent),
+      onRequest:r.conversation_url?evidence=>this.#serial(key,()=>this.#requestCallback(key,a,r.intent)(evidence)):
+        this.#requestCallback(key,a,r.intent)});};
+    if(r.conversation_url) {
+      // Receipt diagnostics must not occupy the effectful dispatch lane. Only
+      // their fenced state application is serialized with sends/observations.
+      const pending={intent:r.intent};a.reconciling=pending;
+      void Promise.resolve().then(read).then(outcome=>this.#serial(key,()=>this.#settleReceipt(key,transport,a,r,outcome,observationSequence)))
+        .catch(error=>this.#serial(key,async()=>{
+          if(a.guard()&&sameIntent(this.repository.get(key)?.intent,r.intent))
+            await this.#observationFailure(key,transport,error,a);
+        })).finally(()=>{if(a.reconciling===pending)delete a.reconciling;})
+        .catch(error=>console.error(JSON.stringify({event:'RECEIPT_DIAGNOSTIC_FAILED',key,error:String(error?.message||error).slice(0,300)})));
+      return;
+    }
+    await this.#settleReceipt(key,transport,a,r,await read(),observationSequence);
+  }
+  async #settleReceipt(key,transport,a,r,outcome,observationSequence) {
     if(!a.guard())return;
     const latest=this.repository.get(key);
     if(!sameIntent(latest.intent,r.intent))return;
+    const token={...a.token,intent_id:r.intent.id,receipt_generation:r.intent.receipt_generation};
     if(outcome.state==='CONFIRMED') {
       const url=canonicalUrl(outcome.probe?.url);
       if(!url)throw new Error('confirmed input lacks canonical conversation');
       const intentKind=r.intent.kind,now=Date.now();
+      const cursorCurrent=(a.observationSequence||0)===observationSequence;
       await this.#move(key,'OBSERVING','POST_USER_MESSAGE_CONFIRMED',{
         intent:{...latest.intent,outcome:'CONFIRMED',message_id:outcome.messageId||latest.intent.message_id},
         ...(intentKind==='recovery'?{last_recovered_response:responseKey(outcome.probe),last_recovery_epoch:r.control_epoch}:{}),
-        conversation_url:url,submission_confirmed:true,response_status:'RUNNING',cursor:cursor(outcome.probe),
-        ...((!latest.cursor||responseKey(latest.cursor)!==responseKey(outcome.probe))?{last_progress_at:now}:{}),error:null},a.token);
+        conversation_url:url,submission_confirmed:true,response_status:'RUNNING',
+        ...(cursorCurrent?{cursor:cursor(outcome.probe),
+          ...((!latest.cursor||responseKey(latest.cursor)!==responseKey(outcome.probe))?{last_progress_at:now}:{})}:{}),error:null},token);
       await this.repository.flushCurrent(transport,key);
       this.#monitor(key,transport);
     } else if(outcome.state==='ABSENT'&&r.intent.kind!=='recovery'&&!latest.conversation_url&&r.intent.sends<2) {
-      await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...latest.intent,outcome:'ABSENT'}},a.token);
-      await this.#post(key,transport,r.intent.kind,prompt,true);
+      await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...latest.intent,outcome:'ABSENT'}},token);
+      await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
     } else {
       // Generic recovery input may be attempted again after its durable quiet window, even without an ACK.
       const recovery=r.intent.kind==='recovery',observe=!!latest.conversation_url;
       await this.#move(key,observe?'OBSERVING':'POST_UNCERTAIN','POST_READBACK_UNKNOWN',
         {intent:{...latest.intent,outcome:recovery&&outcome.state==='ABSENT'?'ABSENT':'UNKNOWN'},
-        error:latest.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},a.token);
+        error:latest.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},token);
       await this.repository.flush(transport);
       if(observe)this.#monitor(key,transport);
     }

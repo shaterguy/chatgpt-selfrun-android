@@ -178,7 +178,9 @@ test('real disk restart restores request and exact intent',async()=>{
     await f.controller.quiesceForStandby();
     const second=new StateStore(config);await second.init();f.store=second;f.controller=f.recreate();
     await f.controller.tick(f.transport);
+    await f.settle();
     assert.equal(f.record().intent.id,before.intent.id);assert.equal(f.record().recovery_count,1);assert.equal(f.sends,1);
+    await f.controller.quiesceForStandby();await f.controller.repository.tail;await second.writeQueue;
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('Drive durable record can restore without previous process memory',async()=>{
@@ -237,7 +239,7 @@ for(const stage of ['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURS
   await f.store.patch(snapshot);f.controller=f.recreate();
   await f.controller.tick(f.transport);
   assert.equal(f.record().conversation_url,f.probe.url);assert.equal(f.prepares,0);
-  assert.ok(['POST_UNCERTAIN','OBSERVING','BLOCKED'].includes(f.record().state));
+  assert.ok(['POST_UNCERTAIN','OBSERVING','BLOCKED','STALLED','RECONCILING'].includes(f.record().state));
   await f.controller.quiesceForStandby();
  });
 }
