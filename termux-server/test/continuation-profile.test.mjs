@@ -89,7 +89,7 @@ test('ChatGptBrowser submission uses UI click and never enables CDP Fetch interc
   const browser=new ChatGptBrowser(null,{navigationTimeoutMs:1000});
   const accepted=await browser.submitIntent({session,prompt:'continue',profileOperations:operations,
     conversationUrl:'https://chatgpt.com/c/existing-profile',guard:()=>true,
-    intent:{baseline:{userCount:1,userMessageId:'user-1'}}});
+    intent:{id:'intent',receipt_generation:'generation-1',prompt:'continue',baseline:{userCount:1,userMessageId:'user-1'}}});
   assert.equal(submitted,1);
   assert.equal(accepted.userMessageId,'user-2');
   assert.equal(calls.includes('Fetch.enable'),false);
@@ -114,7 +114,7 @@ for(const cancellation of ['signal','guard'])test('browser final send fence afte
   }};
   const browser=new ChatGptBrowser(null,{navigationTimeoutMs:100});
   const posting=browser.submitIntent({session,prompt:'continue',profileOperations:operations,
-    conversationUrl:probe.url,guard:()=>allowed,signal:abort.signal,intent:{baseline:probe}});
+    conversationUrl:probe.url,guard:()=>allowed,signal:abort.signal,intent:{id:'intent',receipt_generation:'generation-1',prompt:'continue',baseline:probe}});
   await entered;
   if(cancellation==='signal')abort.abort(new Error('cancelled'));else allowed=false;
   release();

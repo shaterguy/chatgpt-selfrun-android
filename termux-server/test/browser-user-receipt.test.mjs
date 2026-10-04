@@ -51,24 +51,24 @@ function fixture({prompt='p'.repeat(805),extraContent='',persisted=true}={}) {
  const read=()=>browser.readSubmission({session,prompt,conversationUrl:'https://chatgpt.com/c/owned',intent:{baseline:{userCount:0}}});
  return {read,user,prompt,reloads:()=>reloads};
 }
-test('persisted exact user content is confirmed despite the recorded Show more wrapper',async()=>{
+test('exact user content with Show more wrapper is not a semantic server receipt',async()=>{
  const f=fixture();
  assert.equal(norm(f.user.innerText).length,recorded.observed_comparison.actual_length);
  assert.equal(norm(f.prompt).length,recorded.observed_comparison.expected_length);
  const receipt=await f.read();
- assert.equal(f.reloads(),1);
- assert.equal(receipt.state,'CONFIRMED');
+ assert.equal(f.reloads(),0);
+ assert.equal(receipt.state,'UNKNOWN');
 });
-test('literal UI label words in user content are preserved during receipt comparison',async()=>{
+test('literal UI label words cannot turn DOM content into a receipt',async()=>{
  const f=fixture({prompt:'Keep the literal phrases Show more and 더 보기 in this user instruction.'});
- assert.equal((await f.read()).state,'CONFIRMED');
+ assert.equal((await f.read()).state,'UNKNOWN');
 });
 test('additional substantive message text cannot be accepted as a matching prompt prefix',async()=>{
  const f=fixture({extraContent:'different instruction'});
  assert.equal((await f.read()).state,'UNKNOWN');
 });
-test('removing controls cannot turn a disappeared optimistic bubble into accepted submission',async()=>{
+test('an optimistic bubble is UNKNOWN without reloading to remove it',async()=>{
  const f=fixture({persisted:false});
  assert.equal((await f.read()).state,'UNKNOWN');
- assert.equal(f.reloads(),1);
+ assert.equal(f.reloads(),0);
 });

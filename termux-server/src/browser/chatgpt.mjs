@@ -38,11 +38,13 @@ export function conversationResumeReady(probe) {
 
 const delay = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) return reject(signal.reason || new Error('aborted'));
-  const timer = setTimeout(resolve, ms);
-  signal?.addEventListener('abort', () => {
-    clearTimeout(timer);
+  const cleanup = () => signal?.removeEventListener('abort', onAbort);
+  const onAbort = () => {
+    clearTimeout(timer); cleanup();
     reject(signal.reason || new Error('aborted'));
-  }, { once: true });
+  };
+  const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+  signal?.addEventListener('abort', onAbort, { once: true });
 });
 
 async function evaluate(session, expression, timeoutMs = RUNTIME_EVALUATE_TIMEOUT_MS) {
@@ -469,6 +471,172 @@ async function installRequestProfileEngine(session) {
   await evaluate(session,source);
 }
 
+// Receipt-only observer: the existing v1 request-profile engine remains the sole body mutator.
+// Event vocabulary/framing follows Android ChatGptTurnProtocolScript (436da865).
+function installReceiptObserver() {
+  const version='selfrun-passive-receipt-v1';
+  if(window.__selfrunReceiptObserver?.version===version)return true;
+  const downstreamFetch=window.fetch;
+  const MAX_BYTES=262144,MAX_EVENT=65536,MAX_MS=30000;
+  let current=null,sequence=0;
+  const canonical=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(value)
+    &&!value.toLowerCase().startsWith('local-chatgpt')?value:'';
+  const same=(entry,key)=>!!entry&&entry.intent_id===key?.intent_id&&entry.generation===key?.generation;
+  const active=entry=>current===entry&&!entry.retired&&!entry.invalid;
+  const stopReader=entry=>{
+    clearTimeout(entry.timer);entry.timer=null;
+    const reader=entry.reader;entry.reader=null;
+    // Awaiting tee cancellation can wait for the original response. Never do that.
+    if(reader)try{Promise.resolve(reader.cancel()).catch(()=>{});}catch{}
+  };
+  const invalidate=(entry,reason)=>{
+    if(current!==entry)return;
+    entry.invalid=reason;entry.ack=null;stopReader(entry);
+  };
+  const retire=entry=>{if(entry){entry.retired=true;stopReader(entry);}};
+  const bind=(entry,id)=>{
+    if(id===undefined||id===null||id==='')return true;
+    const value=canonical(id);
+    if(!value||(entry.conversation_id&&entry.conversation_id!==value)){
+      invalidate(entry,'conversation_mismatch');return false;
+    }
+    entry.conversation_id=value;return true;
+  };
+  const inspect=(entry,value)=>{
+    if(!active(entry)||!value||typeof value!=='object'||Array.isArray(value))return;
+    if(value.error||value.type==='error'){invalidate(entry,'response_error');return;}
+    if(!bind(entry,value.conversation_id))return;
+    const message=value.message||value.v?.message;
+    if(message?.conversation_id&&!bind(entry,message.conversation_id))return;
+    if(value.type==='message_marker'&&value.event==='first'
+        &&['cot_token','user_visible_token','final_channel_token'].includes(value.marker))entry.ack=value.marker;
+    else if(message&&typeof message==='object'&&typeof message.id==='string'&&message.id.length>0&&message.id.length<=160
+        &&message.author?.role==='assistant'&&['analysis','final','commentary'].includes(message.channel)
+        &&message.content&&Array.isArray(message.content.parts)&&message.content.parts.every(part=>typeof part==='string'))entry.ack='assistant_message';
+  };
+  const inspectResponse=async(entry,response)=>{
+    if(!active(entry))return;
+    if(!response?.ok){invalidate(entry,'http_error');return;}
+    let reader;
+    try{reader=response.clone().body?.getReader();}catch{invalidate(entry,'clone_unavailable');return;}
+    if(!reader){invalidate(entry,'response_body_unavailable');return;}
+    entry.reader=reader;
+    entry.timer=setTimeout(()=>invalidate(entry,'response_bound'),MAX_MS);
+    const decoder=new TextDecoder();let buffer='',bytes=0;
+    const drain=final=>{
+      // Keep a trailing CR until the next chunk so a split CRLF is not two newlines.
+      let source=buffer,carry='';
+      if(!final&&source.endsWith('\r')){source=source.slice(0,-1);carry='\r';}
+      source=source.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+      let boundary;
+      while((boundary=source.indexOf('\n\n'))>=0){
+        const block=source.slice(0,boundary);source=source.slice(boundary+2);
+        if(block.length>MAX_EVENT){invalidate(entry,'event_bound');break;}
+        const data=block.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).replace(/^ /,'')).join('\n');
+        if(data.trim()&&data.trim()!=='[DONE]'){
+          let value;try{value=JSON.parse(data);}catch{invalidate(entry,'malformed_event');break;}
+          inspect(entry,value);
+        }
+        if(!active(entry))break;
+      }
+      buffer=source+carry;
+      if(buffer.length>MAX_EVENT)invalidate(entry,'event_bound');
+    };
+    try{
+      while(active(entry)){
+        const chunk=await reader.read();
+        if(!active(entry))break;
+        if(chunk.done){buffer+=decoder.decode();drain(true);break;}
+        bytes+=chunk.value.byteLength;
+        if(bytes>MAX_BYTES){invalidate(entry,'response_bound');break;}
+        buffer+=decoder.decode(chunk.value,{stream:true});drain(false);
+        if(entry.ack&&entry.conversation_id)break;
+      }
+    }catch{if(active(entry))invalidate(entry,'response_read_error');}
+    finally{stopReader(entry);}
+  };
+  const requestBody=(entry,text)=>{
+    if(!active(entry))return false;
+    let body;try{body=JSON.parse(text);}catch{invalidate(entry,'malformed_request');return false;}
+    const messages=body?.messages;
+    if(!Array.isArray(messages)||messages.length!==1){invalidate(entry,'ambiguous_messages');return false;}
+    const message=messages[0],parts=message?.content?.parts;
+    if(message?.author?.role!=='user'||typeof message.id!=='string'
+        ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(message.id)
+        ||!Array.isArray(parts)||!parts.length||!parts.every(part=>typeof part==='string')||parts.join('')!==entry.prompt){
+      invalidate(entry,'submission_mismatch');return false;
+    }
+    if(entry.expected_conversation&&body.conversation_id!==entry.expected_conversation){invalidate(entry,'request_conversation_mismatch');return false;}
+    if(!entry.expected_conversation&&body.conversation_id){invalidate(entry,'unexpected_request_conversation');return false;}
+    if(!bind(entry,body.conversation_id))return false;
+    entry.message_id=message.id;return true;
+  };
+  window.fetch=function(input,init){
+    const entry=current;let eligible=false,requestInput=false;
+    try{
+      requestInput=typeof Request!=='undefined'&&input instanceof Request;
+      const url=new URL(requestInput?input.url:String(input),location.href);
+      const method=String(init?.method??(requestInput?input.method:'GET')).toUpperCase();
+      const path=url.pathname.toLowerCase().replace(/\/+$/,'');
+      eligible=active(entry)&&method==='POST'&&url.origin===location.origin
+        &&(path==='/backend-api/conversation'||path==='/backend-api/f/conversation');
+    }catch{}
+    let bodyText;
+    if(eligible){
+      entry.released=true;
+      if(entry.request_id)invalidate(entry,'duplicate_request');
+      else {
+        entry.request_id=entry.generation+':'+(++sequence);
+        try{
+          bodyText=init&&Object.hasOwn(init,'body')?init.body:requestInput?input.clone().text():null;
+          if(typeof bodyText!=='string'&&!(bodyText&&typeof bodyText.then==='function'))invalidate(entry,'request_body_unavailable');
+        }catch{invalidate(entry,'request_body_unavailable');}
+      }
+    }
+    // No request reconstruction, mutation, additional fetch, or streaming delay here.
+    let result;
+    try{result=Reflect.apply(downstreamFetch,this,[input,init]);}
+    catch(error){if(eligible)invalidate(entry,'fetch_failed');throw error;}
+    if(!eligible)return result;
+    // Capture outgoing identity independently of response headers. This is only
+    // correlation metadata; acknowledgement still requires a semantic response.
+    const bodyObserved=Promise.resolve(bodyText).then(text=>requestBody(entry,text))
+      .catch(()=>{if(active(entry))invalidate(entry,'observer_error');return false;});
+    return Promise.resolve(result).then(response=>{
+      void bodyObserved.then(valid=>{
+        if(valid)return inspectResponse(entry,response);
+      }).catch(()=>{if(active(entry))invalidate(entry,'observer_error');});
+      return response;
+    },error=>{invalidate(entry,'fetch_failed');throw error;});
+  };
+  window.__selfrunReceiptObserver={version,
+    arm:key=>{
+      if(typeof key?.intent_id!=='string'||!key.intent_id||typeof key.generation!=='string'||!key.generation
+          ||typeof key.prompt!=='string'||!key.prompt||key.conversation_id&&!canonical(key.conversation_id))throw new Error('RECEIPT_INTENT_INVALID');
+      if(same(current,key)&&!current.retired){
+        if(current.prompt!==key.prompt||current.expected_conversation!==(key.conversation_id||''))throw new Error('RECEIPT_INTENT_CHANGED');
+        return true;
+      }
+      retire(current);
+      current={intent_id:key.intent_id,generation:key.generation,prompt:key.prompt,
+        expected_conversation:key.conversation_id||'',conversation_id:key.conversation_id||'',
+        request_id:null,message_id:null,ack:null,invalid:null,released:false,retired:false,reader:null,timer:null};
+      return true;
+    },
+    snapshot:key=>same(current,key)&&!current.retired&&(key.prompt===undefined||key.prompt===current.prompt)?{
+      version:1,intent_id:current.intent_id,generation:current.generation,request_id:current.request_id,
+      message_id:current.message_id,conversation_id:current.conversation_id,ack:current.ack,
+      invalid:current.invalid,released:current.released,
+    }:null,
+    retire:key=>{if(same(current,key))retire(current);return true;},
+  };
+  return true;
+}
+
+export function receiptObserverDocumentStartSource() {
+  return '('+installReceiptObserver.toString()+')()';
+}
+
 export class ChatGptBrowser {
   constructor(chromium, config) {
     this.chromium = chromium;
@@ -655,18 +823,9 @@ export class ChatGptBrowser {
       },{timeoutMs:this.config.navigationTimeoutMs,signal,label:'canonical conversation URL'});
       if(onConversation)await onConversation({url:routeProbe.url,probe:routeProbe});
       if(signal?.aborted||!guard())throw new Error('stale submission');
-      const baselineCount=Number(baseline?.userCount||0);
-      const baselineId=String(baseline?.userMessageId||'');
-      if(Number(routeProbe.userCount||0)>baselineCount
-          ||(!baselineId&&!!routeProbe.userMessageId)
-          ||(!!baselineId&&!!routeProbe.userMessageId&&routeProbe.userMessageId!==baselineId))return routeProbe;
-      return await this.#waitFor(session,p=>{
-        const current=conversationId(p.url);
-        if(expected ? current!==expected : !current)return false;
-        const countAdvanced=Number(p.userCount||0)>baselineCount;
-        const id=String(p.userMessageId||'');
-        return countAdvanced||(!baselineId&&!!id)||(!!baselineId&&!!id&&id!==baselineId);
-      },{timeoutMs:this.config.navigationTimeoutMs,signal,label:'submitted user message'});
+      // The canonical route is useful ownership metadata, never an acceptance signal.
+      // Semantic receipt readback does not wait for a user/assistant DOM bubble.
+      return routeProbe;
     } catch(error) {
       if(clickReleased)error.released=true;
       throw error;
@@ -699,48 +858,72 @@ export class ChatGptBrowser {
     if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
     await evaluate(session,requestProfileDocumentStartSource());
     await evaluate(session,configureRequestProfileExpression(profileOperations));
+    await evaluate(session,receiptObserverDocumentStartSource());
     const staged=await evaluate(session,inputExpression(prompt));
     if(staged?.status!=='READY')throw new Error('submission composer not ready');
     if(signal?.aborted||!guard())throw new Error('stale submission');
-    return this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
+    const key={intent_id:intent?.id,generation:intent?.receipt_generation,prompt,conversation_id:conversationId(conversationUrl)};
+    if(intent?.prompt!==prompt)throw new Error('submission immutable prompt mismatch');
+    await evaluate(session,'window.__selfrunReceiptObserver.arm('+JSON.stringify(key)+')');
+    try {
+      return await this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
+    } finally {
+      if(signal?.aborted||!guard()) {
+        // Retire this exact arm only. A late old cleanup cannot retire its successor.
+        try{await evaluate(session,'window.__selfrunReceiptObserver?.retire('+JSON.stringify(key)+')');}catch{}
+      }
+    }
   }
 
-  async readSubmission({session,intent,prompt,conversationUrl,signal}) {
-    if(signal?.aborted)throw signal.reason;
-    let probe=await evaluate(session,probeExpression());
-    const expectedId=conversationId(conversationUrl)||conversationId(probe.url);
-    if(conversationUrl&&conversationId(probe.url)!==expectedId)return {state:'UNKNOWN',probe};
-    // Optimistic DOM bubbles do not prove server acceptance. Reload the canonical page before classifying.
-    try {
-      await session.call('Page.reload',{ignoreCache:true});
-      probe=await this.#waitFor(session,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')&&p.composer
-        &&(!expectedId||conversationId(p.url)===expectedId)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'submission readback'});
-      if(probe.loginPage)return {state:'UNKNOWN',probe};
-    }catch(error){if(signal?.aborted)throw error;return {state:'UNKNOWN',probe};}
-    if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
-      return {state:'UNKNOWN',probe};
-    const expected=JSON.stringify(String(prompt).replace(/\s+/g,' ').trim());
-    const messageId=JSON.stringify(intent.message_id||'');
-    // User wrappers also contain collapse controls. Compare complete user content on a detached clone.
-    const expression='(() => {const expected='+expected+', id='+messageId+';'+
-      'const users=[...document.querySelectorAll(\'[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"],[data-content-search-unit-key$=":user"]\')];'+
-      'const matched=users.map(e=>{let found=false;'+
-      'for(let n=e,depth=0;n&&depth<6;n=n.parentElement,depth++){'+
-      'const ids=["data-message-id","data-chatgpt-search-unit-key","data-content-search-unit-key"].map(k=>String(n.getAttribute?.(k)||""));'+
-      'if(id&&ids.some(v=>v===id||v===id+":user"))found=true;}'+
-      'const content=e.cloneNode(true);'+
-      'content.querySelectorAll(\'button,[role="button"],[aria-hidden="true"],svg\').forEach(n=>n.remove());'+
-      'const same=String(content.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
-      'return {idMatch:matched.some(m=>m.found),lastTextMatch:matched.at(-1)?.same||false};})()';
-    const evidence=await evaluate(session,expression);
-    const hasBaseline=Number.isFinite(intent.baseline?.userCount)||!!intent.baseline?.userMessageId;
-    const advanced=hasBaseline&&(Number(probe.userCount)>Number(intent.baseline?.userCount||0)||
-      (!!probe.userMessageId&&probe.userMessageId!==intent.baseline?.userMessageId));
-    if(conversationId(probe.url)&&(evidence.idMatch||(advanced&&evidence.lastTextMatch)))
-      return {state:'CONFIRMED',probe,messageId:intent.message_id||probe.userMessageId};
-    // A request released to ChatGPT may arrive later; a quiet page alone cannot prove absence.
-    if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!advanced&&!probe.streaming&&probe.readyState==='complete'&&probe.composer)
-      return {state:'ABSENT',probe};
+  async readSubmission({session,intent,prompt,conversationUrl,signal,guard=()=>true,onRequest}) {
+    const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission readback');};
+    check();
+    const key={intent_id:intent?.id,generation:intent?.receipt_generation,prompt};
+    const validKey=typeof key.intent_id==='string'&&!!key.intent_id&&typeof key.generation==='string'&&!!key.generation&&intent.prompt===prompt;
+    const expected=conversationId(conversationUrl);
+    const belongs=receipt=>validKey&&receipt?.version===1&&receipt.intent_id===key.intent_id&&receipt.generation===key.generation;
+    const metadata=receipt=>({version:1,intent_id:receipt.intent_id,generation:receipt.generation,
+      request_id:receipt.request_id||null,message_id:receipt.message_id||null,conversation_id:receipt.conversation_id||'',
+      ack:receipt.ack||null,invalid:receipt.invalid||null,released:receipt.released===true});
+    const positive=receipt=>belongs(receipt)&&receipt.released===true&&!receipt.invalid
+      &&['cot_token','user_visible_token','final_channel_token','assistant_message'].includes(receipt.ack)
+      &&typeof receipt.message_id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(receipt.message_id)
+      &&typeof receipt.request_id==='string'&&receipt.request_id.startsWith(key.generation+':')
+      &&/^\d+$/.test(receipt.request_id.slice(key.generation.length+1))
+      &&(!intent.message_id||intent.message_id===receipt.message_id)
+      &&(!intent.receipt?.request_id||intent.receipt.request_id===receipt.request_id)
+      &&!!receipt.conversation_id&&conversationId('https://chatgpt.com/c/'+receipt.conversation_id)===receipt.conversation_id
+      &&(!expected||receipt.conversation_id===expected);
+    let durable=belongs(intent?.receipt)?metadata(intent.receipt):null;
+    let probe=null;
+    const started=Date.now(),timeout=Math.min(SUBMIT_POST_GRACE_MS,Number(this.config.navigationTimeoutMs)||SUBMIT_POST_GRACE_MS);
+    do {
+      check();
+      try{probe=await evaluate(session,probeExpression());}catch(error){check();return {state:'UNKNOWN',probe};}
+      check();
+      if(probe?.loginPage||(expected&&conversationId(probe?.url)!==expected))return {state:'UNKNOWN',probe};
+      let observed=null;
+      if(validKey)try{observed=await evaluate(session,'window.__selfrunReceiptObserver?.snapshot('+JSON.stringify(key)+')||null');}catch{check();}
+      check();
+      // A current-page conflict must never fall back to an older saved positive receipt.
+      const receipt=observed===null?durable:belongs(observed)?metadata(observed):null;
+      if(receipt&&((intent.message_id&&receipt.message_id&&intent.message_id!==receipt.message_id)
+          ||(intent.receipt?.request_id&&receipt.request_id&&intent.receipt.request_id!==receipt.request_id)))return {state:'UNKNOWN',probe};
+      if(receipt&&onRequest&&JSON.stringify(receipt)!==JSON.stringify(durable)) {
+        await onRequest({message_id:receipt.message_id,released:receipt.released,receipt});
+        check();durable=receipt;
+      }
+      if(positive(receipt)&&durable&&JSON.stringify(receipt)===JSON.stringify(durable)
+          &&conversationId(probe?.url)===receipt.conversation_id) {
+        check();return {state:'CONFIRMED',probe,messageId:receipt.message_id};
+      }
+      // Only a previously proven pre-release interception abort permits a retry.
+      if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!receipt?.released)
+        return {state:'ABSENT',probe};
+      if(!receipt||receipt.invalid||!onRequest&&JSON.stringify(receipt)!==JSON.stringify(durable))break;
+      if(Date.now()-started>=timeout)break;
+      await delay(Math.min(100,Math.max(1,timeout-(Date.now()-started))),signal);
+    }while(Date.now()-started<=timeout);
     return {state:'UNKNOWN',probe};
   }
 

@@ -7,6 +7,7 @@ const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','V
 const controlStates=new Set(['RUNNING','PAUSED','WAITING_USER_INTERVENTION','STOPPED','DONE','RESUME_REQUESTED','RESUME_STOPPED_REQUESTED']);
 const responseKey=p=>{const value=cursor(p);delete value.streaming;return JSON.stringify(value);};
 const terminal = r => !r||r.retired||['COMMITTED','COMPLETED','CANCELLED','STOPPED'].includes(r.state);
+const sameIntent = (a,b) => !!a&&!!b&&a.id===b.id&&a.receipt_generation===b.receipt_generation;
 const errorInfo = (error,code) => ({code:code||error?.code||'BROWSER_ERROR',message:String(error?.message||error).slice(0,300)});
 
 export class DriveDispatchController {
@@ -134,7 +135,13 @@ export class DriveDispatchController {
       let url=record.conversation_url;
       if(!url&&record.intent) {
         const outcome=await this.browser.readSubmission({session,intent:record.intent,prompt:record.intent.prompt,
-          conversationUrl:'',signal:new AbortController().signal});
+          conversationUrl:'',signal:new AbortController().signal,guard,
+          onRequest:async evidence=>{
+            if(!guard())throw new Error('stale STOP receipt callback');
+            // Retired markers cannot accept receipt writes. Only reuse evidence durable before STOP.
+            if(Object.entries(evidence).some(([name,value])=>JSON.stringify(record.intent[name])!==JSON.stringify(value)))
+              throw new Error('new STOP receipt evidence cannot be persisted');
+          }});
         if(!guard())return;
         if(outcome.state==='ABSENT') {
           await this.repository.recordStopOutcome(record.key,control.control_epoch,'CONFIRMED');return;
@@ -406,6 +413,18 @@ export class DriveDispatchController {
     const directives=await this.#directives();
     await this.#post(key,transport,'recovery',directives.turnContinueDirective||this.config.recoveryPrompt);
   }
+  #requestCallback(key,a,intent) {
+    return async evidence=>{
+      if(!a.guard())throw new Error('stale POST callback');
+      const current=this.repository.get(key);
+      if(!sameIntent(current.intent,intent))throw new Error('submission identity changed');
+      if(evidence.receipt&&(evidence.receipt.intent_id!==intent.id||evidence.receipt.generation!==intent.receipt_generation))
+        throw new Error('receipt generation identity changed');
+      const saved=await this.#move(key,current.state,'POST_REQUEST_IDENTIFIED',{intent:{...current.intent,...evidence}},a.token);
+      if(!saved||!a.guard())throw new Error('stale POST callback');
+      if(!sameIntent(this.repository.get(key)?.intent,intent))throw new Error('submission identity changed');
+    };
+  }
   async #post(key,transport,kind,prompt,retry=false) {
     if(!prompt)throw new Error('configured input required');
     if(kind==='recovery'&&await this.#result(key,transport)!=='NOT_COMMITTED')return;
@@ -416,7 +435,9 @@ export class DriveDispatchController {
     let intent=retry?r.intent:newIntent(r,kind,prompt,await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal}));
     if(!a.guard())return;
     if(retry&&(intent.outcome!=='ABSENT'||intent.sends>=2))return;
-    intent={...intent,sends:intent.sends+1,outcome:'PENDING'};
+    intent={...intent,...(retry?{receipt:null,message_id:null,released:false,absence_proof:null,transport_settled:false}:{}),
+      sends:intent.sends+1,outcome:'PENDING',
+      receipt_generation:JSON.stringify([this.serverGeneration,a.token.run,a.token.epoch,a.token.browser,intent.id,intent.sends+1])};
     r=await this.#move(key,kind==='initial'?'POST_PENDING':'RECOVERY_POST','SUBMISSION_INTENT_DURABLE',
       {intent,recovery_count:r.recovery_count+(kind==='recovery'&&!retry?1:0),error:null,
         ...(kind==='recovery'?{last_recovered_response:responseKey(r.cursor),last_recovery_epoch:r.control_epoch}:{})},a.token);
@@ -428,19 +449,13 @@ export class DriveDispatchController {
     try {
       const submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
         profileOperations:r.body.profile_operations,signal:a.abort.signal,guard:a.guard,
-        onRequest:async evidence=>{
-          if(!a.guard())throw new Error('stale POST callback');
-          const current=this.repository.get(key);
-          if(current.intent?.id!==intent.id)throw new Error('submission identity changed');
-          await this.#move(key,current.state,'POST_REQUEST_IDENTIFIED',{intent:{...current.intent,...evidence}},a.token);
-          if(!a.guard())throw new Error('stale POST callback');
-        },
+        onRequest:this.#requestCallback(key,a,intent),
         onConversation:async evidence=>{
           if(!a.guard())throw new Error('stale conversation callback');
           const url=canonicalUrl(evidence?.url||evidence?.probe?.url);
           if(!url)throw new Error('canonical conversation callback missing URL');
           const current=this.repository.get(key);
-          if(current.intent?.id!==intent.id)throw new Error('submission identity changed');
+          if(!sameIntent(current.intent,intent))throw new Error('submission identity changed');
           if(!current.conversation_url) {
             await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:url},a.token);
             try{await this.repository.flushCurrent(transport,key);}catch(error){
@@ -473,24 +488,27 @@ export class DriveDispatchController {
     await this.#move(key,'RECONCILING','POST_READBACK',{},a.token);
     const prompt=r.intent.prompt;
     if(typeof prompt!=='string'||digest(prompt)!==r.intent.hash)throw new Error('durable submission input hash mismatch');
-    const outcome=await this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,signal:a.abort.signal});
+    const outcome=await this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,
+      signal:a.abort.signal,guard:a.guard,onRequest:this.#requestCallback(key,a,r.intent)});
     if(!a.guard())return;
+    const latest=this.repository.get(key);
+    if(!sameIntent(latest.intent,r.intent))return;
     if(outcome.state==='CONFIRMED') {
       const url=canonicalUrl(outcome.probe?.url);
       if(!url)throw new Error('confirmed input lacks canonical conversation');
       const intentKind=r.intent.kind,now=Date.now();
       await this.#move(key,'OBSERVING','POST_USER_MESSAGE_CONFIRMED',{
-        intent:{...r.intent,outcome:'CONFIRMED',message_id:outcome.messageId||r.intent.message_id},
+        intent:{...latest.intent,outcome:'CONFIRMED',message_id:outcome.messageId||latest.intent.message_id},
         ...(intentKind==='recovery'?{last_recovered_response:responseKey(outcome.probe),last_recovery_epoch:r.control_epoch}:{}),
         conversation_url:url,submission_confirmed:true,response_status:'RUNNING',cursor:cursor(outcome.probe),last_progress_at:now,error:null},a.token);
       await this.repository.flushCurrent(transport,key);
       this.#monitor(key,transport);
     } else if(outcome.state==='ABSENT'&&r.intent.sends<2) {
-      await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...r.intent,outcome:'ABSENT'}},a.token);
+      await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...latest.intent,outcome:'ABSENT'}},a.token);
       await this.#post(key,transport,r.intent.kind,prompt,true);
     } else {
-      await this.#move(key,'POST_UNCERTAIN','POST_READBACK_UNKNOWN',{intent:{...r.intent,outcome:'UNKNOWN'},
-        error:r.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},a.token);
+      await this.#move(key,'POST_UNCERTAIN','POST_READBACK_UNKNOWN',{intent:{...latest.intent,outcome:'UNKNOWN'},
+        error:latest.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},a.token);
       await this.repository.flush(transport);
     }
   }

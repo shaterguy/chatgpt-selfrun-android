@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 
 function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
-  let handler,releaseHook;const failures=[];let reloaded=false,continued=0;
+  let handler,releaseHook;const failures=[];let reloaded=false,continued=0,clicks=0;
   const probe=()=>({url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',streaming:false,
     userCount:optimistic&&!reloaded?2:1,userMessageId:optimistic&&!reloaded?'new-message':'old-message'});
   const session={
@@ -17,6 +17,7 @@ function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
       const s=params.expression;
       if(s.includes('const matched='))return {result:{value:{idMatch:optimistic&&!reloaded,lastTextMatch:optimistic&&!reloaded}}};
       if(s.includes('send.click()')) {
+        clicks++;
         if(held)void handler({requestId:'paused-post',request:{method:'POST',url:'https://chatgpt.com/backend-api/f/conversation',
           postData:JSON.stringify({conversation_id:'owned',messages:[{id:'new-message',author:{role:'user'}}]})}});
         if(evaluateTimeout)throw new Error('CDP command timeout: Runtime.evaluate');
@@ -28,19 +29,17 @@ function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
     },
   };
   const browser=new ChatGptBrowser(null,{navigationTimeoutMs:100});
-  return {session,browser,failures,continued:()=>continued,probe};
+  return {session,browser,failures,continued:()=>continued,clicks:()=>clicks,probe};
 }
 test('evaluate timeout plus unchanged DOM is UNKNOWN, never absence proof',async()=>{
   const f=fixture({evaluateTimeout:true});
-  let error;
-  try{await f.browser.submitIntent({session:f.session,prompt:'continue',profileOperations:[],intent:{id:'intent'},conversationUrl:'https://chatgpt.com/c/owned',guard:()=>true});}
-  catch(e){error=e;}
-  assert.ok(error);assert.equal(error.absenceProof,undefined);
-  const r=await f.browser.readSubmission({session:f.session,prompt:'continue',conversationUrl:'https://chatgpt.com/c/owned',
-    intent:{baseline:{userCount:1,userMessageId:'old-message'},absence_proof:error.absenceProof,released:error.released}});
-  assert.equal(r.state,'UNKNOWN');
+  const intent={id:'intent',receipt_generation:'generation',prompt:'continue',baseline:{userCount:1,userMessageId:'old-message'}};
+  await f.browser.submitIntent({session:f.session,prompt:'continue',profileOperations:[{op:'SET',path:'model',value:'test'},{op:'SET',path:'thinking_effort',value:'max'},{op:'REMOVE',path:'conversation_origin'},{op:'REMOVE',path:'service_tier'}],intent,conversationUrl:'https://chatgpt.com/c/owned',guard:()=>true});
+  assert.equal(f.clicks(),1,'actual submission click was attempted exactly once');
+  const r=await f.browser.readSubmission({session:f.session,prompt:'continue',conversationUrl:'https://chatgpt.com/c/owned',intent});
+  assert.equal(r.state,'UNKNOWN');assert.equal(intent.absence_proof,undefined);assert.equal(f.clicks(),1);
 });
-test('optimistic user bubble disappears after reload and is not accepted',async()=>{
+test('optimistic user bubble is not accepted without semantic response evidence',async()=>{
   const f=fixture({optimistic:true});
   const r=await f.browser.readSubmission({session:f.session,prompt:'continue',conversationUrl:'https://chatgpt.com/c/owned',
     intent:{message_id:'new-message',baseline:{userCount:1,userMessageId:'old-message'}}});
