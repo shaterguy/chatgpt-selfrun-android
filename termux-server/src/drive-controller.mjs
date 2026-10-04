@@ -473,7 +473,8 @@ export class DriveDispatchController {
     await this.#move(key,'RECONCILING','POST_READBACK',{},a.token);
     const prompt=r.intent.prompt;
     if(typeof prompt!=='string'||digest(prompt)!==r.intent.hash)throw new Error('durable submission input hash mismatch');
-    const outcome=await this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,signal:a.abort.signal});
+    const outcome=await this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,
+      signal:a.abort.signal,initialReadback:r.intent.kind==='initial'});
     if(!a.guard())return;
     if(outcome.state==='CONFIRMED') {
       const url=canonicalUrl(outcome.probe?.url);

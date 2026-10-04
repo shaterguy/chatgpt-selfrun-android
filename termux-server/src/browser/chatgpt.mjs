@@ -705,16 +705,48 @@ export class ChatGptBrowser {
     return this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
   }
 
-  async readSubmission({session,intent,prompt,conversationUrl,signal}) {
+  async #reloadInitialReadback(session,signal,timeoutMs) {
+    const before=(await session.call('Page.getFrameTree')).frameTree?.frame;
+    if(!before?.id||!before.loaderId)throw new Error('submission document unavailable');
+    if(signal?.aborted)throw signal.reason;
+    let removeListener=()=>{},timer,onAbort;
+    const committed=new Promise((resolve,reject)=>{
+      removeListener=session.on('Page.frameNavigated',({frame})=>{
+        if(frame?.parentId||frame?.id!==before.id||!frame.loaderId||frame.loaderId===before.loaderId)return;
+        resolve(frame);
+      });
+      timer=setTimeout(()=>reject(new Error('submission document reload timed out')),timeoutMs);
+      onAbort=()=>reject(signal.reason||new Error('aborted'));
+      signal?.addEventListener('abort',onAbort,{once:true});
+    });
+    try {
+      // Reload acknowledgement can precede commit; only a new main-frame loader proves a fresh document.
+      const [frame]=await Promise.all([committed,session.call('Page.reload',{
+        ignoreCache:true,loaderId:before.loaderId,
+      },{timeoutMs})]);
+      return frame;
+    } finally {
+      clearTimeout(timer);removeListener();signal?.removeEventListener('abort',onAbort);
+    }
+  }
+
+  async readSubmission({session,intent,prompt,conversationUrl,signal,initialReadback=false}) {
     if(signal?.aborted)throw signal.reason;
     let probe=await evaluate(session,probeExpression());
     const expectedId=conversationId(conversationUrl)||conversationId(probe.url);
     if(conversationUrl&&conversationId(probe.url)!==expectedId)return {state:'UNKNOWN',probe};
-    // Optimistic DOM bubbles do not prove server acceptance. Reload the canonical page before classifying.
+    const deadline=Date.now()+this.config.navigationTimeoutMs;
+    let readbackFrame=null;
+    // Initial reconciliation is separate from recovery and STOP's existing composer readback.
     try {
-      await session.call('Page.reload',{ignoreCache:true});
-      probe=await this.#waitFor(session,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')&&p.composer
-        &&(!expectedId||conversationId(p.url)===expectedId)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'submission readback'});
+      if(initialReadback) {
+        readbackFrame=await this.#reloadInitialReadback(session,signal,this.config.navigationTimeoutMs);
+        probe=await evaluate(session,probeExpression());
+      } else {
+        await session.call('Page.reload',{ignoreCache:true});
+        probe=await this.#waitFor(session,p=>p.loginPage||((p.readyState==='complete'||p.readyState==='interactive')&&p.composer
+          &&(!expectedId||conversationId(p.url)===expectedId)),{timeoutMs:this.config.navigationTimeoutMs,signal,label:'submission readback'});
+      }
       if(probe.loginPage)return {state:'UNKNOWN',probe};
     }catch(error){if(signal?.aborted)throw error;return {state:'UNKNOWN',probe};}
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
@@ -732,15 +764,27 @@ export class ChatGptBrowser {
       'content.querySelectorAll(\'button,[role="button"],[aria-hidden="true"],svg\').forEach(n=>n.remove());'+
       'const same=String(content.textContent||"").replace(/\\s+/g," ").trim()===expected;return {found,same};});'+
       'return {idMatch:matched.some(m=>m.found),lastTextMatch:matched.at(-1)?.same||false};})()';
-    const evidence=await evaluate(session,expression);
-    const hasBaseline=Number.isFinite(intent.baseline?.userCount)||!!intent.baseline?.userMessageId;
-    const advanced=hasBaseline&&(Number(probe.userCount)>Number(intent.baseline?.userCount||0)||
-      (!!probe.userMessageId&&probe.userMessageId!==intent.baseline?.userMessageId));
-    if(conversationId(probe.url)&&(evidence.idMatch||(advanced&&evidence.lastTextMatch)))
-      return {state:'CONFIRMED',probe,messageId:intent.message_id||probe.userMessageId};
-    // A request released to ChatGPT may arrive later; a quiet page alone cannot prove absence.
-    if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!advanced&&!probe.streaming&&probe.readyState==='complete'&&probe.composer)
-      return {state:'ABSENT',probe};
+    do {
+      if(initialReadback&&(probe.loginPage||(expectedId&&conversationId(probe.url)!==expectedId)))return {state:'UNKNOWN',probe};
+      const evidence=await evaluate(session,expression);
+      if(initialReadback) {
+        const frame=(await session.call('Page.getFrameTree')).frameTree?.frame;
+        if(signal?.aborted)throw signal.reason;
+        if(frame?.id!==readbackFrame.id||frame?.loaderId!==readbackFrame.loaderId
+          ||(expectedId&&conversationId(frame?.url)!==expectedId))return {state:'UNKNOWN',probe};
+      }
+      const hasBaseline=Number.isFinite(intent.baseline?.userCount)||!!intent.baseline?.userMessageId;
+      const advanced=hasBaseline&&(Number(probe.userCount)>Number(intent.baseline?.userCount||0)||
+        (!!probe.userMessageId&&probe.userMessageId!==intent.baseline?.userMessageId));
+      if(conversationId(probe.url)&&(evidence.idMatch||(advanced&&evidence.lastTextMatch)))
+        return {state:'CONFIRMED',probe,messageId:intent.message_id||probe.userMessageId};
+      // A request released to ChatGPT may arrive later; a quiet page alone cannot prove absence.
+      if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!advanced&&!probe.streaming&&probe.readyState==='complete'&&probe.composer)
+        return {state:'ABSENT',probe};
+      if(!initialReadback||Date.now()>=deadline)break;
+      await delay(Math.min(250,deadline-Date.now()),signal);
+      probe=await evaluate(session,probeExpression());
+    } while(Date.now()<deadline);
     return {state:'UNKNOWN',probe};
   }
 
