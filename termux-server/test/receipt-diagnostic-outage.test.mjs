@@ -19,5 +19,6 @@ test('a diagnostic publication outage cannot terminate the Node process',()=>{
   const result=spawnSync(process.execPath,['--unhandled-rejections=strict','--input-type=module','-e',script],
     {encoding:'utf8',timeout:5000});
   assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/SURVIVED/);
-  assert.match(result.stderr,/RECEIPT_DIAGNOSTIC_FAILED/);
+  assert.match(result.stderr,/DRIVE_PROJECTION_PENDING/);
+  assert.doesNotMatch(result.stderr,/OBSERVATION_CALLBACK_FAILED|RECEIPT_DIAGNOSTIC_FAILED/);
 });

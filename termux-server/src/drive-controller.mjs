@@ -387,6 +387,9 @@ export class DriveDispatchController {
   }
   async #observationFailure(key,transport,error,a,monitorEnded=false) {
     if(!a?.guard())return;
+    if(error?.code==='DRIVE_PROJECTION_FAILED') {
+      this.#projectionFailure(error);return;
+    }
     const lost=connectionLost(error);
     if(lost)this.#detach(key);else if(monitorEnded)a.monitoring=false;
     const reason=lost?'BROWSER_OBSERVATION_LOST':monitorEnded?'OBSERVATION_UNAVAILABLE':'OBSERVATION_CALLBACK_FAILED';
@@ -394,6 +397,18 @@ export class DriveDispatchController {
       error:errorInfo(error,lost?classifyAttach(error):reason),blocked_epoch:null,
       retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)},a.token);
     await this.repository.flushCurrent(transport,key);
+  }
+  #projectionFailure(error) {
+    // Publication is retryable telemetry. Do not rewrite browser evidence,
+    // advance the recovery clock, or convert a completed send to a send failure.
+    console.error(JSON.stringify({event:'DRIVE_PROJECTION_PENDING',error:{
+      code:error.code,operation:error.operation,transport_operation:error.transport_operation,
+      stage:error.stage,http_status:error.http_status,cause_code:error.cause_code,
+    }}));
+  }
+  async #publishAfterSubmission(key,transport) {
+    try{await this.repository.flushCurrent(transport,key);}
+    catch(error){if(error?.code!=='DRIVE_PROJECTION_FAILED')throw error;this.#projectionFailure(error);}
   }
   #monitor(key,transport) {
     const a=this.sessions.get(key);
@@ -513,6 +528,14 @@ export class DriveDispatchController {
         {...a.token,intent_id:intent.id,receipt_generation:intent.receipt_generation});
       if(!saved||!a.guard())throw new Error('stale POST callback');
       if(!sameIntent(this.repository.get(key)?.intent,intent))throw new Error('submission identity changed');
+      if(evidence.receipt?.invalid==='http_error'&&Number.isInteger(evidence.receipt.http_status)
+          &&evidence.receipt.http_status>=100&&evidence.receipt.http_status<=599
+          &&['conversation','f_conversation'].includes(evidence.receipt.endpoint_category)
+          &&(current.intent.receipt?.http_status!==evidence.receipt.http_status
+            ||current.intent.receipt?.request_id!==evidence.receipt.request_id)) {
+        console.error(JSON.stringify({event:'CHATGPT_POST_HTTP_ERROR',
+          http_status:evidence.receipt.http_status,endpoint_category:evidence.receipt.endpoint_category}));
+      }
     };
   }
   async #post(key,transport,kind,prompt,retry=false,attemptAt=null) {
@@ -550,8 +573,9 @@ export class DriveDispatchController {
       return;
     }
     if(!await this.#fresh(key,transport)||!a.guard())return;
+    let submitted;
     try {
-      const submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
+      submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
         profileOperations:r.body.profile_operations,signal:a.abort.signal,guard:a.guard,
         onRequest:this.#requestCallback(key,a,intent),
         onConversation:async evidence=>{
@@ -562,21 +586,10 @@ export class DriveDispatchController {
           if(!sameIntent(current.intent,intent))throw new Error('submission identity changed');
           if(!current.conversation_url) {
             await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:url},a.token);
-            try{await this.repository.flushCurrent(transport,key);}catch(error){
-              console.error(JSON.stringify({event:'CONVERSATION_URL_PROJECTION_PENDING',key,url,error:String(error?.message||error).slice(0,300)}));
-            }
+            await this.#publishAfterSubmission(key,transport);
           }
           this.#monitor(key,transport);
         }});
-      const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
-      if(submittedUrl&&a.guard()) {
-        const current=this.repository.get(key);
-        if(!current.conversation_url) {
-          await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:submittedUrl},a.token);
-          await this.repository.flushCurrent(transport,key);
-        }
-        this.#monitor(key,transport);
-      }
     } catch(error) {
       if(a.guard())await this.#move(key,'POST_UNCERTAIN','POST_OUTCOME_UNCERTAIN',
         {intent:{...this.repository.get(key).intent,outcome:'UNKNOWN',absence_proof:error.absenceProof||null,released:!!error.released},error:errorInfo(error,'POST_UNCERTAIN')},a.token);
@@ -587,12 +600,19 @@ export class DriveDispatchController {
         await this.#move(key,this.repository.get(key).state,'RECOVERY_ATTEMPT_FINISHED',
           {last_nudge_attempt_at:Date.now()},
           {...a.token,intent_id:intent.id,receipt_generation:intent.receipt_generation});
-        await this.repository.flushCurrent(transport,key);
       }
     }
     if(!a.guard())return;
+    const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
+    if(submittedUrl) {
+      const current=this.repository.get(key);
+      if(!current.conversation_url)
+        await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:submittedUrl},a.token);
+      this.#monitor(key,transport);
+    }
     r=this.repository.get(key);
     if(r.state!=='POST_UNCERTAIN')await this.#move(key,'POST_UNCERTAIN','POST_AWAIT_READBACK',{intent:{...r.intent,outcome:'UNKNOWN'}},a.token);
+    await this.#publishAfterSubmission(key,transport);
     await this.#reconcile(key,transport);
   }
   async #reconcile(key,transport) {

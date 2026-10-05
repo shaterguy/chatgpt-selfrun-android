@@ -9,7 +9,7 @@ const body=(patch={})=>({conversation_id:'owned',messages:[{id:userId,author:{ro
 const marker=(patch={})=>({type:'message_marker',marker:'cot_token',event:'first',conversation_id:'owned',...patch});
 const block=value=>'data: '+JSON.stringify(value)+'\n\n';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture({status=200,profile=false}={}) {
+function fixture({status=200,profile=false,legacy=false}={}) {
   const pending=[],calls=[],streams=[],cancellations=[];
   const timers=new Set();
   class XHR {open(){} send(){}}
@@ -25,12 +25,18 @@ function fixture({status=200,profile=false}={}) {
     vm.runInContext(browserModule.requestProfileDocumentStartSource(),context);
     window.__selfrunRequestProfileEngine.configure([['set','model','new-model'],['set','thinking_effort','max'],['remove','conversation_origin'],['remove','service_tier']]);
   }
+  const retired=[];let legacyEngine=null;
+  if(legacy) {
+    const downstream=window.fetch;window.fetch=function(...args){return Reflect.apply(downstream,this,args);};
+    legacyEngine={version:'selfrun-passive-receipt-v1',arm:()=>true,snapshot:()=>null,retire:key=>{retired.push(key);return true;}};
+    window.__selfrunReceiptObserver=legacyEngine;
+  }
   assert.equal(typeof browserModule.receiptObserverDocumentStartSource,'function','passive receipt observer is available');
   const install=()=>vm.runInContext(browserModule.receiptObserverDocumentStartSource(),context);
   install();
   const engine=window.__selfrunReceiptObserver;
   engine.arm(expected);
-  return {window,engine,calls,pending,streams,cancellations,install,
+  return {window,engine,calls,pending,streams,cancellations,install,legacyEngine,retired,
     arm:value=>engine.arm({...expected,...value}),
     snapshot:()=>engine.snapshot({intent_id:expected.intent_id,generation:expected.generation}),
     send:async(value=body(),input)=>window.fetch(input||'https://chatgpt.com/backend-api/f/conversation',{method:'POST',body:JSON.stringify(value)}),
@@ -136,4 +142,25 @@ test('retirement ignores late acknowledgement and does not cancel the original b
   assert.equal(f.snapshot(),null);assert.equal(response.bodyUsed,false);assert.equal(f.cancellations.length,0);
   const reader=response.body.getReader();const received=await reader.read();assert.equal(new TextDecoder().decode(received.value),block(marker()));
   void reader.cancel();
+});
+
+for(const status of [403,429,500])for(const endpoint of ['conversation','f/conversation'])test(`HTTP ${status} keeps numeric status and ${endpoint} category only`,async t=>{
+  const f=fixture({status});t.after(f.close);
+  await f.send(body(),'https://chatgpt.com/backend-api/'+endpoint+'?private=secret');await tick();
+  const receipt=f.snapshot();assert.equal(receipt.invalid,'http_error');assert.equal(receipt.ack,null);
+  assert.equal(receipt.http_status,status);assert.equal(receipt.endpoint_category,endpoint==='conversation'?'conversation':'f_conversation');
+  assert.doesNotMatch(JSON.stringify(receipt),/secret|private|https|backend-api|headers|prompt/);
+});
+
+
+test('a legacy page observer upgrades in place without reloading or another fetch',async t=>{
+  const f=fixture({status:429,legacy:true});t.after(f.close);
+  assert.notEqual(f.engine,f.legacyEngine,'v1 early return must not bypass new diagnostics');
+  const input='https://chatgpt.com/backend-api/f/conversation',init={method:'POST',body:JSON.stringify(body())};
+  await f.window.fetch(input,init);await tick();
+  assert.equal(f.calls.length,1);assert.equal(f.calls[0].input,input);assert.equal(f.calls[0].init,init);
+  assert.equal(f.snapshot().http_status,429);
+  assert.equal(f.snapshot().endpoint_category,'f_conversation');assert.equal(f.snapshot().invalid,'http_error');
+  assert.equal(f.retired.length,1);assert.equal(f.retired[0].generation,expected.generation);
+  assert.equal(f.install(),true);assert.equal(f.window.__selfrunReceiptObserver,f.engine);
 });

@@ -2,6 +2,21 @@ import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
 import { appInput, inputFingerprint, retiredState, retireRecord, queueTargetCleanup } from './retired-requests.mjs';
 import { audit, canonicalUrl, digest, initialRecord, keyFor, projection, transition } from './lifecycle.mjs';
 
+function projectionError(error,operation) {
+  const status=error?.http_status??Number(/^Drive \w+ HTTP ([1-5]\d\d)\b/.exec(String(error?.message||''))?.[1]);
+  const http_status=Number.isInteger(status)&&status>=100&&status<=599?status:null;
+  const codes=new Set(['ECONNRESET','ECONNREFUSED','ENOTFOUND','EAI_AGAIN','ETIMEDOUT','EPIPE',
+    'ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET','ABORT_ERR']);
+  const candidate=error?.cause_code||error?.cause?.code||error?.code;
+  return Object.assign(new Error('Drive projection '+operation+' failed'+(http_status?' HTTP '+http_status:'')),{
+    code:'DRIVE_PROJECTION_FAILED',operation,
+    transport_operation:['resolve','version','read','write','list','export'].includes(error?.operation)?error.operation:null,
+    stage:['request','response','body','parse','auth','rate_limit'].includes(error?.stage)?error.stage:'unknown',
+    http_status,cause_code:codes.has(candidate)?candidate:null,
+  });
+}
+
+
 // A single durable snapshot owns both current records and the publication outboxes.
 // Audit/Drive writes are projections; neither can make an uncommitted transition authoritative.
 export class LifecycleStore {
@@ -294,7 +309,8 @@ export class LifecycleStore {
     return this.#publish(pending.path,async()=>{
       const item=this.data.outbox[key];
       if(!item)return;
-      const remote=await transport.read(item.path);
+      let remote;
+      try{remote=await transport.read(item.path);}catch(error){throw projectionError(error,'read');}
       if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision)return;
       if(remote?.request_id!==item.body.request_id||remote?.turn_id!==item.body.turn_id||remote?.task_id!==item.body.task_id)
         throw new Error('Drive projection identity conflict');
@@ -304,7 +320,7 @@ export class LifecycleStore {
         'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
       const body={...remote};
       for(const k of serverKeys)body[k]=item.body[k];
-      await transport.write(item.path,body,{expected:remote});
+      try{await transport.write(item.path,body,{expected:remote});}catch(error){throw projectionError(error,'write');}
       await this.serial(async()=>{
         const next=structuredClone(this.data);
         if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];

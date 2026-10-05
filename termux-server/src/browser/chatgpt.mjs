@@ -518,8 +518,9 @@ async function installRequestProfileEngine(session) {
 // Receipt-only observer: the existing v1 request-profile engine remains the sole body mutator.
 // Event vocabulary/framing follows Android ChatGptTurnProtocolScript (436da865).
 function installReceiptObserver() {
-  const version='selfrun-passive-receipt-v1';
-  if(window.__selfrunReceiptObserver?.version===version)return true;
+  const version='selfrun-passive-receipt-v2';
+  const previousObserver=window.__selfrunReceiptObserver;
+  if(previousObserver?.version===version)return true;
   const downstreamFetch=window.fetch;
   const MAX_BYTES=262144,MAX_EVENT=65536,MAX_MS=30000;
   let current=null,sequence=0;
@@ -560,6 +561,7 @@ function installReceiptObserver() {
   };
   const inspectResponse=async(entry,response)=>{
     if(!active(entry))return;
+    entry.http_status=Number.isInteger(response?.status)&&response.status>=100&&response.status<=599?response.status:null;
     if(!response?.ok){invalidate(entry,'http_error');return;}
     let reader;
     try{reader=response.clone().body?.getReader();}catch{invalidate(entry,'clone_unavailable');return;}
@@ -624,6 +626,7 @@ function installReceiptObserver() {
       const path=url.pathname.toLowerCase().replace(/\/+$/,'');
       eligible=active(entry)&&method==='POST'&&url.origin===location.origin
         &&(path==='/backend-api/conversation'||path==='/backend-api/f/conversation');
+      if(eligible)entry.endpoint_category=path==='/backend-api/conversation'?'conversation':'f_conversation';
     }catch{}
     let bodyText;
     if(eligible){
@@ -657,6 +660,8 @@ function installReceiptObserver() {
     arm:key=>{
       if(typeof key?.intent_id!=='string'||!key.intent_id||typeof key.generation!=='string'||!key.generation
           ||typeof key.prompt!=='string'||!key.prompt||key.conversation_id&&!canonical(key.conversation_id))throw new Error('RECEIPT_INTENT_INVALID');
+      // A legacy wrapper remains passive; retire its matching arm before replacing it.
+      previousObserver?.retire?.(key);
       if(same(current,key)&&!current.retired){
         if(current.prompt!==key.prompt||current.expected_conversation!==(key.conversation_id||''))throw new Error('RECEIPT_INTENT_CHANGED');
         return true;
@@ -670,7 +675,7 @@ function installReceiptObserver() {
     snapshot:key=>same(current,key)&&!current.retired&&(key.prompt===undefined||key.prompt===current.prompt)?{
       version:1,intent_id:current.intent_id,generation:current.generation,request_id:current.request_id,
       message_id:current.message_id,conversation_id:current.conversation_id,ack:current.ack,
-      invalid:current.invalid,released:current.released,
+      invalid:current.invalid,released:current.released,http_status:current.http_status??null,endpoint_category:current.endpoint_category??null,
     }:null,
     retire:key=>{if(same(current,key))retire(current);return true;},
   };
@@ -965,7 +970,9 @@ export class ChatGptBrowser {
     const belongs=receipt=>validKey&&receipt?.version===1&&receipt.intent_id===key.intent_id&&receipt.generation===key.generation;
     const metadata=receipt=>({version:1,intent_id:receipt.intent_id,generation:receipt.generation,
       request_id:receipt.request_id||null,message_id:receipt.message_id||null,conversation_id:receipt.conversation_id||'',
-      ack:receipt.ack||null,invalid:receipt.invalid||null,released:receipt.released===true});
+      ack:receipt.ack||null,invalid:receipt.invalid||null,released:receipt.released===true,
+      http_status:Number.isInteger(receipt.http_status)&&receipt.http_status>=100&&receipt.http_status<=599?receipt.http_status:null,
+      endpoint_category:['conversation','f_conversation'].includes(receipt.endpoint_category)?receipt.endpoint_category:null});
     const positive=receipt=>belongs(receipt)&&receipt.released===true&&!receipt.invalid
       &&['cot_token','user_visible_token','final_channel_token','assistant_message'].includes(receipt.ack)
       &&typeof receipt.message_id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(receipt.message_id)

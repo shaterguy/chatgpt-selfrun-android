@@ -63,3 +63,15 @@ test('initial semantic event without a canonical conversation cannot confirm on 
   assert.equal((await f.read({signal:controller.signal})).state,'UNKNOWN');
   assert.equal(getEventListeners(controller.signal,'abort').length,0);
  });
+
+for(const status of [403,429,500])test(`HTTP ${status} diagnostics persist through receipt readback without confirming`,async()=>{
+  const f=fixture();Object.assign(f.receipt,{ack:null,invalid:'http_error',http_status:status,endpoint_category:'f_conversation',headers:{authorization:'secret'},response_body:'secret'});
+  assert.equal((await f.read()).state,'UNKNOWN');
+  assert.equal(f.saved.at(-1).receipt.http_status,status);assert.equal(f.saved.at(-1).receipt.endpoint_category,'f_conversation');
+  assert.doesNotMatch(JSON.stringify(f.saved),/secret|headers|response_body/);
+});
+test('receipt readback drops invalid status and arbitrary endpoint data',async()=>{
+  const f=fixture();Object.assign(f.receipt,{ack:null,invalid:'http_error',http_status:'500 private',endpoint_category:'https://private?token=secret'});
+  await f.read();assert.equal(f.saved.at(-1).receipt.http_status,null);assert.equal(f.saved.at(-1).receipt.endpoint_category,null);
+  assert.doesNotMatch(JSON.stringify(f.saved),/private|secret/);
+});
