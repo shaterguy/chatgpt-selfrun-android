@@ -51,7 +51,7 @@ function fixture({legacy=false,turnAttribute='assistant',bubble=true,userOnly=fa
   if(!userOnly){if(fallback)main.append(assistant);else{main.append(response);response.append(bubble?assistant:thinking);}}
   const document={title:'Synthetic probe fixture',readyState:'complete',body,querySelectorAll:selector=>body.querySelectorAll(selector),
     createTreeWalker(root){const nodes=descendants(root).filter(node=>node.nodeType===3);let index=0;return {currentNode:null,nextNode(){this.currentNode=nodes[index++];return !!this.currentNode;}};}};
-  const calls=[];const session={call:async(method,params)=>{calls.push(method);assert.equal(method,'Runtime.evaluate','probe must remain read-only');return {result:{value:vm.runInNewContext(params.expression,{document,location:{href:'https://chatgpt.com/c/synthetic',pathname:'/c/synthetic'},NodeFilter:{SHOW_TEXT:4},Node:{DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_PRECEDING:2},getComputedStyle:e=>e.style})}};}};
+  const calls=[];const session={call:async(method,params)=>{calls.push(method);assert.equal(method,'Runtime.evaluate','probe must remain read-only');return {result:{value:vm.runInNewContext(params.expression,{document,performance,location:{href:'https://chatgpt.com/c/synthetic',pathname:'/c/synthetic'},NodeFilter:{SHOW_TEXT:4},Node:{DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_PRECEDING:2},getComputedStyle:e=>e.style})}};}};
   const browser=new ChatGptBrowser(null,{});
   return {main,response,assistant,thinking,user,userSection,calls,session,browser,probe:()=>browser.livenessSnapshot({session}),setText(node,text){node.children=[];node.append(text);}};
 }

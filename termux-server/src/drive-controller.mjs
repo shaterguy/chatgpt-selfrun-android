@@ -6,7 +6,7 @@ import { TerminalBrowserCleanup } from './terminal-browser-cleanup.mjs';
 
 const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT']);
 const controlStates=new Set(['RUNNING','PAUSED','WAITING_USER_INTERVENTION','STOPPED','DONE','RESUME_REQUESTED','RESUME_STOPPED_REQUESTED']);
-const responseKey=p=>{const value=cursor(p);delete value.streaming;return JSON.stringify(value);};
+const responseKey=p=>{const value=cursor(p||{});delete value.streaming;return JSON.stringify(value);};
 const terminal = r => !r||r.retired||['COMMITTED','COMPLETED','CANCELLED','STOPPED'].includes(r.state);
 const sameIntent = (a,b) => !!a&&!!b&&a.id===b.id&&a.receipt_generation===b.receipt_generation;
 const connectionLost=error=>classifyAttach(error)==='BROWSER_DEAD'||['TARGET_LOST','TARGET_CLOSED'].includes(error?.code)
@@ -401,12 +401,13 @@ export class DriveDispatchController {
     a.monitoring=true;
     const r=this.repository.get(key);
     void this.browser.monitor({session:a.session,baseline:r.cursor||a.baseline,signal:a.abort.signal,
-      livenessGate:()=>({state:this.repository.get(key)?.control_state,epoch:this.repository.get(key)?.control_epoch}),
-      onActivity:activity=>{
+      livenessGate:()=>({state:this.repository.get(key)?.control_state,epoch:this.repository.get(key)?.control_epoch,
+        observationGeneration:this.repository.get(key)?.intent?.receipt_generation||null}),
+      onActivity:(activity,observationGeneration=this.repository.get(key)?.intent?.receipt_generation||null)=>{
         a.observationSequence=(a.observationSequence||0)+1;
         const sampledCursor=this.repository.get(key)?.cursor;
         return this.#serial(key,async()=>{
-          try{return await this.#observe(key,transport,activity,a.token,sampledCursor);}
+          try{return await this.#observe(key,transport,activity,a.token,sampledCursor,observationGeneration);}
           catch(error){await this.#observationFailure(key,transport,error,a);}
         });
       },
@@ -417,8 +418,9 @@ export class DriveDispatchController {
       await this.#observationFailure(key,transport,error,a,true);
     })).catch(()=>{});
   }
-  async #observe(key,transport,p,token,sampledCursor) {
+  async #observe(key,transport,p,token,sampledCursor,observationGeneration) {
     if(this.standby||!this.sessions.get(key)?.guard?.()||!this.repository.current(key,token))return;
+    if((this.repository.get(key)?.intent?.receipt_generation||null)!==observationGeneration)return;
     if(this.repository.get(key).retry_at>Date.now())return;
     const result=await this.#result(key,transport,token);
     if(!this.repository.current(key,token)||result==='UNAVAILABLE')return;
@@ -522,7 +524,7 @@ export class DriveDispatchController {
     const a=this.sessions.get(key);
     if(!a?.guard())return;
     let r=this.repository.get(key);
-    let intent=retry?r.intent:newIntent(r,kind,prompt,kind==='recovery'?r.cursor:
+    let intent=retry?r.intent:newIntent(r,kind,prompt,kind==='recovery'?(r.cursor||{}):
       await this.browser.livenessSnapshot({session:a.session,signal:a.abort.signal}));
     if(!a.guard())return;
     if(retry&&(intent.outcome!=='ABSENT'||intent.sends>=2))return;

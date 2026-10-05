@@ -9,6 +9,7 @@ export function normalizeProgressText(value) {
 }
 
 const RUNTIME_EVALUATE_TIMEOUT_MS = 5000;
+const OBSERVATION_DEADLINE_MS = 75000;
 const SUBMIT_POST_GRACE_MS = 5000;
 
 const PAGE_ERROR_PATTERN = [
@@ -47,12 +48,12 @@ const delay = (ms, signal) => new Promise((resolve, reject) => {
   signal?.addEventListener('abort', onAbort, { once: true });
 });
 
-async function evaluate(session, expression, timeoutMs = RUNTIME_EVALUATE_TIMEOUT_MS) {
+async function evaluate(session, expression, timeoutMs = RUNTIME_EVALUATE_TIMEOUT_MS, options = {}) {
   const result = await session.call('Runtime.evaluate', {
     expression,
     returnByValue: true,
     awaitPromise: true,
-  }, { timeoutMs });
+  }, { timeoutMs, ...options });
   if (result.exceptionDetails) {
     const detail = result.exceptionDetails.exception?.description
       || result.exceptionDetails.exception?.value
@@ -684,6 +685,33 @@ export class ChatGptBrowser {
   constructor(chromium, config) {
     this.chromium = chromium;
     this.config = config;
+    this.observations = new WeakMap();
+  }
+
+  async #observeProgress(session, signal, generation = null) {
+    if (signal?.aborted) throw signal.reason || new Error('aborted');
+    let pending = this.observations.get(session);
+    if (pending && (pending.signal !== signal || pending.generation !== generation)) {
+      pending.abort.abort(Object.assign(new Error('observation generation replaced'), { code: 'OBSERVATION_SUPERSEDED' }));
+      pending = null;
+    }
+    if (!pending) {
+      const abort = new AbortController();
+      const combined = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
+      const expression = `(() => { const started = performance.now(); const value = (${probeExpression()});
+        return {...value, __selfrun_engine_elapsed_ms: Math.max(0, Math.round(performance.now() - started))}; })()`;
+      pending = { signal, abort, generation };
+      pending.promise = evaluate(session, expression, OBSERVATION_DEADLINE_MS,
+        { signal: combined, queryLabel: 'progress' }).then(value => {
+          if (combined.aborted) throw combined.reason || new Error('aborted');
+          if (value) delete value.__selfrun_engine_elapsed_ms;
+          return value;
+        }).finally(() => {
+          if (this.observations.get(session) === pending) this.observations.delete(session);
+        });
+      this.observations.set(session, pending);
+    }
+    return pending.promise;
   }
 
   async #waitFor(session, predicate, { timeoutMs, signal, label }) {
@@ -952,7 +980,7 @@ export class ChatGptBrowser {
     const started=Date.now(),timeout=Math.min(SUBMIT_POST_GRACE_MS,Number(this.config.navigationTimeoutMs)||SUBMIT_POST_GRACE_MS);
     do {
       check();
-      try{probe=await evaluate(session,probeExpression());}catch(error){check();return {state:'UNKNOWN',probe};}
+      try{probe=await this.#observeProgress(session,signal,key.generation||null);}catch(error){check();return {state:'UNKNOWN',probe};}
       check();
       if(probe?.loginPage||(expected&&conversationId(probe?.url)!==expected))return {state:'UNKNOWN',probe};
       let observed=null;
@@ -1012,11 +1040,13 @@ export class ChatGptBrowser {
 
     while (!signal?.aborted) {
       let probe;
+      const sampledGate = await livenessGate?.() || {};
       try {
-        probe = await evaluate(session, probeExpression());
+        probe = await this.#observeProgress(session, signal, sampledGate.observationGeneration || null);
         evaluateTimeoutRetries = 0;
       } catch (error) {
         if (signal?.aborted) throw signal.reason || new Error('aborted');
+        if (error?.code === 'OBSERVATION_SUPERSEDED') continue;
         const message = String(error?.message || error);
         if (message !== 'CDP command timeout: Runtime.evaluate'
             || evaluateTimeoutRetries >= 3) {
@@ -1026,7 +1056,10 @@ export class ChatGptBrowser {
         await delay(this.config.probeIntervalMs, signal);
         continue;
       }
+      if (signal?.aborted) throw signal.reason || new Error('aborted');
       const gate = await livenessGate?.() || {};
+      if (signal?.aborted) throw signal.reason || new Error('aborted');
+      if (gate.observationGeneration !== sampledGate.observationGeneration) continue;
       const gateState = String(gate.state || 'UNKNOWN');
       const gateEpoch = Number(gate.epoch || 0);
       const gateToken = gateState + ':' + gateEpoch;
@@ -1109,7 +1142,7 @@ export class ChatGptBrowser {
           conversationStateReady: structurallyReady,
           verificationRetry,
           progressDetected,
-        });
+        }, sampledGate.observationGeneration || null);
         if (action?.resetLiveness) {
           lastActivityAt = Date.now();
           stalled = false;
