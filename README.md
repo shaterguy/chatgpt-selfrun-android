@@ -2,7 +2,7 @@
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 작업 상태는 기존 V3 원장을 유지하며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
-현재 정식 버전은 SelfRun Drive 4.0.7 / versionCode 4002009입니다. 검증 완료된 4.0.7-dev3 기능 소스를 기능 변경 없이 정식 계보로 승격했으며, 4.0.6에서 앱 데이터·설정·쿠키를 유지하는 업데이트와 TEST 병행 설치, 정식 FCM 왕복 검증을 통과했습니다. 정식 applicationId와 서명 계보는 유지됩니다. 최신 정식 Release는 [drive-v4.0.7](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.7)입니다.
+현재 정식 버전은 SelfRun Drive 4.0.8 / versionCode 4002010입니다. 검증 완료된 4.0.8-dev1의 작업 폴더 기반 Drive 전송 기능을 기능 소스 변경 없이 정식 계보로 승격했습니다. 정식 applicationId와 서명 계보는 유지됩니다. 최신 정식 Release는 [drive-v4.0.8](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.8)입니다.
 
 ## 디버그 로그와 턴별 바로가기
 
@@ -69,7 +69,7 @@ CHAT과 WORK 두 모드를 지원합니다. ON_DEVICE는 v3 방식으로 휴대�
 
 ## 제출 방식과 공통 완료 신호
 
-정식 `4.0.7`의 설정에서 `ON_DEVICE`와 `SERVER`는 제출 방식을 선택합니다. 기존 저장된 선택값과 기본 ON_DEVICE는 유지합니다.
+정식 `4.0.8`의 설정에서 `ON_DEVICE`와 `SERVER`는 제출 방식을 선택합니다. 기존 저장된 선택값과 기본 ON_DEVICE는 유지합니다.
 
 - `ON_DEVICE`: 휴대폰 WebView에서 v3 방식으로 프롬프트를 제출하고 대화 주소를 확보·저장하면 WebView를 파괴합니다. 응답 감시는 하지 않습니다.
 - `SERVER`: 현재 v4 서버가 Drive 요청을 받아 제출하고 응답을 감시합니다.
