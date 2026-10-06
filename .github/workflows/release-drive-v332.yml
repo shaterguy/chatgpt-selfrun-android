@@ -1,26 +1,26 @@
-name: Release SelfRun 4.0.7
-run-name: SelfRun Drive 4.0.7 Release (${{ github.ref_name }}) #${{ github.run_number }} attempt-${{ github.run_attempt }}
+name: Release SelfRun 4.0.8
+run-name: SelfRun Drive 4.0.8 Release (${{ github.ref_name }}) #${{ github.run_number }} attempt-${{ github.run_attempt }}
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - release/v4.0.7
+      - release/v4.0.8
     paths:
       - app/build.gradle
       - .github/workflows/release-drive-v332.yml
 
 concurrency:
-  group: selfrun-v407-release-${{ github.ref }}
+  group: selfrun-v408-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  RELEASE_ARTIFACT: selfrun-v407-release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+  RELEASE_ARTIFACT: selfrun-v408-release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   build-release:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.7'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.8'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -52,10 +52,10 @@ jobs:
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '4.0.7' ]]
-          [[ "$VERSION_CODE" == '4002009' ]]
-          grep -Fq "verified source candidate: selfRunDriveVersionCode = 4002009" app/build.gradle
-          grep -Fq "verified source candidate: selfRunDriveVersionName = '4.0.7-dev3'" app/build.gradle
+          [[ "$VERSION_NAME" == '4.0.8' ]]
+          [[ "$VERSION_CODE" == '4002010' ]]
+          grep -Fq "verified source candidate: selfRunDriveVersionCode = 4002010" app/build.gradle
+          grep -Fq "verified source candidate: selfRunDriveVersionName = '4.0.8-dev1'" app/build.gradle
           grep -Fq 'https://selfrun-command-bridge.vercel.app' app/build.gradle
           ! grep -Fq 'selfrun-command-bridge-shaterguy.vercel.app' app/build.gradle
           grep -Fq '1:859485943787:android:feab87243808eb6ca30bae' app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunFirebase.java
@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$SIGNING_PASSPHRASE"
-          PASS_FILE="$RUNNER_TEMP/selfrun-v407-release-pass"
+          PASS_FILE="$RUNNER_TEMP/selfrun-v408-release-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
@@ -133,12 +133,12 @@ jobs:
           sha256sum "$TEST" "$ANDROID_TEST" > release-output/TEST_SHA256SUMS.txt
           printf '%s\n' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
           cat > release-output/RELEASE_NOTES.md <<'EOF'
-          SelfRun Drive 4.0.7은 검증 완료된 4.0.7-dev3 기능 소스를 정식 패키지 계보로 승격한 버전입니다.
+          SelfRun Drive 4.0.8은 검증 완료된 4.0.8-dev1 기능 소스를 정식 패키지 계보로 승격한 버전입니다.
 
-          - 채택 기능 소스: 436da865cfdd243c82782cf7fb42ebcd61c1ca64 (4.0.7-dev3, versionCode 4002009)
-          - 정식 배포 identity: versionName 4.0.7 / versionCode 4002009
+          - 채택 기능 소스: 0d55f8cfe5eadf14ac6f16f699375904dd03f495 (4.0.8-dev1, versionCode 4002010)
+          - 정식 배포 identity: versionName 4.0.8 / versionCode 4002010
           - 기존 정식 applicationId com.shaterguy.chatgptselfrun.drive, 고정 서명 계보, Firebase/FCM 경로 유지
-          - 최신 정식 4.0.6에서 제거 없는 업데이트 및 설정/쿠키 유지 검증
+          - 최신 정식 4.0.7에서 제거 없는 업데이트 및 설정/쿠키 유지 검증
           - TEST 병행 설치와 정식 FCM 왕복 검증 후 발행
           EOF
       - name: Upload exact release candidate
@@ -183,13 +183,13 @@ jobs:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - name: Resolve exact candidate and latest 4.0.6 stable baseline
+      - name: Resolve exact candidate and latest 4.0.7 stable baseline
         shell: bash
         run: |
           set -euo pipefail
-          FORMAL="$(find current -type f -name 'chatgpt-selfrun-drive-v4.0.7.apk' -print -quit)"
-          TEST="$(find current -type f -name 'chatgpt-selfrun-drive-test-v4.0.7.apk' -print -quit)"
-          ANDROID_TEST="$(find current -type f -name 'chatgpt-selfrun-drive-test-v4.0.7-androidTest.apk' -print -quit)"
+          FORMAL="$(find current -type f -name 'chatgpt-selfrun-drive-v4.0.8.apk' -print -quit)"
+          TEST="$(find current -type f -name 'chatgpt-selfrun-drive-test-v4.0.8.apk' -print -quit)"
+          ANDROID_TEST="$(find current -type f -name 'chatgpt-selfrun-drive-test-v4.0.8-androidTest.apk' -print -quit)"
           test -s "$FORMAL"; test -s "$TEST"; test -s "$ANDROID_TEST"
           cp "$FORMAL" current/formal.apk
           cp "$TEST" current/test.apk
@@ -199,16 +199,16 @@ jobs:
           grep -F "$(sha256sum current/test.apk | awk '{print $1}')" current/TEST_SHA256SUMS.txt >/dev/null
           grep -F "$(sha256sum current/androidTest.apk | awk '{print $1}')" current/TEST_SHA256SUMS.txt >/dev/null
           mkdir -p stable
-          gh release download drive-v4.0.6 --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-drive-v4.0.6.apk' --dir stable
-          test -s stable/chatgpt-selfrun-drive-v4.0.6.apk
+          gh release download drive-v4.0.7 --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-drive-v4.0.7.apk' --dir stable
+          test -s stable/chatgpt-selfrun-drive-v4.0.7.apk
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v4.0.6.apk > stable/STABLE_CERT.txt
+          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v4.0.7.apk > stable/STABLE_CERT.txt
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable/STABLE_CERT.txt
-          STABLE_BADGING="$($BT/aapt dump badging stable/chatgpt-selfrun-drive-v4.0.6.apk)"
+          STABLE_BADGING="$($BT/aapt dump badging stable/chatgpt-selfrun-drive-v4.0.7.apk)"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$STABLE_BADGING"
-          grep -Fq "versionCode='4002006'" <<<"$STABLE_BADGING"
-          grep -Fq "versionName='4.0.6'" <<<"$STABLE_BADGING"
-          printf 'BASE_VERSION_NAME=4.0.6\nBASE_VERSION_CODE=4002006\nFORMAL_VERSION_NAME=4.0.7\nFORMAL_VERSION_CODE=4002009\n' >> "$GITHUB_ENV"
+          grep -Fq "versionCode='4002009'" <<<"$STABLE_BADGING"
+          grep -Fq "versionName='4.0.7'" <<<"$STABLE_BADGING"
+          printf 'BASE_VERSION_NAME=4.0.7\nBASE_VERSION_CODE=4002009\nFORMAL_VERSION_NAME=4.0.8\nFORMAL_VERSION_CODE=4002010\n' >> "$GITHUB_ENV"
       - name: Enable hardware acceleration
         shell: bash
         run: |
@@ -232,7 +232,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-v407-release-runtime-${{ github.run_attempt }}
+          name: selfrun-v408-release-runtime-${{ github.run_attempt }}
           path: |
             selfrun-v3-release-runtime-evidence.txt
             stable/STABLE_CERT.txt
@@ -277,7 +277,7 @@ jobs:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
-          FORMAL="$(find current -type f -name 'chatgpt-selfrun-drive-v4.0.7.apk' -print -quit)"
+          FORMAL="$(find current -type f -name 'chatgpt-selfrun-drive-v4.0.8.apk' -print -quit)"
           test -s "$FORMAL"
           [[ "$(tr -d '[:space:]' < current/SOURCE_COMMIT.txt)" == "$GITHUB_SHA" ]]
           grep -F "$(sha256sum "$FORMAL" | awk '{print $1}')" current/SHA256SUMS.txt >/dev/null
@@ -289,7 +289,7 @@ jobs:
           test -s "$RAW"
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/zipalign" -p -f 4 "$RAW" current/formal-androidTest-aligned.apk
-          PASS_FILE="$RUNNER_TEMP/selfrun-v407-formal-fcm-pass"
+          PASS_FILE="$RUNNER_TEMP/selfrun-v408-formal-fcm-pass"
           trap 'rm -f "$PASS_FILE"' EXIT
           umask 077
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
@@ -299,8 +299,8 @@ jobs:
           FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL")"
           TEST_BADGING="$($BT/aapt dump badging current/formal-androidTest.apk)"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionCode='4002009'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionName='4.0.7'" <<<"$FORMAL_BADGING"
+          grep -Fq "versionCode='4002010'" <<<"$FORMAL_BADGING"
+          grep -Fq "versionName='4.0.8'" <<<"$FORMAL_BADGING"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING"
           cp "$FORMAL" current/formal.apk
       - name: Resolve published upgrade baselines
@@ -310,10 +310,10 @@ jobs:
           mkdir -p stable legacy-dev2
           gh release download drive-v4.0.3 --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-drive-v4.0.3.apk' --dir stable
           gh release download drive-v4.0.5 --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-drive-v4.0.5.apk' --dir stable
-          gh release download drive-v4.0.6 --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-drive-v4.0.6.apk' --dir stable
+          gh release download drive-v4.0.7 --repo "$GITHUB_REPOSITORY" --pattern 'chatgpt-selfrun-drive-v4.0.7.apk' --dir stable
           echo '4ecf855d666ef62c9c21ae750810eaba1dcd735a8b82f0611fe67965296778f8  stable/chatgpt-selfrun-drive-v4.0.3.apk' | sha256sum -c -
           echo 'd65be07a260abad5387ed066bbca91ab9b0c1580eaa3c0d9ea3250013850cc2b  stable/chatgpt-selfrun-drive-v4.0.5.apk' | sha256sum -c -
-          echo '8bf1a36671b4d50af1adbf66e5b4211983847477bc06244e41442d834cd26de9  stable/chatgpt-selfrun-drive-v4.0.6.apk' | sha256sum -c -
+          echo '829d6bfcb8653c88e643a91f10d58c8939d748a99b3ec831ac2533c8f9f79082  stable/chatgpt-selfrun-drive-v4.0.7.apk' | sha256sum -c -
           gh run download 36647841421 --repo "$GITHUB_REPOSITORY" --name selfrun-v4-404-dev2-36647841421-1 --dir legacy-dev2
           SOURCE="$(find legacy-dev2 -type f -name SOURCE_COMMIT.txt -print -quit)"
           SUM="$(find legacy-dev2 -type f -name SHA256SUMS.txt -print -quit)"
@@ -347,25 +347,25 @@ jobs:
             FORMAL=com.shaterguy.chatgptselfrun.drive;
             INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d "\r" | sed -n "s#^instrumentation:\([^ ]*\) (target=$FORMAL)#\1#p" | head -1)";
             test -n "$INSTRUMENTATION";
-            adb shell am instrument -w -r -e smokeId "release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" -e class com.shaterguy.chatgptselfrun.SelfRunFormalFcmSmokeAndroidTest "$INSTRUMENTATION" 2>&1 | tee selfrun-v407-formal-fcm-evidence.txt;
-            grep -Fq "OK (" selfrun-v407-formal-fcm-evidence.txt;
-            grep -Fq "selfrunFormalFcmEvent=" selfrun-v407-formal-fcm-evidence.txt;
-            grep -Fq "selfrunFormalFirebaseApp=formal" selfrun-v407-formal-fcm-evidence.txt'
+            adb shell am instrument -w -r -e smokeId "release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" -e class com.shaterguy.chatgptselfrun.SelfRunFormalFcmSmokeAndroidTest "$INSTRUMENTATION" 2>&1 | tee selfrun-v408-formal-fcm-evidence.txt;
+            grep -Fq "OK (" selfrun-v408-formal-fcm-evidence.txt;
+            grep -Fq "selfrunFormalFcmEvent=" selfrun-v408-formal-fcm-evidence.txt;
+            grep -Fq "selfrunFormalFirebaseApp=formal" selfrun-v408-formal-fcm-evidence.txt'
       - name: Upload exact formal FCM evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-v407-formal-fcm-${{ github.run_attempt }}
+          name: selfrun-v408-formal-fcm-${{ github.run_attempt }}
           path: |
-            selfrun-v407-formal-fcm-evidence.txt
-            selfrun-v407-formal-upgrade-evidence.txt
+            selfrun-v408-formal-fcm-evidence.txt
+            selfrun-v408-formal-upgrade-evidence.txt
             current/FORMAL_ANDROIDTEST_CERT.txt
             current/FORMAL_ANDROIDTEST_APKSIGNER_VERIFY.txt
           if-no-files-found: warn
           retention-days: 30
 
   publish-release:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.7'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.8'
     needs: [build-release, verify-release-emulator, verify-formal-fcm]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -391,7 +391,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find release-output -type f -name 'chatgpt-selfrun-drive-v4.0.7.apk' -print -quit)"
+          APK="$(find release-output -type f -name 'chatgpt-selfrun-drive-v4.0.8.apk' -print -quit)"
           SUM="$(find release-output -type f -name 'SHA256SUMS.txt' -print -quit)"
           NOTES="$(find release-output -type f -name 'RELEASE_NOTES.md' -print -quit)"
           SOURCE="$(find release-output -type f -name 'SOURCE_COMMIT.txt' -print -quit)"
@@ -403,9 +403,9 @@ jobs:
           grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/PUBLISH_CERT.txt
           BADGING="$($BT/aapt dump badging "$APK")"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
-          grep -Fq "versionCode='4002009'" <<<"$BADGING"
-          grep -Fq "versionName='4.0.7'" <<<"$BADGING"
-          printf 'DRIVE_TAG=drive-v4.0.7\nRELEASE_APK=%s\nRELEASE_SUM=%s\nRELEASE_NOTES=%s\n' "$APK" "$SUM" "$NOTES" >> "$GITHUB_ENV"
+          grep -Fq "versionCode='4002010'" <<<"$BADGING"
+          grep -Fq "versionName='4.0.8'" <<<"$BADGING"
+          printf 'DRIVE_TAG=drive-v4.0.8\nRELEASE_APK=%s\nRELEASE_SUM=%s\nRELEASE_NOTES=%s\n' "$APK" "$SUM" "$NOTES" >> "$GITHUB_ENV"
       - name: Create or verify tag and GitHub Release
         shell: bash
         run: |
@@ -424,15 +424,15 @@ jobs:
           if ! gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$DRIVE_TAG" "$RELEASE_APK" "$RELEASE_SUM" \
               --repo "$GITHUB_REPOSITORY" --verify-tag --target "$GITHUB_SHA" \
-              --title 'SelfRun Drive v4.0.7' --notes-file "$RELEASE_NOTES"
+              --title 'SelfRun Drive v4.0.8' --notes-file "$RELEASE_NOTES"
           fi
           ASSETS="$(gh release view "$DRIVE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
-          grep -Fxq 'chatgpt-selfrun-drive-v4.0.7.apk' <<<"$ASSETS"
+          grep -Fxq 'chatgpt-selfrun-drive-v4.0.8.apk' <<<"$ASSETS"
           grep -Fxq 'SHA256SUMS.txt' <<<"$ASSETS"
       - name: Upload publish evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-v407-publish-evidence-${{ github.run_attempt }}
+          name: selfrun-v408-publish-evidence-${{ github.run_attempt }}
           path: |
             release-output/PUBLISH_CERT.txt
             release-output/SHA256SUMS.txt

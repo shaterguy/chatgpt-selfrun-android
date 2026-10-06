@@ -21,6 +21,14 @@ public final class SelfRun4TaskControlPolicyTest {
         assertTrue(adapter.contains("!control.equals(readback.optString(\"state\"))"));
     }
 
+    @Test public void taskControlAndDispatchUseTaskFolderAsDriveParent() throws Exception {
+        String adapter = source("SelfRun4DriveWebAdapter.java");
+        assertTrue(adapter.contains("String parentId = snapshot.resource(\"folderId\");"));
+        assertTrue(adapter.contains("token, request, snapshot.resource(\"folderId\")"));
+        assertTrue(adapter.contains("api.createServerDispatchFile(token, id, name, snapshot.resource(\"folderId\"), props, body);"));
+        assertFalse(adapter.contains("snapshot.config().optString(\"baseFolderId\")"));
+    }
+
     @Test public void controlProjectionCoversActiveWaitingPausedStoppedAndDoneStates() throws Exception {
         String adapter = source("SelfRun4DriveWebAdapter.java");
         assertTrue(adapter.contains("case WAITING_USER_INTERVENTION -> \"WAITING_USER_INTERVENTION\""));
