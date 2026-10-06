@@ -167,7 +167,7 @@ final class SelfRun4DriveWebAdapter {
     private void writeTaskControl(String token, SelfRun3Engine.State snapshot,
                                   String control, String reason) throws Exception {
         String taskId = snapshot.taskId();
-        String parentId = snapshot.config().optString("baseFolderId");
+        String parentId = snapshot.resource("folderId");
         if (taskId.isEmpty() || parentId.isEmpty()) return;
         if (!taskId.equals(controlTaskId)) {
             controlTaskId = taskId;
@@ -302,7 +302,7 @@ final class SelfRun4DriveWebAdapter {
             try {
                 writeTaskControl(token, snapshot, "RUNNING", "DISPATCH_RECOVERY");
                 DriveApiClient.Metadata found = api.findLatestServerDispatch(
-                        token, request, snapshot.config().optString("baseFolderId"));
+                        token, request, snapshot.resource("folderId"));
                 if (found == null) throw new IllegalStateException("server dispatch not found");
                 JSONObject body = api.readServerDispatchFile(token, found.id);
                 if (!SCHEMA.equals(body.optString("schema"))
@@ -366,7 +366,7 @@ final class SelfRun4DriveWebAdapter {
                         .put("dispatch_attempt", String.valueOf(attempt));
                 String name = "__SELFRUN_DISPATCH__" + safeName(snapshot.requestId())
                         + "__A" + attempt + ".json";
-                api.createServerDispatchFile(token, id, name, snapshot.config().optString("baseFolderId"), props, body);
+                api.createServerDispatchFile(token, id, name, snapshot.resource("folderId"), props, body);
                 main.post(() -> {
                     if (!active(expectedGeneration, request)) {
                         cancelRemoteBestEffort(token, id, body, "SUPERSEDED");

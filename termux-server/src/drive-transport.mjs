@@ -10,6 +10,17 @@ const NETWORK_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET',
 ]);
 
+const TASK_FOLDER_RE = /^SR-\d{8}-\d{6}-[A-Z0-9]+$/;
+const CONTROL_TASK_RE = /^__SELFRUN_CONTROL__(SR-\d{8}-\d{6}-[A-Z0-9]+)\.json$/;
+const DISPATCH_TASK_RE = /^__SELFRUN_DISPATCH__(SR-\d{8}-\d{6}-[A-Z0-9]+)(?::|__|\.)/;
+
+function taskIdFromName(name) {
+  const control = String(name || '').match(CONTROL_TASK_RE);
+  if (control) return control[1];
+  const dispatch = String(name || '').match(DISPATCH_TASK_RE);
+  return dispatch ? dispatch[1] : '';
+}
+
 function transportError(operation, stage, status = null, cause = null) {
   const http_status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
   let cause_code = null;
@@ -84,28 +95,79 @@ export class DriveDispatchTransport {
     try {return await response.text();} catch (error) {throw transportError(operation, 'body', response.status, error);}
   }
 
-  async list() {
-    const q = "'" + this.folderId + "' in parents and trashed=false and "
-      + "(name contains '__SELFRUN_DISPATCH__' or name contains '__SELFRUN_CONTROL__')";
-    const url = API + '/files?' + new URLSearchParams({
-      q,
+  async #listAll(operation, params) {
+    const files = [];
+    let pageToken = '';
+    do {
+      const query = new URLSearchParams({...params,...(pageToken?{pageToken}:{})});
+      const response = await this.#fetch(operation, API + '/files?' + query);
+      const text = await this.#text(operation, response);
+      const body = parseJson(operation, text || '{}', response.status);
+      if (!body || typeof body !== 'object' || !Array.isArray(body.files) || body.files.includes(null)) {
+        throw transportError(operation, 'parse', response.status);
+      }
+      files.push(...body.files);
+      pageToken = typeof body.nextPageToken === 'string' ? body.nextPageToken : '';
+    } while (pageToken);
+    return files;
+  }
+
+  async #taskFolders(operation='list') {
+    const files = await this.#listAll(operation, {
+      q: "'" + this.folderId + "' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'",
       spaces: 'drive',
-      fields: 'files(id,name,modifiedTime,size,mimeType,parents)',
+      fields: 'nextPageToken,files(id,name)',
+      pageSize: '1000',
+    });
+    const folders = new Map();
+    for (const file of files) {
+      const name = String(file.name || '');
+      if (TASK_FOLDER_RE.test(name) && file.id) folders.set(name, String(file.id));
+    }
+    return folders;
+  }
+
+  async #moveRootFile(id, targetFolderId) {
+    const query = new URLSearchParams({
+      addParents: targetFolderId,
+      removeParents: this.folderId,
+      fields: 'id,parents',
+    });
+    const response = await this.#fetch(
+      'move',
+      API + '/files/' + encodeURIComponent(id) + '?' + query,
+      {method:'PATCH',headers:{'content-type':'application/json; charset=utf-8'},body:'{}'},
+    );
+    await this.#text('move', response);
+  }
+
+  async list() {
+    const taskFolders = await this.#taskFolders();
+    const allowedParents = new Set([this.folderId, ...taskFolders.values()]);
+    const files = await this.#listAll('list', {
+      q: "trashed=false and mimeType='application/json' and "
+        + "(name contains '__SELFRUN_DISPATCH__' or name contains '__SELFRUN_CONTROL__')",
+      spaces: 'drive',
+      fields: 'nextPageToken,files(id,name,modifiedTime,size,mimeType,parents)',
       pageSize: '1000',
       orderBy: 'modifiedTime desc',
     });
-    const response = await this.#fetch('list', url);
-    const text = await this.#text('list', response);
-    const body = parseJson('list', text || '{}', response.status);
-    if (!body || typeof body !== 'object') throw transportError('list', 'parse', response.status);
-    const files = Array.isArray(body.files) ? body.files : [];
     const out = [];
     for (const file of files) {
-      if (file === null) throw transportError('list', 'parse', response.status);
       const name = String(file.name || '');
       const supported = name.startsWith('__SELFRUN_DISPATCH__')
         || name.startsWith('__SELFRUN_CONTROL__');
       if (!supported || !name.endsWith('.json')) continue;
+      const parents = Array.isArray(file.parents) ? file.parents.map(String) : [];
+      if (!parents.some(parent => allowedParents.has(parent))) continue;
+      const taskFolderId = taskFolders.get(taskIdFromName(name));
+      if (taskFolderId && parents.includes(this.folderId) && !parents.includes(taskFolderId) && file.id) {
+        try {
+          await this.#moveRootFile(String(file.id), taskFolderId);
+        } catch (error) {
+          console.error(JSON.stringify({event:'DRIVE_TASK_DOCUMENT_MOVE_FAILED',file_id:String(file.id),code:String(error?.code||'ERROR')}));
+        }
+      }
       this.ids.set(name, String(file.id || ''));
       out.push({ path: name, modTime: String(file.modifiedTime || ''), size: Number(file.size || 0) });
     }
@@ -116,19 +178,22 @@ export class DriveDispatchTransport {
     const name = safeName(relativePath);
     const cached = this.ids.get(name);
     if (cached) return cached;
+    const taskFolders = await this.#taskFolders('resolve');
+    const allowedParents = new Set([this.folderId, ...taskFolders.values()]);
     const esc = name.replace(/'/g, "\\'");
-    const q = "'" + this.folderId + "' in parents and trashed=false and name='" + esc + "'";
-    const url = API + '/files?' + new URLSearchParams({ q, spaces: 'drive', fields: 'files(id,name)', pageSize: '10' });
-    const response = await this.#fetch('resolve', url);
-    const text = await this.#text('resolve', response);
-    const body = parseJson('resolve', text || '{}', response.status);
-    if (!body || typeof body !== 'object') throw transportError('resolve', 'parse', response.status);
-    const files = body.files || [];
-    if (!Array.isArray(files) || files.includes(null)) throw transportError('resolve', 'parse', response.status);
-    const exact = files.find((f) => f.name === name);
-    if (!exact?.id) throw Object.assign(new Error('Drive dispatch file not found'),{code:'DRIVE_FILE_NOT_FOUND'});
-    this.ids.set(name, exact.id);
-    return exact.id;
+    const files = await this.#listAll('resolve', {
+      q: "trashed=false and name='" + esc + "'",
+      spaces: 'drive',
+      fields: 'nextPageToken,files(id,name,parents)',
+      pageSize: '10',
+    });
+    const exact = files.filter((file) => file.name === name
+      && Array.isArray(file.parents)
+      && file.parents.some((parent) => allowedParents.has(String(parent))));
+    if (!exact.length) throw Object.assign(new Error('Drive dispatch file not found'),{code:'DRIVE_FILE_NOT_FOUND'});
+    if (exact.length !== 1) throw new Error('multiple Drive dispatch files found');
+    this.ids.set(name, String(exact[0].id));
+    return String(exact[0].id);
   }
 
   async #version(id) {

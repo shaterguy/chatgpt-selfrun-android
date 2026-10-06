@@ -109,7 +109,7 @@ test('401 still refreshes once and retries the same request', async t => {
   f.transport.auth.forceRefresh = async () => {refreshed++;};
   assert.deepEqual(await f.run(), []);
   assert.equal(refreshed, 1);
-  assert.equal(f.fetchMock.mock.calls.length, 2);
+  assert.equal(f.fetchMock.mock.calls.length, 3);
 });
 
 test('a second 401 stops after the existing single refresh', async t => {
