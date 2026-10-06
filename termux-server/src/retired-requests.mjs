@@ -4,7 +4,7 @@ export const retiredState=r=>['STOPPED','CANCELLED','COMMITTED','COMPLETED'].inc
 export const serverFields=new Set(['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation',
   'request_generation','browser_generation','conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome',
   'server_error','server_error_class','server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms',
-  'result_state','response_cursor','response_status','stop_status','updated_at_ms']);
+  'result_state','response_cursor','response_status','stop_status','server_completion_reason','updated_at_ms']);
 export const appInput=body=>Object.fromEntries(Object.entries(body).filter(([key])=>!serverFields.has(key)));
 const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?
   Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])):value;
@@ -18,10 +18,14 @@ export function queueTargetCleanup(data,record,targetId=record.target_id) {
 }
 export function retireRecord(data,record) {
   queueTargetCleanup(data,record);
-  if(record.reason==='RESULT_COMMITTED_TERMINAL') {
+  const control=data.controls?.[record.task_id];
+  const appDone=record.state==='STOPPED'&&record.control_state==='DONE'
+    &&control?.state==='DONE'&&keyFor(control)===record.key&&control.control_epoch===record.control_epoch;
+  if(record.reason==='RESULT_COMMITTED_TERMINAL'||appDone) {
     data.completionOutbox??={};
-    data.completionOutbox[record.key]=Object.fromEntries(
-      ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at'].map(k=>[k,record[k]]));
+    data.completionOutbox[record.key]={...Object.fromEntries(
+      ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at'].map(k=>[k,record[k]])),
+      ...(appDone?{completion_reason:'APP_DONE',control_epoch:record.control_epoch,result_state:record.result_state||'UNKNOWN'}:{})};
   }
   const marker=Object.fromEntries(['key','path','task_id','turn_id','request_id','dispatch_attempt','state','revision',
     'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status','result_recovery'].map(k=>[k,record[k]]));

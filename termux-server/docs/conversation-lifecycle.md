@@ -79,6 +79,20 @@ COMMITTED without retaining the prompt or POST intent. Publication failures rema
 retryable independently of browser cleanup; a superseded remote identity is never
 overwritten. Publication retries never reread the consumed Result.
 
+If exact app DONE arrives before the server reads Result, the existing local
+STOPPED retirement also saves a completion-only projection in that same durable
+transaction. It publishes server_status COMPLETED, lifecycle_state STOPPED,
+server_control_state DONE and server_completion_reason APP_DONE. The observed
+result_state is preserved; app DONE does not establish server-side COMMITTED
+proof. Result-first completion retains lifecycle_state/result_state COMMITTED
+and uses server_completion_reason RESULT_COMMITTED. Neither ordering waits for
+publication before browser cleanup. Failed publication survives restart, contains
+no executable snapshot, and cannot overwrite a reused request or dispatch attempt.
+STOP retains its existing local teardown and explicit-resume behavior. A newer
+explicit same-identity resume discards pending DONE telemetry and clears a
+previously published completion reason. Historical retired markers are not
+reopened or scanned for Result proof to backfill old telemetry.
+
 ## Regression migration
 Initial submission still follows app authorization without predecessor business gating. During observation, exact committed:true is now an explicit terminal boundary. Technical no-duplicate, restart, ownership, pause and ten-minute liveness safeguards remain. CREATE_REQUESTED prepares, READY_TO_SUBMIT awaits SEND_REQUESTED, and STARTED means the exact owned canonical URL is ready for the app; receipt truth remains separate in post_outcome. Browser readiness, response structure, profile interception and transient CDP monitoring tests remain. Controller/watchdog fixtures now provide strict Result documents, current dispatch reads and the explicit submitIntent/readSubmission boundary.
 Numbered lifecycle scenario tests cover the required creation, timeout, resume, reconnect, restart, stall, recovery, control and successor paths. Additional tests cover every intermediate restart state, cold ABSENT retry, immutable input, audit mismatch, snapshot failure, slow publication, and callback fencing. Regression probes use the same file against old and new source.

@@ -299,6 +299,11 @@ export class LifecycleStore {
         retired.control_epoch=c.control_epoch;retired.control_state=c.state;
         if(!['COMMITTED','COMPLETED'].includes(retired.state))retired.state='STOPPED';
         retired.stop_status='NOT_REQUESTED';
+        const pending=next.completionOutbox[retired.key];
+        if(c.state==='DONE'&&pending?.completion_reason==='APP_DONE') {
+          retired.revision+=1;retired.updated_at=Date.now();
+          Object.assign(pending,{control_epoch:c.control_epoch,revision:retired.revision,updated_at:retired.updated_at});
+        }
       }
       const sameRunningIdentity=prior&&prior.state==='RUNNING'&&c.state==='RUNNING'
         &&prior.turn_id===c.turn_id&&prior.request_id===c.request_id;
@@ -341,6 +346,7 @@ export class LifecycleStore {
         'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
       const body={...remote};
       for(const k of serverKeys)body[k]=item.body[k];
+      delete body.server_completion_reason;
       try{await transport.write(item.path,body,{expected:remote});}catch(error){throw projectionError(error,'write');}
       await this.serial(async()=>{
         const next=structuredClone(this.data);
@@ -369,11 +375,17 @@ export class LifecycleStore {
         await this.#publish(item.path,async()=>{
         const remote=await transport.read(item.path);
         if(this.data.completionOutbox[key]?.revision!==item.revision)return;
-        if(!['COMMITTED','COMPLETED'].includes(this.data.retired[key]?.state))return;
+        const marker=this.data.retired[key],appDone=item.completion_reason==='APP_DONE';
+        const current=appDone?marker?.state==='STOPPED'&&marker.control_state==='DONE'
+          &&marker.control_epoch===item.control_epoch&&marker.revision===item.revision:
+          ['COMMITTED','COMPLETED'].includes(marker?.state);
         const same=remote?.request_id===item.request_id&&remote?.turn_id===item.turn_id&&remote?.task_id===item.task_id
           &&Number(remote.dispatch_attempt)===Number(item.dispatch_attempt);
-        if(same) {
-          const body={...remote,server_status:'COMPLETED',lifecycle_state:'COMMITTED',result_state:'COMMITTED',
+        if(current&&same) {
+          const body={...remote,server_status:'COMPLETED',lifecycle_state:appDone?'STOPPED':'COMMITTED',
+            result_state:appDone?item.result_state:'COMMITTED',
+            ...(appDone?{server_control_state:'DONE',server_control_epoch:item.control_epoch,stop_status:'NOT_REQUESTED'}:{}),
+            server_completion_reason:appDone?'APP_DONE':'RESULT_COMMITTED',
             lifecycle_revision:item.revision,updated_at_ms:item.updated_at,server_error:'',server_error_class:null};
           // Do not leave an older executable lifecycle snapshot in a final projection.
           delete body.lifecycle_record;
