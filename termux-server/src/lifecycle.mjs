@@ -25,6 +25,11 @@ export const STATES = Object.freeze({
   CANCELLED: ['ATTACHING','PREPARING','POST_UNCERTAIN','BLOCKED','STOPPED'],
 });
 export const keyFor = b => JSON.stringify([b.task_id,b.turn_id,b.request_id]);
+// Dispatch/server projections are history, not app execution authorization.
+export const matchingTaskControl=(c,r)=>!!c&&!!r&&c.schema==='selfrun-task-control-v1'
+  &&Number.isSafeInteger(c.control_epoch)&&c.control_epoch>0&&c.control_epoch>=Number(r.control_epoch||0)
+  &&['task_id','turn_id','request_id'].every(k=>!!r[k]&&c[k]===r[k]);
+export const runningTaskControl=(c,r)=>matchingTaskControl(c,r)&&c.state==='RUNNING';
 export const digest = value => createHash('sha256').update(String(value)).digest('hex');
 export function canonicalUrl(value) {
   try {

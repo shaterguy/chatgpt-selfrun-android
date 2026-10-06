@@ -1,7 +1,8 @@
 import { appendTurnStartDirective, humanizeSelfRunPrompt } from './prompt-directives.mjs';
 import { LifecycleStore } from './lifecycle-store.mjs';
-import { canonicalUrl, classifyAttach, cursor, digest, keyFor, newIntent, projection, sameCursor } from './lifecycle.mjs';
+import { canonicalUrl, classifyAttach, cursor, digest, initialRecord, keyFor, matchingTaskControl, newIntent, projection, runningTaskControl, sameCursor } from './lifecycle.mjs';
 import { readResult } from './result-reconciler.mjs';
+import { retiredState } from './retired-requests.mjs';
 import { TerminalBrowserCleanup } from './terminal-browser-cleanup.mjs';
 
 const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT']);
@@ -29,7 +30,7 @@ export class DriveDispatchController {
   get active() {return this.activeDispatches().at(-1)||null;}
   getActive(path) {return this.activeDispatches().find(a=>a.path===path)||null;}
   activeDispatches() {
-    return this.repository.records().filter(r=>!terminal(r)).map(r=>({
+    return this.repository.records().filter(r=>!terminal(r)&&r.control_state==='RUNNING'&&runningTaskControl(this.repository.control(r.task_id),r)).map(r=>({
       path:r.path,body:projection(r),serverStatus:projection(r).server_status,generation:r.run_generation,
       publishPending:false,session:this.sessions.get(r.key)?.session,target:this.sessions.get(r.key)?.target,
     }));
@@ -56,19 +57,35 @@ export class DriveDispatchController {
   async #move(key,state,reason,patch={},token=null) {
     return this.repository.move(key,state,reason,patch,token);
   }
+  async #invalidateControl(identity) {
+    const key=keyFor(identity);
+    this.#detach(key);
+    await this.repository.invalidateControl(key);
+  }
+  async #readCurrentControl(identity,transport) {
+    try {
+      const c=await transport.read('__SELFRUN_CONTROL__'+identity.task_id+'.json');
+      if(c) {
+        if(c.task_id!==identity.task_id||!controlStates.has(c.state))throw new Error('invalid task control');
+        await this.controlDurable(null,c,transport);
+        const current=this.repository.control(identity.task_id);
+        if(matchingTaskControl(c,identity)&&matchingTaskControl(current,identity)
+          &&current.control_epoch===c.control_epoch&&current.state===c.state)return current;
+      }
+      await this.#invalidateControl(identity);return null;
+    } catch(error) {
+      await this.#invalidateControl(identity);
+      if(error?.code==='DRIVE_FILE_NOT_FOUND')return null;
+      throw error;
+    }
+  }
   async #fresh(key,transport) {
     const r=this.repository.get(key);
     if(!r||this.standby||!this.canDispatch())return false;
-    let c;
-    try {c=await transport.read('__SELFRUN_CONTROL__'+r.task_id+'.json');}
-    catch(error) {
-      // Known absence differs from an unreadable control that may contain STOP.
-      if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;
-    }
-    if(c&&controlStates.has(c.state))await this.controlDurable(null,c,transport);
-    const latest=this.repository.get(key);
-    if(c&&controlStates.has(c.state)&&(c.state!=='RUNNING'||c.turn_id!==r.turn_id||c.request_id!==r.request_id))return false;
-    return !terminal(latest)&&latest.control_state==='RUNNING';
+    const c=await this.#readCurrentControl(r,transport),latest=this.repository.get(key);
+    const allowed=runningTaskControl(c,latest)&&!terminal(latest)&&latest.control_state==='RUNNING';
+    if(!allowed)this.#detach(key);
+    return allowed;
   }
   async #applyControl(c,transport) {
     if(!c||!controlStates.has(c.state))return false;
@@ -153,6 +170,14 @@ export class DriveDispatchController {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(body?.schema!=='selfrun-server-dispatch-v1')throw new Error('invalid dispatch schema');
     if(!Array.isArray(body.profile_operations)||!body.prompt||!body.project_url)throw new Error('invalid dispatch payload');
+    // Inert terminal history needs no remote read. Every executable import or
+    // explicit retry must still obtain current app authorization.
+    const prior=this.repository.get(keyFor(body)),imported=prior||initialRecord(path,body);
+    const currentControl=this.repository.control(body.task_id);
+    const retry=imported.never_submitted&&body.dispatch_attempt>imported.dispatch_attempt;
+    const resume=currentControl?.state==='RUNNING'&&currentControl.control_epoch>imported.control_epoch
+      &&canonicalUrl(currentControl.conversation_url)&&!['COMMITTED','COMPLETED'].includes(imported.state);
+    if((!retiredState(imported)||retry||resume)&&!await this.#readCurrentControl(imported,transport))return null;
     let record=await this.repository.ingest(path,body);
     const control=this.repository.control(record.task_id);
     if(record.retired&&control?.state==='RUNNING'&&control.control_epoch>record.control_epoch&&canonicalUrl(control.conversation_url))
@@ -164,12 +189,12 @@ export class DriveDispatchController {
   }
   async ingest(path,body,transport) {
     const r=await this.#ingestRecord(path,body,transport);
-    if(r.retired)return r;
+    if(!r||r.retired)return r;
     return this.#serial(r.key,()=>this.#advance(r.key,transport));
   }
   async ingestDurable(path,body,transport) {
     const r=await this.#ingestRecord(path,body,transport);
-    if(!r.retired)this.#scheduleAdvance(r.key,transport);
+    if(r&&!r.retired)this.#scheduleAdvance(r.key,transport);
     return r;
   }
   prepare(path,body,transport) {return this.ingest(path,body,transport);}

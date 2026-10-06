@@ -1,6 +1,6 @@
 import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
 import { appInput, inputFingerprint, retiredState, retireRecord, queueTargetCleanup } from './retired-requests.mjs';
-import { audit, canonicalUrl, digest, initialRecord, keyFor, projection, transition } from './lifecycle.mjs';
+import { audit, canonicalUrl, digest, initialRecord, keyFor, projection, runningTaskControl, transition } from './lifecycle.mjs';
 
 function projectionError(error,operation) {
   const status=error?.http_status??Number(/^Drive \w+ HTTP ([1-5]\d\d)\b/.exec(String(error?.message||''))?.[1]);
@@ -56,7 +56,7 @@ export class LifecycleStore {
   control(task) {return structuredClone(this.data.controls[task]||null);}
   async save(next) {
     const records=Object.values(next.requests);
-    const active=records.filter(r=>r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
+    const active=records.filter(r=>runningTaskControl(next.controls[r.task_id],r)&&r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
     const latest=records.toSorted((a,b)=>b.updated_at-a.updated_at)[0];
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
       active.length?'RUNNING':latest?.state==='COMPLETED'?'COMPLETED':latest?.state==='STOPPED'?'STOPPED':'IDLE';
@@ -135,6 +135,19 @@ export class LifecycleStore {
       return structuredClone(next.retired[key]||r);
     });
   }
+  async invalidateControl(key) {
+    return this.serial(async()=>{
+      const old=this.data.requests[key];
+      if(!old||retiredState(old)||old.control_state!=='RUNNING')return null;
+      // Preserve the latest state/intent if another transition reached the store
+      // while its control read was outstanding. Do not erase the epoch watermark.
+      const r=transition(old,old.state,'APP_CONTROL_UNCONFIRMED',{
+        control_state:'UNKNOWN',run_generation:old.run_generation+1});
+      const next=structuredClone(this.data);next.requests[key]=r;
+      next.events.push(audit(r,old.state,r.reason));next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
+      await this.save(next);return structuredClone(r);
+    });
+  }
   async move(key,state,reason,patch={},fence=null) {
     return this.serial(async()=>{
       const old=this.data.requests[key];
@@ -166,7 +179,7 @@ export class LifecycleStore {
   }
   current(key,t) {
     const r=this.data.requests[key];
-    return this.matches(key,t)&&r.control_state==='RUNNING'
+    return this.matches(key,t)&&runningTaskControl(this.data.controls[r.task_id],r)&&r.control_state==='RUNNING'
       &&!['STOPPED','PAUSED','COMMITTED','COMPLETED','CANCELLED'].includes(r.state);
   }
   displacedResultCandidate(key) {
@@ -269,7 +282,15 @@ export class LifecycleStore {
       if(prior&&c.control_epoch<prior.control_epoch) return false;
       if(prior&&c.control_epoch===prior.control_epoch) {
         if(c.state!==prior.state||c.request_id!==prior.request_id||c.turn_id!==prior.turn_id) throw new Error('control epoch conflict');
-        return false;
+        const old=this.data.requests[keyFor(c)];
+        // A fresh read may reauthorize the same app command after a missing or
+        // unreadable control suspended execution. Preserve its epoch watermark.
+        if(old?.control_state!=='UNKNOWN'||c.control_epoch<old.control_epoch)return false;
+        const r=transition(old,old.state,'APP_CONTROL_CONFIRMED',{
+          control_epoch:c.control_epoch,control_state:c.state,run_generation:old.run_generation+1});
+        const next=structuredClone(this.data);next.requests[r.key]=r;
+        next.events.push(audit(r,old.state,r.reason));next.outbox[r.key]={revision:r.revision,path:r.path,body:projection(r)};
+        await this.save(next);return true;
       }
       const next=structuredClone(this.data);
       next.controls[c.task_id]=structuredClone(c);

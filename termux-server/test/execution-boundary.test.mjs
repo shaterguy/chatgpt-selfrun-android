@@ -25,11 +25,13 @@ test('execution: predecessor metadata and opaque turn IDs do not gate app SEND_R
   let reads=0; f.transport.readGoogleDocText=async()=>{reads++;throw new Error('no Result access');};
   await send(f); assert.equal(f.sends,1); assert.equal(reads,0);
 });
-test('execution: missing or UNKNOWN control does not veto an app dispatch',async()=>{
+test('execution: missing or UNKNOWN control cannot authorize an app dispatch',async()=>{
   for(const state of [null,'UNKNOWN']) {
     const f=fixture();
     f.control=state?{...f.control,state}:null;
-    await send(f); assert.equal(f.sends,1);
+    if(state)await assert.rejects(send(f),/invalid task control/);
+    else await send(f);
+    assert.equal(f.sends,0);assert.equal(f.prepares,0);assert.equal(f.record(),null);
   }
 });
 test('execution: server prompt rewriting remains the submitted immutable payload',async()=>{

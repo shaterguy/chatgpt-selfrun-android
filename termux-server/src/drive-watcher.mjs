@@ -153,13 +153,16 @@ export class DriveDispatchWatcher {
       control=this.controller.controlForTask(body.task_id);
     }
     if(!this.#current(file))return;
-    if(control&&control.state!=='UNKNOWN'&&(control.turn_id!==body.turn_id||control.request_id!==body.request_id)) {
+    if(!control||control.state==='UNKNOWN'||control.turn_id!==body.turn_id||control.request_id!==body.request_id) {
       this.deferred.set(file.path,{fp,taskId:body.task_id,controlPath,controlFp,controlToken:controlToken(control)});return;
     }
     this.deferred.delete(file.path);
     const input=inputFingerprint(body);
     if(this.inputs.get(file.path)===input){this.seen.set(file.path,fp);return;}
-    await (this.controller.ingestDurable?.(file.path,body,this.transport)??this.controller.ingest(file.path,body,this.transport));
+    const accepted=await (this.controller.ingestDurable?.(file.path,body,this.transport)??this.controller.ingest(file.path,body,this.transport));
+    if(accepted===null) {
+      this.deferred.set(file.path,{fp,taskId:body.task_id,controlPath,controlFp,controlToken:controlToken(this.controller.controlForTask(body.task_id))});return;
+    }
     this.inputs.set(file.path,input);
     if(this.#current(file))this.seen.set(file.path,fp);
   }
