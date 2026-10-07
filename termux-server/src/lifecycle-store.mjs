@@ -1,6 +1,6 @@
 import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
 import { appInput, inputFingerprint, retiredState, retireRecord, queueTargetCleanup } from './retired-requests.mjs';
-import { audit, canonicalUrl, digest, initialRecord, keyFor, projection, runningTaskControl, transition } from './lifecycle.mjs';
+import { audit, canonicalUrl, digest, initialRecord, keyFor, preparationInputDigest, projection, provenUnsubmitted, runningTaskControl, transition } from './lifecycle.mjs';
 
 function projectionError(error,operation) {
   const status=error?.http_status??Number(/^Drive \w+ HTTP ([1-5]\d\d)\b/.exec(String(error?.message||''))?.[1]);
@@ -73,10 +73,12 @@ export class LifecycleStore {
       const key=keyFor(body), old=this.data.requests[key];
       const retired=this.data.retired[key];
       if(retired) {
-        if(retired.state!=='CANCELLED'||!retired.never_submitted||body.dispatch_attempt<=retired.dispatch_attempt
+        if(retired.state!=='CANCELLED'||!retired.never_submitted||retired.pre_submit_proof?.schema!==1||body.dispatch_attempt<=retired.dispatch_attempt
           ||['CANCELLED','SUPERSEDED'].includes(body.client_status))return structuredClone(retired);
         const control=this.data.controls[body.task_id];
-        if(control&&control.state!=='RUNNING')return structuredClone(retired);
+        if(!runningTaskControl(control,retired)||retired.conversation_digest||control.conversation_url||body.conversation_url)return structuredClone(retired);
+        if(preparationInputDigest(body)!==retired.pre_submit_proof.input_digest)
+          throw new Error('accepted preparation input/profile is immutable');
         body={...appInput(body),server_control_epoch:control?.control_epoch||retired.control_epoch};
       }
       const incoming=canonicalUrl(body.conversation_url);
@@ -96,13 +98,14 @@ export class LifecycleStore {
           r.run_generation+=1;r.error=null;r.blocked_epoch=null;r.retry_at=0;
         }
         // The client owns the claim and prompt; server fields come exclusively from this record.
-        if(r.intent&&(r.body.prompt!==body.prompt||JSON.stringify(r.body.profile_operations)!==JSON.stringify(body.profile_operations)))
+        if((r.pre_submit_proof&&preparationInputDigest(body)!==r.pre_submit_proof.input_digest)
+          ||r.intent&&(r.body.prompt!==body.prompt||JSON.stringify(r.body.profile_operations)!==JSON.stringify(body.profile_operations)))
           throw new Error('accepted request input/profile is immutable');
         r.body={...r.body,...appInput(body)};
         if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&!['COMMITTED','COMPLETED','CANCELLED'].includes(r.state)) {
           const previous=r.state;
           r=transition(r,'CANCELLED','CLIENT_CANCELLED_INGRESS',{run_generation:r.run_generation+1,
-            never_submitted:!r.intent&&!r.conversation_url&&!r.submission_confirmed&&['DISCOVERED','PREPARING','PREPARED'].includes(r.state)});
+            never_submitted:provenUnsubmitted(r)});
           next.requests[key]=r;next.events.push(audit(r,previous,r.reason));
         }
         if(retiredState(r))retireRecord(next,r);
@@ -111,13 +114,15 @@ export class LifecycleStore {
         return structuredClone(next.retired[key]||r);
       }
       const next=structuredClone(this.data);let r=initialRecord(path,body);
-      if(retired){delete next.retired[key];r.run_generation=(retired.run_generation||0)+1;r.revision=(retired.revision||0)+1;}
+      if(retired){delete next.retired[key];r.run_generation=(retired.run_generation||0)+1;r.revision=(retired.revision||0)+1;
+        r.pre_submit_proof=structuredClone(retired.pre_submit_proof);}
       if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&!retiredState(r)){
         // Missing fields on a cold historical import are not proof that input was never sent.
         r.never_submitted=false;
         r.state='CANCELLED';
       }
       if(!retiredState(r))r=migrateLegacy(r,this.history,this.legacyPrompt||'');
+      if(!retired&&(this.history.audits.has(key)||this.history.legacy.has(key)))r.pre_submit_proof=null;
       const control=next.controls[r.task_id];
       if(control&&control.control_epoch>=r.control_epoch&&!['COMMITTED','COMPLETED'].includes(r.state)
         &&(!retiredState(r)||['STOPPED','DONE'].includes(control.state))) {
@@ -128,6 +133,11 @@ export class LifecycleStore {
           ...(state==='STOPPED'?{stop_status:'NOT_REQUESTED'}:{})});
         next.events.push(audit(r,previous,r.reason));
       }
+      // Only fresh locally accepted input can establish this authority. Remote
+      // projections and identities with prior history carry an explicit null.
+      if(!Object.hasOwn(r,'pre_submit_proof')&&r.state==='DISCOVERED'&&runningTaskControl(control,r)
+        &&r.intent===null&&r.conversation_url===''&&r.submission_confirmed===false)
+        r.pre_submit_proof={schema:1,input_digest:preparationInputDigest(r.body)};
       next.requests[key]=r;
       if(retiredState(r))retireRecord(next,r);
       else next.outbox[key]={revision:r.revision,path,body:projection(r)};

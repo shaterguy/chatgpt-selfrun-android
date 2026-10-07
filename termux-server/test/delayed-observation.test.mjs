@@ -133,6 +133,8 @@ test('a reply beyond the hard deadline is rejected even if its timer callback is
   await settle();clock=75001;f.reply(1);await settle();
   assert.equal(f.session.pending.size,0);
   assert.equal(f.events.some(e=>e.event==='CDP_OBSERVATION_REPLY'),false,'expired evidence must not look accepted');
+  const timeout=f.events.find(e=>e.event==='CDP_QUERY_TIMEOUT');assert.ok(timeout);
+  assert.equal(timeout.timeout_overrun_ms,1);assert.equal(f.session.timedOutQueries.size,0);
   f.abort.abort(Error('finished'));await monitoring;
 });
 

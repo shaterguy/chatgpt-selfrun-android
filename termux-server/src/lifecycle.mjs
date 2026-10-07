@@ -31,6 +31,13 @@ export const matchingTaskControl=(c,r)=>!!c&&!!r&&c.schema==='selfrun-task-contr
   &&['task_id','turn_id','request_id'].every(k=>!!r[k]&&c[k]===r[k]);
 export const runningTaskControl=(c,r)=>matchingTaskControl(c,r)&&c.state==='RUNNING';
 export const digest = value => createHash('sha256').update(String(value)).digest('hex');
+// Attempt/status/timing are app bookkeeping; the accepted operation stays fixed.
+export const preparationInputDigest=body=>digest(JSON.stringify([
+  body?.project_url,body?.prompt,body?.profile_operations,body?.result_document_id,
+]));
+export const provenUnsubmitted=r=>r?.pre_submit_proof?.schema===1
+  &&r.pre_submit_proof.input_digest===preparationInputDigest(r.body)
+  &&r.intent===null&&r.conversation_url===''&&r.submission_confirmed===false;
 export function canonicalUrl(value) {
   try {
     const u=new URL(value);
@@ -71,7 +78,10 @@ export function initialRecord(path,body,now=Date.now()) {
     if(stored.key!==keyFor(body)||stored.task_id!==body.task_id||stored.turn_id!==body.turn_id||stored.request_id!==body.request_id
       ||stored.conversation_url!==canonicalUrl(body.conversation_url)||!STATES[stored.state])throw new Error('durable Drive identity mismatch');
     delete stored.schema;
-    return {...stored,path,body:structuredClone(body),dispatch_attempt:body.dispatch_attempt};
+    // A Drive projection is not local proof of never entering the submit boundary.
+    // Only the local snapshot or the exact offline operator repair can carry it.
+    return {...stored,pre_submit_proof:null,never_submitted:false,
+      path,body:structuredClone(body),dispatch_attempt:body.dispatch_attempt};
   }
   const url=canonicalUrl(body.conversation_url);
   const imported=body.lifecycle_state;
@@ -81,6 +91,7 @@ export function initialRecord(path,body,now=Date.now()) {
     control_state:body.server_control_state&&body.server_control_state!=='UNKNOWN'?body.server_control_state:'RUNNING',conversation_url:url,conversation_id:url.split('/c/')[1]||null,
     recovery_count:Number(body.recovery_count||0),attach_attempts:Number(body.resume_retry_count||0),failure_epoch:Number(body.server_control_epoch||0),retry_at:0,
     intent:null,cursor:null,last_progress_at:now,result_state:'UNKNOWN',error:null,
+    ...(imported||body.server_status&&body.server_status!=='PENDING'?{pre_submit_proof:null}:{}),
     submission_confirmed:!!url&&['STARTED','COMPLETED','RUNNING','STALLED','RECOVERY_SENT'].includes(body.server_status),response_status:'UNKNOWN',
     created_at:now,updated_at:now};
 }
@@ -96,6 +107,10 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
   if(patch.recovery_count!==undefined&&patch.recovery_count<record.recovery_count) throw new Error('recovery count is monotonic');
   if(record.conversation_url&&patch.conversation_url&&canonicalUrl(patch.conversation_url)!==record.conversation_url) throw new Error('canonical conversation ownership conflict');
   const r={...record,...structuredClone(patch),state:next,revision:record.revision+1,updated_at:now,reason};
+  // The local intake establishes this; a durable intent revokes it before send.
+  if(r.intent||r.conversation_url||r.submission_confirmed
+    ||['POST_PENDING','RECOVERY_POST','POST_UNCERTAIN','RECONCILING','OBSERVING','COMMITTED','COMPLETED','STOPPED'].includes(next))
+    r.pre_submit_proof=null;
   if(['VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT','RECOVERY_POST'].includes(next)) r.recovery_stage=next;
   if(r.conversation_url) {
     r.conversation_url=canonicalUrl(r.conversation_url);
