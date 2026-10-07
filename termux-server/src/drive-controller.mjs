@@ -117,7 +117,7 @@ export class DriveDispatchController {
     for(const item of stopping)await this.#disposeStoppedAttachment(item.r,item.a,c);
     if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
     await this.#restoreRetiredControl(c,transport);
-    if(['STOPPED','DONE'].includes(c.state))void this.cleanupTerminalResources();
+    if(['STOPPED','DONE'].includes(c.state)||c.state==='RUNNING'&&!sameRunningIdentity)void this.cleanupTerminalResources();
     return true;
   }
   async #restoreRetiredControl(c,transport,body=null) {
@@ -345,6 +345,11 @@ export class DriveDispatchController {
   async #open(key,transport,mode) {
     let r=this.repository.get(key);
     const recoveryStage=recoveryStates.has(r.state)?r.state:null;
+    // Generations fence stale callbacks; they do not describe why the browser
+    // is opening. Explicit app entry retries remain explicit until entry succeeds.
+    const explicitEntry=r.browser_entry?.control_epoch===r.control_epoch
+      &&r.browser_entry.conversation_url===r.conversation_url;
+    const automaticRecovery=!explicitEntry;
     const uncertain=!!r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome);
     const next=mode==='prepare'?'PREPARING':'ATTACHING';
     if(r.control_state!=='RUNNING')return null;
@@ -367,17 +372,19 @@ export class DriveDispatchController {
       const saved=guard()?await this.#move(key,this.repository.get(key).state,'BROWSER_TARGET_ACQUIRED',
         {target_id:target.id,target_owned:owned},token):null;
       // Retirement may commit while the acquisition write waits in the store queue.
-      if(!saved&&owned)await this.repository.queueTargetCleanup(key,target.id);
+      if(!saved&&owned){await this.repository.queueTargetCleanup(key,target.id,token);void this.cleanupTerminalResources();}
     };
     try {
       let attached;
       if(mode==='prepare') {
         const directives=await this.#directives();
         attached=await this.browser.prepare({projectUrl:r.body.project_url,
-          prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard});
+          prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard,
+          previousTargetId:r.target_id||null});
       } else if(mode==='target') {
         attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal,onTarget,guard});
-      } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal,onTarget,guard});
+      } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal,onTarget,guard,automaticRecovery,
+        previousTargetId:explicitEntry?r.target_id||null:null});
       if(!guard()) {
         const control=this.repository.control(r.task_id);
         if(control?.state==='STOPPED'&&control.request_id===r.request_id&&control.turn_id===r.turn_id)
@@ -385,7 +392,7 @@ export class DriveDispatchController {
         else {
           attached.session.close();
           if(this.browser.chromium?.isOwnedTarget?.(attached.target.id))
-            await this.repository.queueTargetCleanup(key,attached.target.id);
+            await this.repository.queueTargetCleanup(key,attached.target.id,token);
           void this.cleanupTerminalResources();
         }
         return null;
@@ -393,7 +400,7 @@ export class DriveDispatchController {
       Object.assign(pending,attached,{guard});
       await this.#move(key,uncertain?'POST_UNCERTAIN':mode==='prepare'?'PREPARED':'OBSERVING','BROWSER_ATTACHED',
         {target_id:attached.target.id,target_owned:this.browser.chromium?.isOwnedTarget?.(attached.target.id)===true,
-          attach_attempts:0,error:null,resume_recovery_stage:recoveryStage},token);
+          attach_attempts:0,error:null,resume_recovery_stage:recoveryStage,browser_entry:null},token);
       if(recoveryStage&&!uncertain) await this.#move(key,'STALLED','RESTORE_RECOVERY_STAGE',{recovery_stage:recoveryStage},token);
       return pending;
     } catch(error) {

@@ -2,7 +2,8 @@ import { canonicalUrl, digest, keyFor } from './lifecycle.mjs';
 import { retiredState } from './retired-requests.mjs';
 const consumed=r=>['COMMITTED','COMPLETED'].includes(r?.state);
 
-// Cleanup-only metadata never re-enters dispatch, submission or monitor execution.
+// Terminal and displaced cleanup metadata never re-enters dispatch, submission
+// or monitor execution; disposing a tab does not commit a business Result.
 export class TerminalBrowserCleanup {
   constructor({repository,chromium,stateStore,available,busy}) {
     Object.assign(this,{repository,chromium,stateStore,available,busy});
@@ -17,30 +18,44 @@ export class TerminalBrowserCleanup {
   }
   canClose(entry,target=null) {
     if(!this.available())return false;
-    if(target&&entry.conversation_digest&&digest(canonicalUrl(target.url))!==entry.conversation_digest)return false;
+    if(target&&entry.conversation_digest&&digest(canonicalUrl(target.url))!==entry.conversation_digest
+      &&!(target.id===entry.target_id&&this.chromium?.isOwnedBootstrapTarget?.(target,entry.conversation_digest)===true))return false;
     const data=this.repository.data,marker=data.retired[entry.key],control=data.controls[entry.task_id];
-    if(!retiredState(marker)||JSON.stringify(data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
+    const source=data.requests[entry.key],d=source?.browser_cleanup_displacement;
+    const displaced=entry.kind==='DISPLACED'&&source?.state==='PAUSED'&&source.target_owned===true
+      &&source.target_id===entry.target_id&&source.browser_generation===entry.browser_generation
+      &&d?.target_id===entry.target_id&&d.browser_generation===entry.browser_generation&&d.run_generation===entry.run_generation
+      &&d.control_epoch===entry.control_epoch&&d.successor_key===entry.successor_key
+      &&control?.control_epoch>=entry.control_epoch&&keyFor(control||{})!==entry.key&&entry.key!==entry.successor_key;
+    if((!retiredState(marker)&&!displaced)||JSON.stringify(data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
     const conflicts=body=>body.target_id===entry.target_id||body.lifecycle_record?.target_id===entry.target_id
       ||(entry.conversation_digest&&body.conversation_url
         &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest);
-    if(consumed(marker)) {
+    const independentCleanup=consumed(marker)||displaced;
+    if(independentCleanup) {
       // A successor owns its own resources, not every target belonging to this task.
       for(const c of Object.values(data.controls))if(!['STOPPED','DONE'].includes(c.state)
         &&!consumed(this.repository.get(keyFor(c)))&&conflicts(c))return false;
     } else if(control&&control.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(control.state))return false;
     // HTTP acceptance is durable before the lifecycle control catches up.
     for(const body of Object.values(this.stateStore.snapshot().httpIngress?.files||{})) {
+      // Accepted HTTP history is inert after its identity was displaced. A newer
+      // explicit old-request control still fences the close before application.
+      if(displaced&&keyFor(body)===entry.key&&(
+        body.schema==='selfrun-task-control-v1'&&body.control_epoch<=entry.control_epoch
+        ||body.schema==='selfrun-server-dispatch-v1'&&body.dispatch_attempt<=source.dispatch_attempt
+          &&Number(body.server_control_epoch||0)<=entry.control_epoch&&Number(body.lifecycle_record?.control_epoch||0)<=entry.control_epoch))continue;
       if(body.schema==='selfrun-task-control-v1') {
-        if(consumed(marker)) {
+        if(independentCleanup) {
           if(!['STOPPED','DONE'].includes(body.state)&&!consumed(this.repository.get(keyFor(body)))&&conflicts(body))return false;
         } else if(body.task_id===entry.task_id&&body.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(body.state))return false;
       } else {
         const owner=this.repository.get(keyFor(body));
         const pending=!retiredState(owner)||(!consumed(owner)&&Number(body.dispatch_attempt)>Number(owner.dispatch_attempt));
-        if(pending&&(conflicts(body)||(!consumed(marker)&&body.task_id===entry.task_id)))return false;
+        if(pending&&(conflicts(body)||(!independentCleanup&&body.task_id===entry.task_id)))return false;
       }
     }
-    return !this.repository.records().some(r=>!retiredState(r)&&(r.target_id===entry.target_id
+    return !this.repository.records().some(r=>!retiredState(r)&&(!displaced||r.key!==entry.key)&&(r.target_id===entry.target_id
       ||(entry.conversation_digest&&r.conversation_url&&digest(canonicalUrl(r.conversation_url))===entry.conversation_digest)));
   }
   canRelease() {

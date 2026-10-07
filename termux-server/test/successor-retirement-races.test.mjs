@@ -127,7 +127,7 @@ for(const outcome of ['false','unavailable','wrong-identity','unstable'])test(
     await f.acceptSuccessor();await settleRetirement(f);
     const pending=f.controller.repository.get(f.firstKey),before=calls;
     assert.equal(pending.state,'PAUSED');assert.ok(pending.result_retirement_retry_at>now,'retry deadline is durable');
-    assert.deepEqual(f.closed,[]);
+    assert.deepEqual(f.closed,['target-t1'],'new app entry disposes T1 resources independently of Result commitment');
     await f.controller.tick(f.transport);await settleRetirement(f);assert.equal(calls,before);
     await f.controller.quiesceForStandby();f.controller=f.recreate();f.controller.config.stallAfterMs=600000;
     await f.controller.tick(f.transport);await settleRetirement(f);assert.equal(calls,before,'restart preserves pacing');
@@ -156,7 +156,7 @@ for(const change of ['result-document','new-generation','dispatch-attempt','brow
     await f.controller.control(null,f.control,f.transport);
   }
   gate.resolve();await settleRetirement(f);await f.controller.cleanupTerminalResources();
-  assert.notEqual(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.deepEqual(f.closed,[]);
+  assert.notEqual(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.deepEqual(f.closed,['target-t1']);
   assert.equal(f.resumeUrls.filter(url=>url===f.probe.url).length,1);assert.equal(f.sends,0);
 });
 
@@ -185,7 +185,7 @@ test('snapshot/audit integrity quarantine also fences displaced retirement',asyn
   const f=successorFixture();t.after(()=>f.controller.quiesceForStandby());
   await f.existing();f.result(true);f.controller.repository.integrityFaults.add(f.firstKey);
   await f.acceptSuccessor();await settleRetirement(f);
-  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.deepEqual(f.closed,[]);
+  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.deepEqual(f.closed,['target-t1']);
   assert.equal(f.resultReads.filter(id=>id==='RESULT-1').length,0);
 });
 
@@ -219,5 +219,5 @@ for(const boundary of ['availability','standby','STOP'])test('pending displaced 
   else {f.control={...f.nextControl,state:'STOPPED',control_epoch:3};await f.controller.control(null,f.control,f.transport);}
   gate.resolve();await settleRetirement(f);await f.controller.cleanupTerminalResources();
   assert.notEqual(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.equal(f.sends,0);
-  if(boundary!=='STOP')assert.deepEqual(f.closed,[]);
+  if(boundary!=='STOP')assert.deepEqual(f.closed,['target-t1'],'already completed resource disposal is independent of a later proof boundary');
 });

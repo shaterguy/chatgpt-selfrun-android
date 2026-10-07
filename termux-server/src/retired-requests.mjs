@@ -9,15 +9,24 @@ export const appInput=body=>Object.fromEntries(Object.entries(body).filter(([key
 const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?
   Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])):value;
 export const inputFingerprint=body=>JSON.stringify(stable(appInput(body)));
+function confirmedDisplacedCleanup(data,record,targetId) {
+  const d=record.browser_cleanup_displacement,outcome=data.browserCleanupOutcomes?.[targetId];
+  return d?.target_id===targetId&&d.browser_generation===record.browser_generation
+    &&outcome?.kind==='DISPLACED'&&['CLOSED','ABSENT'].includes(outcome.status)
+    &&outcome.target_id===targetId&&outcome.key===record.key&&outcome.browser_generation===d.browser_generation
+    &&outcome.run_generation===d.run_generation?structuredClone(outcome):null;
+}
 export function queueTargetCleanup(data,record,targetId=record.target_id) {
   if(!targetId||record.target_owned!==true)return;
+  const completed=confirmedDisplacedCleanup(data,record,targetId);
+  if(completed)return completed;
   data.browserCleanup??={};
   data.browserCleanup[targetId]={target_id:targetId,key:record.key,task_id:record.task_id,
     turn_id:record.turn_id,request_id:record.request_id,control_epoch:record.control_epoch,
     conversation_digest:record.conversation_digest||(record.conversation_url?digest(canonicalUrl(record.conversation_url)):null)};
 }
 export function retireRecord(data,record) {
-  queueTargetCleanup(data,record);
+  const completedCleanup=queueTargetCleanup(data,record);
   const control=data.controls?.[record.task_id];
   const appDone=record.state==='STOPPED'&&record.control_state==='DONE'
     &&control?.state==='DONE'&&keyFor(control)===record.key&&control.control_epoch===record.control_epoch;
@@ -29,6 +38,7 @@ export function retireRecord(data,record) {
   }
   const marker=Object.fromEntries(['key','path','task_id','turn_id','request_id','dispatch_attempt','state','revision',
     'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status','result_recovery','pre_submit_proof'].map(k=>[k,record[k]]));
+  if(completedCleanup)marker.browser_cleanup=completedCleanup;
   if(record.conversation_url)marker.conversation_digest=digest(canonicalUrl(record.conversation_url));
   if(marker.state==='STOPPED')marker.stop_status=['CONFIRMED','NOT_REQUESTED'].includes(marker.stop_status)?marker.stop_status:'UNCONFIRMED';
   marker.server_ingress=record.body?.server_ingress||record.server_ingress||'DRIVE';

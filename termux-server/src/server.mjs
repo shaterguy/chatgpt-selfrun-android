@@ -2,7 +2,7 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config.mjs';
 import { StateStore, ensureToken } from './state-store.mjs';
-import { ChromiumManager } from './browser/cdp.mjs';
+import { createBrowserManager } from './browser/adapter.mjs';
 import { ChatGptBrowser } from './browser/chatgpt.mjs';
 import { SignalDispatchTransport } from './signal-transport.mjs';
 import { SelfRunController } from './controller.mjs';
@@ -16,7 +16,7 @@ const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
 await stateStore.init();
 const token = await ensureToken(config);
-const chromium = new ChromiumManager(config);
+const chromium = createBrowserManager(config);
 const browser = new ChatGptBrowser(chromium, config);
 const promptDirectives = new PromptDirectiveStore(config);
 const driveTransport = new SignalDispatchTransport(new DriveDispatchTransport(config),stateStore);
@@ -86,6 +86,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         ok: true,
         version: config.version,
+        browser_adapter: config.browserAdapter,
+        browser_runtime: chromium.status?.(),
         startedAt,
         status: state.status,
         generation: state.generation,
@@ -144,6 +146,7 @@ async function shutdown() {
   driveWatcher.stop();
   await cluster.close().catch(() => {});
   await driveTransport.close().catch(() => {});
+  await chromium.close?.().catch(() => {});
   server.close(() => process.exit(0));
 }
 

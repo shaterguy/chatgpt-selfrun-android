@@ -68,7 +68,7 @@ function runtimeEvaluateTimedOut(error) {
   return String(error?.message || error) === 'CDP command timeout: Runtime.evaluate';
 }
 
-function recoveryInputExpression() {
+export function recoveryInputExpression() {
   return `(() => {
     const visible=e=>e.isConnected&&e.offsetParent!==null;
     const selectors=['textarea#prompt-textarea','textarea[data-testid="prompt-textarea"]',
@@ -95,7 +95,7 @@ function conversationId(url) {
 }
 
 
-const DECORATIVE_ANIMATION_PAUSE_SOURCE = "(() => {" +
+export const DECORATIVE_ANIMATION_PAUSE_SOURCE = "(() => {" +
   "const id='__selfrun_decorative_animation_pause';" +
   "const css=[" +
     "'[class*=\\\"LoadingResultsShimmer\\\"]'," +
@@ -186,7 +186,7 @@ export function effectiveStopButtonVisible({ rawStopButtonVisible, inConversatio
   return Boolean(rawStopButtonVisible && (inConversation || userCount > 0 || assistantCount > 0 || responseTurnId));
 }
 
-function probeExpression() {
+export function probeExpression() {
   const errorPattern = JSON.stringify(PAGE_ERROR_PATTERN);
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
@@ -326,7 +326,7 @@ function probeExpression() {
   })()`;
 }
 
-function newChatExpression() {
+export function newChatExpression() {
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
     const parts=location.pathname.split('/').filter(Boolean);
@@ -341,7 +341,7 @@ function newChatExpression() {
   })()`;
 }
 
-function inputExpression(prompt) {
+export function inputExpression(prompt) {
   const expected = JSON.stringify(prompt);
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
@@ -366,7 +366,7 @@ function inputExpression(prompt) {
   })()`;
 }
 
-function sendReadyExpression() {
+export function sendReadyExpression() {
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
     const selectors=['textarea#prompt-textarea','textarea[data-testid="prompt-textarea"]',
@@ -384,7 +384,7 @@ function sendReadyExpression() {
   })()`;
 }
 
-function submitExpression() {
+export function submitExpression() {
   return `(() => {
     const visible=e=>!!e&&e.isConnected&&e.offsetParent!==null;
     const selectors=['textarea#prompt-textarea','textarea[data-testid="prompt-textarea"]',
@@ -503,7 +503,7 @@ export function requestProfileDocumentStartSource() {
   })()`;
 }
 
-function configureRequestProfileExpression(operations) {
+export function configureRequestProfileExpression(operations) {
   const normalized=JSON.stringify(normalizeProfileOperations(operations));
   const version=JSON.stringify(REQUEST_PROFILE_ENGINE_VERSION);
   return `(()=>{const engine=window.__selfrunRequestProfileEngine;if(!engine||engine.version!==${version}||typeof engine.configure!=='function')throw new Error('REQUEST_PROFILE_ENGINE_UNAVAILABLE');engine.configure(${normalized});return engine.diagnostics?.()||{ok:true};})()`;
@@ -686,6 +686,59 @@ export function receiptObserverDocumentStartSource() {
   return '('+installReceiptObserver.toString()+')()';
 }
 
+
+export const QUIESCE_EXPRESSION = '(() => {'+
+  'const buttons=[...document.querySelectorAll("button")].filter(e=>e.isConnected&&e.offsetParent!==null);'+
+  'const stop=buttons.find(b=>b.dataset.testid==="stop-button"||/stop|중지/i.test((b.getAttribute("aria-label")||"")+" "+(b.title||"")));'+
+  'if(stop)stop.click();return !!stop;})()';
+
+export function pageActionExpression(operation,payload={}) {
+  switch(operation) {
+    case 'snapshot': return probeExpression();
+    case 'progress': return `(() => { const started = performance.now(); const value = (${probeExpression()});
+      return {...value, __selfrun_engine_elapsed_ms: Math.max(0, Math.round(performance.now() - started))}; })()`;
+    case 'recoveryInput': return recoveryInputExpression();
+    case 'newChat': return newChatExpression();
+    case 'input': return inputExpression(payload.prompt);
+    case 'sendReady': return sendReadyExpression();
+    case 'submit': return submitExpression();
+    case 'installProfile': return requestProfileDocumentStartSource();
+    case 'profileConfigure': return configureRequestProfileExpression(payload.operations);
+    case 'installReceipt': return receiptObserverDocumentStartSource();
+    case 'receiptArm': return 'window.__selfrunReceiptObserver.arm('+JSON.stringify(payload.key)+')';
+    case 'receiptSnapshot': return 'window.__selfrunReceiptObserver?.snapshot('+JSON.stringify(payload.key)+')||null';
+    case 'receiptRetire': return 'window.__selfrunReceiptObserver?.retire('+JSON.stringify(payload.key)+')';
+    case 'pauseAnimations': return DECORATIVE_ANIMATION_PAUSE_SOURCE;
+    case 'quiesce': return QUIESCE_EXPRESSION;
+    default: throw Object.assign(new Error('Unsupported page operation'),{code:'PAGE_OPERATION_UNSUPPORTED'});
+  }
+}
+
+async function runPageAction(session,operation,payload={},timeoutMs=RUNTIME_EVALUATE_TIMEOUT_MS,options={}) {
+  if(session?.transport==='extension') {
+    if(typeof session.run!=='function')throw new Error('Extension page session unavailable');
+    return session.run(operation,payload,{timeoutMs,...options});
+  }
+  return evaluate(session,pageActionExpression(operation,payload),timeoutMs,options);
+}
+
+async function initializePageSession(session,config,{network=true,pause=true}={}) {
+  if(session?.transport==='extension') {
+    return session.run('initialize',{clientProfile:String(config?.browserClientProfile||'native')});
+  }
+  await session.call('Page.enable');
+  await session.call('Runtime.enable');
+  if(network)await session.call('Network.enable');
+  await applyBrowserClientProfile(session,config);
+  if(pause)await installDecorativeAnimationPause(session);
+  await installRequestProfileEngine(session);
+}
+
+async function navigatePageSession(session,url) {
+  if(session?.transport==='extension')return session.run('navigate',{url});
+  return session.call('Page.navigate',{url});
+}
+
 export class ChatGptBrowser {
   constructor(chromium, config) {
     this.chromium = chromium;
@@ -703,10 +756,8 @@ export class ChatGptBrowser {
     if (!pending) {
       const abort = new AbortController();
       const combined = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
-      const expression = `(() => { const started = performance.now(); const value = (${probeExpression()});
-        return {...value, __selfrun_engine_elapsed_ms: Math.max(0, Math.round(performance.now() - started))}; })()`;
       pending = { signal, abort, generation };
-      pending.promise = evaluate(session, expression, OBSERVATION_DEADLINE_MS,
+      pending.promise = runPageAction(session, 'progress', {}, OBSERVATION_DEADLINE_MS,
         { signal: combined, queryLabel: 'progress' }).then(value => {
           if (combined.aborted) throw combined.reason || new Error('aborted');
           if (value) delete value.__selfrun_engine_elapsed_ms;
@@ -725,7 +776,7 @@ export class ChatGptBrowser {
     while (Date.now() - started < timeoutMs) {
       if (signal?.aborted) throw signal.reason || new Error('aborted');
       try {
-        last = await evaluate(session, probeExpression());
+        last = await runPageAction(session, 'snapshot');
       } catch (error) {
         if(/websocket.*closed|websocket.*not open|ECONNREFUSED/i.test(String(error?.message||error))) {
           error.code='BROWSER_DEAD';throw error;
@@ -744,14 +795,14 @@ export class ChatGptBrowser {
   }
 
   async #prepareNewChat(session, projectUrl, signal) {
-    await session.call('Page.navigate', { url: projectUrl });
+    await navigatePageSession(session, projectUrl);
     await this.#waitFor(session, (p) => p.readyState === 'complete' || p.readyState === 'interactive', {
       timeoutMs: this.config.navigationTimeoutMs,
       signal,
       label: 'project page',
     });
 
-    let probe = await evaluate(session, probeExpression());
+    let probe = await runPageAction(session, 'snapshot');
     if (probe.loginPage) {
       const error = new Error('ChatGPT browser profile requires sign-in');
       error.code = 'AUTH_REQUIRED';
@@ -760,10 +811,10 @@ export class ChatGptBrowser {
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (!/\/c\//.test(new URL(probe.url).pathname)) break;
-      const result = await evaluate(session, newChatExpression());
+      const result = await runPageAction(session, 'newChat');
       if (result?.status === 'MISSING') break;
       await delay(700, signal);
-      probe = await evaluate(session, probeExpression());
+      probe = await runPageAction(session, 'snapshot');
     }
     if(conversationId(probe.url))throw Object.assign(new Error('new conversation could not be established'),{code:'NEW_CONVERSATION_REQUIRED'});
     return this.#waitFor(session, (p) => p.composer&&!conversationId(p.url), {
@@ -773,19 +824,20 @@ export class ChatGptBrowser {
     });
   }
 
-  async prepare({ projectUrl, prompt, signal, onTarget, guard=()=>true }) {
+  async prepare({ projectUrl, prompt, signal, onTarget, guard=()=>true, previousTargetId=null }) {
+    if(this.chromium.recoveryNavigationDisabled&&previousTargetId){
+      const targets=await this.chromium.listExistingTargets();
+      if(!Array.isArray(targets))throw Object.assign(new Error('Previous entry target inventory unavailable'),{code:'PAGE_UNAVAILABLE'});
+      if(targets.some(target=>target.id===previousTargetId)&&!await this.chromium.closeTarget(previousTargetId,{guard}))
+        throw Object.assign(new Error('Previous owned entry target is not safely disposed'),{code:'PAGE_UNAVAILABLE'});
+    }
     const target = await this.chromium.createTarget('about:blank');
     let session;
     try {
       await onTarget?.(target);
       if(signal?.aborted)throw signal.reason||new Error('aborted');
       session = await this.chromium.connectTarget(target);
-      await session.call('Page.enable');
-      await session.call('Runtime.enable');
-      await session.call('Network.enable');
-      await applyBrowserClientProfile(session,this.config);
-      await installDecorativeAnimationPause(session);
-      await installRequestProfileEngine(session);
+      await initializePageSession(session,this.config);
       const before = await this.#prepareNewChat(session, projectUrl, signal);
       if (signal?.aborted) throw signal.reason || new Error('aborted');
       return {
@@ -808,24 +860,25 @@ export class ChatGptBrowser {
     }
   }
 
-  async resume({ conversationUrl, signal, onTarget, guard=()=>true }) {
+  async resume({ conversationUrl, signal, onTarget, guard=()=>true, automaticRecovery=false, previousTargetId=null }) {
     const expectedUrl = canonicalUrl(conversationUrl);
     if (!expectedUrl) throw new Error('canonical conversation URL unavailable for resume');
 
     const targets=await this.chromium.listExistingTargets();
+    if(this.chromium.recoveryNavigationDisabled&&!Array.isArray(targets))
+      throw Object.assign(new Error('Existing target inventory unavailable; no replacement navigation allowed'),{code:'PAGE_UNAVAILABLE'});
     const existing=targets?.find(t=>t.type==='page'&&!this.chromium.targetClosing?.(t.id)&&canonicalUrl(t.url)===expectedUrl);
+    if(this.chromium.recoveryNavigationDisabled&&previousTargetId&&targets.some(t=>t.id===previousTargetId)&&existing?.id!==previousTargetId)
+      throw Object.assign(new Error('Previous owned entry target is not safely disposed; no replacement navigation allowed'),{code:'PAGE_UNAVAILABLE'});
+    if(!existing&&automaticRecovery&&this.chromium.recoveryNavigationDisabled)
+      throw Object.assign(new Error('Existing conversation page unavailable; automatic navigation is disabled'),{code:'PAGE_UNAVAILABLE'});
     const target = existing || await this.chromium.createTarget(conversationUrl);
     let session;
     try {
       await onTarget?.(target);
       if(signal?.aborted)throw signal.reason||new Error('aborted');
       session = await this.chromium.connectTarget(target);
-      await session.call('Page.enable');
-      await session.call('Runtime.enable');
-      await session.call('Network.enable');
-      await applyBrowserClientProfile(session,this.config);
-      await installDecorativeAnimationPause(session);
-      await installRequestProfileEngine(session);
+      await initializePageSession(session,this.config);
       const probe = await this.#waitFor(session, (p) => p.loginPage
         || ((p.readyState === 'complete' || p.readyState === 'interactive')
           && canonicalUrl(p.url) === expectedUrl) || !!p.errorText, {
@@ -866,12 +919,12 @@ export class ChatGptBrowser {
     let sendReady = null;
     while (Date.now() - sendReadyStarted < 5000) {
       if (signal?.aborted) throw signal.reason || new Error('aborted');
-      sendReady = await evaluate(session, sendReadyExpression());
+      sendReady = await runPageAction(session, 'sendReady');
       if (sendReady?.ready) break;
       if (sendReady?.status==='NO_COMPOSER'||sendReady?.status==='NO_SEND') {
-        const restaged=await evaluate(session,inputExpression(prompt));
+        const restaged=await runPageAction(session,'input',{prompt});
         if(restaged?.status==='READY') {
-          sendReady=await evaluate(session,sendReadyExpression());
+          sendReady=await runPageAction(session,'sendReady');
           if(sendReady?.ready) break;
         }
       }
@@ -887,7 +940,7 @@ export class ChatGptBrowser {
     try {
       try {
         if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');
-        const submitted=await evaluate(session,submitExpression());
+        const submitted=await runPageAction(session,'submit');
         if(submitted?.status!=='SUBMITTED')throw new Error(`Composer send failed: ${submitted?.status||'unknown'}`);
         clickReleased=true;
       } catch(error) {
@@ -913,12 +966,12 @@ export class ChatGptBrowser {
 
   async livenessSnapshot({ session, signal }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
-    return evaluate(session, probeExpression());
+    return runPageAction(session, 'snapshot');
   }
 
   async recoveryInputSnapshot({ session, signal }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
-    return evaluate(session, recoveryInputExpression());
+    return runPageAction(session, 'recoveryInput');
   }
 
   async attachTarget({targetId,signal,onTarget}) {
@@ -928,35 +981,32 @@ export class ChatGptBrowser {
     await onTarget?.(target);
     if(signal?.aborted)throw signal.reason||new Error('aborted');
     const session=await this.chromium.connectTarget(target);
-    await session.call('Page.enable');
-    await session.call('Runtime.enable');
-    await applyBrowserClientProfile(session,this.config);
-    await installRequestProfileEngine(session);
+    await initializePageSession(session,this.config,{network:false,pause:false});
     if(signal?.aborted){session.close();throw signal.reason;}
-    return {target,session,baseline:await evaluate(session,probeExpression())};
+    return {target,session,baseline:await runPageAction(session,'snapshot')};
   }
 
   async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest,onConversation}) {
     if(signal?.aborted||!guard())throw new Error('stale submission');
-    const probe=await evaluate(session,kind==='recovery'?recoveryInputExpression():probeExpression());
+    const probe=await runPageAction(session,kind==='recovery'?'recoveryInput':'snapshot');
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
       throw new Error('submission conversation ownership mismatch');
     if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
-    await evaluate(session,requestProfileDocumentStartSource());
-    await evaluate(session,configureRequestProfileExpression(profileOperations));
-    await evaluate(session,receiptObserverDocumentStartSource());
-    const staged=await evaluate(session,inputExpression(prompt));
+    await runPageAction(session,'installProfile');
+    await runPageAction(session,'profileConfigure',{operations:profileOperations});
+    await runPageAction(session,'installReceipt');
+    const staged=await runPageAction(session,'input',{prompt});
     if(staged?.status!=='READY')throw new Error('submission composer not ready');
     if(signal?.aborted||!guard())throw new Error('stale submission');
     const key={intent_id:intent?.id,generation:intent?.receipt_generation,prompt,conversation_id:conversationId(conversationUrl)};
     if(intent?.prompt!==prompt)throw new Error('submission immutable prompt mismatch');
-    await evaluate(session,'window.__selfrunReceiptObserver.arm('+JSON.stringify(key)+')');
+    await runPageAction(session,'receiptArm',{key});
     try {
       return await this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
     } finally {
       if(signal?.aborted||!guard()) {
         // Retire this exact arm only. A late old cleanup cannot retire its successor.
-        try{await evaluate(session,'window.__selfrunReceiptObserver?.retire('+JSON.stringify(key)+')');}catch{}
+        try{await runPageAction(session,'receiptRetire',{key});}catch{}
       }
     }
   }
@@ -991,7 +1041,7 @@ export class ChatGptBrowser {
       check();
       if(probe?.loginPage||(expected&&conversationId(probe?.url)!==expected))return {state:'UNKNOWN',probe};
       let observed=null;
-      if(validKey)try{observed=await evaluate(session,'window.__selfrunReceiptObserver?.snapshot('+JSON.stringify(key)+')||null');}catch{check();}
+      if(validKey)try{observed=await runPageAction(session,'receiptSnapshot',{key});}catch{check();}
       check();
       // A current-page conflict must never fall back to an older saved positive receipt.
       const receipt=observed===null?durable:belongs(observed)?metadata(observed):null;
@@ -1020,10 +1070,7 @@ export class ChatGptBrowser {
     if(conversationId(before.url)!==conversationId(conversationUrl))throw new Error('quiesce conversation mismatch');
     if(!before.streaming&&!before.stopButtonVisible)return before;
     if(signal?.aborted||!guard())throw new Error('stale stream cleanup');
-    await evaluate(session,'(() => {'+
-      'const buttons=[...document.querySelectorAll("button")].filter(e=>e.isConnected&&e.offsetParent!==null);'+
-      'const stop=buttons.find(b=>b.dataset.testid==="stop-button"||/stop|중지/i.test((b.getAttribute("aria-label")||"")+" "+(b.title||"")));'+
-      'if(stop)stop.click();return !!stop;})()');
+    await runPageAction(session,'quiesce');
     const started=Date.now();
     do {
       if(signal?.aborted||!guard())throw signal?.reason||new Error('stale stream cleanup');

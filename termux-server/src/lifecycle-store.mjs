@@ -16,6 +16,21 @@ function projectionError(error,operation) {
   });
 }
 
+function queueDisplacedCleanup(data,r,targetId=r.target_id) {
+  // A new app entry discards only this browser resource. Its Result/intent stay
+  // under the existing independent business reconciliation policy.
+  const d=r.browser_cleanup_displacement;
+  if(!targetId||r.target_owned!==true||!d||d.target_id!==targetId||d.browser_generation!==r.browser_generation)return false;
+  const outcome=data.browserCleanupOutcomes?.[targetId];
+  if(['CLOSED','ABSENT'].includes(outcome?.status)&&outcome.target_id===targetId&&outcome.key===r.key
+    &&outcome.browser_generation===d.browser_generation&&outcome.run_generation===d.run_generation)return false;
+  data.browserCleanup[targetId]={kind:'DISPLACED',target_id:targetId,key:r.key,task_id:r.task_id,
+    turn_id:r.turn_id,request_id:r.request_id,control_epoch:d.control_epoch,
+    browser_generation:d.browser_generation,run_generation:d.run_generation,successor_key:d.successor_key,
+    conversation_digest:r.conversation_url?digest(r.conversation_url):null};
+  return true;
+}
+
 
 // A single durable snapshot owns both current records and the publication outboxes.
 // Audit/Drive writes are projections; neither can make an uncommitted transition authoritative.
@@ -114,6 +129,10 @@ export class LifecycleStore {
         return structuredClone(next.retired[key]||r);
       }
       const next=structuredClone(this.data);let r=initialRecord(path,body);
+      // Remote lifecycle projections cannot grant a new browser entry. Only
+      // locally accepted app input/control may establish this pending authority.
+      r.browser_entry=null;
+      r.browser_cleanup_displacement=null;
       if(retired){delete next.retired[key];r.run_generation=(retired.run_generation||0)+1;r.revision=(retired.revision||0)+1;
         r.pre_submit_proof=structuredClone(retired.pre_submit_proof);}
       if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&!retiredState(r)){
@@ -124,6 +143,10 @@ export class LifecycleStore {
       if(!retiredState(r))r=migrateLegacy(r,this.history,this.legacyPrompt||'');
       if(!retired&&(this.history.audits.has(key)||this.history.legacy.has(key)))r.pre_submit_proof=null;
       const control=next.controls[r.task_id];
+      const explicitColdResume=r.state==='PAUSED'&&runningTaskControl(control,r)
+        &&control.control_epoch>r.control_epoch&&r.conversation_url
+        &&(this.history.audits.get(key)||0)<=r.revision
+        &&canonicalUrl(control.conversation_url)===r.conversation_url;
       if(control&&control.control_epoch>=r.control_epoch&&!['COMMITTED','COMPLETED'].includes(r.state)
         &&(!retiredState(r)||['STOPPED','DONE'].includes(control.state))) {
         const matching=control.turn_id===r.turn_id&&control.request_id===r.request_id;
@@ -133,6 +156,10 @@ export class LifecycleStore {
           ...(state==='STOPPED'?{stop_status:'NOT_REQUESTED'}:{})});
         next.events.push(audit(r,previous,r.reason));
       }
+      if(explicitColdResume||r.conversation_url&&runningTaskControl(control,r)&&r.control_state==='RUNNING'
+        &&!retiredState(r)&&!body.lifecycle_record&&!body.lifecycle_state
+        &&!this.history.audits.has(key)&&!this.history.legacy.has(key))
+        r.browser_entry={control_epoch:r.control_epoch,conversation_url:r.conversation_url};
       // Only fresh locally accepted input can establish this authority. Remote
       // projections and identities with prior history carry an explicit null.
       if(!Object.hasOwn(r,'pre_submit_proof')&&r.state==='DISCOVERED'&&runningTaskControl(control,r)
@@ -235,6 +262,7 @@ export class LifecycleStore {
       if(!marker||c.state!=='RUNNING'||!url||c.control_epoch<=marker.control_epoch
         ||control?.control_epoch!==c.control_epoch||control.state!=='RUNNING'||keyFor(control)!==key)return null;
       const reject=reason=>{throw Object.assign(new Error(reason),{code:'RESUME_REJECTED',reason});};
+      if((this.history.audits.get(key)||0)>marker.revision)reject('RESUME_LOCAL_HISTORY_AHEAD');
       if(!body||body.schema!=='selfrun-server-dispatch-v1'||keyFor(body)!==key)reject('RESUME_DISPATCH_IDENTITY_CONFLICT');
       if(marker.conversation_digest&&marker.conversation_digest!==digest(url))reject('RESUME_CONVERSATION_MISMATCH');
       if(!Array.isArray(body.profile_operations)||typeof body.prompt!=='string'||!body.prompt||!body.project_url
@@ -243,17 +271,25 @@ export class LifecycleStore {
       const clean={...appInput(body),client_status:'SEND_REQUESTED',conversation_url:url,server_status:'STARTED',server_control_epoch:c.control_epoch};
       const r={...initialRecord(marker.path,clean),run_generation:(marker.run_generation||0)+1,
         browser_generation:(marker.browser_generation||0)+1,revision:(marker.revision||0)+1,control_state:'RUNNING',
+        browser_entry:{control_epoch:c.control_epoch,conversation_url:url},
         resumed_dispatch_fingerprint:digest(inputFingerprint(body))};
       const next=structuredClone(this.data);delete next.retired[key];next.requests[key]=r;
       await this.save(next);return structuredClone(r);
     });
   }
-  async queueTargetCleanup(key,targetId) {
+  async queueTargetCleanup(key,targetId,fence=null) {
     return this.serial(async()=>{
       const marker=this.data.retired[key];
-      if(!marker||!retiredState(marker))return false;
       const next=structuredClone(this.data);
-      queueTargetCleanup(next,{...marker,target_owned:true},targetId);
+      if(marker&&retiredState(marker))queueTargetCleanup(next,{...marker,target_owned:true},targetId);
+      else {
+        const r=next.requests[key],d=r?.browser_cleanup_displacement,c=r&&next.controls[r.task_id];
+        if(!fence||r?.state!=='PAUSED'||!d||d.browser_generation!==fence.browser||r.browser_generation!==fence.browser
+          ||d.run_generation!==fence.run||!(c?.control_epoch>=d.control_epoch)||keyFor(c||{})===key
+          ||(d.target_id&&d.target_id!==targetId))return false;
+        d.target_id=targetId;r.target_id=targetId;r.target_owned=true;
+        if(!queueDisplacedCleanup(next,r,targetId))return false;
+      }
       await this.save(next);return true;
     });
   }
@@ -263,6 +299,7 @@ export class LifecycleStore {
       const next=structuredClone(this.data);
       const observed={target_id:entry.target_id,status:outcome.status,
         observed_at_ms:outcome.observed_at_ms,reason:outcome.reason,
+        ...(entry.kind==='DISPLACED'?{kind:entry.kind,key:entry.key,browser_generation:entry.browser_generation,run_generation:entry.run_generation}:{}),
         ...(outcome.error?{error:String(outcome.error).slice(0,300)}:{})};
       next.browserCleanupOutcomes??={};next.browserCleanupOutcomes[entry.target_id]=observed;
       if(next.retired[entry.key])next.retired[entry.key].browser_cleanup=observed;
@@ -303,6 +340,9 @@ export class LifecycleStore {
         await this.save(next);return true;
       }
       const next=structuredClone(this.data);
+      // Reopening a known request is explicit RESUME, not a new-turn signal.
+      const successorCreation=c.state==='RUNNING'&&!next.requests[keyFor(c)]&&!next.retired[keyFor(c)]
+        &&(!prior||prior.state!=='RUNNING'||keyFor(prior)!==keyFor(c));
       next.controls[c.task_id]=structuredClone(c);
       const retired=next.retired[keyFor(c)];
       if(retired&&['STOPPED','DONE'].includes(c.state)){
@@ -325,12 +365,27 @@ export class LifecycleStore {
         if(c.state==='STOPPED'||c.state==='DONE') state='STOPPED';
         else if(c.state!=='RUNNING'||!matching) state='PAUSED';
         const preserveGeneration=sameRunningIdentity&&matching&&old.control_state==='RUNNING';
+        const pendingEntry=old.browser_entry?.control_epoch===old.control_epoch
+          &&old.browser_entry.conversation_url===old.conversation_url;
+        const appUrl=canonicalUrl(c.conversation_url);
+        const explicitEntry=!sameRunningIdentity&&matching&&c.state==='RUNNING'&&old.state==='PAUSED'
+          &&appUrl&&appUrl===old.conversation_url;
+        const preserveEntry=sameRunningIdentity&&matching&&pendingEntry&&(!c.conversation_url||appUrl===old.conversation_url);
+        const previousDisplacement=old.browser_cleanup_displacement;
+        const displacement=matching?null:previousDisplacement?.browser_generation===old.browser_generation?previousDisplacement:
+          successorCreation?{target_id:old.target_id||null,run_generation:old.run_generation,browser_generation:old.browser_generation,
+            successor_key:keyFor(c),control_epoch:c.control_epoch}:previousDisplacement||null;
+        if(matching)for(const [id,entry]of Object.entries(next.browserCleanup))
+          if(entry.kind==='DISPLACED'&&entry.key===key)delete next.browserCleanup[id];
         const r=transition(old,state,'CONTROL_'+c.state,{
           control_epoch:c.control_epoch,control_state:c.state,
           run_generation:preserveGeneration?old.run_generation:old.run_generation+1,
+          browser_entry:explicitEntry||preserveEntry?{control_epoch:c.control_epoch,conversation_url:old.conversation_url}:null,
+          browser_cleanup_displacement:displacement,
           ...(['STOPPED','DONE'].includes(c.state)?{stop_status:'NOT_REQUESTED'}:{}),
         });
         next.requests[key]=r;next.events.push(audit(r,old.state,r.reason));
+        if(c.state==='RUNNING'&&!matching)queueDisplacedCleanup(next,r);
         if(retiredState(r))retireRecord(next,r);
       else next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
       }
