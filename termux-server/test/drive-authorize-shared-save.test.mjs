@@ -21,7 +21,15 @@ async function fixture(t, scenario = 'success', library = true) {
   const before = await fs.readFile(token, 'utf8');
   if (library) await fs.writeFile(store, `import fs from 'node:fs/promises'; export async function writeAuthorizedToken(file, stored) { await fs.writeFile(${JSON.stringify(captured)}, JSON.stringify({file, stored})); }`);
   const preload = path.join(dir, 'preload.mjs');
-  await fs.writeFile(preload, `globalThis.fetch = async url => {
+  await fs.writeFile(preload, `import http from 'node:http';
+  const listen = http.Server.prototype.listen;
+  http.Server.prototype.listen = function(port, host, callback) {
+    return listen.call(this, 0, host, () => {
+      console.log('TEST_CALLBACK_PORT=' + this.address().port);
+      callback();
+    });
+  };
+  globalThis.fetch = async url => {
     if (String(url).includes('oauth2.googleapis.com')) {
       if (process.env.AUTH_SCENARIO === 'network') throw new Error(${JSON.stringify(SECRET)});
       if (process.env.AUTH_SCENARIO === 'error') return new Response(JSON.stringify({error:'invalid_grant',error_description:${JSON.stringify(SECRET)}}),{status:400});
@@ -31,14 +39,10 @@ async function fixture(t, scenario = 'success', library = true) {
     if (String(url).includes('www.googleapis.com/drive')) return new Response('{}');
     throw new Error('unexpected external fetch');
   };`);
-  const probe = net.createServer();
-  await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
-  const port = probe.address().port;
-  await new Promise(resolve => probe.close(resolve));
   const child = spawn(process.execPath, ['--import', preload, 'tools/drive-authorize.mjs'], {
     cwd: path.resolve(import.meta.dirname, '..'),
     env: {...process.env, SELFRUN_DRIVE_AUTH_CLIENT_FILE: client, SELFRUN_DRIVE_AUTH_TOKEN_FILE: token,
-      SELFRUN_DRIVE_AUTH_PORT: String(port), TERMUX_GOOGLE_AUTH_LIBRARY: store, AUTH_SCENARIO: scenario},
+      SELFRUN_DRIVE_AUTH_PORT: '0', TERMUX_GOOGLE_AUTH_LIBRARY: store, AUTH_SCENARIO: scenario},
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -47,10 +51,13 @@ async function fixture(t, scenario = 'success', library = true) {
   t.after(() => child.kill());
   for (let i = 0; i < 200 && !output.includes('AUTH_URL=') && child.exitCode === null; i++) await delay(10);
   const authLine = output.split('\n').find(line => line.startsWith('AUTH_URL='));
+  const callbackPort = Number(output.split('\n').find(line => line.startsWith('TEST_CALLBACK_PORT='))?.split('=')[1]);
   let response;
   if (authLine) {
     const auth = new URL(authLine.slice('AUTH_URL='.length));
     const callback = new URL(auth.searchParams.get('redirect_uri'));
+    assert.ok(Number.isInteger(callbackPort) && callbackPort > 0 && callbackPort < 65536, 'live callback port must be reported');
+    callback.port = String(callbackPort);
     callback.searchParams.set('state', auth.searchParams.get('state'));
     callback.searchParams.set(scenario === 'denied' ? 'error' : 'code', scenario === 'denied' ? SECRET : 'test-code');
     response = await fetch(callback);
@@ -61,6 +68,7 @@ async function fixture(t, scenario = 'success', library = true) {
 
 test('authorization saves through the installed locked writer at the unchanged token path', async t => {
   const f = await fixture(t);
+  assert.ok(f.response, 'synthetic helper startup failed: ' + f.output());
   assert.equal(f.response.status, 200);
   const saved = await fs.readFile(f.captured, 'utf8').catch(() => null);
   assert.notEqual(saved, null, 'the installed shared writer must receive the authorization save');
@@ -89,4 +97,18 @@ test('missing shared writer fails closed without an independent token-file save'
   assert.equal(await fs.readFile(f.token, 'utf8'), f.before);
   assert.equal(f.output().includes('DRIVE_AUTH_OK'), false);
   assert.equal(f.child.exitCode, 1);
+});
+
+test('authorization fixture uses the live listener port instead of closing and rebinding a probe',async t=>{
+  const create=net.createServer.bind(net),held=[];
+  t.mock.method(net,'createServer',(...args)=>{
+    const server=create(...args),close=server.close.bind(server);held.push(close);
+    // Hold any obsolete probe's socket while reporting its close as completed.
+    // This deterministically exposes the parent fixture's close/rebind race.
+    server.close=callback=>{callback?.();return server;};return server;
+  });
+  t.after(async()=>{for(const close of held)await new Promise(resolve=>close(resolve));});
+  const f=await fixture(t);
+  assert.ok(f.response,'synthetic callback unavailable: '+f.output());
+  assert.equal(f.response.status,200);assert.equal(f.child.exitCode,0);
 });
