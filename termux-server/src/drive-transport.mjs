@@ -73,7 +73,7 @@ export class DriveDispatchTransport {
       });
     } catch (error) {throw transportError(operation, 'request', null, error);}
     if (response.status === 401 && retry) {
-      try {await this.auth.forceRefresh();} catch (error) {throw transportError(operation, 'auth', 401, error);}
+      try {await this.auth.forceRefresh(access);} catch (error) {throw transportError(operation, 'auth', 401, error);}
       return this.#fetch(operation, url, init, false);
     }
     if (response.status === 403 || response.status === 429) {
