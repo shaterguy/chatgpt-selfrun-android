@@ -1,4 +1,4 @@
-import fs from 'node:fs';import fsp from 'node:fs/promises';import path from 'node:path';import {spawn} from 'node:child_process';import {randomUUID} from 'node:crypto';
+import os from 'node:os';import fs from 'node:fs';import fsp from 'node:fs/promises';import path from 'node:path';import {spawn} from 'node:child_process';import {randomUUID} from 'node:crypto';
 import {canonicalUrl,digest} from '../lifecycle.mjs';
 import {applyExtensionClientProfile,extensionProfileFingerprint} from './extension-profile-bootstrap.mjs';
 import {ExtensionBridge} from './extension-bridge.mjs';import {buildExtensionFiles,EXTENSION_ID} from './extension-package.mjs';
@@ -7,7 +7,21 @@ function processIdentity(pid){try{const stat=fs.readFileSync(`/proc/${pid}/stat`
 function processExists(pid){try{fs.statSync(`/proc/${pid}`);return true;}catch(e){return e.code!=='ENOENT';}}
 function bootId(){try{return fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim();}catch{return null;}}
 export function extensionProcessMatches(proof,row,boot){return !!proof&&!!row&&row.state!=='Z'&&!!boot&&proof.bootId===boot&&proof.pid===row.pid&&proof.startTime===row.startTime&&row.args.includes(`--user-data-dir=${proof.profile}`)&&row.args.includes(`--load-extension=${proof.extensionPath}`)&&row.args.includes(`--selfrun-extension-owner=${proof.ownerId}`)&&(!proof.cdpPort||(row.args.includes(`--remote-debugging-port=${proof.cdpPort}`)&&row.args.includes('--remote-debugging-address=127.0.0.1')))&&!row.args.some(x=>x.startsWith('--type='));}
-function profileBusy(profile){try{fs.lstatSync(path.join(profile,'SingletonLock'));return true;}catch(e){if(e.code!=='ENOENT')return true;}try{for(const pid of fs.readdirSync('/proc').filter(x=>/^\d+$/.test(x))){const p=processIdentity(pid);if(p?.args.includes(`--user-data-dir=${profile}`)&&!p.args.some(x=>x.startsWith('--type=')))return true;}}catch{return true;}return false;}
+export function profileBusy(profile){
+  // Do not erase lock files. A dead, same-host holder is the ordinary Chromium
+  // crash-recovery case; Chromium still performs its own singleton handshake.
+  let lock=null;try{lock=fs.lstatSync(path.join(profile,'SingletonLock'));}catch(error){if(error.code!=='ENOENT')return true;}
+  if(lock){
+    if(!lock.isSymbolicLink()||lock.uid!==process.getuid())return true;
+    let match;try{match=fs.readlinkSync(path.join(profile,'SingletonLock')).match(/^(.+)-([1-9][0-9]*)$/);}catch{return true;}
+    if(!match||match[1]!==os.hostname())return true;const pid=Number(match[2]);
+    if(!Number.isSafeInteger(pid)||pid>2147483647||processExists(pid))return true;
+    try{process.kill(pid,0);return true;}catch(error){if(error.code!=='ESRCH')return true;}
+  }
+  try{for(const pid of fs.readdirSync('/proc').filter(x=>/^\d+$/.test(x))){const p=processIdentity(pid);if(p?.args.includes(`--user-data-dir=${profile}`)&&!p.args.some(x=>x.startsWith('--type=')))return true;}}catch{return true;}
+  return false;
+}
+
 async function launch(binary,args,{logFile,env}){const out=fs.openSync(logFile,'a',0o600);let child;try{child=spawn(binary,args,{stdio:['ignore',out,out],env,detached:false});}finally{fs.closeSync(out);}await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();return child;}
 async function atomicJson(file,value){const temp=file+'.tmp-'+randomUUID();await fsp.writeFile(temp,JSON.stringify(value)+'\n',{mode:0o600});const handle=await fsp.open(temp,'r');try{await handle.sync();}finally{await handle.close();}await fsp.rename(temp,file);}
 export class ExtensionManager {
