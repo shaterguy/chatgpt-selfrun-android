@@ -15,6 +15,7 @@ export const config = Object.freeze({
   tokenFile: path.join(dataDir, 'token'),
   driveAuthClientFile: process.env.SELFRUN_DRIVE_AUTH_CLIENT_FILE || path.join(dataDir, 'drive-auth-client.json'),
   driveAuthTokenFile: process.env.SELFRUN_DRIVE_AUTH_TOKEN_FILE || path.join(dataDir, 'drive-auth-token.json'),
+  driveAuthServiceSocket: process.env.SELFRUN_DRIVE_AUTH_SERVICE_SOCKET || process.env.TERMUX_GOOGLE_AUTH_SOCKET || undefined,
   browserLogFile: path.join(dataDir, 'chromium.log'),
   browserProfile: process.env.SELFRUN_BROWSER_PROFILE || path.join(home, '.config', 'chromium'),
   browserPort: Number(process.env.SELFRUN_BROWSER_PORT || 19227),

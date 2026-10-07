@@ -135,14 +135,47 @@ test('diagnostic logger failures never replace the original timeout outcome', as
   assert.equal(f.session.pending.size, 0);
 });
 
-test('ordinary successful replies and non-Runtime timeouts keep their existing behavior', async t => {
+test('ordinary successful replies and Page.enable timeout keep behavior and add metadata timing', async t => {
   const f = await fixture(t);
   const successful = f.session.call('Runtime.evaluate', { expression: '1' });
   f.socket.receive({ id: 1, result: { result: { value: 1 } } });
   assert.deepEqual(await successful, { result: { value: 1 } });
   const timeout = f.session.call('Page.enable', {}, { timeoutMs: 250 }).catch(error => error);
   f.tick(250);
-  assert.equal((await timeout).message, 'CDP command timeout: Page.enable');
-  assert.equal(f.events.length, 0);
-  assert.equal(f.session.timedOutQueries.size, 0);
+  const error=await timeout;
+  assert.equal(error.message, 'CDP command timeout: Page.enable');
+  assert.equal(f.events.length, 1);
+  assert.equal(f.events[0].event,'CDP_COMMAND_TIMEOUT');
+  assert.equal(f.events[0].method,'Page.enable');
+  assert.equal(error.cdpDiagnostics.timeout_overrun_ms,0);
+  assert.equal(f.session.timedOutQueries.size, 1);
+});
+
+test('late Page.enable reply is bounded metadata only and never retries the command',async t=>{
+  const f=await fixture(t);
+  const outcome=f.session.call('Page.enable',{private:'credential'},{timeoutMs:250}).catch(e=>e);
+  f.tick(250);await outcome;f.tick(50);
+  f.socket.receive({id:1,result:{private:'account-text'}});
+  assert.equal(f.events[1].event,'CDP_COMMAND_LATE_REPLY');assert.equal(f.events[1].method,'Page.enable');
+  assert.equal(f.socket.sent.length,1);assert.equal(f.session.timedOutQueries.size,0);
+  assert.doesNotMatch(JSON.stringify(f.events),/private|credential|account-text|token|127\.0\.0\.1/);
+});
+test('Node timer delay is separate from browser reply duration and timeout overrun',async t=>{
+  const f=await fixture(t);
+  const outcome=f.session.call('Page.enable',{}, {timeoutMs:5000}).catch(e=>e);
+  f.advanceClock(6000);t.mock.timers.tick(1000);
+  f.tick(4000);const error=await outcome;
+  assert.ok(error.cdpDiagnostics.node_event_loop_max_delay_ms>=5000);
+  assert.ok(error.cdpDiagnostics.timeout_overrun_ms>=5000);
+  assert.ok(error.cdpDiagnostics.node_event_loop_samples>=1);
+});
+test('command diagnostic cadence is bounded and sampler stops after the last command',async t=>{
+  const f=await fixture(t);
+  const outcomes=Array.from({length:100},()=>f.session.call('Page.enable',{}, {timeoutMs:250}).catch(e=>e));
+  f.tick(250);await Promise.all(outcomes);
+  assert.equal(f.events.length,64);assert.equal(f.session.timedOutQueries.size,32);
+  assert.equal(f.session.loopTimer,null);
+  f.tick(60000);
+  const next=f.session.call('Network.enable',{}, {timeoutMs:250}).catch(e=>e);
+  f.tick(250);await next;assert.equal(f.events.length,65);
 });

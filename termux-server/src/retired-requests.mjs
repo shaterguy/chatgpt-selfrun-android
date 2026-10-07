@@ -24,7 +24,7 @@ export function retireRecord(data,record) {
       ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at'].map(k=>[k,record[k]]));
   }
   const marker=Object.fromEntries(['key','path','task_id','turn_id','request_id','dispatch_attempt','state','revision',
-    'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status','result_recovery'].map(k=>[k,record[k]]));
+    'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status','result_recovery','pre_submit_proof'].map(k=>[k,record[k]]));
   if(record.conversation_url)marker.conversation_digest=digest(canonicalUrl(record.conversation_url));
   if(marker.state==='STOPPED')marker.stop_status=['CONFIRMED','NOT_REQUESTED'].includes(marker.stop_status)?marker.stop_status:'UNCONFIRMED';
   marker.server_ingress=record.body?.server_ingress||record.server_ingress||'DRIVE';

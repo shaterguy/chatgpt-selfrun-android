@@ -68,7 +68,7 @@ class SelfRunClusterTransport {
       headers: { ...(init.headers || {}), authorization: 'Bearer ' + access },
     });
     if (response.status === 401 && retry) {
-      await this.auth.forceRefresh();
+      await this.auth.forceRefresh(access);
       return this.#fetch(url, init, false);
     }
     return response;
@@ -84,7 +84,7 @@ class SelfRunClusterTransport {
       orderBy: 'modifiedTime desc',
     }));
     const raw = await response.text();
-    if (!response.ok) throw new Error('SelfRun cluster list HTTP ' + response.status + ': ' + raw.slice(0, 300));
+    if (!response.ok) throw new Error('SelfRun cluster list HTTP ' + response.status);
     const files = JSON.parse(raw || '{}').files || [];
     const out = [];
     for (const file of files) {
@@ -115,7 +115,7 @@ class SelfRunClusterTransport {
       orderBy: 'modifiedTime desc',
     }));
     const raw = await response.text();
-    if (!response.ok) throw new Error('SelfRun cluster resolve HTTP ' + response.status + ': ' + raw.slice(0, 300));
+    if (!response.ok) throw new Error('SelfRun cluster resolve HTTP ' + response.status);
     const exact = (JSON.parse(raw || '{}').files || []).find((file) => file.name === name);
     if (exact?.id) {
       this.ids.set(name, clean(exact.id));
@@ -132,7 +132,7 @@ class SelfRunClusterTransport {
       }),
     });
     const createdRaw = await create.text();
-    if (!create.ok) throw new Error('SelfRun cluster create HTTP ' + create.status + ': ' + createdRaw.slice(0, 300));
+    if (!create.ok) throw new Error('SelfRun cluster create HTTP ' + create.status);
     const id = clean(JSON.parse(createdRaw || '{}').id);
     if (!id) throw new Error('SelfRun cluster create returned no file id');
     this.ids.set(name, id);
@@ -151,7 +151,7 @@ class SelfRunClusterTransport {
       },
     );
     const raw = await response.text();
-    if (!response.ok) throw new Error('SelfRun cluster write HTTP ' + response.status + ': ' + raw.slice(0, 300));
+    if (!response.ok) throw new Error('SelfRun cluster write HTTP ' + response.status);
   }
 }
 
