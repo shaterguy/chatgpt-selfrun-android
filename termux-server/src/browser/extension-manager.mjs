@@ -22,10 +22,12 @@ export function profileBusy(profile){
   return false;
 }
 
+async function readCdpMetadata(port,resource,{signal}={}){const r=await fetch(`http://127.0.0.1:${port}/json/${resource}`,{redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(2000)]):AbortSignal.timeout(2000)});if(!r.ok)throw Error('Owned browser inventory unavailable');return r.json();}
+function validBrowserKey(key,port){try{const u=new URL(key);return u.protocol==='ws:'&&u.hostname==='127.0.0.1'&&Number(u.port)===Number(port)&&/^\/devtools\/browser\/[a-zA-Z0-9-]+$/.test(u.pathname)&&!u.search&&!u.hash;}catch{return false;}}
 async function launch(binary,args,{logFile,env}){const out=fs.openSync(logFile,'a',0o600);let child;try{child=spawn(binary,args,{stdio:['ignore',out,out],env,detached:false});}finally{fs.closeSync(out);}await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();return child;}
 async function atomicJson(file,value){const temp=file+'.tmp-'+randomUUID();await fsp.writeFile(temp,JSON.stringify(value)+'\n',{mode:0o600});const handle=await fsp.open(temp,'r');try{await handle.sync();}finally{await handle.close();}await fsp.rename(temp,file);}
 export class ExtensionManager {
-  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
+  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
   #serial(fn){const p=this.queue.then(fn,fn);this.queue=p.catch(()=>{});return p;}
   #allowed(guard,...args){try{return !guard||guard(...args)===true;}catch{return false;}}
   setLifecycleGuards(guards={}){this.guards=guards;}
@@ -48,10 +50,10 @@ export class ExtensionManager {
     if(!path.isAbsolute(cfg.extensionChromiumCommand||''))throw fail('Verified absolute Chromium binary is required','EXTENSION_BINARY_REQUIRED');
     await fsp.mkdir(cfg.dataDir,{recursive:true});this.journalFile=path.join(cfg.dataDir,'extension-ownership.json');this.extensionPath=path.join(cfg.dataDir,'browser-extension');
     let prior;try{prior=JSON.parse(await fsp.readFile(this.journalFile,'utf8'));}catch(e){if(e.code!=='ENOENT')throw fail('Extension ownership journal is unreadable','EXTENSION_OWNERSHIP_UNCERTAIN');}
-    this.journal=prior?.ownerId===pair.ownerId&&prior.profile===cfg.browserProfile?prior:{schema:'selfrun-extension-ownership-v1',ownerId:pair.ownerId,profile:cfg.browserProfile,browserSessionId:randomUUID(),process:null,targets:[]};
+    this.journal=prior?.ownerId===pair.ownerId&&prior.profile===cfg.browserProfile?prior:{schema:'selfrun-extension-ownership-v1',ownerId:pair.ownerId,profile:cfg.browserProfile,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};
     if(this.journal.process&&!this.#processOwned()){
       if(!this.#processExited())throw fail('Recorded browser identity changed or is unreadable','EXTENSION_OWNERSHIP_UNCERTAIN');
-      this.journal={...this.journal,browserSessionId:randomUUID(),process:null,targets:[]};
+      this.journal={...this.journal,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};
     }
     this.journal.targetMetadata??={};this.owned=new Set(this.journal.targets||[]);
     const bridge=this.deps.bridgeFactory({port:cfg.extensionBridgePort,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId});
@@ -63,13 +65,44 @@ export class ExtensionManager {
     for(const [name,contents]of Object.entries(files))await fsp.writeFile(path.join(this.extensionPath,name),contents,{mode:0o600});await this.#save();
   }
   async #initialize(){if(!this.initPromise)this.initPromise=this.#init().catch(async e=>{await this.bridge?.close().catch(()=>{});this.bridge=null;this.initPromise=null;throw e;});return this.initPromise;}
-  async #ensure(){await this.#initialize();if(this.#processOwned()){try{await this.bridge.waitReady(1000);return;}catch{}
-      if(!this.#processOwned())throw fail('Owned browser changed before controller restore','EXTENSION_OWNERSHIP_UNCERTAIN');
-      await this.deps.launch(this.config.extensionChromiumCommand,[`--user-data-dir=${this.config.browserProfile}`,`chrome-extension://${EXTENSION_ID}/controller.html`],{logFile:this.config.browserLogFile,env:{...process.env,TMPDIR:this.config.extensionTempDir}});
-      await this.bridge.waitReady(15000);return;}
+  #emptyLocal(){return this.owned.size===0&&this.closing.size===0&&this.profileLeases.size===0&&this.profileInitializations.size===0&&!this.bridge?.pendingCount;}
+  async #bindBrowserEndpoint(targetId,expectedUrl,signal,guard){
+    const port=Number(this.config.browserPort),check=()=>{if(signal?.aborted)throw signal.reason;if(!guard()||!this.#processOwned())throw fail('Browser endpoint owner changed','EXTENSION_OWNERSHIP_UNCERTAIN');};
+    const matches=rows=>Array.isArray(rows)&&rows.filter(t=>(!targetId||t.id===targetId)&&t.type==='page'&&t.url===expectedUrl).length===1;
+    check();const before=await this.deps.readCdpMetadata(port,'list',{signal});if(!matches(before))throw fail('Owned profile target not found','EXTENSION_PROFILE_UNPROVEN');targetId=before.find(t=>(!targetId||t.id===targetId)&&t.type==='page'&&t.url===expectedUrl).id;
+    const version=await this.deps.readCdpMetadata(port,'version',{signal});check();if(!validBrowserKey(version?.webSocketDebuggerUrl,port))throw fail('Browser endpoint key invalid','EXTENSION_PROFILE_UNPROVEN');
+    if(!matches(await this.deps.readCdpMetadata(port,'list',{signal})))throw fail('Owned profile target changed','EXTENSION_PROFILE_UNPROVEN');check();
+    if(this.journal.process.browserKey&&this.journal.process.browserKey!==version.webSocketDebuggerUrl)throw fail('Owned browser endpoint changed','EXTENSION_OWNERSHIP_UNCERTAIN');
+    this.journal.process.browserKey=version.webSocketDebuggerUrl;
+  }
+  async #proveEmptyBrowser(proof,allowed,deadline=Date.now()+2000){
+    const valid=()=>Date.now()<deadline&&allowed()&&this.#emptyLocal()&&this.#processOwned()&&this.journal.process?.pid===proof.pid&&this.journal.process?.startTime===proof.startTime&&this.journal.process?.browserKey===proof.browserKey;
+    if(!valid()||Number(proof.cdpPort)!==Number(this.config.browserPort)||!validBrowserKey(proof.browserKey,proof.cdpPort))return false;
+    try{const options={signal:AbortSignal.timeout(Math.max(1,deadline-Date.now()))};const before=await this.deps.readCdpMetadata(proof.cdpPort,'version',options);if(!valid()||before?.webSocketDebuggerUrl!==proof.browserKey)return false;
+      const rows=await this.deps.readCdpMetadata(proof.cdpPort,'list',options);if(!valid()||!Array.isArray(rows)||rows.length)return false;
+      const after=await this.deps.readCdpMetadata(proof.cdpPort,'version',options);return valid()&&after?.webSocketDebuggerUrl===proof.browserKey;
+    }catch{return false;}
+  }
+  async #retireEmptyBrowser(allowed,deadline=Date.now()+5000){
+    if(this.#processExited())return true;const proof={...this.journal.process};
+    if(!await this.#proveEmptyBrowser(proof,allowed,deadline))return false;
+    this.journal.retiringProcess={pid:proof.pid,startTime:proof.startTime,bootId:proof.bootId,browserKey:proof.browserKey};await this.#save();
+    if(!await this.#proveEmptyBrowser(proof,allowed,deadline))return false;
+    // Only the dedicated, proven empty root is signalled. No broad process kill,
+    // lock deletion, page navigation, extra CDP command or SIGKILL fallback.
+    if(!allowed()||!this.#emptyLocal()||!this.#processOwned())return false;
+    try{this.deps.signalProcess(proof.pid);}catch(error){if(error.code!=='ESRCH')return false;}
+    for(let n=0;n<100&&Date.now()<deadline;n++){if(this.#processExited())return true;if(!this.#processOwned())return false;await this.deps.delay(50);}return this.#processExited();
+  }
+  async #ensure(){await this.#initialize();if(this.#processOwned()){
+      if(!this.journal.retiringProcess){try{await this.bridge.waitReady(1000);if(!this.journal.controllerStopPending)return;const idle=await this.bridge.request('idleStatus',{}, {timeoutMs:1000});if(idle?.stopping===false){this.journal.controllerStopPending=false;await this.#save();return;}}catch{}}
+      // Headless Chromium rejects singleton CLI forwarding. Reopen only after
+      // a persisted owned-target/endpoint proof establishes an empty old root.
+      if(!await this.#retireEmptyBrowser(()=>!this.stopped))throw fail('Owned controller unavailable and browser cannot be safely retired','EXTENSION_UNAVAILABLE');
+    }
     if(this.journal.process){
       if(!this.#processExited())throw fail('Browser process identity is unreadable or changed','EXTENSION_OWNERSHIP_UNCERTAIN');
-      this.journal={...this.journal,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{}};this.owned.clear();this.closing.clear();await this.#save();await this.bridge.close();this.bridge=null;this.initPromise=null;await this.#initialize();
+      this.journal={...this.journal,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};this.owned.clear();this.closing.clear();await this.#save();await this.bridge.close();this.bridge=null;this.initPromise=null;await this.#initialize();
     }
     if(this.deps.profileBusy(this.config.browserProfile))throw fail('Browser profile is already in use; automatic takeover is forbidden','BROWSER_PROFILE_BUSY');
     const cfg=this.config;await fsp.mkdir(cfg.browserProfile,{recursive:true});await fsp.mkdir(cfg.extensionTempDir,{recursive:true,mode:0o700});
@@ -79,7 +112,7 @@ export class ExtensionManager {
     if(!extensionProcessMatches(proof,row,boot))throw fail('Started browser ownership is unproven','EXTENSION_OWNERSHIP_UNCERTAIN');this.journal.process=proof;await this.#save();await this.bridge.waitReady(20000);
   }
   ensureStarted(){return this.#serial(()=>this.#ensure());}
-  createTarget(url='about:blank'){return this.#serial(async()=>{await this.#ensure();const target=await this.bridge.request('createTarget',{url,deferNavigation:this.config.browserClientProfile==='android-webview'});if(!String(target?.id).startsWith(`ext:${this.journal.browserSessionId}:`))throw fail('Invalid target identity','EXTENSION_TARGET_INVALID');this.owned.add(target.id);this.journal.targetMetadata[target.id]={bootstrapUrl:target.bootstrapUrl||null,pendingUrl:target.pendingUrl||null,entryUrl:target.entryUrl||(url!=='about:blank'?url:null),profileFingerprint:null};await this.#save();return target;});}
+  createTarget(url='about:blank'){return this.#serial(async()=>{await this.#ensure();const target=await this.bridge.request('createTarget',{url,deferNavigation:this.config.browserClientProfile==='android-webview'});if(!String(target?.id).startsWith(`ext:${this.journal.browserSessionId}:`))throw fail('Invalid target identity','EXTENSION_TARGET_INVALID');this.owned.add(target.id);this.journal.targetMetadata[target.id]={bootstrapUrl:target.bootstrapUrl||null,pendingUrl:target.pendingUrl||null,entryUrl:target.entryUrl||(url!=='about:blank'?url:null),profileFingerprint:null};await this.#save();if(this.config.browserClientProfile==='android-webview'){const deadline=Date.now()+1000,signal=AbortSignal.timeout(1000);for(let n=0;n<20&&Date.now()<deadline&&!this.journal.process.browserKey;n++){try{await this.#bindBrowserEndpoint(null,target.bootstrapUrl,signal,()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id));await this.#save();break;}catch{/* Initialization retries this proof; never strand an unreported owned target. */}await this.deps.delay(50);}}return target;});}
   async listExistingTargets(timeoutMs=1500){try{await this.#initialize();if(!this.#processOwned())return null;await this.bridge.waitReady(timeoutMs);const targets=await this.bridge.request('listTargets',{}, {timeoutMs});if(!Array.isArray(targets))return null;for(const target of targets)if(String(target.id).startsWith(`ext:${this.journal.browserSessionId}:`))this.owned.add(target.id);await this.#save();return targets;}catch{return null;}}
   async #initializeTarget(target,payload,signal){
     const mode=this.config.browserClientProfile||'native';if(payload.clientProfile!==mode)throw fail('Browser client profile differs from configured contract','BROWSER_PROFILE_UNSUPPORTED');
@@ -105,6 +138,7 @@ export class ExtensionManager {
       const applied=await this.deps.applyProfile({target:{...target,bootstrapUrl:metadata.bootstrapUrl},config:this.config,signal,guard,rebind,bootstrapOrigin:this.bridge.url,
         onLost:()=>{if(this.closing.has(target.id)||!this.isOwnedTarget(target.id))return;this.profileContinuityUnverified=true;this.profileGapCount++;console.warn(JSON.stringify({event:'EXTENSION_PROFILE_CONNECTION_LOST',target_id:target.id,page_preserved:true}));}});
       if(!guard()){applied.release();throw fail('Target owner changed after profile bootstrap','EXTENSION_PROFILE_UNPROVEN');}
+      try{await this.#bindBrowserEndpoint(applied.cdpTargetId,current.url,signal,guard);if(!guard())throw fail('Target owner changed after endpoint binding','EXTENSION_PROFILE_UNPROVEN');}catch(error){applied.release();throw error;}
       this.profileLeases.set(target.id,applied);this.bootstrapCdpCommands+=applied.cdpCommands;metadata.profileFingerprint=fingerprint;metadata.cdpTargetId=applied.cdpTargetId;await this.#save();
     }
     await this.bridge.request('initialize',{...payload,targetId:target.id,profileApplied:true},{signal});
@@ -139,7 +173,18 @@ export class ExtensionManager {
   async #closeTarget(id,{guard,caller=false}={}){const allowed=target=>this.#allowed(guard,target)&&(caller||this.#allowed(this.guards.canCloseTarget,id,target));const skip=reason=>({closed:false,absent:false,reason});if(!this.isOwnedTarget(id))return skip('unowned_target');if(!allowed())return skip('guard_rejected');const targets=await this.listExistingTargets();if(!targets)return skip('targets_unavailable');const target=targets.find(t=>t.id===id);if(!allowed(target))return skip('guard_rejected');if(!target){this.owned.delete(id);this.profileLeases.get(id)?.release();this.profileLeases.delete(id);delete this.journal.targetMetadata[id];await this.#save();return{absent:true,reason:'already_absent'};}this.closing.add(id);try{const result=await this.bridge.request('closeTarget',{targetId:id,expectedUrl:target.url},{timeoutMs:5000});if(result?.closed||result?.absent){this.owned.delete(id);this.profileLeases.get(id)?.release();this.profileLeases.delete(id);this.closing.delete(id);delete this.journal.targetMetadata[id];await this.#save();}return result;}catch{return skip('close_unconfirmed');}}
   closeOwnedTarget(id,options={}){return this.#serial(()=>this.#closeTarget(id,options));}
   async closeTarget(id,{guard}={}){const r=await this.#serial(()=>this.#closeTarget(id,{guard,caller:typeof guard==='function'}));return r.closed===true||r.absent===true;}
-  releaseIfUnused({guard}={}){return this.#serial(async()=>{const allowed=()=>this.#allowed(guard)&&this.#allowed(this.guards.canRelease);if(!allowed())return{released:false,reason:'guard_rejected'};if(!this.bridge?.status().connected)return{released:false,reason:'controller_absent'};const targets=await this.listExistingTargets();if(!targets||targets.length||this.bridge.pendingCount||!allowed())return{released:false,reason:'browser_in_use'};const result=await this.bridge.request('controllerStop',{}, {timeoutMs:3000});return{released:result?.stopped===true,reason:result?.stopped?'owned_controller_closed':result?.reason||'close_unconfirmed'};});}
+  releaseIfUnused({guard}={}){return this.#serial(async()=>{const allowed=()=>this.#allowed(guard)&&this.#allowed(this.guards.canRelease);if(!allowed())return{released:false,reason:'guard_rejected'};
+    if(!this.bridge?.status().connected){const retired=this.#emptyLocal()&&await this.#retireEmptyBrowser(allowed);return{released:!!retired,reason:retired?'empty_owned_browser_exited':'controller_absent'};}
+    const targets=await this.listExistingTargets();if(!targets||targets.length||!this.#emptyLocal()||!allowed())return{released:false,reason:'browser_in_use'};
+    if(this.config.browserClientProfile==='android-webview'&&!validBrowserKey(this.journal.process?.browserKey,this.config.browserPort))return{released:false,reason:'browser_endpoint_unproven'};
+    this.journal.controllerStopPending=true;await this.#save();if(!allowed()||!this.#emptyLocal()){this.journal.controllerStopPending=false;await this.#save();return{released:false,reason:'guard_rejected'};}
+    const result=await this.bridge.request('controllerStop',{}, {timeoutMs:3000});if(!result?.stopped){this.journal.controllerStopPending=false;await this.#save();return{released:false,reason:result?.reason||'close_unconfirmed'};}
+    // Keep acquisition serialized until the controller has really closed and
+    // the CDP keep-alive root has exited, including an immediate next request.
+    const deadline=Date.now()+5000;for(let n=0;n<100&&Date.now()<deadline;n++){if(this.#processExited())return{released:true,reason:'owned_browser_exited'};if(!allowed())return{released:false,reason:'guard_rejected'};if(await this.#proveEmptyBrowser({...this.journal.process},allowed,deadline)){const retired=await this.#retireEmptyBrowser(allowed,deadline);return{released:retired,reason:retired?'empty_owned_browser_exited':'empty_browser_exit_unconfirmed'};}await this.deps.delay(50);}
+    return{released:false,reason:'empty_browser_exit_unconfirmed'};
+  });}
+
   async probe(){await this.ensureStarted();const targets=await this.listExistingTargets();return{ready:true,adapter:'extension',browser:'Chromium extension',protocolVersion:null,targets:targets?.length??null};}
   async close(){this.stopped=true;for(const lease of this.profileLeases.values())lease.release();this.profileLeases.clear();await this.bridge?.close();}
 }

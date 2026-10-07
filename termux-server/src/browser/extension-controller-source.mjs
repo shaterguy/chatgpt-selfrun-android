@@ -81,7 +81,7 @@ export function controllerRuntime(config) {
       const list=[];for(const t of targets.values()){try{const tab=await chrome.tabs.get(t.tabId);list.push({id:t.id,type:'page',url:String(tab.url||''),closing:!!t.closing,bootstrapUrl:t.bootstrapUrl||null,pendingUrl:t.pendingUrl||null,entryUrl:t.entryUrl||null,entryPending:t.entryPending===true});}catch{targets.delete(t.id);}}
       await persist();return list;
     }
-    if(operation==='idleStatus') {const tabs=await chrome.tabs.query({});return{ownedCount:targets.size,unrelatedCount:tabs.filter(t=>t.id!==currentTabId&&!targets.has(targetId(t.id))).length};}
+    if(operation==='idleStatus') {const tabs=await chrome.tabs.query({});return{stopping:stopping===true,ownedCount:targets.size,unrelatedCount:tabs.filter(t=>t.id!==currentTabId&&!targets.has(targetId(t.id))).length};}
     if(operation==='controllerStop') {const tabs=await chrome.tabs.query({});check();if(targets.size||tabs.some(tab=>tab.id!==currentTabId))return{stopped:false,reason:'browser_in_use'};stopping=true;setTimeout(()=>{streamAbort?.abort();void chrome.tabs.remove(currentTabId);},100);return{stopped:true};}
     const t=validTarget(payload.targetId);
     if(mutating.has(operation)&&t.effectFence?.deadlineAt>Date.now())throw fail('Prior document mutation is still settling','TARGET_MUTATION_PENDING');
