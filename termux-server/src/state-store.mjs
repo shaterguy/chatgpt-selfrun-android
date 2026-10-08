@@ -37,10 +37,21 @@ export class StateStore {
     return structuredClone(this.state);
   }
 
+  async update(transform,event=null) {
+    return this.#enqueue(async()=>{
+      const candidate=transform(this.snapshot());
+      await this.persist(candidate);
+      this.state=candidate;
+      if(event)await this.appendEvent(event,this.state);
+      return this.snapshot();
+    });
+  }
+
   async replace(next, event = null) {
     return this.#enqueue(async () => {
-      this.state = { ...EMPTY_STATE, ...next };
-      await this.persist();
+      const candidate = { ...EMPTY_STATE, ...next };
+      await this.persist(candidate);
+      this.state = candidate;
       if (event) await this.appendEvent(event, this.state);
       return this.snapshot();
     });
@@ -48,8 +59,9 @@ export class StateStore {
 
   async patch(changes, event = null) {
     return this.#enqueue(async () => {
-      this.state = { ...this.state, ...changes };
-      await this.persist();
+      const candidate = { ...this.state, ...changes };
+      await this.persist(candidate);
+      this.state = candidate;
       if (event) await this.appendEvent(event, this.state);
       return this.snapshot();
     });
@@ -60,16 +72,17 @@ export class StateStore {
       if (this.state.generation !== generation || this.state.lastSignalId !== signalId) {
         return { applied: false, state: this.snapshot() };
       }
-      this.state = { ...this.state, ...changes };
-      await this.persist();
+      const candidate = { ...this.state, ...changes };
+      await this.persist(candidate);
+      this.state = candidate;
       if (event) await this.appendEvent(event, this.state);
       return { applied: true, state: this.snapshot() };
     });
   }
 
-  async recordEvent(event, details = {}) {
+  async recordEvent(event, details = {}, context = null) {
     return this.#enqueue(async () => {
-      await this.appendEvent(event, this.state, details);
+      await this.appendEvent(event, this.state, details, context);
       return this.snapshot();
     });
   }
@@ -80,21 +93,30 @@ export class StateStore {
     return queued;
   }
 
-  async persist() {
+  async persist(candidate = this.state) {
     const temp = this.config.stateFile + '.tmp-' + process.pid + '-' + Date.now();
-    await fs.writeFile(temp, JSON.stringify(this.state, null, 2) + '\n', { mode: 0o600 });
+    const handle=await fs.open(temp,'w',0o600);
+    try {await handle.writeFile(JSON.stringify(candidate,null,2)+'\n');await handle.sync();}
+    finally {await handle.close();}
     await fs.rename(temp, this.config.stateFile);
+    const directory=await fs.open(path.dirname(this.config.stateFile),'r');
+    try {await directory.sync();} finally {await directory.close();}
   }
 
-  async appendEvent(event, state = this.state, details = null) {
+  async appendEvent(event, state = this.state, details = null, context = null) {
+    const eventContext = context && typeof context === 'object' ? context : null;
+    const value = (key, fallback) => eventContext
+      && Object.prototype.hasOwnProperty.call(eventContext, key)
+      ? eventContext[key]
+      : fallback;
     const row = JSON.stringify({
       at: new Date().toISOString(),
       event,
-      generation: state.generation,
-      status: state.status,
-      signalId: state.activeSignal?.signalId ?? null,
-      turnId: state.activeSignal?.envelope?.TURN_ID ?? null,
-      conversationUrl: state.conversationUrl ?? null,
+      generation: value('generation', state.generation),
+      status: value('status', state.status),
+      signalId: value('signalId', state.activeSignal?.signalId ?? null),
+      turnId: value('turnId', state.activeSignal?.envelope?.TURN_ID ?? null),
+      conversationUrl: value('conversationUrl', state.conversationUrl ?? null),
       ...(details && typeof details === 'object' ? { details } : {}),
     });
     await fs.appendFile(this.config.eventsFile, row + '\n', { mode: 0o600 });

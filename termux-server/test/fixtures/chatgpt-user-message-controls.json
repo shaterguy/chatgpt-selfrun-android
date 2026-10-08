@@ -1,0 +1,489 @@
+{
+  "schema": "selfrun-user-receipt-dom-fixture-v1",
+  "observed_at": "2026-10-02T11:57:03Z",
+  "provenance": "Read-only restored existing conversation; equivalent English-locale fixture. Prompt and one-character decorative token redacted; no original Korean suffix assumed.",
+  "original_failure": {
+    "expected_normalized_length": 805,
+    "wrapper_normalized_length": 810
+  },
+  "observed_comparison": {
+    "actual_length": 817,
+    "expected_length": 805,
+    "common_prefix_length": 805,
+    "common_suffix_length": 0,
+    "actual_delta_length": 12,
+    "expected_delta_length": 0,
+    "finite_ui_delta_label": null,
+    "starts_with_expected": true,
+    "ends_with_expected": false,
+    "expected_substring_index": 0,
+    "raw_exact_match": false,
+    "without_ui_text_length": 805,
+    "without_ui_exact_match": true
+  },
+  "observed_structure": [
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 817,
+      "exact_match": false,
+      "starts_with_expected": true,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "flex",
+        "flex-col"
+      ],
+      "normalized_length": 817,
+      "exact_match": false,
+      "starts_with_expected": true,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "text-user-message",
+        "min-w-0",
+        "max-w-(--user-chat-width)",
+        "overflow-hidden",
+        "break-words",
+        "relative",
+        "text-start"
+      ],
+      "normalized_length": 817,
+      "exact_match": false,
+      "starts_with_expected": true,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "flex",
+        "flex-col"
+      ],
+      "normalized_length": 817,
+      "exact_match": false,
+      "starts_with_expected": true,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "relative",
+        "min-w-0",
+        "text-size-chat"
+      ],
+      "normalized_length": 807,
+      "exact_match": false,
+      "starts_with_expected": true,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "overflow-hidden"
+      ],
+      "normalized_length": 805,
+      "exact_match": true,
+      "starts_with_expected": true,
+      "ends_with_expected": true,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 805,
+      "exact_match": true,
+      "starts_with_expected": true,
+      "ends_with_expected": true,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "text-size-chat",
+        "whitespace-pre-wrap"
+      ],
+      "normalized_length": 805,
+      "exact_match": true,
+      "starts_with_expected": true,
+      "ends_with_expected": true,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "SPAN",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 1,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "BUTTON",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "whitespace-nowrap",
+        "flex",
+        "text-size-chat",
+        "text-codex-description"
+      ],
+      "normalized_length": 9,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": "Show more"
+    },
+    {
+      "tag": "SPAN",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 9,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "svg",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "path",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "flex",
+        "flex-row-reverse"
+      ],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "flex"
+      ],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "DIV",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "flex"
+      ],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "SPAN",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "BUTTON",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "whitespace-nowrap",
+        "flex",
+        "text-tertiary"
+      ],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "svg",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "path",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "SPAN",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "BUTTON",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "whitespace-nowrap",
+        "flex",
+        "text-tertiary"
+      ],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "svg",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "path",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "path",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "SPAN",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    },
+    {
+      "tag": "BUTTON",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [
+        "whitespace-nowrap",
+        "flex",
+        "text-tertiary"
+      ],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "svg",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": true,
+      "known_ui_text": null
+    },
+    {
+      "tag": "path",
+      "role": null,
+      "message_author_role": null,
+      "testid": null,
+      "class_tokens": [],
+      "normalized_length": 0,
+      "exact_match": false,
+      "starts_with_expected": false,
+      "ends_with_expected": false,
+      "control": false,
+      "known_ui_text": null
+    }
+  ],
+  "tree": {
+    "tag": "DIV",
+    "attrs": {
+      "data-message-author-role": "user",
+      "data-message-id": "persisted-user"
+    },
+    "children": [
+      {
+        "tag": "DIV",
+        "attrs": {
+          "class": "text-size-chat whitespace-pre-wrap"
+        },
+        "text": "$PROMPT"
+      },
+      {
+        "tag": "SPAN",
+        "attrs": {
+          "aria-hidden": "true"
+        },
+        "text": "x"
+      },
+      {
+        "tag": "BUTTON",
+        "attrs": {},
+        "children": [
+          {
+            "tag": "SPAN",
+            "attrs": {},
+            "text": "Show more"
+          },
+          {
+            "tag": "SVG",
+            "attrs": {},
+            "text": ""
+          }
+        ]
+      }
+    ]
+  }
+}

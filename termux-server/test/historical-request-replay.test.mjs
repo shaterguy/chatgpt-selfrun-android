@@ -1,0 +1,172 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
+import { keyFor } from '../src/lifecycle.mjs';
+import { fixture } from './helpers/lifecycle-fixture.mjs';
+
+function missingControl(f) {
+  const read=f.transport.read;
+  f.transport.read=async path=>{
+    if(path.startsWith('__SELFRUN_CONTROL__'))throw Object.assign(new Error('missing control'),{code:'DRIVE_FILE_NOT_FOUND'});
+    return read(path);
+  };
+  f.transport.list=async()=>[{path:f.path,modTime:'2020-01-01T00:00:00Z',size:100}];
+}
+for(const status of ['CREATE_REQUESTED','SEND_REQUESTED'])test('historical '+status+' without app control cannot become active',async()=>{
+  const f=fixture();f.body.client_status=status;f.body.server_control_epoch=0;
+  f.rows.set(f.path,structuredClone(f.body));missingControl(f);
+  for(let restart=0;restart<2;restart++) {
+    f.controller=f.recreate();
+    await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();
+    await f.settle();await f.controller.tick(f.transport);
+    assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(f.resumes,0);
+    assert.equal(f.controller.activeDispatches().length,0);
+    assert.equal(f.store.snapshot().activeCount,0);
+    assert.equal(f.controller.repository.records().length,0);
+  }
+});
+
+test('direct ingress without app control cannot bypass discovery eligibility',async()=>{
+  const f=fixture();missingControl(f);await f.ingest();
+  assert.equal(f.record(),null);assert.equal(f.prepares,0);assert.equal(f.sends,0);
+});
+
+test('persisted default RUNNING record is inert without an explicit app control across restart',async()=>{
+  const f=fixture();f.body.server_control_epoch=0;
+  await f.controller.repository.ingest(f.path,f.body);missingControl(f);
+  f.controller=f.recreate();await f.controller.initialize();
+  assert.equal(f.store.snapshot().activeCount,0);
+  assert.equal(f.controller.activeDispatches().length,0);
+  await f.controller.tick(f.transport);
+  assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(f.resumes,0);
+});
+
+test('missing remote control fences a persisted formerly authorized request',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
+  await f.controller.quiesceForStandby();missingControl(f);
+  f.controller=f.recreate();f.body.client_status='SEND_REQUESTED';await f.ingest();await f.controller.tick(f.transport);
+  assert.equal(f.prepares,1);assert.equal(f.sends,0);assert.equal(f.resumes,0);
+});
+
+test('valid app control can activate a previously deferred historical-shaped dispatch',async()=>{
+  const f=fixture();f.body.server_control_epoch=0;f.rows.set(f.path,structuredClone(f.body));
+  const read=f.transport.read,list=f.transport.list;missingControl(f);
+  const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
+  await watcher.scanOnce();await f.settle();assert.equal(f.prepares,0);
+  f.transport.read=read;f.transport.list=list;
+  await watcher.scanOnce();await f.settle();
+  assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().control_epoch,1);
+});
+
+test('control disappears during preparation: no POST is released',async()=>{
+  const f=fixture(),prepare=f.browser.prepare;
+  f.browser.prepare=async args=>{const result=await prepare(args);missingControl(f);return result;};
+  await f.ingest();assert.equal(f.prepares,1);assert.equal(f.sends,0);
+  assert.equal(f.controller.sessions.size,0);
+});
+
+test('a stale RUNNING read cannot override a durable newer control identity',async()=>{
+  const f=fixture();await f.controller.controlDurable(null,{...f.control,control_epoch:2,request_id:'new-request'});
+  await f.ingest();assert.equal(f.prepares,0);assert.equal(f.sends,0);
+  assert.equal(f.controller.repository.get(keyFor(f.body)),null);
+});
+
+for(const [label,patch] of [
+  ['wrong schema',{schema:'other'}],['epoch zero',{control_epoch:0}],
+  ['negative epoch',{control_epoch:-1}],['fractional epoch',{control_epoch:1.5}],
+  ['wrong task',{task_id:'OTHER'}],['unknown state',{state:'UNKNOWN'}],
+])test(label+' cannot authorize a cold dispatch',async()=>{
+  const f=fixture();Object.assign(f.control,patch);
+  await assert.rejects(f.ingest(),/invalid task control/);
+  assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(f.record(),null);
+});
+for(const patch of [{turn_id:'OTHER'},{request_id:'OTHER'},{state:'RESUME_REQUESTED'},{state:'RESUME_STOPPED_REQUESTED'}])
+  test('non-running or different app identity is inert: '+JSON.stringify(patch),async()=>{
+    const f=fixture();Object.assign(f.control,patch);await f.ingest();
+    assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(f.controller.activeDispatches().length,0);
+  });
+
+test('an app dispatch without server epoch fields is authorized by its real positive-epoch control',async()=>{
+  const f=fixture();delete f.body.server_control_epoch;delete f.body.server_control_state;await f.ingest();
+  assert.equal(f.prepares,1);assert.equal(f.sends,1);assert.equal(f.record().control_epoch,1);
+});
+
+test('cached RUNNING without its remote control defers discovery until the control appears',async()=>{
+  const f=fixture();await f.controller.controlDurable(null,f.control);
+  const read=f.transport.read,list=f.transport.list;missingControl(f);
+  const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
+  await watcher.scanOnce();await f.settle();assert.equal(f.prepares,0);
+  f.transport.read=read;f.transport.list=list;
+  await watcher.scanOnce();await f.settle();
+  assert.equal(f.prepares,1);assert.equal(f.sends,1);
+});
+
+test('a current control older than the imported record cannot authorize execution',async()=>{
+  const f=fixture();f.body.server_control_epoch=9;await f.ingest();
+  assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(f.controller.activeDispatches().length,0);
+});
+
+test('confirmed control absence clears active execution and same-epoch restoration remains usable',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
+  const read=f.transport.read;missingControl(f);await f.controller.tick(f.transport);
+  assert.equal(f.controller.sessions.size,0);assert.equal(f.controller.activeDispatches().length,0);
+  assert.equal(f.store.snapshot().activeCount,0);assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,1);
+  f.transport.read=read;f.body.client_status='SEND_REQUESTED';await f.ingest();
+  assert.equal(f.sends,1);assert.equal(f.controller.activeDispatches().length,1);
+});
+
+test('invalid control invalidates an existing observer without erasing the accepted epoch',async()=>{
+  const f=fixture();await f.existing();const observer=f.observations.at(-1);
+  f.control={...f.control,schema:'invalid'};
+  await assert.rejects(f.controller.tick(f.transport),/invalid task control/);
+  assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
+  assert.equal(f.controller.activeDispatches().length,0);assert.equal(f.store.snapshot().activeCount,0);
+  assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,1);assert.equal(f.sends,0);
+});
+
+test('rejected SEND update remains deferred when an existing CREATE loses its control',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';f.rows.set(f.path,structuredClone(f.body));
+  const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
+  await watcher.scanOnce();await f.settle();assert.equal(f.prepares,1);
+  f.body.client_status='SEND_REQUESTED';f.rows.set(f.path,structuredClone(f.body));
+  const read=f.transport.read,list=f.transport.list;missingControl(f);
+  await watcher.scanOnce();await f.settle();assert.equal(f.sends,0);
+  f.transport.read=read;f.transport.list=list;
+  await watcher.scanOnce();await f.settle();
+  assert.equal(f.sends,1);assert.equal(f.record().body.client_status,'SEND_REQUESTED');
+});
+
+test('repeated missing-control checks do not churn revision or generation, and restart can reauthorize',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
+  const read=f.transport.read;missingControl(f);await f.controller.tick(f.transport);
+  const suspended=f.record();
+  await f.controller.tick(f.transport);await f.controller.tick(f.transport);
+  assert.equal(f.record().revision,suspended.revision);assert.equal(f.record().run_generation,suspended.run_generation);
+  f.controller=f.recreate();await f.controller.initialize();assert.equal(f.store.snapshot().activeCount,0);
+  f.transport.read=read;f.body.client_status='SEND_REQUESTED';await f.ingest();
+  assert.equal(f.sends,1);assert.equal(f.record().control_epoch,1);
+});
+
+test('control invalidation cannot overwrite a STOP accepted while its durable write waits',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();missingControl(f);
+  const move=f.controller.repository.move.bind(f.controller.repository);
+  let release,entered;const gate=new Promise(r=>{release=r;});const waiting=new Promise(r=>{entered=r;});
+  const invalidate=f.controller.repository.invalidateControl.bind(f.controller.repository);
+  f.controller.repository.invalidateControl=async key=>{entered();await gate;return invalidate(key);};
+  const tick=f.controller.tick(f.transport);await waiting;await f.stop();release();await tick;
+  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,2);
+  assert.equal(f.controller.repository.records().length,0);assert.equal(f.sends,0);
+});
+
+test('invalidation preserves a lifecycle advance already queued in the same generation',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();missingControl(f);
+  const move=f.controller.repository.move.bind(f.controller.repository);
+  let release,entered;const gate=new Promise(r=>{release=r;});const waiting=new Promise(r=>{entered=r;});
+  const invalidate=f.controller.repository.invalidateControl.bind(f.controller.repository);
+  f.controller.repository.invalidateControl=async key=>{entered();await gate;return invalidate(key);};
+  const tick=f.controller.tick(f.transport);await waiting;
+  await move(keyFor(f.body),'POST_PENDING','already queued submission intent',{intent:{id:'queued',kind:'initial',outcome:'PENDING',sends:0}});
+  release();await tick;
+  assert.equal(f.record().state,'POST_PENDING');assert.equal(f.record().intent.id,'queued');
+  assert.equal(f.record().control_state,'UNKNOWN');assert.equal(f.store.snapshot().activeCount,0);assert.equal(f.sends,0);
+});

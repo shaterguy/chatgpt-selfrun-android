@@ -1194,7 +1194,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
             });
             return;
         }
-        if ("AUTH_REQUIRED".equals(code) || "TURN_PROTOCOL_UNAVAILABLE".equals(code)) {
+        if ("AUTH_REQUIRED".equals(code) || "TURN_PROTOCOL_UNAVAILABLE".equals(code)
+                || "SERVER_CANCELLED_UNPROVEN".equals(code)) {
             pause("V3_" + code);
             return;
         }

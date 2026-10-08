@@ -496,6 +496,17 @@ final class SelfRun4DriveWebAdapter {
         requireMain();
         if (!active(expectedGeneration, request)) return;
         dispatchBody = body;
+        SelfRunCancelledDispatchPolicy.Decision cancellation = SelfRunCancelledDispatchPolicy.evaluate(
+                body, state.taskId(), state.turnId(), state.requestId(), controlEpoch);
+        if (cancellation != SelfRunCancelledDispatchPolicy.Decision.NONE) {
+            // Never rewrite or poll an already cancelled dispatch. Only server-proven
+            // unsent work may release its claim for a higher preparation attempt.
+            cancelLocalAttempt(false);
+            if (cancellation == SelfRunCancelledDispatchPolicy.Decision.PROVEN_UNSENT)
+                listener.onUnsent(state.taskId(), state.turnId(), state.requestId(), "SERVER_CANCELLED_UNSENT:" + body.optLong("dispatch_attempt"));
+            else listener.onFailure(state.taskId(), state.turnId(), state.requestId(), "SERVER_CANCELLED_UNPROVEN");
+            return;
+        }
         String serverStatus = body.optString("server_status", "PENDING");
         if ("ERROR".equals(serverStatus)) {
             fail("SERVER_DISPATCH_ERROR");

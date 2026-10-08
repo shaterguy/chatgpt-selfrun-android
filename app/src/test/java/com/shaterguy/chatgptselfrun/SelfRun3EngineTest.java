@@ -2,10 +2,15 @@ package com.shaterguy.chatgptselfrun;
 
 import org.json.JSONObject;
 import org.junit.Test;
+import org.junit.Before;
 
 import static org.junit.Assert.*;
 
 public final class SelfRun3EngineTest {
+    @Before public void initializeRegisteredProfiles() {
+        ProfileRegistry.resetForTests();
+    }
+
     @Test public void sendClaimIsDurableAndDuplicateClaimDoesNotDispatchAgain() {
         SelfRun3Engine.State ready = readyState();
         JSONObject p = new JSONObject(); SelfRun3Engine.put(p, "at", 100L);

@@ -220,7 +220,8 @@ final class SelfRun3Engine {
             }
             case UNSENT -> {
                 if(stage!=Stage.DISPATCHING || s.flag("dispatchObserved") || s.flag("accepted")) return original;
-                require(NO_SEND_PROOFS.contains(p.optString("status")),"positive no-dispatch proof required");
+                require(NO_SEND_PROOFS.contains(p.optString("status"))
+                    || p.optString("status").matches("SERVER_CANCELLED_UNSENT:[1-9][0-9]{0,17}"),"positive no-dispatch proof required");
                 put(v,"sendClaimed",false); put(v,"stage","READY"); v.remove("submittedAt");
             }
             case ENDED -> { return original; }

@@ -1,0 +1,199 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { SelfRunClusterCoordinator } from '../src/cluster-coordinator.mjs';
+
+class FakeTransport {
+  constructor(states = []) {
+    this.states = states;
+    this.writes = new Map();
+  }
+  async listMemberStates() {
+    return structuredClone(this.states);
+  }
+  async upsertJson(name, body) {
+    this.writes.set(name, structuredClone(body));
+  }
+}
+
+function store(activeCount = 0, status = 'IDLE') {
+  return { snapshot: () => ({ activeCount, status }) };
+}
+
+const config = { version: 'test', driveRunsFolderId: 'folder' };
+
+test('lower numeric priority wins when no server is busy', async () => {
+  const now = 1_800_000_000_000;
+  const transport = new FakeTransport([{
+    schema: 'selfrun-server-state-v1',
+    server_name: 'Galaxy-Tab-S11-Ultra',
+    server_priority: 1,
+    role: 'STANDBY',
+    active_count: 0,
+    status: 'IDLE',
+    updated_at: new Date(now).toISOString(),
+  }]);
+  const cluster = new SelfRunClusterCoordinator({
+    stateStore: store(0),
+    config,
+    transport,
+    serverName: 'Galaxy-S25',
+    serverPriority: 2,
+    settleMs: 0,
+    now: () => now,
+  });
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role, 'STANDBY');
+  assert.equal(cluster.snapshot().active_server, 'Galaxy-Tab-S11-Ultra');
+  assert.equal(cluster.canDispatch(), false);
+});
+
+test('busy active incumbent keeps ownership until its work drains', async () => {
+  const now = 1_800_000_000_000;
+  let activeCount = 1;
+  const stateStore = { snapshot: () => ({ activeCount, status: activeCount ? 'RUNNING' : 'IDLE' }) };
+  const transport = new FakeTransport([{
+    schema: 'selfrun-server-state-v1',
+    server_name: 'Galaxy-Tab-S11-Ultra',
+    server_priority: 1,
+    role: 'STANDBY',
+    active_count: 0,
+    status: 'IDLE',
+    updated_at: new Date(now).toISOString(),
+  }]);
+  const cluster = new SelfRunClusterCoordinator({
+    stateStore,
+    config,
+    transport,
+    serverName: 'Galaxy-S25',
+    serverPriority: 2,
+    settleMs: 0,
+    now: () => now,
+  });
+  cluster.role = 'ACTIVE';
+  cluster.claimReadyAt = now;
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role, 'ACTIVE');
+  assert.equal(cluster.snapshot().active_server, 'Galaxy-S25');
+  assert.equal(cluster.canDispatch(), true);
+
+  activeCount = 0;
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role, 'STANDBY');
+  assert.equal(cluster.snapshot().active_server, 'Galaxy-Tab-S11-Ultra');
+  assert.equal(cluster.canDispatch(), false);
+});
+
+test('stale higher-priority member is ignored', async () => {
+  const now = 1_800_000_000_000;
+  const transport = new FakeTransport([{
+    schema: 'selfrun-server-state-v1',
+    server_name: 'Galaxy-Tab-S11-Ultra',
+    server_priority: 1,
+    role: 'ACTIVE',
+    active_count: 0,
+    status: 'IDLE',
+    updated_at: new Date(now - 70000).toISOString(),
+  }]);
+  const cluster = new SelfRunClusterCoordinator({
+    stateStore: store(0),
+    config,
+    transport,
+    serverName: 'Galaxy-S25',
+    serverPriority: 2,
+    memberTimeoutMs: 65000,
+    settleMs: 0,
+    now: () => now,
+  });
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role, 'ACTIVE');
+  assert.equal(cluster.snapshot().active_server, 'Galaxy-S25');
+  assert.equal(cluster.canDispatch(), true);
+});
+
+
+test('losing ACTIVE ownership quiesces local work before publishing STANDBY state', async () => {
+  const now = 1_800_000_000_000;
+  let activeCount = 1;
+  let callback = null;
+  const stateStore = { snapshot: () => ({ activeCount, status: activeCount ? 'RUNNING' : 'IDLE' }) };
+  const transport = new FakeTransport([{
+    schema: 'selfrun-server-state-v1',
+    server_name: 'Galaxy-Tab-S11-Ultra',
+    server_priority: 1,
+    role: 'ACTIVE',
+    active_count: 1,
+    status: 'RUNNING',
+    updated_at: new Date(now).toISOString(),
+  }]);
+  const cluster = new SelfRunClusterCoordinator({
+    stateStore, config, transport, serverName: 'Galaxy-S25', serverPriority: 2,
+    settleMs: 0, now: () => now,
+    onRoleChange: async (change) => { callback = change; activeCount = 0; },
+  });
+  cluster.role = 'ACTIVE';
+  cluster.activeServer = 'Galaxy-S25';
+  cluster.claimReadyAt = now;
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role, 'STANDBY');
+  assert.equal(callback?.previousRole, 'ACTIVE');
+  assert.equal(callback?.role, 'STANDBY');
+  assert.equal(transport.writes.get('__SELFRUN_SERVER__Galaxy-S25.json')?.active_count, 0);
+});
+
+test('standby publishes zero active executions while retaining recoverable local records',async()=>{
+  const now=1_800_000_000_000,stateStore=store(3,'RUNNING');
+  const transport=new FakeTransport([{server_name:'Galaxy-Tab-S11-Ultra',server_priority:1,
+    role:'ACTIVE',active_count:1,status:'RUNNING',updated_at:new Date(now).toISOString()}]);
+  const cluster=new SelfRunClusterCoordinator({stateStore,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:0,now:()=>now});
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role,'STANDBY');
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
+  assert.equal(stateStore.snapshot().activeCount,3);
+});
+test('candidate publishes zero until an active claim is ready without discarding failover work',async()=>{
+  let now=1_800_000_000_000;
+  const stateStore=store(3,'RUNNING'),transport=new FakeTransport();
+  const cluster=new SelfRunClusterCoordinator({stateStore,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:100,now:()=>now});
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role,'CANDIDATE');
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
+  now+=101;await cluster.refresh();
+  assert.equal(cluster.canDispatch(),true);
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,3);
+  assert.equal(stateStore.snapshot().activeCount,3);
+});
+test('shutdown publishes zero active executions without erasing recoverable records',async()=>{
+  const now=1_800_000_000_000,stateStore=store(3,'RUNNING'),transport=new FakeTransport();
+  const cluster=new SelfRunClusterCoordinator({stateStore,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:0,now:()=>now});
+  await cluster.refresh();await cluster.close();
+  const published=transport.writes.get(cluster.memberFileName());
+  assert.equal(published.role,'STANDBY');assert.equal(published.active_count,0);
+  assert.equal(stateStore.snapshot().activeCount,3);
+});
+
+test('real standby quiesce stops sessions while preserving observation for a later claim',async()=>{
+  const {fixture}=await import('./helpers/lifecycle-fixture.mjs');
+  const f=fixture();await f.existing();f.result(false);await f.observe({});
+  let now=1_800_000_000_000;
+  const transport=new FakeTransport([{server_name:'Galaxy-Tab-S11-Ultra',server_priority:1,
+    role:'ACTIVE',active_count:1,status:'RUNNING',updated_at:new Date(now).toISOString()}]);
+  const cluster=new SelfRunClusterCoordinator({stateStore:f.store,config,transport,
+    serverName:'Galaxy-S25',serverPriority:2,settleMs:0,now:()=>now,
+    onRoleChange:async({role})=>{if(role==='STANDBY')await f.controller.quiesceForStandby();}});
+  cluster.role='ACTIVE';cluster.claimReadyAt=now;
+  f.controller.canDispatch=()=>cluster.canDispatch();
+  await cluster.refresh();
+  assert.equal(cluster.snapshot().role,'STANDBY');
+  assert.equal(f.controller.sessions.size,0);
+  assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
+  assert.equal(f.store.snapshot().activeCount,1);
+  assert.equal(f.record().result_state,'NOT_COMMITTED');
+  transport.states=[];now+=1;await cluster.refresh();await f.controller.tick(f.transport);
+  assert.equal(cluster.canDispatch(),true);
+  assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.resumes,2);assert.equal(f.sends,0);
+  await f.controller.quiesceForStandby();
+});

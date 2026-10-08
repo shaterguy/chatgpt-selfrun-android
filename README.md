@@ -1,3 +1,7 @@
+# SelfRun cancellation recovery candidate 4.0.10-dev3
+
+This isolated candidate fixes cancelled-dispatch recovery only. Automatic retry requires correlated server proof of no submission and completed browser cleanup; unproven cancellation pauses for review. Existing tasks and account bindings are preserved.
+
 # SelfRun Drive
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 작업 상태는 기존 V3 원장을 유지하며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.

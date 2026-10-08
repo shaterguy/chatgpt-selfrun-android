@@ -2,40 +2,47 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config.mjs';
 import { StateStore, ensureToken } from './state-store.mjs';
-import { ChromiumManager } from './browser/cdp.mjs';
+import { createBrowserManager } from './browser/adapter.mjs';
 import { ChatGptBrowser } from './browser/chatgpt.mjs';
+import { SignalDispatchTransport } from './signal-transport.mjs';
 import { SelfRunController } from './controller.mjs';
 import { DriveDispatchTransport } from './drive-transport.mjs';
 import { DriveDispatchController } from './drive-controller.mjs';
 import { DriveDispatchWatcher } from './drive-watcher.mjs';
+import { SelfRunClusterCoordinator } from './cluster-coordinator.mjs';
+import { PromptDirectiveStore, PROMPT_DIRECTIVES_SCHEMA } from './prompt-directives.mjs';
 
 const startedAt = new Date().toISOString();
 const stateStore = new StateStore(config);
 await stateStore.init();
-await stateStore.patch({
-  status: 'IDLE',
-  activeSignal: null,
-  activeTargetId: null,
-  conversationUrl: null,
-  acceptedAt: null,
-  lastActivityAt: null,
-  lastSignalId: null,
-  lastError: null,
-  activeCount: 0,
-  activeDispatches: [],
-}, 'SERVER_RUNTIME_RESET');
 const token = await ensureToken(config);
-const chromium = new ChromiumManager(config);
+const chromium = createBrowserManager(config);
 const browser = new ChatGptBrowser(chromium, config);
-const controller = new SelfRunController({ browser, stateStore, config });
+const promptDirectives = new PromptDirectiveStore(config);
+const driveTransport = new SignalDispatchTransport(new DriveDispatchTransport(config),stateStore);
+const driveController = new DriveDispatchController({
+  browser,
+  stateStore,
+  config,
+  promptDirectives,
+  canDispatch:()=>cluster.canDispatch(),
+});
+const controller = new SelfRunController({lifecycle:driveController,transport:driveTransport,stateStore,config});
 await controller.initialize();
-const driveTransport = new DriveDispatchTransport(config);
-const driveController = new DriveDispatchController({ browser, stateStore, config });
+const cluster = new SelfRunClusterCoordinator({
+  stateStore,
+  config,
+  onRoleChange: async ({ role }) => {
+    if (role === 'STANDBY') await driveController.quiesceForStandby();
+  },
+});
 const driveWatcher = new DriveDispatchWatcher({
   transport: driveTransport,
   controller: driveController,
   config,
+  canDispatch: () => cluster.canDispatch(),
 });
+cluster.start();
 void driveWatcher.start();
 
 function json(res, status, body) {
@@ -75,12 +82,24 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/health') {
       const state = stateStore.snapshot();
+      const directives = await promptDirectives.current();
       return json(res, 200, {
         ok: true,
         version: config.version,
+        browser_adapter: config.browserAdapter,
+        browser_runtime: chromium.status?.(),
         startedAt,
         status: state.status,
         generation: state.generation,
+        cluster: cluster.snapshot(),
+        prompt_directives: {
+          schema: PROMPT_DIRECTIVES_SCHEMA,
+          source: directives.source,
+          file: config.promptDirectivesFile,
+          turn_start_enabled: Boolean(directives.turnStartDirective),
+          turn_continue_enabled: Boolean(directives.turnContinueDirective),
+          error: directives.error,
+        },
       });
     }
 
@@ -91,6 +110,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/signals') {
+      if(!cluster.canDispatch())return json(res,409,{error:'server_not_active'});
       const body = await readJson(req);
       const result = await controller.accept(body);
       return json(res, 202, result);
@@ -124,7 +144,9 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   driveWatcher.stop();
+  await cluster.close().catch(() => {});
   await driveTransport.close().catch(() => {});
+  await chromium.close?.().catch(() => {});
   server.close(() => process.exit(0));
 }
 
