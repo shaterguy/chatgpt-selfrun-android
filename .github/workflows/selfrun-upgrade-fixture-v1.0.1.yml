@@ -1,0 +1,84 @@
+# Install under .github/workflows/selfrun-upgrade-fixture-v1.0.1.yml after independent review.
+# App/server production sources and signed candidate commit remain unchanged.
+name: SelfRun isolated upgrade fixture 1.0.1
+on:
+  push:
+    branches: ['selfrun-upgrade-fixture/v1.0.1-e8a4e06']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  data-preservation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        edge: [phone-formal, tablet-formal, phone-test, tablet-test]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Must be actual installed APK hashes from allowlisted read-only diagnostic.
+      # Empty values deliberately block TEST edges. Setting these expands no app permissions.
+      PHONE_TEST_INSTALLED_APK_SHA256: ${{ vars.PHONE_TEST_INSTALLED_APK_SHA256 }}
+      TABLET_TEST_INSTALLED_APK_SHA256: ${{ vars.TABLET_TEST_INSTALLED_APK_SHA256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Pin exact successful source run and baseline
+        run: python3 tools/upgrade-fixture-v1.0.1/prepare-ci-edge.py '${{ matrix.edge }}'
+      - name: Build isolated fixture only
+        run: bash tools/upgrade-fixture-v1.0.1/build-fixture.sh
+      - name: Sign fixture using existing unchanged identity
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r tools/signing-requirements-linux-x86_64-py312.txt
+          test -n "$SIGNING_PASSPHRASE"
+          PASS_FILE="$RUNNER_TEMP/selfrun-fixture-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+          ROOT=tools/upgrade-fixture-v1.0.1
+          mkdir -p "$ROOT/signed"
+          EDGE='${{ matrix.edge }}'
+          VARIANT=formal; SCRIPT=tools/sign_release.sh
+          if [[ "$EDGE" == *-test ]]; then VARIANT=test; SCRIPT=tools/sign_test.sh; fi
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner" bash "$SCRIPT" "$ROOT/build/fixture-$VARIANT-aligned-unsigned.apk" "$PASS_FILE" "$ROOT/signed/fixture-$VARIANT.apk" > "$ROOT/signed/certificate-public.txt"
+      - name: Enable emulator acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+      - name: Seed old app then update and compare storage and UID
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
+            -camera-back none -camera-front none -memory 2048
+          disable-animations: true
+          script: ADB_SERIAL=emulator-5554 python3 tools/upgrade-fixture-v1.0.1/run-prepared-edge.py '${{ matrix.edge }}'
+      - name: Upload evidence only
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-upgrade-fixture-v1.0.1-${{ matrix.edge }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tools/upgrade-fixture-v1.0.1/evidence/**
+            tools/upgrade-fixture-v1.0.1/inputs/${{ matrix.edge }}/inputs.json
+            tools/upgrade-fixture-v1.0.1/signed/certificate-public.txt
+          if-no-files-found: warn
+          retention-days: 30
