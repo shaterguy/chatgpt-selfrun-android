@@ -1,0 +1,62 @@
+[
+  {
+    "commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "class": "SelfRun3Ledger",
+    "missing_contracts": []
+  },
+  {
+    "commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "class": "SelfRun3Engine",
+    "missing_contracts": []
+  },
+  {
+    "commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "class": "SelfRun3RuntimeSettings",
+    "missing_contracts": []
+  },
+  {
+    "commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "class": "SelfRunStore",
+    "missing_contracts": []
+  },
+  {
+    "commit": "a0de6bfd69f09c81e15ef729e44c1e19806b8972",
+    "class": "SelfRun3Ledger",
+    "missing_contracts": []
+  },
+  {
+    "commit": "a0de6bfd69f09c81e15ef729e44c1e19806b8972",
+    "class": "SelfRun3Engine",
+    "missing_contracts": []
+  },
+  {
+    "commit": "a0de6bfd69f09c81e15ef729e44c1e19806b8972",
+    "class": "SelfRun3RuntimeSettings",
+    "missing_contracts": []
+  },
+  {
+    "commit": "a0de6bfd69f09c81e15ef729e44c1e19806b8972",
+    "class": "SelfRunStore",
+    "missing_contracts": []
+  },
+  {
+    "commit": "eab757281e61ac76fe4e46247ef68a264e2a15d1",
+    "class": "SelfRun3Ledger",
+    "missing_contracts": []
+  },
+  {
+    "commit": "eab757281e61ac76fe4e46247ef68a264e2a15d1",
+    "class": "SelfRun3Engine",
+    "missing_contracts": []
+  },
+  {
+    "commit": "eab757281e61ac76fe4e46247ef68a264e2a15d1",
+    "class": "SelfRun3RuntimeSettings",
+    "missing_contracts": []
+  },
+  {
+    "commit": "eab757281e61ac76fe4e46247ef68a264e2a15d1",
+    "class": "SelfRunStore",
+    "missing_contracts": []
+  }
+]

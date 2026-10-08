@@ -1,0 +1,32 @@
+[
+  {
+    "path": "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunApplication.java",
+    "baseline_commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "baseline_and_candidate_sha256": "708f30be56dc87d9d0ce1be0d0237a7090659fa9d5603d5d77d29e3353ad7dc7",
+    "byte_identical": true
+  },
+  {
+    "path": "app/src/main/java/com/shaterguy/chatgptselfrun/UserNextInputStore.java",
+    "baseline_commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "baseline_and_candidate_sha256": "aae2df9ad7badda906a53c4f894bbfb091230e5489aa29e56b35819d407a86e7",
+    "byte_identical": true
+  },
+  {
+    "path": "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3RuntimeSettings.java",
+    "baseline_commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "baseline_and_candidate_sha256": "938003d213c309e6f7173e0c4d91117bbaaf07232ab258dbc6c778bf578690f0",
+    "byte_identical": true
+  },
+  {
+    "path": "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRunStore.java",
+    "baseline_commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "baseline_and_candidate_sha256": "0684d46090d6fc134f5c9712ed44ff9b46b391ba3fbd85cd3b186b40db2dc5e9",
+    "byte_identical": true
+  },
+  {
+    "path": "app/src/main/java/com/shaterguy/chatgptselfrun/SelfRun3Ledger.java",
+    "baseline_commit": "913973df386c2f7a941caf8e843d1c090407d3c4",
+    "baseline_and_candidate_sha256": "4bfb782d1f0cc2dd596b664a33d3c0aad8e49271508eae076ac6b00a517fa50c",
+    "byte_identical": true
+  }
+]
