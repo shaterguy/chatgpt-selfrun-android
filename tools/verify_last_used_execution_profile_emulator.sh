@@ -8,7 +8,9 @@ if [[ -z "$INSTRUMENTATION" ]]; then
     exit 1
 fi
 
-adb shell am instrument -w -r "$INSTRUMENTATION" | tee selfrun-last-used-profile-runtime-evidence.txt
+adb shell am instrument -w -r \
+    -e class com.shaterguy.chatgptselfrun.LastUsedExecutionProfileAndroidTest \
+    "$INSTRUMENTATION" | tee selfrun-last-used-profile-runtime-evidence.txt
 grep -Fq 'OK (41 tests)' selfrun-last-used-profile-runtime-evidence.txt
 grep -Fq 'class=com.shaterguy.chatgptselfrun.LastUsedExecutionProfileAndroidTest' \
     selfrun-last-used-profile-runtime-evidence.txt
