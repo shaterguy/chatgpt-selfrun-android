@@ -3,290 +3,118 @@ import assert from 'node:assert/strict';
 import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const turn=()=>new Promise(r=>setImmediate(r));
-const controlPath='__SELFRUN_CONTROL__ACTIVE.json';
-const historicalPath='__SELFRUN_DISPATCH__HISTORY.json';
-
-test('STOP arriving during a slow historical read is applied by the next poll',async()=>{
- const blocked=deferred(),entered=deferred();let lists=0,ticks=0,current=null;
- let control={schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1',state:'RUNNING',control_epoch:1};
- const transport={list:async()=>{lists++;return [
-  {path:controlPath,modTime:String(control.control_epoch),size:10},
-  {path:historicalPath,modTime:'2020-01-01T00:00:00Z',size:10},
- ];},read:async path=>{
-  if(path===controlPath)return structuredClone(control);
-  if(path===historicalPath){entered.resolve();await blocked.promise;return {schema:'unrelated-historical-json'};}
-  throw new Error('unexpected path '+path);
+async function until(predicate){for(let i=0;i<100&&!predicate();i++)await turn();assert.ok(predicate(),'watcher work settles');}
+const cp=task=>'__SELFRUN_CONTROL__'+task+'.json';
+const dp=(task,n=1,attempt=1)=>'__SELFRUN_DISPATCH__'+task+':turn:'+n+'-request__A'+attempt+'.json';
+const control=(task,n=1)=>({schema:'selfrun-task-control-v1',task_id:task,turn_id:task+':turn:'+n,request_id:task+':turn:'+n+'-request',state:'RUNNING',control_epoch:n});
+const dispatch=c=>({schema:'selfrun-server-dispatch-v1',task_id:c.task_id,turn_id:c.turn_id,request_id:c.request_id,dispatch_attempt:1});
+function fixture(){
+ const docs=new Map(),versions=new Map(),reads=[],applied=[],ingested=[],current=new Map();let ticks=0;
+ const f={docs,versions,reads,applied,ingested,current,
+  put(path,body,version=1){docs.set(path,body);versions.set(path,String(version));},
+  task(task,n=1){const c=control(task,n);f.put(cp(task),c,n);f.put(dp(task,n),dispatch(c),n);return c;},
+  get ticks(){return ticks;},
+ };
+ f.transport={list:async()=>[...docs].map(([path])=>({path,modTime:versions.get(path),size:10})),read:async path=>{
+  reads.push(path);await f.beforeRead?.(path);
+  if(!docs.has(path))throw Object.assign(Error('missing'),{code:'DRIVE_FILE_NOT_FOUND'});
+  const body=structuredClone(docs.get(path));await f.afterRead?.(path,body);return body;
  }};
- const controller={controlDurable:async(_path,c)=>{current=c;},tick:async()=>{ticks++;}};
- const watcher=new DriveDispatchWatcher({transport,controller,config:{drivePollMs:500}});
- const running=watcher.start();await entered.promise;
- control={...control,state:'STOPPED',control_epoch:2};
- await new Promise(resolve=>setTimeout(resolve,650));
- const observed={lists,ticks,controlState:current?.state,controlEpoch:current?.control_epoch,scanning:watcher.scanning};
- watcher.stop();blocked.resolve();await running;
- console.log('STOP starvation snapshot',JSON.stringify(observed));
- assert.equal(observed.controlState,'STOPPED','new STOP must not wait for historical discovery to drain');
-});
-
-test('pending work receives a tick before a slow historical read finishes',async()=>{
- const blocked=deferred(),entered=deferred();let ticks=0;
- const transport={list:async()=>[{path:historicalPath,modTime:'2020-01-01T00:00:00Z',size:10}],read:async()=>{entered.resolve();await blocked.promise;return {schema:'unrelated-historical-json'};}};
- const watcher=new DriveDispatchWatcher({transport,controller:{tick:async()=>{ticks++;}},config:{}});
- const scan=watcher.scanOnce();await entered.promise;await turn();
- const observed={ticks,scanning:watcher.scanning};blocked.resolve();await scan;
- console.log('Tick starvation snapshot',JSON.stringify(observed));
- assert.ok(observed.ticks>0,'durable pending work must advance independently of historical discovery');
-});
-
-test('newest dispatch intake precedes unrelated historical controls',async()=>{
- const blocked=deferred(),entered=deferred();let ingests=0;
- const historyControl='__SELFRUN_CONTROL__HISTORY.json';
- const dispatchPath='__SELFRUN_DISPATCH__ACTIVE.json';
- const control={schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1',state:'RUNNING',control_epoch:1};
- const dispatch={schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- const transport={list:async()=>[
-  {path:dispatchPath,modTime:'2026-10-04T06:59:00Z',size:20},
-  {path:controlPath,modTime:'2026-10-04T06:58:00Z',size:10},
-  {path:historyControl,modTime:'2020-01-01T00:00:00Z',size:10},
- ],read:async path=>{
-  if(path===historyControl){entered.resolve();await blocked.promise;return {...control,task_id:'HISTORY'};}
-  return path===controlPath?control:dispatch;
- }};
- const controller={controlDurable:async()=>{},controlForTask:()=>control,ingestDurable:async()=>{ingests++;},tick:async()=>{}};
- const watcher=new DriveDispatchWatcher({transport,controller,config:{}});
- const scan=watcher.scanOnce();await entered.promise;await turn();
- const observed={ingests,scanning:watcher.scanning};blocked.resolve();await scan;
- console.log('Intake starvation snapshot',JSON.stringify(observed));
- assert.equal(observed.ingests,1,'fresh dispatch intake must not wait behind unrelated historical controls');
-});
-
-async function until(predicate) {
- for(let i=0;i<100&&!predicate();i++)await turn();
- assert.ok(predicate(),'expected asynchronous watcher work to settle');
+ f.controller={tick:async()=>{ticks++;await f.tickGate?.promise;},activeDispatches:()=>f.active||[],controlForTask:task=>current.get(task),
+  controlDurable:async(path,c)=>{await f.apply?.(path,c);applied.push(c);if(c.state==='RUNNING')current.set(c.task_id,c);else current.delete(c.task_id);},
+  ingestDurable:async(path,b)=>{ingested.push(b);},
+ };
+ f.watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{},canDispatch:()=>f.owned!==false});return f;
 }
 
-test('new dispatch arriving during historical discovery loads its own control and ingests promptly',async()=>{
- const blocked=deferred(),entered=deferred();let arrived=false,current=null;
- const activePath='__SELFRUN_DISPATCH__ACTIVE.json',ingested=[],reads=[];
- const control={schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1',state:'RUNNING',control_epoch:1};
- const transport={list:async()=>[
-  ...(arrived?[{path:activePath,modTime:'2026-10-04T07:00:00Z',size:20},{path:controlPath,modTime:'2026-10-04T06:59:59Z',size:10}]:[]),
-  {path:historicalPath,modTime:'2020-01-01T00:00:00Z',size:10},
- ],read:async path=>{
-  reads.push(path);
-  if(path===historicalPath){entered.resolve();await blocked.promise;return {schema:'unrelated-historical-json'};}
-  if(path===controlPath)return control;
-  return {schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- }};
- const controller={controlForTask:()=>current,controlDurable:async(_path,c)=>{current=c;},
-  ingestDurable:async(_path,b)=>{assert.equal(current?.request_id,b.request_id);ingested.push(b);},tick:async()=>{}};
- const watcher=new DriveDispatchWatcher({transport,controller,config:{}});
- await watcher.scanOnce({drain:false});await entered.promise;arrived=true;
- await watcher.scanOnce({drain:false});await until(()=>ingested.length===1);
- assert.equal(reads.filter(path=>path===controlPath).length,1,'matching control read is shared between lanes');
- watcher.stop();blocked.resolve();
+test('STOP and ticks do not wait for a slow current body',async t=>{
+ const f=fixture(),c=f.task('ACTIVE'),gate=deferred(),entered=deferred();t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.beforeRead=async p=>{if(p===dp('ACTIVE')){entered.resolve();await gate.promise;}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;
+ f.put(cp('ACTIVE'),{...c,state:'STOPPED',control_epoch:2},2);await f.watcher.scanOnce({drain:false});
+ await until(()=>f.applied.some(x=>x.state==='STOPPED'));assert.ok(f.ticks>=2);assert.equal(f.watcher.scanning,false);
+ gate.resolve();await until(()=>f.watcher.jobs.size===0);assert.equal(f.ingested.length,0);
 });
-
-test('stale control read cannot overwrite a newer listing and each path stays single-flight',async()=>{
- const blocked=deferred(),entered=deferred();let version=1,readCount=0,concurrent=0,maxConcurrent=0;
- const applied=[],control={schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- const transport={list:async()=>[{path:controlPath,modTime:String(version),size:10}],read:async()=>{
-  readCount++;concurrent++;maxConcurrent=Math.max(maxConcurrent,concurrent);
-  const epoch=version;
-  if(readCount===1){entered.resolve();await blocked.promise;}
-  concurrent--;return {...control,control_epoch:epoch,state:epoch===1?'RUNNING':'STOPPED'};
- }};
- const controller={activeDispatches:()=>[{body:{task_id:'ACTIVE'}}],controlDurable:async(_path,c)=>applied.push(c),tick:async()=>{}};
- const watcher=new DriveDispatchWatcher({transport,controller,config:{}});
- await watcher.scanOnce({drain:false});await entered.promise;version=2;
- await watcher.scanOnce({drain:false});assert.equal(readCount,1);
- blocked.resolve();await until(()=>applied.length===1);
- assert.equal(applied[0].control_epoch,2);assert.equal(applied[0].state,'STOPPED');assert.equal(maxConcurrent,1);
- watcher.stop();
+test('unknown historical bodies are never opened while durable work keeps ticking',async()=>{
+ const f=fixture();f.put('__SELFRUN_DISPATCH__HISTORY.json',{bad:true});await f.watcher.scanOnce();await f.watcher.scanOnce();
+ assert.equal(f.reads.length,0);assert.equal(f.ticks,2);assert.equal(f.watcher.files.size,0);
 });
-
-test('losing dispatch ownership during a control read prevents control application',async()=>{
- let owned=true,applied=0;
- const transport={list:async()=>[{path:controlPath,modTime:'1',size:10}],read:async()=>{
-  owned=false;return {schema:'selfrun-task-control-v1',task_id:'ACTIVE',control_epoch:2,state:'STOPPED'};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlDurable:async()=>applied++,tick:async()=>{}},config:{},canDispatch:()=>owned});
- await watcher.scanOnce();assert.equal(applied,0);
+test('newest current request is admitted while an unrelated control is slow',async t=>{
+ const f=fixture(),gate=deferred(),entered=deferred();t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.task('ACTIVE');f.put(cp('HISTORY'),{...control('HISTORY'),state:'DONE'},0);
+ f.beforeRead=async p=>{if(p===cp('HISTORY')){entered.resolve();await gate.promise;}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;await until(()=>f.ingested.length===1);assert.equal(f.ingested[0].task_id,'ACTIVE');
 });
-
-test('failed historical bodies back off while changed STOP controls remain responsive',async t=>{
+test('new current request gets its own lane while another current body is slow',async t=>{
+ const f=fixture(),gate=deferred(),entered=deferred();f.task('FIRST');t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.beforeRead=async p=>{if(p===dp('FIRST')){entered.resolve();await gate.promise;}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;f.task('NEW');await f.watcher.scanOnce({drain:false});
+ await until(()=>f.ingested.some(x=>x.task_id==='NEW'));assert.equal(f.reads.filter(p=>p===dp('FIRST')).length,1);
+});
+test('stale control read cannot overwrite a newer listing and stays single-flight',async t=>{
+ const f=fixture(),gate=deferred(),entered=deferred();let concurrent=0,max=0,reads=0;f.put(cp('ACTIVE'),control('ACTIVE'));t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.afterRead=async(p,b)=>{if(p===cp('ACTIVE')){reads++;concurrent++;max=Math.max(max,concurrent);if(reads===1){entered.resolve();await gate.promise;}concurrent--;}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;f.put(cp('ACTIVE'),{...control('ACTIVE'),state:'STOPPED',control_epoch:2},2);
+ await f.watcher.scanOnce({drain:false});gate.resolve();await until(()=>f.applied.length===1);
+ assert.equal(f.applied[0].control_epoch,2);assert.equal(max,1);
+});
+test('ownership lost during control read prevents application and body read',async()=>{
+ const f=fixture();f.task('ACTIVE');f.afterRead=async p=>{if(p===cp('ACTIVE'))f.owned=false;};await f.watcher.scanOnce();
+ assert.equal(f.applied.length,0);assert.equal(f.reads.includes(dp('ACTIVE')),false);
+});
+test('current malformed body backs off but STOP discards its retry state',async t=>{
  t.mock.timers.enable({apis:['Date'],now:10000});t.mock.method(console,'error',()=>{});
- let reads=0,stopped=false,applied=null;
- const transport={list:async()=>[
-  ...(stopped?[{path:controlPath,modTime:'2',size:10}]:[]),{path:historicalPath,modTime:'1',size:10},
- ],read:async path=>{
-  if(path===historicalPath){reads++;throw new Error('old Drive file unavailable');}
-  return {schema:'selfrun-task-control-v1',task_id:'ACTIVE',state:'STOPPED',control_epoch:2};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlDurable:async(_path,c)=>{applied=c;},tick:async()=>{}},config:{}});
- await assert.rejects(watcher.scanOnce(),/unavailable/);
- await watcher.scanOnce();assert.equal(reads,1);
- stopped=true;await watcher.scanOnce();assert.equal(applied.state,'STOPPED');assert.equal(reads,1);
- t.mock.timers.tick(1000);await assert.rejects(watcher.scanOnce(),/unavailable/);assert.equal(reads,2);
- await watcher.scanOnce();assert.equal(reads,2);
- t.mock.timers.tick(1999);await watcher.scanOnce();assert.equal(reads,2);
- t.mock.timers.tick(1);await assert.rejects(watcher.scanOnce(),/unavailable/);assert.equal(reads,3);
- watcher.stop();
+ const f=fixture(),c=f.task('ACTIVE');f.beforeRead=async p=>{if(p===dp('ACTIVE'))throw Error('current parse failed');};
+ await assert.rejects(f.watcher.scanOnce(),/parse failed/);await f.watcher.scanOnce();assert.equal(f.reads.filter(p=>p===dp('ACTIVE')).length,1);
+ f.put(cp('ACTIVE'),{...c,state:'STOPPED',control_epoch:2},2);await f.watcher.scanOnce();t.mock.timers.tick(60000);await f.watcher.scanOnce();
+ assert.equal(f.reads.filter(p=>p===dp('ACTIVE')).length,1);for(const map of ['failures','readFailures','seen','inputs','deferred'])assert.equal(f.watcher[map].has(dp('ACTIVE')),false);
 });
-
-test('STOP during queued history does not replay an old retired dispatch',async()=>{
- const f=(await import('./helpers/lifecycle-fixture.mjs')).fixture();
- f.control.state='STOPPED';
- const list=f.transport.list;
- f.transport.list=async()=>(await list()).map(file=>({...file,modTime:'2020-01-01T00:00:00Z'}));
- const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
- await watcher.scanOnce();await watcher.scanOnce();
- assert.equal(f.record(),null);assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);assert.equal(f.prepares,0);assert.equal(f.sends,0);
- watcher.stop();
+test('queued historical dispatches produce zero reads and zero retry records',async()=>{
+ const f=fixture();for(let i=0;i<100;i++){f.task('OLD'+i);f.put(cp('OLD'+i),{...control('OLD'+i),state:'DONE'},2);}
+ await f.watcher.scanOnce();assert.equal(f.reads.some(p=>p.startsWith('__SELFRUN_DISPATCH__')),false);assert.equal(f.watcher.failures.size,0);assert.equal(f.watcher.runningControls.size,0);
 });
-
-test('discovery plus new intake uses at most three body reads and never duplicates a path',async()=>{
- const blocked=deferred();let arrived=false,active=0,maximum=0;
- const newPath='__SELFRUN_DISPATCH__ACTIVE.json',reads=new Map();
- const history=Array.from({length:100},(_,i)=>({path:'__SELFRUN_DISPATCH__OLD-'+i+'.json',modTime:'1',size:10}));
- const transport={list:async()=>[
-  ...(arrived?[{path:controlPath,modTime:'3',size:10},{path:newPath,modTime:'2',size:10}]:[]),...history,
- ],read:async path=>{
-  reads.set(path,(reads.get(path)||0)+1);active++;maximum=Math.max(maximum,active);
-  await blocked.promise;active--;return {schema:'unrelated-historical-json'};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{tick:async()=>{}},config:{}});
- await watcher.scanOnce({drain:false});await until(()=>active===1);
- arrived=true;await watcher.scanOnce({drain:false});await until(()=>active===3);
- await watcher.scanOnce({drain:false});assert.equal(active,3);assert.equal(maximum,3);
- assert.equal([...reads.values()].every(count=>count===1),true);
- watcher.stop();blocked.resolve();await until(()=>watcher.jobs.size===0);
- assert.equal(reads.size,3,'stopping does not drain queued history');
+test('body reads remain bounded and a path is never duplicated across lanes',async t=>{
+ const f=fixture(),gate=deferred();let active=0,max=0;t.after(()=>{f.watcher.stop();gate.resolve();});f.task('FIRST');
+ f.beforeRead=async p=>{active++;max=Math.max(max,active);if(p===dp('FIRST'))await gate.promise;active--;};
+ await f.watcher.scanOnce({drain:false});await until(()=>f.reads.includes(dp('FIRST')));f.task('SECOND');await f.watcher.scanOnce({drain:false});await until(()=>f.ingested.length===1);
+ assert.ok(max<=3);assert.equal(f.reads.filter(p=>p===dp('FIRST')).length,1);
 });
-
-test('a failed new STOP keeps its priority lane for retry while discovery remains blocked',async t=>{
+test('failed STOP remains eligible for retry while another current body is blocked',async t=>{
  t.mock.timers.enable({apis:['Date'],now:10000});t.mock.method(console,'error',()=>{});
- const blocked=deferred(),entered=deferred();let arrived=false,controlReads=0,applied=null;
- const transport={list:async()=>[
-  ...(arrived?[{path:controlPath,modTime:'2',size:10}]:[]),{path:historicalPath,modTime:'1',size:10},
- ],read:async path=>{
-  if(path===historicalPath){entered.resolve();await blocked.promise;return {schema:'unrelated-historical-json'};}
-  controlReads++;if(controlReads===1)throw new Error('temporary STOP read failure');
-  return {schema:'selfrun-task-control-v1',task_id:'ACTIVE',state:'STOPPED',control_epoch:2};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlDurable:async(_path,c)=>{applied=c;},tick:async()=>{}},config:{}});
- try {
-  await watcher.scanOnce({drain:false});await entered.promise;arrived=true;
-  await watcher.scanOnce({drain:false});await until(()=>watcher.failures.has(controlPath));
-  t.mock.timers.tick(1000);await watcher.scanOnce({drain:false});await until(()=>applied?.state==='STOPPED');
-  assert.equal(controlReads,2);
- } finally {watcher.stop();blocked.resolve();}
+ const f=fixture(),gate=deferred(),entered=deferred();let stops=0;f.task('FIRST');t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.beforeRead=async p=>{if(p===dp('FIRST')){entered.resolve();await gate.promise;}if(p===cp('STOP')){stops++;if(stops===1)throw Error('temporary STOP read failure');}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;f.put(cp('STOP'),{...control('STOP'),state:'STOPPED'},2);
+ await f.watcher.scanOnce({drain:false});await until(()=>f.watcher.failures.has(cp('STOP')));t.mock.timers.tick(1000);await f.watcher.scanOnce({drain:false});await until(()=>f.applied.some(c=>c.task_id==='STOP'));
+ assert.equal(stops,2);
 });
-
-test('startup tick observes the latest STOP before attempting to reattach uncertain work',async()=>{
- const f=(await import('./helpers/lifecycle-fixture.mjs')).fixture();f.mode='unknown';await f.ingest();
- assert.equal(f.record().state,'POST_UNCERTAIN');
- f.control={...f.control,state:'STOPPED',control_epoch:2};
- let attaches=0;f.browser.attachTarget=async()=>{attaches++;throw new Error('STOP must fence reattach');};
- const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
- await watcher.scanOnce();await until(()=>f.record()===null);
- assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);assert.equal(attaches,0);assert.equal(f.sends,1);
- watcher.stop();
+test('startup tick observes STOP before reattaching uncertain work',async()=>{
+ const f=(await import('./helpers/lifecycle-fixture.mjs')).fixture();f.mode='unknown';await f.ingest();f.control={...f.control,state:'STOPPED',control_epoch:2};let attaches=0;
+ f.browser.attachTarget=async()=>{attaches++;throw Error('must not attach');};const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
+ await w.scanOnce();await until(()=>f.record()===null);assert.equal(attaches,0);assert.equal(f.sends,1);w.stop();
 });
-
-test('many historical dispatches share the same failing-control read backoff',async t=>{
- t.mock.timers.enable({apis:['Date'],now:10000});t.mock.method(console,'error',()=>{});
- let controlReads=0,dispatchReads=0;
- const transport={list:async()=>[
-  ...Array.from({length:8},(_,i)=>({path:'__SELFRUN_DISPATCH__OLD-'+i+'.json',modTime:String(10-i),size:10})),
-  {path:controlPath,modTime:'1',size:10},
- ],read:async path=>{
-  if(path===controlPath){controlReads++;throw new Error('shared control unavailable');}
-  dispatchReads++;return {schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlForTask:()=>null,tick:async()=>{}},config:{}});
- await watcher.scanOnce({drain:false});await until(()=>dispatchReads===8&&watcher.jobs.size===0);
- assert.equal(controlReads,1,'dispatch dependencies must share control backoff, not just concurrent reads');
- t.mock.timers.tick(1000);await watcher.scanOnce({drain:false});await until(()=>watcher.jobs.size===0);
- assert.equal(controlReads,2);
- watcher.stop();
+test('many request candidates share failing control backoff without reading bodies',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:10000});t.mock.method(console,'error',()=>{});const f=fixture();f.task('ACTIVE');
+ for(let i=2;i<9;i++)f.put(dp('ACTIVE',1,i),dispatch(control('ACTIVE')));
+ f.beforeRead=async p=>{if(p===cp('ACTIVE'))throw Error('shared control unavailable');};await f.watcher.scanOnce({drain:false});await until(()=>f.watcher.jobs.size===0);
+ assert.equal(f.reads.filter(p=>p===cp('ACTIVE')).length,1);assert.equal(f.reads.some(p=>p.startsWith('__SELFRUN_DISPATCH__')),false);
 });
-
-test('the first listing prioritizes its newest dispatch over a newer unrelated control',async()=>{
- const blocked=deferred(),entered=deferred();let ingests=0,current=null;
- const unrelated='__SELFRUN_CONTROL__UNRELATED.json',dispatchPath='__SELFRUN_DISPATCH__ACTIVE.json';
- const control={schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1',state:'RUNNING',control_epoch:1};
- const transport={list:async()=>[
-  {path:unrelated,modTime:'20',size:10},{path:dispatchPath,modTime:'19',size:20},{path:controlPath,modTime:'18',size:10},
- ],read:async path=>{
-  if(path===unrelated){entered.resolve();await blocked.promise;return {...control,task_id:'UNRELATED'};}
-  return path===controlPath?control:{schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- }};
- const controller={controlForTask:()=>current,controlDurable:async(_path,c)=>{current=c;},
-  ingestDurable:async()=>{assert.equal(current?.task_id,'ACTIVE');ingests++;},tick:async()=>{}};
- const watcher=new DriveDispatchWatcher({transport,controller,config:{}});
- try {await watcher.scanOnce({drain:false});await entered.promise;await turn();assert.equal(ingests,1);}
- finally {watcher.stop();blocked.resolve();}
+test('newest request can bypass a newer unrelated slow control',async t=>{
+ const f=fixture(),gate=deferred(),entered=deferred();f.put(cp('OTHER'),control('OTHER'),20);f.task('ACTIVE');f.versions.set(dp('ACTIVE'),'19');t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.beforeRead=async p=>{if(p===cp('OTHER')){entered.resolve();await gate.promise;}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;await until(()=>f.ingested.length===1);assert.equal(f.ingested[0].task_id,'ACTIVE');
 });
-
-test('a new dispatch retains intake priority when its matching control read is superseded',async()=>{
- const historyGate=deferred(),historyEntered=deferred(),controlGate=deferred(),controlEntered=deferred();
- let arrived=false,version=1,current=null,ingests=0;
- const dispatchPath='__SELFRUN_DISPATCH__ACTIVE.json';
- const transport={list:async()=>[
-  ...(arrived?[{path:dispatchPath,modTime:'3',size:20},{path:controlPath,modTime:String(version),size:10}]:[]),
-  {path:historicalPath,modTime:'0',size:10},
- ],read:async path=>{
-  if(path===historicalPath){historyEntered.resolve();await historyGate.promise;return {schema:'unrelated-historical-json'};}
-  if(path===controlPath){const epoch=version;if(epoch===1){controlEntered.resolve();await controlGate.promise;}
-   return {schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1',state:'RUNNING',control_epoch:epoch};}
-  return {schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlForTask:()=>current,
-  controlDurable:async(_path,c)=>{current=c;},ingestDurable:async()=>{ingests++;},tick:async()=>{}},config:{}});
- try {
-  await watcher.scanOnce({drain:false});await historyEntered.promise;arrived=true;
-  await watcher.scanOnce({drain:false});await controlEntered.promise;version=2;
-  await watcher.scanOnce({drain:false});controlGate.resolve();await until(()=>current?.control_epoch===2);
-  await until(()=>ingests===1);
- } finally {watcher.stop();controlGate.resolve();historyGate.resolve();}
+test('superseded dependency read does not lose the pending current request',async t=>{
+ const f=fixture(),gate=deferred(),entered=deferred();let once=true;f.task('ACTIVE');t.after(()=>{f.watcher.stop();gate.resolve();});
+ f.afterRead=async(p,b)=>{if(p===cp('ACTIVE')&&once){once=false;entered.resolve();await gate.promise;}};
+ await f.watcher.scanOnce({drain:false});await entered.promise;f.put(cp('ACTIVE'),{...control('ACTIVE'),control_epoch:2},2);await f.watcher.scanOnce({drain:false});gate.resolve();await until(()=>f.ingested.length===1);
 });
-
-test('a deferred new dispatch keeps intake priority when a later control makes it eligible',async()=>{
- const blocked=deferred(),entered=deferred();let arrived=false,version=1,current=null,ingests=0;
- const dispatchPath='__SELFRUN_DISPATCH__ACTIVE.json';
- const transport={list:async()=>[
-  ...(arrived?[{path:dispatchPath,modTime:'3',size:20},{path:controlPath,modTime:String(version),size:10}]:[]),
-  {path:historicalPath,modTime:'0',size:10},
- ],read:async path=>{
-  if(path===historicalPath){entered.resolve();await blocked.promise;return {schema:'unrelated-historical-json'};}
-  if(path===controlPath)return {schema:'selfrun-task-control-v1',task_id:'ACTIVE',turn_id:'t1',request_id:version===1?'other':'r1',state:'RUNNING',control_epoch:version};
-  return {schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlForTask:()=>current,
-  controlDurable:async(_path,c)=>{current=c;},ingestDurable:async()=>{ingests++;},tick:async()=>{}},config:{}});
- try {
-  await watcher.scanOnce({drain:false});await entered.promise;arrived=true;
-  await watcher.scanOnce({drain:false});await until(()=>watcher.deferred.has(dispatchPath));assert.equal(ingests,0);
-  version=2;await watcher.scanOnce({drain:false});await until(()=>ingests===1);
- } finally {watcher.stop();blocked.resolve();}
+test('a new control admits an unchanged previously excluded body',async()=>{
+ const f=fixture();f.task('ACTIVE');f.put(cp('ACTIVE'),control('ACTIVE',2),2);await f.watcher.scanOnce();assert.equal(f.ingested.length,0);
+ f.put(cp('ACTIVE'),{...control('ACTIVE'),control_epoch:3},3);await f.watcher.scanOnce();assert.equal(f.ingested.length,1);assert.equal(f.reads.filter(p=>p===dp('ACTIVE')).length,1);
 });
-
-for(const listed of [true,false])test('malformed shared control application backs off with control listed='+listed,async t=>{
- t.mock.timers.enable({apis:['Date'],now:10000});t.mock.method(console,'error',()=>{});
- let controlReads=0,dispatchReads=0,applications=0;
- const transport={list:async()=>[
-  ...Array.from({length:8},(_,i)=>({path:'__SELFRUN_DISPATCH__OLD-'+i+'.json',modTime:String(10-i),size:10})),
-  ...(listed?[{path:controlPath,modTime:'1',size:10}]:[]),
- ],read:async path=>{
-  if(path===controlPath){controlReads++;return {schema:'selfrun-task-control-v1',task_id:'ACTIVE',state:'RUNNING',control_epoch:0};}
-  dispatchReads++;return {schema:'selfrun-server-dispatch-v1',task_id:'ACTIVE',turn_id:'t1',request_id:'r1'};
- }};
- const watcher=new DriveDispatchWatcher({transport,controller:{controlForTask:()=>null,
-  controlDurable:async()=>{applications++;throw new Error('invalid task control');},tick:async()=>{}},config:{}});
- await watcher.scanOnce({drain:false});await until(()=>dispatchReads===8&&watcher.jobs.size===0);
- assert.equal(controlReads,1);assert.equal(applications,1);
- t.mock.timers.tick(1000);await watcher.scanOnce({drain:false});await until(()=>watcher.jobs.size===0);
- assert.equal(controlReads,2);assert.equal(applications,2);
- watcher.stop();
+for(const listed of [true,false])test('invalid control blocks every candidate before body reads, listed='+listed,async t=>{
+ t.mock.timers.enable({apis:['Date'],now:10000});t.mock.method(console,'error',()=>{});const f=fixture();f.task('ACTIVE');f.put(cp('ACTIVE'),{...control('ACTIVE'),control_epoch:0});
+ for(let i=2;i<9;i++)f.put(dp('ACTIVE',1,i),dispatch(control('ACTIVE')));
+ if(!listed){const list=f.transport.list;f.transport.list=async()=>(await list()).filter(row=>row.path!==cp('ACTIVE'));}
+ await f.watcher.scanOnce({drain:false});await until(()=>f.watcher.jobs.size===0);assert.equal(f.reads.filter(p=>p===cp('ACTIVE')).length,1);assert.equal(f.applied.length,0);assert.equal(f.ingested.length,0);assert.equal(f.reads.some(p=>p.startsWith('__SELFRUN_DISPATCH__')),false);
 });

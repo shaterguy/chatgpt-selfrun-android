@@ -32,12 +32,12 @@ test('watcher consumes durable control and dispatch without awaiting lifecycle t
     dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'x',profile_operations:[]};
   const rows=new Map([
     ['__SELFRUN_CONTROL__FAST.json',control],
-    ['__SELFRUN_DISPATCH__FAST.json',body],
+    ['__SELFRUN_DISPATCH__FAST:turn:1-request__A1.json',body],
   ]);
   const transport={
     list:async()=>[
       {path:'__SELFRUN_CONTROL__FAST.json',modTime:new Date().toISOString(),size:10},
-      {path:'__SELFRUN_DISPATCH__FAST.json',modTime:new Date().toISOString(),size:20},
+      {path:'__SELFRUN_DISPATCH__FAST:turn:1-request__A1.json',modTime:new Date().toISOString(),size:20},
     ],
     read:async path=>structuredClone(rows.get(path)),
   };
@@ -50,7 +50,8 @@ test('watcher consumes durable control and dispatch without awaiting lifecycle t
   };
   const watcher=new DriveDispatchWatcher({transport,controller,config:{dispatchRecoveryMs:7200000}});
   await watcher.scanOnce();
-  assert.deepEqual(calls.filter(call=>call!=='tick'),['control','dispatch']);
+  assert.equal(calls.filter(call=>call==='dispatch').length,1);
+  assert.ok(calls.indexOf('control')<calls.indexOf('dispatch'),'control precedes dispatch');
   assert.equal(calls.filter(call=>call==='tick').length,1);
   assert.equal(watcher.ticking,true,'intake completes while the independent tick remains blocked');
   assert.equal(watcher.scanning,false);
@@ -75,10 +76,10 @@ test('a second scan can ingest a fresh dispatch while the prior tick is still pe
   };
   const now=new Date().toISOString();
   rows.set('__SELFRUN_CONTROL__FAST.json',{modTime:now,body:{schema:'selfrun-task-control-v1',task_id:'FAST',turn_id:'FAST:turn:1',request_id:'FAST:turn:1-request',state:'RUNNING',control_epoch:1}});
-  rows.set('__SELFRUN_DISPATCH__FAST-A1.json',{modTime:now,body:{schema:'selfrun-server-dispatch-v1',task_id:'FAST',turn_id:'FAST:turn:1',request_id:'FAST:turn:1-request',dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'x',profile_operations:[]}});
+  rows.set('__SELFRUN_DISPATCH__FAST:turn:1-request__A1.json',{modTime:now,body:{schema:'selfrun-server-dispatch-v1',task_id:'FAST',turn_id:'FAST:turn:1',request_id:'FAST:turn:1-request',dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'x',profile_operations:[]}});
   const watcher=new DriveDispatchWatcher({transport,controller,config:{dispatchRecoveryMs:7200000}});
   await watcher.scanOnce();
-  rows.set('__SELFRUN_DISPATCH__FAST-A2.json',{modTime:new Date(Date.now()+1000).toISOString(),body:{...rows.get('__SELFRUN_DISPATCH__FAST-A1.json').body,dispatch_attempt:2}});
+  rows.set('__SELFRUN_DISPATCH__FAST:turn:1-request__A2.json',{modTime:new Date(Date.now()+1000).toISOString(),body:{...rows.get('__SELFRUN_DISPATCH__FAST:turn:1-request__A1.json').body,dispatch_attempt:2}});
   await watcher.scanOnce();
   assert.deepEqual(ingested,['FAST:turn:1-request','FAST:turn:1-request']);
   tickGate.resolve();

@@ -103,13 +103,13 @@ test('PAUSED retains resumable execution identity and is not retired',async()=>{
  await f.controller.control(null,f.control,f.transport);
  assert.equal(active(f).length,1);assert.equal(f.record().state,'PAUSED');assert.equal(f.quiesces,0);
 });
-test('cold watcher checks current documents once without reactivating terminal work',async()=>{
+test('cold watcher reads current STOP without reading terminal dispatches',async()=>{
  const f=fixture();await f.existing();await f.stop();f.controller=f.recreate();await f.controller.initialize();
  let bodies=0,writes=0;const read=f.transport.read;
  f.transport.read=async name=>{if(name===f.path)bodies++;return read(name);};f.transport.write=async()=>{writes++;};
  const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
  await w.scanOnce();await idle();await w.scanOnce();await idle();
- assert.ok(bodies>=1);assert.equal(writes,0);assert.equal(f.resumes,1);
+ assert.equal(bodies,0);assert.equal(writes,0);assert.equal(f.resumes,1);
 });
 test('explicit current app URL replaces discarded history without replaying input',async()=>{
  const f=fixture();await f.existing();await f.stop();

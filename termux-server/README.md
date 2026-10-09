@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0-dev12
+# SelfRun Termux Server 4.0.0-dev13
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 
@@ -96,3 +96,7 @@ Tests now use current remote documents, complete store/transport mocks and expli
 ## 4.0.0-dev12: finish owned resources across a replacement watch
 
 A stopped request with a pending owned-target close may receive a newer explicit watch for another canonical URL. The old close now transfers to a process-local resource queue before the old terminal marker is discarded. It remains independently cleanable while the new watch runs and after that watch stops. Exact target/URL ownership and current app/HTTP use guards remain in force; unknown-conversation preparation targets retain the newer-control fence. A successful or confirmed-absent close removes this transient context. No ended request history, resource queue or outcome is persisted or replayed after restart.
+
+## 4.0.0-dev13: current-control admission before dispatch reads
+
+The watcher reads the current app control before opening a dispatch body and again before ingestion. Only its exact RUNNING request is admitted. Out-of-scope files leave transient work/retry maps without a retained terminal denylist; current controls can admit explicit resumes and successor requests. Existing lifecycle/browser behavior is unchanged.

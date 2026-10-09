@@ -57,11 +57,11 @@ test('newest dispatch can load its control directly before ingestion',async()=>{
 });
 
 function deferredWatcherFixture() {
- const dispatchPath='__SELFRUN_DISPATCH__CACHE.json',controlPath='__SELFRUN_CONTROL__CACHE.json';
+ let dispatchPath='__SELFRUN_DISPATCH__CACHE:turn:1-request__A1.json';const controlPath='__SELFRUN_CONTROL__CACHE.json';
  const now=Date.now();let dispatchVersion=1,controlVersion=1,current=null;
  const reads=[],ingested=[];
- let body={schema:'selfrun-server-dispatch-v1',task_id:'CACHE',turn_id:'old-turn',request_id:'old-request',dispatch_attempt:1};
- let control={schema:'selfrun-task-control-v1',task_id:'CACHE',turn_id:'new-turn',request_id:'new-request',state:'RUNNING',control_epoch:2};
+ let body={schema:'selfrun-server-dispatch-v1',task_id:'CACHE',turn_id:'CACHE:turn:1',request_id:'CACHE:turn:1-request',dispatch_attempt:1};
+ let control={schema:'selfrun-task-control-v1',task_id:'CACHE',turn_id:'CACHE:turn:2',request_id:'CACHE:turn:2-request',state:'RUNNING',control_epoch:2};
  const transport={
   list:async()=>[
    {path:dispatchPath,modTime:new Date(now+dispatchVersion).toISOString(),size:20},
@@ -78,40 +78,41 @@ function deferredWatcherFixture() {
  const watcher=new DriveDispatchWatcher({transport,controller,config:{}});
  return {watcher,reads,ingested,dispatchPath,controlPath,
   changeControl(c){control={...control,...c};controlVersion++;},
-  changeDispatch(b){body={...body,...b};dispatchVersion++;},
+  changeDispatch(b){body={...body,...b};dispatchPath='__SELFRUN_DISPATCH__'+body.request_id+'__A'+body.dispatch_attempt+'.json';this.dispatchPath=dispatchPath;dispatchVersion++;},
   changeCachedControl(c){current={...current,...c};},
  };
 }
 
-test('unchanged deferred dispatch does not repeat serial Drive body and control reads',async()=>{
+test('unchanged noncurrent dispatch is never read or retained',async()=>{
  const f=deferredWatcherFixture();
  await f.watcher.scanOnce();await f.watcher.scanOnce();await f.watcher.scanOnce();
- assert.deepEqual(f.reads,[f.dispatchPath,f.controlPath]);
+ assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,0);
+ assert.equal(f.watcher.deferred.size,0);
  assert.equal(f.ingested.length,0);
 });
 
-test('changed app control rereads and reconsiders an unchanged deferred dispatch',async()=>{
+test('changed current app control admits a previously excluded unchanged dispatch',async()=>{
  const f=deferredWatcherFixture();await f.watcher.scanOnce();
- f.changeControl({turn_id:'old-turn',request_id:'old-request',control_epoch:3});
+ f.changeControl({turn_id:'CACHE:turn:1',request_id:'CACHE:turn:1-request',control_epoch:3});
  await f.watcher.scanOnce();
  assert.equal(f.ingested.length,1);
- assert.equal(f.ingested[0].request_id,'old-request');
- assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,2);
+ assert.equal(f.ingested[0].request_id,'CACHE:turn:1-request');
+ assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,1);
 });
 
-test('changed deferred dispatch is read and evaluated against current control',async()=>{
+test('new current dispatch is read and evaluated against current control',async()=>{
  const f=deferredWatcherFixture();await f.watcher.scanOnce();
- f.changeDispatch({turn_id:'new-turn',request_id:'new-request',dispatch_attempt:2});
+ f.changeDispatch({turn_id:'CACHE:turn:2',request_id:'CACHE:turn:2-request',dispatch_attempt:2});
  await f.watcher.scanOnce();
  assert.equal(f.ingested.length,1);
  assert.equal(f.ingested[0].dispatch_attempt,2);
- assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,2);
+ assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,1);
 });
 
-test('control reconciled outside the watcher reconsiders cached deferred identity',async()=>{
+test('cached control cannot override the current remote request',async()=>{
  const f=deferredWatcherFixture();await f.watcher.scanOnce();
- f.changeCachedControl({turn_id:'old-turn',request_id:'old-request',control_epoch:3});
+ f.changeCachedControl({turn_id:'CACHE:turn:1',request_id:'CACHE:turn:1-request',control_epoch:3});
  await f.watcher.scanOnce();
- assert.equal(f.ingested.length,1);
- assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,2);
+ assert.equal(f.ingested.length,0);
+ assert.equal(f.reads.filter(p=>p===f.dispatchPath).length,0);
 });
