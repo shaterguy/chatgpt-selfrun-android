@@ -8,6 +8,32 @@ test('extension manager creates and attaches owned targets with named commands o
 test('manager refuses missing pairing and a busy foreign profile rather than attaching it',async t=>{const f=await fixture(t);await fs.unlink(f.config.extensionPairingFile);await assert.rejects(f.manager.createTarget(),/pair/i);});
 test('process identity requires boot, start time, exact profile, extension and owner marker',()=>{const proof={pid:7,startTime:'1',bootId:'b',profile:'/p',extensionPath:'/e',ownerId:'o'};const row={pid:7,startTime:'1',args:['chrome','--user-data-dir=/p','--load-extension=/e','--selfrun-extension-owner=o']};assert.equal(extensionProcessMatches(proof,row,'b'),true);for(const bad of [{...row,startTime:'2'},{...row,args:row.args.filter(a=>!a.startsWith('--load'))}])assert.equal(extensionProcessMatches(proof,bad,'b'),false);assert.equal(extensionProcessMatches(proof,row,'other'),false);});
 test('target close rechecks caller guard and never touches an unowned target',async t=>{const f=await fixture(t),target=await f.manager.createTarget();f.bridge.targets=[{...target,url:'https://chatgpt.com/c/a'}];assert.equal((await f.manager.closeOwnedTarget('foreign')).reason,'unowned_target');assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>false})).reason,'guard_rejected');assert.equal(f.calls.filter(x=>x[0]==='closeTarget').length,0);assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>true})).closed,true);assert.equal(f.manager.isOwnedTarget(target.id),false);});
+async function closeWithoutAcknowledgement(t){
+ const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});
+ let leaseReleases=0;f.manager.deps.applyProfile=async()=>({cdpCommands:3,cdpTargetId:'cdp1',isAlive:()=>true,release(){leaseReleases++;}});
+ const target=await f.manager.createTarget(),session=await f.manager.connectTarget(target);await session.run('initialize',{clientProfile:'android-webview'});session.close();
+ const request=f.bridge.request.bind(f.bridge);f.bridge.request=async(...args)=>{const result=await request(...args);if(args[0]==='closeTarget')throw Error('synthetic close acknowledgement timeout');return result;};
+ const first=await f.manager.closeOwnedTarget(target.id,{guard:()=>true});
+ return{f,target,first,get leaseReleases(){return leaseReleases;}};
+}
+test('an absent target after a lost close acknowledgement clears closing and permits guarded idle release',async t=>{
+ const close=await closeWithoutAcknowledgement(t),{f,target,first}=close;
+ assert.equal(first.reason,'close_unconfirmed');assert.deepEqual(f.bridge.targets,[]);
+ assert.equal(f.manager.isOwnedTarget(target.id),true);assert.equal(f.manager.targetClosing(target.id),true);assert.equal(close.leaseReleases,0);
+ assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).reason,'browser_in_use');assert.equal(f.signals,0);
+ const retry=await f.manager.closeOwnedTarget(target.id,{guard:()=>true});assert.equal(retry.absent,true);assert.equal(retry.reason,'already_absent');
+ assert.equal(f.manager.isOwnedTarget(target.id),false);assert.equal(f.manager.targetClosing(target.id),false);assert.equal(close.leaseReleases,1);assert.equal(f.manager.profileLeases.has(target.id),false);
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.deepEqual(saved.targets,[]);assert.equal(saved.targetMetadata[target.id],undefined);
+ assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);assert.equal(f.signals,1);assert.equal(f.calls.filter(c=>c[0]==='closeTarget').length,1);
+});
+for(const phase of ['before inventory','after inventory'])test('absent-target cleanup preserves ownership when the guard rejects '+phase,async t=>{
+ const close=await closeWithoutAcknowledgement(t),{f,target}=close;let allowed=phase!=='before inventory';
+ const request=f.bridge.request.bind(f.bridge);f.bridge.request=async(...args)=>{const result=await request(...args);if(phase==='after inventory'&&args[0]==='listTargets')allowed=false;return result;};
+ const result=await f.manager.closeOwnedTarget(target.id,{guard:()=>allowed});assert.equal(result.reason,'guard_rejected');
+ assert.equal(f.manager.isOwnedTarget(target.id),true);assert.equal(f.manager.targetClosing(target.id),true);assert.equal(f.manager.profileLeases.has(target.id),true);assert.equal(close.leaseReleases,0);
+ assert.ok(f.manager.journal.targetMetadata[target.id]);assert.equal((await f.manager.releaseIfUnused({guard:()=>false})).reason,'guard_rejected');assert.equal(f.signals,0);
+ assert.equal(f.calls.filter(c=>c[0]==='closeTarget').length,1);assert.equal(f.calls.filter(c=>c[0]==='controllerStop').length,0);
+});
 test('idle release uses a guarded controller-only cleanup, never process signals',async t=>{const f=await fixture(t);const target=await f.manager.createTarget();f.bridge.targets=[target];assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).reason,'browser_in_use');assert.equal(f.calls.filter(x=>x[0]==='controllerStop').length,0);});
 
 test('proven browser exit rotates target identity before a new browser starts',async t=>{const f=await fixture(t);const a=await f.manager.createTarget();f.setProcess(null);const b=await f.manager.createTarget();assert.notEqual(a.id,b.id);assert.equal(f.manager.isOwnedTarget(a.id),false);assert.equal(f.manager.isOwnedTarget(b.id),true);});

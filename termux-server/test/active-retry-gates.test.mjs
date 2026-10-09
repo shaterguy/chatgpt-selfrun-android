@@ -77,6 +77,14 @@ test('canonical resume succeeds without a DOM user ID',async()=>{
  const attached=await f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'});
  assert.equal(attached.target.id,'owned');
 });
+for(const errorText of ['오류가 발생','something went wrong'])test('normal conversation can discuss an error during resume: '+errorText,async()=>{
+ const f=browserResumeFixture({url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',assistantMessageId:'a1',errorText});
+ assert.equal((await f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'})).target.id,'owned');
+});
+test('actual error screen without usable conversation still fails resume',async()=>{
+ const f=browserResumeFixture({url:'https://chatgpt.com/c/owned',composer:false,readyState:'complete',errorText:'something went wrong'});
+ await assert.rejects(f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'}),e=>e.code==='CONVERSATION_LOAD_FAILED');
+});
 for(const probe of [
  {url:'https://chatgpt.com/c/wrong',composer:true,readyState:'complete'},
  {url:'https://example.com/c/owned',composer:true,readyState:'complete'},

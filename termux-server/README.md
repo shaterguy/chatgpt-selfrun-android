@@ -1,4 +1,6 @@
-# SelfRun Termux Server 4.0.0-dev14
+# SelfRun Termux Server 4.0.0-dev18
+
+Dev17 accepts either the existing semantic receipt or a new response generated after the current input in its owned conversation. Existing response-region observation covers thinking/tool output before an assistant bubble appears. Receipt confirmation clears the prior uncertainty warning without resending the input. Browser progress is retained during Result read outages, recovered observations clear only their own outage warning, and ready conversations may contain error-related prose. Target absence after a lost close acknowledgment clears its closing marker under the existing ownership guard. With a response-only recovery cursor, alternative acceptance requires a current input message ID matching the observed user; missing prior user identity does not prove a new input. Exact Result completion remains independent of browser URL readiness. A same-epoch browser block keeps paced, current-request Result retries after an outage without reopening the browser or submitting input.
 
 Dev14 persists completed extension-controller stop flags only after guarded proof that the recorded browser/retiring process has exited and no owned target, metadata, local acquisition or lifecycle work remains. Dev13 current-control-first watcher behavior is preserved.
 
@@ -64,6 +66,8 @@ npm start
 서버의 앱 프롬프트 재작성과 설정된 시작/진행 지시는 유지합니다. 응답이 잠시 멈춘 것만으로 감시를 종료하지 않습니다. 현재 Result의 committed:true가 스키마·식별자·일치하는 재읽기로 확인되면 해당 요청을 COMMITTED로 소비하고 감시와 소유 탭을 즉시 정리합니다. 소비된 요청은 재시작·이전 RUNNING 갱신·재수신으로 되살리지 않으며 Result를 다시 읽거나 진행 멘트를 보내지 않습니다. 새로운 작업은 앱이 보낸 새 turn/request/Result로만 시작합니다. 앱의 새 요청이 먼저 도착해 이전 관측이 분리되어도, 이미 실행된 이전 요청은 자신의 정확한 Result만 독립적으로 재확인해 소비합니다. 이 정리 확인은 다음 요청의 실행을 기다리게 하지 않으며 이전 탭을 재연결하거나 입력을 보내지 않습니다. 실패·미완료 확인의 재시도 시각은 재시작에도 유지됩니다. Result 읽기 실패는 완료로 간주하지 않고 진행 멘트를 억제합니다.
 
 앱 STOP은 이전 로컬 감시·재시도 작업을 무효화하고 소유가 확인된 탭을 바로 닫습니다. 제출 영수증 재확인이나 생성 중지 버튼 조작은 하지 않습니다. stop_status=NOT_REQUESTED는 원격 생성 중지를 시도하지 않았다는 뜻이며, ChatGPT 서버의 생성은 계속될 수 있습니다. response_status는 응답 관측 정보이며 앱의 작업 완료 판단을 대체하지 않습니다.
+
+중지 버튼 미감지, streaming flag 부재, 같은 cursor의 반복 또는 브라우저의 COMPLETED 문자열로 답변 종료를 추정하지 않습니다. 확인된 활성 flag가 없으면 response_status는 UNKNOWN이며 감시를 계속합니다. 이 관측값은 진행 시각을 갱신하거나 진행신호의 새 조건이 되지 않습니다. 기존 활성신호 감시 → 10분 고착 → 정확한 Result 문서 확인 → committed가 true가 아니면 진행신호 흐름을 유지하며, 문서 접근 실패는 미완료로 추정하지 않습니다.
 
 앱 CANCELLED/SUPERSEDED는 해당 시도를 폐기합니다. 같은 RUNNING 제어만으로 되살리지 않으며 새 dispatch_attempt를 받더라도 이미 전송됐거나 불확실한 입력은 재전송하지 않고 기존 증거를 확인합니다. ID는 상관관계 값으로 취급하며 서버가 turn 번호 또는 이전 턴 문서 의미를 해석해 실행을 막지 않습니다.
 

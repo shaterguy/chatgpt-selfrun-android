@@ -94,6 +94,23 @@ function conversationId(url) {
   }
 }
 
+function newResponseAfterInput(intent, probe) {
+  const before=intent?.baseline;
+  if(!before||!(Number(probe?.responseTextLength)>0)||!probe.responseFingerprint)return false;
+  // An initial empty conversation can show thinking/tool content before either
+  // message bubble exists. The probe already excludes user and older turns.
+  if(Number(before.userCount)===0&&Number(before.assistantCount)===0
+      &&Number(before.responseTextLength)===0&&!before.responseTurnId)return true;
+  const user=probe.userMessageId;
+  if(!user||user===before.userMessageId)return false;
+  // Recovery uses a response-only cursor. An absent prior user ID is unknown,
+  // not proof that the currently displayed user belongs to this input.
+  if(!before.userMessageId&&!intent.message_id)return false;
+  if(intent.message_id&&user!==intent.message_id&&user!=='data-message-id:'+intent.message_id)return false;
+  return (!!probe.responseTurnId&&probe.responseTurnId!==before.responseTurnId)
+    ||probe.responseFingerprint!==before.responseFingerprint;
+}
+
 
 export const DECORATIVE_ANIMATION_PAUSE_SOURCE = "(() => {" +
   "const id='__selfrun_decorative_animation_pause';" +
@@ -881,7 +898,8 @@ export class ChatGptBrowser {
       await initializePageSession(session,this.config);
       const probe = await this.#waitFor(session, (p) => p.loginPage
         || ((p.readyState === 'complete' || p.readyState === 'interactive')
-          && canonicalUrl(p.url) === expectedUrl) || !!p.errorText, {
+          && canonicalUrl(p.url) === expectedUrl)
+        || (!!p.errorText&&!conversationStateReady(p)&&!conversationResumeReady(p)), {
         timeoutMs: this.config.navigationTimeoutMs,
         signal,
         label: 'existing conversation',
@@ -891,7 +909,8 @@ export class ChatGptBrowser {
         error.code = 'AUTH_REQUIRED';
         throw error;
       }
-      if(probe.errorText)throw Object.assign(new Error('conversation load failed'),{code:'CONVERSATION_LOAD_FAILED'});
+      if(probe.errorText&&!conversationStateReady(probe)&&!conversationResumeReady(probe))
+        throw Object.assign(new Error('conversation load failed'),{code:'CONVERSATION_LOAD_FAILED'});
       return {
         target,
         session,
@@ -1002,7 +1021,9 @@ export class ChatGptBrowser {
     if(intent?.prompt!==prompt)throw new Error('submission immutable prompt mismatch');
     await runPageAction(session,'receiptArm',{key});
     try {
-      return await this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
+      const submitted=await this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
+      await onRequest?.({released:true});
+      return submitted;
     } finally {
       if(signal?.aborted||!guard()) {
         // Retire this exact arm only. A late old cleanup cannot retire its successor.
@@ -1054,6 +1075,15 @@ export class ChatGptBrowser {
       if(positive(receipt)&&durable&&JSON.stringify(receipt)===JSON.stringify(durable)
           &&conversationId(probe?.url)===receipt.conversation_id) {
         check();return {state:'CONFIRMED',probe,messageId:receipt.message_id};
+      }
+      const responseReadFailure=['response_bound','event_bound','malformed_event','response_read_error',
+        'clone_unavailable','response_body_unavailable'].includes(receipt?.invalid);
+      if(validKey&&expected&&conversationId(probe?.url)===expected
+          &&(intent.released===true||receipt?.released===true)
+          &&(observed===null||belongs(observed))
+          &&(!receipt?.conversation_id||receipt.conversation_id===expected)
+          &&(!receipt?.invalid||responseReadFailure)&&newResponseAfterInput(intent,probe)) {
+        check();return {state:'CONFIRMED',probe,messageId:receipt?.message_id||intent.message_id||null,evidence:'NEW_RESPONSE'};
       }
       // Only a previously proven pre-release interception abort permits a retry.
       if(intent.absence_proof==='INTERCEPTED_REQUEST_ABORTED'&&!intent.released&&!receipt?.released)

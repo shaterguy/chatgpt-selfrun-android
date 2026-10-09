@@ -332,6 +332,11 @@ export class DriveDispatchController {
         await this.#move(key,r.conversation_url?'OBSERVING':'BLOCKED','ACTIVE_RETRY_REENABLED',
           {blocked_epoch:null,retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)});
         await this.repository.flushCurrent(transport,key);
+      } else {
+        // A browser block must not permanently block exact Result completion.
+        // #result retains its retry deadline and current-request fences.
+        await this.#result(key,transport);
+        await this.repository.flushCurrent(transport,key);
       }
       return;
     }
@@ -525,10 +530,11 @@ export class DriveDispatchController {
   async #observe(key,transport,p,token,sampledCursor,observationGeneration) {
     if(this.standby||!this.sessions.get(key)?.guard?.()||!this.repository.current(key,token))return;
     if((this.repository.get(key)?.intent?.receipt_generation||null)!==observationGeneration)return;
-    if(this.repository.get(key).retry_at>Date.now())return;
-    const result=await this.#result(key,transport,token);
-    if(!this.repository.current(key,token)||result==='UNAVAILABLE')return;
     let r=this.repository.get(key);
+    // Exact Result completion is independent of the observed page's readiness/URL.
+    const result=r.retry_at>Date.now()?'UNAVAILABLE':await this.#result(key,transport,token);
+    if(!this.repository.current(key,token))return;
+    r=this.repository.get(key);
     const url=canonicalUrl(p.url||p.pageUrl);
     if(url&&url!==r.conversation_url) {
       await this.#move(key,'BLOCKED','CONVERSATION_OWNERSHIP_MISMATCH',{blocked_epoch:r.control_epoch,error:{code:'IDENTITY_MISMATCH',message:'observed conversation differs from canonical owner'}},token);
@@ -536,7 +542,7 @@ export class DriveDispatchController {
     }
     // A queued monitor sample predates any readback that changed the durable cursor.
     if(r.cursor&&(!sampledCursor||!sameCursor(sampledCursor,r.cursor)))return;
-    if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!recoveryStates.has(r.state)) {
+    if(result!=='UNAVAILABLE'&&r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!recoveryStates.has(r.state)) {
       const before=r.cursor;
       await this.#reconcile(key,transport);
       if(!this.repository.current(key,token)||!this.repository.get(key)?.conversation_url)return;
@@ -546,23 +552,29 @@ export class DriveDispatchController {
     }
     const changed=!r.cursor||!sameCursor(r.cursor,p);
     const progressed=!r.cursor||responseKey(r.cursor)!==responseKey(p);
-    const responseStatus=p.status==='PAGE_ERROR'?'ERROR':p.paused?'PAUSED':p.streaming?'RUNNING':
-      (p.status==='COMPLETED'||(!changed&&(Number(p.assistantCount)>0||Number(p.responseTextLength)>0)))?'COMPLETED':'IDLE';
+    // A missing active flag or an unchanged cursor says nothing about answer completion.
+    // Only the exact Result can end this request; observation never waits for an answer-end guess.
+    const responseStatus=p.status==='PAGE_ERROR'?'ERROR':p.paused?'PAUSED':p.streaming?'RUNNING':'UNKNOWN';
+    const observationRecovered=r.error?.code==='OBSERVATION_UNAVAILABLE'&&!p.probeError&&p.status!=='PAGE_ERROR';
+    if(observationRecovered) {
+      r=await this.#move(key,r.state,'OBSERVATION_RECOVERED',{error:null,retry_at:0},token);
+      await this.repository.flushCurrent(transport,key);
+      if(!r||!this.repository.current(key,token))return;
+    }
     if(r.state==='BLOCKED'&&!changed)return;
-    if(changed) {
-      r=await this.#move(key,'OBSERVING',progressed?'RESPONSE_PROGRESS':'RESPONSE_TELEMETRY',{
-        cursor:cursor(p),...(progressed?{last_progress_at:Date.now()}:{}),response_status:responseStatus,error:null,
+    if(changed||r.response_status!==responseStatus) {
+      // Result availability gates completion/input, not current browser progress.
+      r=await this.#move(key,result==='UNAVAILABLE'?r.state:'OBSERVING',progressed?'RESPONSE_PROGRESS':'RESPONSE_TELEMETRY',{
+        cursor:cursor(p),...(progressed?{last_progress_at:Date.now()}:{}),response_status:responseStatus,
       },token);
       await this.repository.flush(transport);
       if(progressed||!r||!this.repository.current(key,token))return;
     }
+    if(result==='UNAVAILABLE')return;
     // Browser status is telemetry; only the durable progress/attempt deadline authorizes another nudge.
     if(this.#nudgeDue(r)) {
       if(r.state!=='STALLED')await this.#move(key,'STALLED','CURSOR_STALLED',{cursor:cursor(p)},token);
       await this.#recover(key,transport,p,token);
-    } else if(!p.streaming&&r.state==='OBSERVING') {
-      await this.#move(key,'WAIT_RESULT','RESPONSE_IDLE_OBSERVING',{response_status:responseStatus},token);
-      await this.repository.flush(transport);
     }
   }
   async #recover(key,transport,p,token) {
