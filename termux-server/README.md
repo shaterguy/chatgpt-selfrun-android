@@ -1,4 +1,6 @@
-# SelfRun Termux Server 4.0.0-dev13
+# SelfRun Termux Server 4.0.0-dev14
+
+Dev14 persists completed extension-controller stop flags only after guarded proof that the recorded browser/retiring process has exited and no owned target, metadata, local acquisition or lifecycle work remains. Dev13 current-control-first watcher behavior is preserved.
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 

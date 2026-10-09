@@ -102,3 +102,30 @@ for(const reason of ['abort','guard','owner'])test('retained controller readines
  if(reason==='abort')abort.abort();else if(reason==='guard')allowed=false;else f.setProcess(null);
  await rejected;assert.equal(f.bridge.waiters.size,0);assert.equal(f.calls.length,before);assert.equal(f.signals,0);assert.equal(f.launches,1);
 });
+
+test('dev14 persists cleared stop flags after proven Android root exit',async t=>{
+ const f=await androidEmpty(t),originalProcess=structuredClone(f.manager.journal.process);
+ const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.released,true);
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));
+ assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.deepEqual(saved.targets,[]);assert.deepEqual(saved.targetMetadata,{});
+ assert.deepEqual(saved.process,originalProcess,'preserve process proof until next guarded acquisition rotates the session');assert.equal(f.signals,1);
+});
+test('dev14 reconciles a disconnected already-exited owner without browser commands',async t=>{
+ const f=await androidEmpty(t);f.manager.journal.controllerStopPending=true;f.manager.journal.retiringProcess={pid:42,startTime:'123',bootId:'boot',browserKey:f.manager.journal.process.browserKey};
+ const before=structuredClone(f.manager.journal);await fs.writeFile(path.join(f.config.dataDir,'extension-ownership.json'),JSON.stringify(before));f.setProcess(null);f.setReady(false);const calls=f.calls.length;
+ assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));
+ assert.deepEqual(saved,{...before,controllerStopPending:false,retiringProcess:null});assert.equal(f.calls.length,calls);assert.equal(f.signals,0);
+});
+test('dev14 persists stop completion when controller closure itself exits the root',async t=>{
+ const f=await androidEmpty(t),request=f.bridge.request.bind(f.bridge);
+ f.bridge.request=async(...args)=>{const result=await request(...args);if(args[0]==='controllerStop')f.setProcess(null);return result;};
+ assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.equal(f.signals,0);
+});
+test('dev14 rechecks new work after fsync and never commits stale stop finalization',async t=>{
+ const f=await androidEmpty(t);let allowed=true,finalizing=false;f.manager.deps.signalProcess=()=>{f.setProcess(null);finalizing=true;};
+ const open=fs.open;t.mock.method(fs,'open',async(...args)=>{const handle=await open(...args);if(!finalizing||!String(args[0]).includes('extension-ownership.json.tmp-'))return handle;return{async sync(){await handle.sync();allowed=false;},async close(){await handle.close();}};});
+ const result=await f.manager.releaseIfUnused({guard:()=>allowed});assert.equal(result.released,false);
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.controllerStopPending,true);assert.ok(saved.retiringProcess);assert.equal(f.manager.journal.controllerStopPending,true);assert.ok(!(await fs.readdir(f.config.dataDir)).some(x=>x.includes('.tmp-')));
+});
