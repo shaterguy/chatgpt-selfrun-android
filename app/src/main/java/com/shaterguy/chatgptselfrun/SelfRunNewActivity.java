@@ -41,6 +41,7 @@ public final class SelfRunNewActivity extends Activity {
     private static final String STATE_PROJECT = "project";
     private static final String STATE_ATTACHMENTS = "attachments";
     private static final String STATE_CHAT_REASONING = "chatReasoningToken";
+    private static final String STATE_CHAT_MODEL = "chatModel";
     private static final String STATE_WORK_BOOTSTRAP_MODEL = "workBootstrapModel";
     private static final String STATE_WORK_BOOTSTRAP_REASONING = "workBootstrapReasoning";
 
@@ -64,6 +65,12 @@ public final class SelfRunNewActivity extends Activity {
     private boolean firstResume = true;
 
     private boolean profileRefreshPending;
+    private boolean restoringSelections;
+    private String unavailableChatModel = "";
+    private String unavailableChatReasoning = "";
+    private int unavailableChatPosition = -1;
+    private String preferredWorkModel = "";
+    private String preferredWorkReasoning = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -103,7 +110,12 @@ public final class SelfRunNewActivity extends Activity {
         runtime.addView(mode);
         firstMode = Ui.selection(this, "첫 턴 실행 모드");
         firstMode.setItems(new String[]{"일반 채팅", "워크"});
-        firstMode.setOnSelectionChangedListener(position -> updateChatReasoningAvailability());
+        firstMode.setOnSelectionChangedListener(position -> {
+            if (!restoringSelections && mode.getSelectedItemPosition() == 2) {
+                restoreHybridActualModeProfile();
+            }
+            updateChatReasoningAvailability();
+        });
         runtime.addView(firstMode);
         chatReasoning = Ui.selection(this, "첫 턴 모델 조합");
         refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);
@@ -116,7 +128,10 @@ public final class SelfRunNewActivity extends Activity {
         LinearLayout.LayoutParams workGap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         workGap.topMargin = Ui.dp(this, 12);
         runtime.addView(workBootstrapProfile, workGap);
-        mode.setOnSelectionChangedListener(position -> updateChatReasoningAvailability());
+        mode.setOnSelectionChangedListener(position -> {
+            if (!restoringSelections) restoreLastUsedForTaskMode();
+            updateChatReasoningAvailability();
+        });
 
         LinearLayout request = new LinearLayout(this);
         request.setOrientation(LinearLayout.VERTICAL);
@@ -174,10 +189,18 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void refreshChatReasoningOptions(String preferred) {
+        refreshChatReasoningOptions(preferred, "");
+    }
+
+    private void refreshChatReasoningOptions(String preferred, String preferredModel) {
         if (chatReasoning == null) return;
         String wanted = preferred == null || preferred.isEmpty() ? ChatReasoningPreferenceStore.KEEP : preferred;
+        String wantedModel = preferredModel == null ? "" : preferredModel.trim().toLowerCase(Locale.ROOT);
         ArrayList<String> labels = new ArrayList<>();
         chatReasoningValues.clear();
+        unavailableChatPosition = -1;
+        unavailableChatModel = "";
+        unavailableChatReasoning = "";
         labels.add("초기 프로필 선택 필요");
         chatReasoningValues.add(ChatReasoningPreferenceStore.KEEP);
         int selected = 0;
@@ -186,11 +209,17 @@ public final class SelfRunNewActivity extends Activity {
             chatReasoningValues.add(profile.signalReasoning);
             if (profile.signalReasoning.equals(wanted)) selected = chatReasoningValues.size() - 1;
         }
-        if (!ChatReasoningPreferenceStore.KEEP.equals(wanted)
-                && ProfileRegistry.resolveChat(wanted) == null) {
-            labels.add("지원하지 않는 이전 선택 · " + wanted);
-            chatReasoningValues.add(wanted);
-            selected = chatReasoningValues.size() - 1;
+        boolean removed = !ChatReasoningPreferenceStore.KEEP.equals(wanted)
+                && (wantedModel.isEmpty() ? ProfileRegistry.resolveChat(wanted) == null
+                : ProfileRegistry.resolveChat(wantedModel, wanted) == null);
+        if (removed) {
+            labels.add("지원하지 않는 이전 선택 · "
+                    + (wantedModel.isEmpty() ? "" : wantedModel + " / ") + wanted);
+            chatReasoningValues.add(ChatReasoningPreferenceStore.KEEP);
+            unavailableChatPosition = chatReasoningValues.size() - 1;
+            unavailableChatModel = wantedModel;
+            unavailableChatReasoning = wanted;
+            selected = unavailableChatPosition;
         }
         chatReasoning.setItems(labels.toArray(new String[0]));
         chatReasoning.setSelection(selected);
@@ -200,19 +229,93 @@ public final class SelfRunNewActivity extends Activity {
         if (workBootstrapProfile == null) return;
         String wantedModel = preferredModel == null ? "" : preferredModel.trim().toLowerCase(Locale.ROOT);
         String wantedReasoning = preferredReasoning == null ? "" : preferredReasoning.trim().toLowerCase(Locale.ROOT);
+        this.preferredWorkModel = wantedModel;
+        this.preferredWorkReasoning = wantedReasoning;
         ArrayList<String> labels = new ArrayList<>();
         workBootstrapProfiles.clear();
         int selected = 0;
+        boolean matched = false;
         for (ProfileRegistry.Profile profile : ProfileRegistry.listWork()) {
             labels.add(profile.displayLabel());
             workBootstrapProfiles.add(profile);
             if (profile.signalModel.equals(wantedModel) && profile.signalReasoning.equals(wantedReasoning)) {
                 selected = workBootstrapProfiles.size() - 1;
+                matched = true;
             }
+        }
+        if (!matched && !wantedModel.isEmpty() && !wantedReasoning.isEmpty()) {
+            labels.add("지원하지 않는 이전 선택 · " + wantedModel + " / " + wantedReasoning);
+            workBootstrapProfiles.add(null);
+            selected = workBootstrapProfiles.size() - 1;
         }
         if (labels.isEmpty()) labels.add("등록된 Work 조합이 없습니다.");
         workBootstrapProfile.setItems(labels.toArray(new String[0]));
         workBootstrapProfile.setSelection(Math.max(0, Math.min(selected, labels.size() - 1)));
+    }
+
+    private String currentChatModel() {
+        if (chatReasoning.getSelectedItemPosition() == unavailableChatPosition) return unavailableChatModel;
+        ProfileRegistry.Profile selected = ProfileRegistry.resolveChat(selectedChatReasoning());
+        return selected == null ? "" : selected.requestValue("model");
+    }
+
+    private String currentChatPreference() {
+        return chatReasoning.getSelectedItemPosition() == unavailableChatPosition
+                ? unavailableChatReasoning : selectedChatReasoning();
+    }
+
+    private String currentWorkModel() {
+        ProfileRegistry.Profile selected = selectedWorkBootstrapProfile();
+        return selected == null ? preferredWorkModel : selected.signalModel;
+    }
+
+    private String currentWorkReasoning() {
+        ProfileRegistry.Profile selected = selectedWorkBootstrapProfile();
+        return selected == null ? preferredWorkReasoning : selected.signalReasoning;
+    }
+
+    /** Explicit outer-mode changes restore its own last accepted task, never an abandoned draft. */
+    private void restoreLastUsedForTaskMode() {
+        if (store == null || mode == null || firstMode == null) return;
+        String taskMode = MODE_VALUES[mode.getSelectedItemPosition()];
+        LastUsedExecutionProfileStore.Selection last = store.lastUsedProfile(taskMode);
+        restoringSelections = true;
+        try {
+            if (SelfRunStore.MODE_HYBRID.equals(taskMode)) {
+                firstMode.setSelection(last != null && SelfRunStore.MODE_WORK.equals(last.mode) ? 1 : 0);
+            } else {
+                firstMode.setSelection(0);
+            }
+            if (last != null) {
+                if (SelfRunStore.MODE_CHAT.equals(last.mode)) {
+                    refreshChatReasoningOptions(last.reasoning, last.model);
+                } else {
+                    refreshWorkBootstrapOptions(last.model, last.reasoning);
+                }
+            } else if (SelfRunStore.MODE_CHAT.equals(selectedActualMode())) {
+                refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);
+            } else {
+                WorkBootstrapPreferenceStore.Selection legacy = WorkBootstrapPreferenceStore.load(this);
+                refreshWorkBootstrapOptions(legacy.model, legacy.reasoning);
+            }
+        } finally {
+            restoringSelections = false;
+        }
+        updateChatReasoningAvailability();
+    }
+
+    /** Switching the first HYBRID mode does not borrow standalone CHAT/WORK history. */
+    private void restoreHybridActualModeProfile() {
+        LastUsedExecutionProfileStore.Selection last = store.lastUsedProfile(SelfRunStore.MODE_HYBRID);
+        if (last != null && last.mode.equals(selectedActualMode())) {
+            if (SelfRunStore.MODE_CHAT.equals(last.mode)) refreshChatReasoningOptions(last.reasoning, last.model);
+            else refreshWorkBootstrapOptions(last.model, last.reasoning);
+        } else if (SelfRunStore.MODE_CHAT.equals(selectedActualMode())) {
+            refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);
+        } else {
+            WorkBootstrapPreferenceStore.Selection legacy = WorkBootstrapPreferenceStore.load(this);
+            refreshWorkBootstrapOptions(legacy.model, legacy.reasoning);
+        }
     }
 
     private static String workModelLabel(String model) {
@@ -226,9 +329,12 @@ public final class SelfRunNewActivity extends Activity {
         boolean hybrid = mode.getSelectedItemPosition() == 2;
         firstMode.setVisibility(hybrid ? View.VISIBLE : View.GONE);
         boolean chat = SelfRunStore.MODE_CHAT.equals(selectedActualMode());
-        chatReasoning.setEnabled(chat);
+        mode.setEnabled(!profileRefreshPending);
+        firstMode.setEnabled(hybrid && !profileRefreshPending);
+        chatReasoning.setEnabled(chat && !profileRefreshPending);
         chatReasoning.setVisibility(chat ? View.VISIBLE : View.GONE);
-        workBootstrapProfile.setEnabled(!chat && !workBootstrapProfiles.isEmpty());
+        workBootstrapProfile.setEnabled(!chat && !workBootstrapProfiles.isEmpty()
+                && !profileRefreshPending);
         workBootstrapProfile.setVisibility(chat ? View.GONE : View.VISIBLE);
     }
 
@@ -459,20 +565,26 @@ public final class SelfRunNewActivity extends Activity {
 
     private void startSelfRun() {
         if (profileRefreshPending) return;
-        final String previousChatReasoning = selectedChatReasoning();
-        final ProfileRegistry.Profile previousWorkProfile = selectedWorkBootstrapProfile();
+        final String previousChatReasoning = currentChatPreference();
+        final String previousChatModel = currentChatModel();
+        final String previousWorkModel = currentWorkModel();
+        final String previousWorkReasoning = currentWorkReasoning();
         final String previousMode = selectedActualMode();
+        final String previousTaskMode = MODE_VALUES[mode.getSelectedItemPosition()];
         profileRefreshPending = true;
+        updateChatReasoningAvailability();
         ProfileRegistrySync.refresh(this, result -> {
             profileRefreshPending = false;
             if (isFinishing()) return;
-            refreshChatReasoningOptions(previousChatReasoning);
-            if (workBootstrapProfile != null) {
-                refreshWorkBootstrapOptions(
-                        previousWorkProfile == null ? "" : previousWorkProfile.signalModel,
-                        previousWorkProfile == null ? "" : previousWorkProfile.signalReasoning);
-            }
+            refreshChatReasoningOptions(previousChatReasoning, previousChatModel);
+            refreshWorkBootstrapOptions(previousWorkModel, previousWorkReasoning);
             updateChatReasoningAvailability();
+            if (!previousTaskMode.equals(MODE_VALUES[mode.getSelectedItemPosition()])
+                    || !previousMode.equals(selectedActualMode())) {
+                Toast.makeText(this, "실행 모드가 변경되어 시작이 취소되었습니다. 다시 선택하세요.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
             if (SelfRunStore.MODE_CHAT.equals(previousMode)
                     && !ChatReasoningPreferenceStore.KEEP.equals(previousChatReasoning)
                     && ProfileRegistry.resolveChat(previousChatReasoning) == null) {
@@ -480,9 +592,10 @@ public final class SelfRunNewActivity extends Activity {
                         Toast.LENGTH_LONG).show();
                 return;
             }
-            if (SelfRunStore.MODE_WORK.equals(previousMode) && previousWorkProfile != null
-                    && ProfileRegistry.resolveWork(previousWorkProfile.signalModel,
-                    previousWorkProfile.signalReasoning) == null) {
+            if (SelfRunStore.MODE_WORK.equals(previousMode)
+                    && !previousWorkModel.isEmpty() && !previousWorkReasoning.isEmpty()
+                    && ProfileRegistry.resolveWork(previousWorkModel,
+                    previousWorkReasoning) == null) {
                 Toast.makeText(this, "선택한 워크 조합이 최신 Drive 목록에서 제거되었습니다. 다시 선택하세요.",
                         Toast.LENGTH_LONG).show();
                 return;
@@ -579,23 +692,24 @@ public final class SelfRunNewActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (chatReasoning != null) refreshChatReasoningOptions(selectedChatReasoning());
-
+        if (chatReasoning != null) {
+            String chat = currentChatPreference();
+            String model = currentChatModel();
+            refreshChatReasoningOptions(chat, model);
+        }
         if (workBootstrapProfile != null) {
-            ProfileRegistry.Profile selected = selectedWorkBootstrapProfile();
-            WorkBootstrapPreferenceStore.Selection fallback = WorkBootstrapPreferenceStore.load(this);
-            refreshWorkBootstrapOptions(selected == null ? fallback.model : selected.signalModel,
-                    selected == null ? fallback.reasoning : selected.signalReasoning);
+            refreshWorkBootstrapOptions(currentWorkModel(), currentWorkReasoning());
         }
         updateChatReasoningAvailability();
         ProfileRegistrySync.refresh(this, result -> {
             if (isFinishing()) return;
-            String chat = selectedChatReasoning();
-            ProfileRegistry.Profile work = selectedWorkBootstrapProfile();
-            refreshChatReasoningOptions(chat);
+            String chat = currentChatPreference();
+            String model = currentChatModel();
+            String workModel = currentWorkModel();
+            String workReasoning = currentWorkReasoning();
+            refreshChatReasoningOptions(chat, model);
             if (workBootstrapProfile != null) {
-                refreshWorkBootstrapOptions(work == null ? "" : work.signalModel,
-                        work == null ? "" : work.signalReasoning);
+                refreshWorkBootstrapOptions(workModel, workReasoning);
             }
             updateChatReasoningAvailability();
         });
@@ -608,19 +722,17 @@ public final class SelfRunNewActivity extends Activity {
         outState.putString(STATE_REQUIREMENT, requirement == null ? "" : requirement.getText().toString());
         outState.putInt(STATE_MODE, mode == null ? 0 : mode.getSelectedItemPosition());
         outState.putInt("firstMode", firstMode == null ? 0 : firstMode.getSelectedItemPosition());
-        outState.putString(STATE_CHAT_REASONING, selectedChatReasoning());
-        ProfileRegistry.Profile workProfile = selectedWorkBootstrapProfile();
-        outState.putString(STATE_WORK_BOOTSTRAP_MODEL, workProfile == null ? "" : workProfile.signalModel);
-        outState.putString(STATE_WORK_BOOTSTRAP_REASONING, workProfile == null ? "" : workProfile.signalReasoning);
+        outState.putString(STATE_CHAT_REASONING, currentChatPreference());
+        outState.putString(STATE_CHAT_MODEL, currentChatModel());
+        outState.putString(STATE_WORK_BOOTSTRAP_MODEL, currentWorkModel());
+        outState.putString(STATE_WORK_BOOTSTRAP_REASONING, currentWorkReasoning());
         outState.putString(STATE_PROJECT, project == null ? SelfRunScript.GENERAL_CHAT_URL : selectedProjectUrl());
         outState.putString(STATE_ATTACHMENTS, SelfRunStore.encodeAttachmentDrafts(selectedAttachments));
     }
 
     private void restoreDraftState(Bundle state) {
         if (state == null) {
-            refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);
-            WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
-            refreshWorkBootstrapOptions(workDefault.model, workDefault.reasoning);
+            restoreLastUsedForTaskMode();
             renderAttachments();
             updateChatReasoningAvailability();
             return;
@@ -628,10 +740,12 @@ public final class SelfRunNewActivity extends Activity {
         requirement.setText(state.getString(STATE_REQUIREMENT, ""));
         int savedMode = state.getInt(STATE_MODE, 0);
         int modePosition = savedMode >= 0 && savedMode < MODE_VALUES.length ? savedMode : 0;
+        restoringSelections = true;
         mode.setSelection(modePosition);
         firstMode.setSelection(state.getInt("firstMode", 0) == 1 ? 1 : 0);
+        restoringSelections = false;
         String reasoning = state.getString(STATE_CHAT_REASONING, ChatReasoningPreferenceStore.KEEP);
-        refreshChatReasoningOptions(reasoning);
+        refreshChatReasoningOptions(reasoning, state.getString(STATE_CHAT_MODEL, ""));
         WorkBootstrapPreferenceStore.Selection workDefault = WorkBootstrapPreferenceStore.load(this);
         String workModel = state.getString(STATE_WORK_BOOTSTRAP_MODEL, workDefault.model);
         String workReasoning = state.getString(STATE_WORK_BOOTSTRAP_REASONING, workDefault.reasoning);

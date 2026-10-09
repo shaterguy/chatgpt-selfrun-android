@@ -41,8 +41,8 @@ public final class PremiumUiPolicyTest {
         assertTrue(task.contains("Ui.SelectionField chatReasoning"));
         assertTrue(task.contains("mode.setOnSelectionChangedListener"));
         assertTrue(task.contains("outState.putInt(STATE_MODE"));
-        assertTrue(task.contains("outState.putString(STATE_CHAT_REASONING, selectedChatReasoning())"));
-        assertTrue(task.contains("refreshChatReasoningOptions(reasoning)"));
+        assertTrue(task.contains("outState.putString(STATE_CHAT_REASONING, currentChatPreference())"));
+        assertTrue(task.contains("refreshChatReasoningOptions(reasoning, state.getString(STATE_CHAT_MODEL, \"\"))"));
         assertTrue(task.contains("ProfileRegistry.listChat()"));
         assertTrue(task.contains("project.setSelection(selected)"));
         assertTrue(ui.contains("int getSelectedItemPosition()"));

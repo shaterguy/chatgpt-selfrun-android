@@ -42,9 +42,11 @@ public final class BootstrapStageAndDirectPickerPolicyTest {
         String activity = src("SelfRunNewActivity.java");
         int restoreMethod = activity.indexOf("private void restoreDraftState(Bundle state)");
         int defaultRefresh = activity.indexOf(
-                "refreshChatReasoningOptions(ChatReasoningPreferenceStore.KEEP);", restoreMethod);
+                "restoreLastUsedForTaskMode();", restoreMethod);
         int restoredSelection = activity.indexOf("state.getString(STATE_CHAT_REASONING", restoreMethod);
-        int restoredRefresh = activity.indexOf("refreshChatReasoningOptions(reasoning);", restoredSelection);
+        int restoredRefresh = activity.indexOf(
+                "refreshChatReasoningOptions(reasoning, state.getString(STATE_CHAT_MODEL, \"\"));",
+                restoredSelection);
         assertTrue(restoreMethod >= 0 && defaultRefresh > restoreMethod);
         assertTrue(activity.contains("초기 프로필 선택 필요"));
         assertTrue(activity.contains("ProfileRegistry.resolveChat(bootstrapReasoning) == null"));

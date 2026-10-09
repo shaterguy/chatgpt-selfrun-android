@@ -1,6 +1,8 @@
-# SelfRun cancellation recovery candidate 4.0.10-dev3
+# SelfRun mode-specific last-used model profiles 4.0.10-dev4
 
-This isolated candidate fixes cancelled-dispatch recovery only. Automatic retry requires correlated server proof of no submission and completed browser cleanup; unproven cancellation pauses for review. Existing tasks and account bindings are preserved.
+New tasks restore independently recorded CHAT, WORK, and HYBRID bootstrap profiles after successful task creation. Existing 4.0.10-dev3 cancellation recovery behavior is preserved.
+
+The preceding 4.0.10-dev3 baseline fixes cancelled-dispatch recovery. Automatic retry requires correlated server proof of no submission and completed browser cleanup; unproven cancellation pauses for review. Existing tasks and account bindings are preserved.
 
 # SelfRun Drive
 

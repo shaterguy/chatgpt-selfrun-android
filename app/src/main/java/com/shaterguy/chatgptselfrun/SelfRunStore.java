@@ -148,7 +148,7 @@ final class SelfRunStore {
         List<Attachment> drafts = normalizeDrafts(attachments);
         synchronized (RUN_STATE_LOCK) {
             long now = System.currentTimeMillis();
-            commitOrThrow(prefs.edit()
+            SharedPreferences.Editor launchEditor = prefs.edit()
                     .putString("runId", runId)
                     .putLong("createdAt", now)
                     .putLong("phaseStartedAt", now)
@@ -203,7 +203,20 @@ final class SelfRunStore {
                     .remove("terminalSideEffectPending")
                     .remove("terminalSideEffectType")
                     .remove("terminalSideEffectRunId")
-                    .remove("terminalSideEffectCommitId"));
+                    .remove("terminalSideEffectCommitId");
+            LastUsedExecutionProfileStore.Selection usedProfile = null;
+            if (MODE_WORK.equals(mode) && ProfileRegistry.resolveWork(model, reasoning) != null) {
+                usedProfile = new LastUsedExecutionProfileStore.Selection(mode, model, reasoning);
+            } else if (MODE_CHAT.equals(mode)) {
+                String bootstrap = ChatReasoningPreferenceStore.selectionForRun(app, runId);
+                ProfileRegistry.Profile registered = ProfileRegistry.resolveChat(bootstrap);
+                if (registered != null) {
+                    usedProfile = new LastUsedExecutionProfileStore.Selection(
+                            mode, registered.requestValue("model"), registered.signalReasoning);
+                }
+            }
+            LastUsedExecutionProfileStore.put(launchEditor, taskMode, usedProfile);
+            commitOrThrow(launchEditor);
             syncHistory();
         }
     }
@@ -267,6 +280,9 @@ final class SelfRunStore {
     long phaseStartedAt() { return prefs.getLong("phaseStartedAt", createdAt()); }
     String mode() { return getOr("mode", MODE_CHAT); }
     String taskMode() { return getOr("taskMode", mode()); }
+    LastUsedExecutionProfileStore.Selection lastUsedProfile(String taskMode) {
+        return LastUsedExecutionProfileStore.load(prefs, taskMode);
+    }
     String projectUrl() { return get("projectUrl"); }
     String requirement() { return get("requirement"); }
     String conversationUrl() { return get("conversationUrl"); }
