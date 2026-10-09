@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { filterTerminalHistoryEvents } from './maintenance-quarantine.mjs';
 
 const EMPTY_STATE = Object.freeze({
   generation: 0,
@@ -80,6 +81,18 @@ export class StateStore {
     });
   }
 
+  async removeTerminalEvents(records) {
+    if(!records.length||!this.config.eventsFile)return;
+    return this.#enqueue(async()=>{
+      let text;try{text=await fs.readFile(this.config.eventsFile,'utf8');}catch(error){if(error.code==='ENOENT')return;throw error;}
+      const filtered=filterTerminalHistoryEvents(text,{lifecycle:{retired:Object.fromEntries(records.map((r,i)=>[i,r]))}});
+      if(filtered===text)return;
+      const temp=this.config.eventsFile+'.terminal-cleanup-'+process.pid;
+      const handle=await fs.open(temp,'w',0o600);try{await handle.writeFile(filtered);await handle.sync();}finally{await handle.close();}
+      await fs.rename(temp,this.config.eventsFile);
+      const dir=await fs.open(path.dirname(this.config.eventsFile),'r');try{await dir.sync();}finally{await dir.close();}
+    });
+  }
   async recordEvent(event, details = {}, context = null) {
     return this.#enqueue(async () => {
       await this.appendEvent(event, this.state, details, context);

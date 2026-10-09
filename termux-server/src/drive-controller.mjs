@@ -26,7 +26,7 @@ export class DriveDispatchController {
   async initialize() {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
   }
-  cleanupTerminalResources(options) {return this.browserCleanup.run(options);}
+  async cleanupTerminalResources(options) {const result=await this.browserCleanup.run(options);await this.repository.forgetTerminalHistory();return result;}
   get active() {return this.activeDispatches().at(-1)||null;}
   getActive(path) {return this.activeDispatches().find(a=>a.path===path)||null;}
   activeDispatches() {
@@ -75,8 +75,8 @@ export class DriveDispatchController {
       }
       await this.#invalidateControl(identity);return null;
     } catch(error) {
+      if(error?.code==='DRIVE_FILE_NOT_FOUND'){if(await this.repository.removeMissingRequest(identity))this.#detach(keyFor(identity));return null;}
       await this.#invalidateControl(identity);
-      if(error?.code==='DRIVE_FILE_NOT_FOUND')return null;
       throw error;
     }
   }
@@ -97,7 +97,7 @@ export class DriveDispatchController {
     if(old&&c.control_epoch===old.control_epoch) {
       await this.repository.applyControl(c);
       if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
-      await this.#restoreRetiredControl(old,transport);return false;
+      await this.#restoreCurrentControl(old,transport);return false;
     }
     const sameRunningIdentity=old&&old.state==='RUNNING'&&c.state==='RUNNING'
       &&old.turn_id===c.turn_id&&old.request_id===c.request_id;
@@ -117,23 +117,31 @@ export class DriveDispatchController {
     for(const r of this.repository.records())if(r.task_id===c.task_id)this.#scheduleDisplacedResult(r.key,transport);
     for(const item of stopping)await this.#disposeStoppedAttachment(item.r,item.a,c);
     if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
-    await this.#restoreRetiredControl(c,transport);
+    await this.#restoreCurrentControl(c,transport);
     if(['STOPPED','DONE'].includes(c.state)||c.state==='RUNNING'&&!sameRunningIdentity)void this.cleanupTerminalResources();
     return true;
   }
-  async #restoreRetiredControl(c,transport,body=null) {
-    const marker=this.repository.get(keyFor(c));
-    if(['COMMITTED','COMPLETED'].includes(marker?.state))return null;
-    if(transport&&c.state==='RUNNING'&&canonicalUrl(c.conversation_url)&&marker?.retired&&c.control_epoch>marker.control_epoch
-      &&marker.resume_rejected_epoch!==c.control_epoch) {
-      body??=await transport.read(marker.path);
-      try {return await this.repository.restoreFromControl(c,body);}
-      catch(error) {
-        if(error.code!=='RESUME_REJECTED')throw error;
-        await this.repository.recordResumeRejection(marker.key,c.control_epoch,error.reason);
+  async #restoreCurrentControl(c,transport,body=null,dispatchPath=null) {
+    if(!transport||c.state!=='RUNNING'||!canonicalUrl(c.conversation_url)||this.repository.records().some(r=>keyFor(r)===keyFor(c)))return null;
+
+    if(!body) {
+      if(dispatchPath)body=await transport.read(dispatchPath);
+      else for(const row of await transport.list())if(typeof transport.local==='function'?row.path==='__SELFRUN_DISPATCH__HTTP_'+digest(c.request_id)+'.json':row.path.startsWith('__SELFRUN_DISPATCH__'+c.request_id.replace(/[^A-Za-z0-9._:-]/g,'_').slice(0,160)+'__A')) {
+        const candidate=await transport.read(row.path);
+        if(candidate?.schema==='selfrun-server-dispatch-v1'&&keyFor(candidate)===keyFor(c)){body=candidate;dispatchPath=row.path;break;}
       }
     }
-    return null;
+    if(!body||keyFor(body)!==keyFor(c))return null;
+    const documentEpoch=Number(body.server_control_epoch||body.lifecycle_record?.control_epoch||0);
+    if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&(!documentEpoch||c.control_epoch<=documentEpoch)) {
+      await this.repository.removeCurrentTerminalControl(c);return null;
+    }
+
+    // Current app URL is an explicit watch command. Old server fields cannot
+    // turn it into prompt submission or require a retained terminal marker.
+    const clean=Object.fromEntries(Object.entries(body).filter(([k])=>!['lifecycle_record','lifecycle_state','server_status','conversation_url','server_control_epoch'].includes(k)));
+    Object.assign(clean,{client_status:'SEND_REQUESTED',conversation_url:c.conversation_url,server_status:'STARTED',server_control_epoch:c.control_epoch});
+    return this.repository.ingest(dispatchPath,clean);
   }
   async #disposeStoppedAttachment(record,attached,control) {
     // APP STOP is local teardown only. Never read receipts or click remote generation controls.
@@ -170,10 +178,30 @@ export class DriveDispatchController {
   async #ingestRecord(path,body,transport) {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
     if(body?.schema!=='selfrun-server-dispatch-v1')throw new Error('invalid dispatch schema');
+    // The current document, rather than a remembered terminal identity or a
+    // delayed caller snapshot, is the input for this intake transaction.
+    let current;
+    try{current=await transport.read(path);}catch(error){
+      if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;
+      const prior=this.repository.get(keyFor(body));
+      if(prior&&!prior.retired&&await this.repository.removeMissingRequest(prior))this.#detach(prior.key);
+      return undefined;
+    }
+    if(!current||current.schema!=='selfrun-server-dispatch-v1'||keyFor(current)!==keyFor(body))return null;
+    body=current;
+
     if(!Array.isArray(body.profile_operations)||!body.prompt||!body.project_url)throw new Error('invalid dispatch payload');
     // Inert terminal history needs no remote read. Every executable import or
     // explicit retry must still obtain current app authorization.
     const prior=this.repository.get(keyFor(body)),imported=prior||initialRecord(path,body);
+    if(!prior&&['CANCELLED','SUPERSEDED'].includes(body.client_status))return undefined;
+    if(!prior&&retiredState(imported)) {
+      const current=await this.#readCurrentControl(imported,transport);
+      // Old final projections do not become local jobs. An explicit current
+      // app URL may have already attached its matching dispatch in control().
+      if(current?.state==='RUNNING'&&canonicalUrl(current.conversation_url))return this.repository.get(keyFor(body))||undefined;
+      return undefined;
+    }
     const currentControl=this.repository.control(body.task_id);
     const retry=imported.never_submitted&&body.dispatch_attempt>imported.dispatch_attempt;
     const resume=currentControl?.state==='RUNNING'&&currentControl.control_epoch>imported.control_epoch
@@ -182,7 +210,7 @@ export class DriveDispatchController {
     let record=await this.repository.ingest(path,body);
     const control=this.repository.control(record.task_id);
     if(record.retired&&control?.state==='RUNNING'&&control.control_epoch>record.control_epoch&&canonicalUrl(control.conversation_url))
-      record=await this.#restoreRetiredControl(control,transport,body)||record;
+      record=await this.#restoreCurrentControl(control,transport,body,path)||record;
     if(record.retired||['CANCELLED','SUPERSEDED'].includes(record.body?.client_status)) {
       this.#detach(record.key);void this.cleanupTerminalResources();
     }
@@ -190,12 +218,14 @@ export class DriveDispatchController {
   }
   async ingest(path,body,transport) {
     const r=await this.#ingestRecord(path,body,transport);
-    if(!r||r.retired)return r;
+    if(!r)return r;
+    if(r.retired){await this.browserCleanup.run();await this.repository.flush(transport);return r;}
     return this.#serial(r.key,()=>this.#advance(r.key,transport));
   }
   async ingestDurable(path,body,transport) {
     const r=await this.#ingestRecord(path,body,transport);
     if(r&&!r.retired)this.#scheduleAdvance(r.key,transport);
+    else if(r?.retired)void this.browserCleanup.run().then(()=>this.repository.flush(transport)).catch(error=>console.error(JSON.stringify({event:'TERMINAL_FINALIZATION_FAILED',error:String(error?.message||error).slice(0,300)})));
     return r;
   }
   prepare(path,body,transport) {return this.ingest(path,body,transport);}
@@ -345,6 +375,16 @@ export class DriveDispatchController {
   }
   async #open(key,transport,mode) {
     let r=this.repository.get(key);
+    if(mode!=='prepare') {
+      const token=this.repository.token(key),result=await readResult(transport,r);
+      const latest=this.repository.get(key);
+      if(!this.repository.matches(key,token)||!runningTaskControl(this.repository.control(latest?.task_id),latest)||latest.control_state!=='RUNNING'||terminal(latest))return null;
+      if(result.state==='COMMITTED') {
+        await this.#move(key,'COMMITTED','RESULT_COMMITTED_TERMINAL',{result_recovery:result.recovery||null},token);
+        this.#detach(key);await this.repository.flush(transport);void this.cleanupTerminalResources();return null;
+      }
+      // A read outage does not masquerade as completion or remove ongoing work.
+    }
     const recoveryStage=recoveryStates.has(r.state)?r.state:null;
     // Generations fence stale callbacks; they do not describe why the browser
     // is opening. Explicit app entry retries remain explicit until entry succeeds.

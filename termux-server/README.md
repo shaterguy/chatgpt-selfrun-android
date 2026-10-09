@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0-dev8
+# SelfRun Termux Server 4.0.0-dev9
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 
@@ -67,10 +67,14 @@ npm start
 
 앱 STOP/DONE 또는 취소로 작업이 끝나면 SelfRun이 직접 만든 것으로 확인된 탭을 즉시 정리합니다. 실패한 탭 정리는 실행 작업과 분리해 재시작 후 다시 시도합니다. 수동으로 연 탭, 실행·대기·일시정지 중인 작업, 소유 증거가 없는 예전 탭은 닫지 않습니다. 모든 활성·대기 작업과 다른 브라우저 사용이 사라진 경우에만 정확히 소유가 확인된 Chromium 프로세스도 종료하며, SelfRun 서버·worker·supervisor는 유지합니다. ChatGPT 대화 기록은 삭제하지 않습니다.
 
-## 4.0.0-dev8: unaddressable cleanup and explicit no-work maintenance
+## 4.0.0-dev9: terminal records are removed
 
-Extension cleanup for a legacy namespace or a different browser session moves out of the active `browserCleanup` map into `browserCleanupUnresolved`. The archived entry, ownership/session evidence and original PENDING outcome remain intact. `UNRESOLVED` describes physical/business outcome uncertainty; `UNAVAILABLE_IN_CURRENT_ADAPTER` describes execution recovery. No CLOSED/ABSENT/Result is invented and no unowned browser is closed. Current-session targets, uncertain initialization and pending acquisition remain protected; newer controls/HTTP resumes fence archival.
+Finished, stopped and cancelled server records, associated HTTP inputs/signals, operational events and derived queues are removed. No historical identity hash, denylist, terminal epoch watermark or alternate operational archive grants or denies a later app request. Terminal finalization may use its current in-flight cleanup/publication context; it is not persisted as restart input and is discarded when finalization settles, including a failed projection attempt. A pending browser acquisition remains fenced until its current callback settles.
 
-Explicit `quarantineIdleSnapshot` maintenance requires the user's no-work assertion, exact generation/control epoch map, a cutoff time, empty current request/publication/HTTP queues and no pending browser acquisition. Original RUNNING controls and active projections are preserved with a maintenance fence; unchanged epochs cannot reauthorize execution. A greater epoch/new task remains accepted. The helper performs no I/O; a reviewed deployment tool writes the resulting snapshot only after stopping the verified server and retaining a private recovery backup.
+Startup retains ongoing nonterminal request state and its existing receipt/recovery protections. It drops ended records instead of rebuilding cancellation/publication queues from them. A planned patch requires current work and acquisition to be absent and preserves the original state/events in a private backup outside the live data directory. Exact generation, control set/epochs and cutoff guards refuse newly arrived work before maintenance writes.
 
-Unresolved cancellation evidence continues to block unsafe same-request resend. Independent new tasks and separately confirmed future resource cleanup remain functional. The existing Android TEST APK remains unchanged.
+The unchanged Android app already supplies the resume contract. A fresh execution clears the conversation URL and sends a new `turnId:resume:operationUUID` request with `RUNNING/DISPATCH_CREATE` control and attempt 1; the server prepares a new conversation. `RUNNING/STAGE_WAITING` with the same task/turn/request and a canonical conversation URL attaches that current conversation for observation without resending a prompt or requiring an old retired marker. Android's pinned Result waiting branch remains unchanged.
+
+Current STOP/DONE or a committed authoritative Result finishes local work. A successfully resolved absence (`DRIVE_FILE_NOT_FOUND`) clears the corresponding current request; temporary transport/auth failures suspend or retain ongoing recovery and do not claim absence. Export failures, including ambiguous HTTP 404, are not treated as proof that a Result document is gone. External user Result/requirement documents are not deleted. Browser, extension, app, account and permission code is unchanged.
+
+The old offline helper name `quarantineIdleSnapshot` delegates to removal and creates no quarantine. `rollbackIdleSnapshot` refuses source rollback that could reintroduce history; operations must use reviewed forward recovery. Legacy operational quarantine/hash keys are removed during migration.

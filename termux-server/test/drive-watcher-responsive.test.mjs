@@ -141,7 +141,7 @@ test('STOP during queued history does not replay an old retired dispatch',async(
  f.transport.list=async()=>(await list()).map(file=>({...file,modTime:'2020-01-01T00:00:00Z'}));
  const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
  await watcher.scanOnce();await watcher.scanOnce();
- assert.equal(f.record().state,'STOPPED');assert.equal(f.record().retired,true);assert.equal(f.prepares,0);assert.equal(f.sends,0);
+ assert.equal(f.record(),null);assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);assert.equal(f.prepares,0);assert.equal(f.sends,0);
  watcher.stop();
 });
 
@@ -189,8 +189,8 @@ test('startup tick observes the latest STOP before attempting to reattach uncert
  f.control={...f.control,state:'STOPPED',control_epoch:2};
  let attaches=0;f.browser.attachTarget=async()=>{attaches++;throw new Error('STOP must fence reattach');};
  const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
- await watcher.scanOnce();await until(()=>f.record()?.state==='STOPPED');
- assert.equal(f.record().control_epoch,2);assert.equal(attaches,0);assert.equal(f.sends,1);
+ await watcher.scanOnce();await until(()=>f.record()===null);
+ assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);assert.equal(attaches,0);assert.equal(f.sends,1);
  watcher.stop();
 });
 

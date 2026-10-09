@@ -24,7 +24,7 @@ test('CANCELLED commit racing target acquisition retains cleanup for an existing
   const attaching=f.existing();await opening.promise;
   const patch=f.store.patch.bind(f.store);let held=false;
   f.store.patch=async value=>{
-    if(!held&&Object.keys(value.lifecycle?.retired||{}).length){
+    if(!held&&value.status==='IDLE'&&Object.keys(f.store.snapshot().lifecycle?.requests||{}).length&&!Object.keys(value.lifecycle?.requests||{}).length){
       held=true;cancelSave.resolve();await cancelSaveGate.promise;
     }
     return patch(value);
@@ -35,7 +35,7 @@ test('CANCELLED commit racing target acquisition retains cleanup for an existing
   cancelSaveGate.resolve();await cancelling;await attaching;
   await f.controller.cleanupTerminalResources();
   assert.deepEqual(closed,['target-owned']);
-  assert.equal(f.record().retired,true);
+  assert.equal(f.record(),null);
   assert.equal(f.controller.sessions.size,0);
   assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
   assert.equal(f.sends,0);

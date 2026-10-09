@@ -205,8 +205,8 @@ test('APP STOP does not request new receipt metadata', async () => {
   };
   await f.stop();
   assert.equal(stopArgs, undefined);
-  assert.equal(f.record().state, 'STOPPED');
-  assert.equal(f.record().stop_status, 'NOT_REQUESTED');
+  assert.equal(f.record(), null);
+  assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);
   assert.equal(f.quiesces, 0);
   assert.equal(f.controller.repository.records().length, 0);
 });
@@ -253,7 +253,7 @@ test('APP STOP does not reread even an already durable receipt', async () => {
   };
   await f.stop();
   assert.equal(reused, false);
-  assert.equal(f.record().stop_status, 'NOT_REQUESTED');
+  assert.equal(f.record(),null);
   assert.equal(f.quiesces, 0);
   assert.equal(f.controller.repository.records().length, 0);
 });
@@ -265,5 +265,5 @@ test('STOP finishes without waiting for receipt I/O and successor control remain
   f.control={...f.control,state:'RUNNING',control_epoch:3,turn_id:'SAFE-TEST:turn:2',request_id:'successor'};
   await f.controller.controlDurable(null,f.control,f.transport);
   assert.equal(reads,0);assert.equal(f.quiesces,0);
-  assert.equal(f.record().stop_status,'NOT_REQUESTED');assert.equal(f.controller.repository.records().length,0);
+  assert.equal(f.record(),null);assert.equal(f.controller.repository.records().length,0);assert.equal(f.controller.controlForTask(f.control.task_id).request_id,'successor');
 });

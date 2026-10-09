@@ -14,17 +14,18 @@ for(const state of ['RUNNING','STOPPED','DONE'])test('old first-seen '+state+' c
  const list=f.transport.list;f.transport.list=async()=>(await list()).map(file=>({...file,modTime:'2020-01-01T00:00:00Z'}));
  await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{dispatchRecoveryMs:7200000}}).scanOnce();
  await settle();
- assert.ok(f.record(),'first-seen request is examined regardless of age');
  assert.equal(f.sends,state==='RUNNING'?1:0);
- assert.equal(f.record().control_state,state);
+ if(state==='RUNNING'){assert.ok(f.record(),'current running command is examined regardless of age');assert.equal(f.record().control_state,state);}
+ else{assert.equal(f.record(),null);assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);}
 });
 
-test('old retired dispatch is skipped without reading or resurrecting its input',async()=>{
+test('old stopped dispatch is checked against current STOP without retaining its input',async()=>{
  const f=fixture();await f.existing();await f.stop();let reads=0;
  const read=f.transport.read;f.transport.read=async name=>{if(name===f.path)reads++;return read(name);};
  const list=f.transport.list;f.transport.list=async()=>(await list()).map(file=>({...file,modTime:'2020-01-01T00:00:00Z'}));
  await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();await settle();
- assert.equal(reads,0);assert.equal(f.record().retired,true);assert.equal(f.resumes,1);
+ assert.equal(reads,1);assert.equal(f.record(),null);assert.equal(f.resumes,1);
+ await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();await settle();assert.equal(f.record(),null);assert.equal(f.sends,0);
 });
 
 for(const code of ['BROWSER_DEAD','AUTH_REQUIRED','CONVERSATION_UNAVAILABLE'])test(code+' retries beyond three failures with pacing while app is active',async()=>{
@@ -46,7 +47,7 @@ for(const state of ['PAUSED','WAITING_USER_INTERVENTION','STOPPED','DONE'])test(
  await f.controller.tick(f.transport);
  assert.equal(f.resumes,1);assert.equal(f.prepares,0);assert.equal(f.sends,0);
  if(['STOPPED','DONE'].includes(state)) {
-  assert.equal(f.record().retired,true);assert.equal(f.record().intent,undefined);assert.equal(f.record().retry_at,undefined);
+  await f.controller.flush(f.transport);assert.equal(f.record(),null);assert.equal(Object.keys(f.store.snapshot().lifecycle.retired).length,0);
  }
 });
 
@@ -69,7 +70,7 @@ function browserResumeFixture(probe) {
  const session={close(){},async call(method){return method==='Runtime.evaluate'?{result:{value:probe}}:{};}};
  const chromium={listExistingTargets:async()=>[{id:'owned',type:'page',url:'https://chatgpt.com/c/owned'}],
   connectTarget:async t=>{connected.push(t.id);return session;},createTarget:async()=>({id:'created'}),closeTarget:async()=>{}};
- return {browser:new ChatGptBrowser(chromium,{navigationTimeoutMs:1}),connected};
+ return {browser:new ChatGptBrowser(chromium,{navigationTimeoutMs:100}),connected};
 }
 test('canonical resume succeeds without a DOM user ID',async()=>{
  const f=browserResumeFixture({url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',userMessageId:null});

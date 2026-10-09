@@ -65,7 +65,7 @@ test('explicit app RESUME opens the same URL after STOP closed its owned tab',as
   await f.resume();
   assert.equal(f.calls.resume.at(-1).automaticRecovery,false);
   assert.deepEqual(f.calls.create,[f.probe.url,f.probe.url]);
-  assert.equal(f.record().state,'OBSERVING');assert.ok(f.record().browser_generation>1);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().browser_generation,1);
   assert.equal(f.prepares,0);assert.equal(f.sends,0);
   await f.controller.quiesceForStandby();
 });
@@ -127,7 +127,7 @@ test('unconfirmed disposal of a noncanonical owned entry tab cannot accumulate n
 test('STOP cancels pending explicit entry before another retry can create a target',async()=>{
   const f=entryFixture();f.createError=Error('synthetic creation unavailable');await f.existing();
   await f.stop();for(let i=0;i<3;i++)await f.controller.tick(f.transport);
-  assert.equal(f.calls.create.length,1);assert.equal(f.record().retired,true);
+  assert.equal(f.calls.create.length,1);assert.equal(f.record(),null);
   assert.equal(f.controller.sessions.size,0);assert.equal(f.sends,0);
 });
 
@@ -136,7 +136,7 @@ test('client cancellation retires pending entry without replay from its old disp
   const oldBody=structuredClone(f.rows.get(f.path));f.body.client_status='CANCELLED';await f.ingest();
   await f.controller.ingest(f.path,oldBody,f.transport);
   for(let i=0;i<3;i++)await f.controller.tick(f.transport);
-  assert.equal(f.calls.create.length,1);assert.equal(f.record().retired,true);
+  assert.equal(f.calls.create.length,1);assert.equal(f.record(),null);
   assert.equal(f.controller.sessions.size,0);assert.equal(f.sends,0);
 });
 
@@ -213,7 +213,7 @@ test('cold PAUSED projection accepts the newer explicit app URL control as entry
   assert.equal(f.record().state,'OBSERVING');assert.equal(f.sends,0);await f.controller.quiesceForStandby();
 });
 
-test('stale cold PAUSED projection cannot regrant an entry epoch already consumed in local audit history',async()=>{
+test('current app URL grants entry without consulting an old PAUSED audit',async()=>{
   const f=entryFixture();await f.existing();
   f.control={...f.control,state:'PAUSED',control_epoch:2};await f.controller.control(null,f.control,f.transport);
   const staleBody=structuredClone(f.rows.get(f.path));f.targets.clear();await f.resume();
@@ -221,19 +221,19 @@ test('stale cold PAUSED projection cannot regrant an entry epoch already consume
   f.targets.clear();f.store=new MemoryStore();f.controller=f.recreate();await f.controller.initialize();
   f.controller.repository.history.audits.set(keyFor(f.body),acceptedRevision);
   await f.controller.ingest(f.path,staleBody,f.transport);
-  assert.equal(f.calls.resume.at(-1).automaticRecovery,true);assert.equal(f.calls.create.length,2);
-  assert.equal(f.record().error.code,'PAGE_UNAVAILABLE');assert.equal(f.sends,0);await f.stop();
+  assert.equal(f.calls.resume.at(-1).automaticRecovery,false);assert.equal(f.calls.create.length,3);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.sends,0);await f.stop();
 });
 
-for(const state of ['STOPPED','CANCELLED'])test('stale cold '+state+' projection cannot regrant an already consumed explicit resume',async()=>{
+for(const state of ['STOPPED','CANCELLED'])test('stale cold '+state+' projection cannot veto a current explicit URL command',async()=>{
   const f=entryFixture();await f.existing();const staleBody=structuredClone(f.rows.get(f.path));
   await f.stop();await f.controller.cleanupTerminalResources();
-  Object.assign(staleBody.lifecycle_record,{state,control_state:'STOPPED',control_epoch:2,revision:f.record().revision});
+  Object.assign(staleBody.lifecycle_record,{state,control_state:'STOPPED',control_epoch:2,revision:staleBody.lifecycle_record.revision});
   Object.assign(staleBody,{lifecycle_state:state,server_control_state:'STOPPED',server_control_epoch:2,client_status:'CANCELLED'});
   await f.resume();const acceptedRevision=f.record().revision;await f.controller.quiesceForStandby();
   f.targets.clear();f.store=new MemoryStore();f.controller=f.recreate();await f.controller.initialize();
   f.controller.repository.history.audits.set(keyFor(f.body),acceptedRevision);
   await f.controller.control(null,f.control,f.transport);await f.controller.ingest(f.path,staleBody,f.transport);
-  assert.equal(f.record().retired,true);assert.equal(f.record().resume_error,'RESUME_LOCAL_HISTORY_AHEAD');
-  assert.equal(f.calls.create.length,2);assert.equal(f.calls.resume.length,2);assert.equal(f.sends,0);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().resume_error,undefined);
+  assert.equal(f.calls.create.length,3);assert.equal(f.calls.resume.length,3);assert.equal(f.sends,0);await f.controller.quiesceForStandby();
 });

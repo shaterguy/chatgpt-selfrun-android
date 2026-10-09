@@ -11,7 +11,7 @@ class MemoryStore {
   constructor(value={generation:0}){this.value=structuredClone(value);this.events=[];}
   snapshot(){return structuredClone(this.value);}
   async patch(p){if(this.fail)throw new Error('disk failed');this.value={...this.value,...structuredClone(p)};return this.snapshot();}
-  async update(fn){this.value=structuredClone(fn(this.snapshot()));return this.snapshot();}
+  async update(fn){return this.patch(fn(this.snapshot()));}
   async recordEvent(event,details){this.events.push({event,details});}
 }
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
@@ -20,7 +20,7 @@ function fixture(options={}) {
   f.body={schema:'selfrun-server-dispatch-v1',task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',request_id:'SAFE-TEST:turn:1-request',
     dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'test input',profile_operations:[],
     result_document_id:'RESULT-1',client_status:'SEND_REQUESTED',server_status:'PENDING',server_control_epoch:1};
-  f.path='__SELFRUN_DISPATCH__test.json';
+  f.path='__SELFRUN_DISPATCH__'+f.body.request_id+'__A1.json';
   f.control={schema:'selfrun-task-control-v1',task_id:f.body.task_id,turn_id:f.body.turn_id,request_id:f.body.request_id,state:'RUNNING',control_epoch:1};
   f.docs=new Map();
   f.result=(committed=false,id='RESULT-1',turn=1)=>f.docs.set(id,JSON.stringify({schema:'selfrun-turn-result-v3',task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:'+turn,

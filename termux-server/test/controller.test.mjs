@@ -37,7 +37,7 @@ test('HTTP STOP preempts an in-flight POST before POST promise completes',async(
  try{
  await Promise.race([f.http.accept({signalId:'stop',type:'STOP',task_id:f.body.task_id,turn_id:f.body.turn_id,
  request_id:f.body.request_id,control_epoch:2}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('STOP blocked behind POST')),500))]);
- assert.equal(signal.aborted,true);assert.equal(f.record().state,'STOPPED');
+ assert.equal(signal.aborted,true);assert.equal(f.record(),null);
  }finally{gate.resolve();await posting;}
 });
 test('HTTP stale epoch cannot stop resumed execution',async()=>{
@@ -67,8 +67,8 @@ async function quarantinedHttp(){
  await f.store.patch(quarantineIdleSnapshot(s,{userConfirmedNoWork:true,cutoffMs:Date.now(),expectedGeneration:s.generation,expectedControlEpochs:{[f.control.task_id]:1}}));
  f.controller=f.recreate();f.http=new SelfRunController({lifecycle:f.controller,transport:new SignalDispatchTransport(f.transport,f.store),stateStore:f.store,config:{}});return f;
 }
-test('HTTP successor chooses an epoch above the quarantined historical watermark',async()=>{
- const f=await quarantinedHttp();await f.http.accept(f.signal(2));assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,2);assert.equal(f.sends,1);await f.controller.quiesceForStandby();
+test('HTTP successor starts from current authority without a removed historical watermark',async()=>{
+ const f=await quarantinedHttp();await f.http.accept(f.signal(2));assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,1);assert.equal(f.sends,1);await f.controller.quiesceForStandby();
 });
 test('HTTP explicit higher-epoch resume remains accepted after maintenance fence',async()=>{
  const f=await quarantinedHttp();const result=await f.http.accept({signalId:'fresh-resume',type:'RESUME',task_id:f.control.task_id,turn_id:f.control.turn_id,request_id:f.control.request_id,control_epoch:2,conversation_url:f.probe.url});assert.equal(result.accepted,true);assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,2);await f.controller.quiesceForStandby();

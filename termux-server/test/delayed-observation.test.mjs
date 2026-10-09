@@ -111,7 +111,7 @@ for(const boundary of ['STOPPED','DONE','COMMITTED'])test(`${boundary} fences a 
   await f.tick(6000);
   if(boundary==='COMMITTED'){controller.result(true);await controller.controller.repository.move(controller.record().key,'OBSERVING','test due reconciliation',{last_progress_at:Date.now()-600000});await controller.controller.tick(controller.transport);await controller.settle();}
   else {controller.control={...controller.control,state:boundary,control_epoch:2};await controller.controller.control(null,controller.control,controller.transport);}
-  if(boundary==='COMMITTED')assert.equal(controller.record().state,'COMMITTED');
+  if(boundary==='COMMITTED')assert.equal(controller.record(),null);
   const before=JSON.stringify(controller.record());f.reply(1);await controller.settle();
   assert.equal(JSON.stringify(controller.record()),before);assert.equal(controller.sends,0);assert.equal(f.session.pending.size,0);
 });

@@ -70,7 +70,7 @@ export class DriveDispatchWatcher {
     if(this.scanning||this.stopped||!this.canDispatch())return;
     this.scanning=true;
     try {
-      // Age only orders discovery. App control and retired identity decide eligibility.
+      // Age only orders discovery. Current app control decides execution authority.
       const files=(await this.transport.list()).filter(file=>isControl(file)||file.path.startsWith('__SELFRUN_DISPATCH__'))
         .toSorted((a,b)=>modified(b)-modified(a));
       if(this.stopped||!this.canDispatch())return;
@@ -163,6 +163,7 @@ export class DriveDispatchWatcher {
     if(accepted===null) {
       this.deferred.set(file.path,{fp,taskId:body.task_id,controlPath,controlFp,controlToken:controlToken(this.controller.controlForTask(body.task_id))});return;
     }
+    if(accepted===undefined){this.inputs.delete(file.path);if(this.#current(file))this.seen.set(file.path,fp);return;}
     this.inputs.set(file.path,input);
     if(this.#current(file))this.seen.set(file.path,fp);
   }
