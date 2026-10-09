@@ -32,6 +32,23 @@ export class ExtensionManager {
   #allowed(guard,...args){try{return !guard||guard(...args)===true;}catch{return false;}}
   setLifecycleGuards(guards={}){this.guards=guards;}
   isOwnedTarget(id){return this.owned.has(String(id));}
+  async inspectCleanupDisposition(id){
+    await this.#initialize();
+    return this.cleanupDisposition(id);
+  }
+  cleanupDisposition(id){
+    // Unaddressable metadata is not proof of tab absence or business completion.
+    if(typeof id!=='string'||!id||this.journal?.schema!=='selfrun-extension-ownership-v1'||typeof this.journal.browserSessionId!=='string'
+      ||!this.journal.browserSessionId||this.owned.has(id)||this.closing.has(id)||this.journal.controllerStopPending)return null;
+    let reason;
+    if(!id.startsWith('ext:'))reason='UNADDRESSABLE_NAMESPACE';
+    else {
+      const parts=id.split(':');
+      if(parts.length!==3||!parts[1]||!parts[2]||parts[1]===this.journal.browserSessionId)return null;
+      reason='OWNER_SESSION_CHANGED';
+    }
+    return {schema:1,adapter:'extension',target_id:id,observed_session:this.journal.browserSessionId,reason};
+  }
   targetClosing(id){return this.closing.has(String(id));}
   isOwnedBootstrapTarget(target,conversationDigest){
     const metadata=this.journal?.targetMetadata?.[target?.id];if(!this.#processOwned()||!this.isOwnedTarget(target?.id)||!metadata?.bootstrapUrl||!metadata.entryUrl||target.entryPending!==true)return false;

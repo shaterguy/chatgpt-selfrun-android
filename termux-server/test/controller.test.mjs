@@ -60,3 +60,16 @@ test('STANDBY HTTP resume persists control but cannot attach or submit',async()=
  await f.http.accept({...base,signalId:'resume',type:'RESUME',control_epoch:3,conversation_url:f.probe.url});
  assert.equal(f.resumes,0);assert.equal(f.sends,1);assert.equal(f.controller.standby,true);
 });
+
+import {quarantineIdleSnapshot} from '../src/maintenance-quarantine.mjs';
+async function quarantinedHttp(){
+ const f=setup(),s=f.store.snapshot();s.lifecycle={requests:{},controls:{[f.control.task_id]:f.control},retired:{},outbox:{},completionOutbox:{},browserCleanup:{},events:[]};Object.assign(s,{status:'IDLE',activeCount:0,activeDispatches:[]});
+ await f.store.patch(quarantineIdleSnapshot(s,{userConfirmedNoWork:true,cutoffMs:Date.now(),expectedGeneration:s.generation,expectedControlEpochs:{[f.control.task_id]:1}}));
+ f.controller=f.recreate();f.http=new SelfRunController({lifecycle:f.controller,transport:new SignalDispatchTransport(f.transport,f.store),stateStore:f.store,config:{}});return f;
+}
+test('HTTP successor chooses an epoch above the quarantined historical watermark',async()=>{
+ const f=await quarantinedHttp();await f.http.accept(f.signal(2));assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,2);assert.equal(f.sends,1);await f.controller.quiesceForStandby();
+});
+test('HTTP explicit higher-epoch resume remains accepted after maintenance fence',async()=>{
+ const f=await quarantinedHttp();const result=await f.http.accept({signalId:'fresh-resume',type:'RESUME',task_id:f.control.task_id,turn_id:f.control.turn_id,request_id:f.control.request_id,control_epoch:2,conversation_url:f.probe.url});assert.equal(result.accepted,true);assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,2);await f.controller.quiesceForStandby();
+});

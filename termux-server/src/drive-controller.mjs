@@ -36,6 +36,7 @@ export class DriveDispatchController {
     }));
   }
   retiredPath(path) {return Object.values(this.repository.data.retired).some(r=>r.path===path);}
+  controlWatermarkForTask(taskId) {return this.repository.controlWatermark(taskId);}
   controlForTask(taskId) {return this.repository.control(taskId);}
   async flush(transport) {await this.repository.flush(transport);}
   #serial(key,fn) {
@@ -88,7 +89,7 @@ export class DriveDispatchController {
     return allowed;
   }
   async #applyControl(c,transport) {
-    if(!c||!controlStates.has(c.state))return false;
+    if(!c||!controlStates.has(c.state)||this.repository.controlQuarantined(c))return false;
     if(c.schema!=='selfrun-task-control-v1'||!c.task_id||!Number.isSafeInteger(c.control_epoch)||c.control_epoch<1)
       throw new Error('invalid task control');
     const old=this.repository.control(c.task_id);

@@ -1,3 +1,4 @@
+import { controlQuarantined } from './maintenance-quarantine.mjs';
 import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
 import { appInput, inputFingerprint, retiredState, retireRecord, queueTargetCleanup, cancelledCleanupConfirmed, queueCancelledProjection } from './retired-requests.mjs';
 import { audit, canonicalUrl, digest, initialRecord, keyFor, preparationInputDigest, projection, provenUnsubmitted, runningTaskControl, transition } from './lifecycle.mjs';
@@ -69,10 +70,12 @@ export class LifecycleStore {
     return [...Object.values(this.data.requests),...Object.values(this.data.retired)]
       .some(r=>r.task_id===task&&(r.body?.server_ingress||r.server_ingress||'DRIVE')!==ingress);
   }
-  control(task) {return structuredClone(this.data.controls[task]||null);}
+  controlQuarantined(control) {return controlQuarantined(this.data,control);}
+  controlWatermark(task) {return structuredClone(this.data.controls[task]||null);}
+  control(task) {const control=this.data.controls[task];return this.controlQuarantined(control)?null:structuredClone(control||null);}
   async save(next) {
     const records=Object.values(next.requests);
-    const active=records.filter(r=>runningTaskControl(next.controls[r.task_id],r)&&r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
+    const active=records.filter(r=>!controlQuarantined(next,next.controls[r.task_id])&&runningTaskControl(next.controls[r.task_id],r)&&r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
     const latest=records.toSorted((a,b)=>b.updated_at-a.updated_at)[0];
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
       active.length?'RUNNING':latest?.state==='COMPLETED'?'COMPLETED':latest?.state==='STOPPED'?'STOPPED':'IDLE';
@@ -91,7 +94,7 @@ export class LifecycleStore {
       if(retired) {
         if(retired.state!=='CANCELLED'||!retired.never_submitted||retired.pre_submit_proof?.schema!==1||body.dispatch_attempt<=retired.dispatch_attempt
           ||['CANCELLED','SUPERSEDED'].includes(body.client_status))return structuredClone(retired);
-        const control=this.data.controls[body.task_id];
+        const control=this.control(body.task_id);
         if(!runningTaskControl(control,retired)||retired.conversation_digest||control.conversation_url||body.conversation_url)return structuredClone(retired);
         if(preparationInputDigest(body)!==retired.pre_submit_proof.input_digest)
           throw new Error('accepted preparation input/profile is immutable');
@@ -144,7 +147,7 @@ export class LifecycleStore {
       }
       if(!retiredState(r))r=migrateLegacy(r,this.history,this.legacyPrompt||'');
       if(!retired&&(this.history.audits.has(key)||this.history.legacy.has(key)))r.pre_submit_proof=null;
-      const control=next.controls[r.task_id];
+      const candidate=next.controls[r.task_id],control=controlQuarantined(next,candidate)?null:candidate;
       const explicitColdResume=r.state==='PAUSED'&&runningTaskControl(control,r)
         &&control.control_epoch>r.control_epoch&&r.conversation_url
         &&(this.history.audits.get(key)||0)<=r.revision
@@ -218,11 +221,11 @@ export class LifecycleStore {
   }
   current(key,t) {
     const r=this.data.requests[key];
-    return this.matches(key,t)&&runningTaskControl(this.data.controls[r.task_id],r)&&r.control_state==='RUNNING'
+    return this.matches(key,t)&&runningTaskControl(this.control(r.task_id),r)&&r.control_state==='RUNNING'
       &&!['STOPPED','PAUSED','COMMITTED','COMPLETED','CANCELLED'].includes(r.state);
   }
   displacedResultCandidate(key) {
-    const r=this.data.requests[key],c=r&&this.data.controls[r.task_id];
+    const r=this.data.requests[key],c=r&&this.control(r.task_id);
     return !!r&&r.state==='PAUSED'&&!!(r.conversation_url||r.target_id||r.intent)
       &&!!c&&!['STOPPED','DONE'].includes(c.state)&&keyFor(c)!==key;
   }
@@ -258,7 +261,8 @@ export class LifecycleStore {
   }
   async restoreFromControl(c,body) {
     return this.serial(async()=>{
-      const key=keyFor(c),marker=this.data.retired[key],control=this.data.controls[c.task_id];
+      if(this.controlQuarantined(c))return null;
+      const key=keyFor(c),marker=this.data.retired[key],control=this.control(c.task_id);
       const url=canonicalUrl(c.conversation_url);
       if(['COMMITTED','COMPLETED'].includes(marker?.state))return null;
       if(!marker||c.state!=='RUNNING'||!url||c.control_epoch<=marker.control_epoch
@@ -293,13 +297,25 @@ export class LifecycleStore {
       const next=structuredClone(this.data);
       if(marker&&retiredState(marker))queueTargetCleanup(next,{...marker,target_owned:true},targetId);
       else {
-        const r=next.requests[key],d=r?.browser_cleanup_displacement,c=r&&next.controls[r.task_id];
+        const r=next.requests[key],d=r?.browser_cleanup_displacement,candidate=r&&next.controls[r.task_id],c=controlQuarantined(next,candidate)?null:candidate;
         if(!fence||r?.state!=='PAUSED'||!d||d.browser_generation!==fence.browser||r.browser_generation!==fence.browser
           ||d.run_generation!==fence.run||!(c?.control_epoch>=d.control_epoch)||keyFor(c||{})===key
           ||(d.target_id&&d.target_id!==targetId))return false;
         d.target_id=targetId;r.target_id=targetId;r.target_owned=true;
         if(!queueDisplacedCleanup(next,r,targetId))return false;
       }
+      await this.save(next);return true;
+    });
+  }
+  async quarantineTargetCleanup(entry,proof,guard) {
+    return this.serial(async()=>{
+      if(typeof guard!=='function'||!guard()||JSON.stringify(this.data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
+      const next=structuredClone(this.data),archiveKey=digest(JSON.stringify([entry,proof]));
+      next.browserCleanupUnresolved??={};
+      next.browserCleanupUnresolved[archiveKey]??={schema:1,status:'UNRESOLVED',recovery:'UNAVAILABLE_IN_CURRENT_ADAPTER',reason:proof.reason,
+        entry:structuredClone(entry),ownership_proof:structuredClone(proof),quarantined_at_ms:Date.now()};
+      delete next.browserCleanup[entry.target_id];
+      // Preserve actual PENDING outcomes/retired state; never invent CLOSED/ABSENT.
       await this.save(next);return true;
     });
   }
@@ -319,7 +335,7 @@ export class LifecycleStore {
   }
   async recordResumeRejection(key,epoch,reason) {
     return this.serial(async()=>{
-      const marker=this.data.retired[key],c=marker&&this.data.controls[marker.task_id];
+      const marker=this.data.retired[key],c=marker&&this.control(marker.task_id);
       if(!marker||c?.control_epoch!==epoch||c.state!=='RUNNING')return;
       const next=structuredClone(this.data);Object.assign(next.retired[key],{resume_rejected_epoch:epoch,resume_error:reason});
       await this.save(next);
@@ -327,7 +343,7 @@ export class LifecycleStore {
   }
   async recordStopOutcome(key,epoch,status) {
     return this.serial(async()=>{
-      const marker=this.data.retired[key],c=marker&&this.data.controls[marker.task_id];
+      const marker=this.data.retired[key],c=marker&&this.control(marker.task_id);
       if(!marker||marker.control_epoch!==epoch||c?.control_epoch!==epoch||c.state!=='STOPPED')return false;
       const next=structuredClone(this.data);next.retired[key].stop_status=status;
       await this.save(next);return true;
@@ -335,6 +351,7 @@ export class LifecycleStore {
   }
   async applyControl(c) {
     return this.serial(async()=>{
+      if(this.controlQuarantined(c))return false;
       const prior=this.data.controls[c.task_id];
       if(prior&&c.control_epoch<prior.control_epoch) return false;
       if(prior&&c.control_epoch===prior.control_epoch) {

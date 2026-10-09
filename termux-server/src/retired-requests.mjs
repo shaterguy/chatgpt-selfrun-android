@@ -27,7 +27,8 @@ export function queueTargetCleanup(data,record,targetId=record.target_id) {
 }
 // Absence of a cleanup entry is not evidence that asynchronous acquisition finished.
 export function cancelledCleanupConfirmed(data,marker) {
-  if(marker?.browser_open_pending||Object.values(data.browserCleanup||{}).some(entry=>entry.key===marker?.key))return false;
+  if(marker?.browser_open_pending||Object.values(data.browserCleanup||{}).some(entry=>entry.key===marker?.key)
+    ||Object.values(data.browserCleanupUnresolved||{}).some(record=>record.status==='UNRESOLVED'&&record.entry?.key===marker?.key))return false;
   if(marker?.browser_cleanup)return ['CLOSED','ABSENT'].includes(marker.browser_cleanup.status);
   return marker?.browser_generation===0&&marker?.pre_submit_proof?.schema===1;
 }

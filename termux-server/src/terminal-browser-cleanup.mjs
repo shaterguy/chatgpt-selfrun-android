@@ -20,7 +20,7 @@ export class TerminalBrowserCleanup {
     if(!this.available())return false;
     if(target&&entry.conversation_digest&&digest(canonicalUrl(target.url))!==entry.conversation_digest
       &&!(target.id===entry.target_id&&this.chromium?.isOwnedBootstrapTarget?.(target,entry.conversation_digest)===true))return false;
-    const data=this.repository.data,marker=data.retired[entry.key],control=data.controls[entry.task_id];
+    const data=this.repository.data,marker=data.retired[entry.key],candidate=data.controls[entry.task_id],control=this.repository.controlQuarantined(candidate)?null:candidate;
     const source=data.requests[entry.key],d=source?.browser_cleanup_displacement;
     const displaced=entry.kind==='DISPLACED'&&source?.state==='PAUSED'&&source.target_owned===true
       &&source.target_id===entry.target_id&&source.browser_generation===entry.browser_generation
@@ -39,7 +39,7 @@ export class TerminalBrowserCleanup {
       &&body?.state==='RUNNING'&&keyFor(body)===entry.key&&!body.conversation_url;
     if(independentCleanup) {
       // A successor owns its own resources, not every target belonging to this task.
-      for(const c of Object.values(data.controls))if(!['STOPPED','DONE'].includes(c.state)
+      for(const c of Object.values(data.controls))if(!this.repository.controlQuarantined(c)&&!['STOPPED','DONE'].includes(c.state)
         &&!consumed(this.repository.get(keyFor(c)))&&conflicts(c))return false;
     } else if(control&&control.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(control.state)&&!cancelledRefresh(control))return false;
     // HTTP acceptance is durable before the lifecycle control catches up.
@@ -51,6 +51,7 @@ export class TerminalBrowserCleanup {
         ||body.schema==='selfrun-server-dispatch-v1'&&body.dispatch_attempt<=source.dispatch_attempt
           &&Number(body.server_control_epoch||0)<=entry.control_epoch&&Number(body.lifecycle_record?.control_epoch||0)<=entry.control_epoch))continue;
       if(body.schema==='selfrun-task-control-v1') {
+        if(this.repository.controlQuarantined(body))continue;
         if(independentCleanup) {
           if(!['STOPPED','DONE'].includes(body.state)&&!consumed(this.repository.get(keyFor(body)))&&conflicts(body))return false;
         } else if(body.task_id===entry.task_id&&body.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(body.state)&&!cancelledRefresh(body))return false;
@@ -63,15 +64,40 @@ export class TerminalBrowserCleanup {
     return !this.repository.records().some(r=>!retiredState(r)&&(!displaced||r.key!==entry.key)&&(r.target_id===entry.target_id
       ||(entry.conversation_digest&&r.conversation_url&&digest(canonicalUrl(r.conversation_url))===entry.conversation_digest)));
   }
+  canQuarantine(entry,proof) {
+    if(!this.available()||!proof||proof.schema!==1||proof.adapter!=='extension'||proof.target_id!==entry.target_id
+      ||!['UNADDRESSABLE_NAMESPACE','OWNER_SESSION_CHANGED'].includes(proof.reason))return false;
+    const data=this.repository.data,marker=data.retired[entry.key];
+    if(!retiredState(marker)||marker.browser_open_pending||marker.key!==entry.key
+      ||!['task_id','turn_id','request_id'].every(k=>marker[k]&&marker[k]===entry[k])
+      ||JSON.stringify(data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
+    const conflicts=body=>keyFor(body)===entry.key||body.target_id===entry.target_id
+      ||body.lifecycle_record?.target_id===entry.target_id||(entry.conversation_digest&&body.conversation_url
+        &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest);
+    if(this.repository.records().some(r=>!retiredState(r)&&conflicts(r)))return false;
+    for(const body of Object.values(data.controls))if(!this.repository.controlQuarantined(body)&&body.state==='RUNNING'&&conflicts(body)
+      &&(!consumed(marker)||keyFor(body)!==entry.key)&&Number(body.control_epoch)>Number(marker.control_epoch))return false;
+    for(const body of Object.values(this.stateStore.snapshot().httpIngress?.files||{})) {
+      if(!conflicts(body))continue;
+      if(body.schema==='selfrun-task-control-v1') {
+        if(this.repository.controlQuarantined(body))continue;
+        if(body.state==='RUNNING'&&(!consumed(marker)||keyFor(body)!==entry.key)
+          &&Number(body.control_epoch)>Number(marker.control_epoch))return false;
+      } else if(keyFor(body)!==entry.key||!consumed(marker)&&Number(body.dispatch_attempt)>Number(marker.dispatch_attempt))return false;
+    }
+    return JSON.stringify(this.chromium?.cleanupDisposition?.(entry.target_id))===JSON.stringify(proof);
+  }
   canRelease() {
     if(!this.available()||this.busy()||this.repository.records().some(r=>!retiredState(r)))return false;
     for(const c of Object.values(this.repository.data.controls)) {
+      if(this.repository.controlQuarantined(c))continue;
       const marker=this.repository.get(keyFor(c));
       if(!['STOPPED','DONE'].includes(c.state)&&(!retiredState(marker)||(!consumed(marker)&&c.control_epoch>marker.control_epoch)))return false;
     }
     for(const body of Object.values(this.stateStore.snapshot().httpIngress?.files||{})) {
       const marker=this.repository.get(keyFor(body));
       if(body.schema==='selfrun-task-control-v1') {
+        if(this.repository.controlQuarantined(body))continue;
         if(!['STOPPED','DONE'].includes(body.state)&&(!retiredState(marker)||(!consumed(marker)&&body.control_epoch>marker.control_epoch)))return false;
       } else if(!retiredState(marker)||(!consumed(marker)&&Number(body.dispatch_attempt)>Number(marker.dispatch_attempt)))return false;
     }
@@ -85,7 +111,17 @@ export class TerminalBrowserCleanup {
     this.running=(async()=>{
       do {
         this.requested=false;
+        let quarantined=false,resourceConfirmed=false;
         for(const entry of Object.values(this.repository.data.browserCleanup)) {
+          let disposition;
+          try{disposition=this.chromium?.inspectCleanupDisposition
+            ?await this.chromium.inspectCleanupDisposition(entry.target_id)
+            :this.chromium?.cleanupDisposition?.(entry.target_id);}catch{disposition=null;}
+          if(this.canQuarantine(entry,disposition)) {
+            quarantined=await this.repository.quarantineTargetCleanup(entry,disposition,
+              ()=>this.canQuarantine(entry,disposition))||quarantined;
+            continue;
+          }
           let result;
           if(!this.canClose(entry))result={reason:'guard_rejected'};
           else try {
@@ -94,11 +130,12 @@ export class TerminalBrowserCleanup {
             result={reason:'close_error',error:String(error?.message||error).slice(0,300)};
           }
           const status=result?.closed===true?'CLOSED':result?.absent===true?'ABSENT':'PENDING';
+          resourceConfirmed||=status==='CLOSED'||status==='ABSENT';
           await this.repository.recordTargetCleanup(entry,{status,observed_at_ms:Date.now(),
             reason:String(result?.reason||(status==='CLOSED'?'closed':status==='ABSENT'?'already_absent':'close_unconfirmed')).slice(0,300),
             ...(result?.error?{error:result.error}:{})});
         }
-        if(this.canRelease())await this.chromium.releaseIfUnused?.({guard:()=>this.canRelease()});
+        if((!quarantined||resourceConfirmed)&&this.canRelease()&&(!Object.keys(this.repository.data.browserCleanupUnresolved||{}).length||resourceConfirmed))await this.chromium.releaseIfUnused?.({guard:()=>this.canRelease()});
       } while(this.requested);
     })().catch(error=>{
       console.error(JSON.stringify({event:'TERMINAL_BROWSER_CLEANUP_ERROR',error:String(error?.message||error).slice(0,300)}));

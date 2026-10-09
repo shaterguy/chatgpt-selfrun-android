@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0-dev5
+# SelfRun Termux Server 4.0.0-dev8
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 
@@ -66,3 +66,11 @@ npm start
 앱 CANCELLED/SUPERSEDED는 해당 시도를 폐기합니다. 같은 RUNNING 제어만으로 되살리지 않으며 새 dispatch_attempt를 받더라도 이미 전송됐거나 불확실한 입력은 재전송하지 않고 기존 증거를 확인합니다. ID는 상관관계 값으로 취급하며 서버가 turn 번호 또는 이전 턴 문서 의미를 해석해 실행을 막지 않습니다.
 
 앱 STOP/DONE 또는 취소로 작업이 끝나면 SelfRun이 직접 만든 것으로 확인된 탭을 즉시 정리합니다. 실패한 탭 정리는 실행 작업과 분리해 재시작 후 다시 시도합니다. 수동으로 연 탭, 실행·대기·일시정지 중인 작업, 소유 증거가 없는 예전 탭은 닫지 않습니다. 모든 활성·대기 작업과 다른 브라우저 사용이 사라진 경우에만 정확히 소유가 확인된 Chromium 프로세스도 종료하며, SelfRun 서버·worker·supervisor는 유지합니다. ChatGPT 대화 기록은 삭제하지 않습니다.
+
+## 4.0.0-dev8: unaddressable cleanup and explicit no-work maintenance
+
+Extension cleanup for a legacy namespace or a different browser session moves out of the active `browserCleanup` map into `browserCleanupUnresolved`. The archived entry, ownership/session evidence and original PENDING outcome remain intact. `UNRESOLVED` describes physical/business outcome uncertainty; `UNAVAILABLE_IN_CURRENT_ADAPTER` describes execution recovery. No CLOSED/ABSENT/Result is invented and no unowned browser is closed. Current-session targets, uncertain initialization and pending acquisition remain protected; newer controls/HTTP resumes fence archival.
+
+Explicit `quarantineIdleSnapshot` maintenance requires the user's no-work assertion, exact generation/control epoch map, a cutoff time, empty current request/publication/HTTP queues and no pending browser acquisition. Original RUNNING controls and active projections are preserved with a maintenance fence; unchanged epochs cannot reauthorize execution. A greater epoch/new task remains accepted. The helper performs no I/O; a reviewed deployment tool writes the resulting snapshot only after stopping the verified server and retaining a private recovery backup.
+
+Unresolved cancellation evidence continues to block unsafe same-request resend. Independent new tasks and separately confirmed future resource cleanup remain functional. The existing Android TEST APK remains unchanged.

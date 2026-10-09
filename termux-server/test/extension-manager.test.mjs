@@ -45,3 +45,21 @@ test('probe-only startup cannot close an unbound Android controller',async t=>{c
 test('queued acquisition waits through delayed controller removal and root exit',async t=>{const f=await androidEmpty(t);const request=f.bridge.request.bind(f.bridge);let stopped=false,delays=0;f.bridge.request=async(...args)=>{const r=await request(...args);if(args[0]==='controllerStop'){f.setReady(true);stopped=true;}return r;};f.manager.deps.delay=async()=>{if(stopped&&++delays===3)f.setReady(false);};const release=f.manager.releaseIfUnused({guard:()=>true}),acquire=f.manager.createTarget();assert.equal((await release).released,true);assert.ok(await acquire);assert.equal(f.signals,1);assert.equal(f.launches,2);});
 test('accepted SIGTERM with surviving root retains quarantine across manager restoration',async t=>{const f=await androidEmpty(t);f.setReady(false);f.manager.deps.signalProcess=()=>{};await assert.rejects(f.manager.createTarget());assert.equal(f.launches,1);assert.ok(f.manager.journal.retiringProcess);await f.manager.close();const next=f.fresh();next.deps.signalProcess=()=>{};t.after(()=>next.close());await assert.rejects(next.createTarget());assert.equal(f.launches,1);assert.ok(next.journal.retiringProcess);});
 test('close during final endpoint binding never resurrects a profile lease',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});let released=false;f.manager.deps.applyProfile=async()=>({cdpCommands:3,cdpTargetId:'cdp1',isAlive:()=>true,release(){released=true;}});const target=await f.manager.createTarget(),session=await f.manager.connectTarget(target),read=f.manager.deps.readCdpMetadata;let lists=0;f.manager.deps.readCdpMetadata=async(...args)=>{const result=await read(...args);if(args[1]==='list'&&++lists===2)f.manager.owned.delete(target.id);return result;};await assert.rejects(session.run('initialize',{clientProfile:'android-webview'}));assert.equal(released,true);assert.equal(f.manager.profileLeases.size,0);});
+
+test('cold cleanup inspection loads durable journal without launching or signalling browser',async t=>{
+ const f=await fixture(t);await f.manager.createTarget();await f.manager.close();const fresh=f.fresh();t.after(()=>fresh.close());
+ assert.equal(fresh.journal,null);const proof=await fresh.inspectCleanupDisposition('legacy-cdp-target');
+ assert.equal(proof.reason,'UNADDRESSABLE_NAMESPACE');assert.equal(f.launches,1);assert.equal(f.signals,0);
+ assert.equal(await fresh.inspectCleanupDisposition(`ext:${fresh.journal.browserSessionId}:unknown`),null);
+});
+
+import {LifecycleStore} from '../src/lifecycle-store.mjs';
+import {TerminalBrowserCleanup} from '../src/terminal-browser-cleanup.mjs';
+test('cold cleanup loop converges twice using actual saved ownership journal without browser actions',async t=>{
+ const f=await fixture(t);await f.manager.createTarget();await f.manager.close();const fresh=f.fresh();t.after(()=>fresh.close());
+ const key=JSON.stringify(['TASK','TURN','REQ']),marker={key,task_id:'TASK',turn_id:'TURN',request_id:'REQ',state:'STOPPED',retired:true,control_epoch:1};
+ const entry={key,target_id:'legacy-cdp-id',task_id:'TASK',turn_id:'TURN',request_id:'REQ',control_epoch:1};
+ const store={value:{generation:1,lifecycle:{requests:{},controls:{TASK:{task_id:'TASK',turn_id:'TURN',request_id:'REQ',state:'STOPPED',control_epoch:1}},retired:{[key]:marker},browserCleanup:{[entry.target_id]:entry},outbox:{},completionOutbox:{},events:[]}},snapshot(){return structuredClone(this.value)},async patch(p){this.value={...this.value,...structuredClone(p)}}};
+ const repository=new LifecycleStore(store),cleanup=new TerminalBrowserCleanup({repository,chromium:fresh,stateStore:store,available:()=>true,busy:()=>false});
+ await cleanup.run();await cleanup.run();assert.deepEqual(repository.data.browserCleanup,{});assert.equal(Object.keys(repository.data.browserCleanupUnresolved).length,1);assert.equal(f.signals,0);assert.equal(f.launches,1);assert.equal(f.calls.filter(c=>c[0]==='closeTarget'||c[0]==='controllerStop').length,0);
+});

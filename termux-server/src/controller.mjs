@@ -94,7 +94,7 @@ export class SelfRunController {
       if(!task||!turn||!request||!Number.isSafeInteger(epoch)||epoch<1)
         throw new Error('HTTP control requires task_id, turn_id, request_id and control_epoch');
       if(this.lifecycle.repository.ownedByOtherIngress(task,'HTTP'))throw new Error('task is owned by Drive ingress');
-      const prior=this.lifecycle.controlForTask(task);
+      const prior=this.lifecycle.controlWatermarkForTask(task);
       if(!prior||prior.turn_id!==turn||prior.request_id!==request||epoch<=prior.control_epoch)
         throw new Error('stale or unscoped HTTP control');
       const control={schema:'selfrun-task-control-v1',task_id:task,turn_id:turn,request_id:request,
@@ -110,7 +110,7 @@ export class SelfRunController {
     const records=this.lifecycle.repository.records().filter(r=>r.task_id===task);
     if(this.lifecycle.repository.ownedByOtherIngress(task,'HTTP'))throw new Error('task is owned by Drive ingress');
     const existing=records.find(r=>r.request_id===request);
-    const prior=this.lifecycle.controlForTask(task);
+    const prior=this.lifecycle.controlWatermarkForTask(task);
     if(existing&&prior?.state!=='RUNNING')throw new Error('explicit higher-epoch task RESUME required');
     const path='__SELFRUN_DISPATCH__HTTP_'+createHash('sha256').update(request).digest('hex')+'.json';
     const control={schema:'selfrun-task-control-v1',task_id:task,turn_id:e.TURN_ID,request_id:request,state:'RUNNING',
