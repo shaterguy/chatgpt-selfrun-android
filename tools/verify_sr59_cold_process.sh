@@ -16,7 +16,7 @@ sha256sum "$CANONICAL" | tee -a cold-process-evidence/identity.txt
 
 adb shell am instrument -w -r -e class "$CLASS#seedAcceptedSelectionsBeforeOSProcessDeath" "$RUNNER" | tee cold-process-evidence/seed.txt
 grep -Fq 'OK (1 test)' cold-process-evidence/seed.txt
-grep -Fq 'SR59_COLD_SEED_ACCEPTED' cold-process-evidence/seed.txt
+grep -Fq 'test=seedAcceptedSelectionsBeforeOSProcessDeath' cold-process-evidence/seed.txt
 
 adb shell am start -W -n "$TARGET/com.shaterguy.chatgptselfrun.MainActivity" | tee cold-process-evidence/restart-before-stop.txt
 sleep 2
@@ -32,5 +32,5 @@ test -z "$after_pid"
 
 adb shell am instrument -w -r -e class "$CLASS#verifyAfterActualOSForceStopNewProcess" "$RUNNER" | tee cold-process-evidence/readback.txt
 grep -Fq 'OK (1 test)' cold-process-evidence/readback.txt
-grep -Fq 'SR59_COLD_READBACK_AFTER_OS_FORCE_STOP' cold-process-evidence/readback.txt
+grep -Fq 'test=verifyAfterActualOSForceStopNewProcess' cold-process-evidence/readback.txt
 echo 'SR59_COLD_PROCESS_PERSISTENCE_PASS: OS force-stop confirmed; subsequent instrumentation process restored CHAT, WORK, HYBRID and UI selectors' | tee cold-process-evidence/verdict.txt

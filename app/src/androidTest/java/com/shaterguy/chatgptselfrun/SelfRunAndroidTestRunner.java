@@ -42,6 +42,13 @@ public final class SelfRunAndroidTestRunner extends AndroidJUnitRunner {
             super.onCreate(args);
             return;
         }
+        // Exact two-phase OS-process acceptance uses a separate verification-only run.
+        String coldProcess = "com.shaterguy.chatgptselfrun.ColdProcessPersistenceAndroidTest#";
+        if (selected.equals(coldProcess + "seedAcceptedSelectionsBeforeOSProcessDeath")
+                || selected.equals(coldProcess + "verifyAfterActualOSForceStopNewProcess")) {
+            super.onCreate(args);
+            return;
+        }
         String formalUpgrade = "com.shaterguy.chatgptselfrun.SelfRun3OnDeviceFormalUpgradeAndroidTest";
         if (selected.equals(formalUpgrade)) {
             super.onCreate(args);
