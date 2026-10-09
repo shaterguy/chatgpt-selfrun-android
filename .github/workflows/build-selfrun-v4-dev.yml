@@ -212,12 +212,7 @@ jobs:
             cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.8-evidence.txt
             BASE_VERSION_NAME=4.0.0 BASE_VERSION_CODE=4001000 bash tools/verify_selfrun3_release_emulator.sh
             cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.0-evidence.txt
-            INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n 's#^instrumentation:\([^ ]*\) (target=com.shaterguy.chatgptselfrun.drive.test)#\1#p' | head -1)"
-            test -n "$INSTRUMENTATION"
-            adb shell am instrument -w -r \
-              -e class com.shaterguy.chatgptselfrun.LastUsedExecutionProfileAndroidTest \
-              "$INSTRUMENTATION" | tee selfrun-last-used-profile-runtime-evidence.txt
-            grep -Fq 'OK (6 tests)' selfrun-last-used-profile-runtime-evidence.txt
+            bash tools/verify_last_used_execution_profile_emulator.sh
 
       - name: Upload SelfRun 4.0.10-dev4 DEV and TEST APKs
         if: ${{ always() }}
