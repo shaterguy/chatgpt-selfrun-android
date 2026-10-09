@@ -194,10 +194,9 @@ for(const status of ['CLOSED','ABSENT'])test('a real later Result commit reuses 
   f.result(true);now=f.controller.repository.get(f.firstKey).result_retirement_retry_at+1;
   await f.controller.tick(f.transport);await Promise.all([...f.controller.resultRetirements.values()]);await f.clean();
   const committed=f.controller.repository.get(f.firstKey);
-  assert.equal(committed.state,'COMMITTED');assert.equal(committed.retired,true);
+  assert.equal(committed,null);
   assert.deepEqual(f.controller.repository.data.browserCleanup,{},'real business retirement must not reopen disposed resource cleanup');
-  assert.deepEqual(committed.browser_cleanup,successful);
-  assert.deepEqual(f.controller.repository.data.browserCleanupOutcomes['old-owned'],successful);
+  assert.equal(f.controller.repository.data.browserCleanupOutcomes['old-owned'],undefined);
   assert.deepEqual(f.closed,status==='CLOSED'?['old-owned']:[]);assert.equal(f.pages.has('new-owned'),true);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 

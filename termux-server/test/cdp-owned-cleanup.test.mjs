@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { ChromiumManager, CdpSession } from '../src/browser/cdp.mjs';
 
 const fixture = fileURLToPath(new URL('../tools/test-fixtures/owned-cdp-process.mjs', import.meta.url));
+const signalOwnedFixture = process.kill.bind(process);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function makeManager(t, settings = {}) {
@@ -42,7 +43,7 @@ async function makeManager(t, settings = {}) {
     for (const child of new Set(children)) {
       if (child.exitCode !== null || child.signalCode !== null) continue;
       const exited = once(child, 'exit');
-      child.kill('SIGKILL');
+      signalOwnedFixture(child.pid,'SIGKILL');
       await exited;
     }
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -364,7 +365,7 @@ test('real controller STOP closes its owned target and process while control rem
   await f.controller.cleanupTerminalResources();
   assert.equal(f.controller.sessions.size, 0);
   assert.equal(fs.existsSync(`/proc/${first.pid}`), false);
-  assert.equal(f.record().retired, true);
+  assert.equal(f.record(), null);
   await f.resume();
   assert.equal(f.resumes, 2);
   assert.ok(manager.child?.pid);
@@ -420,16 +421,16 @@ test('verified committed Result closes real owned fixture process and a genuinel
     return {target,session:{close(){}},baseline:{...f.probe}};
   };
   f.controller=f.recreate();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const first=manager.child;f.result(true);await f.observe({});await f.controller.cleanupTerminalResources();
-  assert.equal(f.record().state,'COMMITTED');assert.equal(f.controller.sessions.size,0);
+  const first=manager.child,oldKey=f.record().key;f.result(true);await f.observe({});await f.controller.cleanupTerminalResources();
+  assert.equal(f.record(),null);assert.equal(f.controller.sessions.size,0);
   assert.equal(fs.existsSync(`/proc/${first.pid}`),false);
-  const oldKey=f.record().key;f.probe.url='https://chatgpt.com/c/next-owned';
+  f.probe.url='https://chatgpt.com/c/next-owned';
   Object.assign(f.body,{turn_id:'SAFE-TEST:turn:2',request_id:'SAFE-TEST:turn:2-request',result_document_id:'RESULT-2'});
   f.result(false,'RESULT-2',2);f.path='__SELFRUN_DISPATCH__next-committed.json';
   f.control={...f.control,turn_id:f.body.turn_id,request_id:f.body.request_id,state:'RUNNING',control_epoch:2};
   await f.controller.control(null,f.control,f.transport);await f.existing();
   assert.notEqual(manager.child?.pid,first.pid);assert.equal(f.resumes,2);assert.equal(f.sends,0);
-  assert.equal(f.controller.repository.get(oldKey).retired,true);assert.equal(f.record().state,'OBSERVING');
+  assert.equal(f.controller.repository.get(oldKey),null);assert.equal(f.record().state,'OBSERVING');
 });
 
 

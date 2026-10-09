@@ -88,6 +88,7 @@ const server = http.createServer(async (req, res) => {
         version: config.version,
         browser_adapter: config.browserAdapter,
         browser_runtime: chromium.status?.(),
+        drive_watcher: driveWatcher.status(),
         startedAt,
         status: state.status,
         generation: state.generation,

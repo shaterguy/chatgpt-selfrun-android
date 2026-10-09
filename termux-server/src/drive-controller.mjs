@@ -72,6 +72,7 @@ export class DriveDispatchController {
         const current=this.repository.control(identity.task_id);
         if(matchingTaskControl(c,identity)&&matchingTaskControl(current,identity)
           &&current.control_epoch===c.control_epoch&&current.state===c.state)return current;
+        if(matchingTaskControl(c,identity)&&!current&&!this.repository.get(keyFor(identity)))return c;
       }
       await this.#invalidateControl(identity);return null;
     } catch(error) {
@@ -92,6 +93,9 @@ export class DriveDispatchController {
     if(!c||!controlStates.has(c.state)||this.repository.controlQuarantined(c))return false;
     if(c.schema!=='selfrun-task-control-v1'||!c.task_id||!Number.isSafeInteger(c.control_epoch)||c.control_epoch<1)
       throw new Error('invalid task control');
+    this.browserCleanup.observeControl(c);
+    if(!this.repository.records().some(r=>r.task_id===c.task_id))
+      return !!await this.#restoreCurrentControl(c,transport);
     const old=this.repository.control(c.task_id);
     if(old&&c.control_epoch<old.control_epoch) return false;
     if(old&&c.control_epoch===old.control_epoch) {
@@ -133,6 +137,10 @@ export class DriveDispatchController {
     }
     if(!body||keyFor(body)!==keyFor(c))return null;
     const documentEpoch=Number(body.server_control_epoch||body.lifecycle_record?.control_epoch||0);
+    if(retiredState(initialRecord(dispatchPath,body))&&c.control_epoch<=documentEpoch)return null;
+    const result=await readResult(transport,initialRecord(dispatchPath,body));
+    if(result.state==='COMMITTED')return null;
+    if(result.state==='UNAVAILABLE')throw Object.assign(new Error(result.message),{code:result.code});
     if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&(!documentEpoch||c.control_epoch<=documentEpoch)) {
       await this.repository.removeCurrentTerminalControl(c);return null;
     }
@@ -141,7 +149,7 @@ export class DriveDispatchController {
     // turn it into prompt submission or require a retained terminal marker.
     const clean=Object.fromEntries(Object.entries(body).filter(([k])=>!['lifecycle_record','lifecycle_state','server_status','conversation_url','server_control_epoch'].includes(k)));
     Object.assign(clean,{client_status:'SEND_REQUESTED',conversation_url:c.conversation_url,server_status:'STARTED',server_control_epoch:c.control_epoch});
-    return this.repository.ingest(dispatchPath,clean);
+    return this.repository.ingest(dispatchPath,clean,c,{resumeFrom:body});
   }
   async #disposeStoppedAttachment(record,attached,control) {
     // APP STOP is local teardown only. Never read receipts or click remote generation controls.
@@ -206,8 +214,13 @@ export class DriveDispatchController {
     const retry=imported.never_submitted&&body.dispatch_attempt>imported.dispatch_attempt;
     const resume=currentControl?.state==='RUNNING'&&currentControl.control_epoch>imported.control_epoch
       &&canonicalUrl(currentControl.conversation_url)&&!['COMMITTED','COMPLETED'].includes(imported.state);
-    if((!retiredState(imported)||retry||resume)&&!await this.#readCurrentControl(imported,transport))return null;
-    let record=await this.repository.ingest(path,body);
+    let authorized=currentControl;
+    if(!retiredState(imported)||retry||resume) {
+      authorized=await this.#readCurrentControl(imported,transport);
+      if(!authorized)return null;
+    }
+    if(!prior&&['STOPPED','DONE'].includes(authorized?.state))return undefined;
+    let record=await this.repository.ingest(path,body,authorized);
     const control=this.repository.control(record.task_id);
     if(record.retired&&control?.state==='RUNNING'&&control.control_epoch>record.control_epoch&&canonicalUrl(control.conversation_url))
       record=await this.#restoreCurrentControl(control,transport,body,path)||record;

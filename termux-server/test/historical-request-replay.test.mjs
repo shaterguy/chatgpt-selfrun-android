@@ -4,10 +4,10 @@ import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 import { keyFor } from '../src/lifecycle.mjs';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
 
-function missingControl(f) {
+function missingControl(f,code='DRIVE_FILE_NOT_FOUND') {
   const read=f.transport.read;
   f.transport.read=async path=>{
-    if(path.startsWith('__SELFRUN_CONTROL__'))throw Object.assign(new Error('missing control'),{code:'DRIVE_FILE_NOT_FOUND'});
+    if(path.startsWith('__SELFRUN_CONTROL__'))throw Object.assign(new Error('missing control'),{code});
     return read(path);
   };
   f.transport.list=async()=>[{path:f.path,modTime:'2020-01-01T00:00:00Z',size:100}];
@@ -66,9 +66,12 @@ test('control disappears during preparation: no POST is released',async()=>{
 });
 
 test('a stale RUNNING read cannot override a durable newer control identity',async()=>{
-  const f=fixture();await f.controller.controlDurable(null,{...f.control,control_epoch:2,request_id:'new-request'});
-  await f.ingest();assert.equal(f.prepares,0);assert.equal(f.sends,0);
-  assert.equal(f.controller.repository.get(keyFor(f.body)),null);
+  const f=fixture(),older=structuredClone(f.body),oldControl=structuredClone(f.control),oldPath=f.path;
+  f.control={...f.control,control_epoch:2,request_id:'new-request'};
+  f.body={...f.body,request_id:'new-request',server_control_epoch:2};f.path='__SELFRUN_DISPATCH__new-request__A1.json';
+  await f.ingest();f.control=oldControl;f.rows.set(oldPath,older);
+  await f.controller.ingest(oldPath,older,f.transport);assert.equal(f.prepares,1);assert.equal(f.sends,1);
+  assert.equal(f.controller.repository.get(keyFor(older)),null);await f.controller.quiesceForStandby();
 });
 
 for(const [label,patch] of [
@@ -110,7 +113,7 @@ test('confirmed control absence clears active execution and same-epoch restorati
   const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
   const read=f.transport.read;missingControl(f);await f.controller.tick(f.transport);
   assert.equal(f.controller.sessions.size,0);assert.equal(f.controller.activeDispatches().length,0);
-  assert.equal(f.store.snapshot().activeCount,0);assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,1);
+  assert.equal(f.store.snapshot().activeCount,0);assert.equal(f.controller.controlForTask(f.body.task_id),null);
   f.transport.read=read;f.body.client_status='SEND_REQUESTED';await f.ingest();
   assert.equal(f.sends,1);assert.equal(f.controller.activeDispatches().length,1);
 });
@@ -141,30 +144,30 @@ test('repeated missing-control checks do not churn revision or generation, and r
   const read=f.transport.read;missingControl(f);await f.controller.tick(f.transport);
   const suspended=f.record();
   await f.controller.tick(f.transport);await f.controller.tick(f.transport);
-  assert.equal(f.record().revision,suspended.revision);assert.equal(f.record().run_generation,suspended.run_generation);
+  assert.equal(suspended,null);assert.equal(f.record(),null);
   f.controller=f.recreate();await f.controller.initialize();assert.equal(f.store.snapshot().activeCount,0);
   f.transport.read=read;f.body.client_status='SEND_REQUESTED';await f.ingest();
   assert.equal(f.sends,1);assert.equal(f.record().control_epoch,1);
 });
 
 test('control invalidation cannot overwrite a STOP accepted while its durable write waits',async()=>{
-  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();missingControl(f);
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();missingControl(f,'EACCES');
   const move=f.controller.repository.move.bind(f.controller.repository);
   let release,entered;const gate=new Promise(r=>{release=r;});const waiting=new Promise(r=>{entered=r;});
   const invalidate=f.controller.repository.invalidateControl.bind(f.controller.repository);
   f.controller.repository.invalidateControl=async key=>{entered();await gate;return invalidate(key);};
-  const tick=f.controller.tick(f.transport);await waiting;await f.stop();release();await tick;
-  assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,2);
+  const tick=assert.rejects(f.controller.tick(f.transport),/missing control/);await waiting;await f.stop();release();await tick;
+  assert.equal(f.record(),null);
   assert.equal(f.controller.repository.records().length,0);assert.equal(f.sends,0);
 });
 
 test('invalidation preserves a lifecycle advance already queued in the same generation',async()=>{
-  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();missingControl(f);
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();missingControl(f,'EACCES');
   const move=f.controller.repository.move.bind(f.controller.repository);
   let release,entered;const gate=new Promise(r=>{release=r;});const waiting=new Promise(r=>{entered=r;});
   const invalidate=f.controller.repository.invalidateControl.bind(f.controller.repository);
   f.controller.repository.invalidateControl=async key=>{entered();await gate;return invalidate(key);};
-  const tick=f.controller.tick(f.transport);await waiting;
+  const tick=assert.rejects(f.controller.tick(f.transport),/missing control/);await waiting;
   await move(keyFor(f.body),'POST_PENDING','already queued submission intent',{intent:{id:'queued',kind:'initial',outcome:'PENDING',sends:0}});
   release();await tick;
   assert.equal(f.record().state,'POST_PENDING');assert.equal(f.record().intent.id,'queued');

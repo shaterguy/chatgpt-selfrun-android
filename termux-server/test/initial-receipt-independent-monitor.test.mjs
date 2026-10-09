@@ -84,7 +84,7 @@ test('exact committed Result retires unknown-receipt observation and cleans the 
   const f=setup(t);await f.ingest();const observer=f.observations.at(-1);
   assert.ok(observer,'monitor attached before receipt confirmation');
   f.result(true);await f.observe({});await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
-  assert.equal(f.record().state,'COMMITTED');assert.equal(f.record().retired,true);
+  assert.equal(f.record(),null);
   assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
   assert.deepEqual(f.closed,['target-new']);assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
   await f.controller.tick(f.transport);assert.equal(f.sends,1);
@@ -95,7 +95,7 @@ test('STOP immediately retires unknown-receipt observer without rereading or res
   assert.ok(observer,'monitor attached before receipt confirmation');
   await f.stop();await f.controller.cleanupTerminalResources();
   assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
-  assert.equal(f.record().state,'STOPPED');assert.deepEqual(f.closed,['target-new']);
+  assert.equal(f.record(),null);assert.deepEqual(f.closed,['target-new']);
   assert.equal(f.readbacks,readbacks);assert.equal(f.sends,1);assert.equal(f.quiesces,0);
 });
 
@@ -125,7 +125,7 @@ test('STOP remains consumed across restart for an unknown initial receipt with a
   await f.stop();await f.controller.cleanupTerminalResources();
   f.controller=f.recreate();await f.controller.tick(f.transport);
   await f.controller.ingest(f.path,stale,f.transport);await f.controller.tick(f.transport);
-  assert.equal(f.record().state,'STOPPED');assert.equal(f.controller.sessions.size,0);
+  assert.equal(f.record(),null);assert.equal(f.controller.sessions.size,0);
   assert.equal(f.observations.length,1);assert.equal(f.resumes,0);assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 

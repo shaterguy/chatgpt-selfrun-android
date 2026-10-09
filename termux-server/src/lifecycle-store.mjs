@@ -44,6 +44,9 @@ export class LifecycleStore {
     this.data.retired??={};this.data.browserCleanup??={};this.data.completionOutbox??={};
     this.tail=Promise.resolve();this.history={legacy:new Map(),audits:new Map()};this.integrityFaults=new Set();
     this.publications=new Map();
+    // Unfinished owned resources may outlive a replacement watch for the same
+    // request. They are process-local cleanup authority, never restart history.
+    this.resourceCleanups=new Map();
   }
   async initialize(prompt) {
     if(this.initPromise)return this.initPromise;
@@ -66,6 +69,12 @@ export class LifecycleStore {
     return p;
   }
   get(key) {return structuredClone(this.data.requests[key]||this.data.retired[key]||null);}
+  cleanupEntry(id) {return this.data.browserCleanup[id]||this.resourceCleanups.get(id);}
+  cleanupEntries() {return [...new Map([...this.resourceCleanups,...Object.entries(this.data.browserCleanup)]).values()];}
+  independentResource(entry) {
+    return !this.data.browserCleanup[entry.target_id]
+      &&JSON.stringify(this.resourceCleanups.get(entry.target_id))===JSON.stringify(entry);
+  }
   records() {return Object.values(this.data.requests).map(r=>structuredClone(r));}
   ownedByOtherIngress(task,ingress) {
     return Object.values(this.data.requests)
@@ -76,6 +85,7 @@ export class LifecycleStore {
   control(task) {const control=this.data.controls[task];return this.controlQuarantined(control)?null:structuredClone(control||null);}
   async save(next) {
     const records=Object.values(next.requests);
+    for(const task of Object.keys(next.controls))if(!records.some(r=>r.task_id===task))delete next.controls[task];
     const active=records.filter(r=>!controlQuarantined(next,next.controls[r.task_id])&&runningTaskControl(next.controls[r.task_id],r)&&r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
     const latest=records.toSorted((a,b)=>b.updated_at-a.updated_at)[0];
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
@@ -109,21 +119,27 @@ export class LifecycleStore {
   async forgetTerminalHistory({discardPendingPublications=false}={}) {
     return this.serial(async()=>{
       const ongoingTasks=new Set(Object.values(this.data.requests).map(r=>r.task_id));
-      const records=[...Object.values(this.data.retired).filter(r=>!r.browser_open_pending&&(discardPendingPublications||!this.data.completionOutbox[r.key])),...Object.values(this.data.controls).filter(c=>!ongoingTasks.has(c.task_id)&&['STOPPED','DONE'].includes(c.state)&&!Object.values(this.data.retired).some(r=>r.task_id===c.task_id)).map(c=>({...c,state:'STOPPED'}))];
+      const cleaningKeys=new Set(Object.values(this.data.browserCleanup).map(entry=>entry.key));
+      const records=[...Object.values(this.data.retired).filter(r=>!r.browser_open_pending&&!cleaningKeys.has(r.key)&&(discardPendingPublications||!this.data.completionOutbox[r.key])),...Object.values(this.data.controls).filter(c=>!ongoingTasks.has(c.task_id)&&['STOPPED','DONE'].includes(c.state)&&!Object.values(this.data.retired).some(r=>r.task_id===c.task_id)).map(c=>({...c,state:'STOPPED'}))];
       if(!records.length)return;
       const clean=discardTerminalHistorySnapshot({...this.store.snapshot(),lifecycle:this.data},records,true);
-      // Do not drop a still-finishing acquisition or projection in this process.
+      // Keep in-flight resource cleanup in memory only; save() still discards
+      // all terminal history from disk.
       for(const [key,r]of Object.entries(this.data.retired))if(!records.includes(r))clean.lifecycle.retired[key]=structuredClone(r);
       await this.store.removeTerminalEvents?.(records);
       await this.save(clean.lifecycle);
       for(const record of records){const key=keyFor(record);if(!this.data.requests[key]&&!this.data.retired[key]){this.history.audits.delete(key);this.history.legacy.delete(key);this.integrityFaults.delete(key);}}
     });
   }
-  async ingest(path,body) {
+  async ingest(path,body,currentControl=null,{resumeFrom=null}={}) {
     return this.serial(async()=>{
       const key=keyFor(body), old=this.data.requests[key];
       const retired=this.data.retired[key];
-      if(retired) {
+      const currentWatch=resumeFrom&&retired&&['STOPPED','CANCELLED'].includes(retired.state)
+        &&runningTaskControl(currentControl,retired)&&currentControl.control_epoch>retired.control_epoch
+        &&canonicalUrl(body.conversation_url)===canonicalUrl(currentControl.conversation_url)&&!!canonicalUrl(body.conversation_url)
+        &&!retired.browser_open_pending;
+      if(retired&&!currentWatch) {
         if(retired.state!=='CANCELLED'||!retired.never_submitted||retired.pre_submit_proof?.schema!==1||body.dispatch_attempt<=retired.dispatch_attempt
           ||['CANCELLED','SUPERSEDED'].includes(body.client_status))return structuredClone(retired);
         const control=this.control(body.task_id);
@@ -165,14 +181,29 @@ export class LifecycleStore {
         await this.save(next);
         return structuredClone(next.retired[key]||r);
       }
-      const next=structuredClone(this.data);let r=initialRecord(path,body);
+      const next=structuredClone(this.data),resources=[];let r=initialRecord(path,body);
+      if(resumeFrom)r.resumed_dispatch_fingerprint=digest(inputFingerprint(resumeFrom));
+      // Commit new request and its current authority together. Discovery must
+      // never persist an orphan control while waiting for a dispatch to arrive.
+      if(currentControl&&keyFor(currentControl)===key) {
+        const prior=next.controls[r.task_id];
+        if(!prior||currentControl.control_epoch>prior.control_epoch)next.controls[r.task_id]=structuredClone(currentControl);
+        else if(currentControl.control_epoch===prior.control_epoch
+          &&(currentControl.state!==prior.state||keyFor(currentControl)!==keyFor(prior)))throw new Error('control epoch conflict');
+      }
       nextRequestGeneration=Math.max(nextRequestGeneration+1,Date.now());r.run_generation=nextRequestGeneration;
       // Remote lifecycle projections cannot grant a new browser entry. Only
       // locally accepted app input/control may establish this pending authority.
       r.browser_entry=null;
       r.browser_cleanup_displacement=null;
       if(retired){delete next.retired[key];r.run_generation=(retired.run_generation||0)+1;r.revision=(retired.revision||0)+1;
-        r.pre_submit_proof=structuredClone(retired.pre_submit_proof);}
+        r.pre_submit_proof=currentWatch?null:structuredClone(retired.pre_submit_proof);
+        if(currentWatch){
+          delete next.completionOutbox[key];
+          for(const entry of Object.values(next.browserCleanup))if(entry.key===key)resources.push(structuredClone(entry));
+          for(const kind of ['browserCleanup','browserCleanupOutcomes','browserCleanupUnresolved'])
+            for(const [id,entry]of Object.entries(next[kind]||{}))if(entry.key===key||entry.entry?.key===key)delete next[kind][id];
+        }}
       if(['CANCELLED','SUPERSEDED'].includes(body.client_status)&&!retiredState(r)){
         // Missing fields on a cold historical import are not proof that input was never sent.
         r.never_submitted=false;
@@ -211,6 +242,7 @@ export class LifecycleStore {
       if(retiredState(r))retireRecord(next,r);
       else next.outbox[key]={revision:r.revision,path,body:projection(r)};
       await this.save(next);
+      for(const entry of resources)this.resourceCleanups.set(entry.target_id,entry);
       return structuredClone(next.retired[key]||r);
     });
   }
@@ -334,6 +366,10 @@ export class LifecycleStore {
   }
   async recordTargetCleanup(entry,outcome) {
     return this.serial(async()=>{
+      if(this.independentResource(entry)) {
+        if(['CLOSED','ABSENT'].includes(outcome.status))this.resourceCleanups.delete(entry.target_id);
+        return true;
+      }
       if(JSON.stringify(this.data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
       const next=structuredClone(this.data);
       const observed={target_id:entry.target_id,status:outcome.status,
@@ -343,7 +379,9 @@ export class LifecycleStore {
       next.browserCleanupOutcomes??={};next.browserCleanupOutcomes[entry.target_id]=observed;
       if(next.retired[entry.key])next.retired[entry.key].browser_cleanup=observed;
       if(['CLOSED','ABSENT'].includes(outcome.status))delete next.browserCleanup[entry.target_id];
-      await this.save(next);return true;
+      await this.save(next);
+      if(['CLOSED','ABSENT'].includes(outcome.status))this.resourceCleanups.delete(entry.target_id);
+      return true;
     });
   }
   async recordStopOutcome(key,epoch,status) {
@@ -378,8 +416,8 @@ export class LifecycleStore {
         // bookkeeping does not decide whether this explicit entry may run.
       }
       // Only current nonterminal requests participate in concurrency decisions.
-      const successorCreation=c.state==='RUNNING'&&!next.requests[keyFor(c)]&&!next.retired[keyFor(c)]
-        &&(!prior||prior.state!=='RUNNING'||keyFor(prior)!==keyFor(c));
+      const successorCreation=!!prior&&c.state==='RUNNING'&&!next.requests[keyFor(c)]&&!next.retired[keyFor(c)]
+        &&(prior.state!=='RUNNING'||keyFor(prior)!==keyFor(c));
       next.controls[c.task_id]=structuredClone(c);
       const retired=next.retired[keyFor(c)];
       if(retired&&['STOPPED','DONE'].includes(c.state)){

@@ -14,3 +14,19 @@ test('abort sends cancellation and cleans pending command without claiming a cli
 test('stale connection and browser session events cannot establish current identity',async t=>{const b=await setup(t),c=await connect(b);t.after(()=>c.abort.abort());assert.equal((await c.post('/event',{connectionId:'stale',event:'hello',extensionId:EXTENSION_ID})).status,409);assert.equal((await c.post('/event',{browserSessionId:'other',event:'hello',extensionId:EXTENSION_ID})).status,409);});
 test('connection replacement fences pending actions and timeout sends cancel',async t=>{const b=await setup(t),c=await connect(b);t.after(()=>c.abort.abort());const p=b.request('input',{targetId:'ext:session-test:7'},{timeoutMs:20});await c.next();const rejection=assert.rejects(p,e=>e.code==='EXTENSION_TIMEOUT');await rejection;assert.equal((await c.next()).kind,'cancel');const q=b.request('snapshot',{});await c.next();const rejected=assert.rejects(q,/replaced/);const d=await connect(b);t.after(()=>d.abort.abort());await rejected;});
 test('bridge is loopback only, validates frame limit and does not expose pairing secret in status',async t=>{const b=await setup(t);assert.equal(b.address.address,'127.0.0.1');assert.ok(!JSON.stringify(b.status()).includes(capability));const r=await fetch(b.url+'/event',{method:'POST',headers:headers(b),body:'x'.repeat(2*1024*1024+1)});assert.equal(r.status,413);});
+
+test('readiness wakes on authenticated hello and releases all waiting resources',async t=>{
+ const b=await setup(t);const waiting=b.waitReady(20000);assert.equal(b.waiters.size,1);
+ const c=await connect(b);t.after(()=>c.abort.abort());await waiting;assert.equal(b.waiters.size,0);
+});
+test('request cancellation and owner loss interrupt readiness without a command',async t=>{
+ const b=await setup(t),abort=new AbortController();
+ const waiting=b.waitReady(20000,{signal:abort.signal});const rejection=assert.rejects(waiting,e=>e.code==='ABORT_ERR');
+ abort.abort();await rejection;assert.equal(b.waiters.size,0);
+ let owned=true;const ownerWait=b.waitReady(20000,{guard:()=>owned});owned=false;
+ await assert.rejects(ownerWait,e=>e.code==='ABORT_ERR');assert.equal(b.waiters.size,0);assert.equal(b.commandCount,0);
+});
+test('bridge shutdown settles readiness waiters immediately',async t=>{
+ const b=await setup(t),waiting=b.waitReady(20000);const rejection=assert.rejects(waiting,e=>e.code==='EXTENSION_DISCONNECTED');
+ await b.close();await rejection;assert.equal(b.waiters.size,0);
+});

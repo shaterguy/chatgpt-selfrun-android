@@ -1,6 +1,7 @@
 import {digest} from '../src/lifecycle.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {EventEmitter} from 'node:events';
 import {ExtensionManager,extensionProcessMatches} from '../src/browser/extension-manager.mjs';
+import {ExtensionBridge} from '../src/browser/extension-bridge.mjs';
 async function fixture(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'srex-test-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const pairing=path.join(root,'pair.json');await fs.writeFile(pairing,JSON.stringify({schema:'selfrun-extension-pair-v1',ownerId:'owner',capability:'fixture-local-capability-123456'}),{mode:0o600});const config={dataDir:root,extensionPairingFile:pairing,extensionBridgePort:0,extensionChromiumCommand:'/test/chrome',browserProfile:path.join(root,'profile'),browserLogFile:path.join(root,'browser.log'),extensionTempDir:path.join(root,'tmp'),browserClientProfile:'native',browserPort:19227};let process=null,controllerReady=true,extraTargets=[],signals=0,launchCount=0;const calls=[];class Bridge extends EventEmitter{url='http://127.0.0.1:17777';pendingCount=0;async start(){}async close(){}status(){return{connected:!!process&&controllerReady};}async waitReady(){if(!process||!controllerReady)throw Error('not running');}async request(op,p,options){calls.push([op,p,options]);if(op==='idleStatus')return{stopping:false,ownedCount:bridge.targets?.length||0,unrelatedCount:0};if(op==='controllerStop'){controllerReady=false;return{stopped:true};}if(op==='createTarget'){const bootstrapUrl=this.url+'/bootstrap/11111111-1111-1111-1111-111111111111';const target={id:`ext:${this.session}:1`,url:p.deferNavigation?bootstrapUrl:p.url,type:'page',bootstrapUrl,pendingUrl:p.deferNavigation&&p.url!=='about:blank'?p.url:null,entryUrl:p.url!=='about:blank'?p.url:null,entryPending:true};this.targets=[target];return target;}if(op==='navigate'){this.targets=this.targets.map(t=>t.id===p.targetId?{...t,url:p.url}:t);return true;}if(op==='listTargets')return this.targets||[];if(op==='closeTarget'){this.targets=[];return{closed:true};}if(op==='recoveryInput')return{url:this.targets?.find(t=>t.id===p.targetId)?.url};if(op==='snapshot')return{url:'https://chatgpt.com/'};return true;}}
 let bridge;const deps={bridgeFactory:options=>{bridge=new Bridge();bridge.session=options.browserSessionId;return bridge;},processIdentity:pid=>process?.pid===pid?process:null,processExists:pid=>process?.pid===pid,bootId:()=> 'boot',profileBusy:()=>false,readCdpMetadata:async(_port,resource)=>resource==='version'?{webSocketDebuggerUrl:'ws://127.0.0.1:19227/devtools/browser/browser1'}:[...(controllerReady?[{id:'cdp1',type:'page',url:bridge.targets?.[0]?.url||'chrome-extension://controller'}]:[]),...extraTargets],signalProcess:()=>{signals++;process=null;},delay:async()=>{},launch:async(_binary,args)=>{launchCount++;controllerReady=true;process={pid:42,startTime:'123',args};return{pid:42,unref(){}};}};const manager=new ExtensionManager(config,deps);t.after(()=>manager.close());return{manager,config,calls,get bridge(){return bridge;},setProcess:p=>process=p,setReady:r=>controllerReady=r,setExtra:r=>extraTargets=r,get signals(){return signals;},get launches(){return launchCount;},fresh:()=>new ExtensionManager(config,deps)};}
 test('extension manager creates and attaches owned targets with named commands only',async t=>{const f=await fixture(t);const target=await f.manager.createTarget();assert.ok(f.manager.isOwnedTarget(target.id));const s=await f.manager.connectTarget(target);assert.equal(s.transport,'extension');assert.equal((await s.run('snapshot')).url,'https://chatgpt.com/');s.close();await assert.rejects(s.run('submit'),e=>e.name==='AbortError');assert.ok(!f.calls.some(x=>/Runtime|Page/.test(x[0])));});
@@ -59,7 +60,45 @@ test('cold cleanup loop converges twice using actual saved ownership journal wit
  const f=await fixture(t);await f.manager.createTarget();await f.manager.close();const fresh=f.fresh();t.after(()=>fresh.close());
  const key=JSON.stringify(['TASK','TURN','REQ']),marker={key,task_id:'TASK',turn_id:'TURN',request_id:'REQ',state:'STOPPED',retired:true,control_epoch:1};
  const entry={key,target_id:'legacy-cdp-id',task_id:'TASK',turn_id:'TURN',request_id:'REQ',control_epoch:1};
- const store={value:{generation:1,lifecycle:{requests:{},controls:{TASK:{task_id:'TASK',turn_id:'TURN',request_id:'REQ',state:'STOPPED',control_epoch:1}},retired:{[key]:marker},browserCleanup:{[entry.target_id]:entry},outbox:{},completionOutbox:{},events:[]}},snapshot(){return structuredClone(this.value)},async patch(p){this.value={...this.value,...structuredClone(p)}}};
+ const store={value:{generation:1,lifecycle:{requests:{},controls:{TASK:{task_id:'TASK',turn_id:'TURN',request_id:'REQ',state:'STOPPED',control_epoch:1}},retired:{[key]:marker},browserCleanup:{[entry.target_id]:entry},outbox:{},completionOutbox:{},events:[]}},snapshot(){return structuredClone(this.value)},async patch(p){this.value={...this.value,...structuredClone(p)}},async update(fn){return this.patch(fn(this.snapshot()))}};
  const repository=new LifecycleStore(store),cleanup=new TerminalBrowserCleanup({repository,chromium:fresh,stateStore:store,available:()=>true,busy:()=>false});
  await cleanup.run();await cleanup.run();assert.deepEqual(repository.data.browserCleanup,{});assert.equal(Object.keys(repository.data.browserCleanupUnresolved).length,1);assert.equal(f.signals,0);assert.equal(f.launches,1);assert.equal(f.calls.filter(c=>c[0]==='closeTarget'||c[0]==='controllerStop').length,0);
+});
+
+test('a surviving controller reconnecting after one second is awaited without browser retirement',async t=>{
+ const f=await androidEmpty(t);f.setReady(false);
+ f.setExtra([{id:'controller',type:'page',url:'chrome-extension://controller'}]);
+ let ready=false;const started=Date.now();
+ const timer=setTimeout(()=>{ready=true;f.setReady(true);},1200);t.after(()=>clearTimeout(timer));
+ f.bridge.waitReady=async(timeout=15000)=>{
+  const deadline=Date.now()+timeout;
+  while(!ready&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+  if(!ready)throw Object.assign(Error('Extension controller unavailable'),{code:'EXTENSION_UNAVAILABLE'});
+ };
+ const target=await f.manager.createTarget();
+ assert.ok(f.manager.isOwnedTarget(target.id));assert.ok(Date.now()-started>=1000);
+ assert.equal(f.signals,0);assert.equal(f.launches,1);
+});
+
+test('the full controller backoff remains pending until hello and does not create a second browser',async t=>{
+ const f=await androidEmpty(t);f.setReady(false);
+ f.bridge.waiters=new Set();f.bridge.connection={ready:false};f.bridge.waitReady=ExtensionBridge.prototype.waitReady;
+ t.mock.timers.enable({apis:['Date','setTimeout','setInterval']});
+ let finished=false;const acquire=f.manager.createTarget().then(x=>{finished=true;return x;});
+ for(let i=0;i<30&&!f.bridge.waiters.size;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.bridge.waiters.size,1);t.mock.timers.tick(9999);await Promise.resolve();assert.equal(finished,false);
+ t.mock.timers.tick(1);f.setReady(true);f.bridge.connection.ready=true;
+ for(const ready of [...f.bridge.waiters])ready();
+ assert.ok(await acquire);assert.equal(f.signals,0);assert.equal(f.launches,1);
+});
+
+for(const reason of ['abort','guard','owner'])test('retained controller readiness stops on '+reason+' without browser commands',async t=>{
+ const f=await androidEmpty(t);f.setReady(false);f.bridge.waiters=new Set();f.bridge.connection={ready:false};f.bridge.waitReady=ExtensionBridge.prototype.waitReady;
+ const abort=new AbortController();let allowed=true;const before=f.calls.length;
+ const work=f.manager.createTarget('about:blank',{signal:abort.signal,guard:()=>allowed});
+ const rejected=assert.rejects(work,e=>e.name==='AbortError');
+ for(let i=0;i<30&&!f.bridge.waiters.size;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.bridge.waiters.size,1);
+ if(reason==='abort')abort.abort();else if(reason==='guard')allowed=false;else f.setProcess(null);
+ await rejected;assert.equal(f.bridge.waiters.size,0);assert.equal(f.calls.length,before);assert.equal(f.signals,0);assert.equal(f.launches,1);
 });

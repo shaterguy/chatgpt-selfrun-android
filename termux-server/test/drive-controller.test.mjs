@@ -33,7 +33,7 @@ test('initial conversation sends exactly one prompt and has no automatic follow-
 test('matching RUNNING Task Control cannot revive an app-cancelled attempt',async()=>{
  const f=fixture();await f.controller.controlDurable(null,f.control);
  f.body.client_status='CANCELLED';await f.ingest();await f.controller.tick(f.transport);
- assert.equal(f.sends,0);assert.equal(f.prepares,0);assert.equal(f.record().state,'CANCELLED');
+ assert.equal(f.sends,0);assert.equal(f.prepares,0);assert.equal(f.record(),null);
 });
 test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
  const f=fixture();
@@ -46,7 +46,7 @@ test('STOPPED Task Control keeps a client-cancelled request terminal',async()=>{
    await f.controller.repository.move(seeded.key,'CANCELLED','test user stop');
  await f.controller.tick(f.transport);
  assert.equal(f.sends,0);
- assert.equal(f.record().state,'STOPPED');assert.equal(f.record().stop_status,'NOT_REQUESTED');
+ assert.equal(f.record(),null);
  assert.deepEqual(f.controller.repository.records(),[]);assert.equal(f.quiesces,0);
 });
 test('initial POST does not wait for unrelated full projection backlog',async()=>{
@@ -59,13 +59,13 @@ test('initial POST does not wait for unrelated full projection backlog',async()=
 test('explicit app pause stop and done controls still fence execution',async()=>{
  for(const state of ['PAUSED','STOPPED','DONE']) {
   const f=fixture();f.control.state=state;await f.existing();
-  assert.equal(f.sends,0);assert.equal(f.record().control_state,state);
+  assert.equal(f.sends,0);if(state==='PAUSED')assert.equal(f.record().control_state,state);else assert.equal(f.record(),null);
   assert.equal(f.resumes,0);
  }
 });
 test('app STOP is authoritative even when Result is committed',async()=>{
  const f=fixture();f.control.state='STOPPED';f.result(true);await f.existing();
- assert.equal(f.record().state,'STOPPED');assert.equal(f.quiesces,0);assert.equal(f.sends,0);
+ assert.equal(f.record(),null);assert.equal(f.quiesces,0);assert.equal(f.sends,0);
 });
 test('UI paused generation does not override an active app control',async()=>{
  const f=fixture();f.probe.paused=true;await f.existing();await f.stall();
@@ -95,7 +95,7 @@ test('STOP while browser attach is pending rejects late attachment',async()=>{
  const f=fixture(),entered=deferred(),gate=deferred();let closed=0;
  f.browser.resume=async()=>{entered.resolve();await gate.promise;return {target:{id:'late'},session:{close(){closed++;}},baseline:f.probe};};
  const opening=f.existing();await entered.promise;await f.stop();gate.resolve();await opening;
- assert.equal(f.record().state,'STOPPED');assert.equal(f.sends,0);assert.equal(closed,1);
+ assert.equal(f.record(),null);assert.equal(f.sends,0);assert.equal(closed,1);
 });
 test('browser completion hint alone cannot finalize the turn',async()=>{
  const f=fixture();f.browser.monitor=async()=>({status:'COMPLETED'});await f.existing();
@@ -279,11 +279,11 @@ test('parallel task STOP and event identity remain isolated',async()=>{
  assert.equal(f.controller.sessions.size,2);
  const stopped={...controls.get('__SELFRUN_CONTROL__SAFE-A.json'),state:'STOPPED',control_epoch:2};
  controls.set('__SELFRUN_CONTROL__SAFE-A.json',stopped);await f.controller.control(null,stopped,f.transport);
- assert.equal(f.controller.repository.get(keyFor(bodies[0][1])).state,'STOPPED');
+ assert.equal(f.controller.repository.get(keyFor(bodies[0][1])),null);
  assert.equal(f.controller.repository.get(keyFor(bodies[1][1])).state,'OBSERVING');
  const observer=f.observations.find(x=>x.baseline.url.endsWith('owned-b'));
  await observer.onActivity({...f.probe,url:'https://chatgpt.com/c/owned-b',responseTextLength:1234});
  const events=f.store.events.filter(x=>x.event==='CONVERSATION_TRANSITION'&&x.details.reason==='RESPONSE_PROGRESS');
  assert.equal(events.at(-1).details.task_id,'SAFE-B');
- assert.equal(f.controller.repository.get(keyFor(bodies[0][1])).state,'STOPPED');
+ assert.equal(f.controller.repository.get(keyFor(bodies[0][1])),null);
 });

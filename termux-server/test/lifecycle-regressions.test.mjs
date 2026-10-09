@@ -45,6 +45,7 @@ function transportWithControl(base = {}, controller = null, controlOverrides = {
   const baseRead = base.read;
   return {
     ...base,
+    list: base.list|| (async()=>[{path:'__SELFRUN_DISPATCH__req-1__A1.json',modTime:'1',size:1}]),
     read: async (path) => {
       if (String(path).startsWith('__SELFRUN_CONTROL__')) {
         const taskId = String(path).slice('__SELFRUN_CONTROL__'.length, -'.json'.length);
@@ -68,6 +69,7 @@ class MemoryStateStore {
     this.events = [];
   }
   snapshot() { return structuredClone(this.value); }
+  async update(fn) {return this.patch(fn(this.snapshot()));}
   async patch(changes) {
     this.value = { ...this.value, ...changes };
     return this.snapshot();

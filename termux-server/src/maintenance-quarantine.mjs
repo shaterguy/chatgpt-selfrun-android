@@ -75,7 +75,9 @@ export function discardTerminalHistorySnapshot(snapshot,extra=[],onlyExtra=false
   for(const kind of ['requests','retired','outbox','completionOutbox','browserCleanup','browserCleanupUnresolved','browserCleanupOutcomes'])
     for(const [key,v] of Object.entries(data[kind]||{}))if(targets.has(key)||ended(v)||ended(v?.body)||ended(v?.entry)||records.some(r=>r.key===key||r.key===v?.key||r.key===v?.entry?.key))delete data[kind][key];
   const ongoingTasks=new Set(Object.values(data.requests||{}).map(r=>r.task_id));
-  for(const [task,c]of Object.entries(data.controls||{}))if(!ongoingTasks.has(task)&&(ended(c)||!onlyExtra&&(['STOPPED','DONE'].includes(c.state)||data.controlQuarantine?.[task])))delete data.controls[task];
+  // A shared control document alone is not current local work. Retain authority
+  // only alongside a request; new dispatch admission supplies its freshly read control.
+  for(const task of Object.keys(data.controls||{}))if(!ongoingTasks.has(task))delete data.controls[task];
   delete data.terminalReplayFences;delete data.controlQuarantine;delete next.maintenanceQuarantine;
   data.events=(data.events||[]).filter(e=>!ended(e));
   if(next.httpIngress){

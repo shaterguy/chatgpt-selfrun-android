@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { SelfRunController, buildPrompt, normalizeSignal } from '../src/controller.mjs';
 import { SignalDispatchTransport } from '../src/signal-transport.mjs';
@@ -71,5 +72,8 @@ test('HTTP successor starts from current authority without a removed historical 
  const f=await quarantinedHttp();await f.http.accept(f.signal(2));assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,1);assert.equal(f.sends,1);await f.controller.quiesceForStandby();
 });
 test('HTTP explicit higher-epoch resume remains accepted after maintenance fence',async()=>{
- const f=await quarantinedHttp();const result=await f.http.accept({signalId:'fresh-resume',type:'RESUME',task_id:f.control.task_id,turn_id:f.control.turn_id,request_id:f.control.request_id,control_epoch:2,conversation_url:f.probe.url});assert.equal(result.accepted,true);assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,2);await f.controller.quiesceForStandby();
+ const f=await quarantinedHttp();
+ const path='__SELFRUN_DISPATCH__HTTP_'+createHash('sha256').update(f.body.request_id).digest('hex')+'.json';
+ await f.http.transport.register('current-context',path,{...f.body,server_ingress:'HTTP',conversation_url:f.probe.url,server_status:'STARTED'},'__SELFRUN_CONTROL__'+f.control.task_id+'.json',f.control);
+ const result=await f.http.accept({signalId:'fresh-resume',type:'RESUME',task_id:f.control.task_id,turn_id:f.control.turn_id,request_id:f.control.request_id,control_epoch:2,conversation_url:f.probe.url});assert.equal(result.accepted,true);assert.equal(f.controller.controlForTask(f.body.task_id).control_epoch,2);assert.equal(f.resumes,1);assert.equal(f.sends,0);await f.controller.quiesceForStandby();
 });

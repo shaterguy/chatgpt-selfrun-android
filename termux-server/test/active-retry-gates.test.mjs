@@ -24,7 +24,7 @@ test('old stopped dispatch is checked against current STOP without retaining its
  const read=f.transport.read;f.transport.read=async name=>{if(name===f.path)reads++;return read(name);};
  const list=f.transport.list;f.transport.list=async()=>(await list()).map(file=>({...file,modTime:'2020-01-01T00:00:00Z'}));
  await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();await settle();
- assert.equal(reads,1);assert.equal(f.record(),null);assert.equal(f.resumes,1);
+ assert.equal(reads,2,'discovery and current-document admission each verify the dispatch');assert.equal(f.record(),null);assert.equal(f.resumes,1);
  await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();await settle();assert.equal(f.record(),null);assert.equal(f.sends,0);
 });
 

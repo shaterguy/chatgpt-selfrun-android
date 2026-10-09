@@ -83,7 +83,7 @@ test('explicit current URL resumes observation; finished Result does not become 
   const f=fixture();await f.existing();await f.stop();assert.equal(f.record(),null);
   await f.resume();assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(f.resumes,2);assert.equal(f.record().state,'OBSERVING');
   await f.controller.quiesceForStandby();
-  const g=await blockedPreparation();await g.controller.repository.move(keyFor(g.body),'COMMITTED','RESULT_COMMITTED_TERMINAL');await g.controller.flush(g.transport);assert.equal(g.record(),null);
+  const g=await blockedPreparation();await g.controller.repository.move(keyFor(g.body),'COMMITTED','RESULT_COMMITTED_TERMINAL');await g.controller.flush(g.transport);await g.controller.cleanupTerminalResources();assert.equal(g.record(),null);
   g.body={...g.body,request_id:g.body.turn_id+':resume:11111111-2222-3333-4444-555555555555',result_document_id:'RESULT-NEW',client_status:'CREATE_REQUESTED'};g.control={...g.control,request_id:g.body.request_id,control_epoch:2};g.browser.prepare=async()=>{g.prepares++;return {target:{id:'fresh'},session:{close(){}},baseline:{}};};await g.ingest();assert.equal(g.prepares,2);assert.equal(g.sends,0);
 });
 test('historical BLOCKED records with absent or even explicit empty fields do not gain fresh proof',async()=>{

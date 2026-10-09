@@ -7,31 +7,46 @@ const consumed=r=>['COMMITTED','COMPLETED'].includes(r?.state);
 export class TerminalBrowserCleanup {
   constructor({repository,chromium,stateStore,available,busy}) {
     Object.assign(this,{repository,chromium,stateStore,available,busy});
-    this.running=null;this.requested=false;this.nextAttempt=0;
+    this.running=null;this.requested=false;this.nextAttempt=0;this.controls=new Map();
     chromium?.setLifecycleGuards?.({
       canCloseTarget:(id,target)=>{
-        const entry=this.repository.data.browserCleanup[id];
+        const entry=this.repository.cleanupEntry(id);
         return !!entry&&this.canClose(entry,target);
       },
       canRelease:()=>this.canRelease(),
     });
   }
+  currentControls() {
+    for(const task of this.controls.keys())if(!this.repository.cleanupEntries().some(entry=>entry.task_id===task))this.controls.delete(task);
+    const current=new Map(Object.entries(this.repository.data.controls));
+    for(const [task,control]of this.controls)if(!current.has(task)||control.control_epoch>=current.get(task).control_epoch)current.set(task,control);
+    return current;
+  }
+  observeControl(control) {
+    this.currentControls();
+    if(!this.repository.cleanupEntries().some(entry=>entry.task_id===control.task_id))return;
+    const prior=this.controls.get(control.task_id);
+    if(!prior||control.control_epoch>=prior.control_epoch)this.controls.set(control.task_id,structuredClone(control));
+  }
   canClose(entry,target=null) {
     if(!this.available())return false;
     if(target&&entry.conversation_digest&&digest(canonicalUrl(target.url))!==entry.conversation_digest
       &&!(target.id===entry.target_id&&this.chromium?.isOwnedBootstrapTarget?.(target,entry.conversation_digest)===true))return false;
-    const data=this.repository.data,marker=data.retired[entry.key],candidate=data.controls[entry.task_id],control=this.repository.controlQuarantined(candidate)?null:candidate;
+    const data=this.repository.data,marker=data.retired[entry.key],candidate=this.currentControls().get(entry.task_id),control=this.repository.controlQuarantined(candidate)?null:candidate;
     const source=data.requests[entry.key],d=source?.browser_cleanup_displacement;
     const displaced=entry.kind==='DISPLACED'&&source?.state==='PAUSED'&&source.target_owned===true
       &&source.target_id===entry.target_id&&source.browser_generation===entry.browser_generation
       &&d?.target_id===entry.target_id&&d.browser_generation===entry.browser_generation&&d.run_generation===entry.run_generation
       &&d.control_epoch===entry.control_epoch&&d.successor_key===entry.successor_key
       &&control?.control_epoch>=entry.control_epoch&&keyFor(control||{})!==entry.key&&entry.key!==entry.successor_key;
-    if((!retiredState(marker)&&!displaced)||JSON.stringify(data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
+    const resource=this.repository.independentResource(entry);
+    if((!retiredState(marker)&&!displaced&&!resource)||JSON.stringify(this.repository.cleanupEntry(entry.target_id))!==JSON.stringify(entry))return false;
     const conflicts=body=>body.target_id===entry.target_id||body.lifecycle_record?.target_id===entry.target_id
       ||(entry.conversation_digest&&body.conversation_url
         &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest);
-    const independentCleanup=consumed(marker)||displaced;
+    // A known old conversation can be disposed independently of the new watch.
+    // A preparation target without a conversation retains the newer-control fence.
+    const independentCleanup=consumed(marker)||displaced||resource&&!!entry.conversation_digest;
     // A normal same-request app retry refresh is not authority for a new target.
     // Only a locally proven unsent cancellation may finish its owned cleanup.
     const cancelledRefresh=body=>marker?.state==='CANCELLED'&&marker.never_submitted===true
@@ -39,7 +54,7 @@ export class TerminalBrowserCleanup {
       &&body?.state==='RUNNING'&&keyFor(body)===entry.key&&!body.conversation_url;
     if(independentCleanup) {
       // A successor owns its own resources, not every target belonging to this task.
-      for(const c of Object.values(data.controls))if(!this.repository.controlQuarantined(c)&&!['STOPPED','DONE'].includes(c.state)
+      for(const c of this.currentControls().values())if(!this.repository.controlQuarantined(c)&&!['STOPPED','DONE'].includes(c.state)
         &&!consumed(this.repository.get(keyFor(c)))&&conflicts(c))return false;
     } else if(control&&control.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(control.state)&&!cancelledRefresh(control))return false;
     // HTTP acceptance is durable before the lifecycle control catches up.
@@ -75,7 +90,7 @@ export class TerminalBrowserCleanup {
       ||body.lifecycle_record?.target_id===entry.target_id||(entry.conversation_digest&&body.conversation_url
         &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest);
     if(this.repository.records().some(r=>!retiredState(r)&&conflicts(r)))return false;
-    for(const body of Object.values(data.controls))if(!this.repository.controlQuarantined(body)&&body.state==='RUNNING'&&conflicts(body)
+    for(const body of this.currentControls().values())if(!this.repository.controlQuarantined(body)&&body.state==='RUNNING'&&conflicts(body)
       &&(!consumed(marker)||keyFor(body)!==entry.key)&&Number(body.control_epoch)>Number(marker.control_epoch))return false;
     for(const body of Object.values(this.stateStore.snapshot().httpIngress?.files||{})) {
       if(!conflicts(body))continue;
@@ -88,8 +103,8 @@ export class TerminalBrowserCleanup {
     return JSON.stringify(this.chromium?.cleanupDisposition?.(entry.target_id))===JSON.stringify(proof);
   }
   canRelease() {
-    if(!this.available()||this.busy()||this.repository.records().some(r=>!retiredState(r)))return false;
-    for(const c of Object.values(this.repository.data.controls)) {
+    if(!this.available()||this.busy()||this.repository.resourceCleanups.size||this.repository.records().some(r=>!retiredState(r)))return false;
+    for(const c of this.currentControls().values()) {
       if(this.repository.controlQuarantined(c))continue;
       const marker=this.repository.get(keyFor(c));
       if(!['STOPPED','DONE'].includes(c.state)&&(!retiredState(marker)||(!consumed(marker)&&c.control_epoch>marker.control_epoch)))return false;
@@ -112,7 +127,7 @@ export class TerminalBrowserCleanup {
       do {
         this.requested=false;
         let quarantined=false,resourceConfirmed=false;
-        for(const entry of Object.values(this.repository.data.browserCleanup)) {
+        for(const entry of this.repository.cleanupEntries()) {
           let disposition;
           try{disposition=this.chromium?.inspectCleanupDisposition
             ?await this.chromium.inspectCleanupDisposition(entry.target_id)
@@ -139,7 +154,7 @@ export class TerminalBrowserCleanup {
       } while(this.requested);
     })().catch(error=>{
       console.error(JSON.stringify({event:'TERMINAL_BROWSER_CLEANUP_ERROR',error:String(error?.message||error).slice(0,300)}));
-    }).finally(()=>{this.running=null;this.nextAttempt=Date.now()+60000;});
+    }).finally(()=>{this.currentControls();this.running=null;this.nextAttempt=Date.now()+60000;});
     return this.running;
   }
 }

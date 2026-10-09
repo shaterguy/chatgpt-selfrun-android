@@ -45,7 +45,19 @@ export class ExtensionBridge extends EventEmitter {
     else return this.#json(res,400,{error:'unsupported_event'});
     this.#json(res,200,{ok:true});
   }
-  async waitReady(timeoutMs=15000){if(this.connection?.ready)return;return new Promise((resolve,reject)=>{const done=()=>{clearTimeout(timer);this.waiters.delete(done);resolve();};const timer=setTimeout(()=>{this.waiters.delete(done);reject(error('Extension controller unavailable','EXTENSION_UNAVAILABLE'));},timeoutMs);this.waiters.add(done);});}
+  async waitReady(timeoutMs=15000,{signal,guard=()=>true}={}){
+    const permitted=()=>{try{return !signal?.aborted&&guard()===true;}catch{return false;}};
+    const cancelled=()=>Object.assign(error('Extension readiness cancelled','ABORT_ERR'),{name:'AbortError'});
+    if(!permitted())throw cancelled();if(this.connection?.ready)return;
+    return new Promise((resolve,reject)=>{
+      const done=reason=>{clearTimeout(timer);clearInterval(check);signal?.removeEventListener('abort',abort);this.waiters.delete(done);reason?reject(reason):permitted()?resolve():reject(cancelled());};
+      const abort=()=>done(cancelled());
+      const timer=setTimeout(()=>done(error('Extension controller unavailable','EXTENSION_UNAVAILABLE')),timeoutMs);
+      const check=setInterval(()=>{if(!permitted())abort();},50);
+      signal?.addEventListener('abort',abort,{once:true});this.waiters.add(done);
+      if(!permitted())abort();else if(this.connection?.ready)done();
+    });
+  }
   async request(operation,payload={},options={}){
     if(!EXTENSION_OPERATIONS.has(operation))throw error('Unsupported named extension operation','EXTENSION_UNSUPPORTED');
     const {timeoutMs=20000,signal}=options;if(signal?.aborted)throw Object.assign(error('Extension command aborted','ABORT_ERR'),{name:'AbortError'});
@@ -60,5 +72,5 @@ export class ExtensionBridge extends EventEmitter {
       this.commandCount+=1;c.res.write(frame);
     });
   }
-  async close(){if(this.connection)this.#drop(this.connection,'Extension bridge stopped');for(const p of [...this.pending.values()])p.finish(error('Extension bridge stopped','EXTENSION_DISCONNECTED',p.operation==='submit'));if(this.server){const server=this.server;this.server=null;server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}
+  async close(){for(const done of [...this.waiters])done(error('Extension bridge stopped','EXTENSION_DISCONNECTED'));if(this.connection)this.#drop(this.connection,'Extension bridge stopped');for(const p of [...this.pending.values()])p.finish(error('Extension bridge stopped','EXTENSION_DISCONNECTED',p.operation==='submit'));if(this.server){const server=this.server;this.server=null;server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}
 }

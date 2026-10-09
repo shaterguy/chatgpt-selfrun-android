@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { initialRecord, keyFor } from '../src/lifecycle.mjs';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
 import { cleanupStoppedSnapshot } from '../src/retired-requests.mjs';
 const options=(f,overrides={})=>({allStopped:true,cutoffMs:1000,expectedControlEpochs:{[f.body.task_id]:2},...overrides});
 async function stopped(){
- const f=fixture();await f.existing();await f.stop();const s=f.store.snapshot();
- const marker=s.lifecycle.retired[JSON.stringify([f.body.task_id,f.body.turn_id,f.body.request_id])];
+ const f=fixture();f.control={...f.control,state:'STOPPED',control_epoch:2,updated_at_ms:500};
+ const marker={...initialRecord(f.path,f.body,500),state:'STOPPED',control_state:'STOPPED',control_epoch:2,retired:true};
+ const s={generation:1,status:'IDLE',activeCount:0,activeDispatches:[],lifecycle:{requests:{},retired:{},controls:{[f.body.task_id]:f.control},events:[],outbox:{}}};
  // Restore an old-format stopped record with server-owned churn after the approval cutoff.
  s.lifecycle.requests[marker.key]={...marker,body:{...f.body,created_at_ms:500},updated_at:5000,conversation_url:f.probe.url,intent:{prompt:'private input'},retry_at:9999};
  s.lifecycle.retired={};s.lifecycle.events=[{task_id:f.body.task_id,turn_id:f.body.turn_id,request_id:f.body.request_id}];

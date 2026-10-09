@@ -265,5 +265,9 @@ test('STOP finishes without waiting for receipt I/O and successor control remain
   f.control={...f.control,state:'RUNNING',control_epoch:3,turn_id:'SAFE-TEST:turn:2',request_id:'successor'};
   await f.controller.controlDurable(null,f.control,f.transport);
   assert.equal(reads,0);assert.equal(f.quiesces,0);
-  assert.equal(f.record(),null);assert.equal(f.controller.repository.records().length,0);assert.equal(f.controller.controlForTask(f.control.task_id).request_id,'successor');
+  assert.equal(f.record(),null);assert.equal(f.controller.repository.records().length,0);assert.equal(f.controller.controlForTask(f.control.task_id),null);
+  f.body={...f.body,turn_id:f.control.turn_id,request_id:f.control.request_id,result_document_id:'RESULT-2',server_control_epoch:3};
+  f.path='__SELFRUN_DISPATCH__successor__A1.json';f.result(false,'RESULT-2',2);f.mode='confirmed';
+  await f.ingest();assert.equal(f.controller.controlForTask(f.control.task_id).request_id,'successor');
+  assert.equal(f.sends,2);await f.controller.quiesceForStandby();
 });

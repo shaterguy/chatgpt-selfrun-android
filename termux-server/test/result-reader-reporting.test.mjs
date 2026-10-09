@@ -47,7 +47,7 @@ test('terminal transition clears current error while prior record stays immutabl
   const after=transition(before,'COMMITTED','RESULT_COMMITTED_TERMINAL');
   assert.equal(after.error,null);assert.equal(projection(after).server_error_class,null);assert.equal(before.error.code,'OLD');
 });
-test('cleanup outcome persists separately from lifecycle success with target and time',async()=>{
+test('in-process cleanup outcome records target and time without durable terminal history',async()=>{
   const f=fixture();await f.existing();const repo=f.controller.repository;
   await repo.move(keyFor(f.body),'COMMITTED','RESULT_COMMITTED_TERMINAL',{target_owned:true,target_id:'owned'});
   const entry=structuredClone(repo.data.browserCleanup.owned);
@@ -57,7 +57,7 @@ test('cleanup outcome persists separately from lifecycle success with target and
   await repo.recordTargetCleanup(entry,{status:'CLOSED',observed_at_ms:101,reason:'TARGET_ABSENT_AFTER_CLOSE'});
   assert.equal(repo.data.browserCleanup.owned,undefined);
   assert.deepEqual(repo.get(entry.key).browser_cleanup,{target_id:'owned',status:'CLOSED',observed_at_ms:101,reason:'TARGET_ABSENT_AFTER_CLOSE'});
-  f.controller=f.recreate();assert.equal(f.record().browser_cleanup.observed_at_ms,101);
+  f.controller=f.recreate();assert.equal(f.record(),null);
 });
 test('stale cleanup outcome cannot overwrite replaced queue ownership',async()=>{
   const f=fixture();await f.existing();const repo=f.controller.repository;
@@ -67,16 +67,16 @@ test('stale cleanup outcome cannot overwrite replaced queue ownership',async()=>
   assert.ok(repo.data.browserCleanup.owned);assert.equal(repo.get(entry.key).browser_cleanup,undefined);
 });
 
-test('terminal success retains pending error audit events for publication',async()=>{
+test('terminal success discards pending historical error audit publication',async()=>{
   const f=fixture();await f.existing();const repo=f.controller.repository,key=keyFor(f.body);
   await repo.move(key,'OBSERVING','PENDING_DIAGNOSTIC',{error:{code:'RESULT_JSON_INVALID',message:'Result JSON could not be parsed; retry pending'}});
   await repo.move(key,'COMMITTED','RESULT_COMMITTED_TERMINAL');await repo.flush(f.transport);
-  assert.ok(f.store.events.some(row=>row.details.reason==='PENDING_DIAGNOSTIC'&&row.details.error_class==='RESULT_JSON_INVALID'));
+  assert.equal(f.store.events.some(row=>row.details.reason==='PENDING_DIAGNOSTIC'),false);assert.deepEqual(repo.data.events,[]);
 });
-test('bounded recovery is recorded separately from success and clears prior parse warning',async()=>{
+test('bounded Result recovery clears prior parse warning without terminal audit history',async()=>{
   const f=fixture();await f.existing();f.result(true);f.docs.set('RESULT-1',f.docs.get('RESULT-1')+'}');
   await f.observe({});await f.controller.flush(f.transport);
-  assert.equal(f.record().state,'COMMITTED');assert.equal(f.record().result_recovery,'SINGLE_TRAILING_BRACE');
+  assert.equal(f.record(),null);
   assert.equal(f.rows.get(f.path).server_error,'');assert.equal(f.rows.get(f.path).server_error_class,null);
-  assert.ok(f.store.events.some(row=>row.details.result_recovery==='SINGLE_TRAILING_BRACE'));
+  assert.deepEqual(f.store.snapshot().lifecycle.events,[]);
 });

@@ -10,8 +10,11 @@ export class DriveDispatchWatcher {
     this.canDispatch=canDispatch||(()=>true);this.running=false;this.scanning=false;this.ticking=false;this.stopped=false;
     this.seen=new Map();this.inputs=new Map();this.deferred=new Map();
     this.files=new Map();this.jobs=new Map();this.controls=new Map();this.reads=new Map();this.readFailures=new Map();this.priority=new Map();this.failures=new Map();
-    this.lanes=new Set();this.listed=false;
+    this.lanes=new Set();this.listed=false;this.completedScans=0;
   }
+  status(){return {dispatchEnabled:!this.stopped&&this.canDispatch(),completedScans:this.completedScans,
+    scanning:this.scanning,pendingFiles:this.jobs.size,pendingReads:this.reads.size,
+    deferredFiles:this.deferred.size,failedFiles:this.failures.size};}
   async start() {
     if(this.running)return;this.running=true;this.stopped=false;
     while(this.running) {
@@ -88,6 +91,7 @@ export class DriveDispatchWatcher {
       this.files=new Map(files.map(file=>[file.path,file]));this.listed=true;
       for(const map of [this.deferred,this.priority,this.failures])for(const path of map.keys())if(!this.files.has(path))map.delete(path);
       this.#drain();
+      this.completedScans++;
     } finally {this.scanning=false;}
     // Explicit one-shot callers may wait for intake; production polling never does.
     if(drain)while(this.jobs.size)await Promise.all([...this.jobs.values()]);
@@ -118,6 +122,7 @@ export class DriveDispatchWatcher {
       if(!current())return;
       await (this.controller.controlDurable?.(file.path,body,this.transport)??this.controller.control(file.path,body,this.transport));
       if(!unlisted&&current())this.seen.set(file.path,fp);
+      return current()?body:null;
     })().catch(error=>{
       if(error.watchRetryAt>Date.now())throw error;
       throw this.#pace(file.path,fp,error,failed);
@@ -143,18 +148,21 @@ export class DriveDispatchWatcher {
     const controlListedUnseen=controlFile&&this.seen.get(controlPath)!==controlFp;
     const identityMismatch=!control||control.turn_id!==body.turn_id||control.request_id!==body.request_id;
     if(controlListedUnseen) {
-      await this.#control(controlFile);
+      const observed=await this.#control(controlFile);
       // A newer control listing superseded the in-flight body; retry from that listing.
       if(this.seen.get(controlPath)!==fingerprint(this.files.get(controlPath)))return;
-      control=this.controller.controlForTask(body.task_id);
+      control=this.controller.controlForTask(body.task_id)||observed;
     } else if(identityMismatch&&!controlFile) {
-      try {await this.#control({path:controlPath},true);} catch(error) {if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;}
+      try {control=await this.#control({path:controlPath},true);} catch(error) {if(error?.code!=='DRIVE_FILE_NOT_FOUND')throw error;}
       if(!this.#current(file)||this.files.has(controlPath))return;
-      control=this.controller.controlForTask(body.task_id);
+      control=this.controller.controlForTask(body.task_id)||control;
+    } else if(!control&&controlFile) {
+      // A seen standalone control has no durable entry; read it for this request.
+      control=await this.#read(controlPath);
     }
     if(!this.#current(file))return;
     if(!control||control.state==='UNKNOWN'||control.turn_id!==body.turn_id||control.request_id!==body.request_id) {
-      this.deferred.set(file.path,{fp,taskId:body.task_id,controlPath,controlFp,controlToken:controlToken(control)});return;
+      this.deferred.set(file.path,{fp,taskId:body.task_id,controlPath,controlFp,controlToken:controlToken(this.controller.controlForTask(body.task_id))});return;
     }
     this.deferred.delete(file.path);
     const input=inputFingerprint(body);

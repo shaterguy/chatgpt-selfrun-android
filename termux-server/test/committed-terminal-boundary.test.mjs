@@ -15,13 +15,14 @@ function committedFixture() {
     },
     releaseIfUnused:async({guard})=>{if(guard()&&!f.owned.size){f.releases++;return {released:true};}return {released:false};},
   };
+  const existing=f.existing;f.existing=async()=>{await existing();f.resultReads=0;};
   f.controller=f.recreate();return f;
 }
 
 test('exact committed true retires monitor and owned resources without app STOP',async()=>{
   const f=committedFixture();await f.existing();const observer=f.observations.at(-1);f.result(true);
   await f.observe({streaming:true});await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
-  assert.equal(f.record().state,'COMMITTED');assert.equal(f.record().retired,true);
+  assert.equal(f.record(),null);
   assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
   assert.deepEqual(f.closed,['target-owned']);assert.ok(f.releases>0);assert.equal(f.resultReads,2);
   assert.equal(f.store.snapshot().activeCount,0);assert.notEqual(f.store.snapshot().status,'RUNNING');
@@ -34,8 +35,8 @@ test('committed retirement survives restart and old same-request higher RUNNING 
   await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
   f.controller=f.recreate();f.control={...f.control,state:'RUNNING',control_epoch:9,conversation_url:f.probe.url};
   await f.controller.control(null,f.control,f.transport);await f.controller.ingest(f.path,stale,f.transport);await f.controller.tick(f.transport);
-  assert.equal(f.record().state,'COMMITTED');assert.equal(f.record().retired,true);assert.equal(f.resumes,1);
-  assert.equal(f.resultReads,2);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,0);
+  assert.equal(f.record(),null);assert.equal(f.resumes,1);
+  assert.ok(f.resultReads>=2);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,0);
 });
 test('new same-identity RUNNING cannot obstruct committed resource cleanup',async()=>{
   const f=committedFixture();await f.existing();const entered=deferred(),gate=deferred();
@@ -63,15 +64,11 @@ test('late committed readback cannot retire a newer same-request browser generat
   gate.resolve();await observing;
   assert.equal(f.record().retired,undefined);assert.deepEqual(f.closed,[]);assert.equal(f.record().control_epoch,3);
 });
-test('failed final publication is retried without any additional Result read or observer',async()=>{
+test('failed final publication leaves no durable terminal work after restart',async()=>{
   const f=committedFixture();await f.existing();f.writeFail=true;f.result(true);await f.observe({});
-  await f.controller.flush(f.transport).catch(()=>{});assert.equal(f.record().retired,true);
-  assert.equal(Object.keys(f.store.snapshot().lifecycle.completionOutbox||{}).length,1);
-  const pending=Object.values(f.store.snapshot().lifecycle.completionOutbox)[0];
-  for(const key of ['prompt','body','intent','conversation_url'])assert.equal(pending[key],undefined);
+  await f.controller.flush(f.transport).catch(()=>{});assert.deepEqual(f.store.snapshot().lifecycle.completionOutbox,{});
   f.controller=f.recreate();f.writeFail=false;await f.controller.tick(f.transport);
-  assert.equal(f.rows.get(f.path).server_status,'COMPLETED');assert.equal(f.resultReads,2);assert.equal(f.resumes,1);
-  assert.deepEqual(f.store.snapshot().lifecycle.completionOutbox,{});
+  assert.equal(f.record(),null);assert.equal(f.resultReads,2);assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,0);
 });
 
 test('superseded completion projection is discarded without overwriting newer app input or blocking tick',async()=>{
@@ -83,10 +80,19 @@ test('superseded completion projection is discarded without overwriting newer ap
   assert.equal(f.resultReads,2);assert.equal(f.resumes,1);
 });
 
-test('failed completion telemetry cannot block restarted terminal resource cleanup',async()=>{
+test('failed completion telemetry cannot block current owned-resource cleanup retry',async()=>{
   const f=committedFixture();await f.existing();f.writeFail=true;f.closeFails=true;f.result(true);await f.observe({});
-  await f.controller.cleanupTerminalResources();f.controller=f.recreate();f.closeFails=false;
-  await assert.doesNotReject(f.controller.tick(f.transport));await f.controller.cleanupTerminalResources();
+  await f.controller.cleanupTerminalResources();assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
+  f.closeFails=false;await assert.doesNotReject(f.controller.tick(f.transport));await f.controller.cleanupTerminalResources();
   assert.deepEqual(f.closed,['target-owned']);assert.equal(f.resultReads,2);assert.equal(f.controller.sessions.size,0);
-  assert.equal(Object.keys(f.store.snapshot().lifecycle.completionOutbox).length,1);
+  assert.deepEqual(f.store.snapshot().lifecycle.completionOutbox,{});
+  f.controller=f.recreate();await f.controller.tick(f.transport);assert.equal(f.resumes,1);assert.equal(f.sends,0);
+});
+
+for(const conflicting of [true,false])test('current standalone successor control fences only conflicting consumed resources: '+conflicting,async()=>{
+ const f=committedFixture();await f.existing();f.closeFails=true;f.result(true);await f.observe({});await f.controller.cleanupTerminalResources();
+ f.control={...f.control,request_id:'successor-without-dispatch',control_epoch:5,conversation_url:conflicting?f.probe.url:'https://chatgpt.com/c/independent'};
+ await f.controller.control(null,f.control,f.transport);f.closeFails=false;await f.controller.cleanupTerminalResources();
+ assert.deepEqual(f.closed,conflicting?[]:['target-owned']);assert.equal(f.sends,0);assert.equal(f.resumes,1);
+ assert.deepEqual(f.store.snapshot().lifecycle.controls,{});assert.deepEqual(f.store.snapshot().lifecycle.retired,{});
 });

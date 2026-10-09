@@ -831,7 +831,7 @@ export class ChatGptBrowser {
       if(targets.some(target=>target.id===previousTargetId)&&!await this.chromium.closeTarget(previousTargetId,{guard}))
         throw Object.assign(new Error('Previous owned entry target is not safely disposed'),{code:'PAGE_UNAVAILABLE'});
     }
-    const target = await this.chromium.createTarget('about:blank');
+    const target = await this.chromium.createTarget('about:blank',{signal,guard});
     let session;
     try {
       await onTarget?.(target);
@@ -872,7 +872,7 @@ export class ChatGptBrowser {
       throw Object.assign(new Error('Previous owned entry target is not safely disposed; no replacement navigation allowed'),{code:'PAGE_UNAVAILABLE'});
     if(!existing&&automaticRecovery&&this.chromium.recoveryNavigationDisabled)
       throw Object.assign(new Error('Existing conversation page unavailable; automatic navigation is disabled'),{code:'PAGE_UNAVAILABLE'});
-    const target = existing || await this.chromium.createTarget(conversationUrl);
+    const target = existing || await this.chromium.createTarget(conversationUrl,{signal,guard});
     let session;
     try {
       await onTarget?.(target);

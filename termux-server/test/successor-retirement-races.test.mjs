@@ -25,6 +25,7 @@ function successorFixture() {
     await args.onTarget?.({id});
     return {target:{id},session:{id,close(){f.sessionCloses.push(id);}},baseline:{...f.probe,url:args.conversationUrl}};
   };
+  const existing=f.existing;f.existing=async()=>{await existing();f.resultReads=[];};
   f.controller=f.recreate();f.controller.config.stallAfterMs=600000;
   f.firstKey=keyFor(f.body);
   f.nextBody={...f.body,turn_id:'SAFE-TEST:turn:2',request_id:'SAFE-TEST:turn:2-request',result_document_id:'RESULT-2',
@@ -54,15 +55,14 @@ test('T1 Result commits before T2 control: old retirement still happens after it
   await oldObserver.onActivity({...f.probe});
   await f.controller.tick(f.transport);await f.controller.cleanupTerminalResources();await idle();
   const old=f.controller.repository.get(f.firstKey),snapshot=f.store.snapshot().lifecycle;
-  t.diagnostic(JSON.stringify({oldState:old.state,oldResultState:old.result_state,oldObserverAborted:oldObserver.signal.aborted,
+  t.diagnostic(JSON.stringify({oldState:old?.state||null,oldResultState:old?.result_state||null,oldObserverAborted:oldObserver.signal.aborted,
     oldProjectedState:f.rows.get(f.path).lifecycle_state,oldProjectedStatus:f.rows.get(f.path).server_status,
     resultReads:f.resultReads,cleanupQueued:Object.keys(snapshot.browserCleanup),closeCalls:f.closeCalls,closed:f.closed,
     successorState:f.controller.repository.get(f.nextKey).state,successorObserverAborted:f.nextObserver.signal.aborted}));
   assert.equal(oldObserver.signal.aborted,true);
   assert.equal(f.sends,0,'No prompt or recovery may be sent by retired T1');
   assert.equal(f.resumes,2,'T1 must not be reopened');
-  assert.equal(old.state,'COMMITTED','exact T1 committed Result must retire independently of T2 control');
-  assert.equal(old.retired,true);
+  assert.equal(old,null,'exact T1 committed Result must leave no old executable request');
   assert.deepEqual(f.closed,['target-t1']);
   assert.equal(f.nextObserver.signal.aborted,false);
 });
@@ -78,7 +78,7 @@ for(const ingress of ['applied-control','http-control','http-dispatch'])test(
     if(ingress==='applied-control')await f.acceptSuccessor();
     else await f.store.patch({httpIngress:{files:{next:ingress==='http-control'?f.nextControl:f.nextBody},signals:{}}});
     gate.resolve();await f.controller.cleanupTerminalResources();await idle();
-    t.diagnostic(JSON.stringify({ingress,oldState:f.controller.repository.get(f.firstKey).state,
+    t.diagnostic(JSON.stringify({ingress,oldState:f.controller.repository.get(f.firstKey)?.state||null,
       queued:Object.keys(f.controller.repository.data.browserCleanup),closeCalls:f.closeCalls,closed:f.closed,
       canClose:f.controller.repository.data.browserCleanup['target-t1']?f.controller.browserCleanup.canClose(f.controller.repository.data.browserCleanup['target-t1']):null}));
     assert.deepEqual(f.closed,['target-t1'],'T2 on another owned target cannot fence consumed T1 cleanup');
@@ -107,7 +107,7 @@ test('displaced exact-Result read cannot block accepting or observing T2',async 
   assert.equal(reading,true,'displaced Result reconciliation must start without awaiting T2');
   assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');
   gate.resolve();await settleRetirement(f);await f.controller.cleanupTerminalResources();
-  assert.equal(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.deepEqual(f.closed,['target-t1']);
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.deepEqual(f.closed,['target-t1']);
   assert.equal(f.resumeUrls.filter(url=>url===f.probe.url).length,1);assert.equal(f.sends,0);
 });
 
@@ -134,7 +134,7 @@ for(const outcome of ['false','unavailable','wrong-identity','unstable'])test(
     assert.equal(f.resumes,3,'only T2 may reattach after restart');
     f.transport.readGoogleDocText=read;f.result(true);now=pending.result_retirement_retry_at+1;
     await f.controller.tick(f.transport);await settleRetirement(f);await f.controller.cleanupTerminalResources();
-    assert.equal(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.deepEqual(f.closed,['target-t1']);
+    assert.equal(f.controller.repository.get(f.firstKey),null);assert.deepEqual(f.closed,['target-t1']);
     assert.equal(f.sends,0);assert.equal(f.resumes,3);
   },
 );
@@ -156,7 +156,7 @@ for(const change of ['result-document','new-generation','dispatch-attempt','brow
     await f.controller.control(null,f.control,f.transport);
   }
   gate.resolve();await settleRetirement(f);await f.controller.cleanupTerminalResources();
-  assert.notEqual(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.deepEqual(f.closed,['target-t1']);
+  assert.notEqual(f.controller.repository.get(f.firstKey)?.state,'COMMITTED');assert.deepEqual(f.closed,['target-t1']);
   assert.equal(f.resumeUrls.filter(url=>url===f.probe.url).length,1);assert.equal(f.sends,0);
 });
 
@@ -198,7 +198,7 @@ test('failed telemetry cannot starve displaced Result retirement after restart',
   await f.controller.quiesceForStandby();f.controller=f.recreate();f.controller.config.stallAfterMs=600000;
   now=old.result_retirement_retry_at+1;f.result(true);f.writeFail=true;
   await f.controller.tick(f.transport).catch(()=>{});await settleRetirement(f);await f.controller.cleanupTerminalResources();
-  assert.equal(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.deepEqual(f.closed,['target-t1']);
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.deepEqual(f.closed,['target-t1']);
   assert.equal(f.resumeUrls.filter(url=>url===f.probe.url).length,1);assert.equal(f.sends,0);
 });
 
@@ -218,6 +218,6 @@ for(const boundary of ['availability','standby','STOP'])test('pending displaced 
   else if(boundary==='standby')await f.controller.quiesceForStandby();
   else {f.control={...f.nextControl,state:'STOPPED',control_epoch:3};await f.controller.control(null,f.control,f.transport);}
   gate.resolve();await settleRetirement(f);await f.controller.cleanupTerminalResources();
-  assert.notEqual(f.controller.repository.get(f.firstKey).state,'COMMITTED');assert.equal(f.sends,0);
+  assert.notEqual(f.controller.repository.get(f.firstKey)?.state,'COMMITTED');assert.equal(f.sends,0);
   if(boundary!=='STOP')assert.deepEqual(f.closed,['target-t1'],'already completed resource disposal is independent of a later proof boundary');
 });

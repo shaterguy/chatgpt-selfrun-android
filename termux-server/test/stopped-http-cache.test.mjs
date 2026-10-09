@@ -121,7 +121,7 @@ test('restart retries persisted STOP cache retirement without repeating no-op wr
   const again=new StateStore(f.config);await again.init();assert.deepEqual(again.snapshot().httpIngress,{files:{},signals:{'old-start':true,'old-stop':true}});
 });
 
-test('COMMITTED and COMPLETED cache survives STOP purge for final completion publication',async t=>{
+test('legacy completion cache is removed after final publication without durable history',async t=>{
   for(const state of ['COMMITTED','COMPLETED']) {
     const f=await fixture(t);
     await f.store.update(snapshot=>{
@@ -131,8 +131,7 @@ test('COMMITTED and COMPLETED cache survives STOP purge for final completion pub
     const before=f.store.snapshot();assert.equal(await f.transport.purgeStopped(stop),false);assert.equal(await f.transport.purgeStopped(),false);
     assert.deepEqual(f.store.snapshot(),before);
     const repository=new LifecycleStore(f.store);await repository.flush(f.transport);
-    assert.equal(f.transport.local().files[dispatchPath].server_status,'COMPLETED');
-    assert.equal(f.transport.local().files[dispatchPath].result_state,'COMMITTED');
+    assert.equal(f.transport.local().files[dispatchPath],undefined);
     assert.deepEqual(repository.data.completionOutbox,{});assert.deepEqual(f.writes,[]);
   }
 });

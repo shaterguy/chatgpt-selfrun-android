@@ -111,25 +111,35 @@ export class ExtensionManager {
     try{this.deps.signalProcess(proof.pid);}catch(error){if(error.code!=='ESRCH')return false;}
     for(let n=0;n<100&&Date.now()<deadline;n++){if(this.#processExited())return true;if(!this.#processOwned())return false;await this.deps.delay(50);}return this.#processExited();
   }
-  async #ensure(){await this.#initialize();if(this.#processOwned()){
-      if(!this.journal.retiringProcess){try{await this.bridge.waitReady(1000);if(!this.journal.controllerStopPending)return;const idle=await this.bridge.request('idleStatus',{}, {timeoutMs:1000});if(idle?.stopping===false){this.journal.controllerStopPending=false;await this.#save();return;}}catch{}}
+  async #ensure({signal,guard=()=>true}={}){
+    const check=()=>{if(this.stopped||signal?.aborted||!this.#allowed(guard))throw Object.assign(fail('Browser acquisition cancelled','ABORT_ERR'),{name:'AbortError'});};
+    check();await this.#initialize();check();if(this.#processOwned()){
+      if(!this.journal.retiringProcess){try{
+        // The retained controller reconnects with up to 10s backoff. Await its
+        // authenticated hello using the existing cold-start budget, waking on
+        // readiness or loss of the exact owner/current request, not a blind delay.
+        await this.bridge.waitReady(20000,{signal,guard:()=>!this.stopped&&this.#allowed(guard)&&this.#processOwned()});
+        check();if(!this.#processOwned())throw fail('Browser owner changed during readiness','EXTENSION_OWNERSHIP_UNCERTAIN');
+        if(!this.journal.controllerStopPending)return;
+        const idle=await this.bridge.request('idleStatus',{}, {timeoutMs:1000,signal});if(idle?.stopping===false){this.journal.controllerStopPending=false;await this.#save();return;}
+      }catch(error){check();if(error.code==='ABORT_ERR'||!this.#processOwned())throw error;}}
       // Headless Chromium rejects singleton CLI forwarding. Reopen only after
       // a persisted owned-target/endpoint proof establishes an empty old root.
-      if(!await this.#retireEmptyBrowser(()=>!this.stopped))throw fail('Owned controller unavailable and browser cannot be safely retired','EXTENSION_UNAVAILABLE');
+      if(!await this.#retireEmptyBrowser(()=>!this.stopped&&!signal?.aborted&&this.#allowed(guard)))throw fail('Owned controller unavailable and browser cannot be safely retired','EXTENSION_UNAVAILABLE');
     }
     if(this.journal.process){
       if(!this.#processExited())throw fail('Browser process identity is unreadable or changed','EXTENSION_OWNERSHIP_UNCERTAIN');
       this.journal={...this.journal,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};this.owned.clear();this.closing.clear();await this.#save();await this.bridge.close();this.bridge=null;this.initPromise=null;await this.#initialize();
     }
-    if(this.deps.profileBusy(this.config.browserProfile))throw fail('Browser profile is already in use; automatic takeover is forbidden','BROWSER_PROFILE_BUSY');
+    check();if(this.deps.profileBusy(this.config.browserProfile))throw fail('Browser profile is already in use; automatic takeover is forbidden','BROWSER_PROFILE_BUSY');
     const cfg=this.config;await fsp.mkdir(cfg.browserProfile,{recursive:true});await fsp.mkdir(cfg.extensionTempDir,{recursive:true,mode:0o700});
     const args=['--headless=new','--single-process','--no-zygote','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',`--user-data-dir=${cfg.browserProfile}`,`--load-extension=${this.extensionPath}`,...(cfg.browserClientProfile==='android-webview'?['--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${cfg.browserPort}`]:[]),`--selfrun-extension-owner=${this.journal.ownerId}`,`chrome-extension://${EXTENSION_ID}/controller.html`];
-    const child=await this.deps.launch(cfg.extensionChromiumCommand,args,{logFile:cfg.browserLogFile,env:{...process.env,TMPDIR:cfg.extensionTempDir}});
+    check();const child=await this.deps.launch(cfg.extensionChromiumCommand,args,{logFile:cfg.browserLogFile,env:{...process.env,TMPDIR:cfg.extensionTempDir}});
     const row=this.deps.processIdentity(child.pid),boot=this.deps.bootId();const proof={pid:child.pid,startTime:row?.startTime,bootId:boot,profile:cfg.browserProfile,extensionPath:this.extensionPath,ownerId:this.journal.ownerId,...(cfg.browserClientProfile==='android-webview'?{cdpPort:Number(cfg.browserPort)}:{})};
-    if(!extensionProcessMatches(proof,row,boot))throw fail('Started browser ownership is unproven','EXTENSION_OWNERSHIP_UNCERTAIN');this.journal.process=proof;await this.#save();await this.bridge.waitReady(20000);
+    if(!extensionProcessMatches(proof,row,boot))throw fail('Started browser ownership is unproven','EXTENSION_OWNERSHIP_UNCERTAIN');this.journal.process=proof;await this.#save();await this.bridge.waitReady(20000,{signal,guard:()=>!this.stopped&&this.#allowed(guard)&&this.#processOwned()});check();
   }
   ensureStarted(){return this.#serial(()=>this.#ensure());}
-  createTarget(url='about:blank'){return this.#serial(async()=>{await this.#ensure();const target=await this.bridge.request('createTarget',{url,deferNavigation:this.config.browserClientProfile==='android-webview'});if(!String(target?.id).startsWith(`ext:${this.journal.browserSessionId}:`))throw fail('Invalid target identity','EXTENSION_TARGET_INVALID');this.owned.add(target.id);this.journal.targetMetadata[target.id]={bootstrapUrl:target.bootstrapUrl||null,pendingUrl:target.pendingUrl||null,entryUrl:target.entryUrl||(url!=='about:blank'?url:null),profileFingerprint:null};await this.#save();if(this.config.browserClientProfile==='android-webview'){const deadline=Date.now()+1000,signal=AbortSignal.timeout(1000);for(let n=0;n<20&&Date.now()<deadline&&!this.journal.process.browserKey;n++){try{await this.#bindBrowserEndpoint(null,target.bootstrapUrl,signal,()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id));await this.#save();break;}catch{/* Initialization retries this proof; never strand an unreported owned target. */}await this.deps.delay(50);}}return target;});}
+  createTarget(url='about:blank',options={}){return this.#serial(async()=>{await this.#ensure(options);const target=await this.bridge.request('createTarget',{url,deferNavigation:this.config.browserClientProfile==='android-webview'},{signal:options.signal});if(!String(target?.id).startsWith(`ext:${this.journal.browserSessionId}:`))throw fail('Invalid target identity','EXTENSION_TARGET_INVALID');this.owned.add(target.id);this.journal.targetMetadata[target.id]={bootstrapUrl:target.bootstrapUrl||null,pendingUrl:target.pendingUrl||null,entryUrl:target.entryUrl||(url!=='about:blank'?url:null),profileFingerprint:null};await this.#save();if(this.config.browserClientProfile==='android-webview'){const deadline=Date.now()+1000,signal=AbortSignal.timeout(1000);for(let n=0;n<20&&Date.now()<deadline&&!this.journal.process.browserKey;n++){try{await this.#bindBrowserEndpoint(null,target.bootstrapUrl,signal,()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id));await this.#save();break;}catch{/* Initialization retries this proof; never strand an unreported owned target. */}await this.deps.delay(50);}}return target;});}
   async listExistingTargets(timeoutMs=1500){try{await this.#initialize();if(!this.#processOwned())return null;await this.bridge.waitReady(timeoutMs);const targets=await this.bridge.request('listTargets',{}, {timeoutMs});if(!Array.isArray(targets))return null;for(const target of targets)if(String(target.id).startsWith(`ext:${this.journal.browserSessionId}:`))this.owned.add(target.id);await this.#save();return targets;}catch{return null;}}
   async #initializeTarget(target,payload,signal){
     const mode=this.config.browserClientProfile||'native';if(payload.clientProfile!==mode)throw fail('Browser client profile differs from configured contract','BROWSER_PROFILE_UNSUPPORTED');

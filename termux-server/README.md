@@ -1,4 +1,4 @@
-# SelfRun Termux Server 4.0.0-dev9
+# SelfRun Termux Server 4.0.0-dev12
 
 SelfRun Android 앱의 Task/Turn/Result 상태머신은 그대로 유지하고, ChatGPT 브라우저 실행과 liveness 감시만 태블릿 Termux 서버로 분리합니다.
 
@@ -78,3 +78,21 @@ The unchanged Android app already supplies the resume contract. A fresh executio
 Current STOP/DONE or a committed authoritative Result finishes local work. A successfully resolved absence (`DRIVE_FILE_NOT_FOUND`) clears the corresponding current request; temporary transport/auth failures suspend or retain ongoing recovery and do not claim absence. Export failures, including ambiguous HTTP 404, are not treated as proof that a Result document is gone. External user Result/requirement documents are not deleted. Browser, extension, app, account and permission code is unchanged.
 
 The old offline helper name `quarantineIdleSnapshot` delegates to removal and creates no quarantine. `rollbackIdleSnapshot` refuses source rollback that could reintroduce history; operations must use reviewed forward recovery. Legacy operational quarantine/hash keys are removed during migration.
+
+## 4.0.0-dev10: current request authority and controller readiness
+
+Standalone shared controls are not durable jobs. A new dispatch commits its freshly read control with the current request; startup removes orphan controls without terminal IDs, hashes, or epoch history. A committed Result cannot be revived by an old RUNNING control. Explicit current resume and ongoing restart recovery remain supported.
+
+A retained extension controller is awaited by authenticated readiness within the existing 20-second startup budget, covering its 10-second reconnect backoff. Request cancellation, owner loss, and server shutdown interrupt the wait; readiness never permits taking over an unproven browser.
+
+## 4.0.0-dev11: current cleanup and explicit resume races
+
+An unfinished owned-target cleanup retains only its in-process terminal resource context until it settles. Terminal records, publication retries and cleanup history remain absent from durable state. Fresh observed controls fence conflicting pending cleanup even before a matching dispatch exists. Completed cleanup drops its control context.
+
+An explicit current app resume can replace a stopped or cancelled cleanup context after current dispatch and Result validation. Its active record remembers the exact current dispatch input fingerprint so re-reading that older cancellation projection cannot cancel the new observation. This adds no prompt submission authority or terminal replay history.
+
+Tests now use current remote documents, complete store/transport mocks and explicit legacy snapshots. Obsolete terminal-history assertions were removed while ownership, cancellation, current-control, no-resend and restart safety coverage remains.
+
+## 4.0.0-dev12: finish owned resources across a replacement watch
+
+A stopped request with a pending owned-target close may receive a newer explicit watch for another canonical URL. The old close now transfers to a process-local resource queue before the old terminal marker is discarded. It remains independently cleanable while the new watch runs and after that watch stops. Exact target/URL ownership and current app/HTTP use guards remain in force; unknown-conversation preparation targets retain the newer-control fence. A successful or confirmed-absent close removes this transient context. No ended request history, resource queue or outcome is persisted or replayed after restart.

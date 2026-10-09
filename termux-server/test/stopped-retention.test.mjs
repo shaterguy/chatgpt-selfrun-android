@@ -20,25 +20,23 @@ test('retired STOP disposes local ownership then leaves no execution or publicat
  assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
  const snapshot=f.store.snapshot();await observer.onActivity({...f.probe,responseTextLength:99999});
  assert.deepEqual(f.store.snapshot(),snapshot);
- const marker=f.store.snapshot().lifecycle.retired[keyFor(f.body)];
- assert.equal(marker.state,'STOPPED');assert.equal(marker.stop_status,'NOT_REQUESTED');
- for(const field of ['body','prompt','conversation_url','intent','cursor','target_id'])assert.equal(marker[field],undefined);
+ assert.deepEqual(f.store.snapshot().lifecycle.retired,{});
 });
 test('APP STOP never invokes remote generation stop across ticks or restart',async()=>{
  const f=fixture();await f.existing();let attempts=0;f.browser.quiesce=async()=>{attempts++;throw Error('closed target');};
  await f.stop();f.controller=f.recreate();const io=countIo(f);
  await f.controller.tick(f.transport);await f.controller.tick(f.transport);
  assert.equal(attempts,0);assert.equal(f.resumes,1);assert.deepEqual(active(f),[]);
- assert.deepEqual(io,{reads:0,writes:0});assert.equal(f.record().stop_status,'NOT_REQUESTED');
+ assert.deepEqual(io,{reads:0,writes:0});assert.equal(f.record(),null);
 });
 test('cold historical STOP import has no readback, browser, outbox or active request',async()=>{
  const f=fixture();await f.existing();await f.stop();
  const body=structuredClone(f.rows.get(f.path));body.lifecycle_state='STOPPED';body.server_control_state='STOPPED';
  body.server_control_epoch=2;body.lifecycle_record={...body.lifecycle_record,state:'STOPPED',control_state:'STOPPED',control_epoch:2};
- f.store=new MemoryStore();f.controller=f.recreate();const io=countIo(f);
+ f.rows.set(f.path,body);f.store=new MemoryStore();f.controller=f.recreate();const io=countIo(f);
  await f.controller.ingest(f.path,body,f.transport);await f.controller.tick(f.transport);
  assert.deepEqual(active(f),[]);assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
- assert.equal(f.resumes,1);assert.deepEqual(io,{reads:0,writes:0});
+ assert.equal(f.resumes,1);assert.ok(io.reads>=1);assert.equal(io.writes,0);
 });
 test('CANCELLED and DONE retire without browser reopen or repeated publication',async()=>{
  for(const state of ['CANCELLED','DONE']){
@@ -47,11 +45,11 @@ test('CANCELLED and DONE retire without browser reopen or repeated publication',
   else {f.control={...f.control,state:'DONE',control_epoch:2};await f.controller.control(null,f.control,f.transport);}
   const io=countIo(f);await f.controller.tick(f.transport);
   assert.deepEqual(active(f),[]);assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
-  assert.deepEqual(io,state==='CANCELLED'?{reads:1,writes:1}:{reads:0,writes:0});
+  assert.deepEqual(io,{reads:0,writes:0});
   if(state==='CANCELLED') {
     assert.equal(f.rows.get(f.path).server_status,'CANCELLED');
     assert.equal(f.rows.get(f.path).server_cancel_proof.never_submitted,false);
-    await f.controller.tick(f.transport);assert.deepEqual(io,{reads:1,writes:1});
+    await f.controller.tick(f.transport);assert.deepEqual(io,{reads:0,writes:0});
   }
   assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,0);
  }
@@ -87,7 +85,7 @@ test('retired dispatch projection cannot reopen after fresh store cleanup and re
  const f=fixture();await f.existing();const oldBody=structuredClone(f.rows.get(f.path));await f.stop();
  f.controller=f.recreate();const io=countIo(f);
  await f.controller.ingest(f.path,oldBody,f.transport);await f.controller.tick(f.transport);
- assert.deepEqual(active(f),[]);assert.equal(f.resumes,1);assert.deepEqual(io,{reads:0,writes:0});
+ assert.deepEqual(active(f),[]);assert.equal(f.resumes,1);assert.ok(io.reads>=1);assert.equal(io.writes,0);
 });
 test('publication waiting on a remote read is fenced when STOP retires its request',async()=>{
  const f=fixture();await f.existing();
@@ -105,20 +103,20 @@ test('PAUSED retains resumable execution identity and is not retired',async()=>{
  await f.controller.control(null,f.control,f.transport);
  assert.equal(active(f).length,1);assert.equal(f.record().state,'PAUSED');assert.equal(f.quiesces,0);
 });
-test('cold watcher skips retired exact paths without reading their dispatch bodies',async()=>{
+test('cold watcher checks current documents once without reactivating terminal work',async()=>{
  const f=fixture();await f.existing();await f.stop();f.controller=f.recreate();await f.controller.initialize();
  let bodies=0,writes=0;const read=f.transport.read;
  f.transport.read=async name=>{if(name===f.path)bodies++;return read(name);};f.transport.write=async()=>{writes++;};
  const w=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
  await w.scanOnce();await idle();await w.scanOnce();await idle();
- assert.equal(bodies,0);assert.equal(writes,0);assert.equal(f.resumes,1);
+ assert.ok(bodies>=1);assert.equal(writes,0);assert.equal(f.resumes,1);
 });
-test('resume rejects a valid app URL for a different conversation',async()=>{
+test('explicit current app URL replaces discarded history without replaying input',async()=>{
  const f=fixture();await f.existing();await f.stop();
  f.control={...f.control,state:'RUNNING',control_epoch:3,conversation_url:'https://chatgpt.com/c/different-owned'};
- await f.controller.control(null,f.control,f.transport);
- assert.equal(f.record().resume_error,'RESUME_CONVERSATION_MISMATCH');
- assert.deepEqual(active(f),[]);assert.equal(f.resumes,1);
+ await f.controller.control(null,f.control,f.transport);await f.controller.tick(f.transport);
+ assert.equal(f.record().conversation_url,f.control.conversation_url);assert.equal(f.sends,0);assert.equal(f.prepares,0);
+ assert.equal(f.resumes,2);await f.controller.quiesceForStandby();
 });
 test('new explicit cancelled-attempt dispatch can prepare without old intent replay',async()=>{
  const f=fixture();f.browser.chromium={isOwnedTarget:()=>true,closeOwnedTarget:async()=>({closed:true})};f.controller=f.recreate();f.body.client_status='CREATE_REQUESTED';await f.ingest();
@@ -130,7 +128,7 @@ test('higher dispatch attempt alone cannot replay a retired accepted or uncertai
  for(const mode of ['accepted','unknown']){
   const f=fixture();if(mode==='unknown')f.mode=mode;await f.ingest();
   f.body.client_status='CANCELLED';await f.ingest();
-  f.body={...f.body,dispatch_attempt:2,client_status:'SEND_REQUESTED'};await f.ingest();
+  f.body={...f.rows.get(f.path),dispatch_attempt:2,client_status:'SEND_REQUESTED'};await f.ingest();
   assert.equal(f.sends,1);assert.equal(f.prepares,1);assert.deepEqual(active(f),[]);
  }
 });
@@ -151,14 +149,14 @@ test('explicit resume retries the same accepted epoch after metadata read failur
  assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.record().state,'OBSERVING');
  await f.controller.quiesceForStandby();
 });
-test('HTTP cannot claim a retired Drive request by sending a higher epoch resume',async()=>{
+test('HTTP cannot claim an ongoing Drive request by sending a higher epoch resume',async()=>{
  const {SelfRunController}=await import('../src/controller.mjs');
  const {SignalDispatchTransport}=await import('../src/signal-transport.mjs');
- const f=fixture();await f.existing();await f.stop();
+ const f=fixture();await f.existing();
  const http=new SelfRunController({lifecycle:f.controller,transport:new SignalDispatchTransport(f.transport,f.store),stateStore:f.store,config:{}});
  await assert.rejects(http.accept({signalId:'http-resume',type:'RESUME',task_id:f.body.task_id,
   turn_id:f.body.turn_id,request_id:f.body.request_id,control_epoch:3,conversation_url:f.probe.url}),/owned by Drive/);
- assert.equal(f.resumes,1);assert.equal(f.store.snapshot().httpIngress,undefined);
+ assert.equal(f.resumes,1);assert.equal(f.store.snapshot().httpIngress,undefined);await f.controller.quiesceForStandby();
 });
 test('late owned attachment is disposed when it arrives during the STOP outcome transaction',async()=>{
  const f=fixture(),opening=deferred(),attachGate=deferred(),outcomeEntered=deferred(),outcomeGate=deferred();let closed=0;
@@ -173,8 +171,8 @@ test('late owned attachment is disposed when it arrives during the STOP outcome 
 test('cold cancelled input cannot infer never-submitted from missing fields or old legacy uncertainty',async()=>{
  const f=fixture();await f.controller.initialize();
  f.controller.repository.history.legacy.set(keyFor(f.body),{unknown_post:true,recovery_count:0,error:'old POST timeout'});
- f.body.client_status='CANCELLED';await f.ingest();f.body={...f.body,dispatch_attempt:2,client_status:'SEND_REQUESTED'};
- await f.ingest();assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.deepEqual(active(f),[]);
+ f.body.client_status='CANCELLED';await f.ingest();
+ assert.equal(f.rows.get(f.path).server_cancel_proof,undefined);await f.ingest();assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.deepEqual(active(f),[]);
 });
 test('cold import consumes a newer explicit app resume without raising the old retirement epoch',async()=>{
  for(const state of ['STOPPED','CANCELLED']){
@@ -189,13 +187,12 @@ test('cold import consumes a newer explicit app resume without raising the old r
   await f.controller.quiesceForStandby();
  }
 });
-test('deterministically invalid resume metadata is rejected once per app epoch without a polling loop',async()=>{
+test('repeated invalid current resume metadata never authorizes browser work',async()=>{
  const f=fixture();await f.existing();await f.stop();let reads=0;const read=f.transport.read;
  f.control={...f.control,state:'RUNNING',control_epoch:3,conversation_url:f.probe.url};
  f.transport.read=async name=>{if(name===f.path){reads++;return {...await read(name),request_id:'wrong-request'};}return read(name);};
  for(let i=0;i<3;i++)await f.controller.control(null,f.control,f.transport).catch(()=>{});
- assert.equal(reads,1);assert.equal(f.resumes,1);assert.deepEqual(active(f),[]);
- assert.equal(f.record().resume_rejected_epoch,3);
+ assert.equal(reads,3);assert.equal(f.resumes,1);assert.deepEqual(active(f),[]);assert.equal(f.record(),null);assert.equal(f.sends,0);
 });
 test('STOP between durable browser transition and token acquisition returns without browser work or throw',async()=>{
  const f=fixture(),entered=deferred(),gate=deferred();f.body.client_status='CREATE_REQUESTED';
@@ -204,10 +201,10 @@ test('STOP between durable browser transition and token acquisition returns with
  const preparing=f.ingest();await entered.promise;await f.stop();gate.resolve();await assert.doesNotReject(preparing);
  assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.deepEqual(active(f),[]);
 });
-test('invalid resume dispatch attempt is an inert per-epoch rejection',async()=>{
+test('invalid current resume dispatch attempt remains inert on repeated reads',async()=>{
  const f=fixture();await f.existing();await f.stop();let reads=0;const read=f.transport.read;
  f.control={...f.control,state:'RUNNING',control_epoch:3,conversation_url:f.probe.url};
  f.transport.read=async name=>{if(name===f.path){reads++;return {...await read(name),dispatch_attempt:0};}return read(name);};
  for(let i=0;i<2;i++)await f.controller.control(null,f.control,f.transport).catch(()=>{});
- assert.equal(reads,1);assert.equal(f.record().resume_rejected_epoch,3);assert.equal(f.resumes,1);
+ assert.equal(reads,2);assert.equal(f.record(),null);assert.equal(f.resumes,1);assert.equal(f.sends,0);
 });

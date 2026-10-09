@@ -11,7 +11,7 @@ import { fixture, MemoryStore, deferred } from './helpers/lifecycle-fixture.mjs'
 test('01 confirmed POST and exact Result commit retire observation',async()=>{
   const f=fixture();await f.ingest();assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
   await f.observe({responseTextLength:1000});f.result(true);await f.observe({});
-  assert.equal(f.record().state,'COMMITTED');assert.equal(f.record().retired,true);
+  assert.equal(f.record(),null);
   assert.equal(f.observations.at(-1).signal.aborted,true);
 });
 test('02 initial POST accepted but timed out is read back without duplicate',async()=>{
@@ -52,14 +52,14 @@ test('10 recovery POST timeout accepted readback prevents duplicate',async()=>{
 });
 test('11 Result commit during recovery suppresses SEND and retires observation',async()=>{
   const f=fixture();f.onQuiesce=()=>f.result(true);await f.existing();await f.stall();
-  assert.equal(f.sends,0);assert.equal(f.record().state,'COMMITTED');
-  assert.equal(f.record().retired,true);assert.equal(f.observations.at(-1).signal.aborted,true);
+  assert.equal(f.sends,0);assert.equal(f.record(),null);
+  assert.equal(f.record(),null);assert.equal(f.observations.at(-1).signal.aborted,true);
 });
 test('12 STOP during POST fences late completion',async()=>{
   const f=fixture();const gate=deferred(),entered=deferred();f.onSubmit=async()=>{entered.resolve();await gate.promise;};
   const sending=f.ingest();await entered.promise;
   await f.stop();gate.resolve();await sending;
-  assert.equal(f.record().state,'STOPPED');assert.equal(f.sends,1);
+  assert.equal(f.record(),null);assert.equal(f.sends,1);
 });
 test('13 STOP then explicit higher epoch resumes existing request without recreation',async()=>{
   const f=fixture();await f.existing();await f.stop();await f.resume();
@@ -167,7 +167,7 @@ test('slow Drive publication cannot block local STOP persistence',async()=>{
   await entered.promise;
   const c={...f.control,state:'STOPPED',control_epoch:2};
   await f.controller.repository.applyControl(c);
-  assert.equal(f.record().state,'STOPPED');gate.resolve();await publishing;
+  assert.deepEqual(f.controller.repository.records(),[]);assert.deepEqual(f.store.snapshot().lifecycle.requests,{});gate.resolve();await publishing;
 });
 test('real disk restart restores request and exact intent',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'selfrun-restart-'));
@@ -199,7 +199,7 @@ test('legacy uncertain POST does not preserve executable state after STOP',async
     await fs.writeFile(config.eventsFile,JSON.stringify({event:'LIVENESS_RECOVERY_DECISION',details:{task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',
       request_id:'SAFE-TEST:turn:1-request',recovery_count:1,error:'Canonical conversation POST timeout'}})+'\n');
     const f=fixture({store});f.control.state='STOPPED';f.control.control_epoch=13;await f.existing();
-    assert.equal(f.record().state,'STOPPED');assert.equal(f.record().recovery_count,undefined);assert.equal(f.record().intent,undefined);
+    assert.equal(f.record(),null);
     assert.equal(f.sends,0);assert.equal(f.resumes,0);assert.equal(f.quiesces,0);
     assert.deepEqual(f.controller.repository.records(),[]);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
@@ -220,9 +220,9 @@ test('control-first stopped ingestion retires without a projection echo',async()
  const f=fixture();f.control.state='STOPPED';f.control.control_epoch=13;
  await f.controller.control(null,f.control,f.transport);
  await f.existing();await f.controller.flush(f.transport);
- assert.equal(f.record().state,'STOPPED');assert.equal(f.record().control_epoch,13);
+ assert.equal(f.record(),null);
  assert.equal(f.rows.get(f.path).server_control_state,undefined);assert.equal(f.sends,0);
- assert.equal(f.resumes,0);assert.equal(f.quiesces,0);assert.equal(f.record().stop_status,'NOT_REQUESTED');
+ assert.equal(f.resumes,0);assert.equal(f.quiesces,0);assert.equal(f.record(),null);
  assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
 });
 test('successor without predecessor document prepares from the app request',async()=>{

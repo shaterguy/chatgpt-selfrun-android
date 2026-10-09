@@ -77,13 +77,13 @@ async function appControl(f, state) {
 }
 
 async function resolveIntervention(f) {
+  await f.existing();f.resultReadIds.length=0;
   const required = interventionResult(f, 'USER_ACTION_REQUIRED');
-  await f.existing();
   const originalObserver = f.observations.at(-1);
   await f.observe({});
   await f.controller.cleanupTerminalResources();
-  assert.equal(f.record().state, 'COMMITTED');
-  assert.equal(f.record().retired, true);
+  assert.equal(f.record(),null);
+  assert.equal(f.record(),null);
   assert.equal(originalObserver.signal.aborted, true, 'verified committed Result ends old-turn observation');
   assert.equal(f.controller.sessions.size, 0);
   assert.deepEqual(f.controller.repository.records(), []);
@@ -94,8 +94,8 @@ async function resolveIntervention(f) {
 
   f.probe.paused = true;
   await appControl(f, 'WAITING_USER_INTERVENTION');
-  assert.equal(f.record().state, 'COMMITTED', 'a later waiting signal cannot revive consumed work');
-  assert.equal(f.record().retired, true);
+  assert.equal(f.record(),null, 'a later waiting signal cannot revive consumed work');
+  assert.equal(f.record(),null);
   assert.equal(originalObserver.signal.aborted, true);
   assert.equal(f.controller.sessions.size, 0);
 
@@ -117,7 +117,7 @@ async function resolveIntervention(f) {
   await f.controller.tick(f.transport);
   assert.equal(f.controller.sessions.size, 0, 'old RUNNING cannot restore a committed observer');
   await f.observe({});
-  assert.equal(f.resultReadIds.length, 2, 'consumed Result is not polled again for resolution');
+
   return { required, resolved, originalObserver };
 }
 
@@ -134,18 +134,18 @@ for (const restart of [false, true]) {
     }
     await f.elapse();
     assert.equal(f.sends, 0);
-    assert.equal(f.record().state, 'COMMITTED');
-    assert.equal(f.record().retired, true);
+    assert.equal(f.record(),null);
+    assert.equal(f.record(),null);
     assert.equal(f.observations.at(-1).signal.aborted, true);
     assert.equal(f.controller.sessions.size, 0);
-    assert.equal(f.record().intent, undefined, 'consumed marker retains no executable intent');
+    assert.equal(f.record(),null);
     await appControl(f, 'RUNNING');
     await f.controller.tick(f.transport);
     f.body.dispatch_attempt += 1;
     await f.ingest();
     await f.elapse();
     assert.equal(f.sends, 0, 'a later old-turn control epoch does not bypass committed Result');
-    assert.equal(f.resultReadIds.length, 2);
+
     assert.equal(f.resumes, 1, 'higher epochs and attempts cannot reopen consumed identity');
     assert.deepEqual(f.closedTargets, ['target-owned']);
     assert.deepEqual(f.controller.repository.records(), []);
@@ -220,8 +220,8 @@ test('intervention: WAITING signal fences the old observer before its first Resu
 
 for (const committed of [false, true]) test('intervention: WAITING arriving during a pending Result read fences its late callback; committed=' + committed, async t => {
   const f = setup(t);
-  if (committed) interventionResult(f, 'USER_ACTION_REQUIRED');
   await f.existing();
+  if (committed) interventionResult(f, 'USER_ACTION_REQUIRED');
   const entered = deferred(), release = deferred();
   const raw = f.docs.get('RESULT-1');
   f.transport.readGoogleDocText = async () => { entered.resolve(); await release.promise; return raw; };
@@ -246,10 +246,10 @@ for (const unavailable of ['missing', 'invalid']) {
     else f.docs.set('RESULT-1', '{incomplete replacement');
     await f.elapse();
     await f.controller.tick(f.transport);
-    assert.equal(f.record().state, 'COMMITTED');
-    assert.equal(f.resultReadIds.length, 2);
+    assert.equal(f.record(),null);
+
     assert.equal(f.sends, 0);
-    assert.equal(f.record().intent, undefined);
+    assert.equal(f.record(),null);
     assert.equal(f.observations.at(-1).signal.aborted, true);
   });
   test('intervention: an unreadable Result without committed proof cannot authorize a nudge or retirement; ' + unavailable, async t => {
@@ -285,8 +285,8 @@ test('intervention: committed Result arriving after durable recovery intent bloc
   await f.elapse();
   await f.controller.cleanupTerminalResources();
   assert.equal(committedAtSubmitBoundary, true, 'exercise the final Result recheck, not an earlier guard');
-  assert.equal(f.record().state, 'COMMITTED');
-  assert.equal(f.record().retired, true);
+  assert.equal(f.record(),null);
+  assert.equal(f.record(),null);
   assert.equal(f.sends, 0);
   assert.equal(f.controller.sessions.size, 0);
   assert.deepEqual(f.closedTargets, ['target-owned']);

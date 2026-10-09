@@ -17,23 +17,23 @@ async function terminalFixture(state, {control=true, activeCount=0}={}) {
 }
 
 for(const state of ['COMMITTED','COMPLETED']) {
-  test('restart preserves historical '+state+' despite cached RUNNING control',async()=>{
+  test('restart discards historical '+state+' despite cached RUNNING control',async()=>{
     const {f,record}=await terminalFixture(state);
     await f.controller.tick(f.transport);
-    assert.equal(f.record().state,state);
-    assert.equal(f.record().revision,record.revision);
-    assert.equal(f.record().updated_at,record.updated_at);
+    assert.equal(f.record(),null);
+    
+    
     assert.equal(f.resumes,0);assert.equal(f.prepares,0);assert.equal(f.sends,0);
     assert.equal(f.store.snapshot().activeCount,0);
     assert.deepEqual(f.controller.activeDispatches(),[]);
   });
-  test('Drive import preserves historical '+state+' without claiming an observer',async()=>{
+  test('Drive import ignores historical '+state+' without claiming an observer',async()=>{
     const {f,body}=await terminalFixture(state);
     const {MemoryStore}=await import('./helpers/lifecycle-fixture.mjs');
     f.store=new MemoryStore();f.controller=f.recreate();
     await f.controller.controlDurable(null,f.control);
     await f.controller.ingest(f.path,body,f.transport);
-    assert.equal(f.record().state,state);
+    assert.equal(f.record(),null);
     assert.equal(f.resumes,0);assert.equal(f.prepares,0);assert.equal(f.sends,0);
     assert.equal(f.store.snapshot().activeCount,0);
     assert.deepEqual(f.controller.activeDispatches(),[]);
@@ -43,30 +43,30 @@ for(const state of ['COMMITTED','COMPLETED']) {
 test('restart does not revive terminal history when no cached control exists',async()=>{
   const {f}=await terminalFixture('COMPLETED',{control:false});
   f.control=null;await f.controller.tick(f.transport);
-  assert.equal(f.record().state,'COMPLETED');
+  assert.equal(f.record(),null);
   assert.equal(f.resumes,0);assert.equal(f.sends,0);
   assert.equal(f.store.snapshot().activeCount,0);
 });
-test('standby initialization retains terminal history and publishes no local active records',async()=>{
+test('standby initialization discards terminal history and publishes no local active records',async()=>{
   const {f}=await terminalFixture('COMPLETED');
   f.controller.canDispatch=()=>false;
   await f.controller.tick(f.transport);
-  assert.equal(f.record().state,'COMPLETED');
+  assert.equal(f.record(),null);
   assert.equal(f.store.snapshot().activeCount,0);
   assert.equal(f.resumes,0);assert.equal(f.sends,0);
 });
-test('restart recomputes a stale active summary without changing terminal records',async()=>{
+test('restart recomputes a stale active summary and removes terminal records',async()=>{
   const {f,record}=await terminalFixture('COMPLETED',{activeCount:7});
   await f.controller.tick(f.transport);
   assert.equal(f.store.snapshot().activeCount,0);
   assert.deepEqual(f.store.snapshot().activeDispatches,[]);
-  assert.equal(f.record().key,record.key);assert.equal(f.record().revision,record.revision);
-  assert.equal(f.record().body,undefined);assert.deepEqual(f.controller.repository.records(),[]);
+  
+  assert.deepEqual(f.controller.repository.records(),[]);
 });
 test('a verified committed Result remains consumed across restart',async()=>{
   const f=fixture();await f.existing();f.result(true);await f.observe({});
-  assert.equal(f.record().state,'COMMITTED');
-  assert.equal(f.record().retired,true);
+  assert.equal(f.record(),null);
+  
   await f.controller.quiesceForStandby();f.controller=f.recreate();
   await f.controller.tick(f.transport);
   assert.equal(f.resumes,1);assert.equal(f.sends,0);
@@ -81,7 +81,7 @@ test('a fresh app request can prepare without reviving its historical predecesso
     lifecycle_state:undefined,server_status:'PENDING',client_status:'CREATE_REQUESTED'});
   Object.assign(f.control,{turn_id:f.body.turn_id,request_id:f.body.request_id,control_epoch:2});
   f.path='__SELFRUN_DISPATCH__next.json';await f.ingest();
-  assert.equal(f.controller.repository.get(oldKey).state,record.state);
+  assert.equal(f.controller.repository.get(oldKey),null);
   assert.equal(f.prepares,1);assert.equal(f.sends,0);
   assert.equal(f.record().state,'PREPARED');
   await f.controller.quiesceForStandby();
@@ -91,7 +91,7 @@ test('legacy completed status without lifecycle fields stays finalized on import
   const f=fixture();
   Object.assign(f.body,{conversation_url:f.probe.url,server_status:'COMPLETED'});
   await f.ingest();
-  assert.equal(f.record().state,'COMPLETED');
+  assert.equal(f.record(),null);
   assert.equal(f.resumes,0);assert.equal(f.sends,0);
   assert.equal(f.store.snapshot().activeCount,0);
 });
@@ -110,8 +110,8 @@ test('STOP and cancellation of terminal history remain idempotent without browse
     await f.stop();
     f.body.client_status='CANCELLED';await f.ingest();
     await f.controller.tick(f.transport);
-    assert.equal(f.record().state,state);
-    assert.equal(f.record().revision,record.revision);
+    assert.equal(f.record(),null);
+    
     assert.equal(f.resumes,0);assert.equal(f.quiesces,0);assert.equal(f.sends,0);
     assert.equal(f.store.snapshot().activeCount,0);
   }
@@ -123,7 +123,7 @@ test('server startup recomputes terminal summaries before cluster publication',a
   const controller=new SelfRunController({lifecycle:f.controller,transport:f.transport,stateStore:f.store,config:{}});
   await controller.initialize();
   assert.equal(f.store.snapshot().activeCount,0);
-  assert.equal(f.record().key,record.key);assert.equal(f.record().revision,record.revision);
-  assert.equal(f.record().body,undefined);assert.deepEqual(f.controller.repository.records(),[]);
+  
+  assert.deepEqual(f.controller.repository.records(),[]);
   assert.equal(f.resumes,0);assert.equal(f.sends,0);
 });
