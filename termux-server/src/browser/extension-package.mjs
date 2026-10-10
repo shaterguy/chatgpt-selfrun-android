@@ -11,7 +11,7 @@ export function buildExtensionFiles({bridgeUrl,ownerId,capability,browserSession
   let targetOrigins=['https://chatgpt.com'];
   if(fixtureOrigin){const u=new URL(fixtureOrigin);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.origin!==fixtureOrigin)throw Error('Fixture must be loopback only');targetOrigins=[fixtureOrigin];}
   const installationKey=createHash('sha256').update('selfrun-page-bootstrap:'+capability+':'+browserSessionId).digest('hex');
-  const manifest={manifest_version:3,name:'SelfRun browser adapter',version:'1.0.0',key:PUBLIC_KEY,
+  const manifest={manifest_version:3,name:'SelfRun browser adapter',version:'1.0.2',key:PUBLIC_KEY,
     permissions:['scripting','storage'],host_permissions:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*','http://127.0.0.1/*'],
     content_scripts:[{matches:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*'],js:['page-runtime.js'],run_at:'document_start',world:'MAIN',all_frames:false},{matches:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*'],js:['content.js'],run_at:'document_start',all_frames:false}],
     content_security_policy:{extension_pages:"script-src 'self'; object-src 'self'"}};

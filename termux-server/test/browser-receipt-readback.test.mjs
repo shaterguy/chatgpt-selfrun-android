@@ -75,3 +75,61 @@ test('receipt readback drops invalid status and arbitrary endpoint data',async()
   await f.read();assert.equal(f.saved.at(-1).receipt.http_status,null);assert.equal(f.saved.at(-1).receipt.endpoint_category,null);
   assert.doesNotMatch(JSON.stringify(f.saved),/private|secret/);
 });
+
+for(const stalled of ['progress','receiptSnapshot'])test(`a pending ${stalled} does not prevent the other independent evidence query`,async()=>{
+ const f=fixture();let release;const gate=new Promise(r=>release=r),calls=[];
+ f.session={transport:'extension',async run(operation){calls.push(operation);if(operation===stalled)await gate;return operation==='receiptSnapshot'?f.receipt:f.probe;}};
+ const reading=f.read();
+ try{for(let n=0;n<25&&calls.length<2;n++)await new Promise(r=>setTimeout(r,2));assert.ok(calls.includes('progress'));assert.ok(calls.includes('receiptSnapshot'));}
+ finally{release();await reading;}
+ assert.equal(f.saved.length,1);
+});
+
+function failedProgress(f,error=new Error('progress unavailable'),beforeFailure=()=>{}) {
+ const calls=[];
+ f.session={transport:'extension',async run(operation){
+  calls.push(operation);
+  if(operation==='progress'){await Promise.resolve();beforeFailure();throw error;}
+  assert.equal(operation,'receiptSnapshot','readback must not send or navigate');return f.receipt;
+ }};
+ return calls;
+}
+for(const code of ['OBSERVATION_FAILED','EXTENSION_TIMEOUT'])for(const status of [403,429,500])
+test(`progress ${code} preserves matching HTTP ${status} diagnostics without confirming`,async()=>{
+ const f=fixture(),calls=failedProgress(f,Object.assign(new Error('progress failed'),{code}));
+ Object.assign(f.receipt,{ack:null,invalid:'http_error',http_status:status,endpoint_category:'f_conversation',headers:{authorization:'secret'},response_body:'secret'});
+ assert.equal((await f.read()).state,'UNKNOWN');
+ assert.deepEqual(calls.sort(),['progress','receiptSnapshot']);assert.equal(f.saved.length,1);
+ assert.equal(f.saved[0].receipt.http_status,status);assert.equal(f.saved[0].receipt.endpoint_category,'f_conversation');
+ assert.doesNotMatch(JSON.stringify(f.saved),/secret|headers|response_body/);
+});
+test('semantic ACK survives failed observation as evidence but requires canonical page proof to confirm',async()=>{
+ const f=fixture();failedProgress(f);
+ assert.equal((await f.read()).state,'UNKNOWN');assert.equal(f.saved.length,1);
+ assert.equal(f.saved[0].receipt.ack,'cot_token');assert.equal(f.saved[0].message_id,messageId);
+});
+for(const conflict of ['intent','generation','message','request','conversation','prompt'])
+test(`failed observation cannot persist a receipt with a conflicting ${conflict}`,async()=>{
+ const f=fixture();failedProgress(f);
+ if(conflict==='intent')f.receipt.intent_id='other';
+ if(conflict==='generation')f.receipt.generation='other';
+ if(conflict==='message')f.intent.message_id='ffffffff-1242-4d48-8f34-413e8ed42aa4';
+ if(conflict==='request')f.intent.receipt={...receipt(),request_id:'generation-1:2'};
+ if(conflict==='conversation')f.receipt.conversation_id='other';
+ assert.equal((await f.read(conflict==='prompt'?{prompt:'different'}:{})).state,'UNKNOWN');
+ assert.equal(f.saved.length,0);
+});
+for(const loss of ['STOP','ownership'])test(`failed observation after ${loss} cannot persist late receipt evidence`,async()=>{
+ const f=fixture(),controller=new AbortController(),reason=new Error('STOP requested');
+ failedProgress(f,new Error('progress failed'),()=>{if(loss==='STOP')controller.abort(reason);else f.allowed=false;});
+ await assert.rejects(f.read({signal:controller.signal}),loss==='STOP'?/STOP requested/:/stale/);
+ assert.equal(f.saved.length,0);
+});
+test('receipt persistence failure during progress failure is reported instead of silently losing evidence',async()=>{
+ const f=fixture();failedProgress(f);
+ await assert.rejects(f.read({onRequest:async()=>{throw new Error('disk failed');}}),/disk failed/);
+});
+test('ownership loss during receipt persistence after progress failure cannot return a late outcome',async()=>{
+ const f=fixture();failedProgress(f);
+ await assert.rejects(f.read({onRequest:async()=>{f.allowed=false;}}),/stale/);
+});

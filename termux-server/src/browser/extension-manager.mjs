@@ -47,7 +47,7 @@ async function atomicJson(file,value,guard=()=>true){
   }finally{if(pending)await fsp.unlink(temp).catch(error=>{if(error.code!=='ENOENT')throw error;});}
 }
 export class ExtensionManager {
-  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
+  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.targetClosures=new Map();this.targetRemovalGeneration=0;this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
   #serial(fn){const p=this.queue.then(fn,fn);this.queue=p.catch(()=>{});return p;}
   #allowed(guard,...args){try{return !guard||guard(...args)===true;}catch{return false;}}
   setLifecycleGuards(guards={}){this.guards=guards;}
@@ -95,7 +95,7 @@ export class ExtensionManager {
     this.journal.targetMetadata??={};this.owned=new Set(this.journal.targets||[]);
     const bridge=this.deps.bridgeFactory({port:cfg.extensionBridgePort,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId});
     await bridge.start();this.bridge=bridge;
-    bridge.on('targetRemoved',({targetId})=>{if(this.owned.delete(targetId)){this.profileLeases.get(targetId)?.release();this.profileLeases.delete(targetId);this.closing.delete(targetId);delete this.journal.targetMetadata[targetId];void this.#save().catch(()=>{});}});
+    bridge.on('targetRemoved',({targetId})=>{if(this.bridge!==bridge||!String(targetId).startsWith(`ext:${this.journal.browserSessionId}:`))return;this.targetRemovalGeneration++;if(this.owned.delete(targetId)){this.profileLeases.get(targetId)?.release();this.profileLeases.delete(targetId);this.closing.delete(targetId);delete this.journal.targetMetadata[targetId];void this.#save().catch(()=>{});}});
     // Runtime config contains the local capability; it is never committed or logged.
     await fsp.mkdir(this.extensionPath,{recursive:true,mode:0o700});
     const files=buildExtensionFiles({bridgeUrl:bridge.url,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId,fixtureOrigin:cfg.extensionFixtureOrigin||null});
@@ -160,7 +160,15 @@ export class ExtensionManager {
   }
   ensureStarted(){return this.#serial(()=>this.#ensure());}
   createTarget(url='about:blank',options={}){return this.#serial(async()=>{await this.#ensure(options);const target=await this.bridge.request('createTarget',{url,deferNavigation:this.config.browserClientProfile==='android-webview'},{signal:options.signal});if(!String(target?.id).startsWith(`ext:${this.journal.browserSessionId}:`))throw fail('Invalid target identity','EXTENSION_TARGET_INVALID');this.owned.add(target.id);this.journal.targetMetadata[target.id]={bootstrapUrl:target.bootstrapUrl||null,pendingUrl:target.pendingUrl||null,entryUrl:target.entryUrl||(url!=='about:blank'?url:null),profileFingerprint:null};await this.#save();if(this.config.browserClientProfile==='android-webview'){const deadline=Date.now()+1000,signal=AbortSignal.timeout(1000);for(let n=0;n<20&&Date.now()<deadline&&!this.journal.process.browserKey;n++){try{await this.#bindBrowserEndpoint(null,target.bootstrapUrl,signal,()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id));await this.#save();break;}catch{/* Initialization retries this proof; never strand an unreported owned target. */}await this.deps.delay(50);}}return target;});}
-  async listExistingTargets(timeoutMs=1500){try{await this.#initialize();if(!this.#processOwned())return null;await this.bridge.waitReady(timeoutMs);const targets=await this.bridge.request('listTargets',{}, {timeoutMs});if(!Array.isArray(targets))return null;for(const target of targets)if(String(target.id).startsWith(`ext:${this.journal.browserSessionId}:`))this.owned.add(target.id);await this.#save();return targets;}catch{return null;}}
+  async listExistingTargets(timeoutMs=1500){try{
+    await this.#initialize();if(!this.#processOwned())return null;
+    const journal=this.journal,removalGeneration=this.targetRemovalGeneration;
+    const current=()=>this.journal===journal&&this.targetRemovalGeneration===removalGeneration;
+    await this.bridge.waitReady(timeoutMs);const targets=await this.bridge.request('listTargets',{}, {timeoutMs});
+    if(!Array.isArray(targets)||!current())return null;
+    for(const target of targets)if(String(target.id).startsWith(`ext:${journal.browserSessionId}:`))this.owned.add(target.id);
+    await this.#save();return current()?targets:null;
+  }catch{return null;}}
   async #initializeTarget(target,payload,signal){
     const mode=this.config.browserClientProfile||'native';if(payload.clientProfile!==mode)throw fail('Browser client profile differs from configured contract','BROWSER_PROFILE_UNSUPPORTED');
     if(mode==='native')return this.bridge.request('initialize',{...payload,targetId:target.id},{signal});
@@ -217,9 +225,33 @@ export class ExtensionManager {
     }};
   }
 
-  async #closeTarget(id,{guard,caller=false}={}){const allowed=target=>this.#allowed(guard,target)&&(caller||this.#allowed(this.guards.canCloseTarget,id,target));const skip=reason=>({closed:false,absent:false,reason});if(!this.isOwnedTarget(id))return skip('unowned_target');if(!allowed())return skip('guard_rejected');const targets=await this.listExistingTargets();if(!targets)return skip('targets_unavailable');const target=targets.find(t=>t.id===id);if(!allowed(target))return skip('guard_rejected');if(!target){this.owned.delete(id);this.closing.delete(id);this.profileLeases.get(id)?.release();this.profileLeases.delete(id);delete this.journal.targetMetadata[id];await this.#save();return{absent:true,reason:'already_absent'};}this.closing.add(id);try{const result=await this.bridge.request('closeTarget',{targetId:id,expectedUrl:target.url},{timeoutMs:5000});if(result?.closed||result?.absent){this.owned.delete(id);this.profileLeases.get(id)?.release();this.profileLeases.delete(id);this.closing.delete(id);delete this.journal.targetMetadata[id];await this.#save();}return result;}catch{return skip('close_unconfirmed');}}
-  closeOwnedTarget(id,options={}){return this.#serial(()=>this.#closeTarget(id,options));}
-  async closeTarget(id,{guard}={}){const r=await this.#serial(()=>this.#closeTarget(id,{guard,caller:typeof guard==='function'}));return r.closed===true||r.absent===true;}
+  async #closeTarget(id,{guard,caller=false,ownership}={}){
+    const sameOwner=()=>!ownership||(this.journal===ownership.journal&&this.journal?.targetMetadata?.[id]===ownership.metadata);
+    const authority=target=>this.#allowed(guard,target)&&(caller||this.#allowed(this.guards.canCloseTarget,id,target));
+    const allowed=target=>sameOwner()&&authority(target);
+    const alreadyRemoved=()=>this.journal===ownership?.journal&&this.targetRemovalGeneration>ownership.removalGeneration&&!this.owned.has(id)&&this.journal.targetMetadata[id]===undefined;
+    const skip=reason=>({closed:false,absent:false,reason});
+    if(!this.isOwnedTarget(id))return skip('unowned_target');if(!allowed())return skip('guard_rejected');
+    const targets=await this.listExistingTargets();if(alreadyRemoved())return authority()?{absent:true,reason:'already_removed'}:skip('guard_rejected');if(!targets)return skip('targets_unavailable');
+    const target=targets.find(t=>t.id===id);if(!allowed(target))return skip('guard_rejected');
+    if(!target){if(this.owned.delete(id))this.targetRemovalGeneration++;this.closing.delete(id);this.profileLeases.get(id)?.release();this.profileLeases.delete(id);delete this.journal.targetMetadata[id];await this.#save();return{absent:true,reason:'already_absent'};}
+    this.closing.add(id);
+    try{const result=await this.bridge.request('closeTarget',{targetId:id,expectedUrl:target.url},{timeoutMs:5000});
+      if(result?.closed||result?.absent){
+        if(!sameOwner()&&!alreadyRemoved())return skip('guard_rejected');
+        if(this.owned.delete(id))this.targetRemovalGeneration++;this.profileLeases.get(id)?.release();this.profileLeases.delete(id);this.closing.delete(id);delete this.journal.targetMetadata[id];await this.#save();
+      }
+      return result;
+    }catch{return skip('close_unconfirmed');}
+  }
+  #closeSerial(id,options){
+    const ownership={journal:this.journal,metadata:this.journal?.targetMetadata?.[id],removalGeneration:this.targetRemovalGeneration};
+    const prior=this.targetClosures.get(id)||Promise.resolve();
+    const work=prior.catch(()=>{}).then(()=>this.#closeTarget(id,{...options,ownership}));this.targetClosures.set(id,work);
+    work.finally(()=>{if(this.targetClosures.get(id)===work)this.targetClosures.delete(id);}).catch(()=>{});return work;
+  }
+  closeOwnedTarget(id,options={}){return this.#closeSerial(id,options);}
+  async closeTarget(id,{guard}={}){const r=await this.#closeSerial(id,{guard,caller:typeof guard==='function'});return r.closed===true||r.absent===true;}
   async #finishReleasedBrowser(allowed){
     const current=this.journal,proof=current?.process,retiring=current?.retiringProcess;
     const candidate=()=>clearedExitedExtensionJournal({...this.journal,targets:[...this.owned]},this.deps,()=>allowed()&&this.#emptyLocal());

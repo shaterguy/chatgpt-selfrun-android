@@ -90,6 +90,7 @@ export function contentRuntime(snapshot,recoveryInput) {
     if(message.kind==='selfrun.content.deactivate') {active=false;observer?.disconnect();observer=null;cache=null;dirty=true;reply({ok:true});return;}
     if(!active)return;
     try {
+      if(!Number.isFinite(message.deadlineAt)||Date.now()>=message.deadlineAt)throw Error('Page observation expired');
       if(message.kind==='selfrun.content.snapshot') {
         // The content script is isolated from the page. Dirty notices are hints,
         // not ownership or receipt evidence. Every server observation takes a fresh sample.

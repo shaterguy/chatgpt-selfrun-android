@@ -30,3 +30,15 @@ test('bridge shutdown settles readiness waiters immediately',async t=>{
  const b=await setup(t),waiting=b.waitReady(20000);const rejection=assert.rejects(waiting,e=>e.code==='EXTENSION_DISCONNECTED');
  await b.close();await rejection;assert.equal(b.waiters.size,0);
 });
+
+for(const phase of ['before','during'])for(const kind of ['generation','timeout','stop'])test(`bridge preserves ${kind} cancellation ${phase} sending and fences late results`,async t=>{
+ const b=await setup(t),c=await connect(b);t.after(()=>c.abort.abort());const a=new AbortController();
+ const reason=kind==='generation'?Object.assign(new Error('observation generation replaced'),{code:'OBSERVATION_SUPERSEDED'}):kind==='timeout'?new DOMException('operation timeout','TimeoutError'):new Error('app STOP');
+ if(phase==='before')a.abort(reason);
+ const p=b.request('submit',{}, {signal:a.signal});let command;
+ const rejected=assert.rejects(p,e=>e.cause===reason&&e.code===(kind==='generation'?'OBSERVATION_SUPERSEDED':kind==='timeout'?'EXTENSION_TIMEOUT':'ABORT_ERR')&&e.released===(phase==='during'));
+ if(phase==='during'){command=await c.next();a.abort(reason);}await rejected;
+ assert.equal(b.pendingCount,0);
+ if(command){assert.equal((await c.next()).kind,'cancel');assert.equal((await c.post('/result',{id:command.id,ok:true,result:{old:true}})).status,409);}
+ const current=b.request('snapshot',{}),next=await c.next();await c.post('/result',{id:next.id,ok:true,result:{current:true}});assert.deepEqual(await current,{current:true});
+});

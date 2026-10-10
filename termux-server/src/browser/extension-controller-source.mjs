@@ -5,38 +5,51 @@ export function controllerRuntime(config) {
   const VERSION='selfrun-extension-controller-v1';
   const storageKey=VERSION+':'+config.browserSessionId;
   const headers={'Content-Type':'application/json','Authorization':'Bearer '+config.capability,'X-SelfRun-Owner':config.ownerId};
-  const targets=new Map(),readyWaiters=new Map(),inflight=new Map(),completed=new Map(),contexts=new Map(),mutationLanes=new Map();
-  let connectionId=null,stopping=false,currentTabId=null,streamAbort=null,saveChain=Promise.resolve(),commandChain=Promise.resolve();
+  const targets=new Map(),readyWaiters=new Map(),inflight=new Map(),completed=new Map(),contexts=new Map(),mutationLanes=new Map(),commandQueue=[];
+  let connectionId=null,stopping=false,currentTabId=null,streamAbort=null,saveChain=Promise.resolve(),commandRunning=false;
   const originAllowed=url=>{try{return config.targetOrigins.includes(new URL(url).origin);}catch{return false;}};
   const mutating=new Set(['initialize','navigate','newChat','input','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptRetire','pauseAnimations','quiesce']);
+  const observations=new Set(['snapshot','progress','recoveryInput','receiptSnapshot']);
+  const cleanup=new Set(['listTargets','idleStatus','closeTarget']);
   const targetId=id=>'ext:'+config.browserSessionId+':'+id;
   const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
   const isConversation=url=>{try{return /\/c\/[A-Za-z0-9_-]+\/?$/.test(new URL(url).pathname);}catch{return false;}};
   const checkUrl=async(t,url)=>{if(!originAllowed(url))throw fail('Owned target left approved site','TARGET_SCOPE_CHANGED');if(!t.boundUrl){t.boundUrl=urlKey(url);await persist();return;}if(urlKey(url)===t.boundUrl)return;if(t.entryTransition?.deadlineAt>Date.now()&&t.entryTransition.allowed.includes(urlKey(url))){t.boundUrl=urlKey(url);t.url=url;await persist();return;}if(t.released&&!isConversation(t.boundUrl)&&isConversation(url)){t.boundUrl=urlKey(url);t.url=url;await persist();return;}throw fail('Owned target was repurposed','TARGET_SCOPE_CHANGED');};
   const persist=()=>{const value=Object.fromEntries([...targets].map(([id,t])=>[id,{id,tabId:t.tabId,url:t.url,boundUrl:t.boundUrl||null,documentId:t.documentId||null,contentNonce:t.contentNonce||null,armed:t.armed||null,released:t.released||null,entryTransition:t.entryTransition||null,effectFence:t.effectFence||null,bootstrapUrl:t.bootstrapUrl||null,pendingUrl:t.pendingUrl||null,entryUrl:t.entryUrl||null,entryPending:t.entryPending===true}]));
     saveChain=saveChain.catch(()=>{}).then(()=>chrome.storage.local.set({[storageKey]:value}));return saveChain;};
-  const post=async(path,data)=>{const r=await fetch(config.bridgeUrl+path,{method:'POST',headers,body:JSON.stringify({...data,browserSessionId:config.browserSessionId})});if(!r.ok)throw Error('Local bridge HTTP '+r.status);return r.json();};
+  const post=async(path,data)=>{const abort=new AbortController();let timer;
+    const expired=new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(Error('Local bridge request timeout'));},5000);});
+    try{return await Promise.race([expired,(async()=>{const r=await fetch(config.bridgeUrl+path,{method:'POST',headers,body:JSON.stringify({...data,browserSessionId:config.browserSessionId}),signal:abort.signal});if(!r.ok)throw Error('Local bridge HTTP '+r.status);return r.json();})()]);}
+    finally{clearTimeout(timer);}
+  };
   const report=(event,data={})=>post('/event',{connectionId,event,...data}).catch(()=>{});
   const fail=(message,code='EXTENSION_COMMAND_FAILED',released=false)=>Object.assign(new Error(message),{code,released});
   const validTarget=id=>{const t=targets.get(id);if(!t||t.closing)throw fail('Target is not owned','TARGET_NOT_OWNED');return t;};
   const liveTarget=async id=>{const t=validTarget(id);let tab;try{tab=await chrome.tabs.get(t.tabId);}catch{throw fail('Owned target is absent','TARGET_LOST');}
     const url=String(tab.url||'');if(url===t.bootstrapUrl)throw fail('Approved entry navigation is pending','PAGE_UNAVAILABLE');if(url&&url!=='about:blank'&&!originAllowed(url))throw fail('Owned target left allowed site','TARGET_SCOPE_CHANGED');
     if(url!=='about:blank')await checkUrl(t,url);return{...t,url,tab};};
-  const ready=async t=>{
-    if(t.documentId&&t.contentNonce)return t;
-    await chrome.tabs.sendMessage(t.tabId,{kind:'selfrun.content.helloRequest'}).catch(()=>{});
-    if(t.documentId&&t.contentNonce)return t;
-    return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{readyWaiters.delete(t.id);reject(fail('Page content bridge unavailable','PAGE_UNAVAILABLE'));},15000);
-      readyWaiters.set(t.id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});});
+  const settleReady=(id,error)=>{for(const waiter of [...(readyWaiters.get(id)||[])])error?waiter.reject(error):waiter.resolve(targets.get(id));};
+  const cancelTargetWork=id=>{for(const context of contexts.values())if(context.targetId===id&&context.operation!=='closeTarget')context.cancel();};
+  const ready=async(t,check)=>{
+    check();if(t.documentId&&t.contentNonce)return t;
+    return new Promise((resolve,reject)=>{
+      const waiters=readyWaiters.get(t.id)||new Set();readyWaiters.set(t.id,waiters);let timer;
+      const finish=(error,value)=>{clearTimeout(timer);check.signal.removeEventListener('abort',abort);waiters.delete(waiter);if(!waiters.size&&readyWaiters.get(t.id)===waiters)readyWaiters.delete(t.id);error?reject(error):resolve(value);};
+      const abort=()=>finish(fail('Command cancelled or expired','COMMAND_CANCELLED'));
+      const waiter={resolve:value=>finish(null,value),reject:error=>finish(error)};waiters.add(waiter);
+      timer=setTimeout(()=>finish(fail('Page content bridge unavailable','PAGE_UNAVAILABLE')),15000);check.signal.addEventListener('abort',abort,{once:true});
+      if(check.signal.aborted)abort();else void chrome.tabs.sendMessage(t.tabId,{kind:'selfrun.content.helloRequest'}).catch(()=>{});
+    });
   };
-  const content=async(t,kind)=>{
-    await ready(t);const documentId=t.documentId,nonce=t.contentNonce;
-    const result=await chrome.tabs.sendMessage(t.tabId,{kind,nonce},{documentId});
+  const content=async(t,kind,check)=>{
+    check();await ready(t,check);check();const documentId=t.documentId,nonce=t.contentNonce;
+    const result=await chrome.tabs.sendMessage(t.tabId,{kind,nonce,deadlineAt:check.deadlineAt},{documentId});
+    check();
     if(t.documentId!==documentId||result?.nonce&&result.nonce!==nonce)throw fail('Page document changed','DOCUMENT_CHANGED');
     if(result?.ok!==true)throw fail(result?.error||'Page content unavailable','PAGE_UNAVAILABLE');if(result.snapshot?.url)await checkUrl(t,result.snapshot.url);return result;
   };
   const main=async(t,operation,payload,check)=>{
-    check();await ready(t);check();const documentId=t.documentId;
+    check();await ready(t,check);check();const documentId=t.documentId;
     if(t.mainDocumentId!==documentId){
       const challenge=crypto.randomUUID();const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(config.installationKey),{name:'HMAC',hash:'SHA-256'},false,['sign']);
       const expected=Array.from(new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(challenge))),x=>x.toString(16).padStart(2,'0')).join('');check();
@@ -61,11 +74,11 @@ export function controllerRuntime(config) {
       const first=!t.documentId||entryChange;t.documentId=sender.documentId;t.contentNonce=message.nonce;t.url=sender.url;
       if(first){t.entryPending=false;t.mainDocumentId=null;t.boundUrl??=urlKey(sender.url);void persist();}
       void chrome.tabs.sendMessage(t.tabId,{kind:'selfrun.content.activate',nonce:t.contentNonce},{documentId:t.documentId}).catch(()=>{});
-      readyWaiters.get(t.id)?.resolve(t);readyWaiters.delete(t.id);void report('targetReady',{target:{id:t.id,url:t.url,type:'page'}});
+      settleReady(t.id);void report('targetReady',{target:{id:t.id,url:t.url,type:'page'}});
     } else if(message?.kind==='selfrun.content.dirty'&&message.nonce===t.contentNonce&&sender.documentId===t.documentId)void report('targetDirty',{targetId:t.id});
   });
   chrome.tabs.onRemoved.addListener(id=>{const key=targetId(id),t=targets.get(key);if(!t)return;
-    targets.delete(key);readyWaiters.get(key)?.reject(fail('Owned target closed','TARGET_CLOSED'));readyWaiters.delete(key);void persist();void report('targetRemoved',{targetId:key});});
+    targets.delete(key);settleReady(key,fail('Owned target closed','TARGET_CLOSED'));cancelTargetWork(key);void persist();void report('targetRemoved',{targetId:key});});
   async function execute(operation,payload,check) {
     check();
     if(operation==='createTarget') {
@@ -97,12 +110,12 @@ export function controllerRuntime(config) {
       let tab;try{tab=await chrome.tabs.get(t.tabId);}catch{targets.delete(t.id);await persist();return{absent:true};}
       if(tab.url!==t.bootstrapUrl)await checkUrl(t,String(tab.url||''));
       if(String(tab.url||'')!==String(payload.expectedUrl||''))return{closed:false,reason:'guard_rejected'};
-      check();t.closing=true;await chrome.tabs.remove(t.tabId);let absent=false;try{await chrome.tabs.get(t.tabId);}catch{absent=true;}
+      check();t.closing=true;cancelTargetWork(t.id);await chrome.tabs.remove(t.tabId);let absent=false;try{await chrome.tabs.get(t.tabId);}catch{absent=true;}
       if(absent){targets.delete(t.id);await persist();}return{closed:absent,reason:absent?'closed':'close_unconfirmed'};
     }
     const live=await liveTarget(t.id);if(!originAllowed(live.url))throw fail('Target is not at approved page','PAGE_UNAVAILABLE');
-    if(operation==='snapshot'||operation==='progress')return (await content(t,'selfrun.content.snapshot')).snapshot;
-    if(operation==='recoveryInput')return (await content(t,'selfrun.content.recoveryInput')).snapshot;
+    if(operation==='snapshot'||operation==='progress')return (await content(t,'selfrun.content.snapshot',check)).snapshot;
+    if(operation==='recoveryInput')return (await content(t,'selfrun.content.recoveryInput',check)).snapshot;
     const allowed=new Set(['newChat','input','sendReady','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptSnapshot','receiptRetire','pauseAnimations','quiesce']);
     if(!allowed.has(operation))throw fail('Unsupported named page operation');
     if(operation==='newChat'){const u=new URL(t.boundUrl),prefix=u.pathname.split('/c/')[0];t.entryTransition={allowed:[u.origin+'/',u.origin+prefix,u.origin+prefix+'/project'],deadlineAt:check.deadlineAt};await persist();}
@@ -120,26 +133,39 @@ export function controllerRuntime(config) {
     }
     return main(t,operation,payload,check);
   }
+  const drainCommands=()=>{if(commandRunning||!commandQueue.length)return;const entry=commandQueue.shift();entry.context.queued=null;commandRunning=true;
+    Promise.resolve().then(entry.execute).then(entry.resolve,entry.reject).finally(()=>{commandRunning=false;drainCommands();});};
+  const enqueueCommand=(execute,context)=>new Promise((resolve,reject)=>{const entry={execute,context,resolve,reject};context.queued=entry;commandQueue.push(entry);drainCommands();});
   async function handle(message) {
-    if(message?.kind==='welcome'){connectionId=message.connectionId;await report('hello',{controllerVersion:VERSION,extensionId:chrome.runtime.id,browserSessionId:config.browserSessionId});return;}
+    if(message?.kind==='welcome'){connectionId=message.connectionId;await report('hello',{controllerVersion:VERSION,extensionVersion:chrome.runtime.getManifest?.().version??null,extensionId:chrome.runtime.id,browserSessionId:config.browserSessionId});return;}
     if(message?.kind==='cancel'&&message.connectionId===connectionId){const context=contexts.get(message.id);if(context)context.cancel();return;}
     if(message?.kind!=='command'||message.connectionId!==connectionId||typeof message.id!=='string')return;
     const id=message.id;
     if(completed.has(id)){await post('/result',completed.get(id)).catch(()=>{});return;}
     if(inflight.has(id))return;
     let rejectCancelled;const cancelled=new Promise((_,reject)=>{rejectCancelled=reject;});cancelled.catch(()=>{});
-    const context={cancelled:false,connectionId:message.connectionId,cancel(){this.cancelled=true;rejectCancelled(fail('Command cancelled or expired','COMMAND_CANCELLED',message.operation==='submit'));}};contexts.set(id,context);
-    const deadlineTimer=setTimeout(()=>context.cancel(),Math.max(0,Math.min(60000,Number(message.deadlineAt)-Date.now()||0)));
-    const check=()=>{if(context.cancelled||(stopping&&message.operation!=='controllerStop')||connectionId!==context.connectionId||!Number.isFinite(message.deadlineAt)||Date.now()>=message.deadlineAt)throw fail('Command cancelled or expired','COMMAND_CANCELLED');};
-    check.deadlineAt=message.deadlineAt;check.commandId=id;
-    const work=commandChain.then(async()=>{let response;try{check();const target=message.payload?.targetId,isMutation=mutating.has(message.operation);
+    const abort=new AbortController();
+    const context={cancelled:false,connectionId:message.connectionId,targetId:message.payload?.targetId,operation:message.operation,queued:null,cancel(){if(this.cancelled)return;this.cancelled=true;const reason=fail('Command cancelled or expired','COMMAND_CANCELLED',message.operation==='submit');abort.abort(reason);rejectCancelled(reason);if(this.queued){const index=commandQueue.indexOf(this.queued);if(index>=0)commandQueue.splice(index,1);this.queued.reject(reason);this.queued=null;}}};contexts.set(id,context);
+    const deadlineAt=Number.isFinite(message.deadlineAt)?Math.min(message.deadlineAt,Date.now()+60000):0;
+    const deadlineTimer=setTimeout(()=>context.cancel(),Math.max(0,deadlineAt-Date.now()));
+    const check=()=>{if(context.cancelled||(stopping&&message.operation!=='controllerStop')||connectionId!==context.connectionId||Date.now()>=deadlineAt)throw fail('Command cancelled or expired','COMMAND_CANCELLED');};
+    check.deadlineAt=deadlineAt;check.commandId=id;check.signal=abort.signal;
+    const executeCommand=async()=>{check();const target=message.payload?.targetId,isMutation=mutating.has(message.operation);
         if(target&&isMutation&&mutationLanes.has(target))throw fail('Prior mutation is still settling','TARGET_MUTATION_PENDING');
         const execution=execute(message.operation,message.payload||{},check);
         if(target&&isMutation){mutationLanes.set(target,id);execution.finally(()=>{if(mutationLanes.get(target)===id)mutationLanes.delete(target);}).catch(()=>{});}
-        const result=await Promise.race([execution,cancelled]);check();response={id,connectionId:message.connectionId,ok:true,result};}
+        const result=await Promise.race([execution,cancelled]);check();return result;};
+    // Cleanup must reach its target even while an unrelated mutation is stuck.
+    // Queued cancellation removes the entry, without interrupting its neighbor.
+    const execution=observations.has(message.operation)||cleanup.has(message.operation)?Promise.resolve().then(executeCommand):enqueueCommand(executeCommand,context);
+    const work=(async()=>{let response;try{const result=await execution;response={id,connectionId:message.connectionId,ok:true,result};}
       catch(error){response={id,connectionId:message.connectionId,ok:false,error:{message:String(error?.message||error).slice(0,250),code:String(error?.code||'EXTENSION_COMMAND_FAILED'),released:error?.released===true}};}
-      clearTimeout(deadlineTimer);completed.set(id,response);while(completed.size>512)completed.delete(completed.keys().next().value);await post('/result',response).catch(()=>{});
-    });commandChain=work.catch(()=>{});inflight.set(id,work);try{await work;}finally{inflight.delete(id);contexts.delete(id);}
+      clearTimeout(deadlineTimer);completed.set(id,response);while(completed.size>512)completed.delete(completed.keys().next().value);
+      // HTTP acknowledgement is independent of execution. Correlation remains
+      // pinned to this command/connection; an old report cannot own a new turn.
+      void post('/result',response).catch(()=>{});
+    })();
+    inflight.set(id,work);try{await work;}finally{inflight.delete(id);contexts.delete(id);}
   }
   async function start() {
     currentTabId=(await chrome.tabs.getCurrent())?.id;

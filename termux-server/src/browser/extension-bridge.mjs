@@ -5,6 +5,8 @@ import {EXTENSION_ID} from './extension-package.mjs';
 const LIMIT=2*1024*1024;
 export const EXTENSION_OPERATIONS=new Set(['createTarget','listTargets','idleStatus','controllerStop','initialize','navigate','closeTarget','snapshot','progress','recoveryInput','newChat','input','sendReady','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptSnapshot','receiptRetire','pauseAnimations','quiesce']);
 const error=(message,code,released=false)=>Object.assign(new Error(message),{code,released});
+const aborted=(signal,released=false)=>Object.assign(error('Extension command aborted',
+  signal?.reason?.code==='OBSERVATION_SUPERSEDED'?'OBSERVATION_SUPERSEDED':signal?.reason?.name==='TimeoutError'?'EXTENSION_TIMEOUT':'ABORT_ERR',released),{name:'AbortError',cause:signal?.reason});
 const equal=(a,b)=>{const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return x.length===y.length&&timingSafeEqual(x,y);};
 export class ExtensionBridge extends EventEmitter {
   constructor({port,ownerId,capability,browserSessionId,extensionId=EXTENSION_ID}) {
@@ -15,7 +17,7 @@ export class ExtensionBridge extends EventEmitter {
   get address(){return this.server?.address();}
   get url(){return `http://127.0.0.1:${this.address?.port}`;}
   get pendingCount(){return this.pending.size;}
-  status(){return{adapter:'extension',connected:!!this.connection?.ready,pending:this.pending.size,commandCount:this.commandCount,requests:this.requests,rejections:this.rejections,lastRejection:this.lastRejection,browserSessionId:this.browserSessionId};}
+  status(){return{adapter:'extension',connected:!!this.connection?.ready,extensionVersion:this.connection?.ready?this.connection.extensionVersion??null:null,pending:this.pending.size,commandCount:this.commandCount,requests:this.requests,rejections:this.rejections,lastRejection:this.lastRejection,browserSessionId:this.browserSessionId};}
   async start(){if(this.server)return;this.server=http.createServer((req,res)=>void this.#handle(req,res).catch(()=>{if(!res.headersSent)this.#json(res,400,{error:'invalid_request'});else res.destroy();}));this.server.requestTimeout=15000;this.server.headersTimeout=10000;this.server.keepAliveTimeout=5000;
     await new Promise((resolve,reject)=>{this.server.once('error',reject);this.server.listen(this.port,'127.0.0.1',resolve);});
   }
@@ -40,7 +42,7 @@ export class ExtensionBridge extends EventEmitter {
       const p=this.pending.get(body.id);if(!p||p.connectionId!==c.id)return this.#json(res,409,{error:'unknown_command'});
       if(body.ok===true)p.finish(null,body.result);else p.finish(error(String(body.error?.message||'Extension command failed').slice(0,250),String(body.error?.code||'EXTENSION_COMMAND_FAILED'),body.error?.released===true));
     }else if(body.event==='hello'){
-      if(body.extensionId!==this.extensionId)return this.#json(res,403,{error:'identity_mismatch'});c.ready=true;for(const done of [...this.waiters])done();this.emit('ready');
+      if(body.extensionId!==this.extensionId)return this.#json(res,403,{error:'identity_mismatch'});c.extensionVersion=typeof body.extensionVersion==='string'&&/^\d+\.\d+\.\d+$/.test(body.extensionVersion)?body.extensionVersion:null;c.ready=true;for(const done of [...this.waiters])done();this.emit('ready');
     }else if(c.ready&&['targetReady','targetDirty','targetRemoved'].includes(body.event))this.emit(body.event,body);
     else return this.#json(res,400,{error:'unsupported_event'});
     this.#json(res,200,{ok:true});
@@ -60,12 +62,12 @@ export class ExtensionBridge extends EventEmitter {
   }
   async request(operation,payload={},options={}){
     if(!EXTENSION_OPERATIONS.has(operation))throw error('Unsupported named extension operation','EXTENSION_UNSUPPORTED');
-    const {timeoutMs=20000,signal}=options;if(signal?.aborted)throw Object.assign(error('Extension command aborted','ABORT_ERR'),{name:'AbortError'});
+    const {timeoutMs=20000,signal}=options;if(signal?.aborted)throw aborted(signal);
     const c=this.connection;if(!c?.ready)throw error('Extension controller disconnected','EXTENSION_UNAVAILABLE');
     const id=randomUUID(),message={kind:'command',id,connectionId:c.id,operation,payload,deadlineAt:Date.now()+timeoutMs};const frame=JSON.stringify(message)+'\n';if(Buffer.byteLength(frame)>LIMIT)throw error('Extension command too large','EXTENSION_PAYLOAD_TOO_LARGE');
     return new Promise((resolve,reject)=>{
       const cancel=()=>{if(this.connection===c&&!c.res.destroyed)c.res.write(JSON.stringify({kind:'cancel',id,connectionId:c.id})+'\n');};
-      const abort=()=>{cancel();finish(Object.assign(error('Extension command aborted','ABORT_ERR',operation==='submit'),{name:'AbortError'}));};
+      const abort=()=>{cancel();finish(aborted(signal,operation==='submit'));};
       const timer=setTimeout(()=>{cancel();finish(error('Extension command timeout','EXTENSION_TIMEOUT',operation==='submit'));},timeoutMs);
       const finish=(e,value)=>{if(!this.pending.has(id))return;this.pending.delete(id);clearTimeout(timer);signal?.removeEventListener('abort',abort);e?reject(e):resolve(value);};
       this.pending.set(id,{finish,operation,connectionId:c.id});signal?.addEventListener('abort',abort,{once:true});

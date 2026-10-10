@@ -990,7 +990,7 @@ export class ChatGptBrowser {
 
   async recoveryInputSnapshot({ session, signal }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
-    return runPageAction(session, 'recoveryInput');
+    return runPageAction(session, 'recoveryInput', {}, RUNTIME_EVALUATE_TIMEOUT_MS, {signal});
   }
 
   async attachTarget({targetId,signal,onTarget}) {
@@ -1058,20 +1058,28 @@ export class ChatGptBrowser {
     const started=Date.now(),timeout=Math.min(SUBMIT_POST_GRACE_MS,Number(this.config.navigationTimeoutMs)||SUBMIT_POST_GRACE_MS);
     do {
       check();
-      try{probe=await this.#observeProgress(session,signal,key.generation||null);}catch(error){check();return {state:'UNKNOWN',probe};}
-      check();
-      if(probe?.loginPage||(expected&&conversationId(probe?.url)!==expected))return {state:'UNKNOWN',probe};
+      // These are independent reads. A delayed progress query must not prevent
+      // receipt collection, and a delayed receipt must not stop observation.
+      const observing=this.#observeProgress(session,signal,key.generation||null)
+        .then(value=>({value}),error=>({error}));
       let observed=null;
-      if(validKey)try{observed=await runPageAction(session,'receiptSnapshot',{key});}catch{check();}
+      if(validKey)try{observed=await runPageAction(session,'receiptSnapshot',{key},RUNTIME_EVALUATE_TIMEOUT_MS,{signal});}catch{check();}
+      const observation=await observing;
+      if(!observation.error)probe=observation.value;
       check();
+      if(!observation.error&&(probe?.loginPage||(expected&&conversationId(probe?.url)!==expected)))return {state:'UNKNOWN',probe};
       // A current-page conflict must never fall back to an older saved positive receipt.
       const receipt=observed===null?durable:belongs(observed)?metadata(observed):null;
       if(receipt&&((intent.message_id&&receipt.message_id&&intent.message_id!==receipt.message_id)
-          ||(intent.receipt?.request_id&&receipt.request_id&&intent.receipt.request_id!==receipt.request_id)))return {state:'UNKNOWN',probe};
+          ||(intent.receipt?.request_id&&receipt.request_id&&intent.receipt.request_id!==receipt.request_id)
+          ||(expected&&receipt.conversation_id&&receipt.conversation_id!==expected)))return {state:'UNKNOWN',probe};
       if(receipt&&onRequest&&JSON.stringify(receipt)!==JSON.stringify(durable)) {
         await onRequest({message_id:receipt.message_id,released:receipt.released,receipt});
         check();durable=receipt;
       }
+      // An independent observation failure must not discard same-intent receipt
+      // diagnostics. Without current-page proof it still cannot confirm delivery.
+      if(observation.error)return {state:'UNKNOWN',probe};
       if(positive(receipt)&&durable&&JSON.stringify(receipt)===JSON.stringify(durable)
           &&conversationId(probe?.url)===receipt.conversation_id) {
         check();return {state:'CONFIRMED',probe,messageId:receipt.message_id};
