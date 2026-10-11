@@ -7,6 +7,7 @@ import {fixture as lifecycleFixture,MemoryStore} from './helpers/lifecycle-fixtu
 import {monitorRuntimeFixture,wait} from './helpers/monitor-runtime-fixture.mjs';
 import {connectedPageRuntime} from './helpers/connected-page-runtime-fixture.mjs';
 const TEN_MINUTES=600000;
+const appUrl=url=>'https://chatgpt.com/c/'+new URL(url).pathname.split('/c/')[1];
 const profileOperations=['model','thinking_effort','conversation_origin','service_tier'].map(path=>({op:'REMOVE',path}));
 async function setup(t,{afterAction=null,manualClock=true,composerKind='textarea',deferConversationUrl=false,conversationUrlOnSend=''}={}){
  let now=Date.now();if(manualClock)t.mock.method(Date,'now',()=>now);
@@ -53,12 +54,12 @@ test('current create, navigate, real input, one click, URL publication and real 
  assert.equal(page.requests[0].messages[0].content.parts[0],f.life.record().intent.prompt);
  assert.notEqual(f.life.record().intent.prompt,f.life.body.prompt,'the actual prepared prompt, including directive, is sent');
  for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(Object.hasOwn(page.requests[0],field),false);
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/owned-1');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/owned-1');
  assert.ok(f.wire.calls.some(c=>c[0]==='selfrun.content.snapshot'),'actual controller requested actual generated content probe');
  assert.ok(f.samples.some(s=>s.userCount===1&&s.assistantCount===1));
  assert.equal(f.life.record().intent.sends,1);
  await f.sample();assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);await assertAppliedProgress(f);
- await fs.writeFile(new URL('../evidence/dev30-connected-normal-dispatch.json',import.meta.url),JSON.stringify(f.life.rows.get(f.life.path),null,2)+'\n');
+ await fs.writeFile(new URL('../evidence/dev31-connected-normal-dispatch.json',import.meta.url),JSON.stringify(f.life.rows.get(f.life.path),null,2)+'\n');
 });
 
 test('the connected monitor enforces ten-minute Result and intervention branches, then creates a fresh successor',async t=>{
@@ -122,7 +123,7 @@ test('URL appearing just after actual input publishes and monitors without a cli
  const f=await setup(t,{afterAction:async(operation,page)=>{if(operation==='input'&&!changed){changed=true;page.context.window.history.pushState({},'', '/g/test/c/input-transition');}}});
  await start(f);
  assert.equal(changed,true);assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);assert.equal(f.wire.pageRuntimes.get(1).requests.length,0);
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/input-transition');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/input-transition');
  assert.ok(f.samples.length>0);assert.notEqual(f.life.record().intent.released,true);assert.equal(f.life.record().intent.sends,0);await assertAppliedProgress(f);
  await f.life.controller.tick(f.life.transport);await f.sample();assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);
 });
@@ -133,7 +134,7 @@ test('lost response after one actual click publishes and monitors, and CDP recon
  await start(f);
  const actor=f.wire.manager.actionSessions.get(f.life.record().target_id),page=f.wire.pageRuntimes.get(1),fence=actor.released;
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.equal(page.requests.length,1);
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/owned-1');assert.ok(f.samples.length>0);assert.ok(fence);
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/owned-1');assert.ok(f.samples.length>0);assert.ok(fence);
  actor.reconnect=async()=>({...page.transport,socket:{readyState:1}});
  await actor.run('recoveryInput');assert.equal(actor.released,fence);
  await assert.rejects(actor.run('submit',{initialProjectUrl:f.life.body.project_url}),/already have been released/);
@@ -149,7 +150,7 @@ test('URL arriving after a lost input response and controller restart reaches th
  await f.life.controller.quiesceForStandby();f.life.controller=f.life.recreate();
  page.context.window.history.pushState({},'', '/g/test/c/reconnected-transition');
  await f.life.controller.tick(f.life.transport);
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/reconnected-transition');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/reconnected-transition');
  await f.life.controller.tick(f.life.transport);await wait(()=>f.samples.length>0,'same page observer after restart');await f.life.settle();
  assert.equal(f.life.record().target_id,target);assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);
  assert.equal(f.wire.calls.filter(c=>c[0]==='server'&&c[1]==='Target.createTarget').length,1);
@@ -200,7 +201,7 @@ test('observed hidden textarea and visible contenteditable execute selection ins
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.equal(page.requests.length,1);
  assert.equal(page.effects.find(e=>e.kind==='input').method,'execCommand');
  assert.equal(page.requests[0].messages[0].content.parts[0],f.life.record().intent.prompt);
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/owned-1');assert.ok(f.samples.length>0);
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/owned-1');assert.ok(f.samples.length>0);
 });
 
 for(const legacy of [{server_status:'COMPLETED'},{lifecycle_state:'COMMITTED'},{server_control_epoch:99,server_control_state:'STOPPED'}])test('current CONTROL owns admission despite stale server projection '+JSON.stringify(legacy),async t=>{
@@ -257,7 +258,7 @@ test('audit revision disagreement permits owned URL adoption and monitoring afte
  f.life.controller.repository.integrityFaults.add(keyFor(f.life.body));
  await f.life.controller.tick(f.life.transport);await f.life.controller.tick(f.life.transport);
  await wait(()=>f.samples.length>0,'owned URL monitor under audit disagreement');
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/audit-transition');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/audit-transition');
  f.life.result(false);await f.elapse(TEN_MINUTES);assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);
 });
 
@@ -272,7 +273,7 @@ test('pending URL publication cannot hold actual monitor samples, cursor updates
  f.life.control={...f.life.control,state:'STOPPED',control_epoch:2};await f.life.controller.control(null,f.life.control,f.life.transport);
  assert.equal(late.signal.aborted,true);assert.equal(f.life.record(),null);assert.equal(f.life.controller.sessions.size,0);
  release();await ingest;await f.life.settle();await late.onActivity(f.samples[0]);await f.life.controller.cleanupTerminalResources();
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/pending-publication');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/pending-publication');
  assert.equal(f.life.record(),null);assert.equal(actor.closed,true);assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);
  assert.ok(page.effects.some(e=>e.kind==='observer-disconnected'));
 });
@@ -323,7 +324,7 @@ for(const arrival of ['monitor','metadata'])test('late canonical URL after real 
   assert.doesNotMatch(f.life.record().error?.message||'',/invalid lifecycle transition/);
  } finally {release();page.contentMessage=message;}
  await assertAppliedProgress(f);await f.life.controller.flush(f.life.transport);
- assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/g/test/c/owned-1');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/owned-1');
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);
  await f.life.controller.quiesceForStandby();f.life.controller=f.life.recreate();await f.life.controller.tick(f.life.transport);await f.sample();
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);
@@ -373,7 +374,7 @@ for(const [label,conversation,newDocument] of [
  assert.equal(f.life.record().conversation_url,canonical);
  await wait(()=>f.samples.some(sample=>sample.userCount===1&&sample.assistantCount===0&&sample.stopButtonVisible),'actual registered content sample');
  await assertAppliedProgress(f);
- await f.life.controller.flush(f.life.transport);assert.equal(f.life.rows.get(f.life.path).conversation_url,conversation);
+ await f.life.controller.flush(f.life.transport);assert.equal(f.life.rows.get(f.life.path).conversation_url,appUrl(conversation));
  assert.equal(f.life.record().intent.sends,0);assert.notEqual(f.life.record().intent.released,true);assert.notEqual(f.life.record().intent.outcome,'CONFIRMED');
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);assert.equal(f.wire.calls.filter(c=>c[0]==='server'&&c[1]==='Target.createTarget').length,1);
  if(newDocument)assert.notEqual(page.context.window.__selfrunExtensionPage,firstHelper);
@@ -396,7 +397,7 @@ test('owned named address is published and sampled while CONTROL input authoriza
  page.context.window.history.pushState({},'',actualConversation);page.observeSubmitted(f.life.record().intent.prompt);
  const read=f.life.transport.read;f.life.transport.read=async name=>{if(name.startsWith('__SELFRUN_CONTROL__'))throw Error('control temporarily unavailable');return read(name);};
  await assert.rejects(f.life.controller.tick(f.life.transport),/control temporarily unavailable/);
- await wait(()=>f.life.rows.get(f.life.path).conversation_url===actualConversation,'URL despite uncertain input authority');
+ await wait(()=>f.life.rows.get(f.life.path).conversation_url===appUrl(actualConversation),'URL despite uncertain input authority');
  await assertAppliedProgress(f);await f.sample();
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),0);assert.equal(f.life.record().intent.sends,0);
  assert.equal([...f.life.controller.sessions.values()][0].inputAuthorized,false);
@@ -431,13 +432,13 @@ test('STOP first received after address observation still purges ownership and c
  assert.equal(f.wire.calls.filter(c=>c[0]==='server'&&c[1]==='Target.createTarget').length,1);
 });
 
-for(const loseReply of [false,true])test('actual first click creates exact named address, publishes it unchanged and continues once; lost reply='+loseReply,async t=>{
+for(const loseReply of [false,true])test('actual first click creates exact named address, publishes its normalized app link and continues once; lost reply='+loseReply,async t=>{
  let lost=false;
  const f=await setup(t,{conversationUrlOnSend:actualConversation,afterAction:async operation=>{if(loseReply&&operation==='submit'&&!lost){lost=true;throw Error('synthetic lost submit response');}}});
  f.life.body.project_url=actualProjectEntry;await start(f);await f.life.controller.flush(f.life.transport);
  const page=f.wire.pageRuntimes.get(1),target=f.life.record().target_id,actor=f.wire.manager.actionSessions.get(target),firstFence=actor.released;
- assert.equal(page.context.location.href,actualConversation);assert.equal(f.life.rows.get(f.life.path).conversation_url,actualConversation);
- if(!loseReply)await fs.writeFile(new URL('../evidence/dev30-connected-dispatch.json',import.meta.url),JSON.stringify(f.life.rows.get(f.life.path),null,2)+'\n');
+ assert.equal(page.context.location.href,actualConversation);assert.equal(f.life.record().observed_conversation_url,actualConversation);assert.equal(f.life.rows.get(f.life.path).conversation_url,appUrl(actualConversation));
+ if(!loseReply)await fs.writeFile(new URL('../evidence/dev31-connected-dispatch.json',import.meta.url),JSON.stringify(f.life.rows.get(f.life.path),null,2)+'\n');
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.equal(page.requests.length,1);assert.ok(firstFence);
  assert.equal(page.requests[0].messages[0].content.parts[0],f.life.record().intent.prompt);await assertAppliedProgress(f);
  await assert.rejects(actor.run('submit'),/already have been released/);assert.equal(f.clicks(),1);assert.equal(actor.released,firstFence);
@@ -452,11 +453,13 @@ test('a later conversation on the same owned tab is published and monitored with
  const f=await setup(t,{conversationUrlOnSend:actualConversation});f.life.body.project_url=actualProjectEntry;await start(f);
  const page=f.wire.pageRuntimes.get(1),original=f.life.record().conversation_url,actor=f.wire.manager.actionSessions.get(f.life.record().target_id),late=f.late[0];
  const other='https://chatgpt.com/g/different-project/c/later-owned-tab-address';page.context.window.history.pushState({},'',other);
- await wait(()=>f.life.rows.get(f.life.path).conversation_url===other,'updated owned-tab URL publication');
+ await wait(()=>f.life.rows.get(f.life.path).conversation_url===appUrl(other),'updated owned-tab URL publication');
  await assertAppliedProgress(f);assert.equal(late.signal.aborted,false);assert.equal(f.life.record().conversation_url,original);
+ assert.equal(f.life.record().observed_conversation_url,other);await f.life.controller.flush(f.life.transport);
+ await fs.writeFile(new URL('../evidence/dev31-connected-later-dispatch.json',import.meta.url),JSON.stringify(f.life.rows.get(f.life.path),null,2)+'\n');
  await assert.rejects(actor.run('input',{prompt:'do not transfer'}),/repurposed/);
  f.life.result(false);await f.tickAfter(TEN_MINUTES);await f.sample();
- assert.equal(late.signal.aborted,false);assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.equal(f.life.rows.get(f.life.path).conversation_url,other);
+ assert.equal(late.signal.aborted,false);assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.equal(f.life.rows.get(f.life.path).conversation_url,appUrl(other));
  const before=JSON.stringify(f.life.record().cursor);page.appendResponse('later address still observed after refused effect');
  await wait(()=>JSON.stringify(f.life.record()?.cursor)!==before,'cursor remains live after refused cross-conversation input');
  await f.life.stop();assert.equal(f.life.record(),null);assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);
@@ -477,7 +480,7 @@ for(const clientStatus of ['SEND_REQUESTED','CREATE_REQUESTED'])test('intent-nul
  const f=await setup(t,{composerKind:'contenteditable'}),control=await preparedWithoutIntent(f,clientStatus),page=f.wire.pageRuntimes.get(1);
  page.context.window.history.pushState({},'',actualConversation);page.observeSubmitted('synthetic independently observed site input');
  await assert.rejects(f.life.controller.tick(f.life.transport),/CONTROL failed after prepare/);
- await wait(()=>f.life.rows.get(f.life.path).conversation_url===actualConversation,'intent-null exact address publication');
+ await wait(()=>f.life.rows.get(f.life.path).conversation_url===appUrl(actualConversation),'intent-null exact address publication');
  await assertAppliedProgress(f);await f.sample();
  assert.equal(f.life.record().state,'OBSERVING');assert.equal(f.life.record().intent,null);
  assert.equal(f.late[0].livenessGate().observationGeneration,null);assert.equal(f.inputs(),0);assert.equal(f.clicks(),0);
@@ -527,7 +530,7 @@ for(const phase of ['PREPARED','PREPARING'])test('intent-null '+phase+' restorat
  page.context.window.history.pushState({},'',actualConversation);page.observeSubmitted('synthetic site observation after restoration');
  const effects=page.effects.length,calls=f.wire.calls.length;
  await assert.rejects(f.life.controller.tick(f.life.transport),/CONTROL failed after prepare/);
- await wait(()=>f.life.rows.get(f.life.path).conversation_url===actualConversation,'restored exact address publication');
+ await wait(()=>f.life.rows.get(f.life.path).conversation_url===appUrl(actualConversation),'restored exact address publication');
  await assertAppliedProgress(f);await f.sample();
  assert.equal(f.life.record().target_id,target);assert.equal(f.life.record().intent,null);assert.equal(f.life.record().state,'OBSERVING');
  assert.equal(f.inputs(),0);assert.equal(f.clicks(),0);
@@ -576,7 +579,7 @@ test('readonly restart with an uncertain initial intent and lost Android lease o
  const calls=f.wire.calls.length,effects=page.effects.length;
  await assert.rejects(f.life.controller.tick(f.life.transport),/CONTROL unavailable during readonly reconnect/);
  await assertAppliedProgress(f);await f.sample();
- assert.equal(f.life.rows.get(f.life.path).conversation_url,actualConversation);assert.equal(leases.length,1,'readonly observation must not reapply Android profile');assert.equal(f.life.record().intent.outcome,'UNKNOWN');
+ assert.equal(f.life.rows.get(f.life.path).conversation_url,appUrl(actualConversation));assert.equal(leases.length,1,'readonly observation must not reapply Android profile');assert.equal(f.life.record().intent.outcome,'UNKNOWN');
  assert.equal(page.effects.slice(effects).filter(e=>e.kind==='action').length,0);
  assert.equal(f.wire.calls.slice(calls).filter(c=>c[0]==='server').length,0);assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);
  f.life.transport.read=read;await f.life.controller.tick(f.life.transport);await f.sample();

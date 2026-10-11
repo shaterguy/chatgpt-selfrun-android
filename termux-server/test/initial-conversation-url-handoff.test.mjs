@@ -27,7 +27,7 @@ test('actual submitIntent publishes owned metadata URL and enters controller mon
  t.after(()=>life.controller.quiesceForStandby());
  await life.ingest();
  assert.equal(life.record().conversation_url,'https://chatgpt.com/c/owned-conversation');
- assert.equal(life.rows.get(life.path).conversation_url,conversation);
+ assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
  assert.equal(life.rows.get(life.path).server_status,'PENDING','URL publication does not add a lifecycle status contract');
  assert.ok(life.observations.length>0);
  assert.equal(operations.length,0,'metadata URL handoff precedes all DOM/input calls');
@@ -57,7 +57,7 @@ for(const failure of ['MISMATCH','NO_COMPOSER','TIMEOUT'])test('lost first input
  life.browser.submitIntent=args=>browser.submitIntent(args);
  t.after(()=>life.controller.quiesceForStandby());
  await life.ingest();
- assert.equal(life.rows.get(life.path).conversation_url,conversation);
+ assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
  assert.ok(life.observations.length>0);
  assert.equal(operations.filter(x=>x==='input').length,1);
  assert.equal(operations.filter(x=>x==='submit').length,0);
@@ -79,7 +79,7 @@ test('owned metadata URL wins before a pre-submit retry timer and dead DOM',asyn
  assert.ok(life.record().retry_at>Date.now());
  const before=domCalls;url=conversation;
  await Promise.all([life.controller.tick(life.transport),life.controller.tick(life.transport)]);await life.settle();
- assert.equal(life.rows.get(life.path).conversation_url,conversation);
+ assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
  assert.ok(life.observations.length>0);
  assert.equal(domCalls,before);
  assert.equal(life.record().intent.sends,0);
@@ -217,12 +217,12 @@ test('restart publishes the owned URL before unavailable attachment DOM and neve
  life.browser.prepare=async()=>({target:{id:'target-owned'},session:{transport:'extension',close(){},async run(){dom++;throw Error('CDP command timeout: Runtime.evaluate');}},baseline:{url:project}});
  life.browser.submitIntent=args=>browser.submitIntent(args);
  life.browser.ownedConversationUrl=args=>browser.ownedConversationUrl(args);
- life.browser.attachTarget=async options=>{attaches++;assert.equal(options.targetId,'target-owned');assert.equal(options.observationOnly,true);assert.equal(life.rows.get(life.path).conversation_url,conversation);throw Error('CDP command timeout: Runtime.evaluate');};
+ life.browser.attachTarget=async options=>{attaches++;assert.equal(options.targetId,'target-owned');assert.equal(options.observationOnly,true);assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');throw Error('CDP command timeout: Runtime.evaluate');};
  t.after(()=>life.controller.quiesceForStandby());
  await life.ingest();assert.equal(life.record().reason,'PRE_SUBMIT_RETRY');const before=dom;
  await life.controller.quiesceForStandby();life.controller=life.recreate();url=conversation;
  await life.controller.tick(life.transport);await life.settle();
- assert.equal(life.rows.get(life.path).conversation_url,conversation);
+ assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
  assert.equal(attaches,1,'publish URL before the readonly attachment attempt');
  await life.controller.tick(life.transport);await life.settle();
  assert.equal(attaches,1);assert.equal(dom,before);assert.equal(life.record().intent.sends,0);

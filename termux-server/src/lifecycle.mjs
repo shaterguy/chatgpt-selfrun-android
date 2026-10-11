@@ -126,9 +126,9 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
 // App-facing output is URL-only; lifecycle and business completion stay local/app-owned.
 export function projection(r) {
   return {task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,dispatch_attempt:r.dispatch_attempt,
-    // Only local observation callbacks populate this field. External dispatch
-    // intake never imports it; canonical identity remains internal.
-    conversation_url:r.observed_conversation_url||r.conversation_url};
+    // Keep the observed address locally; normalize only the app-facing link.
+    // Prefer its latest cID without changing the original effect ownership pin.
+    conversation_url:canonicalUrl(r.observed_conversation_url||r.conversation_url)};
 }
 export function newIntent(record,kind,prompt,baseline) {
   return {id:randomUUID(),kind,prompt:String(prompt),hash:digest(prompt),baseline:structuredClone(baseline||{}),outcome:'PENDING',
