@@ -5,8 +5,8 @@ const consumed=r=>['COMMITTED','COMPLETED'].includes(r?.state);
 // Terminal and displaced cleanup metadata never re-enters dispatch, submission
 // or monitor execution; disposing a tab does not commit a business Result.
 export class TerminalBrowserCleanup {
-  constructor({repository,chromium,stateStore,available,busy}) {
-    Object.assign(this,{repository,chromium,stateStore,available,busy});
+  constructor({repository,chromium,stateStore,available,busy,idleReleaseAllowed=available}) {
+    Object.assign(this,{repository,chromium,stateStore,available,busy,idleReleaseAllowed});
     this.running=null;this.requested=false;this.nextAttempt=0;this.controls=new Map();
     chromium?.setLifecycleGuards?.({
       canCloseTarget:(id,target)=>{
@@ -103,7 +103,7 @@ export class TerminalBrowserCleanup {
     return JSON.stringify(this.chromium?.cleanupDisposition?.(entry.target_id))===JSON.stringify(proof);
   }
   canRelease() {
-    if(!this.available()||this.busy()||this.repository.resourceCleanups.size||this.repository.records().some(r=>!retiredState(r)))return false;
+    if(!this.idleReleaseAllowed()||this.busy()||this.repository.records().some(r=>!retiredState(r)))return false;
     for(const c of this.currentControls().values()) {
       if(this.repository.controlQuarantined(c))continue;
       const marker=this.repository.get(keyFor(c));
@@ -119,7 +119,7 @@ export class TerminalBrowserCleanup {
     return true;
   }
   run({force=true}={}) {
-    if(!this.chromium?.closeOwnedTarget||!this.available())return Promise.resolve();
+    if(!this.chromium?.closeOwnedTarget||!this.available()&&!this.idleReleaseAllowed())return Promise.resolve();
     if(!force&&Date.now()<this.nextAttempt)return this.running||Promise.resolve();
     this.requested=true;
     if(this.running)return this.running;
@@ -127,7 +127,7 @@ export class TerminalBrowserCleanup {
       do {
         this.requested=false;
         let quarantined=false,resourceConfirmed=false;
-        for(const entry of this.repository.cleanupEntries()) {
+        if(this.available())for(const entry of this.repository.cleanupEntries()) {
           let disposition;
           try{disposition=this.chromium?.inspectCleanupDisposition
             ?await this.chromium.inspectCleanupDisposition(entry.target_id)
@@ -150,7 +150,7 @@ export class TerminalBrowserCleanup {
             reason:String(result?.reason||(status==='CLOSED'?'closed':status==='ABSENT'?'already_absent':'close_unconfirmed')).slice(0,300),
             ...(result?.error?{error:result.error}:{})});
         }
-        if((!quarantined||resourceConfirmed)&&this.canRelease()&&(!Object.keys(this.repository.data.browserCleanupUnresolved||{}).length||resourceConfirmed))await this.chromium.releaseIfUnused?.({guard:()=>this.canRelease()});
+        if(this.canRelease())await this.chromium.releaseIfUnused?.({guard:()=>this.canRelease()});
       } while(this.requested);
     })().catch(error=>{
       console.error(JSON.stringify({event:'TERMINAL_BROWSER_CLEANUP_ERROR',error:String(error?.message||error).slice(0,300)}));

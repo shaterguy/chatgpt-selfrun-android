@@ -7,17 +7,34 @@ function processIdentity(pid){try{const stat=fs.readFileSync(`/proc/${pid}/stat`
 function processExists(pid){try{fs.statSync(`/proc/${pid}`);return true;}catch(e){return e.code!=='ENOENT';}}
 function bootId(){try{return fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim();}catch{return null;}}
 export function extensionProcessMatches(proof,row,boot){return !!proof&&!!row&&row.state!=='Z'&&!!boot&&proof.bootId===boot&&proof.pid===row.pid&&proof.startTime===row.startTime&&row.args.includes(`--user-data-dir=${proof.profile}`)&&row.args.includes(`--load-extension=${proof.extensionPath}`)&&row.args.includes(`--selfrun-extension-owner=${proof.ownerId}`)&&(!proof.cdpPort||(row.args.includes(`--remote-debugging-port=${proof.cdpPort}`)&&row.args.includes('--remote-debugging-address=127.0.0.1')))&&!row.args.some(x=>x.startsWith('--type='));}
+// PID reuse and a changed boot prove that the recorded process exited.
+// An unreadable process is not proof of exit and must never be signalled.
+export function extensionProcessExited(proof,deps){
+  if(!proof||!Number.isSafeInteger(proof.pid)||proof.pid<1||typeof proof.startTime!=='string'||!proof.startTime
+    ||typeof proof.bootId!=='string'||!proof.bootId)return false;
+  const row=deps.processIdentity(proof.pid),exists=deps.processExists(proof.pid),boot=deps.bootId();
+  if(exists===false&&!row)return true;
+  if(boot&&proof.bootId!==boot)return true;
+  if(row?.pid===proof.pid&&typeof row.startTime==='string'&&row.startTime!==proof.startTime)return true;
+  return !!row&&row.pid===proof.pid&&row.state==='Z'&&row.startTime===proof.startTime&&proof.bootId===boot;
+}
+// Only a root carrying this SelfRun pairing, exact extension and profile may be
+// retired. This is deliberately scoped to the private Termux Chromium instance.
+function findOwnedBrowserRoots({profile,extensionPath,ownerId}){
+  let pids;try{pids=fs.readdirSync('/proc').filter(x=>/^\d+$/.test(x));}catch{return null;}
+  const boot=bootId();if(!boot)return null;const roots=[];
+  for(const raw of pids){const row=processIdentity(Number(raw));if(!row||row.state==='Z'||!row.startTime)continue;
+    const proof={pid:row.pid,startTime:row.startTime,bootId:boot,profile,extensionPath,ownerId};
+    if(extensionProcessMatches(proof,row,boot))roots.push(proof);
+  }
+  return roots;
+}
 // Pure proof check shared with guarded offline maintenance; never signals or initializes a browser.
 export function clearedExitedExtensionJournal(journal,deps,canRelease=()=>false){
   try{
     if(canRelease()!==true||journal?.schema!=='selfrun-extension-ownership-v1'||!Array.isArray(journal.targets)||journal.targets.length
       ||!journal.targetMetadata||typeof journal.targetMetadata!=='object'||Array.isArray(journal.targetMetadata)||Object.keys(journal.targetMetadata).length)return null;
-    const exited=proof=>{
-      if(!proof||!Number.isSafeInteger(proof.pid)||proof.pid<1||typeof proof.startTime!=='string'||!proof.startTime||typeof proof.bootId!=='string'||!proof.bootId)return false;
-      const row=deps.processIdentity(proof.pid),exists=deps.processExists(proof.pid);
-      if(exists===false)return !row;
-      return !!row&&row.pid===proof.pid&&row.state==='Z'&&row.startTime===proof.startTime&&proof.bootId===deps.bootId();
-    };
+    const exited=proof=>extensionProcessExited(proof,deps);
     if(!exited(journal.process)||(journal.retiringProcess&&!exited(journal.retiringProcess))||canRelease()!==true)return null;
     return {...journal,controllerStopPending:false,retiringProcess:null};
   }catch{return null;}
@@ -47,7 +64,7 @@ async function atomicJson(file,value,guard=()=>true){
   }finally{if(pending)await fsp.unlink(temp).catch(error=>{if(error.code!=='ENOENT')throw error;});}
 }
 export class ExtensionManager {
-  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.targetClosures=new Map();this.targetRemovalGeneration=0;this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
+  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),findOwnedBrowserRoots,...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.targetClosures=new Map();this.targetRemovalGeneration=0;this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
   #serial(fn){const p=this.queue.then(fn,fn);this.queue=p.catch(()=>{});return p;}
   #allowed(guard,...args){try{return !guard||guard(...args)===true;}catch{return false;}}
   setLifecycleGuards(guards={}){this.guards=guards;}
@@ -78,7 +95,28 @@ export class ExtensionManager {
   status(){return{...(this.bridge?.status()||{adapter:'extension',connected:false,pending:0,commandCount:0}),profileBootstrap:this.config.extensionProfileBootstrap||'none',bootstrapCdpCommands:this.bootstrapCdpCommands,profileConnections:[...this.profileLeases.values()].filter(lease=>lease.isAlive()).length,profileGapCount:this.profileGapCount,profileContinuityUnverified:this.profileContinuityUnverified};}
   async #save(){const snapshot=structuredClone({...this.journal,targets:[...this.owned]});const write=this.saveChain.catch(()=>{}).then(()=>atomicJson(this.journalFile,snapshot));this.saveChain=write;await write;}
   #processOwned(){return extensionProcessMatches(this.journal?.process,this.deps.processIdentity(this.journal?.process?.pid),this.deps.bootId());}
-  #processExited(){const p=this.journal?.process;if(!p)return true;const row=this.deps.processIdentity(p.pid);return !this.deps.processExists(p.pid)||(row?.state==='Z'&&row.startTime===p.startTime&&p.bootId===this.deps.bootId());}
+  #processExited(){return !this.journal?.process||extensionProcessExited(this.journal.process,this.deps);}
+  #ownedRoots(){
+    const roots=this.deps.findOwnedBrowserRoots({profile:this.config.browserProfile,extensionPath:this.extensionPath,ownerId:this.journal.ownerId});
+    if(!Array.isArray(roots))return null;
+    if(this.#processOwned()&&!roots.some(p=>p.pid===this.journal.process.pid))roots.push({...this.journal.process});
+    return roots;
+  }
+  async #clearIdleBrowser(allowed){
+    if(!allowed()||this.profileInitializations.size||this.bridge?.pendingCount)return false;
+    const roots=this.#ownedRoots();if(!roots||roots.length||this.journal.process&&!this.#processExited())return false;
+    if(!this.journal.process&&!this.owned.size&&!(this.journal.targets||[]).length&&!Object.keys(this.journal.targetMetadata||{}).length
+      &&!this.journal.controllerStopPending&&!this.journal.retiringProcess){
+      if(this.bridge){const bridge=this.bridge;this.bridge=null;this.initPromise=null;await bridge.close();}
+      return true;
+    }
+    const previous=this.journal,next={...previous,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};
+    if(!await atomicJson(this.journalFile,next,()=>allowed()&&this.journal===previous&&!this.#ownedRoots()?.length))return false;
+    this.journal=next;this.targetRemovalGeneration++;this.owned.clear();this.closing.clear();this.targetClosures.clear();
+    for(const lease of this.profileLeases.values())lease.release();this.profileLeases.clear();
+    if(this.bridge){const bridge=this.bridge;this.bridge=null;this.initPromise=null;await bridge.close();}
+    return true;
+  }
   async #init(){
     if(this.stopped)throw fail('Extension manager stopped','EXTENSION_UNAVAILABLE');
     if(this.bridge)return;
@@ -262,16 +300,29 @@ export class ExtensionManager {
     if(!await write)return false;
     current.controllerStopPending=false;current.retiringProcess=null;return true;
   }
-  releaseIfUnused({guard}={}){return this.#serial(async()=>{const allowed=()=>this.#allowed(guard)&&this.#allowed(this.guards.canRelease);if(!allowed())return{released:false,reason:'guard_rejected'};
-    if(!this.bridge?.status().connected){const retired=this.#emptyLocal()&&await this.#retireEmptyBrowser(allowed),released=!!retired&&await this.#finishReleasedBrowser(allowed);return{released,reason:released?'empty_owned_browser_exited':'controller_absent'};}
-    const targets=await this.listExistingTargets();if(!targets||targets.length||!this.#emptyLocal()||!allowed())return{released:false,reason:'browser_in_use'};
-    if(this.config.browserClientProfile==='android-webview'&&!validBrowserKey(this.journal.process?.browserKey,this.config.browserPort))return{released:false,reason:'browser_endpoint_unproven'};
-    this.journal.controllerStopPending=true;await this.#save();if(!allowed()||!this.#emptyLocal()){this.journal.controllerStopPending=false;await this.#save();return{released:false,reason:'guard_rejected'};}
-    const result=await this.bridge.request('controllerStop',{}, {timeoutMs:3000});if(!result?.stopped){this.journal.controllerStopPending=false;await this.#save();return{released:false,reason:result?.reason||'close_unconfirmed'};}
-    // Keep acquisition serialized until the controller has really closed and
-    // the CDP keep-alive root has exited, including an immediate next request.
-    const deadline=Date.now()+5000;for(let n=0;n<100&&Date.now()<deadline;n++){if(this.#processExited()){const released=await this.#finishReleasedBrowser(allowed);return{released,reason:released?'owned_browser_exited':'release_proof_changed'};}if(!allowed())return{released:false,reason:'guard_rejected'};if(await this.#proveEmptyBrowser({...this.journal.process},allowed,deadline)){const retired=await this.#retireEmptyBrowser(allowed,deadline),released=retired&&await this.#finishReleasedBrowser(allowed);return{released,reason:released?'empty_owned_browser_exited':'empty_browser_exit_unconfirmed'};}await this.deps.delay(50);}
-    return{released:false,reason:'empty_browser_exit_unconfirmed'};
+  // No admitted SelfRun work means no SelfRun browser, including untracked or
+  // legacy-session tabs. Retire only roots with exact per-process proof; never
+  // signal unrelated Chromium or a PID whose identity cannot be established.
+  releaseIfUnused({guard}={}){return this.#serial(async()=>{
+    const allowed=()=>!this.stopped&&this.#allowed(guard)&&this.#allowed(this.guards.canRelease);
+    if(!allowed())return{released:false,reason:'guard_rejected'};
+    if(!this.journal)await this.#initialize();if(!allowed())return{released:false,reason:'guard_rejected'};
+    if(this.profileInitializations.size||this.bridge?.pendingCount)return{released:false,reason:'browser_operation_pending'};
+    if(this.journal.process&&!this.#processOwned()&&!this.#processExited())return{released:false,reason:'ownership_unproven'};
+    const roots=this.#ownedRoots();if(!roots)return{released:false,reason:'process_inventory_unavailable'};
+    for(const proof of roots){
+      if(!allowed())return{released:false,reason:'guard_rejected'};
+      if(!extensionProcessMatches(proof,this.deps.processIdentity(proof.pid),this.deps.bootId()))
+        return{released:false,reason:'ownership_changed'};
+      try{this.deps.signalProcess(proof.pid);}catch(error){if(error.code!=='ESRCH')return{released:false,reason:'browser_signal_failed'};}
+    }
+    const deadline=Date.now()+5000;
+    for(let n=0;n<100&&Date.now()<deadline&&roots.some(p=>!extensionProcessExited(p,this.deps));n++){
+      if(!allowed())return{released:false,reason:'guard_rejected'};await this.deps.delay(50);
+    }
+    if(roots.some(p=>!extensionProcessExited(p,this.deps)))return{released:false,reason:'browser_exit_unconfirmed'};
+    const released=await this.#clearIdleBrowser(allowed);
+    return{released,reason:released?'idle_browser_retired':'idle_release_proof_changed'};
   });}
 
   async probe(){await this.ensureStarted();const targets=await this.listExistingTargets();return{ready:true,adapter:'extension',browser:'Chromium extension',protocolVersion:null,targets:targets?.length??null};}

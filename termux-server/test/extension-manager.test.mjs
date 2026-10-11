@@ -1,6 +1,6 @@
 import {digest} from '../src/lifecycle.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {EventEmitter} from 'node:events';
-import {ExtensionManager,extensionProcessMatches} from '../src/browser/extension-manager.mjs';
+import {ExtensionManager,extensionProcessMatches,extensionProcessExited} from '../src/browser/extension-manager.mjs';
 import {ExtensionBridge} from '../src/browser/extension-bridge.mjs';
 async function fixture(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'srex-test-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const pairing=path.join(root,'pair.json');await fs.writeFile(pairing,JSON.stringify({schema:'selfrun-extension-pair-v1',ownerId:'owner',capability:'fixture-local-capability-123456'}),{mode:0o600});const config={dataDir:root,extensionPairingFile:pairing,extensionBridgePort:0,extensionChromiumCommand:'/test/chrome',browserProfile:path.join(root,'profile'),browserLogFile:path.join(root,'browser.log'),extensionTempDir:path.join(root,'tmp'),browserClientProfile:'native',browserPort:19227};let process=null,controllerReady=true,extraTargets=[],signals=0,launchCount=0;const calls=[];class Bridge extends EventEmitter{url='http://127.0.0.1:17777';pendingCount=0;async start(){}async close(){}status(){return{connected:!!process&&controllerReady};}async waitReady(){if(!process||!controllerReady)throw Error('not running');}async request(op,p,options){calls.push([op,p,options]);if(op==='idleStatus')return{stopping:false,ownedCount:bridge.targets?.length||0,unrelatedCount:0};if(op==='controllerStop'){controllerReady=false;return{stopped:true};}if(op==='createTarget'){const bootstrapUrl=this.url+'/bootstrap/11111111-1111-1111-1111-111111111111';const target={id:`ext:${this.session}:1`,url:p.deferNavigation?bootstrapUrl:p.url,type:'page',bootstrapUrl,pendingUrl:p.deferNavigation&&p.url!=='about:blank'?p.url:null,entryUrl:p.url!=='about:blank'?p.url:null,entryPending:true};this.targets=[target];return target;}if(op==='navigate'){this.targets=this.targets.map(t=>t.id===p.targetId?{...t,url:p.url}:t);return true;}if(op==='listTargets')return this.targets||[];if(op==='closeTarget'){this.targets=[];return{closed:true};}if(op==='recoveryInput')return{url:this.targets?.find(t=>t.id===p.targetId)?.url};if(op==='snapshot')return{url:'https://chatgpt.com/'};return true;}}
 let bridge;const deps={bridgeFactory:options=>{bridge=new Bridge();bridge.session=options.browserSessionId;return bridge;},processIdentity:pid=>process?.pid===pid?process:null,processExists:pid=>process?.pid===pid,bootId:()=> 'boot',profileBusy:()=>false,readCdpMetadata:async(_port,resource)=>resource==='version'?{webSocketDebuggerUrl:'ws://127.0.0.1:19227/devtools/browser/browser1'}:[...(controllerReady?[{id:'cdp1',type:'page',url:bridge.targets?.[0]?.url||'chrome-extension://controller'}]:[]),...extraTargets],signalProcess:()=>{signals++;process=null;},delay:async()=>{},launch:async(_binary,args)=>{launchCount++;controllerReady=true;process={pid:42,startTime:'123',args};return{pid:42,unref(){}};}};const manager=new ExtensionManager(config,deps);t.after(()=>manager.close());return{manager,config,calls,get bridge(){return bridge;},setProcess:p=>process=p,setReady:r=>controllerReady=r,setExtra:r=>extraTargets=r,get signals(){return signals;},get launches(){return launchCount;},fresh:()=>new ExtensionManager(config,deps)};}
@@ -16,15 +16,14 @@ async function closeWithoutAcknowledgement(t){
  const first=await f.manager.closeOwnedTarget(target.id,{guard:()=>true});
  return{f,target,first,get leaseReleases(){return leaseReleases;}};
 }
-test('an absent target after a lost close acknowledgement clears closing and permits guarded idle release',async t=>{
- const close=await closeWithoutAcknowledgement(t),{f,target,first}=close;
- assert.equal(first.reason,'close_unconfirmed');assert.deepEqual(f.bridge.targets,[]);
- assert.equal(f.manager.isOwnedTarget(target.id),true);assert.equal(f.manager.targetClosing(target.id),true);assert.equal(close.leaseReleases,0);
- assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).reason,'browser_in_use');assert.equal(f.signals,0);
- const retry=await f.manager.closeOwnedTarget(target.id,{guard:()=>true});assert.equal(retry.absent,true);assert.equal(retry.reason,'already_absent');
- assert.equal(f.manager.isOwnedTarget(target.id),false);assert.equal(f.manager.targetClosing(target.id),false);assert.equal(close.leaseReleases,1);assert.equal(f.manager.profileLeases.has(target.id),false);
- const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.deepEqual(saved.targets,[]);assert.equal(saved.targetMetadata[target.id],undefined);
- assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);assert.equal(f.signals,1);assert.equal(f.calls.filter(c=>c[0]==='closeTarget').length,1);
+test('an absent target after a lost close acknowledgement is removed by idle cleanup',async t=>{
+  const close=await closeWithoutAcknowledgement(t),{f,target,first}=close;
+  assert.equal(first.reason,'close_unconfirmed');assert.deepEqual(f.bridge.targets,[]);
+  assert.equal(f.manager.isOwnedTarget(target.id),true);assert.equal(f.manager.targetClosing(target.id),true);assert.equal(close.leaseReleases,0);
+  const released=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(released.released,true);assert.equal(f.signals,1);
+  assert.equal(f.manager.isOwnedTarget(target.id),false);assert.equal(f.manager.targetClosing(target.id),false);assert.equal(close.leaseReleases,1);
+  const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.deepEqual(saved.targets,[]);assert.equal(saved.process,null);
+  assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>true})).reason,'unowned_target');assert.equal(f.calls.filter(c=>c[0]==='closeTarget').length,1);
 });
 for(const phase of ['before inventory','after inventory'])test('absent-target cleanup preserves ownership when the guard rejects '+phase,async t=>{
  const close=await closeWithoutAcknowledgement(t),{f,target}=close;let allowed=phase!=='before inventory';
@@ -34,7 +33,7 @@ for(const phase of ['before inventory','after inventory'])test('absent-target cl
  assert.ok(f.manager.journal.targetMetadata[target.id]);assert.equal((await f.manager.releaseIfUnused({guard:()=>false})).reason,'guard_rejected');assert.equal(f.signals,0);
  assert.equal(f.calls.filter(c=>c[0]==='closeTarget').length,1);assert.equal(f.calls.filter(c=>c[0]==='controllerStop').length,0);
 });
-test('idle release uses a guarded controller-only cleanup, never process signals',async t=>{const f=await fixture(t);const target=await f.manager.createTarget();f.bridge.targets=[target];assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).reason,'browser_in_use');assert.equal(f.calls.filter(x=>x[0]==='controllerStop').length,0);});
+test('idle release closes the dedicated browser even with an unrecorded live tab',async t=>{const f=await fixture(t);const target=await f.manager.createTarget();f.bridge.targets=[target,{id:'ext:lost-session:2',type:'page',url:'https://chatgpt.com/c/old'}];assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);assert.equal(f.signals,1);assert.equal(f.manager.journal.process,null);assert.deepEqual(f.manager.journal.targets,[]);});
 
 test('proven browser exit rotates target identity before a new browser starts',async t=>{const f=await fixture(t);const a=await f.manager.createTarget();f.setProcess(null);const b=await f.manager.createTarget();assert.notEqual(a.id,b.id);assert.equal(f.manager.isOwnedTarget(a.id),false);assert.equal(f.manager.isOwnedTarget(b.id),true);});
 
@@ -59,16 +58,16 @@ test('a fresh manager retires a bound empty orphan instead of singleton CLI forw
 test('any remaining page or worker blocks orphan termination',async t=>{for(const type of ['page','service_worker','background_page']){const f=await androidEmpty(t);f.setReady(false);f.setExtra([{id:'unrelated',type,url:'about:blank'}]);await assert.rejects(f.manager.createTarget(),e=>e.code==='EXTENSION_UNAVAILABLE');assert.equal(f.signals,0);assert.equal(f.launches,1);}});
 test('missing or changed browser endpoint proof blocks empty-root termination',async t=>{for(const mode of ['missing','changed','malformed']){const f=await androidEmpty(t);f.setReady(false);if(mode==='missing')delete f.manager.journal.process.browserKey;if(mode==='changed')f.manager.journal.process.browserKey='ws://127.0.0.1:19227/devtools/browser/other';if(mode==='malformed')f.manager.deps.readCdpMetadata=async()=>({});await assert.rejects(f.manager.createTarget(),e=>e.code==='EXTENSION_UNAVAILABLE');assert.equal(f.signals,0);}});
 test('ownership lost during endpoint inventory never signals the process',async t=>{const f=await androidEmpty(t);f.setReady(false);const read=f.manager.deps.readCdpMetadata;f.manager.deps.readCdpMetadata=async(...args)=>{const r=await read(...args);f.setProcess({pid:42,startTime:'reused',args:[]});return r;};await assert.rejects(f.manager.createTarget());assert.equal(f.signals,0);});
-test('idle guard change after controller close leaves process untouched',async t=>{const f=await androidEmpty(t);let allowed=true;const request=f.bridge.request.bind(f.bridge);f.bridge.request=async(...args)=>{const r=await request(...args);if(args[0]==='controllerStop')allowed=false;return r;};const result=await f.manager.releaseIfUnused({guard:()=>allowed});assert.equal(result.released,false);assert.equal(f.signals,0);});
+test('idle guard change during process inventory prevents any signal',async t=>{const f=await androidEmpty(t);let allowed=true;const scan=f.manager.deps.findOwnedBrowserRoots;f.manager.deps.findOwnedBrowserRoots=options=>{allowed=false;return scan(options);};const result=await f.manager.releaseIfUnused({guard:()=>allowed});assert.equal(result.released,false);assert.equal(f.signals,0);});
 test('signal failure keeps durable retirement quarantine and never cold-launches',async t=>{const f=await androidEmpty(t);f.setReady(false);f.manager.deps.signalProcess=()=>{throw Object.assign(Error('denied'),{code:'EPERM'});};await assert.rejects(f.manager.createTarget());assert.equal(f.launches,1);assert.ok(f.manager.journal.retiringProcess);const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.retiringProcess.pid,42);});
 test('active profile initialization or lease blocks empty-orphan retirement',async t=>{for(const slot of ['profileLeases','profileInitializations']){const f=await androidEmpty(t);f.setReady(false);f.manager[slot].set('pending',{release(){}});await assert.rejects(f.manager.createTarget());assert.equal(f.signals,0);f.manager[slot].clear();}});
 
 test('an unsent pending controller stop is reconciled without blocking acquisition',async t=>{const f=await androidEmpty(t);f.manager.journal.controllerStopPending=true;const target=await f.manager.createTarget();assert.ok(f.manager.isOwnedTarget(target.id));assert.equal(f.manager.journal.controllerStopPending,false);assert.equal(f.signals,0);assert.equal(f.launches,1);});
 test('Android target stopped before initialization retains endpoint proof and can restart',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});const target=await f.manager.createTarget();assert.ok(f.manager.journal.process.browserKey);await f.manager.closeOwnedTarget(target.id,{guard:()=>true});assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);assert.ok(await f.manager.createTarget());assert.equal(f.signals,1);});
 test('failed profile initialization can close and retire its empty owned browser',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});f.manager.deps.applyProfile=async()=>{throw Error('profile failed');};const target=await f.manager.createTarget(),session=await f.manager.connectTarget(target);await assert.rejects(session.run('initialize',{clientProfile:'android-webview'}));session.close();await f.manager.closeOwnedTarget(target.id,{guard:()=>true});assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);assert.equal(f.signals,1);});
-test('missing early endpoint proof preserves the healthy controller instead of orphaning it',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});f.manager.deps.readCdpMetadata=async()=>{throw Error('unavailable');};const target=await f.manager.createTarget();await f.manager.closeOwnedTarget(target.id,{guard:()=>true});const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.reason,'browser_endpoint_unproven');assert.equal(f.calls.filter(c=>c[0]==='controllerStop').length,0);assert.equal(f.signals,0);});
+test('idle cleanup does not require CDP endpoint proof to dispose the exact SelfRun root',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});f.manager.deps.readCdpMetadata=async()=>{throw Error('unavailable');};const target=await f.manager.createTarget();await f.manager.closeOwnedTarget(target.id,{guard:()=>true});const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.released,true);assert.equal(f.calls.filter(c=>c[0]==='controllerStop').length,0);assert.equal(f.signals,1);});
 
-test('probe-only startup cannot close an unbound Android controller',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});await f.manager.ensureStarted();const r=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(r.reason,'browser_endpoint_unproven');assert.equal(f.calls.filter(c=>c[0]==='controllerStop').length,0);assert.ok(await f.manager.createTarget());});
+test('probe-only SelfRun browser is retired once global work is idle',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});await f.manager.ensureStarted();const r=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(r.released,true);assert.equal(f.signals,1);assert.ok(await f.manager.createTarget());assert.equal(f.launches,2);});
 test('queued acquisition waits through delayed controller removal and root exit',async t=>{const f=await androidEmpty(t);const request=f.bridge.request.bind(f.bridge);let stopped=false,delays=0;f.bridge.request=async(...args)=>{const r=await request(...args);if(args[0]==='controllerStop'){f.setReady(true);stopped=true;}return r;};f.manager.deps.delay=async()=>{if(stopped&&++delays===3)f.setReady(false);};const release=f.manager.releaseIfUnused({guard:()=>true}),acquire=f.manager.createTarget();assert.equal((await release).released,true);assert.ok(await acquire);assert.equal(f.signals,1);assert.equal(f.launches,2);});
 test('accepted SIGTERM with surviving root retains quarantine across manager restoration',async t=>{const f=await androidEmpty(t);f.setReady(false);f.manager.deps.signalProcess=()=>{};await assert.rejects(f.manager.createTarget());assert.equal(f.launches,1);assert.ok(f.manager.journal.retiringProcess);await f.manager.close();const next=f.fresh();next.deps.signalProcess=()=>{};t.after(()=>next.close());await assert.rejects(next.createTarget());assert.equal(f.launches,1);assert.ok(next.journal.retiringProcess);});
 test('close during final endpoint binding never resurrects a profile lease',async t=>{const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});let released=false;f.manager.deps.applyProfile=async()=>({cdpCommands:3,cdpTargetId:'cdp1',isAlive:()=>true,release(){released=true;}});const target=await f.manager.createTarget(),session=await f.manager.connectTarget(target),read=f.manager.deps.readCdpMetadata;let lists=0;f.manager.deps.readCdpMetadata=async(...args)=>{const result=await read(...args);if(args[1]==='list'&&++lists===2)f.manager.owned.delete(target.id);return result;};await assert.rejects(session.run('initialize',{clientProfile:'android-webview'}));assert.equal(released,true);assert.equal(f.manager.profileLeases.size,0);});
@@ -88,7 +87,7 @@ test('cold cleanup loop converges twice using actual saved ownership journal wit
  const entry={key,target_id:'legacy-cdp-id',task_id:'TASK',turn_id:'TURN',request_id:'REQ',control_epoch:1};
  const store={value:{generation:1,lifecycle:{requests:{},controls:{TASK:{task_id:'TASK',turn_id:'TURN',request_id:'REQ',state:'STOPPED',control_epoch:1}},retired:{[key]:marker},browserCleanup:{[entry.target_id]:entry},outbox:{},completionOutbox:{},events:[]}},snapshot(){return structuredClone(this.value)},async patch(p){this.value={...this.value,...structuredClone(p)}},async update(fn){return this.patch(fn(this.snapshot()))}};
  const repository=new LifecycleStore(store),cleanup=new TerminalBrowserCleanup({repository,chromium:fresh,stateStore:store,available:()=>true,busy:()=>false});
- await cleanup.run();await cleanup.run();assert.deepEqual(repository.data.browserCleanup,{});assert.equal(Object.keys(repository.data.browserCleanupUnresolved).length,1);assert.equal(f.signals,0);assert.equal(f.launches,1);assert.equal(f.calls.filter(c=>c[0]==='closeTarget'||c[0]==='controllerStop').length,0);
+ await cleanup.run();await cleanup.run();assert.deepEqual(repository.data.browserCleanup,{});assert.equal(Object.keys(repository.data.browserCleanupUnresolved).length,1);assert.equal(f.signals,1);assert.equal(f.launches,1);assert.equal(f.calls.filter(c=>c[0]==='closeTarget'||c[0]==='controllerStop').length,0);
 });
 
 test('a surviving controller reconnecting after one second is awaited without browser retirement',async t=>{
@@ -134,24 +133,54 @@ test('dev14 persists cleared stop flags after proven Android root exit',async t=
  const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.released,true);
  const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));
  assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.deepEqual(saved.targets,[]);assert.deepEqual(saved.targetMetadata,{});
- assert.deepEqual(saved.process,originalProcess,'preserve process proof until next guarded acquisition rotates the session');assert.equal(f.signals,1);
+ assert.equal(saved.process,null,'no old Chromium PID may remain in an idle server');assert.equal(f.signals,1);assert.ok(originalProcess.pid);
 });
 test('dev14 reconciles a disconnected already-exited owner without browser commands',async t=>{
  const f=await androidEmpty(t);f.manager.journal.controllerStopPending=true;f.manager.journal.retiringProcess={pid:42,startTime:'123',bootId:'boot',browserKey:f.manager.journal.process.browserKey};
  const before=structuredClone(f.manager.journal);await fs.writeFile(path.join(f.config.dataDir,'extension-ownership.json'),JSON.stringify(before));f.setProcess(null);f.setReady(false);const calls=f.calls.length;
  assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);
  const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));
- assert.deepEqual(saved,{...before,controllerStopPending:false,retiringProcess:null});assert.equal(f.calls.length,calls);assert.equal(f.signals,0);
+ assert.equal(saved.process,null);assert.deepEqual(saved.targets,[]);assert.deepEqual(saved.targetMetadata,{});assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.notEqual(saved.browserSessionId,before.browserSessionId);assert.equal(f.calls.length,calls);assert.equal(f.signals,0);
 });
 test('dev14 persists stop completion when controller closure itself exits the root',async t=>{
  const f=await androidEmpty(t),request=f.bridge.request.bind(f.bridge);
  f.bridge.request=async(...args)=>{const result=await request(...args);if(args[0]==='controllerStop')f.setProcess(null);return result;};
  assert.equal((await f.manager.releaseIfUnused({guard:()=>true})).released,true);
- const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.equal(f.signals,0);
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.equal(saved.process,null);assert.equal(f.signals,1);
 });
 test('dev14 rechecks new work after fsync and never commits stale stop finalization',async t=>{
  const f=await androidEmpty(t);let allowed=true,finalizing=false;f.manager.deps.signalProcess=()=>{f.setProcess(null);finalizing=true;};
  const open=fs.open;t.mock.method(fs,'open',async(...args)=>{const handle=await open(...args);if(!finalizing||!String(args[0]).includes('extension-ownership.json.tmp-'))return handle;return{async sync(){await handle.sync();allowed=false;},async close(){await handle.close();}};});
  const result=await f.manager.releaseIfUnused({guard:()=>allowed});assert.equal(result.released,false);
- const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.controllerStopPending,true);assert.ok(saved.retiringProcess);assert.equal(f.manager.journal.controllerStopPending,true);assert.ok(!(await fs.readdir(f.config.dataDir)).some(x=>x.includes('.tmp-')));
+ const saved=JSON.parse(await fs.readFile(path.join(f.config.dataDir,'extension-ownership.json'),'utf8'));assert.equal(saved.controllerStopPending,false);assert.equal(saved.retiringProcess,null);assert.ok(saved.process);assert.equal(f.manager.journal.controllerStopPending,false);assert.ok(!(await fs.readdir(f.config.dataDir)).some(x=>x.includes('.tmp-')));
+});
+
+test('a reused PID is an exited old owner and does not block the first new task',async t=>{
+  const f=await fixture(t);const first=await f.manager.createTarget();const old=structuredClone(f.manager.journal.process);
+  f.setProcess({...old,startTime:'other-process',args:['unrelated']});await f.manager.close();
+  const next=f.fresh();t.after(()=>next.close());const target=await next.createTarget();
+  assert.notEqual(target.id,first.id);assert.equal(f.signals,0);assert.equal(f.launches,2);
+});
+test('reboot or PID reuse proves exit but unreadable same PID does not',()=>{
+  const proof={pid:42,startTime:'123',bootId:'boot',profile:'/private',extensionPath:'/extension',ownerId:'owner'};
+  const deps={processIdentity:()=>({pid:42,startTime:'456',state:'S'}),processExists:()=>true,bootId:()=> 'boot'};
+  assert.equal(extensionProcessExited(proof,deps),true);
+  deps.processIdentity=()=>null;assert.equal(extensionProcessExited(proof,deps),false);
+  deps.bootId=()=> 'next-boot';assert.equal(extensionProcessExited(proof,deps),true);
+});
+test('idle cleanup also retires a SelfRun-marked orphan root absent from the journal',async t=>{
+  const f=await fixture(t);await f.manager.ensureStarted();f.setProcess(null);f.manager.journal.process=null;
+  const proof={pid:77,startTime:'777',bootId:'boot',profile:f.config.browserProfile,extensionPath:f.manager.extensionPath,ownerId:'owner'};
+  let alive=true,signals=0;f.manager.deps.findOwnedBrowserRoots=()=>alive?[proof]:[];
+  f.manager.deps.processIdentity=pid=>pid===77&&alive?{pid:77,startTime:'777',state:'S',args:['chrome',`--user-data-dir=${proof.profile}`,`--load-extension=${proof.extensionPath}`,'--selfrun-extension-owner=owner']}:null;
+  f.manager.deps.processExists=pid=>pid===77&&alive;f.manager.deps.signalProcess=pid=>{assert.equal(pid,77);signals++;alive=false;};
+  const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.released,true);assert.equal(signals,1);assert.equal(f.manager.journal.process,null);
+});
+test('unproven root identity and current work block idle signals',async t=>{
+  const f=await fixture(t);await f.manager.createTarget();assert.equal((await f.manager.releaseIfUnused({guard:()=>false})).reason,'guard_rejected');assert.equal(f.signals,0);
+  f.setProcess({pid:42,startTime:'123',args:['unrelated']});const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.reason,'ownership_unproven');assert.equal(f.signals,0);
+});
+test('failed idle SIGTERM does not erase ownership or report cleanup success',async t=>{
+  const f=await fixture(t);await f.manager.createTarget();f.manager.deps.signalProcess=()=>{};
+  const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.reason,'browser_exit_unconfirmed');assert.equal(result.released,false);assert.ok(f.manager.journal.process);
 });

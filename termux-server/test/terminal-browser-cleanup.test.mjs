@@ -245,3 +245,8 @@ test('repurposed target retains pending guard evidence rather than closure succe
   assert.equal(f.record().browser_cleanup.reason,'guard');
   assert.equal(f.pages.has('target-owned'),true);
 });
+
+test('idle standby node performs orphan retirement without admitting new tasks',async()=>{
+  const f=ownedFixture();await f.controller.initialize();f.controller.canDispatch=()=>false;
+  await f.controller.tick(f.transport);assert.equal(f.controller.standby,true);assert.equal(f.releases,1);
+});

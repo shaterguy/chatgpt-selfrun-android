@@ -21,7 +21,7 @@ export class DriveDispatchController {
     this.sessions=new Map();this.operations=new Map();this.resultRetirements=new Map();this.standby=false;
     this.serverGeneration=Date.now();
     this.browserCleanup=new TerminalBrowserCleanup({repository:this.repository,chromium:browser.chromium,stateStore,
-      available:()=>!this.standby&&this.canDispatch(),busy:()=>this.sessions.size>0||this.operations.size>0});
+      available:()=>!this.standby&&this.canDispatch(),idleReleaseAllowed:()=>true,busy:()=>this.sessions.size>0||this.operations.size>0});
   }
   async initialize() {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
@@ -250,7 +250,7 @@ export class DriveDispatchController {
   }
   async tick(transport) {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
-    if(!this.canDispatch()){await this.quiesceForStandby();return;}
+    if(!this.canDispatch()){await this.quiesceForStandby();await this.cleanupTerminalResources({force:false});return;}
     this.standby=false;
     for(const r of this.repository.records())this.#scheduleDisplacedResult(r.key,transport);
     await transport?.purgeStopped?.();
