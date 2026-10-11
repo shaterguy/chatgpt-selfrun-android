@@ -2,6 +2,7 @@ package com.shaterguy.chatgptselfrun;
 
 import org.junit.Test;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import static org.junit.Assert.*;
 
@@ -87,10 +88,10 @@ public final class SelfRunAppGateRecoveryPolicyTest {
 
     private static String source(String name) throws Exception {
         String override = System.getProperty("selfrun.sourceRoot");
-        if (override != null) return Files.readString(Path.of(override, name + ".java"));
+        if (override != null) return new String(Files.readAllBytes(Path.of(override, name + ".java")), StandardCharsets.UTF_8);
         Path root = Path.of("app/src/main/java/com/shaterguy/chatgptselfrun");
         if (!Files.isDirectory(root)) root = Path.of("src/main/java/com/shaterguy/chatgptselfrun");
-        return Files.readString(root.resolve(name + ".java"));
+        return new String(Files.readAllBytes(root.resolve(name + ".java")), StandardCharsets.UTF_8);
     }
 
     private static String method(String source, String signature) {

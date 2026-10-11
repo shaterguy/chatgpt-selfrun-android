@@ -26,7 +26,7 @@ concurrency:
 env:
   TEST_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_only }}
   EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha || github.sha }}
-  BUILD_ARTIFACT: selfrun-v4-4010-dev6-${{ github.run_id }}-${{ github.run_attempt }}
+  BUILD_ARTIFACT: selfrun-v4-4010-dev7-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   build-dev:
@@ -56,7 +56,7 @@ jobs:
           gradle-version: '9.5.0'
           cache-read-only: false
 
-      - name: Resolve 4.0.10-dev6 identities
+      - name: Resolve 4.0.10-dev7 identities
         shell: bash
         run: |
           set -euo pipefail
@@ -65,8 +65,8 @@ jobs:
           [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_SHA" == "$EXPECTED_SOURCE_SHA" ]]
           [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]]
-          [[ "$VERSION_NAME" == '4.0.10-dev6' ]]
-          [[ "$VERSION_CODE" == '4002019' ]]
+          [[ "$VERSION_NAME" == '4.0.10-dev7' ]]
+          [[ "$VERSION_CODE" == '4002020' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
           grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
@@ -280,7 +280,7 @@ jobs:
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
 
-      - name: Verify phone 4.0.8 and tablet 4.0.0 upgrades to 4.0.10-dev6 with TEST co-install
+      - name: Verify phone 4.0.8 and tablet 4.0.0 upgrades to 4.0.10-dev7 with TEST co-install
         if: env.TEST_ONLY != 'true' || steps.test-runtime-access.outputs.available == 'true'
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
@@ -304,15 +304,15 @@ jobs:
             fi
             bash tools/verify_last_used_execution_profile_emulator.sh
 
-      - name: Upload SelfRun 4.0.10-dev6 DEV and TEST APKs
+      - name: Upload SelfRun 4.0.10-dev7 DEV and TEST APKs
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: |
-            release-output/SelfRun-Drive-v4.0.10-dev6.apk
-            release-output/SelfRun-Drive-TEST-v4.0.10-dev6.apk
-            release-output/SelfRun-Drive-TEST-v4.0.10-dev6-androidTest.apk
+            release-output/SelfRun-Drive-v4.0.10-dev7.apk
+            release-output/SelfRun-Drive-TEST-v4.0.10-dev7.apk
+            release-output/SelfRun-Drive-TEST-v4.0.10-dev7-androidTest.apk
             release-output/SHA256SUMS.txt
             release-output/TEST_SHA256SUMS.txt
             release-output/*APKSIGNER_VERIFY.txt
