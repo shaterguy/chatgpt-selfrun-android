@@ -7,6 +7,20 @@ let bridge;const deps={bridgeFactory:options=>{bridge=new Bridge();bridge.sessio
 test('extension manager creates and attaches owned targets with named commands only',async t=>{const f=await fixture(t);const target=await f.manager.createTarget();assert.ok(f.manager.isOwnedTarget(target.id));const s=await f.manager.connectTarget(target);assert.equal(s.transport,'extension');assert.equal((await s.run('snapshot')).url,'https://chatgpt.com/');s.close();await assert.rejects(s.run('submit'),e=>e.name==='AbortError');assert.ok(!f.calls.some(x=>/Runtime|Page/.test(x[0])));});
 test('manager refuses missing private pairing',async t=>{const f=await fixture(t);await fs.unlink(f.config.extensionPairingFile);await assert.rejects(f.manager.createTarget(),/pair/i);});
 test('Chromium launch is not blocked by a stale profile-busy heuristic',async t=>{const f=await fixture(t);f.manager.deps.profileBusy=()=>{throw Error('stale heuristic must not run');};const target=await f.manager.createTarget();assert.ok(f.manager.isOwnedTarget(target.id));assert.equal(f.launches,1);});
+test('lost registry on active Android tab heals and retries only the explicitly rejected pre-effect command',async t=>{
+ const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});
+ f.manager.deps.applyProfile=async()=>({cdpCommands:3,cdpTargetId:'cdp1',isAlive:()=>true,release(){}});
+ const target=await f.manager.createTarget('https://chatgpt.com/c/original'),session=await f.manager.connectTarget(target);
+ await session.run('initialize',{clientProfile:'android-webview'});
+ let missing=true,restorations=0;const original=f.bridge.request.bind(f.bridge);
+ f.bridge.request=async(operation,payload,options)=>{
+   if(operation==='snapshot'&&missing){missing=false;throw Object.assign(Error('Target is not owned'),{code:'TARGET_NOT_OWNED'});}
+   if(operation==='restoreTarget'){restorations++;assert.equal(payload.targetId,target.id);assert.equal(payload.expectedUrl,'https://chatgpt.com/c/original');return{restored:true};}
+   return original(operation,payload,options);
+ };
+ const answer=await session.run('snapshot');assert.equal(answer.url,'https://chatgpt.com/');
+ assert.equal(restorations,1);assert.equal(f.launches,1);assert.equal(f.manager.isOwnedTarget(target.id),true);
+});
 test('process identity requires boot, start time, exact profile, extension and owner marker',()=>{const proof={pid:7,startTime:'1',bootId:'b',profile:'/p',extensionPath:'/e',ownerId:'o'};const row={pid:7,startTime:'1',args:['chrome','--user-data-dir=/p','--load-extension=/e','--selfrun-extension-owner=o']};assert.equal(extensionProcessMatches(proof,row,'b'),true);for(const bad of [{...row,startTime:'2'},{...row,args:row.args.filter(a=>!a.startsWith('--load'))}])assert.equal(extensionProcessMatches(proof,bad,'b'),false);assert.equal(extensionProcessMatches(proof,row,'other'),false);});
 test('target close rechecks caller guard and never touches an unowned target',async t=>{const f=await fixture(t),target=await f.manager.createTarget();f.bridge.targets=[{...target,url:'https://chatgpt.com/c/a'}];assert.equal((await f.manager.closeOwnedTarget('foreign')).reason,'unowned_target');assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>false})).reason,'guard_rejected');assert.equal(f.calls.filter(x=>x[0]==='closeTarget').length,0);assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>true})).closed,true);assert.equal(f.manager.isOwnedTarget(target.id),false);});
 async function closeWithoutAcknowledgement(t){

@@ -10,7 +10,7 @@ export function controllerRuntime(config) {
   const originAllowed=url=>{try{return config.targetOrigins.includes(new URL(url).origin);}catch{return false;}};
   const mutating=new Set(['initialize','navigate','newChat','input','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptRetire','pauseAnimations','quiesce']);
   const observations=new Set(['snapshot','progress','recoveryInput','receiptSnapshot']);
-  const cleanup=new Set(['listTargets','idleStatus','closeTarget']);
+  const cleanup=new Set(['listTargets','idleStatus','closeTarget','restoreTarget']);
   const targetId=id=>'ext:'+config.browserSessionId+':'+id;
   const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
   const isConversation=url=>{try{return /\/c\/[A-Za-z0-9_-]+\/?$/.test(new URL(url).pathname);}catch{return false;}};
@@ -96,6 +96,27 @@ export function controllerRuntime(config) {
     }
     if(operation==='idleStatus') {const tabs=await chrome.tabs.query({});return{stopping:stopping===true,ownedCount:targets.size,unrelatedCount:tabs.filter(t=>t.id!==currentTabId&&!targets.has(targetId(t.id))).length};}
     if(operation==='controllerStop') {const tabs=await chrome.tabs.query({});check();if(targets.size||tabs.some(tab=>tab.id!==currentTabId))return{stopped:false,reason:'browser_in_use'};stopping=true;setTimeout(()=>{streamAbort?.abort();void chrome.tabs.remove(currentTabId);},100);return{stopped:true};}
+    if(operation==='restoreTarget') {
+      // Rebind the exact tab after the controller loses its own volatile registry.
+      const id=String(payload.targetId||''),prefix='ext:'+config.browserSessionId+':';
+      const suffix=id.startsWith(prefix)?id.slice(prefix.length):'';
+      if(!/^[1-9][0-9]*$/.test(suffix)||!Number.isSafeInteger(Number(suffix)))throw fail('Target identity is invalid','TARGET_LOST');
+      const tabId=Number(suffix);
+      let tab;try{tab=await chrome.tabs.get(tabId);}catch{throw fail('Original target is absent','TARGET_LOST');}
+      const url=String(tab.url||''),bootstrap=typeof payload.bootstrapUrl==='string'&&url===payload.bootstrapUrl;
+      if(url!==payload.expectedUrl||(!bootstrap&&!originAllowed(url)))throw fail('Original target page changed','TARGET_SCOPE_CHANGED');
+      check();
+      let current=targets.get(id);
+      if(current?.closing)throw fail('Target is closing','TARGET_LOST');
+      if(!current){
+        current={id,tabId,url,boundUrl:bootstrap?null:urlKey(url),
+          bootstrapUrl:payload.bootstrapUrl||null,pendingUrl:bootstrap?payload.pendingUrl||null:null,
+          entryUrl:payload.entryUrl||(!bootstrap?url:null),entryPending:bootstrap,
+          documentId:null,contentNonce:null};
+        targets.set(id,current);await persist();
+      }
+      return{restored:true,id,url};
+    }
     const t=validTarget(payload.targetId);
     if(mutating.has(operation)&&t.effectFence?.deadlineAt>Date.now())throw fail('Prior document mutation is still settling','TARGET_MUTATION_PENDING');
     if(operation==='initialize') {if(payload.clientProfile!=='native'&&!(payload.clientProfile==='android-webview'&&payload.profileApplied===true))throw fail('Verified browser profile bootstrap is required','BROWSER_PROFILE_UNSUPPORTED');return true;}
@@ -170,7 +191,18 @@ export function controllerRuntime(config) {
   async function start() {
     currentTabId=(await chrome.tabs.getCurrent())?.id;
     const selfUrl=chrome.runtime.getURL?.('controller.html');
-    if(selfUrl){const others=(await chrome.tabs.query({})).filter(tab=>tab.id!==currentTabId&&String(tab.url||'').split('#')[0]===selfUrl);if(others.some(tab=>tab.id<currentTabId)){stopping=true;await chrome.tabs.remove(currentTabId);return;}}
+    if(selfUrl){
+      // tabs.query may omit extension-page URLs without the tabs permission.
+      let ids=[];
+      if(typeof chrome.runtime.getContexts==='function'){
+        try{ids=(await chrome.runtime.getContexts({contextTypes:['TAB'],documentUrls:[selfUrl]}))
+          .map(context=>context.tabId).filter(Number.isSafeInteger);}catch{}
+      }
+      if(!ids.length)ids=(await chrome.tabs.query({})).filter(tab=>String(tab.url||'').split('#')[0]===selfUrl).map(tab=>tab.id);
+      if(Number.isSafeInteger(currentTabId)&&ids.some(id=>id!==currentTabId&&id<currentTabId)){
+        stopping=true;await chrome.tabs.remove(currentTabId);return;
+      }
+    }
     const saved=(await chrome.storage.local.get(storageKey))[storageKey]||{};
     for(const [id,t] of Object.entries(saved))if(id===targetId(t.tabId))try{const tab=await chrome.tabs.get(t.tabId);targets.set(id,{...t,url:String(tab.url||'')});}catch{}
     let backoff=250;

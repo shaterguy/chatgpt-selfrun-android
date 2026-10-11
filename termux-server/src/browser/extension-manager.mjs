@@ -212,8 +212,16 @@ export class ExtensionManager {
     await this.#initialize();if(!this.#processOwned())return null;
     const journal=this.journal,removalGeneration=this.targetRemovalGeneration;
     const current=()=>this.journal===journal&&this.targetRemovalGeneration===removalGeneration;
-    await this.bridge.waitReady(timeoutMs);const targets=await this.bridge.request('listTargets',{}, {timeoutMs});
+    await this.bridge.waitReady(timeoutMs);let targets=await this.bridge.request('listTargets',{}, {timeoutMs});
     if(!Array.isArray(targets)||!current())return null;
+    for(const id of this.owned){
+      if(!current())return null;
+      if(targets.some(t=>t.id===id)||this.closing.has(id))continue;
+      if(await this.#restoreLostControllerTarget(id)){
+        targets=await this.bridge.request('listTargets',{}, {timeoutMs});
+        if(!Array.isArray(targets)||!current())return null;
+      }
+    }
     for(const target of targets)if(String(target.id).startsWith(`ext:${journal.browserSessionId}:`))this.owned.add(target.id);
     await this.#save();return current()?targets:null;
   }catch{return null;}}
@@ -252,6 +260,25 @@ export class ExtensionManager {
     }
     return true;
   }
+  async #restoreLostControllerTarget(id,{signal}={}){
+    const meta=this.journal?.targetMetadata?.[id],proof=this.journal?.process;
+    if(!this.isOwnedTarget(id)||this.targetClosing(id)||!this.#processOwned()||!meta?.cdpTargetId||!proof?.browserKey)return false;
+    try{
+      const port=Number(this.config.browserPort),version=await this.deps.readCdpMetadata(port,'version',{signal});
+      if(version?.webSocketDebuggerUrl!==proof.browserKey)return false;
+      const rows=await this.deps.readCdpMetadata(port,'list',{signal});
+      const row=Array.isArray(rows)?rows.find(x=>x.id===meta.cdpTargetId&&x.type==='page'):null;
+      if(!row||typeof row.url!=='string')return false;
+      const bootstrap=row.url===meta.bootstrapUrl;
+      const expectedOrigin=new URL(this.config.extensionFixtureOrigin||'https://chatgpt.com').origin;
+      if(!bootstrap&&new URL(row.url).origin!==expectedOrigin)return false;
+      if(!this.#processOwned()||!this.isOwnedTarget(id)||this.targetClosing(id))return false;
+      const result=await this.bridge.request('restoreTarget',{
+        targetId:id,expectedUrl:row.url,bootstrapUrl:meta.bootstrapUrl||null,
+        pendingUrl:meta.pendingUrl||null,entryUrl:meta.entryUrl||null},{signal,timeoutMs:4000});
+      return result?.restored===true;
+    }catch{return false;}
+  }
   async connectTarget(target){
     if(!this.isOwnedTarget(target?.id)||this.targetClosing(target.id))throw fail('Target is not available for this owner','TARGET_NOT_OWNED');
     const abort=new AbortController(),manager=this;
@@ -269,7 +296,16 @@ export class ExtensionManager {
         finally{if(onAbort)signal.removeEventListener('abort',onAbort);}
         if(operation==='initialize')return true;
       }
-      return manager.bridge.request(operation,{...payload,targetId:target.id},{...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});
+      const command=()=>manager.bridge.request(operation,{...payload,targetId:target.id},
+        {...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});
+      try{return await command();}
+      catch(error){
+        // A rejected pre-effect command can be retried after exact target repair.
+        // Never retry a submission whose effect may already have been released.
+        if(error?.code!=='TARGET_NOT_OWNED'||error?.released===true||signal.aborted)throw error;
+        if(!await manager.#restoreLostControllerTarget(target.id,{signal}))throw error;
+        return command();
+      }
     }};
   }
 

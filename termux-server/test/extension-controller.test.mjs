@@ -7,6 +7,27 @@ const chrome={runtime:{id:'test',onMessage:{addListener:fn=>receiver=fn}},storag
 const fetch=async(url,options)=>{if(url.endsWith('/events'))return{ok:true,body:new ReadableStream({start(c){controller=c;}})};const b=JSON.parse(options.body);if(url.endsWith('/result'))results.push(b);return{ok:true,json:async()=>({ok:true})};};
 const context=vm.createContext({chrome,fetch,setTimeout,clearTimeout,AbortController,TextDecoder,TextEncoder,crypto,URL,console});vm.runInContext(`(${controllerRuntime.toString()})(${JSON.stringify(config)})`,context);await wait(()=>controller);const send=m=>controller.enqueue(new TextEncoder().encode(JSON.stringify(m)+'\n'));send({kind:'welcome',connectionId:'c'});let n=0;const command=(operation,payload={},deadlineAt=Date.now()+5000)=>{const id='cmd'+(++n);send({kind:'command',id,connectionId:'c',operation,payload,deadlineAt});return{id,result:()=>wait(()=>results.find(r=>r.id===id))};};
 t.after(()=>{controller.close();});return{tabs,calls,command,send,results,receiver,pauseStorage(p){pauseSave=p;},pauseScript(p){scriptGate=p;}};}
+test('controller restores exact existing browser tab after its registry disappears without re-sending',async t=>{
+ const f=await fixture(t);f.tabs.set(42,{id:42,url:config.targetOrigins[0]+'/project'});
+ const lost=await f.command('snapshot',{targetId:'ext:s:42'}).result();assert.equal(lost.error.code,'TARGET_NOT_OWNED');
+ const restore=await f.command('restoreTarget',{targetId:'ext:s:42',expectedUrl:config.targetOrigins[0]+'/project'}).result();
+ assert.equal(restore.ok,true);assert.equal(restore.result.restored,true);
+ assert.equal((await f.command('snapshot',{targetId:'ext:s:42'}).result()).ok,true);
+ assert.equal(f.calls.filter(x=>x[0]==='navigate'||x[1]==='submit').length,0);
+ assert.equal((await f.command('restoreTarget',{targetId:'ext:foreign:42',expectedUrl:config.targetOrigins[0]+'/project'}).result()).ok,false);
+ assert.equal((await f.command('restoreTarget',{targetId:'ext:s:99',expectedUrl:'chrome-extension://test/controller.html'}).result()).ok,false);
+});
+test('controller singleton elects existing extension TAB context even when tabs.query has no URL',async()=>{
+ let removed=null,fetchCount=0;
+ const chrome={runtime:{onMessage:{addListener:()=>{}},getURL:()=> 'chrome-extension://test/controller.html',getContexts:async()=>[
+  {contextType:'TAB',tabId:98,documentUrl:'chrome-extension://test/controller.html'},
+  {contextType:'TAB',tabId:99,documentUrl:'chrome-extension://test/controller.html'}]},
+  tabs:{onRemoved:{addListener:()=>{}},getCurrent:async()=>({id:99}),query:async()=>[{id:98},{id:99}],remove:async id=>{removed=id;}}};
+ const fetch=async()=>{fetchCount++;throw Error('should not start second stream');};
+ const context=vm.createContext({chrome,fetch,setTimeout,clearTimeout,AbortController,TextDecoder,TextEncoder,crypto,URL,console});
+ vm.runInContext('('+controllerRuntime.toString()+')('+JSON.stringify(config)+')',context);
+ await wait(()=>removed===99);assert.equal(fetchCount,0);
+});
 test('controller creates only allowed owned targets and refuses arbitrary page operations',async t=>{const f=await fixture(t);assert.equal((await f.command('createTarget',{url:'https://evil.example/'}).result()).ok,false);const created=await f.command('createTarget',{url:config.targetOrigins[0]}).result();assert.equal(created.result.id,'ext:s:1');assert.equal((await f.command('evaluate',{targetId:'ext:s:1',expression:'1'}).result()).ok,false);assert.equal((await f.command('input',{targetId:'ext:s:99',prompt:'no'}).result()).ok,false);assert.equal(f.calls.some(x=>x[0]==='script'),false);});
 test('controller never navigates existing pages and closes only exact owned URL',async t=>{const f=await fixture(t);await f.command('createTarget',{url:config.targetOrigins[0]}).result();assert.equal((await f.command('navigate',{targetId:'ext:s:1',url:config.targetOrigins[0]+'/again'}).result()).error.code,'PAGE_NAVIGATION_FORBIDDEN');assert.equal((await f.command('closeTarget',{targetId:'ext:s:1',expectedUrl:'wrong'}).result()).result.closed,false);assert.equal((await f.command('closeTarget',{targetId:'ext:s:1',expectedUrl:config.targetOrigins[0]}).result()).result.closed,true);assert.equal(f.tabs.has(99),true);});
 test('controller persists submission release before click and rejects another release for same intent',async t=>{const f=await fixture(t);await f.command('createTarget',{url:config.targetOrigins[0]}).result();await f.command('receiptArm',{targetId:'ext:s:1',key:{intent_id:'i',generation:'g'}}).result();assert.equal((await f.command('submit',{targetId:'ext:s:1'}).result()).ok,true);const duplicate=await f.command('submit',{targetId:'ext:s:1'}).result();assert.equal(duplicate.error.released,true);assert.equal(f.calls.filter(x=>x[1]==='submit').length,1);});
