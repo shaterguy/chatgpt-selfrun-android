@@ -1,3 +1,5 @@
+import {isDeepStrictEqual} from 'node:util';
+
 // Legacy maintenance metadata is removed during initialization, never used as
 // permission to reject a future app command. Old helper names do not archive it.
 export function controlQuarantined() {return false;}
@@ -85,7 +87,16 @@ export function discardTerminalHistorySnapshot(snapshot,extra=[],onlyExtra=false
   // only alongside a request; new dispatch admission supplies its freshly read control.
   for(const task of Object.keys(data.controls||{}))if(!ongoingTasks.has(task)&&!Object.values(data.retired||{}).some(r=>r.task_id===task&&currentCancellationProof(data,r)))delete data.controls[task];
   delete data.terminalReplayFences;delete data.controlQuarantine;delete next.maintenanceQuarantine;
-  data.events=(data.events||[]).filter(e=>!ended(e));
+  // Old snapshots can already lack the request while retaining its queued
+  // audit event or cleanup receipt. Keep these two runtime collections only
+  // for current execution authority; raw audit files are untouched.
+  const current=[...Object.values(data.requests||{}),...Object.values(data.retired||{}).filter(r=>currentCancellationProof(data,r))];
+  const currentKeys=new Set(current.map(r=>r.key).filter(Boolean));
+  const currentIdentities=new Set(current.map(identityKey));
+  const currentOwner=value=>value&&(currentKeys.has(value.key)||currentIdentities.has(identityKey(value)));
+  data.events=(data.events||[]).filter(e=>!ended(e)&&currentOwner(e));
+  for(const [target,value]of Object.entries(data.browserCleanupOutcomes||{}))if(!currentOwner(value)
+    &&!current.some(r=>r.browser_cleanup?.target_id===target&&isDeepStrictEqual(r.browser_cleanup,value)))delete data.browserCleanupOutcomes[target];
   if(next.httpIngress){
     const files=next.httpIngress.files||{},removedPaths=new Set();
     const newer=(value,record)=>{
