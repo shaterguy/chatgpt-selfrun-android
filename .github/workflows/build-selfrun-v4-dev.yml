@@ -306,7 +306,7 @@ jobs:
           emulator-boot-timeout: 600
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
-            -camera-back none -camera-front none -memory 2048
+            -camera-back none -camera-front none -memory 4096
           disable-animations: true
           script: bash tools/verify_selfrun_v4_runtime_emulator.sh
 
