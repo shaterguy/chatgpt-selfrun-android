@@ -85,7 +85,12 @@ export function discardTerminalHistorySnapshot(snapshot,extra=[],onlyExtra=false
   const ongoingTasks=new Set(Object.values(data.requests||{}).map(r=>r.task_id));
   // A shared control document alone is not current local work. Retain authority
   // only alongside a request; new dispatch admission supplies its freshly read control.
-  for(const task of Object.keys(data.controls||{}))if(!ongoingTasks.has(task)&&!Object.values(data.retired||{}).some(r=>r.task_id===task&&currentCancellationProof(data,r)))delete data.controls[task];
+  for(const [task,control]of Object.entries(data.controls||{})) {
+    // A successor command belongs to its new identity, not to the discarded
+    // predecessor. Keep it available while its dispatch admission is pending.
+    const successor=control.state==='RUNNING'&&records.some(r=>r.task_id===task&&identityKey(r)!==identityKey(control)&&control.control_epoch>=r.control_epoch);
+    if(!ongoingTasks.has(task)&&!successor&&!Object.values(data.retired||{}).some(r=>r.task_id===task&&currentCancellationProof(data,r)))delete data.controls[task];
+  }
   delete data.terminalReplayFences;delete data.controlQuarantine;delete next.maintenanceQuarantine;
   // Old snapshots can already lack the request while retaining its queued
   // audit event or cleanup receipt. Keep these two runtime collections only

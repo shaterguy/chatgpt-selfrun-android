@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import {SignalDispatchTransport} from '../src/signal-transport.mjs';
+import {LifecycleStore} from '../src/lifecycle-store.mjs';
 import {ChatGptBrowser} from '../src/browser/chatgpt.mjs';
 import {keyFor} from '../src/lifecycle.mjs';
 import {fixture as lifecycleFixture,MemoryStore} from './helpers/lifecycle-fixture.mjs';
@@ -586,4 +588,30 @@ test('readonly restart with an uncertain initial intent and lost Android lease o
  await wait(()=>leases.length===2,'profile restoration resumes only after CONTROL authorization');
  assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.ok(f.life.record().cursor);
  await f.life.stop();await f.life.controller.cleanupTerminalResources();assert.equal(f.life.record(),null);
+});
+
+
+test('successor removes prior execution payload, HTTP cache and extension ownership while the new turn remains live',async t=>{
+ const f=await setup(t);await start(f);const prior=structuredClone(f.life.record()),oldKey=prior.key,oldTarget=prior.target_id,oldMonitor=f.late[0],sample=f.samples.at(-1);
+ const http=new SignalDispatchTransport(f.life.transport,f.life.store);
+ await http.register('synthetic-old-signal',f.life.path,f.life.body,'__SELFRUN_CONTROL__SAFE-TEST.json',f.life.control);
+ const next={...f.life.body,turn_id:'SAFE-TEST:turn:2',request_id:'SAFE-TEST:turn:2-request',result_document_id:'RESULT-2',conversation_url:'',client_status:'CREATE_REQUESTED',server_control_epoch:2};
+ f.life.control={...f.life.control,turn_id:next.turn_id,request_id:next.request_id,control_epoch:2};await f.life.controller.control(null,f.life.control,f.life.transport);
+ f.life.body=next;f.life.path='__SELFRUN_DISPATCH__successor-discard.json';f.life.result(false,'RESULT-2',2);await f.life.ingest();
+ await f.life.controller.cleanupTerminalResources();await f.life.settle();await f.wire.manager.saveChain;
+ const data=f.life.store.snapshot();
+ for(const field of ['requests','retired','outbox','completionOutbox','browserCleanup','browserCleanupOutcomes','browserCleanupUnresolved']){
+  assert.equal(Object.hasOwn(data.lifecycle[field]||{},oldKey),false,field);
+  assert.equal(Object.hasOwn(data.lifecycle[field]||{},oldTarget),false,field);
+ }
+ assert.equal(f.life.controller.repository.get(oldKey),null);assert.equal(oldMonitor.signal.aborted,true);
+ assert.equal(f.life.controller.sessions.has(oldKey),false);assert.equal(f.life.controller.operations.has(oldKey),false);assert.equal(f.life.controller.repository.resourceCleanups.size,0);
+ assert.equal(f.wire.tabs.has(1),false);assert.equal(f.wire.manager.isOwnedTarget(oldTarget),false);assert.equal(f.wire.manager.actionSessions.has(oldTarget),false);assert.equal(f.wire.manager.sessions.has(oldTarget),false);
+ assert.equal(Object.hasOwn(f.wire.manager.journal.targetMetadata,oldTarget),false);assert.equal(JSON.stringify(f.wire.storage).includes(oldTarget),false);
+ assert.equal(Object.values(data.httpIngress.files).some(b=>b.request_id===prior.request_id),false);assert.equal(data.httpIngress.signals['synthetic-old-signal'],undefined);
+ const restoredStore=new MemoryStore(data),restored=new LifecycleStore(restoredStore);await restored.initialize('synthetic');assert.equal(restored.get(oldKey),null);
+ assert.equal(f.life.record().state,'PREPARED');assert.equal(f.wire.tabs.has(2),true);assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);
+ const nextBefore=JSON.stringify(f.life.record());await oldMonitor.onActivity(sample);await f.life.settle();assert.equal(JSON.stringify(f.life.record()),nextBefore);assert.equal(f.life.controller.repository.get(oldKey),null);
+ f.life.body.client_status='SEND_REQUESTED';await f.life.ingest();await wait(()=>f.clicks()===2,'one successor click');await f.sample();assert.equal(f.inputs(),2);assert.ok(f.life.record().cursor);
+ await f.life.stop();await f.life.controller.cleanupTerminalResources();assert.equal(f.life.record(),null);assert.deepEqual(f.life.store.snapshot().httpIngress,{files:{},signals:{}});
 });

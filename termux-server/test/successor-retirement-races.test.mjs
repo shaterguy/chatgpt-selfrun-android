@@ -51,7 +51,7 @@ test('successor CONTROL changes the monitored identity without consuming the pri
   const observer=f.observations.at(-1);f.result(true);await f.acceptSuccessor();await f.controller.cleanupTerminalResources();
   await observer.onActivity({...f.probe,status:'STALLED'});await f.controller.tick(f.transport);
   assert.equal(observer.signal.aborted,true);assert.equal(f.nextObserver.signal.aborted,false);assert.equal(f.sends,0);assert.equal(f.resumes,2);
-  assert.equal(f.controller.repository.get(f.firstKey)?.state,'PAUSED');assert.deepEqual(f.closed,['target-t1']);
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.equal(f.controller.repository.data.retired[f.firstKey],undefined);assert.deepEqual(f.closed,['target-t1']);
   assert.deepEqual(f.resultReads,[]);assert.deepEqual(f.store.snapshot().lifecycle.completionOutbox,{});
 });
 
@@ -74,7 +74,7 @@ test('pending deadline read from the displaced observer does not block or retire
   const read=f.transport.readGoogleDocText;f.transport.readGoogleDocText=async id=>{if(id==='RESULT-1'){entered.resolve();await gate.promise;}return read(id);};
   const observing=f.observe({});await entered.promise;await f.acceptSuccessor();
   assert.equal(f.nextObserver.signal.aborted,false);gate.resolve();await observing;await f.controller.cleanupTerminalResources();
-  assert.equal(f.controller.repository.get(f.nextKey).state,'OBSERVING');assert.notEqual(f.controller.repository.get(f.firstKey)?.state,'COMMITTED');
+  assert.equal(f.controller.repository.get(f.nextKey).state,'OBSERVING');assert.equal(f.controller.repository.get(f.firstKey),null);
   assert.equal(f.sends,0);assert.equal(f.resumes,2);assert.deepEqual(f.closed,['target-t1']);
 });
 
@@ -83,9 +83,11 @@ for(const result of ['false','true','unavailable','wrong-identity'])test('displa
   await f.existing();if(result==='true')f.result(true);if(result==='unavailable')f.docs.delete('RESULT-1');
   if(result==='wrong-identity')f.docs.set('RESULT-1',JSON.stringify({committed:true,task_id:'WRONG'}));
   await f.acceptSuccessor();await f.controller.cleanupTerminalResources();
-  assert.deepEqual(f.resultReads,[]);assert.equal(f.controller.repository.get(f.firstKey).result_retirement_retry_at,undefined);
+  assert.deepEqual(f.resultReads,[]);assert.equal(f.controller.repository.get(f.firstKey),null);
+  for(const field of ['requests','retired','outbox','completionOutbox','browserCleanup','browserCleanupOutcomes','browserCleanupUnresolved'])
+    assert.equal(Object.values(f.store.snapshot().lifecycle[field]||{}).some(row=>row.key===f.firstKey||row.entry?.key===f.firstKey),false,field);
   await f.controller.quiesceForStandby();f.controller=f.recreate();now+=30000;await f.controller.tick(f.transport);
-  assert.deepEqual(f.resultReads,[]);assert.equal(f.resumes,3);assert.equal(f.sends,0);assert.equal(f.controller.sessions.has(f.firstKey),false);
+  assert.deepEqual(f.resultReads,[]);assert.equal(f.resumes,3);assert.equal(f.sends,0);assert.equal(f.controller.sessions.has(f.firstKey),false);assert.equal(f.controller.repository.get(f.firstKey),null);assert.equal(f.controller.repository.cleanupEntries().length,0);
   assert.deepEqual(f.closed,['target-t1']);
 });
 

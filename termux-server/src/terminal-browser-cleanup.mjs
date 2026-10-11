@@ -14,7 +14,8 @@ export class TerminalBrowserCleanup {
         return !!entry&&this.canClose(entry,target);
       },
       canRelease:()=>this.canRelease(),
-      activeTargetIds:()=>this.repository.records().filter(r=>!retiredState(r)).map(r=>r.target_id).filter(Boolean),
+      // Preserve exact journal addressing until an in-memory final disposal ends.
+      activeTargetIds:()=>[...new Set([...this.repository.records().filter(r=>!retiredState(r)).map(r=>r.target_id).filter(Boolean),...this.repository.resourceCleanups.keys()])],
     });
   }
   currentControls() {

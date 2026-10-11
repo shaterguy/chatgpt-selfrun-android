@@ -54,7 +54,7 @@ export class DriveDispatchController {
       const pending=new Set([this.sessions.get(r.key),...this.browserOpenings.values()].filter(a=>a&&(a.key===r.key||a===this.sessions.get(r.key))));
       for(const a of pending) {
         a.terminalResource={key:r.key,task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,
-        control_epoch:r.control_epoch,conversation_digest:r.conversation_digest||null,terminal_state:r.state};
+        control_epoch:r.control_epoch,conversation_digest:r.conversation_digest||(r.conversation_url?digest(r.conversation_url):null),terminal_state:r.state};
         a.discardedTargets=new Set(this.repository.cleanupEntries().filter(e=>e.key===r.key).map(e=>e.target_id));
         a.abort.abort(new Error('terminal execution discarded'));
         if(a.openingId)this.browserOpenings.delete(a.openingId);
@@ -112,7 +112,8 @@ export class DriveDispatchController {
         const current=this.repository.control(identity.task_id);
         if(matchingTaskControl(c,identity)&&matchingTaskControl(current,identity)
           &&current.control_epoch===c.control_epoch&&current.state===c.state)return current;
-        if(matchingTaskControl(c,identity)&&!current&&!this.repository.get(keyFor(identity)))return c;
+        if(matchingTaskControl(c,identity)&&!this.repository.get(keyFor(identity))
+          &&(!current||c.control_epoch>current.control_epoch))return c;
       }
       await this.#invalidateControl(identity);return null;
     } catch(error) {

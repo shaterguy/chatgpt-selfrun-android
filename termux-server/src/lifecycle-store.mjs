@@ -84,15 +84,15 @@ export class LifecycleStore {
   controlWatermark(task) {return structuredClone(this.data.controls[task]||null);}
   control(task) {const control=this.data.controls[task];return this.controlQuarantined(control)?null:structuredClone(control||null);}
   async save(next,discardedRecords=[]) {
-    const records=Object.values(next.requests);
-    for(const task of Object.keys(next.controls))if(!records.some(r=>r.task_id===task)&&!Object.values(next.retired||{}).some(r=>r.task_id===task&&currentCancellationProof(next,r)))delete next.controls[task];
+    const ended=[...Object.values(next.retired||{}).filter(r=>['STOPPED','COMMITTED','COMPLETED'].includes(r.state)),...discardedRecords];
+    const endedKeys=new Set(ended.map(r=>r.key||keyFor(r)));
+    const records=Object.values(next.requests).filter(r=>!endedKeys.has(r.key));
     const active=records.filter(r=>!controlQuarantined(next,next.controls[r.task_id])&&observingTaskControl(next.controls[r.task_id],r)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(r.control_state)&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
     const latest=records.toSorted((a,b)=>b.updated_at-a.updated_at)[0];
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
       active.length?'RUNNING':latest?.state==='COMPLETED'?'COMPLETED':latest?.state==='STOPPED'?'STOPPED':'IDLE';
     // Terminal execution state is discarded in memory and on disk together.
     // Cancellation keeps its existing bounded pre-submit proof policy.
-    const ended=[...Object.values(next.retired||{}).filter(r=>['STOPPED','COMMITTED','COMPLETED'].includes(r.state)),...discardedRecords];
     const resources=Object.values(next.browserCleanup||{}).filter(entry=>ended.some(r=>r.key===entry.key));
     const clean=discardTerminalHistorySnapshot({lifecycle:next},ended,true).lifecycle;
     // Keep cancellation bookkeeping only; no ended execution is moved to retired.
@@ -374,6 +374,14 @@ export class LifecycleStore {
       if(prior&&c.control_epoch<prior.control_epoch) return false;
       if(prior&&c.control_epoch===prior.control_epoch) {
         if(c.state!==prior.state||c.request_id!==prior.request_id||c.turn_id!==prior.turn_id) throw new Error('control epoch conflict');
+        // Fresh current authority also discards legacy PAUSED predecessors.
+        // Startup alone cannot infer this from a cached control snapshot.
+        const displaced=c.state==='RUNNING'?Object.values(this.data.requests).filter(r=>r.task_id===c.task_id&&r.state==='PAUSED'&&keyFor(r)!==keyFor(c)):[];
+        if(displaced.length){
+          const next=structuredClone(this.data);
+          for(const r of displaced)queueTargetCleanup(next,r);
+          await this.save(next,displaced);return true;
+        }
         const old=this.data.requests[keyFor(c)];
         // A fresh read may reauthorize the same app command after a missing or
         // unreadable control suspended execution. Preserve its epoch watermark.
@@ -384,7 +392,7 @@ export class LifecycleStore {
         next.events.push(audit(r,old.state,r.reason));next.outbox[r.key]={revision:r.revision,path:r.path,body:projection(r)};
         await this.save(next);return true;
       }
-      let next=structuredClone(this.data);
+      let next=structuredClone(this.data);const discarded=[];
       if(c.state==='RUNNING'&&canonicalUrl(c.conversation_url)&&next.retired[keyFor(c)]) {
         next=discardTerminalHistorySnapshot({lifecycle:next},[next.retired[keyFor(c)]],true).lifecycle;
         // The incoming current command sets fresh state; old cleanup/projection
@@ -427,11 +435,11 @@ export class LifecycleStore {
           ...(['STOPPED','DONE'].includes(c.state)?{stop_status:'NOT_REQUESTED'}:{}),
         });
         next.requests[key]=r;next.events.push(audit(r,old.state,r.reason));
-        if(c.state==='RUNNING'&&!matching)queueDisplacedCleanup(next,r);
+        if(c.state==='RUNNING'&&!matching){queueTargetCleanup(next,r);discarded.push(r);}
         if(retiredState(r))retireRecord(next,r);
       else next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
       }
-      await this.save(next);
+      await this.save(next,discarded);
       return true;
     });
   }

@@ -52,8 +52,7 @@ for(const result of ['false','missing','read failure'])test('next-turn entry dis
   await f.next();await f.clean();await f.settle();
   assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.has(f.firstKey),false);
   assert.deepEqual(f.closed,['old-owned']);assert.equal(f.pages.has('new-owned'),true);
-  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.equal(f.controller.repository.get(f.firstKey).retired,undefined);
-  assert.notEqual(f.controller.repository.get(f.firstKey).result_state,'COMMITTED');
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.equal(f.controller.repository.data.retired[f.firstKey],undefined);
   assert.equal(f.controller.repository.get(f.nextKey).state,'PREPARED');assert.equal(f.sends,0);assert.equal(f.uiStops,0);
   if(result!=='missing')assert.equal(f.docs.get('RESULT-1'),raw);
 });
@@ -64,23 +63,19 @@ test('next-turn exact owned-tab disposal does not start a displaced business Res
   f.transport.readGoogleDocText=async id=>{if(id==='RESULT-1'){reading=true;await readGate.promise;}return read(id);};
   await f.next();await f.clean();assert.equal(reading,false);
   assert.deepEqual(f.closed,['old-owned']);assert.equal(f.pages.has('new-owned'),true);
-  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.equal(f.sends,0);assert.equal(f.uiStops,0);
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
   readGate.resolve();assert.equal(f.controller.resultRetirements,undefined);
 });
 
-test('failed displaced cleanup retains exact source generations and retries only that tab after restart',async t=>{
+test('failed displaced cleanup consumes one attempt and never restores an execution or cleanup queue after restart',async t=>{
   const f=disposalFixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const source=f.controller.repository.get(f.firstKey);f.closeFails=true;await f.next();await f.clean();
-  const entry=f.controller.repository.data.browserCleanup['old-owned'];
-  assert.ok(entry,'failed displaced close must retain a cleanup entry');
-  assert.equal(entry.kind,'DISPLACED');assert.equal(entry.browser_generation,source.browser_generation);
-  assert.equal(entry.run_generation,source.run_generation);assert.equal(entry.successor_key,f.nextKey);
-  for(const field of ['prompt','intent','body','conversation_url'])assert.equal(entry[field],undefined);
+  f.closeFails=true;let attempts=0;const close=f.browser.chromium.closeOwnedTarget;f.browser.chromium.closeOwnedTarget=async(...args)=>{attempts++;return close(...args);};
+  await f.next();await f.clean();assert.equal(attempts,1);assert.equal(f.pages.has('old-owned'),true,'failed close is not reported as successful');
+  assert.deepEqual(f.controller.repository.data.browserCleanup,{});assert.equal(f.controller.repository.resourceCleanups.size,0);assert.equal(f.controller.repository.get(f.firstKey),null);
   const counts={resumes:f.resumes,prepares:f.prepares};await f.controller.quiesceForStandby();
   f.closeFails=false;f.controller=f.recreate();await f.controller.initialize();await f.clean();
-  assert.deepEqual(f.closed,['old-owned']);assert.equal(f.pages.has('new-owned'),true);
+  assert.deepEqual(f.closed,[]);assert.equal(f.pages.has('new-owned'),true);assert.equal(attempts,1);
   assert.deepEqual({resumes:f.resumes,prepares:f.prepares},counts);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
-  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');
 });
 
 for(const state of ['RUNNING','PAUSED'])test('same-identity '+state+' control does not dispose its observer tab',async t=>{
@@ -102,7 +97,7 @@ test('historical HTTP cache cannot veto disposal but a pending explicit old-requ
     await f.existing();
     await f.store.patch({httpIngress:{files:{oldDispatch:structuredClone(f.rows.get(f.path)),oldControl:f.firstControl},signals:{}}});
     f.beforeClose=async id=>{if(id==='old-owned'){entered.resolve();await gate.promise;}};
-    await f.next();assert.ok(f.controller.repository.data.browserCleanup['old-owned'],'displaced close must be queued');await entered.promise;
+    await f.next();assert.ok(f.controller.repository.resourceCleanups.has('old-owned'),'one process-local close is pending');await entered.promise;
     if(pending)await f.store.patch({httpIngress:{files:{resume:{...f.firstControl,control_epoch:3,conversation_url:f.probe.url}},signals:{}}});
     gate.resolve();await f.clean();assert.deepEqual(f.closed,pending?[]:['old-owned']);assert.equal(f.pages.has('new-owned'),true);
   }
@@ -111,17 +106,18 @@ test('historical HTTP cache cannot veto disposal but a pending explicit old-requ
 for(const boundary of ['reactivation','browser generation','successor target claim','availability','standby'])test('queued displaced close is fenced by '+boundary,async t=>{
   const f=disposalFixture(),entered=deferred(),gate=deferred();t.after(()=>{gate.resolve();return f.controller.quiesceForStandby();});
   await f.existing();f.beforeClose=async id=>{if(id==='old-owned'){entered.resolve();await gate.promise;}};
-  await f.next();assert.ok(f.controller.repository.data.browserCleanup['old-owned'],'displaced close must be queued');await entered.promise;
+  await f.next();assert.ok(f.controller.repository.resourceCleanups.has('old-owned'),'one process-local close is pending');await entered.promise;
   if(boundary==='reactivation'){
     f.control={...f.firstControl,control_epoch:3,conversation_url:f.probe.url};await f.controller.control(null,f.control,f.transport);
   } else if(boundary==='browser generation'){
-    const source=f.controller.repository.get(f.firstKey);
-    await f.controller.repository.move(f.firstKey,'PAUSED','test replacement generation',{browser_generation:source.browser_generation+1});
+    f.control={...f.firstControl,control_epoch:3,conversation_url:f.probe.url};await f.controller.control(null,f.control,f.transport);
+    const current=f.controller.repository.get(f.firstKey);assert.ok(current);
+    await f.controller.repository.move(f.firstKey,current.state,'test replacement generation',{browser_generation:current.browser_generation+1,target_id:'old-owned',target_owned:true});
   } else if(boundary==='successor target claim')await f.controller.repository.move(f.nextKey,'PREPARED','test claimed old target',{target_id:'old-owned'});
   else if(boundary==='availability')f.controller.canDispatch=()=>false;
   else await f.controller.quiesceForStandby();
   gate.resolve();await f.clean();await f.controller.browserCleanup.running;
-  assert.deepEqual(f.closed,[]);assert.equal(f.pages.has('new-owned'),true);assert.equal(f.uiStops,0);
+  assert.equal(f.closed.includes('old-owned'),false);assert.equal(f.pages.has('old-owned'),true);assert.equal(f.pages.has('new-owned'),!['reactivation','browser generation'].includes(boundary));assert.equal(f.uiStops,0);
 });
 
 for(const refresh of [false,true])test('late prior target acquisition after successor control '+(refresh?'and metadata refresh ':'')+'disposes only its original generation',async t=>{
@@ -130,18 +126,18 @@ for(const refresh of [false,true])test('late prior target acquisition after succ
     const attached=await f.attach(args,'old-owned',args.conversationUrl);
     if(args.signal.aborted)throw Error('synthetic stale entry');return attached;
   };
-  const first=f.existing();await opening.promise;
+  const first=f.existing();await opening.promise;const pending=[...f.controller.browserOpenings.values()][0];
   if(refresh){
     f.control=f.nextControl;await f.controller.control(null,f.control,f.transport);
-    const original=f.controller.repository.get(f.firstKey).browser_cleanup_displacement;
+    const original=structuredClone(pending.terminalResource);
     f.nextControl={...f.nextControl,control_epoch:3};f.control=f.nextControl;
     await f.controller.control(null,f.control,f.transport);
-    const retained=f.controller.repository.get(f.firstKey).browser_cleanup_displacement;
-    assert.equal(retained.run_generation,original.run_generation);assert.equal(retained.browser_generation,original.browser_generation);
+    const retained=pending.terminalResource;
+    assert.deepEqual(retained,original);assert.equal(f.controller.repository.get(f.firstKey),null);
   }
   await f.next();gate.resolve();await first;await f.clean();
   assert.deepEqual(f.closed,['old-owned']);assert.equal(f.pages.has('new-owned'),true);
-  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.equal(f.controller.repository.get(f.nextKey).state,'PREPARED');
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.equal(f.controller.repository.get(f.nextKey).state,'PREPARED');
   assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 
@@ -168,7 +164,7 @@ test('a later known different-request RESUME preserves the already authorized or
   await f.next();await entered.promise;
   f.control={...f.firstControl,turn_id:historical.turn_id,request_id:historical.request_id,control_epoch:3,conversation_url:historical.conversation_url};
   await f.controller.control(null,f.control,f.transport);gate.resolve();await f.clean();
-  assert.deepEqual(f.closed,['old-owned']);assert.equal(f.pages.has('new-owned'),true);assert.equal(f.uiStops,0);
+  assert.deepEqual(f.closed,['old-owned','new-owned']);assert.equal(f.pages.has('new-owned'),false);assert.equal(f.uiStops,0);assert.equal(f.controller.repository.get(f.firstKey),null);
 });
 
 for(const restart of [false,true])test('confirmed displaced disposal stays inert on metadata refresh'+(restart?' after restart':''),async t=>{
@@ -179,7 +175,7 @@ for(const restart of [false,true])test('confirmed displaced disposal stays inert
   await f.controller.control(null,f.control,f.transport);
   assert.deepEqual(f.controller.repository.data.browserCleanup,{},'confirmed exact generation must not be queued again');
   assert.deepEqual({resumes:f.resumes,prepares:f.prepares},counts);assert.equal(f.pages.has('new-owned'),true);
-  assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.equal(f.sends,0);assert.equal(f.uiStops,0);
+  assert.equal(f.controller.repository.get(f.firstKey),null);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 
 for(const status of ['CLOSED','ABSENT'])test('a later business Result commit cannot change displaced '+status+' evidence',async t=>{
@@ -188,22 +184,23 @@ for(const status of ['CLOSED','ABSENT'])test('a later business Result commit can
   if(status==='ABSENT')f.beforeClose=async id=>{if(id==='old-owned'){f.pages.delete(id);f.owned.delete(id);}};
   await f.next();await f.clean();
   assert.equal(f.controller.resultRetirements,undefined);
-  const successful=structuredClone(f.controller.repository.data.browserCleanupOutcomes['old-owned']);
-  assert.equal(successful.status,status);assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');
+  const successful=f.controller.repository.data.browserCleanupOutcomes?.['old-owned'];
+  assert.equal(successful,undefined);assert.equal(f.controller.repository.get(f.firstKey),null);
   const close=f.browser.chromium.closeOwnedTarget;
   f.browser.chromium.closeOwnedTarget=async(id,options)=>!f.owned.has(id)?{closed:false,reason:'unowned_target'}:close(id,options);
   f.result(true);now+=600001;
   await f.controller.tick(f.transport);assert.equal(f.controller.resultRetirements,undefined);await f.clean();
   const committed=f.controller.repository.get(f.firstKey);
-  assert.equal(committed.state,'PAUSED');
+  assert.equal(committed,null);
   assert.deepEqual(f.controller.repository.data.browserCleanup,{},'real business retirement must not reopen disposed resource cleanup');
-  assert.deepEqual(f.controller.repository.data.browserCleanupOutcomes['old-owned'],successful);
+  assert.deepEqual(f.controller.repository.data.browserCleanupOutcomes?.['old-owned'],successful);
   assert.deepEqual(f.closed,status==='CLOSED'?['old-owned']:[]);assert.equal(f.pages.has('new-owned'),true);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 
 for(const changed of ['target','browser generation','resource run generation','source identity'])test('confirmed old disposal cannot be inherited by a different '+changed,async t=>{
-  const f=disposalFixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();await f.next();await f.clean();
-  const data=structuredClone(f.controller.repository.data),record=f.controller.repository.get(f.firstKey);
+  const f=disposalFixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();const record=f.controller.repository.get(f.firstKey);
+  record.browser_cleanup_displacement={target_id:record.target_id,browser_generation:record.browser_generation,run_generation:record.run_generation};
+  await f.next();await f.clean();const data=structuredClone(f.controller.repository.data);assert.equal(f.controller.repository.get(f.firstKey),null);
   if(changed==='target')record.browser_cleanup_displacement.target_id=record.target_id='replacement-owned';
   else if(changed==='browser generation')record.browser_cleanup_displacement.browser_generation=++record.browser_generation;
   else if(changed==='resource run generation')record.browser_cleanup_displacement.run_generation++;
@@ -219,13 +216,13 @@ test('two fresh successor controls preserve the first original generation for a 
     const attached=await f.attach(args,'old-owned',args.conversationUrl);
     if(args.signal.aborted)throw Error('synthetic stale entry');return attached;
   };
-  const first=f.existing();await opening.promise;
+  const first=f.existing();await opening.promise;const pending=[...f.controller.browserOpenings.values()][0];
   f.control=f.nextControl;await f.controller.control(null,f.control,f.transport);
-  const original=f.controller.repository.get(f.firstKey).browser_cleanup_displacement;
+  const original=structuredClone(pending.terminalResource);
   const latest={...f.nextBody,turn_id:'SAFE-TEST:turn:3',request_id:'SAFE-TEST:turn:3-request',server_control_epoch:3};
   f.control={...f.nextControl,turn_id:latest.turn_id,request_id:latest.request_id,control_epoch:3};
   await f.controller.control(null,f.control,f.transport);
-  const retained=f.controller.repository.get(f.firstKey).browser_cleanup_displacement;
+  const retained=pending.terminalResource;
   assert.deepEqual(retained,original,'later controls must preserve original resource generation and entry provenance');
   f.rows.set('latest.json',latest);await f.controller.ingest('latest.json',latest,f.transport);
   gate.resolve();await first;await f.clean();
