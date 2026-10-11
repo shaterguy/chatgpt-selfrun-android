@@ -3,7 +3,7 @@
 set -euo pipefail
 [[ "${GITHUB_ACTIONS:-}" == 'true' ]]
 [[ "${TEST_ONLY:-}" == 'true' ]]
-[[ "${VERSION_NAME:-}" == '4.0.10-dev8' ]]
+[[ "${VERSION_NAME:-}" == '4.0.10' ]]
 [[ "${VERSION_CODE:-}" == '4002021' ]]
 [[ "$(adb get-serialno)" == emulator-* ]]
 [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == '1' ]]

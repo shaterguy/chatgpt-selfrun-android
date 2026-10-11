@@ -14,7 +14,7 @@ public final class TestAppVariantPolicyTest {
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
         assertTrue(gradle.contains("selfRunDriveVersionCode = 4002021"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.10-dev8'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.10'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
@@ -49,8 +49,8 @@ public final class TestAppVariantPolicyTest {
         assertTrue(workflow.contains("tools/sign_test.sh"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.test"));
-        assertTrue(workflow.contains("SelfRun-Drive-v4.0.10-dev8.apk"));
-        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.10-dev8.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-v4.0.10.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.10.apk"));
         assertTrue(workflow.contains("drive-v4.0.8"));
         assertTrue(workflow.contains("BASE_VERSION_NAME=4.0.8"));
         assertTrue(workflow.contains("bash tools/verify_selfrun3_release_emulator.sh"));
@@ -61,7 +61,7 @@ public final class TestAppVariantPolicyTest {
         assertTrue(workflow.contains("env.TEST_ONLY != 'true'"));
         assertTrue(workflow.contains("tools/verify_selfrun_test_update_emulator.sh"));
         assertTrue(workflow.contains("selfrun-drive-test-v4.0.10-dev4-sr59pxha"));
-        assertFalse(workflow.contains("      - 'selfrun-v4/v4.0.10-dev8'"));
+        assertFalse(workflow.contains("      - 'selfrun-v4/v4.0.10'"));
     }
 
     @Test public void serverProductCapabilityIsIndependentFromServerOnlyTestSelection() throws Exception {

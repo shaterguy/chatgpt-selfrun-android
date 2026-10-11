@@ -1,4 +1,4 @@
-# SelfRun app gate recovery candidate 4.0.10-dev8
+# SelfRun Drive 4.0.10 stable release
 
 The server adapter advances from a correlated, trusted conversation URL without consuming server READY, STARTED, or COMPLETED status gates. App-authored dispatch/cancellation controls and the existing Result/Vercel completion authority remain separate. A valid Result push wakes the consumer even when local ACK persistence fails; rejected foreign rows do not end polling. User STOP is effective locally before external STOP delivery, and pending delivery retains the existing single-task ownership protection.
 
@@ -12,7 +12,7 @@ The preceding 4.0.10-dev3 baseline fixes cancelled-dispatch recovery. Automatic 
 
 SelfRun 3는 Android 앱 안에서 ChatGPT 대화와 Google Drive 결과물을 하나의 논리 작업으로 관리하는 ledger 기반 실행기입니다. 작업 상태는 기존 V3 원장을 유지하며, V1/V2 실행 상태머신·Drive title signal·rollover·legacy migration을 런타임 호환 경로로 유지하지 않습니다.
 
-현재 정식 버전은 SelfRun Drive 4.0.8 / versionCode 4002010입니다. 검증 완료된 4.0.8-dev1의 작업 폴더 기반 Drive 전송 기능을 기능 소스 변경 없이 정식 계보로 승격했습니다. 정식 applicationId와 서명 계보는 유지됩니다. 최신 정식 Release는 [drive-v4.0.8](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.8)입니다.
+현재 정식 버전은 SelfRun Drive 4.0.10 / versionCode 4002021입니다. 검증된 4.0.10-dev8 후보의 기능 소스를 유지하여 정식 서명·업데이트 계보로 승격했습니다. 최신 정식 Release는 [drive-v4.0.10](https://github.com/shaterguy/chatgpt-selfrun-android/releases/tag/drive-v4.0.10)입니다.
 
 ## 디버그 로그와 턴별 바로가기
 
