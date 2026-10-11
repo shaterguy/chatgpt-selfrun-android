@@ -282,6 +282,19 @@ jobs:
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
 
+      - name: Reclaim unused hosted-runner SDK storage for Android emulator
+        if: env.TEST_ONLY != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf -- /usr/share/dotnet /usr/local/share/powershell /opt/ghc
+          FREE_MB="$(df -Pm "$HOME" | awk 'NR==2 {print $4}')"
+          printf 'ANDROID_EMULATOR_HOST_DISK_FREE_MB=%s\n' "$FREE_MB"
+          if (( FREE_MB < 11000 )); then
+            echo '::error::Insufficient free disk for Android 36 AVD userdata after runner cleanup'
+            exit 1
+          fi
+
       - name: Verify phone 4.0.8 and tablet 4.0.0 upgrades to 4.0.10 with TEST co-install
         if: env.TEST_ONLY != 'true' || steps.test-runtime-access.outputs.available == 'true'
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
@@ -293,7 +306,7 @@ jobs:
           emulator-boot-timeout: 600
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
-            -camera-back none -camera-front none -memory 2048 -partition-size 4096
+            -camera-back none -camera-front none -memory 2048
           disable-animations: true
           script: |
             if [[ "$TEST_ONLY" == 'true' ]]; then
