@@ -67,9 +67,10 @@ public final class SelfRunDebugUiAndroidTest {
             });
             long down = SystemClock.uptimeMillis();
             inject(down, down, MotionEvent.ACTION_DOWN, touch);
-            SystemClock.sleep(850);
+            SystemClock.sleep(Math.max(1200L, android.view.ViewConfiguration.getLongPressTimeout() + 500L));
             inject(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, touch);
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            SystemClock.sleep(150L);
             scenario.onActivity(activity -> {
                 TextView info = field(activity, "technicalDetails");
                 assertTrue("long press did not create a native selection", info.getSelectionEnd() > info.getSelectionStart());
@@ -95,7 +96,10 @@ public final class SelfRunDebugUiAndroidTest {
 
     private static void inject(long down, long now, int action, int[] point) {
         MotionEvent event = MotionEvent.obtain(down, now, action, point[0], point[1], 0);
-        try { assertTrue(InstrumentationRegistry.getInstrumentation().getUiAutomation().injectInputEvent(event, true)); }
+        try {
+            event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+            assertTrue(InstrumentationRegistry.getInstrumentation().getUiAutomation().injectInputEvent(event, true));
+        }
         finally { event.recycle(); }
     }
 

@@ -8,10 +8,8 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
-import android.os.PatternMatcher;
 import android.service.notification.StatusBarNotification;
 import android.view.View;
 import android.view.ViewGroup;
@@ -148,16 +146,21 @@ public final class SelfRun31WorkFixAndroidTest {
             instrumentation.waitForIdleSync();
             scenario.onActivity(activity -> assertTrue(currentConversationButton(activity).isEnabled()));
 
-            IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
-            filter.addDataScheme("https");
-            filter.addDataAuthority("chatgpt.com", null);
-            filter.addDataPath("/c/" + CONVERSATION_ID, PatternMatcher.PATTERN_LITERAL);
-            Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
-                    filter, new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true);
+            AtomicReference<Intent> opened = new AtomicReference<>();
+            Instrumentation.ActivityMonitor monitor = new Instrumentation.ActivityMonitor() {
+                @Override public Instrumentation.ActivityResult onStartActivity(Intent outgoing) {
+                    if (!Intent.ACTION_VIEW.equals(outgoing.getAction())) return null;
+                    opened.set(outgoing);
+                    return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null);
+                }
+            };
+            instrumentation.addMonitor(monitor);
             try {
                 scenario.onActivity(activity -> currentConversationButton(activity).performClick());
                 instrumentation.waitForIdleSync();
-                assertEquals(1, monitor.getHits());
+                assertNotNull(opened.get());
+                assertEquals("https://www.chatgpt.com/c/" + CONVERSATION_ID + "?temporary=1",
+                        opened.get().getDataString());
             } finally {
                 instrumentation.removeMonitor(monitor);
             }
