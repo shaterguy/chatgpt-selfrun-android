@@ -129,12 +129,12 @@ test('STOP remains consumed across restart for an unknown initial receipt with a
   assert.equal(f.observations.length,1);assert.equal(f.resumes,0);assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 
-for(const failure of ['composer','quiesce','result'])test(`unknown initial receipt cannot block paced recovery after transient ${failure} failure`,async t=>{
+for(const failure of ['input-lookup','input-lookup-timeout','result'])test(`unknown initial receipt cannot block paced recovery after transient ${failure} failure`,async t=>{
   let now=1700000000000;t.mock.method(Date,'now',()=>now);
   const f=setup(t);await f.ingest();await f.observe({});
   now+=TEN_MINUTES;
-  if(failure==='composer')Object.assign(f.probe,{composer:false,streaming:false,stopButtonVisible:false});
-  if(failure==='quiesce')f.browser.quiesce=async()=>{throw new Error('temporary quiesce error');};
+  const lookup=f.browser.recoveryInputSnapshot;
+  if(failure!=='result')f.browser.recoveryInputSnapshot=async()=>{throw new Error(failure==='input-lookup'?'temporary input lookup error':'CDP command timeout: Runtime.evaluate');};
   if(failure==='result') {
     await f.controller.repository.move(keyFor(f.body),'STALLED','test quiet window elapsed');
     f.docs.set('RESULT-1','temporarily unreadable');
@@ -145,7 +145,7 @@ for(const failure of ['composer','quiesce','result'])test(`unknown initial recei
   const attempted=f.record().last_nudge_attempt_at;
   if(failure!=='result')assert.equal(attempted,now);
   f.result(false);f.probe.composer=true;
-  f.browser.quiesce=async()=>{f.quiesces++;f.probe.streaming=false;f.probe.stopButtonVisible=false;};
+  f.browser.recoveryInputSnapshot=lookup;
   // Result failure has its own shorter read retry; a UI attempt consumes the full quiet window.
   now+=failure==='result'?30000:TEN_MINUTES-1;
   await f.controller.tick(f.transport);

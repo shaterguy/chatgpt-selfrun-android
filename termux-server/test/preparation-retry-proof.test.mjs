@@ -106,11 +106,11 @@ test('cold Drive '+importedState+' cannot inject durable preparation proof',asyn
   f.body.lifecycle_record={schema:1,...initialRecord(f.path,f.body),state:importedState,reason:'IMPORTED_FAILURE',blocked_epoch:1,
     pre_submit_proof:{schema:1,input_digest:preparationInputDigest(f.body)},never_submitted:true};
   await f.ingest();
-  if(importedState==='CANCELLED')assert.equal(f.record(),null);else assert.notEqual(f.record().pre_submit_proof?.schema,1,'remote proof is not local submit-boundary evidence');
-  f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();if(importedState==='CANCELLED')assert.equal(f.record(),null);else cancelledProof(f);
+  assert.notEqual(f.record().pre_submit_proof?.schema,1,'remote proof is not local submit-boundary evidence');
+  f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();cancelledProof(f);
   const prepares=f.prepares;
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
-  if(importedState==='CANCELLED')assert.equal(f.record(),null);else{assert.ok(f.record());assert.notEqual(f.record().pre_submit_proof?.schema,1);assert.equal(f.sends,0);}
+  assert.ok(f.record());assert.notEqual(f.record().pre_submit_proof?.schema,1);assert.equal(f.sends,0);assert.equal(f.prepares,prepares);
 });
 test('cold historical PREPARING without a proof cannot establish fresh local proof',async()=>{
   const f=fixture();f.body.client_status='CREATE_REQUESTED';f.body.lifecycle_state='PREPARING';

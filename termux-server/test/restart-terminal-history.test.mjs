@@ -28,16 +28,18 @@ for(const state of ['COMMITTED','COMPLETED']) {
     assert.equal(f.store.snapshot().activeCount,0);
     assert.deepEqual(f.controller.activeDispatches(),[]);
   });
-  test('Drive import ignores historical '+state+' without claiming an observer',async()=>{
+  test('Drive import observes a current RUNNING URL despite historical '+state,async()=>{
     const {f,body}=await terminalFixture(state);
     const {MemoryStore}=await import('./helpers/lifecycle-fixture.mjs');
     f.store=new MemoryStore();f.controller=f.recreate();
     await f.controller.controlDurable(null,f.control);
     await f.controller.ingest(f.path,body,f.transport);
-    assert.equal(f.record(),null);
-    assert.equal(f.resumes,0);assert.equal(f.prepares,0);assert.equal(f.sends,0);
-    assert.equal(f.store.snapshot().activeCount,0);
-    assert.deepEqual(f.controller.activeDispatches(),[]);
+    assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().conversation_url,f.probe.url);
+    assert.equal(f.resumes,1);assert.equal(f.prepares,0);assert.equal(f.sends,0);
+    assert.equal(f.store.snapshot().activeCount,1);assert.equal(f.controller.activeDispatches().length,1);
+    assert.equal(f.record().submission_confirmed,false);
+    await f.controller.tick(f.transport);assert.equal(f.resumes,1);assert.equal(f.sends,0);
+    await f.controller.quiesceForStandby();
   });
 }
 
@@ -88,13 +90,15 @@ test('a fresh app request can prepare without reviving its historical predecesso
   await f.controller.quiesceForStandby();
 });
 
-test('legacy completed status without lifecycle fields stays finalized on import',async()=>{
+test('legacy completed status without lifecycle fields cannot veto current URL observation',async()=>{
   const f=fixture();
   Object.assign(f.body,{conversation_url:f.probe.url,server_status:'COMPLETED'});
   await f.ingest();
-  assert.equal(f.record(),null);
-  assert.equal(f.resumes,0);assert.equal(f.sends,0);
-  assert.equal(f.store.snapshot().activeCount,0);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().conversation_url,f.probe.url);
+  assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.prepares,0);
+  assert.equal(f.store.snapshot().activeCount,1);assert.equal(f.record().submission_confirmed,false);
+  await f.controller.tick(f.transport);assert.equal(f.resumes,1);assert.equal(f.sends,0);
+  await f.controller.quiesceForStandby();
 });
 test('terminal history cannot be reopened by a stale uncertain-POST audit',async()=>{
   const {migrateLegacy}=await import('../src/lifecycle-migration.mjs');

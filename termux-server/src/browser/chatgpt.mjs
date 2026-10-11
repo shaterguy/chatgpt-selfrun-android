@@ -1,11 +1,24 @@
 import { canonicalUrl, cursor } from '../lifecycle.mjs';
-import { isActionNotSubmitted } from './server-action-errors.mjs';
+import { isActionNotSubmitted, actionNotSubmittedStage } from './server-action-errors.mjs';
 
 // Local call-stack evidence only. Page errors and imported Drive records cannot
 // manufacture proof that this invocation never reached the submit operation.
 const preSubmitFailures = new WeakMap();
 export const preSubmitFailureStage = error => error && typeof error === 'object'
   ? preSubmitFailures.get(error) || null : null;
+
+// Only the normal conversation path of the requested project may be adopted.
+// Keep the raw project prefix until after this ownership check.
+export function projectConversationUrl(projectUrl,value) {
+  try {
+    const from=new URL(projectUrl),to=new URL(value);
+    if(from.origin!==to.origin||from.origin!=='https://chatgpt.com'||from.username||from.password||to.username||to.password)return '';
+    const entry=from.pathname.replace(/\/$/,'');
+    const prefix=entry===''?'':/^\/g\/[^/]+(?:\/project)?$/.test(entry)?entry.replace(/\/project$/,''):null;
+    if(prefix===null||!to.pathname.startsWith(prefix+'/c/'))return '';
+    return /^[A-Za-z0-9_-]+\/?$/.test(to.pathname.slice((prefix+'/c/').length))?to.href:'';
+  } catch {return '';}
+}
 
 export function normalizeProgressText(value) {
   return String(value || '')
@@ -808,30 +821,6 @@ export class ChatGptBrowser {
     return pending.promise;
   }
 
-  async #waitFor(session, predicate, { timeoutMs, signal, label }) {
-    const started = Date.now();
-    let last = null;
-    while (Date.now() - started < timeoutMs) {
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
-      try {
-        last = await runPageAction(session, 'snapshot');
-      } catch (error) {
-        if(/websocket.*closed|websocket.*not open|ECONNREFUSED/i.test(String(error?.message||error))) {
-          error.code='BROWSER_DEAD';throw error;
-        }
-        last = { probeError: String(error?.message || error) };
-        await delay(250, signal);
-        continue;
-      }
-      if (predicate(last)) return last;
-      await delay(250, signal);
-    }
-    const error = new Error(`Timed out waiting for ${label}`);
-    error.lastProbe = last;
-    error.code=last?.probeError?'ATTACH_FAILED':'CONVERSATION_LOAD_FAILED';
-    throw error;
-  }
-
   async prepare({ projectUrl, signal, onTarget, guard=()=>true, previousTargetId=null }) {
     const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale preparation');};
     check();
@@ -880,34 +869,10 @@ export class ChatGptBrowser {
       if(signal?.aborted)throw signal.reason||new Error('aborted');
       session = await this.chromium.connectTarget(target);
       await initializePageSession(session,this.config);
-      const probe = await this.#waitFor(session, (p) => p.loginPage
-        || ((p.readyState === 'complete' || p.readyState === 'interactive')
-          && canonicalUrl(p.url) === expectedUrl)
-        || (!!p.errorText&&!conversationStateReady(p)&&!conversationResumeReady(p)), {
-        timeoutMs: this.config.navigationTimeoutMs,
-        signal,
-        label: 'existing conversation',
-      });
-      if (probe.loginPage) {
-        const error = new Error('ChatGPT browser profile requires sign-in');
-        error.code = 'AUTH_REQUIRED';
-        throw error;
-      }
-      if(probe.errorText&&!conversationStateReady(probe)&&!conversationResumeReady(probe))
-        throw Object.assign(new Error('conversation load failed'),{code:'CONVERSATION_LOAD_FAILED'});
-      return {
-        target,
-        session,
-        baseline: {
-          assistantCount: Math.max(0, Number(probe.assistantCount || 0) - 1),
-          assistantTextLength: 0,
-          responseTurnId: probe.responseTurnId || null,
-          responseTextLength: probe.responseTextLength || 0,
-          responseFingerprint: probe.responseFingerprint || '',
-          userCount: probe.userCount || 0,
-          userTextLength: probe.userTextLength || 0,
-        },
-      };
+      if(signal?.aborted||!guard())throw signal?.reason||new Error('stale attachment');
+      // DOM availability is observation, not permission to start observing an
+      // already identified conversation. The monitor owns the first sample.
+      return {target,session,baseline:{}};
     } catch (error) {
       session?.close();
       if(!existing) await this.chromium.closeTarget(target.id,{guard});
@@ -915,39 +880,16 @@ export class ChatGptBrowser {
     }
   }
 
-  async #submitWithProfile({ session, prompt, signal, guard = () => true, onStage = () => {}, onSubmitStart = () => {}, onSubmitted = null }) {
+  async #submitWithProfile({ session, prompt, signal, initialProjectUrl, handoff, guard = () => true, onSubmitStart = () => {}, onSubmitted = null }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
-
-    const sendReadyStarted = Date.now();
-    let sendReady = null;
-    while (Date.now() - sendReadyStarted < 5000) {
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
-      onStage('sendReady');
-      sendReady = await runPageAction(session, 'sendReady');
-      if (sendReady?.ready) break;
-      if (sendReady?.status==='NO_COMPOSER'||sendReady?.status==='NO_SEND') {
-        onStage('input');
-        const restaged=await runPageAction(session,'input',{prompt});
-        if(restaged?.status==='READY') {
-          onStage('sendReady');
-          sendReady=await runPageAction(session,'sendReady');
-          if(sendReady?.ready) break;
-        }
-      }
-      await delay(150, signal);
-    }
-    if (!sendReady?.ready) {
-      const error=new Error(`Composer send control not ready: ${sendReady?.status || 'unknown'}`);
-      error.released=false;
-      throw error;
-    }
 
     let clickReleased=false;
     try {
       try {
         if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');
         onSubmitStart();
-        const submitted=await runPageAction(session,'submit');
+        const submitted=await runPageAction(session,'submit',{initialProjectUrl});
+        if(submitted?.status==='CONVERSATION_OBSERVED'){const observed=await handoff(submitted.url);if(observed)return {...observed,noSubmitEffect:true};}
         if(submitted?.status!=='SUBMITTED')throw new Error(`Composer send failed: ${submitted?.status||'unknown'}`);
         clickReleased=true;
       } catch(error) {
@@ -982,33 +924,50 @@ export class ChatGptBrowser {
     const session=await this.chromium.connectTarget(target);
     await initializePageSession(session,this.config,{network:false,pause:false});
     if(signal?.aborted){session.close();throw signal.reason;}
-    return {target,session,baseline:await runPageAction(session,'snapshot')};
+    return {target,session,baseline:{}};
   }
 
-  async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest,onSubmitted}) {
+  async ownedConversationUrl({targetId,projectUrl,signal,guard=()=>true}) {
+    const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale conversation lookup');};
+    check();
+    if(!targetId||!this.chromium?.listExistingTargets)return '';
+    let targets;try{targets=await this.chromium.listExistingTargets();}catch{check();return '';}
+    check();
+    const target=targets?.find(t=>t.id===targetId&&t.type==='page'&&!t.closing);
+    return target?projectConversationUrl(projectUrl,target.url):'';
+  }
+
+  async submitIntent({session,prompt,kind,intent,conversationUrl,projectUrl,targetId,profileOperations,signal,guard,onRequest,onSubmitted,onConversation,resumeSubmit=false}) {
     let stage='recoveryInput',submitCalled=false;
     const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');};
     const onStage=value=>{check();stage=value;};
+    const handoff=async value=>{const url=projectConversationUrl(projectUrl,value);if(kind!=='initial'||!url)return null;check();await onConversation?.({url});check();return {submitted:false,observationOnly:true,noSubmitEffect:!submitCalled,url};};
+    const findConversation=async()=>kind==='initial'?handoff(await this.ownedConversationUrl({targetId,projectUrl,signal,guard})):null;
     const run=async(operation,payload={})=>{onStage(operation);const value=await runPageAction(session,operation,payload,undefined,{signal});check();return value;};
     try {
     if(signal?.aborted||!guard())throw new Error('stale submission');
+    const existing=await findConversation();if(existing)return existing;
     const probe=await run('recoveryInput');
+    const observed=await handoff(probe?.url);if(observed)return observed;
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
       throw new Error('submission conversation ownership mismatch');
     if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
+    if(!resumeSubmit){
     await run('installProfile');
     await run('profileConfigure',{operations:profileOperations});
     await run('installReceipt');
-    const staged=await run('input',{prompt});
-    if(staged?.status!=='READY')throw new Error('submission composer not ready');
+    const staged=await run('input',{prompt,...(kind==='initial'?{initialProjectUrl:projectUrl}: {})});
+    if(staged?.status==='CONVERSATION_OBSERVED'){const observed=await handoff(staged.url);if(observed)return observed;}
+    if(staged?.status!=='READY')throw new Error('submission composer not ready: '+(staged?.status||'UNKNOWN'));
+    }
     if(signal?.aborted||!guard())throw new Error('stale submission');
     const key={intent_id:intent?.id,generation:intent?.receipt_generation,prompt,conversation_id:conversationId(conversationUrl)};
     if(intent?.prompt!==prompt)throw new Error('submission immutable prompt mismatch');
     await run('receiptArm',{key});
     try {
-      const submitted=await this.#submitWithProfile({session,prompt,signal,guard,
-        onStage,onSubmitStart:()=>{check();submitCalled=true;},onSubmitted});
-      await onRequest?.({released:true});
+      const submitted=await this.#submitWithProfile({session,prompt,signal,guard,initialProjectUrl:kind==='initial'?projectUrl:null,handoff,
+        onSubmitStart:()=>{check();submitCalled=true;},onSubmitted});
+      if(!submitted?.observationOnly)await onRequest?.({released:true});
       return submitted;
     } finally {
       if(signal?.aborted||!guard()) {
@@ -1017,7 +976,8 @@ export class ChatGptBrowser {
       }
     }
     } catch(error) {
-      if(isActionNotSubmitted(error))preSubmitFailures.set(error,'input');
+      if(!signal?.aborted&&guard()){const observed=await findConversation();if(observed)return observed;}
+      if(isActionNotSubmitted(error))preSubmitFailures.set(error,actionNotSubmittedStage(error));
       else if(!submitCalled&&error&&typeof error==='object')preSubmitFailures.set(error,stage);
       throw error;
     }
@@ -1239,13 +1199,6 @@ export class ChatGptBrowser {
       }
 
       previous = probe;
-      if (pageError) {
-        return {
-          status,
-          probe: { ...probe, errorText: pageError },
-          lastActivityAt,
-        };
-      }
       await delay(this.config.probeIntervalMs, signal);
     }
 

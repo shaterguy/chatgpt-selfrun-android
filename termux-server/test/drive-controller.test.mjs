@@ -124,7 +124,7 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
   let now = 1000;
   let evaluateCalls = 0;
   let stalledCalls = 0;
-  let forcePageError = false;
+  let forcePageError = false;const abort=new AbortController();
   const baseProbe = {
     url: 'https://chatgpt.com/c/abc-123',
     composer: true,
@@ -168,7 +168,7 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
       conversationStateGraceMs: 0,
     });
     const result = await browser.monitor({
-      session,
+      session,signal:abort.signal,
       baseline: {
         assistantCount: 0,
         assistantTextLength: 0,
@@ -178,15 +178,16 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
       },
       livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
       onActivity: async (activity) => {
+        if(activity.status==='PAGE_ERROR')abort.abort(Error('test complete'));
         if (activity.status === 'STALLED') {
           stalledCalls += 1;
           forcePageError = true;
           return { resetLiveness: true };
         }
       },
-    });
+    }).catch(error=>{assert.match(error.message,/test complete/);return{status:'ABORTED'};});
     assert.equal(stalledCalls, 1);
-    assert.equal(result.status, 'PAGE_ERROR');
+    assert.equal(result.status, 'ABORTED');
   } finally {
     Date.now = originalNow;
   }
@@ -195,7 +196,7 @@ test('browser monitor does not treat Stop button visibility changes as liveness 
 test('browser monitor schedules stalled verification retries without resetting real activity time', async () => {
   let evaluateCalls = 0;
   let stalledCalls = 0;
-  let forcePageError = false;
+  let forcePageError = false;const abort=new AbortController();
   const stalledTimes = [];
   const baseProbe = {
     url: 'https://chatgpt.com/c/abc-123',
@@ -233,7 +234,7 @@ test('browser monitor schedules stalled verification retries without resetting r
     conversationStateGraceMs: 0,
   });
   const result = await browser.monitor({
-    session,
+    session,signal:abort.signal,
     baseline: {
       assistantCount: 0,
       assistantTextLength: 0,
@@ -243,6 +244,7 @@ test('browser monitor schedules stalled verification retries without resetting r
     },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
     onActivity: async (activity) => {
+        if(activity.status==='PAGE_ERROR')abort.abort(Error('test complete'));
       if (activity.status !== 'STALLED') return;
       stalledCalls += 1;
       stalledTimes.push(activity.lastActivityAt);
@@ -254,10 +256,10 @@ test('browser monitor schedules stalled verification retries without resetting r
       forcePageError = true;
       return { resetLiveness: true };
     },
-  });
+  }).catch(error=>{assert.match(error.message,/test complete/);return{status:'ABORTED'};});
   assert.equal(stalledCalls, 2);
   assert.equal(stalledTimes[0], stalledTimes[1]);
-  assert.equal(result.status, 'PAGE_ERROR');
+  assert.equal(result.status, 'ABORTED');
 });
 
 test('another logical request cannot take over a live canonical conversation',async()=>{
@@ -290,6 +292,7 @@ test('parallel task STOP and event identity remain isolated',async()=>{
  assert.equal(f.controller.repository.get(keyFor(bodies[1][1])).state,'OBSERVING');
  const observer=f.observations.find(x=>x.baseline.url.endsWith('owned-b'));
  await observer.onActivity({...f.probe,url:'https://chatgpt.com/c/owned-b',responseTextLength:1234});
+ await f.controller.flush(f.transport);
  const events=f.store.events.filter(x=>x.event==='CONVERSATION_TRANSITION'&&x.details.reason==='RESPONSE_PROGRESS');
  assert.equal(events.at(-1).details.task_id,'SAFE-B');
  assert.equal(f.controller.repository.get(keyFor(bodies[0][1])),null);

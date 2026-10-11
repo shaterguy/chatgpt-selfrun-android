@@ -1,4 +1,4 @@
-import {probeExpression,recoveryInputExpression,newChatExpression,inputExpression,sendReadyExpression,
+import {projectConversationUrl,probeExpression,recoveryInputExpression,newChatExpression,inputExpression,sendReadyExpression,
   submitExpression,requestProfileDocumentStartSource,receiptObserverDocumentStartSource,
   configureRequestProfileExpression,normalizeProfileOperations,DECORATIVE_ANIMATION_PAUSE_SOURCE,
   QUIESCE_EXPRESSION} from './chatgpt.mjs';
@@ -34,20 +34,20 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     const originalFetch=window.fetch,xhr=typeof XMLHttpRequest==='function'?XMLHttpRequest.prototype:null;
     const originalOpen=xhr?.open,originalSend=xhr?.send;let activeXhr=new WeakSet();
     let profileEngine=null,receiptObserver=null,profileFetch=null,receiptFetch=null,profileOpen=null,profileSend=null;
-    let ownership=null,active=false,revoked=false,allowInitialConversation=false,armedKey=null,entryTransition=null;
+    let ownership=null,active=false,revoked=false,armedKey=null,entryTransition=null;
     const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
-    const conversation=url=>{try{return /\\/c\\/[A-Za-z0-9_-]+\\/?$/.test(new URL(url).pathname);}catch{return false;}};
+    const projectConversationUrl=${projectConversationUrl.toString()};
     const terminalDispose=()=>{
       active=false;revoked=true;
       try{receiptObserver?.dispose();}catch{}
       try{profileEngine?.dispose();}catch{}
-      ownership=null;armedKey=null;entryTransition=null;allowInitialConversation=false;
+      ownership=null;armedKey=null;entryTransition=null;
       receiptObserver=null;profileEngine=null;profileFetch=null;receiptFetch=null;profileOpen=null;profileSend=null;activeXhr=new WeakSet();
       return true;
     };
     const revoke=terminalDispose;
     const ownerMatches=()=>{if(revoked||!ownership)return false;const now=urlKey(location.href);if(now===ownership.url)return true;if(entryTransition?.deadline>nativeNow()&&entryTransition.allowed.includes(now)){ownership.url=now;return true;}
-      if(allowInitialConversation&&!conversation(ownership.url)&&conversation(now)){ownership.url=now;allowInitialConversation=false;return true;}revoke();return false;};
+      if(projectConversationUrl(ownership.url,now)){ownership.url=now;return true;}revoke();return false;};
     const ownerActive=()=>active&&ownerMatches();
     // Inactive paths do not inspect URL, arguments, body, response, or Promise.
     // These non-async wrappers preserve the original receiver, return and throw.
@@ -64,11 +64,13 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
       if(!Object.hasOwn(actions,operation))throw new Error('Unsupported page operation');
       if(activationKey!==installationKey)throw new Error('Page activation unauthorized');
       if(!Number.isFinite(deadline)||nativeNow()>=deadline)throw new Error('Page command expired');
-      if(revoked||typeof nonce!=='string'||nonce.length<16||urlKey(location.href)!==urlKey(expectedUrl))throw new Error('Page ownership unavailable');
+      if(revoked||typeof nonce!=='string'||nonce.length<16||(urlKey(location.href)!==urlKey(expectedUrl)&&!projectConversationUrl(expectedUrl,location.href)))throw new Error('Page ownership unavailable');
       if(!ownership)ownership={nonce,url:urlKey(expectedUrl)};
       if(ownership.nonce!==nonce)throw new Error('Page owner mismatch');
       if(active&&!ownerActive())throw new Error('Page ownership revoked');
       if(operation==='newChat'){const u=new URL(ownership.url),prefix=u.pathname.split('/c/')[0];entryTransition={allowed:[u.origin+'/',u.origin+prefix,u.origin+prefix+'/project'],deadline};}
+      if((operation==='input'||operation==='submit')&&projectConversationUrl(payload.initialProjectUrl,location.href))
+        return {status:'CONVERSATION_OBSERVED',url:location.href};
       if(operation==='submit'){
         const expected=payload.expectedArm;
         // This check and the click run synchronously in the same document.
@@ -76,9 +78,10 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
         if(!active||!profileEngine||!receiptObserver||!armedKey||!expected
           ||armedKey.intent_id!==expected.intent_id||armedKey.generation!==expected.generation)
           return {status:'NOT_SUBMITTED',reason:'PREPARATION_LOST',intent_id:expected?.intent_id,generation:expected?.generation};
-        allowInitialConversation=!conversation(ownership.url);
       }
       const result=actions[operation](payload);
+      if(operation==='submit'&&['NO_SEND','NO_COMPOSER'].includes(result?.status))
+        return {status:'NOT_SUBMITTED',reason:result.status,intent_id:payload.expectedArm.intent_id,generation:payload.expectedArm.generation};
       if(operation==='profileConfigure'){ownership.url=urlKey(expectedUrl);entryTransition=null;active=true;}
       if(operation==='receiptArm')armedKey={intent_id:payload.key.intent_id,generation:payload.key.generation};
       if(operation==='receiptRetire'&&armedKey?.intent_id===payload.key?.intent_id&&armedKey?.generation===payload.key?.generation)armedKey=null;

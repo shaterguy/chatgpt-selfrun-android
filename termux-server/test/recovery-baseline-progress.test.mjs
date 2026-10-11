@@ -58,34 +58,34 @@ for(const boundary of ['setup','submit-success','submit-unknown'])test(
   },
 );
 
-for(const outcome of ['success','quiesce-failure','snapshot-failure'])test(
-  'slow recovery quiesce '+outcome+' renews the quiet window at UI completion',async t=>{
+for(const outcome of ['success','input-lookup-failure','snapshot-failure'])test(
+  'slow recovery input lookup '+outcome+' renews the quiet window at UI completion',async t=>{
     const WINDOW=600000;let now=1000000;
     t.mock.method(Date,'now',()=>now);
     const f=fixture();f.controller.config.stallAfterMs=WINDOW;
     t.after(()=>f.controller.quiesceForStandby());
     await f.existing();await f.observe({});
-    let quiesces=0,snapshots=0;
-    f.browser.quiesce=async()=>{
-      quiesces++;
-      if(quiesces===1)now+=WINDOW+60000;
-      if(outcome==='quiesce-failure')throw Error('slow quiesce failed');
-      f.probe.streaming=false;f.probe.stopButtonVisible=false;
+    let attempts=0,snapshots=0;
+    f.browser.recoveryInputSnapshot=async()=>{
+      attempts++;
+      if(attempts===1)now+=WINDOW+60000;
+      if(outcome==='input-lookup-failure')throw Error('slow input lookup failed');
+      return {...f.probe};
     };
     f.browser.livenessSnapshot=async()=>{
       if(++snapshots===2&&outcome==='snapshot-failure')throw Error('post-quiesce snapshot failed');
       return {...f.probe};
     };
     now+=WINDOW;await f.observe({status:'STALLED'}).catch(()=>{});
-    const finishedAt=now,initialSends=outcome==='quiesce-failure'?0:1;
-    assert.equal(quiesces,1);assert.equal(f.sends,initialSends);
+    const finishedAt=now,initialSends=outcome==='input-lookup-failure'?0:1;
+    assert.equal(attempts,1);assert.equal(f.sends,initialSends);
     assert.equal(f.record().last_nudge_attempt_at,finishedAt);
     now+=30000;await f.observe({status:'STALLED'}).catch(()=>{});
-    assert.equal(quiesces,1);assert.equal(f.sends,initialSends);
+    assert.equal(attempts,1);assert.equal(f.sends,initialSends);
     now+=WINDOW-30001;await f.observe({status:'STALLED'}).catch(()=>{});
-    assert.equal(quiesces,1);assert.equal(f.sends,initialSends);
+    assert.equal(attempts,1);assert.equal(f.sends,initialSends);
     now+=1;await f.observe({status:'STALLED'}).catch(()=>{});
-    if(outcome==='quiesce-failure')assert.equal(quiesces,2);
+    if(outcome==='input-lookup-failure')assert.equal(attempts,2);
     else assert.equal(f.sends,initialSends+1);
   },
 );
@@ -101,7 +101,7 @@ test('streaming-only recovery verification uses fresh UI state without resetting
   f.browser.recoveryInputSnapshot=async()=>({...f.probe,streaming:f.quiesces===0});
   now+=WINDOW;await f.observe({status:'STALLED'});
   assert.equal(f.record().last_progress_at,progressAt,'streaming telemetry is not response text progress');
-  assert.equal(f.quiesces,1,'fresh streaming state still selects recovery quiesce');
+  assert.equal(f.quiesces,0,'streaming telemetry does not insert cleanup before input');
   assert.equal(f.sends,1,'a telemetry-only change cannot postpone an otherwise due nudge');
   now+=WINDOW-1;await f.observe({status:'STALLED'});assert.equal(f.sends,1);
   now+=1;await f.observe({status:'STALLED'});assert.equal(f.sends,2);

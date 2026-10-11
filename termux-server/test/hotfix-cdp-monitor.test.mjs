@@ -95,7 +95,7 @@ test('browser monitor keeps observing a live page with missing conversation DOM'
 
 test('browser monitor ignores visible page error text while usable and does not complete on response idle', async () => {
   let calls = 0;
-  const statuses = [];
+  const statuses = [];const abort=new AbortController();let pageError;
   const session = {
     call: async (method) => {
       assert.equal(method, 'Runtime.evaluate');
@@ -131,13 +131,13 @@ test('browser monitor ignores visible page error text while usable and does not 
     stallAfterMs: 600000, probeIntervalMs: 0, conversationStateGraceMs: 0,
   });
   const result = await browser.monitor({
-    session,
+    session,signal:abort.signal,
     baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 2, userTextLength: 100 },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
-    onActivity: async (activity) => { statuses.push(activity.status); },
-  });
-  assert.equal(result.status, 'PAGE_ERROR');
-  assert.equal(result.probe.errorText, 'Could not load this ChatGPT conversation');
+    onActivity: async (activity) => { statuses.push(activity.status);if(activity.status==='PAGE_ERROR'){pageError=activity.pageError;abort.abort(Error('test complete'));} },
+  }).catch(error=>{assert.match(error.message,/test complete/);return{status:'ABORTED'};});
+  assert.equal(result.status, 'ABORTED');
+  assert.equal(pageError, 'Could not load this ChatGPT conversation');
   assert.equal(statuses.includes('COMPLETED'), false);
   assert.equal(calls, 3);
 });
@@ -152,7 +152,7 @@ test('page error detector recognizes the observed conversation load failure fixt
 
 test('browser monitor retries transient Runtime.evaluate timeouts without completing on response idle', async () => {
   let calls = 0;
-  const statuses = [];
+  const statuses = [];const abort=new AbortController();let pageError;
   const session = {
     call: async (method) => {
       assert.equal(method, 'Runtime.evaluate');
@@ -204,13 +204,13 @@ test('browser monitor retries transient Runtime.evaluate timeouts without comple
     conversationStateGraceMs: 0,
   });
   const result = await browser.monitor({
-    session,
+    session,signal:abort.signal,
     baseline: { assistantCount: 0, assistantTextLength: 0, userCount: 1, userTextLength: 10 },
     livenessGate: async () => ({ state: 'RUNNING', epoch: 1 }),
-    onActivity: async (activity) => { statuses.push(activity.status); },
-  });
+    onActivity: async (activity) => { statuses.push(activity.status);if(activity.status==='PAGE_ERROR'){pageError=activity.pageError;abort.abort(Error('test complete'));} },
+  }).catch(error=>{assert.match(error.message,/test complete/);return{status:'ABORTED'};});
   assert.equal(calls, 4);
-  assert.equal(result.status, 'PAGE_ERROR');
+  assert.equal(result.status, 'ABORTED');
   assert.equal(statuses.includes('COMPLETED'), false);
 });
 

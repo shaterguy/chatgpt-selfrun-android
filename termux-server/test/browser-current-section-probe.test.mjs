@@ -122,7 +122,7 @@ test('unchanged pre-answer thinking and minute clock labels recover once per ten
       assert.equal(f.sends,0,'a one-minute observation is not a ten-minute stall');assert.equal(f.record().last_progress_at,initialProgress,'clock-only changes and probes are not progress');
     }
     now+=60000;dom.setText(clock,'Thinking for 10 minutes');f.probe=await dom.probe();await f.observe({status:'RUNNING'});
-    assert.equal(f.sends,1);assert.equal(f.quiesces,1);assert.equal(f.sent[0].prompt,'configured thinking continuation');assert.equal(f.sent[0].kind,'recovery');assert.equal(f.prepares,0);
+    assert.equal(f.sends,1);assert.equal(f.quiesces,0);assert.equal(f.sent[0].prompt,'configured thinking continuation');assert.equal(f.sent[0].kind,'recovery');assert.equal(f.prepares,0);
     for(let minute=1;minute<=9;minute++){now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);}
     now+=60000;await f.observe({status:'RUNNING'});
     assert.equal(f.sends,2,'a fresh ten-minute quiet interval permits one new recovery');
@@ -139,7 +139,7 @@ test('same-length pre-answer tool progress resets the ten-minute controller dead
     now+=540000;dom.setText(tool,'Reading file B');f.probe=await dom.probe();await f.observe({status:'RUNNING'});
     assert.equal(f.probe.assistantCount,0);assert.equal(f.probe.responseTextLength,before.responseTextLength);assert.notEqual(f.probe.responseFingerprint,before.responseFingerprint);assert.equal(f.record().last_progress_at,now);
     now+=540000;await f.observe({status:'RUNNING'});assert.equal(f.sends,0,'eighteen minutes since start is only nine minutes since real tool progress');
-    now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);assert.equal(f.quiesces,1);
+    now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);assert.equal(f.quiesces,0);
   }finally{await f.controller.quiesceForStandby();Date.now=originalNow;}
 });
 
@@ -190,6 +190,6 @@ test('prior assistant changes cannot postpone the current thinking recovery dead
   try{
     f.probe=await dom.probe();await f.existing();await f.observe({});const initial=f.record().last_progress_at;
     now+=540000;alterOldAssistant(dom);f.probe=await dom.probe();await f.observe({status:'RUNNING'});assert.equal(f.record().last_progress_at,initial);assert.equal(f.sends,0);
-    now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);assert.equal(f.quiesces,1);
+    now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);assert.equal(f.quiesces,0);
   }finally{await f.controller.quiesceForStandby();Date.now=originalNow;}
 });

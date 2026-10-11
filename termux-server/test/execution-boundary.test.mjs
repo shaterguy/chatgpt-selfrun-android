@@ -141,28 +141,40 @@ test('execution: migration does not reactivate an observer after authoritative D
   await f.store.patch(snapshot);f.controller=f.recreate();await f.controller.tick(f.transport);
   assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,0);
 });
-test('execution: imported legacy terminal state stays finished under cached RUNNING',async()=>{
+test('execution: current RUNNING observes imported URL without trusting legacy terminal state',async()=>{
   const f=fixture();await f.existing();await f.controller.quiesceForStandby();
   const body=projection(f.record());body.lifecycle_record.state='COMPLETED';
   body.lifecycle_record.result_state='COMMITTED';body.lifecycle_state='COMPLETED';
   const {MemoryStore}=await import('./helpers/lifecycle-fixture.mjs');
   f.store=new MemoryStore();f.controller=f.recreate();f.rows.set(f.path,body);
   await f.controller.ingest(f.path,body,f.transport);
-  assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,0);
-  assert.equal(f.record(),null);assert.equal(f.store.snapshot().activeCount,0);
+  assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().conversation_url,f.probe.url);
+  assert.equal(f.store.snapshot().activeCount,1);assert.equal(f.record().submission_confirmed,false);
+  await f.controller.tick(f.transport);assert.equal(f.resumes,2);assert.equal(f.sends,0);
+  await f.stop();assert.equal(f.record(),null);assert.equal(f.controller.sessions.size,0);
 });
 
-test('execution: durable cancellation fences a POST waiting on publication',async()=>{
-  const f=fixture(),entered=deferred(),gate=deferred();
-  const flush=f.controller.repository.flushCurrent.bind(f.controller.repository);let held=false;
+test('execution: durable cancellation fences the final authority read while publication is pending',async()=>{
+  const f=fixture(),entered=deferred(),gate=deferred(),controlEntered=deferred(),controlGate=deferred();
+  const flush=f.controller.repository.flushCurrent.bind(f.controller.repository),read=f.transport.read;
+  let held=false,controlHeld=false;
   f.controller.repository.flushCurrent=async(...args)=>{
     if(!held&&f.record()?.state==='POST_PENDING'){held=true;entered.resolve();await gate.promise;}
     return flush(...args);
   };
-  const posting=f.ingest();await entered.promise;
+  f.transport.read=async path=>{
+    if(!controlHeld&&path.startsWith('__SELFRUN_CONTROL__')&&f.record()?.state==='POST_PENDING'){
+      controlHeld=true;controlEntered.resolve();await controlGate.promise;
+    }
+    return read(path);
+  };
+  const posting=f.ingest();await Promise.all([entered.promise,controlEntered.promise]);
+  assert.equal(f.sends,0,'the pending final authority check precedes the effect');
   f.body.client_status='CANCELLED';f.rows.set(f.path,structuredClone(f.body));
   await f.controller.ingestDurable(f.path,f.body,f.transport);
-  gate.resolve();await posting;
+  assert.equal(f.record().state,'CANCELLED');
+  controlGate.resolve();gate.resolve();await posting;
   assert.equal(f.sends,0);assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().intent,undefined);
 });
 test('execution: unreadable TaskControl fails closed instead of assuming absence',async()=>{

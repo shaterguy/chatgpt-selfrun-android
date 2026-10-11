@@ -20,7 +20,7 @@ function entryFixture() {
     },
     connectTarget:async target=>({transport:'extension',close(){},
       async run(operation,payload={}) {
-        if(operation==='initialize')return {};
+        if(operation==='initialize'){if(f.loginPage){targets.get(target.id).url='https://chatgpt.com/auth/login';throw Error('Owned action page was repurposed');}return {};}
         if(operation==='navigate'){if(f.navigationError)throw f.navigationError;targets.get(target.id).url=payload.url;return {};}
         assert.equal(operation,'snapshot');
         if(f.snapshotError)throw f.snapshotError;
@@ -53,7 +53,7 @@ function entryFixture() {
   f.loseObservation=async()=>{
     await f.observe({});
     await f.controller.repository.move(keyFor(f.body),'STALLED','test observation loss',{last_progress_at:0});
-    f.browser.quiesce=async()=>{throw Object.assign(Error('synthetic page session lost'),{code:'TARGET_LOST'});};
+    f.browser.recoveryInputSnapshot=async()=>{throw Object.assign(Error('synthetic page session lost'),{code:'TARGET_LOST'});};
     await f.controller.tick(f.transport);
     assert.equal(f.controller.sessions.size,0);
   };
@@ -95,11 +95,11 @@ test('pending explicit RESUME survives failure and server reconstruction without
   await f.controller.quiesceForStandby();
 });
 
-test('failed explicit readiness with confirmed owned-tab disposal can retry entry',async()=>{
+test('unavailable initial DOM does not gate explicit entry or create a replacement tab',async()=>{
   const f=entryFixture();f.snapshotError=Error('synthetic snapshot unavailable');await f.existing();
-  assert.equal(f.targets.size,0);assert.equal(f.calls.close.length,1);
+  assert.equal(f.targets.size,1);assert.equal(f.calls.close.length,0);
   f.snapshotError=null;await f.elapsed();await f.controller.tick(f.transport);
-  assert.equal(f.calls.create.length,2);assert.equal(f.calls.resume.at(-1).automaticRecovery,false);
+  assert.equal(f.calls.create.length,1);assert.equal(f.calls.resume.at(-1).automaticRecovery,false);
   assert.equal(f.record().state,'OBSERVING');assert.equal(f.sends,0);
   await f.controller.quiesceForStandby();
 });

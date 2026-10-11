@@ -24,8 +24,8 @@ function fixture(t,{native=()=>Promise.resolve(new Response('')),RequestType=Req
   let source=buildPageRuntimeSource();
   source=insert(source,'let current=null,sequence=0;','audit.receipt=()=>current;');
   source=insert(source,"const state={operations:null,last:{ok:false,reason:'not_configured'}};",'audit.profile=state;');
-  source=insert(source,"let ownership=null,active=false,revoked=false,allowInitialConversation=false,armedKey=null,entryTransition=null;",
-    'audit.page=()=>({ownership,active,revoked,allowInitialConversation,armedKey,entryTransition,profileEngine,receiptObserver,profileFetch,receiptFetch,profileOpen,profileSend});');
+  source=insert(source,"let ownership=null,active=false,revoked=false,armedKey=null,entryTransition=null;",
+    'audit.page=()=>({ownership,active,revoked,armedKey,entryTransition,profileEngine,receiptObserver,profileFetch,receiptFetch,profileOpen,profileSend});');
   vm.runInNewContext(source,{audit,window,location,XMLHttpRequest:XHR,Request:RequestType,Response,URL,TextEncoder,TextDecoder,Uint8Array,crypto,
     setTimeout:(fn,ms)=>{const id=setTimeout(fn,ms);id.unref();timers.add(id);return id;},clearTimeout:id=>{timers.delete(id);clearTimeout(id);}});
   const run=(operation,payload={},owner=nonce)=>window.__selfrunExtensionPage.run(operation,payload,owner,location.href,Date.now()+5000,'selfrun-static-test-key');
@@ -57,7 +57,7 @@ test('terminalDispose clears owned private runtime, blocks rearm and leaves a li
   assert.equal(f.run('terminalDispose'),true);
   const state=f.audit.page();assert.equal(state.active,false);assert.equal(state.revoked,true);
   for(const name of ['ownership','armedKey','entryTransition','profileEngine','receiptObserver','profileFetch','receiptFetch','profileOpen','profileSend'])assert.equal(state[name],null,name+' must be released');
-  assert.equal(state.allowInitialConversation,false);assert.equal(f.audit.receipt(),null);assert.equal(profile.operations,null);
+  assert.equal(f.audit.receipt(),null);assert.equal(profile.operations,null);
   for(const value of [key.prompt,key.intent_id,key.generation,userId,'owned'])assert.equal(JSON.stringify(entry).includes(value),false,'disposed entry retains '+value);
   assert.throws(()=>old.receiptObserver.arm(key),/disposed/i);
   assert.throws(()=>old.profileEngine.configure([['set','model','late'],['remove','thinking_effort'],['remove','conversation_origin'],['remove','service_tier']]),/disposed/i);

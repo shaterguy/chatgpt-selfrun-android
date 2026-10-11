@@ -39,8 +39,8 @@ test('07 server restart restores durable running request without input',async()=
   f.controller=f.recreate();await f.controller.tick(f.transport);
   assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.record().state,'OBSERVING');
 });
-test('08 unchanged streaming cursor stalls and quiesces before recovery',async()=>{
-  const f=fixture();await f.existing();await f.stall();assert.equal(f.quiesces,1);assert.equal(f.sends,1);
+test('08 unchanged streaming cursor reaches actual recovery without a quiesce gate',async()=>{
+  const f=fixture();await f.existing();await f.stall();assert.equal(f.quiesces,0);assert.equal(f.sends,1);
 });
 test('09 recovery success is durably confirmed',async()=>{
   const f=fixture();await f.existing();await f.stall();assert.equal(f.record().recovery_count,1);
@@ -204,15 +204,18 @@ test('legacy uncertain POST does not preserve executable state after STOP',async
     assert.deepEqual(f.controller.repository.records(),[]);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
-test('audit newer than restored canonical state is quarantined before browser work',async()=>{
+test('audit newer than restored disk state blocks effects but preserves canonical observation',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'selfrun-audit-'));
   try {
     const config={dataDir:dir,stateFile:path.join(dir,'state.json'),eventsFile:path.join(dir,'events.jsonl')};
     const store=new StateStore(config);await store.init();const f=fixture({store});await f.existing();await f.controller.quiesceForStandby();
     await fs.appendFile(config.eventsFile,JSON.stringify({event:'CONVERSATION_TRANSITION',details:{task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',
       request_id:'SAFE-TEST:turn:1-request',revision:999}})+'\n');
-    f.controller=f.recreate();await assert.rejects(f.controller.tick(f.transport),/behind committed audit/);
-    assert.equal(f.resumes,1);assert.equal(f.sends,0);
+    f.store=new StateStore(config);await f.store.init();f.controller=f.recreate();await f.controller.tick(f.transport);
+    assert.equal(f.resumes,2);assert.equal(f.sends,0);assert.equal(f.record().state,'OBSERVING');
+    assert.equal(f.controller.repository.integrityFaults.has(keyFor(f.body)),true);
+    await f.stall();assert.equal(f.sends,0);assert.equal(f.observations.at(-1).signal.aborted,false);
+    await f.stop();assert.equal(f.record(),null);assert.equal(f.controller.sessions.size,0);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 

@@ -20,7 +20,7 @@ export async function readLifecycleHistory(eventsFile) {
     if(observed)old.baseline={userCount:observed.user_count,userMessageId:observed.user_message_id,
       responseTurnId:observed.response_turn_id,responseTextLength:observed.response_text_length,responseFingerprint:observed.response_fingerprint};
     old.recovery_count=Math.max(old.recovery_count,Number(d.recovery_count||0));
-    if(/Canonical conversation POST timeout|CDP command timeout: Runtime.evaluate/.test(String(d.error||''))) {
+    if(/Canonical conversation POST timeout/.test(String(d.error||''))) {
       old.unknown_post=true;old.error=String(d.error).slice(0,300);
     }
     if(row.event==='LIVENESS_RECOVERY_SENT')old.unknown_post=false;
@@ -33,7 +33,7 @@ export function migrateLegacy(record,history,prompt) {
   if(!old)return record;
   record.recovery_count=Math.max(record.recovery_count,old.recovery_count);
   if(old.unknown_post&&!record.intent&&!['COMMITTED','COMPLETED'].includes(record.state)) {
-    record.intent={...newIntent(record,'recovery',prompt,old.baseline||{}),outcome:'UNKNOWN',sends:1,legacy:true,released:true};
+    record.intent={...newIntent(record,'recovery',prompt,old.baseline||{}),outcome:'UNKNOWN',sends:1,legacy:true,released:false};
     record.state='POST_UNCERTAIN';
     record.error={code:'LEGACY_POST_UNCERTAIN',message:old.error};
     record.recovery_stage='LEGACY_POST_READBACK_REQUIRED';

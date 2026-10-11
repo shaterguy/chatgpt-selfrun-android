@@ -6,7 +6,7 @@ export const STATES = Object.freeze({
   PREPARED: ['PREPARING','POST_PENDING','ATTACHING','BLOCKED'],
   ATTACHING: ['OBSERVING','POST_UNCERTAIN','BLOCKED'],
   POST_PENDING: ['ATTACHING','POST_UNCERTAIN','OBSERVING','BLOCKED'],
-  POST_UNCERTAIN: ['RECONCILING','POST_PENDING','RECOVERY_POST','ATTACHING','BLOCKED','STALLED'],
+  POST_UNCERTAIN: ['OBSERVING','RECONCILING','POST_PENDING','RECOVERY_POST','ATTACHING','BLOCKED','STALLED'],
   RECONCILING: ['ATTACHING','POST_UNCERTAIN','POST_PENDING','RECOVERY_POST','OBSERVING','BLOCKED','STALLED'],
   OBSERVING: ['RECONCILING','STALLED','WAIT_RESULT','RECOVERY_POST','ATTACHING','BLOCKED'],
   WAIT_RESULT: ['RECONCILING','OBSERVING','STALLED','RECOVERY_POST','ATTACHING','BLOCKED'],
@@ -74,26 +74,27 @@ export function initialRecord(path,body,now=Date.now()) {
   for(const k of ['task_id','turn_id','request_id']) if(!body[k]) throw new Error('dispatch '+k+' required');
   if(body.conversation_url&&!canonicalUrl(body.conversation_url))throw new Error('invalid canonical conversation URL');
   if(!Number.isSafeInteger(body.dispatch_attempt)||body.dispatch_attempt<1) throw new Error('dispatch attempt invalid');
-  if(body.lifecycle_record?.schema===1) {
-    const stored=structuredClone(body.lifecycle_record);
-    if(stored.key!==keyFor(body)||stored.task_id!==body.task_id||stored.turn_id!==body.turn_id||stored.request_id!==body.request_id
-      ||stored.conversation_url!==canonicalUrl(body.conversation_url)||!STATES[stored.state])throw new Error('durable Drive identity mismatch');
-    delete stored.schema;
-    // A Drive projection is not local proof of never entering the submit boundary.
-    // Only the local snapshot or the exact offline operator repair can carry it.
-    return {...stored,pre_submit_proof:null,never_submitted:false,
-      path,body:structuredClone(body),dispatch_attempt:body.dispatch_attempt};
-  }
+  const candidate=body.lifecycle_record;
+  const stored=candidate?.schema===1&&candidate.key===keyFor(body)
+    &&candidate.task_id===body.task_id&&candidate.turn_id===body.turn_id&&candidate.request_id===body.request_id
+    &&candidate.conversation_url===canonicalUrl(body.conversation_url)?candidate:null;
+  // Old server projections cannot complete, pause or authorize a current app
+  // command. Keep only same-operation effect evidence to prevent replay.
+  const saved=stored?.intent;
+  const effectRisk=saved&&typeof saved.id==='string'&&saved.id&&['initial','recovery'].includes(saved.kind)
+    &&typeof saved.prompt==='string'&&saved.hash===digest(saved.prompt)
+    &&(saved.released===true||Number.isSafeInteger(saved.sends)&&saved.sends>0||saved.receipt?.released===true);
+  const intent=effectRisk?{...structuredClone(saved),outcome:'UNKNOWN',absence_proof:null,pre_submit_stage:null}:null;
   const url=canonicalUrl(body.conversation_url);
-  const imported=body.lifecycle_state;
-  const state=STATES[imported]?imported:body.server_status==='COMPLETED'?'COMPLETED':url?'ATTACHING':body.server_status==='READY_TO_SUBMIT'?'PREPARED':'DISCOVERED';
+  const state=intent?'POST_UNCERTAIN':url?'ATTACHING':'DISCOVERED';
   return {key:keyFor(body),path,body:structuredClone(body),task_id:body.task_id,turn_id:body.turn_id,request_id:body.request_id,
-    dispatch_attempt:body.dispatch_attempt,state,revision:0,run_generation:0,browser_generation:0,control_epoch:Number(body.server_control_epoch||0),
-    control_state:body.server_control_state&&body.server_control_state!=='UNKNOWN'?body.server_control_state:'RUNNING',conversation_url:url,conversation_id:url.split('/c/')[1]||null,
-    recovery_count:Number(body.recovery_count||0),attach_attempts:Number(body.resume_retry_count||0),failure_epoch:Number(body.server_control_epoch||0),retry_at:0,
-    intent:null,cursor:null,last_progress_at:now,result_state:'UNKNOWN',error:null,
-    ...(imported||body.server_status&&body.server_status!=='PENDING'?{pre_submit_proof:null}:{}),
-    submission_confirmed:!!url&&['STARTED','COMPLETED','RUNNING','STALLED','RECOVERY_SENT'].includes(body.server_status),response_status:'UNKNOWN',
+    dispatch_attempt:body.dispatch_attempt,state,revision:0,run_generation:0,browser_generation:0,control_epoch:0,
+    control_state:'UNKNOWN',conversation_url:url,conversation_id:url.split('/c/')[1]||null,
+    recovery_count:0,attach_attempts:0,failure_epoch:0,retry_at:0,
+    ...(intent&&typeof stored.target_id==='string'?{target_id:stored.target_id,target_owned:false}:{}),
+    intent,cursor:null,last_progress_at:now,result_state:'UNKNOWN',error:null,
+    ...(candidate||body.lifecycle_state||body.server_status&&body.server_status!=='PENDING'?{pre_submit_proof:null}:{}),
+    submission_confirmed:false,response_status:'UNKNOWN',
     created_at:now,updated_at:now};
 }
 export function transition(record,next,reason,patch={},now=Date.now()) {

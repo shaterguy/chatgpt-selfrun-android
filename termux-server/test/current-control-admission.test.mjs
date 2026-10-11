@@ -10,24 +10,32 @@ const emptyControls=f=>{
   assert.equal(f.controller.repository.records().length,0);
 };
 
-test('polling completed shared dispatch and orphan RUNNING controls leaves no historical authority',async()=>{
+test('polling current RUNNING dispatch ignores historical completion labels without repeating its send',async()=>{
   const f=fixture();f.body={...f.body,server_status:'COMPLETED',lifecycle_state:'COMMITTED'};
   f.rows.set(f.path,f.body);f.result(true);
   const watcher=new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}});
   await watcher.scanOnce();await f.settle();await f.controller.tick(f.transport);
-  emptyControls(f);assert.equal(f.sends,0);assert.equal(f.prepares,0);
-  // A restart and another complete shared-folder scan must not reimport it.
+  assert.equal(f.sends,1);assert.equal(f.prepares,1);assert.equal(f.record().state,'OBSERVING');
+  assert.equal(f.record().control_epoch,1);assert.equal(f.controller.sessions.size,1);
+  // A restart restores this current execution, never a second initial submission.
+  await f.controller.quiesceForStandby();
   f.controller=f.recreate();
   await new DriveDispatchWatcher({transport:f.transport,controller:f.controller,config:{}}).scanOnce();
-  await f.settle();emptyControls(f);
+  await f.settle();assert.equal(f.sends,1);assert.equal(f.prepares,1);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.controller.sessions.size,1);
+  await f.controller.quiesceForStandby();
 });
 
-test('an old RUNNING control URL cannot revive its committed Result',async()=>{
+test('current RUNNING control URL starts observation despite historical completion and committed Result',async()=>{
   const f=fixture();f.body={...f.body,server_status:'COMPLETED',lifecycle_state:'COMMITTED'};
   f.rows.set(f.path,f.body);f.result(true);f.control={...f.control,conversation_url:f.probe.url};
   await f.controller.initialize();await f.controller.controlDurable(null,f.control,f.transport);
-  await f.controller.tick(f.transport);emptyControls(f);
-  assert.equal(f.resumes,0);assert.equal(f.sends,0);
+  await f.controller.tick(f.transport);
+  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().conversation_url,f.probe.url);
+  assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.prepares,0);
+  const observer=f.observations.at(-1);await f.stall();
+  assert.equal(f.sends,0);assert.equal(observer.signal.aborted,false);assert.equal(f.controller.sessions.size,1);
+  await f.controller.quiesceForStandby();
 });
 
 test('a control arriving before a fresh dispatch is not retained and is reread when the dispatch arrives',async()=>{

@@ -65,10 +65,10 @@ test('missing DOM user ID does not disable otherwise usable conversation readine
  assert.equal(conversationResumeReady({composer:false,userMessageId:'u1'}),false);
 });
 
-function browserResumeFixture(probe) {
+function browserResumeFixture(probe,metadataUrl='https://chatgpt.com/c/owned') {
  const connected=[];
  const session={close(){},async call(method){return method==='Runtime.evaluate'?{result:{value:probe}}:{};}};
- const chromium={listExistingTargets:async()=>[{id:'owned',type:'page',url:'https://chatgpt.com/c/owned'}],
+ const chromium={recoveryNavigationDisabled:true,listExistingTargets:async()=>[{id:'owned',type:'page',url:metadataUrl}],
   connectTarget:async t=>{connected.push(t.id);return session;},createTarget:async()=>({id:'created'}),closeTarget:async()=>{}};
  return {browser:new ChatGptBrowser(chromium,{navigationTimeoutMs:100}),connected};
 }
@@ -81,17 +81,14 @@ for(const errorText of ['오류가 발생','something went wrong'])test('normal 
  const f=browserResumeFixture({url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',assistantMessageId:'a1',errorText});
  assert.equal((await f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'})).target.id,'owned');
 });
-test('actual error screen without usable conversation still fails resume',async()=>{
+test('actual error-screen telemetry does not gate attachment before monitoring',async()=>{
  const f=browserResumeFixture({url:'https://chatgpt.com/c/owned',composer:false,readyState:'complete',errorText:'something went wrong'});
- await assert.rejects(f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'}),e=>e.code==='CONVERSATION_LOAD_FAILED');
+ const result=await f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'});assert.equal(result.target.id,'owned');assert.deepEqual(result.baseline,{});
 });
-for(const probe of [
- {url:'https://chatgpt.com/c/wrong',composer:true,readyState:'complete'},
- {url:'https://example.com/c/owned',composer:true,readyState:'complete'},
- {url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',loginPage:true},
-])test('relaxed readiness still rejects wrong conversation, origin, or login: '+JSON.stringify(probe),async()=>{
- const f=browserResumeFixture(probe);
- await assert.rejects(f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned'}));
+for(const url of ['https://chatgpt.com/c/wrong','https://example.com/c/owned','https://chatgpt.com/auth/login'])test('metadata ownership still rejects unavailable canonical target: '+url,async()=>{
+ const f=browserResumeFixture({url,composer:true,readyState:'complete'},url);
+ await assert.rejects(f.browser.resume({conversationUrl:'https://chatgpt.com/c/owned',automaticRecovery:true}),e=>e.code==='PAGE_UNAVAILABLE');
+ assert.equal(f.connected.length,0);
 });
 
 for(const [kind,code] of [['missing','RESULT_UNAVAILABLE'],['unreadable','RESULT_READ_FAILED'],['malformed','RESULT_JSON_INVALID']])test('Result '+kind+' surfaces a safe error and waits between retries',async()=>{
@@ -140,20 +137,13 @@ test('missing live-page DOM reports unknown observation without claiming target 
  assert.deepEqual(statuses,['OBSERVATION_UNKNOWN','OBSERVATION_UNKNOWN']);
 });
 
-test('missing composer keeps current target and retries input availability at a paced deadline',async()=>{
- const missing='composer';
- const f=fixture();f.probe.streaming=false;f.probe.stopButtonVisible=false;f.probe[missing]=false;
- await f.existing();await f.stall();
- assert.equal(f.sends,0);assert.equal(f.record().error?.code,'COMPOSER_UNAVAILABLE');assert.equal(f.record().intent,null);
- const observer=f.observations.at(-1),revision=f.record().revision;
+test('composer availability telemetry does not veto the actual input action',async()=>{
+ const f=fixture();f.probe.streaming=false;f.probe.stopButtonVisible=false;f.probe.composer=false;
+ await f.existing();await f.stall();assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
+ const observer=f.observations.at(-1);
  for(let i=0;i<3;i++){await f.controller.tick(f.transport);await f.observe({status:'STALLED'});}
- assert.equal(f.resumes,1);assert.equal(f.prepares,0);assert.equal(observer.signal.aborted,false);
- assert.equal(f.record().revision,revision);
- f.probe[missing]=true;await elapsed(f);
- await f.controller.repository.move(keyFor(f.body),f.record().state,'test input attempt window elapsed',
-  {last_nudge_attempt_at:Date.now()-f.controller.config.stallAfterMs});
- await f.controller.tick(f.transport);
- assert.equal(f.sends,1);assert.equal(f.resumes,1);
+ assert.equal(f.sends,1);assert.equal(f.resumes,1);assert.equal(f.prepares,0);assert.equal(observer.signal.aborted,false);
+ await f.controller.quiesceForStandby();
 });
 
 test('monitor activity callback failure retains session and reports callback error, not browser loss',async()=>{
@@ -184,20 +174,19 @@ for(const reason of ['ATTACH_FAILED','ATTACH_BUDGET_EXHAUSTED','GENERATION_PAUSE
  assert.notEqual(f.record().blocked_epoch,1);
 });
 
-test('tick-driven quiesce UI failure stays on the current page and paces retry',async()=>{
+test('unused stream cleanup failure cannot veto a due actual input',async()=>{
  const f=fixture();await f.existing();await f.observe({});
  await f.controller.repository.move(keyFor(f.body),'STALLED','test stalled',{last_progress_at:0});
  let quiesces=0;f.browser.quiesce=async()=>{quiesces++;throw Error('Timed out waiting for stuck stream cleanup');};
  await f.controller.tick(f.transport);
- assert.equal(quiesces,1);assert.equal(f.record().error?.code,'OBSERVATION_CALLBACK_FAILED');
- assert.ok(f.record().retry_at>Date.now());assert.equal(f.controller.sessions.size,1);
- await f.controller.tick(f.transport);assert.equal(quiesces,1);assert.equal(f.resumes,1);assert.equal(f.sends,0);
+ assert.equal(quiesces,0);assert.equal(f.sends,1);assert.equal(f.controller.sessions.size,1);
+ await f.controller.tick(f.transport);assert.equal(quiesces,0);assert.equal(f.resumes,1);assert.equal(f.sends,1);
 });
 
 test('genuine CDP loss during a recovery callback detaches and retries the same canonical conversation',async()=>{
  const f=fixture();await f.existing();await f.observe({});
  await f.controller.repository.move(keyFor(f.body),'STALLED','test stalled',{last_progress_at:0});
- f.browser.quiesce=async()=>{throw Error('CDP websocket closed');};
+ f.browser.recoveryInputSnapshot=async()=>{throw Error('CDP websocket closed');};
  await f.controller.tick(f.transport);
  assert.equal(f.record().error?.code,'BROWSER_DEAD');assert.equal(f.controller.sessions.size,0);
  assert.ok(f.record().retry_at>Date.now());
@@ -218,7 +207,7 @@ test('recovery reads Result once at the deadline and does not add final pre-send
 test('app WAITING retains the observer through a pending observation error publication',async()=>{
  const f=fixture();await f.existing();await f.observe({});
  await f.controller.repository.move(keyFor(f.body),'STALLED','test stalled',{last_progress_at:0});
- f.browser.quiesce=async()=>{throw Error('Timed out waiting for stuck stream cleanup');};
+ f.browser.recoveryInputSnapshot=async()=>{throw Error('UI input lookup unavailable');};
  const entered=deferred(),release=deferred(),move=f.controller.repository.move.bind(f.controller.repository);
  f.controller.repository.move=async(...args)=>{if(args[2]==='OBSERVATION_CALLBACK_FAILED'){entered.resolve();await release.promise;}return move(...args);};
  const pending=f.controller.tick(f.transport);await entered.promise;

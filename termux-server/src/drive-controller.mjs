@@ -97,8 +97,9 @@ export class DriveDispatchController {
   }
   async #invalidateControl(identity) {
     const key=keyFor(identity);
-    this.#detach(key);
-    await this.repository.invalidateControl(key);
+    // An uncertain control read suspends effects, not read-only observation.
+    const active=this.sessions.get(key);
+    if(active)active.inputAuthorized=false;
   }
   async #readCurrentControl(identity,transport) {
     const token=this.repository.token(keyFor(identity));
@@ -128,7 +129,8 @@ export class DriveDispatchController {
     const c=await this.#readCurrentControl(r,transport),latest=this.repository.get(key);
     if(!this.repository.matches(key,token))return false;
     const allowed=observingTaskControl(c,latest)&&!terminal(latest);
-    if(!allowed)this.#detach(key);
+    if(allowed){const active=this.sessions.get(key);if(active)active.inputAuthorized=true;}
+    else if(c)this.#detach(key);
     return allowed;
   }
   async #applyControl(c,transport) {
@@ -326,7 +328,13 @@ export class DriveDispatchController {
     if(!this.canDispatch()){await this.quiesceForStandby();await this.cleanupTerminalResources({force:false});return;}
     this.standby=false;
     await transport?.purgeStopped?.();
-    await this.repository.flush(transport);
+    // The independent quiet deadline must not join a pending URL publication.
+    // Reuse the existing flush/publication lanes; no retry work is queued while
+    // a remote publication is already pending.
+    if(!this.repository.publications.size)void this.repository.flush(transport).catch(error=>{
+      if(error?.code==='DRIVE_PROJECTION_FAILED')this.#projectionFailure(error);
+      else console.error(JSON.stringify({event:'LIFECYCLE_FLUSH_FAILED',code:error?.code||'FLUSH_FAILED'}));
+    });
     for(const r of this.repository.records()) {
       if(this.operations.has(r.key))continue;
       await this.#serial(r.key,()=>this.#advance(r.key,transport));
@@ -353,12 +361,21 @@ export class DriveDispatchController {
   }
   async #advance(key,transport) {
     let r=this.repository.get(key);
-    if(this.repository.integrityFaults.has(key))throw new Error('current state is behind committed audit revision; reconciliation required');
     if(terminal(r))return;
     if(!await this.#fresh(key,transport)) {
-      await this.repository.flushCurrent(transport,key);return;
+      this.#publishAfterSubmission(key,transport);return;
     }
     r=this.repository.get(key);
+    if(this.repository.integrityFaults.has(key)) {
+      // Uncertain local effect history cannot authorize another input. It does
+      // not revoke current app authority to observe the same owned conversation.
+      let a=this.sessions.get(key);
+      await this.#adoptInitialConversation(key,transport,a);
+      r=this.repository.get(key);if(!r)return;
+      if(r.conversation_url&&!a)a=await this.#open(key,transport,'attach');
+      if(a?.guard?.()&&r.conversation_url)this.#monitor(key,transport);
+      return;
+    }
     if(r.state==='BLOCKED'&&r.reason==='RECOVERY_ALREADY_APPLIED_NO_PROGRESS'
       &&r.error?.code==='RECOVERY_NO_PROGRESS'&&r.intent?.kind==='recovery'&&r.intent.outcome==='CONFIRMED')
       r=await this.#move(key,'OBSERVING','RECOVERY_INTERVAL_POLICY_RESTORED',{blocked_epoch:null,error:null});
@@ -366,9 +383,13 @@ export class DriveDispatchController {
       if(['ATTACH_FAILED','ATTACH_BUDGET_EXHAUSTED','GENERATION_PAUSED'].includes(r.reason)) {
         await this.#move(key,r.conversation_url?'OBSERVING':'BLOCKED','ACTIVE_RETRY_REENABLED',
           {blocked_epoch:null,retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)});
-        await this.repository.flushCurrent(transport,key);
+        this.#publishAfterSubmission(key,transport);
       }
       return;
+    }
+    if(this.sessions.get(key)?.guard?.()&&r.intent?.kind==='recovery'&&r.intent.outcome==='ABSENT'&&r.intent.pre_submit_stage==='submit') {
+      if(r.retry_at<=Date.now())await this.#post(key,transport,'recovery',r.intent.prompt,true);
+      this.#monitor(key,transport);return;
     }
     // The server tick owns the quiet deadline independently of page observation.
     // A pending/failed probe, receipt readback, or observation retry cannot reset it.
@@ -380,8 +401,9 @@ export class DriveDispatchController {
         await this.#recover(key,transport,r.cursor||{},attached.token);
       } catch(error){await this.#observationFailure(key,transport,error,attached);}
       if(attached.guard())this.#monitor(key,transport);
-      await this.repository.flushCurrent(transport,key);return;
+      this.#publishAfterSubmission(key,transport);return;
     }
+    if(await this.#adoptInitialConversation(key,transport,attached))return;
     if(r.retry_at>Date.now())return;
     let a=this.sessions.get(key);
     if(!a) {
@@ -395,6 +417,7 @@ export class DriveDispatchController {
       } else a=await this.#open(key,transport,r.conversation_url?'attach':'prepare');
       if(!a)return;
     }
+    if(a!==attached&&await this.#adoptInitialConversation(key,transport,a))return;
     r=this.repository.get(key);
     if(r.intent&&['PENDING','UNKNOWN','ABSENT'].includes(r.intent.outcome)&&!recoveryStates.has(r.state)) {
       try {
@@ -402,6 +425,9 @@ export class DriveDispatchController {
           if(r.intent.outcome==='ABSENT'&&!r.conversation_url)await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
           else await this.#reconcile(key,transport);
           return;
+        }
+        if(r.intent.outcome==='ABSENT'&&r.intent.pre_submit_stage==='submit') {
+          await this.#post(key,transport,'recovery',r.intent.prompt,true);this.#monitor(key,transport);return;
         }
         await this.#reconcile(key,transport);
         r=this.repository.get(key);
@@ -420,7 +446,19 @@ export class DriveDispatchController {
       catch(error){await this.#observationFailure(key,transport,error,a);return;}
     }
     if(r.conversation_url||r.intent)this.#monitor(key,transport);
-    await this.repository.flushCurrent(transport,key);
+    this.#publishAfterSubmission(key,transport);
+  }
+  async #adoptInitialConversation(key,transport,a) {
+    const r=this.repository.get(key);
+    if(!r||r.conversation_url||r.intent?.kind!=='initial'||!this.browser.ownedConversationUrl)return false;
+    const token=a?.token||this.repository.token(key);
+    const guard=a?.guard||(()=>this.repository.current(key,token)&&!this.standby&&this.canDispatch());
+    if(!guard())return false;
+    const observed=await this.browser.ownedConversationUrl({targetId:r.target_id,projectUrl:r.body.project_url,signal:a?.abort.signal,guard});
+    if(!observed||!guard())return false;
+    await this.#move(key,'OBSERVING','CONVERSATION_URL_OBSERVED',{conversation_url:canonicalUrl(observed),error:null,retry_at:0},token);
+    await this.#publishAfterSubmission(key,transport);
+    this.#monitor(key,transport);return true;
   }
   async #open(key,transport,mode) {
     let r=this.repository.get(key);
@@ -513,7 +551,7 @@ export class DriveDispatchController {
     await this.#move(key,lost?'BLOCKED':this.repository.get(key).state,reason,{
       error:errorInfo(error,lost?classifyAttach(error):reason),blocked_epoch:null,
       retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)},a.token);
-    await this.repository.flushCurrent(transport,key);
+    this.#publishAfterSubmission(key,transport);
   }
   #projectionFailure(error) {
     // Publication is retryable telemetry. Do not rewrite browser evidence,
@@ -523,9 +561,13 @@ export class DriveDispatchController {
       stage:error.stage,http_status:error.http_status,cause_code:error.cause_code,
     }}));
   }
-  async #publishAfterSubmission(key,transport) {
-    try{await this.repository.flushCurrent(transport,key);}
-    catch(error){if(error?.code!=='DRIVE_PROJECTION_FAILED')throw error;this.#projectionFailure(error);}
+  #publishAfterSubmission(key,transport) {
+    const pending=this.repository.data.outbox[key];
+    if(!pending||this.repository.publications.has(pending.path))return;
+    void this.repository.flushCurrent(transport,key).catch(error=>{
+      if(error?.code==='DRIVE_PROJECTION_FAILED')this.#projectionFailure(error);
+      else console.error(JSON.stringify({event:'DRIVE_PROJECTION_PENDING',error:String(error?.message||error).slice(0,300)}));
+    });
   }
   #monitor(key,transport) {
     const a=this.sessions.get(key);
@@ -560,7 +602,7 @@ export class DriveDispatchController {
       this.#detach(key);return;
     }
     if(url&&!r.conversation_url) {
-      r=await this.#move(key,r.state,'CONVERSATION_URL_OBSERVED',{conversation_url:url},token);
+      r=await this.#move(key,'OBSERVING','CONVERSATION_URL_OBSERVED',{conversation_url:url},token);
       await this.#publishAfterSubmission(key,transport);
       if(!r)return;
     }
@@ -582,7 +624,7 @@ export class DriveDispatchController {
     const observationRecovered=r.error?.code==='OBSERVATION_UNAVAILABLE'&&!p.probeError&&p.status!=='PAGE_ERROR';
     if(observationRecovered) {
       r=await this.#move(key,r.state,'OBSERVATION_RECOVERED',{error:null,retry_at:0},token);
-      await this.repository.flushCurrent(transport,key);
+      this.#publishAfterSubmission(key,transport);
       if(!r||!this.repository.current(key,token))return;
     }
     if(r.state==='BLOCKED'&&!changed)return;
@@ -590,7 +632,7 @@ export class DriveDispatchController {
       r=await this.#move(key,r.intent?.outcome!=='CONFIRMED'&&!r.conversation_url?r.state:'OBSERVING',progressed?'RESPONSE_PROGRESS':'RESPONSE_TELEMETRY',{
         cursor:cursor(p),...(progressed?{last_progress_at:Date.now()}:{}),response_status:responseStatus,
       },token);
-      await this.repository.flush(transport);
+      this.#publishAfterSubmission(key,transport);
       if(progressed||!r||!this.repository.current(key,token))return;
     }
     // Browser status is telemetry; only the durable progress/attempt deadline authorizes another nudge.
@@ -600,6 +642,7 @@ export class DriveDispatchController {
     }
   }
   async #recover(key,transport,p,token) {
+    if(this.repository.integrityFaults.has(key))return;
     if(!this.repository.current(key,token)||!this.#nudgeDue(this.repository.get(key))||this.repository.get(key).result_retry_at>Date.now())return;
     await this.#move(key,'VERIFY_RESULT','RECOVERY_RESULT_CHECK',{},token);
     if(await this.#result(key,transport,token)!=='NOT_COMMITTED'){
@@ -620,32 +663,21 @@ export class DriveDispatchController {
     // needed here; full response inspection must never gate a due continuation.
     const attemptAt=Date.now();
     if(!await this.#move(key,'VERIFY_CURSOR','RECOVERY_ATTEMPT_STARTED',{last_nudge_attempt_at:attemptAt},token))return;
-    await this.repository.flushCurrent(transport,key);
+    this.#publishAfterSubmission(key,transport);
     if(!await this.#fresh(key,transport)||!this.repository.current(key,token))return;
     try {
       let current=await this.browser.recoveryInputSnapshot({session:a.session,signal:a.abort.signal});
       if(!a.guard())return;
       if(canonicalUrl(current.url)!==r.conversation_url)throw new Error('recovery conversation mismatch');
-      if(current.streaming||current.stopButtonVisible) {
-        await this.#move(key,'QUIESCING','STUCK_STREAM_QUIESCE',{},token);
-        if(!a.guard()||!runningTaskControl(this.repository.control(r.task_id),this.repository.get(key)))return;
-        current=await this.browser.quiesce({session:a.session,conversationUrl:r.conversation_url,signal:a.abort.signal,guard:()=>a.guard()&&runningTaskControl(this.repository.control(r.task_id),this.repository.get(key))})||current;
-      }
       if(!a.guard())return;
-      await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT_CHECK',{},token);
-      if(current.composer===false) {
-        await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT_UNAVAILABLE',{
-          error:{code:'COMPOSER_UNAVAILABLE',message:'Conversation input is unavailable; observing the current page until retry'},
-          retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000)},token);
-        await this.repository.flushCurrent(transport,key);return;
-      }
+      await this.#move(key,'VERIFY_INPUT','RECOVERY_INPUT',{},token);
       const directives=await this.#directives();
       await this.#post(key,transport,'recovery',directives.turnContinueDirective||this.config.recoveryPrompt,false,attemptAt);
     } finally {
       if(a.guard()&&this.repository.get(key)?.last_nudge_attempt_at===attemptAt) {
         await this.#move(key,this.repository.get(key).state,'RECOVERY_UI_ATTEMPT_FINISHED',
           {last_nudge_attempt_at:Date.now()},token);
-        await this.repository.flushCurrent(transport,key);
+        this.#publishAfterSubmission(key,transport);
       }
     }
   }
@@ -671,14 +703,16 @@ export class DriveDispatchController {
     };
   }
   async #post(key,transport,kind,prompt,retry=false,attemptAt=null) {
+    if(this.repository.integrityFaults.has(key))return;
     if(!prompt)throw new Error('configured input required');
-    if(kind==='recovery'&&(retry||(attemptAt===null?!this.#nudgeDue(this.repository.get(key))
-      :this.repository.get(key)?.last_nudge_attempt_at!==attemptAt)))return;
+    if(kind==='recovery'&&(retry?this.repository.get(key)?.intent?.pre_submit_stage!=='submit':
+      attemptAt===null?!this.#nudgeDue(this.repository.get(key)):this.repository.get(key)?.last_nudge_attempt_at!==attemptAt))return;
     if(!await this.#fresh(key,transport)||!runningTaskControl(this.repository.control(this.repository.get(key)?.task_id),this.repository.get(key)))return;
     const a=this.sessions.get(key);
     if(!a?.guard())return;
     let r=this.repository.get(key);
     let intent=retry?r.intent:newIntent(r,kind,prompt,r.cursor||a.baseline||{});
+    const resumeSubmit=retry&&intent.pre_submit_stage==='submit';
     if(!a.guard())return;
     if(retry&&(intent.outcome!=='ABSENT'||intent.sends>=2))return;
     intent={...intent,...(retry?{receipt:null,message_id:null,released:false,absence_proof:null,pre_submit_stage:null,transport_settled:false}:{}),
@@ -689,13 +723,13 @@ export class DriveDispatchController {
         ...(kind==='recovery'?{last_nudge_attempt_at:attemptAt??Date.now(),cursor:cursor(intent.baseline),
           last_recovered_response:responseKey(r.cursor),last_recovery_epoch:r.control_epoch}:{})},a.token);
     if(!r)return;
-    await this.repository.flushCurrent(transport,key);
+    this.#publishAfterSubmission(key,transport);
     // Re-read app authority before the side effect. Result was checked once at the recovery deadline.
     if(!await this.#fresh(key,transport)||!a.guard()||!runningTaskControl(this.repository.control(r.task_id),this.repository.get(key)))return;
     let submitted;
     try {
-      submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,
-        profileOperations:r.body.profile_operations,signal:a.abort.signal,guard:()=>a.guard()&&runningTaskControl(this.repository.control(r.task_id),this.repository.get(key)),
+      submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,projectUrl:r.body.project_url,targetId:r.target_id,resumeSubmit,
+        profileOperations:r.body.profile_operations,signal:a.abort.signal,guard:()=>a.guard()&&a.inputAuthorized!==false&&runningTaskControl(this.repository.control(r.task_id),this.repository.get(key)),
         onSubmitted:async()=>{
           if(!a.guard())return;
           await this.#move(key,this.repository.get(key).state,'POST_CLICKED',{intent:{...this.repository.get(key).intent,released:true}},a.token);
@@ -709,15 +743,16 @@ export class DriveDispatchController {
           const current=this.repository.get(key);
           if(!sameIntent(current.intent,intent))throw new Error('submission identity changed');
           if(!current.conversation_url) {
-            await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:url},a.token);
+            await this.#move(key,'OBSERVING','POST_CONVERSATION_URL_OBSERVED',{conversation_url:url},a.token);
             await this.#publishAfterSubmission(key,transport);
           }
           this.#monitor(key,transport);
         }});
     } catch(error) {
-      const stage=kind==='initial'?preSubmitFailureStage(error):null;
+      const proofStage=preSubmitFailureStage(error);
+      const stage=kind==='initial'||proofStage==='submit'?proofStage:null;
       if(stage&&a.guard()) {
-        await this.#move(key,'POST_PENDING','PRE_SUBMIT_RETRY',{
+        await this.#move(key,kind==='initial'?'POST_PENDING':'RECOVERY_POST','PRE_SUBMIT_RETRY',{
           intent:{...this.repository.get(key).intent,outcome:'ABSENT',sends:Math.max(0,intent.sends-1),
             absence_proof:'SUBMIT_NOT_CALLED',pre_submit_stage:stage,released:false},
           retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000),
@@ -725,7 +760,7 @@ export class DriveDispatchController {
         await this.#publishAfterSubmission(key,transport);
         return;
       }
-      if(a.guard())await this.#move(key,'POST_UNCERTAIN','POST_OUTCOME_UNCERTAIN',
+      if(a.guard())await this.#move(key,this.repository.get(key).conversation_url?'OBSERVING':'POST_UNCERTAIN','POST_OUTCOME_UNCERTAIN',
         {intent:{...this.repository.get(key).intent,outcome:'UNKNOWN',absence_proof:error.absenceProof||null,released:!!error.released},error:errorInfo(error,'POST_UNCERTAIN')},a.token);
     } finally {
       // Slow UI preparation/completion cannot leave an already expired send deadline.
@@ -737,6 +772,11 @@ export class DriveDispatchController {
       }
     }
     if(!a.guard())return;
+    if(submitted?.observationOnly){
+      const current=this.repository.get(key);
+      await this.#move(key,'OBSERVING','CONVERSATION_MONITOR_HANDOFF',{intent:{...current.intent,sends:submitted.noSubmitEffect?Math.max(0,intent.sends-1):intent.sends,outcome:'UNKNOWN'},error:null,retry_at:0},a.token);
+      await this.#publishAfterSubmission(key,transport);this.#monitor(key,transport);return;
+    }
     this.#monitor(key,transport);
     const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
     if(submittedUrl) {
@@ -746,13 +786,14 @@ export class DriveDispatchController {
       this.#monitor(key,transport);
     }
     r=this.repository.get(key);
-    if(r.state!=='POST_UNCERTAIN')await this.#move(key,'POST_UNCERTAIN','POST_AWAIT_READBACK',{intent:{...r.intent,outcome:'UNKNOWN'}},a.token);
+    if(r.state!=='POST_UNCERTAIN')await this.#move(key,r.conversation_url?'OBSERVING':'POST_UNCERTAIN','POST_AWAIT_READBACK',{intent:{...r.intent,outcome:'UNKNOWN'}},a.token);
     await this.#publishAfterSubmission(key,transport);
     await this.#reconcile(key,transport);
   }
   async #reconcile(key,transport) {
     const a=this.sessions.get(key),r=this.repository.get(key);
     if(!a?.guard()||!r.intent)return;
+    if(r.intent.kind==='recovery'&&r.intent.outcome==='ABSENT'&&r.intent.pre_submit_stage==='submit')return;
     if(sameIntent(a.reconciling?.intent,r.intent))return;
     // Receipt evidence is diagnostic; observation is independent of URL/ACK readiness.
     if(r.conversation_url||r.intent)this.#monitor(key,transport);
@@ -796,7 +837,7 @@ export class DriveDispatchController {
         conversation_url:url,submission_confirmed:true,response_status:'RUNNING',
         ...(cursorCurrent?{cursor:cursor(outcome.probe),
           ...((!latest.cursor||responseKey(latest.cursor)!==responseKey(outcome.probe))?{last_progress_at:now}:{})}:{}),error:null},token);
-      await this.repository.flushCurrent(transport,key);
+      this.#publishAfterSubmission(key,transport);
       this.#monitor(key,transport);
     } else if(outcome.state==='ABSENT'&&r.intent.kind!=='recovery'&&!latest.conversation_url&&r.intent.sends<2) {
       await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...latest.intent,outcome:'ABSENT'}},token);
@@ -807,7 +848,7 @@ export class DriveDispatchController {
       await this.#move(key,observe?'OBSERVING':'POST_UNCERTAIN','POST_READBACK_UNKNOWN',
         {intent:{...latest.intent,outcome:recovery&&outcome.state==='ABSENT'?'ABSENT':'UNKNOWN'},
         error:latest.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},token);
-      await this.repository.flush(transport);
+      this.#publishAfterSubmission(key,transport);
       if(observe)this.#monitor(key,transport);
     }
   }

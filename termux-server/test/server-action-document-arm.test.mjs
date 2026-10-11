@@ -85,10 +85,8 @@ for(const boundary of ['after-arm','after-submit-attestation'])test('controller 
  const call=f.transport.call.bind(f.transport);let switched=false,armed=false;
  f.transport.call=async(method,params)=>{const result=await call(method,params);
    if(params.expression?.includes('helper.run("receiptArm"')){armed=true;if(boundary==='after-arm'&&!switched){switched=true;f.replaceDocument(project);}}
-   else if(boundary==='after-submit-attestation'&&armed&&!switched&&params.expression?.includes('helper.run("sendReady"')){
-     // The next attestation belongs to the final submit operation.
-     const next=f.transport.call.bind(f.transport);f.transport.call=async(m,p)=>{const value=await next(m,p);
-       if(!switched&&p.expression?.includes('.attest(')){switched=true;f.replaceDocument(project);}return value;};
+   else if(boundary==='after-submit-attestation'&&armed&&!switched&&params.expression?.includes('.attest(')){
+     switched=true;f.replaceDocument(project);
    }return result;};
  life.body.profile_operations=profileOperations;life.body.prompt='prompt';
  life.probe={url:project,composer:true,readyState:'complete',userCount:0,assistantCount:0,streaming:false};

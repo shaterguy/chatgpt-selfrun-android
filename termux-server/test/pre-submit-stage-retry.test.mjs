@@ -4,7 +4,7 @@ import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
 
 const baseTime=1791698204077;
-const stages=['recoveryInput','installProfile','profileConfigure','installReceipt','input','receiptArm','sendReady'];
+const stages=['recoveryInput','installProfile','profileConfigure','installReceipt','input','receiptArm'];
 function setup(t,{failing,failures=1,afterSend=false}={}) {
   let now=baseTime;
   t.mock.method(Date,'now',()=>now);
@@ -114,4 +114,8 @@ for(const stoppingAt of stages)test(`STOP during ${stoppingAt} allows no later e
   const stopped=f.calls.indexOf(stoppingAt);
   assert.deepEqual(f.calls.slice(stopped+1).filter(operation=>operation!=='receiptRetire'),[]);
   assert.equal(f.submitCalls,0);
+});
+
+test('unused readiness advisory cannot fail an otherwise valid send',async t=>{
+ const f=setup(t,{failing:'sendReady'});await f.ingest();assert.equal(f.calls.includes('sendReady'),false);assert.equal(f.submitCalls,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
 });

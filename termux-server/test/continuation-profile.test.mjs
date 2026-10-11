@@ -76,7 +76,7 @@ test('ChatGptBrowser submission uses UI click and never enables CDP Fetch interc
     calls.push(method);
     if(method==='Runtime.evaluate'){
       const expression=params.expression||'';
-      if(expression.includes("status:send?'SEND_FOUND'"))return {result:{value:{ready:true,status:'SEND_FOUND'}}};
+      if(expression.includes('window.__selfrunReceiptObserver.arm('))return {result:{value:{ready:true,status:'SEND_FOUND'}}};
       if(expression.includes('send.focus?.();send.click()')){submitted++;userCount=2;userMessageId='user-2';return {result:{value:{status:'SUBMITTED'}}};}
       if(expression.includes("return {status:same()?'READY':'MISMATCH'"))return {result:{value:{status:'READY',length:8}}};
       if(expression.includes('__selfrunRequestProfileEngine'))return {result:{value:true}};
@@ -97,7 +97,7 @@ test('ChatGptBrowser submission uses UI click and never enables CDP Fetch interc
   assert.equal(calls.includes('Fetch.failRequest'),false);
 });
 
-for(const cancellation of ['signal','guard'])test('browser final send fence after awaited readiness: '+cancellation,async()=>{
+for(const cancellation of ['signal','guard'])test('browser final send fence after awaited receipt arm: '+cancellation,async()=>{
   let release,enteredResolve,submitted=0,allowed=true;
   const entered=new Promise(resolve=>{enteredResolve=resolve;});
   const ready=new Promise(resolve=>{release=resolve;});
@@ -106,7 +106,7 @@ for(const cancellation of ['signal','guard'])test('browser final send fence afte
   const session={async call(method,params={}){
     assert.equal(method,'Runtime.evaluate');
     const expression=params.expression||'';
-    if(expression.includes("status:send?'SEND_FOUND'")){enteredResolve();await ready;return {result:{value:{ready:true,status:'SEND_FOUND'}}};}
+    if(expression.includes('window.__selfrunReceiptObserver.arm(')){enteredResolve();await ready;return {result:{value:{ready:true,status:'SEND_FOUND'}}};}
     if(expression.includes('send.focus?.();send.click()')){submitted++;return {result:{value:{status:'SUBMITTED'}}};}
     if(expression.includes("return {status:same()?'READY':'MISMATCH'"))return {result:{value:{status:'READY'}}};
     if(expression.includes('__selfrunRequestProfileEngine'))return {result:{value:true}};

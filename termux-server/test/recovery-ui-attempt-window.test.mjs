@@ -7,10 +7,10 @@ for(const restart of ['none','local'])test('failed recovery UI attempt keeps a d
   let now=1000000;t.mock.method(Date,'now',()=>now);
   const f=fixture();f.controller.config.stallAfterMs=WINDOW;t.after(()=>f.controller.quiesceForStandby());
   let attempts=0,expectedAt=0;const observed=[];
-  f.browser.quiesce=async()=>{
+  f.browser.recoveryInputSnapshot=async()=>{
     attempts++;
     observed.push({local:f.record().last_nudge_attempt_at,remote:f.rows.get(f.path).lifecycle_record});
-    throw Error('temporary quiesce failure');
+    throw Error('temporary input lookup failure');
   };
   await f.existing();await f.observe({});now+=WINDOW;expectedAt=now;
   await f.observe({status:'STALLED'});
