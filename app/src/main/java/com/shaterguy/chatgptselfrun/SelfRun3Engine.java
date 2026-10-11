@@ -115,7 +115,7 @@ final class SelfRun3Engine {
                 require(Set.of("folderId","requirementDocumentId","resultDocumentId","conversationUrl","resultCreateIntent","requirementCreateIntent").contains(k),"unknown resource");
                 require(!val.isEmpty() && val.length()<=2048,"invalid resource");
                 JSONObject r=copy(v.optJSONObject("resources")); String prior=r.optString(k);
-                if("conversationUrl".equals(k)) require(val.matches("https://chatgpt\\.com/c/[A-Za-z0-9-]+"),"canonical conversation URL required");
+                if("conversationUrl".equals(k)) require(!SelfRunScript.conversationId(val).isEmpty(),"valid conversation URL required");
                 require(prior.isEmpty() || prior.equals(val),"pinned resource cannot change");
                 if(prior.equals(val)) return original;
                 put(r,k,val); put(v,"resources",r);

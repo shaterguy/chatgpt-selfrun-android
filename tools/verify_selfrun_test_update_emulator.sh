@@ -3,8 +3,8 @@
 set -euo pipefail
 [[ "${GITHUB_ACTIONS:-}" == 'true' ]]
 [[ "${TEST_ONLY:-}" == 'true' ]]
-[[ "${VERSION_NAME:-}" == '4.0.10-dev7' ]]
-[[ "${VERSION_CODE:-}" == '4002020' ]]
+[[ "${VERSION_NAME:-}" == '4.0.10-dev8' ]]
+[[ "${VERSION_CODE:-}" == '4002021' ]]
 [[ "$(adb get-serialno)" == emulator-* ]]
 [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == '1' ]]
 [[ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" == '36' ]]
@@ -50,7 +50,7 @@ adb install -r --no-incremental current/androidTest.apk >/dev/null
 INSTRUMENTATION="$(adb shell pm list instrumentation | tr -d '\r' | sed -n "s#^instrumentation:\([^ ]*\) (target=$TEST)#\1#p" | head -1)"
 test -n "$INSTRUMENTATION"
 adb shell am instrument -w -r \
-  -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest \
+  -e class com.shaterguy.chatgptselfrun.SelfRun3RuntimeAndroidTest,com.shaterguy.chatgptselfrun.SelfRunConversationUrlAndroidTest \
   "$INSTRUMENTATION" | tee selfrun-v3-release-runtime-evidence.txt
 grep -Fq 'OK (' selfrun-v3-release-runtime-evidence.txt
 printf 'TEST_RUNTIME_PASS\n' >> selfrun-test-update-runtime-evidence.txt

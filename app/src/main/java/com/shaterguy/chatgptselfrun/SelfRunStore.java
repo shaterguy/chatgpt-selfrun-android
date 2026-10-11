@@ -382,7 +382,6 @@ final class SelfRunStore {
             }
             String conversationId = SelfRunScript.conversationId(url);
             if (conversationId.isEmpty()) throw new IllegalArgumentException("conversation identity required");
-            url = "https://chatgpt.com/c/" + conversationId;
         }
         synchronized (RUN_STATE_LOCK) {
             if (executionMode.equals(mode()) && safe(model).equals(pendingModel())

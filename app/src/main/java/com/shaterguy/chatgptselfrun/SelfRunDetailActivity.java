@@ -189,7 +189,7 @@ public final class SelfRunDetailActivity extends Activity {
                     || uri.getUserInfo() != null || (uri.getPort() != -1 && uri.getPort() != 443)) return "";
             String id = SelfRunScript.conversationId(raw);
             if (id.isEmpty() || !id.matches("[A-Za-z0-9_-]{1,200}")) return "";
-            return "https://chatgpt.com/c/" + id;
+            return raw;
         } catch (RuntimeException invalid) {
             return "";
         }
