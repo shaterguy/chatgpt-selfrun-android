@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 
 function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
-  let handler,releaseHook;const failures=[];let reloaded=false,continued=0,clicks=0;
+  let handler,releaseHook;const failures=[];let reloaded=false,continued=0,clicks=0,staged=0;
   const probe=()=>({url:'https://chatgpt.com/c/owned',composer:true,readyState:'complete',streaming:false,
     userCount:optimistic&&!reloaded?2:1,userMessageId:optimistic&&!reloaded?'new-message':'old-message'});
   const session={
@@ -23,13 +23,13 @@ function fixture({evaluateTimeout=false,held=false,optimistic=false}={}) {
         if(evaluateTimeout)throw new Error('CDP command timeout: Runtime.evaluate');
         return {result:{value:{status:'SUBMITTED'}}};
       }
-      if(s.includes('const expected='))return {result:{value:{status:'READY'}}};
+      if(s.includes('const expected=')){staged++;return {result:{value:{status:'READY'}}};}
       if(s.includes("status:send?'SEND_FOUND'"))return {result:{value:{ready:true}}};
       return {result:{value:probe()}};
     },
   };
   const browser=new ChatGptBrowser(null,{navigationTimeoutMs:100});
-  return {session,browser,failures,continued:()=>continued,clicks:()=>clicks,probe};
+  return {session,browser,failures,continued:()=>continued,clicks:()=>clicks,staged:()=>staged,probe};
 }
 test('evaluate timeout plus unchanged DOM is UNKNOWN, never absence proof',async()=>{
   const f=fixture({evaluateTimeout:true});
@@ -46,8 +46,13 @@ test('optimistic user bubble is not accepted without semantic response evidence'
   assert.equal(r.state,'UNKNOWN');
 });
 
-test('initial submission refuses an existing canonical conversation before touching the composer',async()=>{
- const f=fixture();await assert.rejects(f.browser.submitIntent({session:f.session,prompt:'test',kind:'initial',intent:{id:'i'},guard:()=>true,profileOperations:[]}),/existing conversation/);
+test('initial submission hands off an existing conversation without touching the composer or reporting a send',async()=>{
+ const f=fixture();let observed=null,submitted=0,requests=0;
+ const result=await f.browser.submitIntent({session:f.session,prompt:'test',kind:'initial',intent:{id:'i'},guard:()=>true,profileOperations:[],
+  onConversation:async evidence=>observed=evidence,onSubmitted:async()=>submitted++,onRequest:async()=>requests++});
+ assert.equal(result.observationOnly,true);assert.equal(result.submitted,false);assert.equal(result.noSubmitEffect,true);
+ assert.equal(result.url,'https://chatgpt.com/c/owned');assert.deepEqual(observed,{url:'https://chatgpt.com/c/owned'});
+ assert.equal(f.staged(),0);assert.equal(f.clicks(),0);assert.equal(submitted,0);assert.equal(requests,0);
 });
 test('prepare navigation does not inspect response or click inferred new-chat controls',async()=>{
  let staged=0,closed=0;

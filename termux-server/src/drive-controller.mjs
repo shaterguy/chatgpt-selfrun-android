@@ -4,7 +4,7 @@ import { canonicalUrl, classifyAttach, cursor, digest, initialRecord, keyFor, ma
 import { readResult } from './result-reconciler.mjs';
 import { retiredState } from './retired-requests.mjs';
 import { TerminalBrowserCleanup } from './terminal-browser-cleanup.mjs';
-import { preSubmitFailureStage } from './browser/chatgpt.mjs';
+import { observedConversationUrl, preSubmitFailureStage } from './browser/chatgpt.mjs';
 
 const recoveryStates=new Set(['STALLED','VERIFY_RESULT','VERIFY_CONVERSATION','VERIFY_CURSOR','QUIESCING','VERIFY_INPUT']);
 const controlStates=new Set(['RUNNING','PAUSED','WAITING_USER_INTERVENTION','STOPPED','DONE','RESUME_REQUESTED','RESUME_STOPPED_REQUESTED']);
@@ -356,15 +356,32 @@ export class DriveDispatchController {
     return result.state;
   }
   #nudgeDue(record) {
+    if(record?.body?.client_status!=='SEND_REQUESTED')return false;
     const attempted=record.last_nudge_attempt_at??(record.intent?.kind==='recovery'?record.intent.created_at:0)??0;
     return Date.now()-Math.max(Number(record.last_progress_at||0),Number(attempted),Number(record.last_recovery_check_at||0))>=Number(this.config.stallAfterMs||600000);
   }
   async #advance(key,transport) {
     let r=this.repository.get(key);
     if(terminal(r))return;
-    if(!await this.#fresh(key,transport)) {
-      this.#publishAfterSubmission(key,transport);return;
-    }
+    // Existing task ownership authorizes observation even if the next CONTROL
+    // read cannot authorize input. STOP/generation guards still fence adoption.
+    const adopted=await this.#adoptInitialConversation(key,transport,this.sessions.get(key));
+    const observationToken=this.repository.token(key);
+    const reconnectObservation=async()=>{
+      if(this.standby||!this.canDispatch()||!this.repository.current(key,observationToken))return;
+      const observed=this.repository.get(key);
+      if(!this.sessions.get(key)&&observed?.conversation_url&&observed.target_id&&observed.retry_at<=Date.now()) {
+        const observer=await this.#open(key,transport,'target',{observationOnly:true});
+        if(observer?.guard?.())this.#monitor(key,transport);
+      }
+    };
+    if(adopted)await reconnectObservation();
+    try {
+      if(!await this.#fresh(key,transport)) {
+        await reconnectObservation();this.#publishAfterSubmission(key,transport);return;
+      }
+    } catch(error) {await reconnectObservation();throw error;}
+    if(adopted)return;
     r=this.repository.get(key);
     if(this.repository.integrityFaults.has(key)) {
       // Uncertain local effect history cannot authorize another input. It does
@@ -450,17 +467,17 @@ export class DriveDispatchController {
   }
   async #adoptInitialConversation(key,transport,a) {
     const r=this.repository.get(key);
-    if(!r||r.conversation_url||r.intent?.kind!=='initial'||!this.browser.ownedConversationUrl)return false;
+    if(!r||r.conversation_url||!this.browser.ownedConversationUrl)return false;
     const token=a?.token||this.repository.token(key);
     const guard=a?.guard||(()=>this.repository.current(key,token)&&!this.standby&&this.canDispatch());
     if(!guard())return false;
     const observed=await this.browser.ownedConversationUrl({targetId:r.target_id,projectUrl:r.body.project_url,signal:a?.abort.signal,guard});
     if(!observed||!guard())return false;
-    await this.#move(key,'OBSERVING','CONVERSATION_URL_OBSERVED',{conversation_url:canonicalUrl(observed),error:null,retry_at:0},token);
+    await this.#move(key,'OBSERVING','CONVERSATION_URL_OBSERVED',{conversation_url:canonicalUrl(observed),observed_conversation_url:observed,error:null,retry_at:0},token);
     await this.#publishAfterSubmission(key,transport);
     this.#monitor(key,transport);return true;
   }
-  async #open(key,transport,mode) {
+  async #open(key,transport,mode,{observationOnly=false}={}) {
     let r=this.repository.get(key);
     const recoveryStage=recoveryStates.has(r.state)?r.state:null;
     // Generations fence stale callbacks; they do not describe why the browser
@@ -483,7 +500,7 @@ export class DriveDispatchController {
     const token=this.repository.token(key);
     if(!token||!this.repository.current(key,token))return null;
     const abort=new AbortController();
-    const pending={abort,token,key,openingId:JSON.stringify([key,token]),session:null,target:null,monitoring:false};
+    const pending={abort,token,key,openingId:JSON.stringify([key,token]),session:null,target:null,monitoring:false,...(observationOnly?{inputAuthorized:false}:{})};
     this.browserOpenings.set(pending.openingId,pending);
     this.sessions.set(key,pending);
     const guard=()=>this.sessions.get(key)===pending&&!abort.signal.aborted&&this.repository.current(key,token)&&!this.standby&&this.canDispatch();
@@ -502,7 +519,7 @@ export class DriveDispatchController {
           prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard,
           previousTargetId:r.target_id||null});
       } else if(mode==='target') {
-        attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal,onTarget,guard});
+        attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal,onTarget,guard,...(observationOnly?{observationOnly:true}:{})});
       } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal,onTarget,guard,automaticRecovery,
         previousTargetId:explicitEntry?r.target_id||null:null});
       if(!guard()) {
@@ -518,7 +535,7 @@ export class DriveDispatchController {
         return null;
       }
       Object.assign(pending,attached,{guard});
-      await this.#move(key,uncertain?'POST_UNCERTAIN':mode==='prepare'?'PREPARED':'OBSERVING','BROWSER_ATTACHED',
+      await this.#move(key,observationOnly?'OBSERVING':uncertain?'POST_UNCERTAIN':mode==='prepare'?'PREPARED':'OBSERVING','BROWSER_ATTACHED',
         {target_id:attached.target.id,target_owned:this.browser.chromium?.isOwnedTarget?.(attached.target.id)===true,
           attach_attempts:0,error:null,resume_recovery_stage:recoveryStage,browser_entry:null},token);
       if(recoveryStage&&!uncertain) await this.#move(key,'STALLED','RESTORE_RECOVERY_STAGE',{recovery_stage:recoveryStage},token);
@@ -596,13 +613,10 @@ export class DriveDispatchController {
     if(this.standby||!this.sessions.get(key)?.guard?.()||!this.repository.current(key,token))return;
     if((this.repository.get(key)?.intent?.receipt_generation||null)!==observationGeneration)return;
     let r=this.repository.get(key);
-    const url=canonicalUrl(p.url||p.pageUrl);
-    if(url&&r.conversation_url&&url!==r.conversation_url) {
-      await this.#move(key,'BLOCKED','CONVERSATION_OWNERSHIP_MISMATCH',{blocked_epoch:r.control_epoch,error:{code:'IDENTITY_MISMATCH',message:'observed conversation differs from canonical owner'}},token);
-      this.#detach(key);return;
-    }
-    if(url&&!r.conversation_url) {
-      r=await this.#move(key,'OBSERVING','CONVERSATION_URL_OBSERVED',{conversation_url:url},token);
+    const observedUrl=observedConversationUrl(p.url||p.pageUrl),url=canonicalUrl(observedUrl);
+    // The current owned-tab address is observation, not an input ownership transfer.
+    if(url&&(!r.conversation_url||r.observed_conversation_url!==observedUrl)) {
+      r=await this.#move(key,'OBSERVING','CONVERSATION_URL_OBSERVED',{...(!r.conversation_url?{conversation_url:url}:{}),observed_conversation_url:observedUrl},token);
       await this.#publishAfterSubmission(key,transport);
       if(!r)return;
     }
@@ -704,6 +718,8 @@ export class DriveDispatchController {
   }
   async #post(key,transport,kind,prompt,retry=false,attemptAt=null) {
     if(this.repository.integrityFaults.has(key))return;
+    // Address observation alone never upgrades CREATE into an input command.
+    if(this.repository.get(key)?.body.client_status!=='SEND_REQUESTED')return;
     if(!prompt)throw new Error('configured input required');
     if(kind==='recovery'&&(retry?this.repository.get(key)?.intent?.pre_submit_stage!=='submit':
       attemptAt===null?!this.#nudgeDue(this.repository.get(key)):this.repository.get(key)?.last_nudge_attempt_at!==attemptAt))return;
@@ -729,7 +745,7 @@ export class DriveDispatchController {
     let submitted;
     try {
       submitted=await this.browser.submitIntent({session:a.session,prompt,kind,intent,conversationUrl:r.conversation_url,projectUrl:r.body.project_url,targetId:r.target_id,resumeSubmit,
-        profileOperations:r.body.profile_operations,signal:a.abort.signal,guard:()=>a.guard()&&a.inputAuthorized!==false&&runningTaskControl(this.repository.control(r.task_id),this.repository.get(key)),
+        profileOperations:r.body.profile_operations,signal:a.abort.signal,observationGuard:()=>a.guard(),guard:()=>a.guard()&&a.inputAuthorized!==false&&runningTaskControl(this.repository.control(r.task_id),this.repository.get(key)),
         onSubmitted:async()=>{
           if(!a.guard())return;
           await this.#move(key,this.repository.get(key).state,'POST_CLICKED',{intent:{...this.repository.get(key).intent,released:true}},a.token);
@@ -738,12 +754,12 @@ export class DriveDispatchController {
         onRequest:this.#requestCallback(key,a,intent),
         onConversation:async evidence=>{
           if(!a.guard())throw new Error('stale conversation callback');
-          const url=canonicalUrl(evidence?.url||evidence?.probe?.url);
+          const observedUrl=observedConversationUrl(evidence?.url||evidence?.probe?.url),url=canonicalUrl(observedUrl);
           if(!url)throw new Error('canonical conversation callback missing URL');
           const current=this.repository.get(key);
           if(!sameIntent(current.intent,intent))throw new Error('submission identity changed');
           if(!current.conversation_url) {
-            await this.#move(key,'OBSERVING','POST_CONVERSATION_URL_OBSERVED',{conversation_url:url},a.token);
+            await this.#move(key,'OBSERVING','POST_CONVERSATION_URL_OBSERVED',{conversation_url:url,observed_conversation_url:observedUrl},a.token);
             await this.#publishAfterSubmission(key,transport);
           }
           this.#monitor(key,transport);
@@ -778,11 +794,11 @@ export class DriveDispatchController {
       await this.#publishAfterSubmission(key,transport);this.#monitor(key,transport);return;
     }
     this.#monitor(key,transport);
-    const submittedUrl=canonicalUrl(submitted?.url||submitted?.pageUrl);
+    const submittedAddress=observedConversationUrl(submitted?.url||submitted?.pageUrl),submittedUrl=canonicalUrl(submittedAddress);
     if(submittedUrl) {
       const current=this.repository.get(key);
       if(!current.conversation_url)
-        await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:submittedUrl},a.token);
+        await this.#move(key,current.state,'POST_CONVERSATION_URL_OBSERVED',{conversation_url:submittedUrl,observed_conversation_url:submittedAddress},a.token);
       this.#monitor(key,transport);
     }
     r=this.repository.get(key);
@@ -792,7 +808,7 @@ export class DriveDispatchController {
   }
   async #reconcile(key,transport) {
     const a=this.sessions.get(key),r=this.repository.get(key);
-    if(!a?.guard()||!r.intent)return;
+    if(!a?.guard()||a.inputAuthorized===false||!r.intent)return;
     if(r.intent.kind==='recovery'&&r.intent.outcome==='ABSENT'&&r.intent.pre_submit_stage==='submit')return;
     if(sameIntent(a.reconciling?.intent,r.intent))return;
     // Receipt evidence is diagnostic; observation is independent of URL/ACK readiness.
@@ -806,7 +822,7 @@ export class DriveDispatchController {
       &&r.intent.absence_proof==='NOT_SUBMITTED_RESULT_GATE';
     let observationSequence=a.observationSequence||0;
     const read=()=>{observationSequence=a.observationSequence||0;return neverCalled?{state:'ABSENT'}:this.browser.readSubmission({session:a.session,intent:r.intent,prompt,conversationUrl:r.conversation_url,
-      signal:a.abort.signal,guard:()=>a.guard()&&sameIntent(this.repository.get(key)?.intent,r.intent),
+      signal:a.abort.signal,guard:()=>a.guard()&&a.inputAuthorized!==false&&sameIntent(this.repository.get(key)?.intent,r.intent),
       onRequest:evidence=>{if(!a.guard())return Promise.reject(new Error('stale POST callback'));return this.#serial(key,()=>this.#requestCallback(key,a,r.intent)(evidence));}});};
     {
       // Receipt diagnostics must not occupy the effectful dispatch lane. Only
@@ -827,14 +843,14 @@ export class DriveDispatchController {
     if(!sameIntent(latest.intent,r.intent))return;
     const token={...a.token,intent_id:r.intent.id,receipt_generation:r.intent.receipt_generation};
     if(outcome.state==='CONFIRMED') {
-      const url=canonicalUrl(outcome.probe?.url);
+      const observedUrl=observedConversationUrl(outcome.probe?.url),url=canonicalUrl(observedUrl);
       if(!url)throw new Error('confirmed input lacks canonical conversation');
       const intentKind=r.intent.kind,now=Date.now();
       const cursorCurrent=(a.observationSequence||0)===observationSequence;
       await this.#move(key,'OBSERVING','POST_USER_MESSAGE_CONFIRMED',{
         intent:{...latest.intent,outcome:'CONFIRMED',message_id:outcome.messageId||latest.intent.message_id},
         ...(intentKind==='recovery'?{last_recovered_response:responseKey(outcome.probe),last_recovery_epoch:r.control_epoch}:{}),
-        conversation_url:url,submission_confirmed:true,response_status:'RUNNING',
+        conversation_url:url,...(cursorCurrent?{observed_conversation_url:observedUrl}:{}),submission_confirmed:true,response_status:'RUNNING',
         ...(cursorCurrent?{cursor:cursor(outcome.probe),
           ...((!latest.cursor||responseKey(latest.cursor)!==responseKey(outcome.probe))?{last_progress_at:now}:{})}:{}),error:null},token);
       this.#publishAfterSubmission(key,transport);

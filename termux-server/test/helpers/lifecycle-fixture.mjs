@@ -41,7 +41,7 @@ function fixture(options={}) {
   f.browser={
     prepare:async()=>{f.prepares++;return {target:{id:'target-new'},session:session(),baseline:{...f.probe}};},
     resume:async()=>{f.resumes++;if(f.attachError)throw f.attachError;return {target:{id:'target-owned'},session:session(),baseline:{...f.probe}};},
-    attachTarget:async()=>({target:{id:'target-new'},session:session(),baseline:{...f.probe}}),
+    attachTarget:async({targetId})=>({target:{id:targetId},session:session(),baseline:{...f.probe}}),
     livenessSnapshot:async()=>({...f.probe}),
     recoveryInputSnapshot:async()=>({...f.probe}),
     quiesce:async()=>{f.quiesces++;f.probe.streaming=false;f.probe.stopButtonVisible=false;await f.onQuiesce?.();},

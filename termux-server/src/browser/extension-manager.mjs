@@ -313,7 +313,6 @@ export class ExtensionManager {
     const meta=this.journal.targetMetadata[target.id];if(!meta||!this.isOwnedTarget(target.id))throw fail('Observation target unavailable','TARGET_NOT_OWNED');
     const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal}),row=rows?.find(r=>r.id===meta.cdpTargetId&&r.type==='page');
     if(!row)throw fail('Observation target unavailable','TARGET_LOST');
-    this.actionSessions.get(target.id)?.verifyUrl(row.url);
     await this.bridge.waitReady(5000,{signal,guard:()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)&&this.#processOwned()});
     const challenge=randomUUID(),key=createHmac('sha256',this.installationKey).update(target.id).digest('hex'),mac=createHmac('sha256',key).update(challenge).digest('hex');
     const registered=await this.bridge.request('registerTarget',{targetId:target.id,tabId:meta.observerTabId,expectedUrl:row.url,bootstrapUrl:meta.bootstrapUrl,challenge,mac},{signal});
@@ -350,7 +349,7 @@ export class ExtensionManager {
       if(!manager.isOwnedTarget(target.id)||manager.targetClosing(target.id))throw fail('Target ownership changed','TARGET_NOT_OWNED');
       const budget=Math.max(1,Math.round(Number(options.timeoutMs)||20000)),deadline=Date.now()+budget;
       const signal=AbortSignal.any([abort.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(budget)]);
-      if(operation==='initialize'||(manager.config.browserClientProfile==='android-webview'&&!manager.profileLeases.get(target.id)?.isAlive())){
+      if(operation==='initialize'||(!['snapshot','progress'].includes(operation)&&manager.config.browserClientProfile==='android-webview'&&!manager.profileLeases.get(target.id)?.isAlive())){
         const existing=manager.profileInitializations.get(target.id);
         if(existing&&existing.owner!==abort.signal)throw fail('Previous profile initialization is still settling','PROFILE_INITIALIZATION_BUSY');
         if(!existing){const work=manager.#initializeTarget(target,operation==='initialize'?payload:{clientProfile:manager.config.browserClientProfile},signal);const entry={owner:abort.signal,work};manager.profileInitializations.set(target.id,entry);work.finally(()=>{if(manager.profileInitializations.get(target.id)===entry)manager.profileInitializations.delete(target.id);}).catch(()=>{});}

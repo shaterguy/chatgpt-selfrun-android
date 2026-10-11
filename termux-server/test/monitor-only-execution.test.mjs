@@ -25,7 +25,7 @@ test('late server click completion cannot restore discarded action or observer o
 });
 test('controller health identifies monitor-only build and refuses old build before stream replacement',async t=>{
  const f=await monitorRuntimeFixture(t);await prepare(f);await wait(()=>f.bridge.status().connected);
- assert.equal(f.bridge.status().controllerBuild,'selfrun-monitor-only-v2');const current=f.bridge.connection;
+ assert.equal(f.bridge.status().controllerBuild,'selfrun-monitor-only-v3');const current=f.bridge.connection;
  const response=await fetch(f.bridge.url+'/events',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer fixture-only-capability-123456','X-SelfRun-Owner':'fixture-owner',Origin:'chrome-extension://test'},body:JSON.stringify({browserSessionId:f.bridge.browserSessionId,controllerBuild:'selfrun-controller-lock-session-v1'})});
  assert.equal(response.status,409);await response.text();assert.equal(f.bridge.connection,current);
 });

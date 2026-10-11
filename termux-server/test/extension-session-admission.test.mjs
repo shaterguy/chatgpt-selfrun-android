@@ -7,10 +7,10 @@ async function fixture(t){
   const b=new ExtensionBridge({port:0,ownerId,capability,browserSessionId});await b.start();
   const abort=new AbortController();t.after(async()=>{abort.abort();await b.close();});
   const headers={Origin:`chrome-extension://${EXTENSION_ID}`,Authorization:`Bearer ${capability}`,'X-SelfRun-Owner':ownerId,'Content-Type':'application/json'};
-  const post=(route,body,extra={})=>fetch(b.url+route,{method:'POST',headers:{...headers,...extra},body:JSON.stringify({controllerBuild:'selfrun-monitor-only-v2',...body}),signal:abort.signal});
+  const post=(route,body,extra={})=>fetch(b.url+route,{method:'POST',headers:{...headers,...extra},body:JSON.stringify({controllerBuild:'selfrun-monitor-only-v3',...body}),signal:abort.signal});
   async function connect(){const response=await post('/events',{browserSessionId}),reader=response.body.getReader();let buffer='';
     async function next(){while(!buffer.includes('\n')){const {value,done}=await reader.read();if(done)throw Error('closed');buffer+=new TextDecoder().decode(value);}const n=buffer.indexOf('\n'),line=buffer.slice(0,n);buffer=buffer.slice(n+1);return JSON.parse(line);}
-    const welcome=await next();await post('/event',{browserSessionId,connectionId:welcome.connectionId,event:'hello',extensionId:EXTENSION_ID,controllerBuild:'selfrun-monitor-only-v2'});
+    const welcome=await next();await post('/event',{browserSessionId,connectionId:welcome.connectionId,event:'hello',extensionId:EXTENSION_ID,controllerBuild:'selfrun-monitor-only-v3'});
     return{next,connectionId:welcome.connectionId};}
   return{b,post,connect};
 }
@@ -32,5 +32,5 @@ for(const body of [{},{browserSessionId:'old'}])test('missing or stale session c
   assert.equal((await p).status,'READY');
 });
 test('health identifies the loaded monitor-only controller build',async t=>{
-  const f=await fixture(t);await f.connect();assert.equal(f.b.status().controllerBuild,'selfrun-monitor-only-v2');
+  const f=await fixture(t);await f.connect();assert.equal(f.b.status().controllerBuild,'selfrun-monitor-only-v3');
 });

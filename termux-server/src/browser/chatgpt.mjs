@@ -7,16 +7,27 @@ const preSubmitFailures = new WeakMap();
 export const preSubmitFailureStage = error => error && typeof error === 'object'
   ? preSubmitFailures.get(error) || null : null;
 
-// Only the normal conversation path of the requested project may be adopted.
-// Keep the raw project prefix until after this ownership check.
-export function projectConversationUrl(projectUrl,value) {
+// Address observation is scoped by the caller's exact owned target, not by the
+// requested project's display name, route prefix, or submission receipt.
+export function observedConversationUrl(value) {
   try {
-    const from=new URL(projectUrl),to=new URL(value);
-    if(from.origin!==to.origin||from.origin!=='https://chatgpt.com'||from.username||from.password||to.username||to.password)return '';
+    const to=new URL(value);
+    if(to.origin!=='https://chatgpt.com'||to.username||to.password)return '';
+    return /^(?:\/g\/[^/]+)?\/c\/[A-Za-z0-9_-]{1,160}\/?$/.test(to.pathname)?to.href:'';
+  } catch {return '';}
+}
+
+// Action ownership follows the first conversation on the already owned tab.
+// Once bound to a conversation, another conversation cannot inherit its input
+// authority. Route aliases of that same conversation are harmless.
+export function actionConversationUrl(fromUrl,value) {
+  try {
+    const from=new URL(fromUrl),to=observedConversationUrl(value);
+    if(!to||from.origin!=='https://chatgpt.com'||from.username||from.password)return '';
+    const previous=observedConversationUrl(fromUrl);
+    if(previous)return new URL(previous).pathname.split('/c/')[1].replace(/\/$/,'')===new URL(to).pathname.split('/c/')[1].replace(/\/$/,'')?to:'';
     const entry=from.pathname.replace(/\/$/,'');
-    const prefix=entry===''?'':/^\/g\/[^/]+(?:\/project)?$/.test(entry)?entry.replace(/\/project$/,''):null;
-    if(prefix===null||!to.pathname.startsWith(prefix+'/c/'))return '';
-    return /^[A-Za-z0-9_-]+\/?$/.test(to.pathname.slice((prefix+'/c/').length))?to.href:'';
+    return entry===''||/^\/g\/[^/]+(?:\/project)?$/.test(entry)?to:'';
   } catch {return '';}
 }
 
@@ -915,14 +926,14 @@ export class ChatGptBrowser {
     return runPageAction(session, 'recoveryInput', {}, RUNTIME_EVALUATE_TIMEOUT_MS, {signal});
   }
 
-  async attachTarget({targetId,signal,onTarget}) {
+  async attachTarget({targetId,signal,onTarget,observationOnly=false}) {
     const targets=await this.chromium.listExistingTargets();
     const target=targets?.find(t=>t.id===targetId&&t.type==='page'&&!this.chromium.targetClosing?.(t.id));
     if(!target)throw Object.assign(new Error('original submission target unavailable'),{code:'ATTACH_FAILED'});
     await onTarget?.(target);
     if(signal?.aborted)throw signal.reason||new Error('aborted');
     const session=await this.chromium.connectTarget(target);
-    await initializePageSession(session,this.config,{network:false,pause:false});
+    if(!observationOnly)await initializePageSession(session,this.config,{network:false,pause:false});
     if(signal?.aborted){session.close();throw signal.reason;}
     return {target,session,baseline:{}};
   }
@@ -934,19 +945,20 @@ export class ChatGptBrowser {
     let targets;try{targets=await this.chromium.listExistingTargets();}catch{check();return '';}
     check();
     const target=targets?.find(t=>t.id===targetId&&t.type==='page'&&!t.closing);
-    return target?projectConversationUrl(projectUrl,target.url):'';
+    return target?observedConversationUrl(target.url):'';
   }
 
-  async submitIntent({session,prompt,kind,intent,conversationUrl,projectUrl,targetId,profileOperations,signal,guard,onRequest,onSubmitted,onConversation,resumeSubmit=false}) {
+  async submitIntent({session,prompt,kind,intent,conversationUrl,projectUrl,targetId,profileOperations,signal,guard,observationGuard=guard,onRequest,onSubmitted,onConversation,resumeSubmit=false}) {
     let stage='recoveryInput',submitCalled=false;
     const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');};
     const onStage=value=>{check();stage=value;};
-    const handoff=async value=>{const url=projectConversationUrl(projectUrl,value);if(kind!=='initial'||!url)return null;check();await onConversation?.({url});check();return {submitted:false,observationOnly:true,noSubmitEffect:!submitCalled,url};};
-    const findConversation=async()=>kind==='initial'?handoff(await this.ownedConversationUrl({targetId,projectUrl,signal,guard})):null;
+    const observeCheck=()=>{if(signal?.aborted||!observationGuard())throw signal?.reason||new Error('stale conversation observation');};
+    const handoff=async value=>{const url=observedConversationUrl(value);if(kind!=='initial'||!url)return null;observeCheck();await onConversation?.({url});observeCheck();return {submitted:false,observationOnly:true,noSubmitEffect:!submitCalled,url};};
+    const findConversation=async()=>kind==='initial'?handoff(await this.ownedConversationUrl({targetId,signal,guard:observationGuard})):null;
     const run=async(operation,payload={})=>{onStage(operation);const value=await runPageAction(session,operation,payload,undefined,{signal});check();return value;};
     try {
-    if(signal?.aborted||!guard())throw new Error('stale submission');
     const existing=await findConversation();if(existing)return existing;
+    check();
     const probe=await run('recoveryInput');
     const observed=await handoff(probe?.url);if(observed)return observed;
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
@@ -976,7 +988,7 @@ export class ChatGptBrowser {
       }
     }
     } catch(error) {
-      if(!signal?.aborted&&guard()){const observed=await findConversation();if(observed)return observed;}
+      if(!signal?.aborted&&observationGuard()){const observed=await findConversation();if(observed)return observed;}
       if(isActionNotSubmitted(error))preSubmitFailures.set(error,actionNotSubmittedStage(error));
       else if(!submitCalled&&error&&typeof error==='object')preSubmitFailures.set(error,stage);
       throw error;

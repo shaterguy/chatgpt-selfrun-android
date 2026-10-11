@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 
 export const STATES = Object.freeze({
   DISCOVERED: ['PREPARING','ATTACHING','POST_UNCERTAIN','BLOCKED'],
-  PREPARING: ['PREPARED','BLOCKED'],
-  PREPARED: ['PREPARING','POST_PENDING','ATTACHING','BLOCKED'],
+  PREPARING: ['PREPARED','OBSERVING','BLOCKED'],
+  PREPARED: ['PREPARING','POST_PENDING','OBSERVING','ATTACHING','BLOCKED'],
   ATTACHING: ['OBSERVING','POST_UNCERTAIN','BLOCKED'],
   POST_PENDING: ['ATTACHING','POST_UNCERTAIN','OBSERVING','BLOCKED'],
   POST_UNCERTAIN: ['OBSERVING','RECONCILING','POST_PENDING','RECOVERY_POST','ATTACHING','BLOCKED','STALLED'],
@@ -126,7 +126,9 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
 // App-facing output is URL-only; lifecycle and business completion stay local/app-owned.
 export function projection(r) {
   return {task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,dispatch_attempt:r.dispatch_attempt,
-    conversation_url:r.conversation_url};
+    // Only local observation callbacks populate this field. External dispatch
+    // intake never imports it; canonical identity remains internal.
+    conversation_url:r.observed_conversation_url||r.conversation_url};
 }
 export function newIntent(record,kind,prompt,baseline) {
   return {id:randomUUID(),kind,prompt:String(prompt),hash:digest(prompt),baseline:structuredClone(baseline||{}),outcome:'PENDING',

@@ -2,7 +2,7 @@
 // No page-supplied JavaScript or MAIN-world postMessage response is accepted.
 export function controllerRuntime(config) {
   'use strict';
-  Object.defineProperty(globalThis,'__selfrunMonitorBuild',{configurable:false,writable:false,value:'selfrun-monitor-only-v2'});
+  Object.defineProperty(globalThis,'__selfrunMonitorBuild',{configurable:false,writable:false,value:'selfrun-monitor-only-v3'});
   Object.defineProperty(globalThis,'__selfrunMonitorAttest',{configurable:false,writable:false,value:async challenge=>{
     if(typeof challenge!=='string'||challenge.length>100)return null;
     const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(config.installationKey),{name:'HMAC',hash:'SHA-256'},false,['sign']);
@@ -20,22 +20,13 @@ export function controllerRuntime(config) {
   const cleanup=new Set(['listTargets','idleStatus','discardTarget','registerTarget']);
   const targetId=id=>'ext:'+config.browserSessionId+':'+id;
   const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
-  function projectConversationUrl(projectUrl,value) {
-    try {
-      const from=new URL(projectUrl),to=new URL(value);
-      if(from.origin!==to.origin||from.origin!=='https://chatgpt.com'||from.username||from.password||to.username||to.password)return '';
-      const entry=from.pathname.replace(/\/$/,'');
-      const prefix=entry===''?'':/^\/g\/[^/]+(?:\/project)?$/.test(entry)?entry.replace(/\/project$/,''):null;
-      if(prefix===null||!to.pathname.startsWith(prefix+'/c/'))return '';
-      return /^[A-Za-z0-9_-]+\/?$/.test(to.pathname.slice((prefix+'/c/').length))?to.href:'';
-    } catch {return '';}
-  }
-  const checkUrl=async(t,url)=>{if(!originAllowed(url))throw fail('Owned target left approved site','TARGET_SCOPE_CHANGED');if(!t.boundUrl){t.boundUrl=urlKey(url);await persist();return;}if(urlKey(url)===t.boundUrl)return;if(t.entryTransition?.deadlineAt>Date.now()&&t.entryTransition.allowed.includes(urlKey(url))){t.boundUrl=urlKey(url);t.url=url;await persist();return;}if(projectConversationUrl(t.boundUrl,url)){t.boundUrl=urlKey(url);t.url=url;await persist();return;}throw fail('Owned target was repurposed','TARGET_SCOPE_CHANGED');};
+  // Observation follows the registered tab; input ownership belongs to the server.
+  const checkUrl=async(t,url)=>{if(!originAllowed(url))throw fail('Owned target left approved site','TARGET_SCOPE_CHANGED');if(t.boundUrl===urlKey(url))return;t.boundUrl=urlKey(url);t.url=url;await persist();};
   const persist=()=>{const value=Object.fromEntries([...targets].map(([id,t])=>[id,{id,tabId:t.tabId,url:t.url,boundUrl:t.boundUrl||null,documentId:t.documentId||null,contentNonce:t.contentNonce||null,bootstrapUrl:t.bootstrapUrl||null,pendingUrl:t.pendingUrl||null,entryUrl:t.entryUrl||null,entryPending:t.entryPending===true,createdBy:t.createdBy||null}]));
     saveChain=saveChain.catch(()=>{}).then(()=>chrome.storage.local.set({[storageKey]:value}));return saveChain;};
   const post=async(path,data)=>{const abort=new AbortController();let timer;
     const expired=new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(Error('Local bridge request timeout'));},5000);});
-    try{return await Promise.race([expired,(async()=>{const r=await fetch(config.bridgeUrl+path,{method:'POST',headers,body:JSON.stringify({...data,controllerBuild:'selfrun-monitor-only-v2',browserSessionId:config.browserSessionId}),signal:abort.signal});if(!r.ok){await r.body?.cancel().catch(()=>{});throw Object.assign(Error('Local bridge HTTP '+r.status),{httpStatus:r.status});}return r.json();})()]);}
+    try{return await Promise.race([expired,(async()=>{const r=await fetch(config.bridgeUrl+path,{method:'POST',headers,body:JSON.stringify({...data,controllerBuild:'selfrun-monitor-only-v3',browserSessionId:config.browserSessionId}),signal:abort.signal});if(!r.ok){await r.body?.cancel().catch(()=>{});throw Object.assign(Error('Local bridge HTTP '+r.status),{httpStatus:r.status});}return r.json();})()]);}
     finally{clearTimeout(timer);}
   };
   const report=(event,data={})=>post('/event',{connectionId,event,...data}).catch(()=>{});
@@ -92,13 +83,12 @@ export function controllerRuntime(config) {
     if(sender.id!==chrome.runtime.id||sender.frameId!==0||!sender.tab||!sender.documentId)return;
     const t=[...targets.values()].find(t=>t.tabId===sender.tab.id);if(!t||t.closing||!originAllowed(sender.url))return;
     if(message?.kind==='selfrun.content.hello'&&typeof message.nonce==='string'&&message.nonce.length<100){
-      const entryChange=t.entryTransition?.deadlineAt>Date.now()&&t.entryTransition.allowed.includes(urlKey(sender.url));
-      const conversationChange=!!projectConversationUrl(t.boundUrl,sender.url);
-      if(t.documentId&&t.documentId!==sender.documentId&&!entryChange&&!conversationChange)return;
-      if(t.contentNonce&&t.contentNonce!==message.nonce&&!entryChange&&!conversationChange)return;
-      if(t.boundUrl&&urlKey(sender.url)!==t.boundUrl&&!entryChange&&!conversationChange)return;
-      const first=!t.documentId||entryChange||conversationChange;t.documentId=sender.documentId;t.contentNonce=message.nonce;t.url=sender.url;
-      if(first){t.entryPending=false;t.mainDocumentId=null;t.boundUrl=urlKey(sender.url);void persist();}
+      // A new document is accepted only after registerTarget attests it and
+      // clears the previous document binding. Route names are not authority.
+      if(t.documentId&&t.documentId!==sender.documentId)return;
+      if(t.contentNonce&&t.contentNonce!==message.nonce)return;
+      t.documentId=sender.documentId;t.contentNonce=message.nonce;t.url=sender.url;
+      t.entryPending=false;t.boundUrl=urlKey(sender.url);void persist();
       void chrome.tabs.sendMessage(t.tabId,{kind:'selfrun.content.activate',nonce:t.contentNonce},{documentId:t.documentId}).catch(()=>{});
       settleReady(t.id);void report('targetReady',{target:{id:t.id,url:t.url,type:'page'}});
     } else if(message?.kind==='selfrun.content.dirty'&&message.nonce===t.contentNonce&&sender.documentId===t.documentId)void report('targetDirty',{targetId:t.id});
@@ -140,7 +130,7 @@ export function controllerRuntime(config) {
     Promise.resolve().then(entry.execute).then(entry.resolve,entry.reject).finally(()=>{commandRunning=false;drainCommands();});};
   const enqueueCommand=(execute,context)=>new Promise((resolve,reject)=>{const entry={execute,context,resolve,reject};context.queued=entry;commandQueue.push(entry);drainCommands();});
   async function handle(message) {
-    if(message?.kind==='welcome'){connectionId=message.connectionId;const owner=connectionId,abort=new AbortController();const check=()=>{if(connectionId!==owner||Date.now()>=check.deadlineAt)throw fail('Controller connection changed','COMMAND_CANCELLED');};check.signal=abort.signal;check.deadlineAt=Date.now()+2000;check.commandId='reconcile';await reconcile(message.ownership,check);await report('hello',{controllerVersion:VERSION,controllerBuild:'selfrun-monitor-only-v2',extensionVersion:chrome.runtime.getManifest?.().version??null,extensionId:chrome.runtime.id,browserSessionId:config.browserSessionId});return;}
+    if(message?.kind==='welcome'){connectionId=message.connectionId;const owner=connectionId,abort=new AbortController();const check=()=>{if(connectionId!==owner||Date.now()>=check.deadlineAt)throw fail('Controller connection changed','COMMAND_CANCELLED');};check.signal=abort.signal;check.deadlineAt=Date.now()+2000;check.commandId='reconcile';await reconcile(message.ownership,check);await report('hello',{controllerVersion:VERSION,controllerBuild:'selfrun-monitor-only-v3',extensionVersion:chrome.runtime.getManifest?.().version??null,extensionId:chrome.runtime.id,browserSessionId:config.browserSessionId});return;}
     if(message?.kind==='cancel'&&message.connectionId===connectionId){const context=contexts.get(message.id);if(context)context.cancel();return;}
     if(message?.kind!=='command'||message.connectionId!==connectionId||typeof message.id!=='string')return;
     const id=message.id;
@@ -201,7 +191,7 @@ export function controllerRuntime(config) {
     let backoff=250;
     while(!stopping){
       try{
-        streamAbort=new AbortController();const r=await fetch(config.bridgeUrl+'/events',{method:'POST',body:JSON.stringify({controllerBuild:'selfrun-monitor-only-v2',browserSessionId:config.browserSessionId}),headers,signal:streamAbort.signal,cache:'no-store'});
+        streamAbort=new AbortController();const r=await fetch(config.bridgeUrl+'/events',{method:'POST',body:JSON.stringify({controllerBuild:'selfrun-monitor-only-v3',browserSessionId:config.browserSessionId}),headers,signal:streamAbort.signal,cache:'no-store'});
         if([400,403,409].includes(r.status)){await r.body?.cancel().catch(()=>{});await closeSelf();return;}
         if(!r.ok||!r.body)throw Error('Bridge unavailable');
         backoff=250;const reader=r.body.getReader(),decoder=new TextDecoder();let buffer='';

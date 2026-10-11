@@ -1,4 +1,4 @@
-import {projectConversationUrl,probeExpression,recoveryInputExpression,newChatExpression,inputExpression,sendReadyExpression,
+import {observedConversationUrl,actionConversationUrl,probeExpression,recoveryInputExpression,newChatExpression,inputExpression,sendReadyExpression,
   submitExpression,requestProfileDocumentStartSource,receiptObserverDocumentStartSource,
   configureRequestProfileExpression,normalizeProfileOperations,DECORATIVE_ANIMATION_PAUSE_SOURCE,
   QUIESCE_EXPRESSION} from './chatgpt.mjs';
@@ -36,7 +36,8 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     let profileEngine=null,receiptObserver=null,profileFetch=null,receiptFetch=null,profileOpen=null,profileSend=null;
     let ownership=null,active=false,revoked=false,armedKey=null,entryTransition=null;
     const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
-    const projectConversationUrl=${projectConversationUrl.toString()};
+    const observedConversationUrl=${observedConversationUrl.toString()};
+    const actionConversationUrl=${actionConversationUrl.toString()};
     const terminalDispose=()=>{
       active=false;revoked=true;
       try{receiptObserver?.dispose();}catch{}
@@ -47,7 +48,7 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     };
     const revoke=terminalDispose;
     const ownerMatches=()=>{if(revoked||!ownership)return false;const now=urlKey(location.href);if(now===ownership.url)return true;if(entryTransition?.deadline>nativeNow()&&entryTransition.allowed.includes(now)){ownership.url=now;return true;}
-      if(projectConversationUrl(ownership.url,now)){ownership.url=now;return true;}revoke();return false;};
+      if(actionConversationUrl(ownership.url,now)){ownership.url=now;return true;}revoke();return false;};
     const ownerActive=()=>active&&ownerMatches();
     // Inactive paths do not inspect URL, arguments, body, response, or Promise.
     // These non-async wrappers preserve the original receiver, return and throw.
@@ -64,12 +65,12 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
       if(!Object.hasOwn(actions,operation))throw new Error('Unsupported page operation');
       if(activationKey!==installationKey)throw new Error('Page activation unauthorized');
       if(!Number.isFinite(deadline)||nativeNow()>=deadline)throw new Error('Page command expired');
-      if(revoked||typeof nonce!=='string'||nonce.length<16||(urlKey(location.href)!==urlKey(expectedUrl)&&!projectConversationUrl(expectedUrl,location.href)))throw new Error('Page ownership unavailable');
+      if(revoked||typeof nonce!=='string'||nonce.length<16||(urlKey(location.href)!==urlKey(expectedUrl)&&!actionConversationUrl(expectedUrl,location.href)))throw new Error('Page ownership unavailable');
       if(!ownership)ownership={nonce,url:urlKey(expectedUrl)};
       if(ownership.nonce!==nonce)throw new Error('Page owner mismatch');
       if(active&&!ownerActive())throw new Error('Page ownership revoked');
       if(operation==='newChat'){const u=new URL(ownership.url),prefix=u.pathname.split('/c/')[0];entryTransition={allowed:[u.origin+'/',u.origin+prefix,u.origin+prefix+'/project'],deadline};}
-      if((operation==='input'||operation==='submit')&&projectConversationUrl(payload.initialProjectUrl,location.href))
+      if((operation==='input'||operation==='submit')&&actionConversationUrl(payload.initialProjectUrl,location.href))
         return {status:'CONVERSATION_OBSERVED',url:location.href};
       if(operation==='submit'){
         const expected=payload.expectedArm;

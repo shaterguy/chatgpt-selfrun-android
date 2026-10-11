@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {ServerActionSession} from '../src/browser/server-action-session.mjs';
-import {ChatGptBrowser} from '../src/browser/chatgpt.mjs';
+import {ChatGptBrowser,observedConversationUrl,actionConversationUrl} from '../src/browser/chatgpt.mjs';
 import {fixture} from './helpers/lifecycle-fixture.mjs';
 import {monitorRuntimeFixture,wait} from './helpers/monitor-runtime-fixture.mjs';
+import {connectedPageRuntime} from './helpers/connected-page-runtime-fixture.mjs';
 const project='https://chatgpt.com/g/test/project';
 const conversation='https://chatgpt.com/g/test/c/owned-conversation';
 const profileOperations=['model','thinking_effort','conversation_origin','service_tier'].map(path=>({op:'REMOVE',path}));
@@ -26,7 +27,7 @@ test('actual submitIntent publishes owned metadata URL and enters controller mon
  t.after(()=>life.controller.quiesceForStandby());
  await life.ingest();
  assert.equal(life.record().conversation_url,'https://chatgpt.com/c/owned-conversation');
- assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
+ assert.equal(life.rows.get(life.path).conversation_url,conversation);
  assert.equal(life.rows.get(life.path).server_status,'PENDING','URL publication does not add a lifecycle status contract');
  assert.ok(life.observations.length>0);
  assert.equal(operations.length,0,'metadata URL handoff precedes all DOM/input calls');
@@ -34,15 +35,13 @@ test('actual submitIntent publishes owned metadata URL and enters controller mon
  assert.notEqual(life.record().intent.released,true);
 });
 
-test('monitor accepts project to conversation next-document hello with no release flag',async t=>{
- const f=await monitorRuntimeFixture(t),target=await f.manager.createTarget(project),session=await f.manager.connectTarget(target);
- await session.run('navigate',{url:project});
- await session.run('progress');
- f.tabs.get(1).url=conversation;
- f.hello(1,{documentId:'next-document'});
- await wait(()=>f.calls.some(c=>c[0]==='selfrun.content.activate'&&c[2].nonce==='nonce-1')&&Object.values(f.storage).some(rows=>Object.values(rows).some(row=>row.documentId==='next-document')),'conversation document hello');
- assert.equal((await session.run('progress')).url,conversation);
- assert.equal(f.calls.filter(c=>c[0]==='serverOperation'&&['input','submit'].includes(c[1])).length,0);
+test('monitor accepts an attested new conversation document without any release or project flag',async t=>{
+ const f=await monitorRuntimeFixture(t,{pageRuntimeFactory:connectedPageRuntime}),target=await f.manager.createTarget(project),session=await f.manager.connectTarget(target);
+ await session.run('navigate',{url:project});await session.run('progress');
+ const page=f.pageRuntimes.get(1);t.after(()=>page.disposeTimers());page.replaceDocument('https://chatgpt.com/g/other/c/owned-conversation');
+ assert.equal((await session.run('progress')).url,'https://chatgpt.com/g/other/c/owned-conversation');
+ assert.ok(Object.values(f.storage).some(rows=>Object.values(rows).some(row=>row.documentId===page.documentId)));
+ assert.equal(page.effects.filter(e=>['input','click'].includes(e.kind)).length,0);
 });
 
 for(const failure of ['MISMATCH','NO_COMPOSER','TIMEOUT'])test('lost first input '+failure+' hands its new URL to the real controller without another input',async t=>{
@@ -58,7 +57,7 @@ for(const failure of ['MISMATCH','NO_COMPOSER','TIMEOUT'])test('lost first input
  life.browser.submitIntent=args=>browser.submitIntent(args);
  t.after(()=>life.controller.quiesceForStandby());
  await life.ingest();
- assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
+ assert.equal(life.rows.get(life.path).conversation_url,conversation);
  assert.ok(life.observations.length>0);
  assert.equal(operations.filter(x=>x==='input').length,1);
  assert.equal(operations.filter(x=>x==='submit').length,0);
@@ -80,7 +79,7 @@ test('owned metadata URL wins before a pre-submit retry timer and dead DOM',asyn
  assert.ok(life.record().retry_at>Date.now());
  const before=domCalls;url=conversation;
  await Promise.all([life.controller.tick(life.transport),life.controller.tick(life.transport)]);await life.settle();
- assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
+ assert.equal(life.rows.get(life.path).conversation_url,conversation);
  assert.ok(life.observations.length>0);
  assert.equal(domCalls,before);
  assert.equal(life.record().intent.sends,0);
@@ -93,10 +92,13 @@ for(const status of ['MISMATCH','NO_COMPOSER'])test('initial input preserves '+s
    kind:'initial',projectUrl:project,prompt,intent:{prompt},guard:()=>true}),error=>error.message.endsWith(status)&&!error.message.includes(prompt));
 });
 
-for(const row of [{id:'other-target',url:conversation},{id:'target-owned',url:'https://chatgpt.com/g/other/c/foreign'},
- {id:'target-owned',url:'https://example.com/g/test/c/foreign'},{id:'target-owned',url:'https://chatgpt.com/c/foreign'}])test('metadata cannot adopt foreign target or scope '+row.url+':'+row.id,async()=>{
+for(const row of [{id:'other-target',url:conversation},{id:'target-owned',url:'https://example.com/g/test/c/foreign'}])test('metadata rejects foreign target or origin '+row.url+':'+row.id,async()=>{
  const browser=new ChatGptBrowser({listExistingTargets:async()=>[{...row,type:'page'}]},{});
  assert.equal(await browser.ownedConversationUrl({targetId:'target-owned',projectUrl:project}),'');
+});
+for(const url of ['https://chatgpt.com/g/other/c/foreign','https://chatgpt.com/c/foreign'])test('metadata hands off the exact owned target address independently of requested project '+url,async()=>{
+ const browser=new ChatGptBrowser({listExistingTargets:async()=>[{id:'target-owned',url,type:'page'}]},{});
+ assert.equal(await browser.ownedConversationUrl({targetId:'target-owned',projectUrl:project}),url);
 });
 
 const initial='http://127.0.0.1:9223/bootstrap/00000000-0000-4000-8000-000000000000';
@@ -192,13 +194,13 @@ test('STOP during metadata lookup cannot publish a stale URL or reach input',asy
  assert.equal(publish,0);assert.equal(dom,0);
 });
 
-test('monitor checkUrl follows only the owned project conversation without a released flag',async t=>{
+test('monitor follows the registered tab while refusing an unattested different document',async t=>{
  const f=await monitorRuntimeFixture(t),target=await f.manager.createTarget(project),session=await f.manager.connectTarget(target);
  await session.run('navigate',{url:project});await session.run('progress');
  f.tabs.get(1).url=conversation;
  assert.equal((await f.bridge.request('progress',{targetId:target.id})).url,conversation);
  f.tabs.get(1).url='https://chatgpt.com/g/other/c/foreign';
- await assert.rejects(f.bridge.request('progress',{targetId:target.id}),/repurposed/);
+ assert.equal((await f.bridge.request('progress',{targetId:target.id})).url,'https://chatgpt.com/g/other/c/foreign');
  f.hello(1,{documentId:'foreign-document'});
  assert.equal(Object.values(f.storage).some(rows=>Object.values(rows).some(row=>row.documentId==='foreign-document')),false);
 });
@@ -215,13 +217,13 @@ test('restart publishes the owned URL before unavailable attachment DOM and neve
  life.browser.prepare=async()=>({target:{id:'target-owned'},session:{transport:'extension',close(){},async run(){dom++;throw Error('CDP command timeout: Runtime.evaluate');}},baseline:{url:project}});
  life.browser.submitIntent=args=>browser.submitIntent(args);
  life.browser.ownedConversationUrl=args=>browser.ownedConversationUrl(args);
- life.browser.attachTarget=life.browser.resume=async()=>{attaches++;assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');throw Error('CDP command timeout: Runtime.evaluate');};
+ life.browser.attachTarget=async options=>{attaches++;assert.equal(options.targetId,'target-owned');assert.equal(options.observationOnly,true);assert.equal(life.rows.get(life.path).conversation_url,conversation);throw Error('CDP command timeout: Runtime.evaluate');};
  t.after(()=>life.controller.quiesceForStandby());
  await life.ingest();assert.equal(life.record().reason,'PRE_SUBMIT_RETRY');const before=dom;
  await life.controller.quiesceForStandby();life.controller=life.recreate();url=conversation;
  await life.controller.tick(life.transport);await life.settle();
- assert.equal(life.rows.get(life.path).conversation_url,'https://chatgpt.com/c/owned-conversation');
- assert.equal(attaches,0,'publish URL without waiting for attachment');
+ assert.equal(life.rows.get(life.path).conversation_url,conversation);
+ assert.equal(attaches,1,'publish URL before the readonly attachment attempt');
  await life.controller.tick(life.transport);await life.settle();
  assert.equal(attaches,1);assert.equal(dom,before);assert.equal(life.record().intent.sends,0);
  assert.equal(life.record().conversation_url,'https://chatgpt.com/c/owned-conversation');
@@ -241,4 +243,24 @@ for(const state of ['STOPPED','DONE'])test(state+' during a restart metadata loo
  release();await advancing;await life.settle();
  assert.equal(life.record(),null);assert.equal(life.controller.sessions.size,0);
  assert.equal(life.rows.get(life.path)?.conversation_url,undefined);
+});
+
+test('URL-only observation does not borrow the input authorization guard',async()=>{
+ let input=0,published='';
+ const browser=new ChatGptBrowser({listExistingTargets:async()=>[{id:'owned',type:'page',url:'https://chatgpt.com/g/different/c/observed'}]},{});
+ const result=await browser.submitIntent({session:{transport:'extension',run:async()=>input++},targetId:'owned',projectUrl:project,kind:'initial',intent:{prompt:'prompt'},prompt:'prompt',
+  guard:()=>false,observationGuard:()=>true,onConversation:async({url})=>published=url});
+ assert.equal(published,'https://chatgpt.com/g/different/c/observed');assert.equal(result.observationOnly,true);assert.equal(input,0);
+});
+
+for(const url of ['https://chatgpt.com/g/renamed/c/a','https://chatgpt.com/g/g-p-other-id/c/a','https://chatgpt.com/g/%ED%95%9C%EA%B8%80/c/a','https://chatgpt.com/c/a'])
+ test('conversation observation ignores the project name or ID: '+url,()=>{assert.equal(observedConversationUrl(url),url);assert.equal(actionConversationUrl(project,url),url);});
+for(const url of ['http://chatgpt.com/c/a','https://chatgpt.com:444/c/a','https://chatgpt.com.evil.invalid/c/a','https://user@chatgpt.com/c/a','https://chatgpt.com/c/a%2Fb','https://chatgpt.com/c/%2e%2e','https://chatgpt.com/c/a/extra','https://chatgpt.com/g/test/project'])
+ test('conversation observation retains URL syntax and approved-origin boundary: '+url,()=>assert.equal(observedConversationUrl(url),''));
+
+test('action ownership follows route aliases of its conversation but refuses another conversation',()=>{
+ const actor=new ServerActionSession({session:{},installationKey:'test',initialUrl:project});
+ actor.verifyUrl('https://chatgpt.com/g/renamed/c/owned');
+ assert.equal(actor.verifyUrl('https://chatgpt.com/c/owned'),'https://chatgpt.com/c/owned');
+ assert.throws(()=>actor.verifyUrl('https://chatgpt.com/c/another'),/repurposed/);
 });

@@ -68,7 +68,7 @@ test('explicit replacement with current runtime establishes build while preservi
   const f=await fixture(t,{extraTabs:[{id:777,url:'https://unrelated.invalid/'}]});f.start(10,{runtime:legacyControllerRuntime});
   await until(()=>f.records.some(x=>x.id===10&&x.url.endsWith('/events')&&x.status===409),'legacy controller rejection');
   f.disposePage(10);f.start(20);await f.bridge.waitReady(2000);
-  assert.equal(f.bridge.status().controllerBuild,'selfrun-monitor-only-v2');assert.equal(f.bridge.status().extensionVersion,'1.0.2');
+  assert.equal(f.bridge.status().controllerBuild,'selfrun-monitor-only-v3');assert.equal(f.bridge.status().extensionVersion,'1.0.2');
   assert.equal(f.held.size,1);assert.equal([...f.held.values()][0].id,20);assert.equal(f.tabs.has(777),true);assert.equal(f.tabs.has(10),false);
   assert.equal([...f.tabs.values()].filter(x=>x.url===`chrome-extension://${EXTENSION_ID}/controller.html`).length,1);
 });

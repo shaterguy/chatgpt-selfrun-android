@@ -4,8 +4,8 @@ import {buildContentSource} from '../../src/browser/extension-page-source.mjs';
 // Only browser DOM/CDP delivery and the remote site's response are simulated.
 // Every action expression, profile/receipt engine and content observer is the
 // current candidate's generated source, evaluated without success-result stubs.
-export function connectedPageRuntime({id,tabs,calls,notify,composerKind='textarea',deferConversationUrl=false}) {
- const scripts=new Map(),effects=[],requests=[],documents=[];let context,content,receiver,documentId,enabled=false,serial=0,appendResponse;
+export function connectedPageRuntime({id,tabs,calls,notify,composerKind='textarea',deferConversationUrl=false,conversationUrlOnSend=''}) {
+ const scripts=new Map(),effects=[],requests=[],documents=[];let context,content,receiver,documentId,enabled=false,serial=0,appendResponse,observeSubmitted;
  const timers=new Set();
  const timer=(fn,ms)=>{const t=setTimeout(()=>{timers.delete(t);fn();},ms);t.unref();timers.add(t);return t;};
  const clear=t=>{clearTimeout(t);timers.delete(t);};
@@ -20,18 +20,20 @@ export function connectedPageRuntime({id,tabs,calls,notify,composerKind='textare
   if(composerKind==='textarea')Object.defineProperty(composer,'value',{get:()=>value,set:v=>{value=v;effects.push({kind:'input',method:'nativeSet',length:v.length});}});
   else Object.defineProperty(composer,'innerText',{get:()=>value});
   const hiddenTextarea={isConnected:true,offsetParent:null,value:''};
+  const stop={isConnected:true,offsetParent:null,dataset:{testid:'stop-button'},getAttribute:()=>null};
+  observeSubmitted=prompt=>{value='';users.push(message('user',prompt,crypto.randomUUID(),users.length*2));stop.offsetParent={};};
   const send={isConnected:true,offsetParent:{},dataset:{testid:'send-button'},disabled:false,getAttribute:()=>null,focus(){},click(){
    effects.push({kind:'click'});const prompt=value,guid=crypto.randomUUID(),conversation=location.pathname.split('/c/')[1];value='';
    const body={messages:[{id:guid,author:{role:'user'},content:{parts:[prompt]}}],model:'old',thinking_effort:'old',conversation_origin:'old',service_tier:'old',...(conversation?{conversation_id:conversation}:{})};
    void capturedFetch('https://chatgpt.com/backend-api/conversation',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).catch(error=>effects.push({kind:'fetch-error',message:error.message}));
   }};
   const document={readyState:'complete',title:'fixture',body:{innerText:''},documentElement:{},head:{appendChild(){}},getElementById:()=>null,createElement:()=>({}),
-   querySelectorAll(selector){if(selector==='button')return[send];if(selector.startsWith('textarea'))return composerKind==='textarea'?[composer]:[hiddenTextarea];if(selector.includes('prompt-textarea')||selector==='main form [contenteditable="true"]')return composerKind==='textarea'?[]:[composer];if(selector.includes('data-message-author-role="assistant"'))return assistants;if(selector.includes('data-message-author-role="user"'))return users;return[];},
+   querySelectorAll(selector){if(selector==='button')return[send,stop];if(selector.startsWith('textarea'))return composerKind==='textarea'?[composer]:[hiddenTextarea];if(selector.includes('prompt-textarea')||selector==='main form [contenteditable="true"]')return composerKind==='textarea'?[]:[composer];if(selector.includes('data-message-author-role="assistant"'))return assistants;if(selector.includes('data-message-author-role="user"'))return users;return[];},
    createRange(){return{selectNodeContents:node=>selected=node};},execCommand(command,_ui,text){if(selected!==composer)return false;if(command==='delete')value='';if(command==='insertText'){value=text;effects.push({kind:'input',method:'execCommand',length:text.length});}return true;},
    createTreeWalker(root){let pending=true;return{nextNode(){if(!pending)return false;pending=false;this.currentNode={parentElement:root,nodeValue:root.innerText};return true;}};}};
   const window={getSelection:()=>({removeAllRanges(){},addRange(){}}),addEventListener:(name,fn)=>events[name]=fn,history:{pushState(_a,_b,next){location.href=new URL(next,location.href).href;},replaceState(){}},
    fetch:async(input,init)=>{const request=input instanceof Request?input:new Request(input,init),body=JSON.parse(await request.text());requests.push(body);
-    const conversation=location.pathname.split('/c/')[1]||'owned-'+id;if(!deferConversationUrl)window.history.pushState({},'', '/g/test/c/'+conversation);
+    const conversation=location.pathname.split('/c/')[1]||(conversationUrlOnSend?new URL(conversationUrlOnSend).pathname.split('/c/')[1]:'owned-'+id);if(!deferConversationUrl)window.history.pushState({},'',location.pathname.includes('/c/')?location.pathname:conversationUrlOnSend||'/g/test/c/'+conversation);
     const user=body.messages[0],index=users.length*2;users.push(message('user',user.content.parts.join(''),user.id,index));assistants.push(message('assistant','fixture response '+users.length,'assistant-'+users.length,index+1));
     return new Response('data: '+JSON.stringify({conversation_id:conversation,type:'message_marker',event:'first',marker:'user_visible_token'})+'\n\n',{headers:{'content-type':'text/event-stream'}});
    }};
@@ -57,6 +59,8 @@ export function connectedPageRuntime({id,tabs,calls,notify,composerKind='textare
  }};
  return{transport,effects,requests,documents,get documentId(){return documentId;},get context(){return context;},
   appendResponse:text=>appendResponse(text),
+  observeSubmitted:prompt=>observeSubmitted(prompt),
+  replaceDocument:url=>{const doc=documents.at(-1);doc?.events.pagehide?.();doc?.contentEvents.pagehide?.();replaceDocument(url);},
   attest:challenge=>context.window.__selfrunExtensionPage?.attest(challenge),
   contentMessage(message){let result;receiver(message,{id:'test',url:'chrome-extension://test/controller.html'},value=>result=value);return Promise.resolve(result);},
   closeDocument(){const doc=documents.at(-1);doc?.events.pagehide?.();doc?.contentEvents.pagehide?.();},

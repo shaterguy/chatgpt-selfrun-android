@@ -39,7 +39,7 @@ export class ExtensionBridge extends EventEmitter {
       let body;try{body=await this.#body(req);}catch{return this.#json(res,400,{error:'invalid_body'});}
       // Reject stale/legacy controllers before they can displace current work.
       if(body?.browserSessionId!==this.browserSessionId)return this.#json(res,409,{error:'stale_session'});
-      if(body?.controllerBuild!=='selfrun-monitor-only-v2')return this.#json(res,409,{error:'stale_controller_build'});
+      if(body?.controllerBuild!=='selfrun-monitor-only-v3')return this.#json(res,409,{error:'stale_controller_build'});
       if(req.url==='/session')return this.#json(res,200,{ok:true,...this.#ownership()});
       if(this.connection)this.#drop(this.connection,'Extension connection replaced');
       const c={id:randomUUID(),res,ready:false};this.connection=c;
@@ -53,7 +53,7 @@ export class ExtensionBridge extends EventEmitter {
       const p=this.pending.get(body.id);if(!p||p.connectionId!==c.id)return this.#json(res,409,{error:'unknown_command'});
       if(body.ok===true)p.finish(null,body.result);else p.finish(error(String(body.error?.message||'Extension command failed').slice(0,250),String(body.error?.code||'EXTENSION_COMMAND_FAILED'),body.error?.released===true));
     }else if(body.event==='hello'){
-      if(body.extensionId!==this.extensionId)return this.#json(res,403,{error:'identity_mismatch'});c.extensionVersion=typeof body.extensionVersion==='string'&&/^\d+\.\d+\.\d+$/.test(body.extensionVersion)?body.extensionVersion:null;if(body.controllerBuild!=='selfrun-monitor-only-v2')return this.#json(res,409,{error:'stale_controller_build'});c.controllerBuild=body.controllerBuild;c.ready=true;for(const done of [...this.waiters])done();this.emit('ready');
+      if(body.extensionId!==this.extensionId)return this.#json(res,403,{error:'identity_mismatch'});c.extensionVersion=typeof body.extensionVersion==='string'&&/^\d+\.\d+\.\d+$/.test(body.extensionVersion)?body.extensionVersion:null;if(body.controllerBuild!=='selfrun-monitor-only-v3')return this.#json(res,409,{error:'stale_controller_build'});c.controllerBuild=body.controllerBuild;c.ready=true;for(const done of [...this.waiters])done();this.emit('ready');
     }else if(c.ready&&['targetReady','targetDirty','targetRemoved'].includes(body.event))this.emit(body.event,body);
     else return this.#json(res,400,{error:'unsupported_event'});
     this.#json(res,200,{ok:true});
