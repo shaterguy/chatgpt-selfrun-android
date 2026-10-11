@@ -308,16 +308,7 @@ jobs:
             -no-window -gpu swiftshader_indirect -accel on -no-snapshot -noaudio -no-boot-anim
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
-          script: |
-            if [[ "$TEST_ONLY" == 'true' ]]; then
-              bash tools/verify_selfrun_test_update_emulator.sh
-            else
-              bash tools/verify_selfrun3_release_emulator.sh
-              cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.8-evidence.txt
-              BASE_VERSION_NAME=4.0.0 BASE_VERSION_CODE=4001000 bash tools/verify_selfrun3_release_emulator.sh
-              cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.0-evidence.txt
-            fi
-            bash tools/verify_last_used_execution_profile_emulator.sh
+          script: bash tools/verify_selfrun_v4_runtime_emulator.sh
 
       - name: Upload SelfRun 4.0.10 DEV and TEST APKs
         if: ${{ always() }}
