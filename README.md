@@ -1,6 +1,6 @@
-# SelfRun URL-only server handoff candidate 4.0.10-dev5
+# SelfRun app gate recovery candidate 4.0.10-dev6
 
-The server adapter advances from a correlated, trusted conversation URL without consuming server READY, STARTED, or COMPLETED status gates. App-authored dispatch/cancellation controls and the existing Result/Vercel completion authority remain separate.
+The server adapter advances from a correlated, trusted conversation URL without consuming server READY, STARTED, or COMPLETED status gates. App-authored dispatch/cancellation controls and the existing Result/Vercel completion authority remain separate. A valid Result push wakes the consumer even when local ACK persistence fails; rejected foreign rows do not end polling. User STOP is effective locally before external STOP delivery, and pending delivery retains the existing single-task ownership protection.
 
 # SelfRun mode-specific last-used model profiles 4.0.10-dev4
 

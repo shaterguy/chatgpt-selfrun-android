@@ -498,7 +498,11 @@ final class SelfRun4DriveWebAdapter {
         if (!SCHEMA.equals(body.optString("schema"))
                 || !state.taskId().equals(body.optString("task_id"))
                 || !state.turnId().equals(body.optString("turn_id"))
-                || !request.equals(body.optString("request_id"))) return;
+                || !request.equals(body.optString("request_id"))) {
+            // Reject foreign/stale content without abandoning this request's poll chain.
+            later(() -> poll(expectedGeneration, request), POLL_MS);
+            return;
+        }
         dispatchBody = body;
         // App-authored cancellation is authoritative. Server telemetry is not an app signal.
         String clientStatus = body.optString("client_status", "");

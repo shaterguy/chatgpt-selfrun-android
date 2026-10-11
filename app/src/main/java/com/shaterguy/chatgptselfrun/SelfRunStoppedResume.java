@@ -49,6 +49,10 @@ final class SelfRunStoppedResume {
         JSONObject item = history.get(runId);
         if (!isEligible(item)) return false;
         SelfRunStore store = new SelfRunStore(app);
+        if (store.stopControlPending()) {
+            Toast.makeText(context, "서버 중지 명령을 전달 중입니다. 현재 작업은 재개하지 않습니다.", Toast.LENGTH_LONG).show();
+            return false;
+        }
         if (store.active() && (!runId.equals(store.runId()) || !store.userStopped())) {
             Toast.makeText(context, "다른 SelfRun 작업이 실행 중입니다.", Toast.LENGTH_LONG).show();
             return false;
@@ -181,7 +185,7 @@ final class SelfRunStoppedResume {
     void close() { closed = true; }
 
     private boolean current(String target, String operation) {
-        return !closed && target.equals(pendingTarget())
+        return !closed && !store.stopControlPending() && target.equals(pendingTarget())
                 && operation.equals(prefs(service).getString(KEY_OPERATION, ""));
     }
 

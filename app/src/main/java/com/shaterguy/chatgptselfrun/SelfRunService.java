@@ -45,6 +45,9 @@ public final class SelfRunService extends Service {
         String action = intent == null || intent.getAction() == null
                 ? (stoppedResume.hasPending() ? ACTION_RESUME_STOPPED : ACTION_RUN)
                 : intent.getAction();
+        // Process recovery of an undelivered STOP may deliver only that same STOP.
+        // No execution, new task, or resume is selected while the existing owner is pinned.
+        if (store.stopControlPending()) action = ACTION_STOP;
         if (!ACTION_RUN.equals(action) && !ACTION_PAUSE.equals(action)
                 && !ACTION_RESUME.equals(action) && !ACTION_RESUME_STOPPED.equals(action)
                 && !ACTION_STOP.equals(action) && !ACTION_PUSH_RESULT.equals(action)

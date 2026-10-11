@@ -147,6 +147,7 @@ final class SelfRunStore {
         }
         List<Attachment> drafts = normalizeDrafts(attachments);
         synchronized (RUN_STATE_LOCK) {
+            if (stopControlPending()) throw new IllegalStateException("STOP_CONTROL_PENDING");
             long now = System.currentTimeMillis();
             SharedPreferences.Editor launchEditor = prefs.edit()
                     .putString("runId", runId)
@@ -217,6 +218,19 @@ final class SelfRunStore {
             }
             LastUsedExecutionProfileStore.put(launchEditor, taskMode, usedProfile);
             commitOrThrow(launchEditor);
+            syncHistory();
+        }
+    }
+
+    /** Existing active task identity remains pinned only until its STOP is delivered. */
+    boolean stopControlPending() { return active() && userStopped(); }
+
+    void markStopRequested() {
+        synchronized (RUN_STATE_LOCK) {
+            commitOrThrow(prefs.edit()
+                    .putBoolean("userStopped", true)
+                    .putBoolean("paused", false)
+                    .putString("status", "앱 중지됨 · 서버 중지 전달 대기"));
             syncHistory();
         }
     }

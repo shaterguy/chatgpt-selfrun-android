@@ -605,6 +605,11 @@ public final class SelfRunNewActivity extends Activity {
     }
 
     private void startSelfRunWithCurrentProfiles() {
+        if (store.stopControlPending()) {
+            Toast.makeText(this, "앱은 중지되었습니다. 서버 중지 명령 전달이 끝나면 새 작업을 시작할 수 있습니다.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         if (store.active() && !store.userStopped()
                 && !SelfRunStore.PHASE_DONE.equals(store.phase()) && !SelfRunStore.PHASE_IDLE.equals(store.phase())) {
             Toast.makeText(this, "현재 SelfRun Drive 작업(일시정지 포함)을 먼저 중지하세요.", Toast.LENGTH_LONG).show();

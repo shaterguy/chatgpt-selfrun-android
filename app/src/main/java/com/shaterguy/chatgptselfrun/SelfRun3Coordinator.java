@@ -95,6 +95,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     void onStoppedResumeAuthorized(String token) {
         requireMain();
+        if (store.stopControlPending()) throw new IllegalStateException("STOP_CONTROL_PENDING");
         stopRequested = false;
         setAccessToken(token);
         web.restoreAccessToken(token);
@@ -102,6 +103,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     int onStart(String action) {
         requireMain();
+        if (store.stopControlPending()) action = BuildConfig.APPLICATION_ID + ".STOP";
         if ((BuildConfig.APPLICATION_ID + ".PAUSE").equals(action)) {
             pause("USER_PAUSE");
             return store.active() ? Service.START_STICKY : Service.START_NOT_STICKY;
@@ -112,7 +114,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         }
         if ((BuildConfig.APPLICATION_ID + ".STOP").equals(action)) {
             stop();
-            return Service.START_NOT_STICKY;
+            return store.stopControlPending() ? Service.START_STICKY : Service.START_NOT_STICKY;
         }
         startOrRecover();
         return store.active() ? Service.START_STICKY : Service.START_NOT_STICKY;
@@ -1111,7 +1113,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     web.submit(claimed.execution(turn));
                 });
             } catch (Throwable error) {
-                main.post(() -> hardPause("V3_SEND_CLAIM_FAILED", error));
+                main.post(() -> {
+                    if (!validEpoch(expectedEpoch) || !canRun()) return;
+                    hardPause("V3_SEND_CLAIM_FAILED", error);
+                });
             }
         });
     }
@@ -1142,10 +1147,12 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     }
 
     @Override public void onConversation(String task, String turn, String url) {
+        if (!canRun()) return;
         if (!SelfRun3WebAdapter.trusted(url) || SelfRunScript.conversationId(url).isEmpty()) return;
         int expectedEpoch = epoch;
         io.execute(() -> {
             try {
+                if (!validEpoch(expectedEpoch) || !canRun()) return;
                 SelfRun3Engine.State state = ledger.loadExecution(task, turn);
                 if (state == null || !state.turnId().equals(turn)) return;
                 JSONObject payload = new JSONObject();
@@ -1160,7 +1167,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     requestDebugWait(after.execution(turn));
                 });
             } catch (Throwable error) {
-                main.post(() -> hardPause("V3_CONVERSATION_BIND_FAILED", error));
+                main.post(() -> {
+                    if (!validEpoch(expectedEpoch) || !canRun()) return;
+                    hardPause("V3_CONVERSATION_BIND_FAILED", error);
+                });
             }
         });
     }
@@ -1231,9 +1241,11 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void recordCallback(String task, String turn, String request, String eventId,
                                 SelfRun3Engine.Kind kind, JSONObject payload) {
+        if (!canRun()) return;
         int expectedEpoch = epoch;
         io.execute(() -> {
             try {
+                if (!validEpoch(expectedEpoch) || !canRun()) return;
                 SelfRun3Engine.State state = ledger.loadExecution(task, turn);
                 if (!callbackMatches(state, task, turn, request)) return;
                 SelfRun3Engine.State after = ledger.apply(event(state, eventId, kind, payload));
@@ -1259,7 +1271,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     scheduleNext(0L);
                 });
             } catch (Throwable error) {
-                main.post(() -> hardPause("V3_CALLBACK_COMMIT_FAILED", error));
+                main.post(() -> {
+                    if (!validEpoch(expectedEpoch) || !canRun()) return;
+                    hardPause("V3_CALLBACK_COMMIT_FAILED", error);
+                });
             }
         });
     }
@@ -1503,11 +1518,15 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         releaseWakeLock();
         int expectedEpoch = epoch;
         String task = store.runId();
-        store.setStatus("중지 처리 중");
+        if (!store.stopControlPending()) store.markStopRequested();
         io.execute(() -> {
             SelfRun3Engine.State snapshot;
             try {
-                snapshot = ledger.load(task);
+                if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+                SelfRun3Engine.State loaded = ledger.load(task);
+                if (loaded == null) throw new IllegalStateException("STOP_TASK_NOT_FOUND");
+                snapshot = loaded.terminal() ? loaded : ledger.apply(event(loaded,
+                        task + ":stop-local:" + UUID.randomUUID(), SelfRun3Engine.Kind.STOP, new JSONObject()));
             } catch (Throwable error) {
                 main.post(() -> onStopControlResult(task, expectedEpoch, error));
                 return;
@@ -1531,7 +1550,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
         if (error != null) {
-            store.setStatus("중지 요청 재시도 중");
+            store.setStatus("앱 중지됨 · 서버 중지 전달 실패, 재시도 중");
+            store.setLastError("V3_STOP_CONTROL_PENDING", "앱 실행은 중지되었습니다. 서버 중지 명령은 아직 전달 확인되지 않았습니다.");
             log.record(store, "V3_STOP_CONTROL_RETRY", "error=" + error.getClass().getSimpleName());
             main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);
             return;
@@ -1559,6 +1579,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         requireMain();
         if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
         store.stopByUser();
+        store.clearLastError();
         log.record(store, "V3_STOP", "user_stop_control_confirmed");
         SelfRunDebugLogSync.requestStored(service, task, "STOP");
         service.stopSelf();
