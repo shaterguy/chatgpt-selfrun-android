@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
 
-for(const readyAt of ['new-watch','new-stop'])test('pending old owned target survives same-request different-URL watch and cleans at '+readyAt,async t=>{
+for(const readyAt of ['new-watch','new-stop'])test('discarded old cleanup is not retried by same-request different-URL watch at '+readyAt,async t=>{
  const f=fixture(),oldUrl=f.probe.url,newUrl='https://chatgpt.com/c/new-owned-watch';
  const pages=new Map(),closed=[];let oldReady=false;
  f.browser.chromium={isOwnedTarget:id=>pages.has(id),closeOwnedTarget:async(id,{guard})=>{
@@ -16,20 +16,20 @@ for(const readyAt of ['new-watch','new-stop'])test('pending old owned target sur
  };
  f.controller=f.recreate();t.after(()=>f.controller.quiesceForStandby());
  await f.existing();await f.stop();await f.controller.cleanupTerminalResources();
- assert.equal(pages.has('old-owned'),true);assert.ok(f.controller.repository.data.browserCleanup['old-owned']);
+ assert.equal(pages.has('old-owned'),true);assert.equal(f.controller.repository.cleanupEntries().length,0);
  f.control={...f.control,state:'RUNNING',control_epoch:3,conversation_url:newUrl};
  await f.controller.control(null,f.control,f.transport);await f.controller.tick(f.transport);await f.settle();
  assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().conversation_url,newUrl);
  assert.equal(f.resumes,2);assert.equal(f.prepares,0);assert.equal(f.sends,0);assert.equal(pages.has('new-owned'),true);
  assert.deepEqual(f.store.snapshot().lifecycle.retired,{});assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
  if(readyAt==='new-watch'){
-  oldReady=true;await f.controller.cleanupTerminalResources();assert.deepEqual(closed,['old-owned']);
+  oldReady=true;await f.controller.cleanupTerminalResources();assert.deepEqual(closed,[]);
   assert.equal(pages.has('new-owned'),true);assert.equal(f.record().state,'OBSERVING');
  }
  await f.stop();await f.controller.cleanupTerminalResources();
  assert.equal(pages.has('new-owned'),false);
  oldReady=true;await f.controller.cleanupTerminalResources();await f.controller.cleanupTerminalResources();
- assert.deepEqual([...closed].sort(),['new-owned','old-owned']);assert.equal(pages.size,0);
+ assert.deepEqual(closed,['new-owned']);assert.equal(pages.has('old-owned'),true);assert.equal(pages.size,1);
  assert.equal(f.controller.repository.resourceCleanups.size,0);assert.equal(f.controller.browserCleanup.controls.size,0);
  assert.equal(f.sends,0);assert.equal(f.resumes,2);assert.equal(f.record(),null);
  assert.deepEqual(f.store.snapshot().lifecycle.retired,{});assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
@@ -53,6 +53,6 @@ for(const claim of ['same-url','repurposed-url'])test('independent pending resou
  ready=true;await f.controller.cleanupTerminalResources();assert.deepEqual(closed,[]);assert.equal(f.record().state,'OBSERVING');
  await f.stop();await f.controller.cleanupTerminalResources();
  assert.deepEqual(closed,claim==='same-url'?['old']:['new']);assert.equal(pages.has('old'),claim!=='same-url');
- assert.equal(f.controller.repository.resourceCleanups.size,claim==='same-url'?0:1);
+ assert.equal(f.controller.repository.resourceCleanups.size,0);
  assert.equal(f.sends,0);assert.deepEqual(f.store.snapshot().lifecycle.retired,{});assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
 });

@@ -1,7 +1,7 @@
-import { controlQuarantined, discardTerminalHistorySnapshot } from './maintenance-quarantine.mjs';
+import { controlQuarantined, currentCancellationProof, discardTerminalHistorySnapshot } from './maintenance-quarantine.mjs';
 import { readLifecycleHistory, migrateLegacy } from './lifecycle-migration.mjs';
 import { appInput, inputFingerprint, retiredState, retireRecord, queueTargetCleanup, cancelledCleanupConfirmed } from './retired-requests.mjs';
-import { audit, canonicalUrl, digest, initialRecord, keyFor, preparationInputDigest, projection, provenUnsubmitted, runningTaskControl, transition } from './lifecycle.mjs';
+import { audit, canonicalUrl, digest, initialRecord, keyFor, preparationInputDigest, projection, provenUnsubmitted, observingTaskControl, runningTaskControl, transition } from './lifecycle.mjs';
 
 function projectionError(error,operation) {
   const status=error?.http_status??Number(/^Drive \w+ HTTP ([1-5]\d\d)\b/.exec(String(error?.message||''))?.[1]);
@@ -18,8 +18,8 @@ function projectionError(error,operation) {
 }
 
 function queueDisplacedCleanup(data,r,targetId=r.target_id) {
-  // A new app entry discards only this browser resource. Its Result/intent stay
-  // under the existing independent business reconciliation policy.
+  // A new app entry disposes only its displaced browser resource; no business
+  // Result read is started for the preceding request.
   const d=r.browser_cleanup_displacement;
   if(!targetId||r.target_owned!==true||!d||d.target_id!==targetId||d.browser_generation!==r.browser_generation)return false;
   const outcome=data.browserCleanupOutcomes?.[targetId];
@@ -38,7 +38,8 @@ let nextRequestGeneration=0;
 // A single durable snapshot owns both current records and the publication outboxes.
 // Audit/Drive writes are projections; neither can make an uncommitted transition authoritative.
 export class LifecycleStore {
-  constructor(stateStore) {
+  constructor(stateStore,{onTerminal=()=>{}}={}) {
+    this.onTerminal=onTerminal;
     this.store=stateStore;
     this.data=structuredClone(stateStore.snapshot().lifecycle||{schema:1,requests:{},controls:{},events:[],outbox:{}});
     this.data.retired??={};this.data.browserCleanup??={};this.data.completionOutbox??={};
@@ -52,7 +53,6 @@ export class LifecycleStore {
     if(this.initPromise)return this.initPromise;
     this.initPromise=(async()=>{
       const original={...this.store.snapshot(),lifecycle:this.data};
-      await this.store.removeTerminalEvents?.([...Object.values(this.data.retired),...Object.values(this.data.requests).filter(retiredState)]);
       const clean=discardTerminalHistorySnapshot(original);this.data=clean.lifecycle;
       await this.store.patch(clean);
       this.history=await readLifecycleHistory(this.store.config?.eventsFile);
@@ -83,21 +83,31 @@ export class LifecycleStore {
   controlQuarantined(control) {return controlQuarantined(this.data,control);}
   controlWatermark(task) {return structuredClone(this.data.controls[task]||null);}
   control(task) {const control=this.data.controls[task];return this.controlQuarantined(control)?null:structuredClone(control||null);}
-  async save(next) {
+  async save(next,discardedRecords=[]) {
     const records=Object.values(next.requests);
-    for(const task of Object.keys(next.controls))if(!records.some(r=>r.task_id===task))delete next.controls[task];
-    const active=records.filter(r=>!controlQuarantined(next,next.controls[r.task_id])&&runningTaskControl(next.controls[r.task_id],r)&&r.control_state==='RUNNING'&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
+    for(const task of Object.keys(next.controls))if(!records.some(r=>r.task_id===task)&&!Object.values(next.retired||{}).some(r=>r.task_id===task&&currentCancellationProof(next,r)))delete next.controls[task];
+    const active=records.filter(r=>!controlQuarantined(next,next.controls[r.task_id])&&observingTaskControl(next.controls[r.task_id],r)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(r.control_state)&&!['COMMITTED','COMPLETED','CANCELLED','STOPPED','PAUSED'].includes(r.state));
     const latest=records.toSorted((a,b)=>b.updated_at-a.updated_at)[0];
     const status=active.some(r=>r.state==='BLOCKED')?'ERROR':active.some(r=>['STALLED','POST_UNCERTAIN','RECONCILING'].includes(r.state))?'STALLED':
       active.length?'RUNNING':latest?.state==='COMPLETED'?'COMPLETED':latest?.state==='STOPPED'?'STOPPED':'IDLE';
-    await this.store.removeTerminalEvents?.([...Object.values(next.retired||{}),...Object.values(next.requests||{}).filter(retiredState)]);
+    // Terminal execution state is discarded in memory and on disk together.
+    // Cancellation keeps its existing bounded pre-submit proof policy.
+    const ended=[...Object.values(next.retired||{}).filter(r=>['STOPPED','COMMITTED','COMPLETED'].includes(r.state)),...discardedRecords];
+    const resources=Object.values(next.browserCleanup||{}).filter(entry=>ended.some(r=>r.key===entry.key));
+    const clean=discardTerminalHistorySnapshot({lifecycle:next},ended,true).lifecycle;
+    // Keep cancellation bookkeeping only; no ended execution is moved to retired.
+    next=clean;
     await this.store.update(current=>discardTerminalHistorySnapshot({...current,lifecycle:next,status,activeCount:active.length,
       activeDispatches:active.map(r=>({
         path:r.path,task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,dispatch_attempt:r.dispatch_attempt,
-        ...Object.fromEntries(Object.entries(projection(r)).filter(([k])=>['server_status','lifecycle_state','lifecycle_revision','server_generation','browser_generation','conversation_url','recovery_count','server_error','server_control_state','server_control_epoch'].includes(k)))})),
+        conversation_url:r.conversation_url})),
       conversationUrl:latest?.conversation_url||null,lastError:latest?.error?.message||null,
-      lastActivityAt:latest?new Date(latest.last_progress_at).toISOString():null}));
+      lastActivityAt:latest?new Date(latest.last_progress_at).toISOString():null},ended));
     this.data=next;
+    for(const entry of resources)this.resourceCleanups.set(entry.target_id,{...structuredClone(entry),
+      terminal_state:ended.find(r=>r.key===entry.key).state});
+    for(const r of ended){this.history.audits.delete(r.key);this.history.legacy.delete(r.key);this.integrityFaults.delete(r.key);}
+    this.onTerminal(ended);
   }
   async removeCurrentTerminalControl(control) {
     return this.serial(async()=>{
@@ -111,7 +121,6 @@ export class LifecycleStore {
       const key=keyFor(identity),current=this.data.requests[key];
       if(!current||current.run_generation!==identity.run_generation||current.browser_generation!==identity.browser_generation||current.revision!==identity.revision)return false;
       const clean=discardTerminalHistorySnapshot({...this.store.snapshot(),lifecycle:this.data},[{...current,state:'STOPPED'}],true);
-      await this.store.removeTerminalEvents?.([{...current,state:'STOPPED'}]);
       this.history.audits.delete(key);this.history.legacy.delete(key);this.integrityFaults.delete(key);
       await this.save(clean.lifecycle);return true;
     });
@@ -120,19 +129,19 @@ export class LifecycleStore {
     return this.serial(async()=>{
       const ongoingTasks=new Set(Object.values(this.data.requests).map(r=>r.task_id));
       const cleaningKeys=new Set(Object.values(this.data.browserCleanup).map(entry=>entry.key));
-      const records=[...Object.values(this.data.retired).filter(r=>!r.browser_open_pending&&!cleaningKeys.has(r.key)&&(discardPendingPublications||!this.data.completionOutbox[r.key])),...Object.values(this.data.controls).filter(c=>!ongoingTasks.has(c.task_id)&&['STOPPED','DONE'].includes(c.state)&&!Object.values(this.data.retired).some(r=>r.task_id===c.task_id)).map(c=>({...c,state:'STOPPED'}))];
+      const records=[...Object.values(this.data.retired).filter(r=>!currentCancellationProof(this.data,r)&&!r.browser_open_pending&&!cleaningKeys.has(r.key)&&(discardPendingPublications||!this.data.completionOutbox[r.key])),...Object.values(this.data.controls).filter(c=>!ongoingTasks.has(c.task_id)&&['STOPPED','DONE'].includes(c.state)&&!Object.values(this.data.retired).some(r=>r.task_id===c.task_id)).map(c=>({...c,state:'STOPPED'}))];
       if(!records.length)return;
       const clean=discardTerminalHistorySnapshot({...this.store.snapshot(),lifecycle:this.data},records,true);
       // Keep in-flight resource cleanup in memory only; save() still discards
       // all terminal history from disk.
       for(const [key,r]of Object.entries(this.data.retired))if(!records.includes(r))clean.lifecycle.retired[key]=structuredClone(r);
-      await this.store.removeTerminalEvents?.(records);
-      await this.save(clean.lifecycle);
+      await this.save(clean.lifecycle,records);
       for(const record of records){const key=keyFor(record);if(!this.data.requests[key]&&!this.data.retired[key]){this.history.audits.delete(key);this.history.legacy.delete(key);this.integrityFaults.delete(key);}}
     });
   }
-  async ingest(path,body,currentControl=null,{resumeFrom=null}={}) {
+  async ingest(path,body,currentControl=null,{resumeFrom=null,admissionGuard=null}={}) {
     return this.serial(async()=>{
+      if(admissionGuard&&!admissionGuard())return null;
       const key=keyFor(body), old=this.data.requests[key];
       const retired=this.data.retired[key];
       const currentWatch=resumeFrom&&retired&&['STOPPED','CANCELLED'].includes(retired.state)
@@ -249,7 +258,7 @@ export class LifecycleStore {
   async invalidateControl(key) {
     return this.serial(async()=>{
       const old=this.data.requests[key];
-      if(!old||retiredState(old)||old.control_state!=='RUNNING')return null;
+      if(!old||retiredState(old)||!['RUNNING','WAITING_USER_INTERVENTION'].includes(old.control_state))return null;
       // Preserve the latest state/intent if another transition reached the store
       // while its control read was outstanding. Do not erase the epoch watermark.
       const r=transition(old,old.state,'APP_CONTROL_UNCONFIRMED',{
@@ -262,8 +271,8 @@ export class LifecycleStore {
   async move(key,state,reason,patch={},fence=null) {
     return this.serial(async()=>{
       const old=this.data.requests[key];
-      if(!old){if(this.data.retired[key])return null;throw new Error('unknown request');}
-      if(fence&&(!this.matches(key,fence)||old.control_state!=='RUNNING'||['COMMITTED','COMPLETED','CANCELLED'].includes(old.state))) return null;
+      if(!old){if(fence||this.data.retired[key])return null;throw new Error('unknown request');}
+      if(fence&&(!this.matches(key,fence)||!['RUNNING','WAITING_USER_INTERVENTION'].includes(old.control_state)||['COMMITTED','COMPLETED','CANCELLED'].includes(old.state))) return null;
       if(fence?.intent_id&&(old.intent?.id!==fence.intent_id||old.intent?.receipt_generation!==fence.receipt_generation))return null;
       const url=canonicalUrl(patch.conversation_url||old.conversation_url);
       if(url&&Object.values(this.data.requests).some(r=>r.key!==key&&r.conversation_url===url&&!['COMPLETED','CANCELLED'].includes(r.state)))
@@ -290,43 +299,8 @@ export class LifecycleStore {
   }
   current(key,t) {
     const r=this.data.requests[key];
-    return this.matches(key,t)&&runningTaskControl(this.control(r.task_id),r)&&r.control_state==='RUNNING'
+    return this.matches(key,t)&&observingTaskControl(this.control(r.task_id),r)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(r.control_state)
       &&!['STOPPED','PAUSED','COMMITTED','COMPLETED','CANCELLED'].includes(r.state);
-  }
-  displacedResultCandidate(key) {
-    const r=this.data.requests[key],c=r&&this.control(r.task_id);
-    return !!r&&r.state==='PAUSED'&&!!(r.conversation_url||r.target_id||r.intent)
-      &&!!c&&!['STOPPED','DONE'].includes(c.state)&&keyFor(c)!==key;
-  }
-  async beginDisplacedResult(key,retryMs) {
-    return this.serial(async()=>{
-      if(!this.displacedResultCandidate(key))return null;
-      const old=this.data.requests[key],now=Date.now();
-      if(old.result_retirement_retry_at>now)return null;
-      // Persist pacing before any remote read; restart cannot turn this into a busy loop.
-      const r=transition(old,old.state,'DISPLACED_RESULT_CHECK',{
-        result_retirement_retry_at:now+Math.max(1000,Number(retryMs)||30000)},now);
-      const next=structuredClone(this.data);next.requests[key]=r;
-      next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
-      await this.save(next);return structuredClone(r);
-    });
-  }
-  async settleDisplacedResult(key,fence,result) {
-    return this.serial(async()=>{
-      // This lane can only consume an exact displaced identity; it never restores execution.
-      if(!this.displacedResultCandidate(key)||!this.matches(key,fence))return null;
-      const old=this.data.requests[key],committed=result.state==='COMMITTED';
-      if(!committed&&result.state===old.result_state&&result.code===old.error?.code)return null;
-      const patch={result_state:result.state,...(committed?{result_recovery:result.recovery||null}:{}),
-        ...(result.state==='UNAVAILABLE'?{error:{code:result.code,message:result.message}}:
-          old.error?.code?.startsWith('RESULT_')?{error:null}:{})};
-      const r=transition(old,committed?'COMMITTED':old.state,
-        committed?'RESULT_COMMITTED_TERMINAL':'DISPLACED_RESULT_OBSERVED',patch);
-      const next=structuredClone(this.data);next.requests[key]=r;
-      if(committed){next.events.push(audit(r,old.state,r.reason));retireRecord(next,r);}
-      else next.outbox[key]={revision:r.revision,path:r.path,body:projection(r)};
-      await this.save(next);return structuredClone(next.retired[key]||r);
-    });
   }
   async completeBrowserOpen(key,fence) {
     return this.serial(async()=>{
@@ -367,7 +341,8 @@ export class LifecycleStore {
   async recordTargetCleanup(entry,outcome) {
     return this.serial(async()=>{
       if(this.independentResource(entry)) {
-        if(['CLOSED','ABSENT'].includes(outcome.status))this.resourceCleanups.delete(entry.target_id);
+        // A terminal disposal has one current attempt only; it cannot become future work.
+        if(entry.terminal_state||['CLOSED','ABSENT'].includes(outcome.status))this.resourceCleanups.delete(entry.target_id);
         return true;
       }
       if(JSON.stringify(this.data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;
@@ -410,7 +385,7 @@ export class LifecycleStore {
         await this.save(next);return true;
       }
       let next=structuredClone(this.data);
-      if(c.state==='RUNNING'&&next.retired[keyFor(c)]) {
+      if(c.state==='RUNNING'&&canonicalUrl(c.conversation_url)&&next.retired[keyFor(c)]) {
         next=discardTerminalHistorySnapshot({lifecycle:next},[next.retired[keyFor(c)]],true).lifecycle;
         // The incoming current command sets fresh state; old cleanup/projection
         // bookkeeping does not decide whether this explicit entry may run.
@@ -419,18 +394,10 @@ export class LifecycleStore {
       const successorCreation=!!prior&&c.state==='RUNNING'&&!next.requests[keyFor(c)]&&!next.retired[keyFor(c)]
         &&(prior.state!=='RUNNING'||keyFor(prior)!==keyFor(c));
       next.controls[c.task_id]=structuredClone(c);
-      const retired=next.retired[keyFor(c)];
-      if(retired&&['STOPPED','DONE'].includes(c.state)){
-        retired.control_epoch=c.control_epoch;retired.control_state=c.state;
-        if(!['COMMITTED','COMPLETED'].includes(retired.state))retired.state='STOPPED';
-        retired.stop_status='NOT_REQUESTED';
-        const pending=next.completionOutbox[retired.key];
-        if(c.state==='DONE'&&pending?.completion_reason==='APP_DONE') {
-          retired.revision+=1;retired.updated_at=Date.now();
-          Object.assign(pending,{control_epoch:c.control_epoch,revision:retired.revision,updated_at:retired.updated_at});
-        }
+      if(['STOPPED','DONE'].includes(c.state))for(const retired of Object.values(next.retired))if(retired.task_id===c.task_id) {
+        retired.control_epoch=c.control_epoch;retired.control_state=c.state;retired.state='STOPPED';retired.stop_status='NOT_REQUESTED';
       }
-      const sameRunningIdentity=prior&&prior.state==='RUNNING'&&c.state==='RUNNING'
+      const sameRunningIdentity=prior&&['RUNNING','WAITING_USER_INTERVENTION'].includes(prior.state)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state)
         &&prior.turn_id===c.turn_id&&prior.request_id===c.request_id;
       for(const [key,old] of Object.entries(next.requests)) {
         if(old.task_id!==c.task_id||['COMMITTED','COMPLETED'].includes(old.state)
@@ -438,8 +405,8 @@ export class LifecycleStore {
         const matching=old.request_id===c.request_id&&old.turn_id===c.turn_id;
         let state=old.state;
         if(c.state==='STOPPED'||c.state==='DONE') state='STOPPED';
-        else if(c.state!=='RUNNING'||!matching) state='PAUSED';
-        const preserveGeneration=sameRunningIdentity&&matching&&old.control_state==='RUNNING';
+        else if(!['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state)||!matching) state='PAUSED';
+        const preserveGeneration=sameRunningIdentity&&matching&&['RUNNING','WAITING_USER_INTERVENTION'].includes(old.control_state);
         const pendingEntry=old.browser_entry?.control_epoch===old.control_epoch
           &&old.browser_entry.conversation_url===old.conversation_url;
         const appUrl=canonicalUrl(c.conversation_url);
@@ -475,19 +442,21 @@ export class LifecycleStore {
     return this.#publish(pending.path,async()=>{
       const item=this.data.outbox[key];
       if(!item)return;
+      if(!canonicalUrl(item.body.conversation_url)){
+        await this.serial(async()=>{const next=structuredClone(this.data);if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];await this.save(next);});
+        return;
+      }
       let remote;
       try{remote=await transport.read(item.path);}catch(error){throw projectionError(error,'read');}
       if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision)return;
       if(remote?.request_id!==item.body.request_id||remote?.turn_id!==item.body.turn_id||remote?.task_id!==item.body.task_id)
         throw new Error('Drive projection identity conflict');
       if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
-      const serverKeys=['lifecycle_record','lifecycle_state','lifecycle_revision','server_status','server_generation','browser_generation',
-        'conversation_url','recovery_count','recovery_attempt_id','post_correlation','post_outcome','server_error','server_error_class',
-        'server_control_state','server_control_epoch','resume_retry_count','resume_retry_at_ms','result_state','response_cursor','response_status','stop_status','updated_at_ms'];
-      const body={...remote};
-      for(const k of serverKeys)body[k]=item.body[k];
-      delete body.server_completion_reason;
-      try{await transport.write(item.path,body,{expected:remote});}catch(error){throw projectionError(error,'write');}
+      // Only newly observed URLs cross the app boundary. No READY/COMPLETED/error business projection.
+      if(canonicalUrl(item.body.conversation_url)&&remote.conversation_url!==item.body.conversation_url) {
+        const body={...remote,conversation_url:item.body.conversation_url};
+        try{await transport.write(item.path,body,{expected:remote});}catch(error){throw projectionError(error,'write');}
+      }
       await this.serial(async()=>{
         const next=structuredClone(this.data);
         if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];
@@ -500,7 +469,7 @@ export class LifecycleStore {
     const p=prior.then(operation,operation);this.publications.set(path,p);
     return p.finally(()=>{if(this.publications.get(path)===p)this.publications.delete(path);});
   }
-  async flush(transport) {
+  async flush(transport,{awaitTerminal=false}={}) {
     const publish=async()=>{
       for(const event of [...this.data.events]) {
         if(!this.data.retired[event.key]&&!Object.values(this.data.retired).some(r=>keyFor(r)===keyFor(event)))await this.store.recordEvent('CONVERSATION_TRANSITION',event,{generation:event.server_generation,
@@ -510,66 +479,6 @@ export class LifecycleStore {
         });
       }
       if(!transport)return;
-      for(const [key,item] of Object.entries(this.data.completionOutbox)) {
-        try {
-        await this.#publish(item.path,async()=>{
-        const remote=await transport.read(item.path);
-        if(this.data.completionOutbox[key]?.revision!==item.revision)return;
-        const marker=this.data.retired[key],appDone=item.completion_reason==='APP_DONE';
-        if(item.completion_reason==='CLIENT_CANCELLED') {
-          const same=remote?.request_id===item.request_id&&remote?.turn_id===item.turn_id&&remote?.task_id===item.task_id
-            &&Number(remote.dispatch_attempt)===Number(item.dispatch_attempt);
-          const current=marker?.state==='CANCELLED'&&marker.revision===item.revision;
-          if(current&&same) {
-            const cleanupConfirmed=cancelledCleanupConfirmed(this.data,marker);
-            if(marker.never_submitted===true&&!cleanupConfirmed)return;
-            const proof={schema:1,task_id:item.task_id,turn_id:item.turn_id,request_id:item.request_id,
-              dispatch_attempt:item.dispatch_attempt,control_epoch:marker.control_epoch,
-              never_submitted:marker.never_submitted===true&&marker.pre_submit_proof?.schema===1&&!marker.conversation_digest,
-              cleanup_confirmed:cleanupConfirmed};
-            const body={...remote,server_status:'CANCELLED',lifecycle_state:'CANCELLED',
-              server_control_state:marker.control_state,server_control_epoch:marker.control_epoch,
-              server_cancel_proof:proof,lifecycle_revision:marker.revision,updated_at_ms:marker.updated_at};
-            delete body.lifecycle_record;
-            await transport.write(item.path,body,{expected:remote});
-          }
-          await this.serial(async()=>{
-            const next=structuredClone(this.data);
-            if(next.completionOutbox[key]?.revision===item.revision){
-              delete next.completionOutbox[key];
-              if(next.retired[key]?.revision===item.revision)next.retired[key].cancel_projection_schema=1;
-            }
-            await this.save(next);
-          });
-          return;
-        }
-        const current=appDone?marker?.state==='STOPPED'&&marker.control_state==='DONE'
-          &&marker.control_epoch===item.control_epoch&&marker.revision===item.revision:
-          ['COMMITTED','COMPLETED'].includes(marker?.state);
-        const same=remote?.request_id===item.request_id&&remote?.turn_id===item.turn_id&&remote?.task_id===item.task_id
-          &&Number(remote.dispatch_attempt)===Number(item.dispatch_attempt);
-        if(current&&same) {
-          const body={...remote,server_status:'COMPLETED',lifecycle_state:appDone?'STOPPED':'COMMITTED',
-            result_state:appDone?item.result_state:'COMMITTED',
-            ...(appDone?{server_control_state:'DONE',server_control_epoch:item.control_epoch,stop_status:'NOT_REQUESTED'}:{}),
-            server_completion_reason:appDone?'APP_DONE':'RESULT_COMMITTED',
-            lifecycle_revision:item.revision,updated_at_ms:item.updated_at,server_error:'',server_error_class:null};
-          // Do not leave an older executable lifecycle snapshot in a final projection.
-          delete body.lifecycle_record;
-          await transport.write(item.path,body,{expected:remote});
-        }
-        // A reused path/new app attempt supersedes old telemetry, never new work.
-
-        await this.serial(async()=>{
-          const next=structuredClone(this.data);
-          if(next.completionOutbox[key]?.revision===item.revision)delete next.completionOutbox[key];
-          await this.save(next);
-        });
-        });
-        } catch(error) {
-          console.error(JSON.stringify({event:'COMPLETION_PROJECTION_PENDING',key,error:String(error?.message||error).slice(0,300)}));
-        }
-      }
       for(const key of Object.keys(this.data.outbox))await this.flushCurrent(transport,key);
     };
     const p=(this.flushTail||Promise.resolve()).then(publish,publish);

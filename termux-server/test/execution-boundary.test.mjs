@@ -1,3 +1,4 @@
+import { projection } from './helpers/legacy-projection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
@@ -9,8 +10,8 @@ async function send(f) { f.body.client_status='SEND_REQUESTED'; await f.ingest()
 test('execution: formal app preparation waits for SEND_REQUESTED',async()=>{
   const f=fixture(); f.body.client_status='CREATE_REQUESTED'; await f.ingest();
   assert.equal(f.prepares,1); assert.equal(f.sends,0);
-  assert.equal(f.rows.get(f.path).server_status,'READY_TO_SUBMIT');
-  await send(f); assert.equal(f.sends,1); assert.equal(f.rows.get(f.path).server_status,'STARTED');
+  assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
+  await send(f); assert.equal(f.sends,1); assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
 });
 test('execution: Result documents are never read to authorize initial submission',async()=>{
   const f=fixture(); let reads=0;
@@ -46,7 +47,7 @@ test('execution: cancelled attempt is not revived by unchanged RUNNING control',
   const f=fixture();f.browser.chromium={isOwnedTarget:()=>true,closeOwnedTarget:async()=>({closed:true})};f.controller=f.recreate(); f.body.client_status='CREATE_REQUESTED'; await f.ingest();
   f.body.client_status='CANCELLED'; await f.ingest();await f.controller.cleanupTerminalResources();
   await f.controller.tick(f.transport);
-  assert.equal(f.sends,0); assert.equal(f.prepares,1); assert.equal(f.record(),null);
+  assert.equal(f.sends,0); assert.equal(f.prepares,1); assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);
   f.body.dispatch_attempt=2; f.path='__SELFRUN_DISPATCH__retry.json';
   f.body.client_status='CREATE_REQUESTED'; await f.ingest();
   assert.equal(f.sends,0); assert.equal(f.record().state,'PREPARED');
@@ -57,29 +58,29 @@ test('execution: early canonical URL is STARTED without inventing a verified rec
   await send(f);
   assert.equal(f.rows.get(f.path).conversation_url,f.probe.url);
   assert.equal(f.record().intent.outcome,'UNKNOWN');
-  assert.equal(f.rows.get(f.path).server_status,'STARTED');
+  assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
   assert.equal(f.record().submission_confirmed,false);
   await f.controller.tick(f.transport); assert.equal(f.sends,1);
 });
-test('execution: exact Result commit retires observation while response idle alone does not',async()=>{
+test('execution: ordinary observation cannot consume a committed business Result',async()=>{
   const f=fixture(); await f.existing(); f.result(true);
   const observer=f.observations.at(-1);
   await f.observe({streaming:false,stopButtonVisible:false,status:'COMPLETED'});
-  assert.equal(observer.signal.aborted,true); assert.equal(f.controller.sessions.size,0);
-  assert.equal(f.record(),null);
-  await f.controller.flush(f.transport);assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
+  assert.equal(observer.signal.aborted,false); assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.record().state,'OBSERVING');
+  await f.controller.flush(f.transport);assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
 });
-test('execution: ten-minute nudge requires uncommitted Result and committed identity stays consumed',async()=>{
+test('execution: ten-minute nudge requires false Result while every Result outcome retains monitoring',async()=>{
   for(const result of ['open','committed','unreadable']) {
     const f=fixture(); await f.existing(); f.controller.config.stallAfterMs=600000;
     if(result==='committed')f.result(true);
     if(result==='unreadable')f.docs.set('RESULT-1','unreadable');
     await f.observe({});
-    if(result!=='committed')await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:Date.now()-600001});
+    await f.controller.repository.move(keyFor(f.body),'OBSERVING','elapsed',{last_progress_at:Date.now()-600001});
     await f.observe({status:'STALLED'});
     assert.equal(f.sends,result==='open'?1:0);
     if(result==='open')assert.equal(f.sent[0].prompt,'continue test');
-    assert.equal(f.observations.at(-1).signal.aborted,result==='committed');
+    assert.equal(f.observations.at(-1).signal.aborted,false);
   }
 });
 test('execution: STOP disposes local ownership and fences late callbacks without remote UI',async()=>{
@@ -99,7 +100,7 @@ test('execution: next app request ends the preceding observer without interpreti
   const nextPath='__SELFRUN_DISPATCH__next.json';f.rows.set(nextPath,next);
   await f.controller.ingest(nextPath,next,f.transport);
   assert.equal(observer.signal.aborted,true); assert.equal(f.sends,0);
-  assert.equal(f.rows.get(nextPath).server_status,'READY_TO_SUBMIT');
+  assert.equal(f.rows.get(nextPath).server_status,next.server_status);assert.equal(f.controller.repository.get(keyFor(next)).state,'PREPARED');
 });
 
 test('execution: STOP fences abort-aware pending attach without reopening for cleanup',async()=>{
@@ -142,7 +143,7 @@ test('execution: migration does not reactivate an observer after authoritative D
 });
 test('execution: imported legacy terminal state stays finished under cached RUNNING',async()=>{
   const f=fixture();await f.existing();await f.controller.quiesceForStandby();
-  const body=structuredClone(f.rows.get(f.path));body.lifecycle_record.state='COMPLETED';
+  const body=projection(f.record());body.lifecycle_record.state='COMPLETED';
   body.lifecycle_record.result_state='COMMITTED';body.lifecycle_state='COMPLETED';
   const {MemoryStore}=await import('./helpers/lifecycle-fixture.mjs');
   f.store=new MemoryStore();f.controller=f.recreate();f.rows.set(f.path,body);
@@ -162,7 +163,7 @@ test('execution: durable cancellation fences a POST waiting on publication',asyn
   f.body.client_status='CANCELLED';f.rows.set(f.path,structuredClone(f.body));
   await f.controller.ingestDurable(f.path,f.body,f.transport);
   gate.resolve();await posting;
-  assert.equal(f.sends,0);assert.equal(f.record(),null);
+  assert.equal(f.sends,0);assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().intent,undefined);
 });
 test('execution: unreadable TaskControl fails closed instead of assuming absence',async()=>{
   const f=fixture(),read=f.transport.read;

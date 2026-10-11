@@ -7,6 +7,12 @@ export function rollbackIdleSnapshot() {throw new Error('terminal removal requir
 // Explicit no-work maintenance removes history; current commands retain their own authority.
 const identityKey=b=>JSON.stringify([b?.task_id,b?.turn_id,b?.request_id]);
 const terminalState=state=>['STOPPED','CANCELLED','COMMITTED','COMPLETED'].includes(state);
+// A cancelled attempt inside the same live app execution is duplicate-input
+// evidence, not ended-task history. Explicit STOP/DONE releases it completely.
+export const currentCancellationProof=(data,r)=>r?.state==='CANCELLED'
+  &&['RUNNING','PAUSED','WAITING_USER_INTERVENTION','RESUME_REQUESTED','RESUME_STOPPED_REQUESTED'].includes(data.controls?.[r.task_id]?.state)
+  &&identityKey(data.controls[r.task_id])===identityKey(r)
+  &&Number(data.controls[r.task_id].control_epoch)>=Number(r.control_epoch||0);
 export function removeTerminalHistorySnapshot(snapshot,{userConfirmedNoWork=false,cutoffMs,expectedGeneration,expectedControlEpochs}={}) {
   const refuse=()=>{throw new Error('terminal cleanup authority changed or current work exists; no state modified');};
   const life=snapshot.lifecycle;
@@ -68,7 +74,7 @@ export function discardTerminalHistorySnapshot(snapshot,extra=[],onlyExtra=false
   const next=structuredClone(snapshot),data=next.lifecycle;
   if(!data)return next;
   const activeTasks=new Set(Object.values(data.requests||{}).filter(r=>!terminalState(r.state)).map(r=>r.task_id));
-  const records=onlyExtra?extra:[...Object.values(data.retired||{}),...Object.values(data.requests||{}).filter(r=>terminalState(r.state)),...Object.values(data.controls||{}).filter(c=>!activeTasks.has(c.task_id)&&['STOPPED','DONE'].includes(c.state)).map(c=>({...c,state:'STOPPED'})),...extra];
+  const records=onlyExtra?extra:[...Object.values(data.retired||{}).filter(r=>!currentCancellationProof(data,r)),...Object.values(data.requests||{}).filter(r=>terminalState(r.state)&&!currentCancellationProof(data,r)),...Object.values(data.controls||{}).filter(c=>!activeTasks.has(c.task_id)&&['STOPPED','DONE'].includes(c.state)).map(c=>({...c,state:'STOPPED'})),...extra];
   const keys=new Set(records.map(identityKey)),ids=new Set(records.map(r=>r.request_id)),paths=new Set(records.map(r=>r.path).filter(Boolean));
   const targets=new Set(records.flatMap(r=>[r.target_id,r.browser_cleanup?.target_id]).filter(Boolean));
   const ended=v=>v&&keys.has(identityKey(v));
@@ -77,7 +83,7 @@ export function discardTerminalHistorySnapshot(snapshot,extra=[],onlyExtra=false
   const ongoingTasks=new Set(Object.values(data.requests||{}).map(r=>r.task_id));
   // A shared control document alone is not current local work. Retain authority
   // only alongside a request; new dispatch admission supplies its freshly read control.
-  for(const task of Object.keys(data.controls||{}))if(!ongoingTasks.has(task))delete data.controls[task];
+  for(const task of Object.keys(data.controls||{}))if(!ongoingTasks.has(task)&&!Object.values(data.retired||{}).some(r=>r.task_id===task&&currentCancellationProof(data,r)))delete data.controls[task];
   delete data.terminalReplayFences;delete data.controlQuarantine;delete next.maintenanceQuarantine;
   data.events=(data.events||[]).filter(e=>!ended(e));
   if(next.httpIngress){
@@ -88,7 +94,7 @@ export function discardTerminalHistorySnapshot(snapshot,extra=[],onlyExtra=false
         ||Number.isSafeInteger(value?.dispatch_attempt)&&Number.isSafeInteger(record.dispatch_attempt)&&value.dispatch_attempt>record.dispatch_attempt;
     };
     for(const [key,value]of Object.entries(files)) {
-      const matching=records.filter(record=>identityKey(value)===identityKey(record)||record.path===key);
+      const matching=records.filter(record=>identityKey(value)===identityKey(record));
       if(!matching.length)continue;
       // HTTP registration is committed before lifecycle ingestion. A newer
       // current control or attempt must survive an older run's finalization.

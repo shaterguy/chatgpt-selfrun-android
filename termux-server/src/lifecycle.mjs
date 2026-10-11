@@ -30,6 +30,7 @@ export const matchingTaskControl=(c,r)=>!!c&&!!r&&c.schema==='selfrun-task-contr
   &&Number.isSafeInteger(c.control_epoch)&&c.control_epoch>0&&c.control_epoch>=Number(r.control_epoch||0)
   &&['task_id','turn_id','request_id'].every(k=>!!r[k]&&c[k]===r[k]);
 export const runningTaskControl=(c,r)=>matchingTaskControl(c,r)&&c.state==='RUNNING';
+export const observingTaskControl=(c,r)=>matchingTaskControl(c,r)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state);
 export const digest = value => createHash('sha256').update(String(value)).digest('hex');
 // Attempt/status/timing are app bookkeeping; the accepted operation stays fixed.
 export const preparationInputDigest=body=>digest(JSON.stringify([
@@ -121,19 +122,10 @@ export function transition(record,next,reason,patch={},now=Date.now()) {
   if(next==='COMMITTED'||next==='COMPLETED') {r.result_state='COMMITTED';r.error=null;}
   return r;
 }
+// App-facing output is URL-only; lifecycle and business completion stay local/app-owned.
 export function projection(r) {
-  const statuses={PREPARED:'READY_TO_SUBMIT',COMMITTED:'COMPLETED',COMPLETED:'COMPLETED',CANCELLED:'CANCELLED',
-    STOPPED:'CANCELLED',PAUSED:'CANCELLED',BLOCKED:'ERROR'};
-  // STARTED releases the owned URL to the app; post_outcome retains receipt truth.
-  const status=statuses[r.state]||(canonicalUrl(r.conversation_url)?'STARTED':'PENDING');
-  const {body,...durable}=r;
-  return {...r.body,lifecycle_record:{schema:1,...durable},server_status:status,lifecycle_state:r.state,
-    lifecycle_revision:r.revision,server_generation:r.server_generation||0,request_generation:r.run_generation,browser_generation:r.browser_generation,
-    conversation_url:r.conversation_url,recovery_count:r.recovery_count,recovery_attempt_id:r.intent?.kind==='recovery'?r.intent.id:null,
-    post_correlation:r.intent?.id||null,post_outcome:r.intent?.outcome||null,server_error:r.error?.message||'',
-    server_error_class:r.error?.code||null,server_control_state:r.control_state,server_control_epoch:r.control_epoch,
-    resume_retry_count:r.attach_attempts,resume_retry_at_ms:r.retry_at||0,result_state:r.result_state,
-    response_cursor:r.cursor,response_status:r.response_status||'UNKNOWN',stop_status:r.stop_status||null,updated_at_ms:r.updated_at};
+  return {task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,dispatch_attempt:r.dispatch_attempt,
+    conversation_url:r.conversation_url};
 }
 export function newIntent(record,kind,prompt,baseline) {
   return {id:randomUUID(),kind,prompt:String(prompt),hash:digest(prompt),baseline:structuredClone(baseline||{}),outcome:'PENDING',

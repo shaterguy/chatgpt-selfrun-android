@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
-test('cancelled unsubmitted request publishes terminal proof after cleanup without reopening browser',async t=>{
+test('cancelled unsubmitted request closes owned resources without publishing terminal proof',async t=>{
  const f=fixture();t.after(()=>f.controller.quiesceForStandby());
  f.browser.chromium={isOwnedTarget:()=>true,closeOwnedTarget:async()=>({closed:true}),releaseIfUnused:async()=>({released:false})};
  f.controller=f.recreate();
  f.body.client_status='CREATE_REQUESTED';await f.ingest();
  const prepared=f.rows.get(f.path);f.body={...prepared,client_status:'CANCELLED',cancelled_at_ms:Date.now()};
  await f.ingest();await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
- const row=f.rows.get(f.path);assert.equal(row.server_status,'CANCELLED');
- assert.equal(row.server_cancel_proof.never_submitted,true);assert.equal(row.server_cancel_proof.cleanup_confirmed,true);
- assert.equal(row.server_cancel_proof.dispatch_attempt,1);assert.equal(f.sends,0);assert.equal(f.record(),null);
+ const row=f.rows.get(f.path);assert.equal(row.server_status,f.body.server_status);
+ assert.equal(row.server_cancel_proof,undefined);assert.deepEqual(f.controller.repository.data.completionOutbox,{});assert.equal(f.sends,0);assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);
 });
 function cancellationFixture(t,close=async()=>({closed:true})) {
  const f=fixture();f.browser.chromium={isOwnedTarget:()=>true,closeOwnedTarget:close,releaseIfUnused:async()=>({released:false})};f.controller=f.recreate();t.after(()=>f.controller.quiesceForStandby());return f;
@@ -22,10 +21,10 @@ test('pending cleanup cannot publish an automatic retry proof',async t=>{
  const f=cancellationFixture(t,async()=>({closed:false,reason:'guard_rejected'}));await cancelPrepared(f);await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
  assert.equal(f.rows.get(f.path).server_cancel_proof,undefined);assert.equal(Object.keys(f.store.snapshot().lifecycle.completionOutbox).length,0);assert.equal(f.sends,0);
 });
-test('failed cancellation projection leaves no executable work or durable retry history after restart',async t=>{
+test('cancelled current-run proof remains nonexecutable across restart without a publication outbox',async t=>{
  const f=cancellationFixture(t);await cancelPrepared(f);await f.controller.cleanupTerminalResources();f.writeFail=true;await f.controller.flush(f.transport);
  assert.deepEqual(f.store.snapshot().lifecycle.completionOutbox,{});await f.controller.quiesceForStandby();f.controller=f.recreate();f.writeFail=false;await f.controller.initialize();await f.controller.tick(f.transport);
- assert.equal(f.sends,0);assert.equal(f.prepares,1);assert.equal(f.record(),null);assert.equal(f.controller.sessions.size,0);
+ assert.equal(f.sends,0);assert.equal(f.prepares,1);assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);assert.equal(f.controller.sessions.size,0);
 });
 test('terminal telemetry cannot overwrite a newer dispatch attempt on the same path',async t=>{
  const f=cancellationFixture(t);await cancelPrepared(f);await f.controller.cleanupTerminalResources();const newer={...f.rows.get(f.path),client_status:'CREATE_REQUESTED',dispatch_attempt:2};f.rows.set(f.path,newer);await f.controller.flush(f.transport);
@@ -46,7 +45,7 @@ test('cancel proof and retry wait until a pending target acquisition settles and
  f.body={...f.rows.get(f.path),client_status:'CANCELLED',cancelled_at_ms:Date.now()};f.rows.set(f.path,structuredClone(f.body));await f.controller.ingest(f.path,f.body,f.transport);await f.controller.flush(f.transport);
  const earlyProof=f.rows.get(f.path).server_cancel_proof?.cleanup_confirmed;
  arrival.resolve();await f.settle();await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
- assert.notEqual(earlyProof,true);assert.ok(closed.includes('target-late'));assert.equal(f.rows.get(f.path).server_cancel_proof.cleanup_confirmed,true);assert.equal(f.sends,0);
+ assert.notEqual(earlyProof,true);assert.ok(closed.includes('target-late'));assert.equal(f.rows.get(f.path).server_cancel_proof,undefined);assert.equal(f.sends,0);
 });
 
 test('higher attempt cannot remove a retired marker while old target acquisition is pending',async t=>{
@@ -66,7 +65,7 @@ test('same-request RUNNING epoch refresh does not permanently fence proven unsen
  await cancelPrepared(f);await f.controller.cleanupTerminalResources();assert.equal(closed,0);
  f.control={...f.control,control_epoch:2};await f.controller.control(null,f.control,f.transport);canClose=true;
  await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
- assert.equal(closed,1);assert.equal(f.rows.get(f.path).server_cancel_proof.cleanup_confirmed,true);assert.equal(f.sends,0);
+ assert.equal(closed,1);assert.equal(f.rows.get(f.path).server_cancel_proof,undefined);assert.equal(f.sends,0);
 });
 test('other-request RUNNING epoch still fences old cancellation cleanup',async t=>{
  let canClose=false,closed=0;const f=cancellationFixture(t,async()=>{if(!canClose)return {closed:false};closed++;return {closed:true};});

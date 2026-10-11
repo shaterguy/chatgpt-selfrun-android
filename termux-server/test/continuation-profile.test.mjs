@@ -91,7 +91,7 @@ test('ChatGptBrowser submission uses UI click and never enables CDP Fetch interc
     conversationUrl:'https://chatgpt.com/c/existing-profile',guard:()=>true,
     intent:{id:'intent',receipt_generation:'generation-1',prompt:'continue',baseline:{userCount:1,userMessageId:'user-1'}}});
   assert.equal(submitted,1);
-  assert.equal(accepted.userMessageId,'user-2');
+  assert.deepEqual(accepted,{submitted:true});
   assert.equal(calls.includes('Fetch.enable'),false);
   assert.equal(calls.includes('Fetch.continueRequest'),false);
   assert.equal(calls.includes('Fetch.failRequest'),false);

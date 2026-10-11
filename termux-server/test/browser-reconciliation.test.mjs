@@ -49,7 +49,7 @@ test('optimistic user bubble is not accepted without semantic response evidence'
 test('initial submission refuses an existing canonical conversation before touching the composer',async()=>{
  const f=fixture();await assert.rejects(f.browser.submitIntent({session:f.session,prompt:'test',kind:'initial',intent:{id:'i'},guard:()=>true,profileOperations:[]}),/existing conversation/);
 });
-test('prepare rejects existing conversation when new chat control is missing',async()=>{
+test('prepare navigation does not inspect response or click inferred new-chat controls',async()=>{
  let staged=0,closed=0;
  const session={close(){},async call(method,p={}){
   if(method!=='Runtime.evaluate')return {};
@@ -59,6 +59,6 @@ test('prepare rejects existing conversation when new chat control is missing',as
  }};
  const chromium={createTarget:async()=>({id:'new-target'}),connectTarget:async()=>session,closeTarget:async()=>{closed++;}};
  const browser=new ChatGptBrowser(chromium,{navigationTimeoutMs:100});
- await assert.rejects(browser.prepare({projectUrl:'https://chatgpt.com/',prompt:'test'}),/new conversation/);
- assert.equal(staged,0);assert.equal(closed,1);
+ await browser.prepare({projectUrl:'https://chatgpt.com/',prompt:'test'});
+ assert.equal(staged,0);assert.equal(closed,0);
 });

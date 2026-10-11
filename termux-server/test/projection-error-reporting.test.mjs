@@ -6,7 +6,7 @@ const reasons=f=>[...f.controller.repository.data.events,...f.store.events.filte
 for(const kind of ['initial','recovery'])test(`${kind} submission survives a failed post-send Drive publication`,async t=>{
   const f=fixture(),logs=[];t.after(()=>f.controller.quiesceForStandby());
   t.mock.method(console,'error',line=>logs.push(JSON.parse(line)));
-  if(kind==='recovery')await f.existing();
+  if(kind==='recovery'){await f.existing();f.onSubmit=()=>{delete f.rows.get(f.path).conversation_url;};}
   const write=f.transport.write;let failures=0;
   f.transport.write=async(...args)=>{
     if(f.sends&&failures++===0)throw Object.assign(new TypeError('fetch failed secret-body'),{cause:{code:'ECONNRESET'}});
@@ -27,7 +27,7 @@ for(const kind of ['initial','recovery'])test(`${kind} submission survives a fai
 
 for(const operation of ['read','write'])test(`projection ${operation} failure has safe operation and transport cause`,async t=>{
   const f=fixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const key=f.record().key;await f.controller.repository.move(key,'OBSERVING','fixture pending');
+  const key=f.record().key;delete f.rows.get(f.path).conversation_url;await f.controller.repository.move(key,'OBSERVING','fixture pending');
   f.transport[operation]=async()=>{throw Object.assign(new Error('private URL token message'),{
     code:'DRIVE_TRANSPORT_ERROR',operation:'version',stage:'request',cause_code:'ENOTFOUND',http_status:null});};
   await assert.rejects(f.controller.repository.flushCurrent(f.transport,key),error=>{
@@ -41,7 +41,7 @@ for(const operation of ['read','write'])test(`projection ${operation} failure ha
 
 test('a repeated projection outage keeps local confirmation and the pending outbox',async t=>{
   const f=fixture(),logs=[];t.after(()=>f.controller.quiesceForStandby());
-  t.mock.method(console,'error',line=>logs.push(JSON.parse(line)));await f.existing();
+  t.mock.method(console,'error',line=>logs.push(JSON.parse(line)));await f.existing();f.onSubmit=()=>{delete f.rows.get(f.path).conversation_url;};
   const write=f.transport.write;
   f.transport.write=async(...args)=>{if(f.sends)throw new Error('Drive write HTTP 503: private response');return write(...args);};
   await f.stall();await f.settle();
@@ -50,7 +50,7 @@ test('a repeated projection outage keeps local confirmation and the pending outb
   assert.equal(f.record().error,null);assert.equal(f.record().retry_at,0);
   assert.ok(logs.some(e=>e.event==='DRIVE_PROJECTION_PENDING'&&e.error.http_status===503));
   f.transport.write=write;await f.controller.repository.flushCurrent(f.transport,f.record().key);
-  assert.equal(f.rows.get(f.path).post_outcome,'CONFIRMED');assert.equal(f.sends,1);
+  assert.equal(f.rows.get(f.path).post_outcome,undefined);assert.equal(f.sends,1);
 });
 
 test('HTTP error receipt produces a separate numeric ChatGPT diagnostic',async t=>{
@@ -66,11 +66,11 @@ test('HTTP error receipt produces a separate numeric ChatGPT diagnostic',async t
   assert.equal(logs.some(e=>e.event==='DRIVE_PROJECTION_PENDING'),false);
 });
 
-test('pre-send Drive durability failure still blocks submission',async t=>{
+test('Drive URL publication outage does not block locally durable initial submission',async t=>{
   const f=fixture();t.after(()=>f.controller.quiesceForStandby());
   f.transport.write=async()=>{throw new Error('Drive write HTTP 503');};
-  await assert.rejects(f.ingest(),error=>error.code==='DRIVE_PROJECTION_FAILED');
-  assert.equal(f.sends,0);assert.ok(f.controller.repository.data.outbox[f.record().key]);
+  await f.ingest();
+  assert.equal(f.sends,1);assert.ok(f.controller.repository.data.outbox[f.record().key]);
 });
 
 test('local durable write failure is never treated as a retryable Drive projection',async t=>{

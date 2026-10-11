@@ -1,5 +1,11 @@
 import { canonicalUrl, cursor } from '../lifecycle.mjs';
 
+// Local call-stack evidence only. Page errors and imported Drive records cannot
+// manufacture proof that this invocation never reached the submit operation.
+const preSubmitFailures = new WeakMap();
+export const preSubmitFailureStage = error => error && typeof error === 'object'
+  ? preSubmitFailures.get(error) || null : null;
+
 export function normalizeProgressText(value) {
   return String(value || '')
     .replace(/(?:Today|Yesterday|오늘|어제)\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|오전|오후)?/gi, ' ')
@@ -449,6 +455,7 @@ export function requestProfileDocumentStartSource() {
     if(window.__selfrunRequestProfileEngine?.version===${version})return true;
     const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
     const state={operations:null,last:{ok:false,reason:'not_configured'}};
+    let disposed=false;
     const norm=value=>String(value??'').trim().toLowerCase();
     const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,100)};throw new Error('REQUEST_PROFILE:'+state.last.reason);};
     const validateOps=operations=>{
@@ -477,6 +484,7 @@ export function requestProfileDocumentStartSource() {
     }catch(_){return false;}};
     const strip=object=>{const copy={...object};for(const key of CONTROL)delete copy[key];return copy;};
     const patchObject=(body,url)=>{
+      if(disposed)fail('runtime_disposed');
       if(!conversationRoute(url))fail('conversation_route_not_allowed');
       if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))fail('unknown_conversation_schema');
       if(!state.operations)fail('target_not_ready');
@@ -508,13 +516,14 @@ export function requestProfileDocumentStartSource() {
       if(patched===null)fail('target_patch_not_applied');
       try{return nativeFetch(new Request(request,{body:patched}));}catch(_){fail('patched_request_construction_failed');}
     };
-    const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send,metadata=new WeakMap();
+    const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;let metadata=new WeakMap();
     XMLHttpRequest.prototype.open=function(method,url,...rest){metadata.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
     XMLHttpRequest.prototype.send=function(body){const request=metadata.get(this)||{method:'',url:''};const patched=patchText(request.url,request.method,body);return nativeSend.call(this,patched===null?body:patched);};
     window.__selfrunRequestProfileEngine={
       version:${version},
-      configure:operations=>{state.operations=validateOps(operations);state.last={ok:true,reason:'target_ready'};return true;},
-      diagnostics:()=>({...state.last})
+      configure:operations=>{if(disposed)fail('runtime_disposed');state.operations=validateOps(operations);state.last={ok:true,reason:'target_ready'};return true;},
+      diagnostics:()=>({...state.last}),
+      dispose:()=>{disposed=true;state.operations=null;state.last={ok:false,reason:'disposed'};metadata=new WeakMap();return true;}
     };
     return true;
   })()`;
@@ -536,15 +545,16 @@ async function installRequestProfileEngine(session) {
 // Event vocabulary/framing follows Android ChatGptTurnProtocolScript (436da865).
 function installReceiptObserver() {
   const version='selfrun-passive-receipt-v2';
-  const previousObserver=window.__selfrunReceiptObserver;
+  let previousObserver=window.__selfrunReceiptObserver;
   if(previousObserver?.version===version)return true;
   const downstreamFetch=window.fetch;
   const MAX_BYTES=262144,MAX_EVENT=65536,MAX_MS=30000;
   let current=null,sequence=0;
+  let disposed=false;
   const canonical=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(value)
     &&!value.toLowerCase().startsWith('local-chatgpt')?value:'';
   const same=(entry,key)=>!!entry&&entry.intent_id===key?.intent_id&&entry.generation===key?.generation;
-  const active=entry=>current===entry&&!entry.retired&&!entry.invalid;
+  const active=entry=>!!entry&&current===entry&&!entry.retired&&!entry.invalid;
   const stopReader=entry=>{
     clearTimeout(entry.timer);entry.timer=null;
     const reader=entry.reader;entry.reader=null;
@@ -555,7 +565,15 @@ function installReceiptObserver() {
     if(current!==entry)return;
     entry.invalid=reason;entry.ack=null;stopReader(entry);
   };
-  const retire=entry=>{if(entry){entry.retired=true;stopReader(entry);}};
+  const retire=entry=>{
+    if(!entry)return;
+    if(current===entry)current=null;
+    entry.retired=true;stopReader(entry);
+    // Pending response callbacks may retain this object. Release our data even
+    // when the original response or request-body promise is still outstanding.
+    for(const name of Object.keys(entry))entry[name]=null;
+    entry.retired=true;
+  };
   const bind=(entry,id)=>{
     if(id===undefined||id===null||id==='')return true;
     const value=canonical(id);
@@ -675,6 +693,7 @@ function installReceiptObserver() {
   };
   window.__selfrunReceiptObserver={version,
     arm:key=>{
+      if(disposed)throw new Error('RECEIPT_OBSERVER_DISPOSED');
       if(typeof key?.intent_id!=='string'||!key.intent_id||typeof key.generation!=='string'||!key.generation
           ||typeof key.prompt!=='string'||!key.prompt||key.conversation_id&&!canonical(key.conversation_id))throw new Error('RECEIPT_INTENT_INVALID');
       // A legacy wrapper remains passive; retire its matching arm before replacing it.
@@ -695,6 +714,7 @@ function installReceiptObserver() {
       invalid:current.invalid,released:current.released,http_status:current.http_status??null,endpoint_category:current.endpoint_category??null,
     }:null,
     retire:key=>{if(same(current,key))retire(current);return true;},
+    dispose:()=>{disposed=true;retire(current);previousObserver=null;sequence=0;return true;},
   };
   return true;
 }
@@ -811,68 +831,31 @@ export class ChatGptBrowser {
     throw error;
   }
 
-  async #prepareNewChat(session, projectUrl, signal) {
-    await navigatePageSession(session, projectUrl);
-    await this.#waitFor(session, (p) => p.readyState === 'complete' || p.readyState === 'interactive', {
-      timeoutMs: this.config.navigationTimeoutMs,
-      signal,
-      label: 'project page',
-    });
-
-    let probe = await runPageAction(session, 'snapshot');
-    if (probe.loginPage) {
-      const error = new Error('ChatGPT browser profile requires sign-in');
-      error.code = 'AUTH_REQUIRED';
-      throw error;
-    }
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (!/\/c\//.test(new URL(probe.url).pathname)) break;
-      const result = await runPageAction(session, 'newChat');
-      if (result?.status === 'MISSING') break;
-      await delay(700, signal);
-      probe = await runPageAction(session, 'snapshot');
-    }
-    if(conversationId(probe.url))throw Object.assign(new Error('new conversation could not be established'),{code:'NEW_CONVERSATION_REQUIRED'});
-    return this.#waitFor(session, (p) => p.composer&&!conversationId(p.url), {
-      timeoutMs: this.config.navigationTimeoutMs,
-      signal,
-      label: 'ChatGPT composer',
-    });
-  }
-
-  async prepare({ projectUrl, prompt, signal, onTarget, guard=()=>true, previousTargetId=null }) {
-    if(this.chromium.recoveryNavigationDisabled&&previousTargetId){
+  async prepare({ projectUrl, signal, onTarget, guard=()=>true, previousTargetId=null }) {
+    const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale preparation');};
+    check();
+    // A failed navigation owns its acquired tab. Retry that action there rather
+    // than closing it and replaying successful creation.
+    let target;
+    if(previousTargetId) {
+      if(this.chromium.isOwnedTarget?.(previousTargetId)!==true)
+        throw Object.assign(new Error('Preparation retry target is not owned'),{code:'TARGET_OWNERSHIP_REQUIRED'});
       const targets=await this.chromium.listExistingTargets();
-      if(!Array.isArray(targets))throw Object.assign(new Error('Previous entry target inventory unavailable'),{code:'PAGE_UNAVAILABLE'});
-      if(targets.some(target=>target.id===previousTargetId)&&!await this.chromium.closeTarget(previousTargetId,{guard}))
-        throw Object.assign(new Error('Previous owned entry target is not safely disposed'),{code:'PAGE_UNAVAILABLE'});
+      if(!Array.isArray(targets))throw Object.assign(new Error('Preparation target inventory unavailable'),{code:'PAGE_UNAVAILABLE'});
+      target=targets.find(t=>t.id===previousTargetId&&t.type==='page');
+      if(!target)throw Object.assign(new Error('Preparation retry target unavailable'),{code:'TARGET_LOST'});
     }
-    const target = await this.chromium.createTarget('about:blank',{signal,guard});
-    let session;
+    target??=await this.chromium.createTarget('about:blank',{signal,guard});
+    let session,acquired=false;
     try {
-      await onTarget?.(target);
-      if(signal?.aborted)throw signal.reason||new Error('aborted');
-      session = await this.chromium.connectTarget(target);
-      await initializePageSession(session,this.config);
-      const before = await this.#prepareNewChat(session, projectUrl, signal);
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
-      return {
-        target,
-        session,
-        baseline: {
-          assistantCount: before.assistantCount || 0,
-          assistantTextLength: before.assistantTextLength || 0,
-          responseTurnId: before.responseTurnId || null,
-          responseTextLength: before.responseTextLength || 0,
-          responseFingerprint: before.responseFingerprint || '',
-          userCount: before.userCount || 0,
-          userTextLength: before.userTextLength || 0,
-        },
-      };
-    } catch (error) {
+      await onTarget?.(target);acquired=true;check();
+      session=await this.chromium.connectTarget(target);check();
+      await initializePageSession(session,this.config);check();
+      await navigatePageSession(session,projectUrl);check();
+      return {target,session,baseline:{}};
+    } catch(error) {
       session?.close();
-      await this.chromium.closeTarget(target.id,{guard});
+      if(!acquired)await this.chromium.closeTarget(target.id,{guard});
       throw error;
     }
   }
@@ -931,18 +914,21 @@ export class ChatGptBrowser {
     }
   }
 
-  async #submitWithProfile({ session, prompt, signal, guard = () => true, conversationUrl = '', baseline = {}, onConversation = null }) {
+  async #submitWithProfile({ session, prompt, signal, guard = () => true, onStage = () => {}, onSubmitStart = () => {}, onSubmitted = null }) {
     if (signal?.aborted) throw signal.reason || new Error('aborted');
 
     const sendReadyStarted = Date.now();
     let sendReady = null;
     while (Date.now() - sendReadyStarted < 5000) {
       if (signal?.aborted) throw signal.reason || new Error('aborted');
+      onStage('sendReady');
       sendReady = await runPageAction(session, 'sendReady');
       if (sendReady?.ready) break;
       if (sendReady?.status==='NO_COMPOSER'||sendReady?.status==='NO_SEND') {
+        onStage('input');
         const restaged=await runPageAction(session,'input',{prompt});
         if(restaged?.status==='READY') {
+          onStage('sendReady');
           sendReady=await runPageAction(session,'sendReady');
           if(sendReady?.ready) break;
         }
@@ -959,6 +945,7 @@ export class ChatGptBrowser {
     try {
       try {
         if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');
+        onSubmitStart();
         const submitted=await runPageAction(session,'submit');
         if(submitted?.status!=='SUBMITTED')throw new Error(`Composer send failed: ${submitted?.status||'unknown'}`);
         clickReleased=true;
@@ -967,16 +954,8 @@ export class ChatGptBrowser {
         clickReleased=true;
       }
       if(signal?.aborted||!guard())throw new Error('stale submission');
-      const expected=conversationId(conversationUrl);
-      const routeProbe=await this.#waitFor(session,p=>{
-        const current=conversationId(p.url);
-        return expected ? current===expected : !!current;
-      },{timeoutMs:this.config.navigationTimeoutMs,signal,label:'canonical conversation URL'});
-      if(onConversation)await onConversation({url:routeProbe.url,probe:routeProbe});
-      if(signal?.aborted||!guard())throw new Error('stale submission');
-      // The canonical route is useful ownership metadata, never an acceptance signal.
-      // Semantic receipt readback does not wait for a user/assistant DOM bubble.
-      return routeProbe;
+      await onSubmitted?.();
+      return {submitted:true};
     } catch(error) {
       if(clickReleased)error.released=true;
       throw error;
@@ -1005,23 +984,29 @@ export class ChatGptBrowser {
     return {target,session,baseline:await runPageAction(session,'snapshot')};
   }
 
-  async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest,onConversation}) {
+  async submitIntent({session,prompt,kind,intent,conversationUrl,profileOperations,signal,guard,onRequest,onSubmitted}) {
+    let stage='recoveryInput',submitCalled=false;
+    const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale submission');};
+    const onStage=value=>{check();stage=value;};
+    const run=async(operation,payload={})=>{onStage(operation);const value=await runPageAction(session,operation,payload,undefined,{signal});check();return value;};
+    try {
     if(signal?.aborted||!guard())throw new Error('stale submission');
-    const probe=await runPageAction(session,kind==='recovery'?'recoveryInput':'snapshot');
+    const probe=await run('recoveryInput');
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))
       throw new Error('submission conversation ownership mismatch');
     if(kind==='initial'&&conversationId(probe.url))throw new Error('initial submission cannot target an existing conversation');
-    await runPageAction(session,'installProfile');
-    await runPageAction(session,'profileConfigure',{operations:profileOperations});
-    await runPageAction(session,'installReceipt');
-    const staged=await runPageAction(session,'input',{prompt});
+    await run('installProfile');
+    await run('profileConfigure',{operations:profileOperations});
+    await run('installReceipt');
+    const staged=await run('input',{prompt});
     if(staged?.status!=='READY')throw new Error('submission composer not ready');
     if(signal?.aborted||!guard())throw new Error('stale submission');
     const key={intent_id:intent?.id,generation:intent?.receipt_generation,prompt,conversation_id:conversationId(conversationUrl)};
     if(intent?.prompt!==prompt)throw new Error('submission immutable prompt mismatch');
-    await runPageAction(session,'receiptArm',{key});
+    await run('receiptArm',{key});
     try {
-      const submitted=await this.#submitWithProfile({session,prompt,signal,guard,conversationUrl,baseline:intent?.baseline||{},onConversation});
+      const submitted=await this.#submitWithProfile({session,prompt,signal,guard,
+        onStage,onSubmitStart:()=>{check();submitCalled=true;},onSubmitted});
       await onRequest?.({released:true});
       return submitted;
     } finally {
@@ -1029,6 +1014,10 @@ export class ChatGptBrowser {
         // Retire this exact arm only. A late old cleanup cannot retire its successor.
         try{await runPageAction(session,'receiptRetire',{key});}catch{}
       }
+    }
+    } catch(error) {
+      if(!submitCalled&&error&&typeof error==='object')preSubmitFailures.set(error,stage);
+      throw error;
     }
   }
 

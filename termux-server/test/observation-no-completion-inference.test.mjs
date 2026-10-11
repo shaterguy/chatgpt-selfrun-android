@@ -19,7 +19,7 @@ test('an unchanged response without a stop button remains observation, not answe
     assert.equal(f.record().response_status,'UNKNOWN');
     assert.equal(f.record().state,'OBSERVING');
     assert.equal(f.record().last_progress_at,progressAt);
-    assert.equal(f.rows.get(f.path).response_status,'UNKNOWN');
+    assert.equal(f.rows.get(f.path).response_status,undefined);
   }
   assert.equal(f.sends,0);assert.equal(f.quiesces,0);assert.equal(f.resumes,1);
 });
@@ -58,10 +58,10 @@ test('the unchanged ten-minute deadline checks the exact false Result and sends 
   assert.equal(f.sent[0].prompt,'continue test');assert.equal(f.quiesces,0);
 });
 
-test('an exact true Result still retires monitoring without needing an answer-end observation',async t=>{
+test('an exact true Result suppresses continuation while retaining monitoring',async t=>{
   const {f,advance}=await setup(t);f.result(true);advance(WINDOW);
   await f.observe({status:'RUNNING',streaming:true});
-  assert.equal(f.record(),null);assert.equal(f.rows.get(f.path).lifecycle_state,'COMMITTED');
+  assert.equal(f.record().result_state,'COMMITTED');assert.equal(f.record().state,'OBSERVING');assert.equal(f.rows.get(f.path).lifecycle_state,undefined);assert.equal(f.observations.at(-1).signal.aborted,false);
   assert.equal(f.sends,0);assert.equal(f.quiesces,0);
 });
 

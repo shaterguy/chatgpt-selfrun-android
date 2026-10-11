@@ -73,7 +73,7 @@ test('late current response clears unknown outcome and warning projections witho
   }}});
   await f.controller.tick(f.transport);await f.settle();
   assert.equal(f.record().intent.outcome,'CONFIRMED');assert.equal(f.record().submission_confirmed,true);assert.equal(f.record().error,null);
-  const projected=f.rows.get(f.path);assert.equal(projected.post_outcome,'CONFIRMED');assert.equal(projected.server_error,'');assert.equal(projected.server_error_class,null);
+  const projected=f.rows.get(f.path);assert.equal(projected.post_outcome,undefined);assert.equal(projected.server_error,undefined);assert.equal(projected.server_error_class,undefined);
   assert.notEqual(f.record().reason,'POST_READBACK_UNKNOWN');assert.equal(f.sends,1);
 });
 

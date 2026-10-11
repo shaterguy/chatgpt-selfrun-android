@@ -103,15 +103,13 @@ test('slow observation diagnostics distinguish engine time without logging page 
   assert.equal(seen[0].__selfrun_engine_elapsed_ms,undefined);
 });
 
-for(const boundary of ['STOPPED','DONE','COMMITTED'])test(`${boundary} fences a delayed real browser observation at the controller`,async t=>{
+for(const boundary of ['STOPPED','DONE'])test(`${boundary} fences a delayed real browser observation at the controller`,async t=>{
   const f=await fixture(t),controller=lifecycleFixture();
   controller.browser.resume=async()=>({session:f.session,target:{id:'target-owned'},baseline:controller.probe});
   controller.browser.monitor=f.browser.monitor.bind(f.browser);
   t.after(()=>controller.controller.quiesceForStandby());await controller.existing();
   await f.tick(6000);
-  if(boundary==='COMMITTED'){controller.result(true);await controller.controller.repository.move(controller.record().key,'OBSERVING','test due reconciliation',{last_progress_at:Date.now()-600000});await controller.controller.tick(controller.transport);await controller.settle();}
-  else {controller.control={...controller.control,state:boundary,control_epoch:2};await controller.controller.control(null,controller.control,controller.transport);}
-  if(boundary==='COMMITTED')assert.equal(controller.record(),null);
+  controller.control={...controller.control,state:boundary,control_epoch:2};await controller.controller.control(null,controller.control,controller.transport);
   const before=JSON.stringify(controller.record());f.reply(1);await controller.settle();
   assert.equal(JSON.stringify(controller.record()),before);assert.equal(controller.sends,0);assert.equal(f.session.pending.size,0);
 });

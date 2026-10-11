@@ -24,7 +24,7 @@ test('canonical URL starts observation and projects STARTED before initial ACK r
   f.onSubmit=async()=>{
     observedDuringSubmit=f.observations.length===1;
     assert.equal(f.rows.get(f.path).conversation_url,f.probe.url);
-    assert.equal(f.rows.get(f.path).server_status,'STARTED');
+    assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
     assert.equal(f.record().intent.outcome,'PENDING');
     assert.equal(f.record().submission_confirmed,false);
   };
@@ -32,9 +32,9 @@ test('canonical URL starts observation and projects STARTED before initial ACK r
   assert.equal(observedDuringSubmit,true,'observation begins in onConversation, before submit returns');
   assert.equal(f.observations.length,1);
   assert.equal(f.record().intent.outcome,'UNKNOWN');
-  assert.equal(f.rows.get(f.path).post_outcome,'UNKNOWN');
+  assert.equal(f.rows.get(f.path).post_outcome,undefined);
   assert.equal(f.record().submission_confirmed,false);
-  assert.equal(f.rows.get(f.path).server_status,'STARTED');
+  assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
 });
 
 test('unknown initial receipt does not suppress visible response progress',async t=>{
@@ -80,13 +80,13 @@ test('unknown initial receipt retains real ten-minute visible progress and recov
   assert.equal(f.sent.filter(s=>s.kind==='initial').length,1);
 });
 
-test('exact committed Result retires unknown-receipt observation and cleans the owned target',async t=>{
+test('exact committed Result suppresses continuation while preserving the owned target and unknown-receipt observer',async t=>{
   const f=setup(t);await f.ingest();const observer=f.observations.at(-1);
   assert.ok(observer,'monitor attached before receipt confirmation');
-  f.result(true);await f.observe({});await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
-  assert.equal(f.record(),null);
-  assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
-  assert.deepEqual(f.closed,['target-new']);assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
+  f.result(true);await f.stall();await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
+  assert.equal(f.record().result_state,'COMMITTED');
+  assert.equal(observer.signal.aborted,false);assert.equal(f.controller.sessions.size,1);
+  assert.deepEqual(f.closed,[]);assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
   await f.controller.tick(f.transport);assert.equal(f.sends,1);
 });
 
@@ -99,13 +99,13 @@ test('STOP immediately retires unknown-receipt observer without rereading or res
   assert.equal(f.readbacks,readbacks);assert.equal(f.sends,1);assert.equal(f.quiesces,0);
 });
 
-test('waiting for user intervention fences an unknown-receipt observer and recovery',async t=>{
+test('waiting for user intervention retains unknown-receipt observation and suppresses recovery',async t=>{
   const f=setup(t);await f.ingest();const observer=f.observations.at(-1);
   assert.ok(observer,'monitor attached before receipt confirmation');
   f.control={...f.control,state:'WAITING_USER_INTERVENTION',control_epoch:2};
   await f.controller.control(null,f.control,f.transport);
   await observer.onActivity({...f.probe,status:'STALLED'});await f.controller.tick(f.transport);
-  assert.equal(observer.signal.aborted,true);assert.equal(f.controller.sessions.size,0);
+  assert.equal(observer.signal.aborted,false);assert.equal(f.controller.sessions.size,1);
   assert.equal(f.sends,1);assert.equal(f.quiesces,0);
 });
 

@@ -1,3 +1,4 @@
+import {fixtureNavigator} from './helpers/web-locks-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -17,7 +18,7 @@ async function fixture(t){
   calls.push([msg.kind,id]);if(msg.kind==='selfrun.content.snapshot'&&gates.snapshot)await gates.snapshot;
   return{ok:true,nonce:'fixture-content-nonce',snapshot:{url:tabs.get(id)?.url,composer:true,responseFingerprint:'fresh-'+id}};
  }},scripting:{executeScript:async p=>{
-  const op=p.args?.[0];calls.push(['script',op]);if(op==='selfrun-attest')return[{documentId:p.target.documentIds[0],result:{url:tabs.get(p.target.tabId).url,mac:createHmac('sha256',config.installationKey).update(p.args[1]).digest('hex')}}];
+  const op=p.args?.[0];calls.push(['script',op]);if(p.args?.length===1)return[{documentId:'doc'+p.target.tabId,result:{url:tabs.get(p.target.tabId).url,mac:createHmac('sha256',config.installationKey).update(op).digest('hex')}}];if(op==='selfrun-attest')return[{documentId:p.target.documentIds[0],result:{url:tabs.get(p.target.tabId).url,mac:createHmac('sha256',config.installationKey).update(p.args[1]).digest('hex')}}];
   if(op==='submit'&&gates.script)await gates.script;
   return[{documentId:p.target.documentIds[0],result:{url:tabs.get(p.target.tabId)?.url,value:op==='submit'?{status:'SUBMITTED'}:true}}];
  }}};
@@ -27,43 +28,36 @@ async function fixture(t){
   if(url.endsWith('/result')){results.push(body);const gate=gates.result;if(gate?.stage==='headers')await gate.promise;return{ok:true,json:async()=>{if(gate?.stage==='body')await gate.promise;return{ok:true};}};}
   return{ok:true,json:async()=>({ok:true})};
  };
- const context=vm.createContext({chrome,fetch,setTimeout:timer,clearTimeout:clear,AbortController,TextEncoder,TextDecoder,crypto,URL,console});
+ const context=vm.createContext({navigator:fixtureNavigator(),chrome,fetch,setTimeout:timer,clearTimeout:clear,AbortController,TextEncoder,TextDecoder,crypto,URL,console});
  vm.runInContext(`(${controllerRuntime.toString()})(${JSON.stringify(config)})`,context);
  await wait(()=>reader);const send=m=>reader.enqueue(new TextEncoder().encode(JSON.stringify(m)+'\n'));send({kind:'welcome',connectionId:'c'});
  t.after(()=>{closed=true;for(const id of timers)clearTimeout(id);reader.close();});
  const command=(operation,payload={},deadlineAt=Date.now()+30000)=>{const id='command-'+(++commandId);send({kind:'command',id,operation,payload,deadlineAt,connectionId:'c'});return{id,result:()=>wait(()=>results.find(x=>x.id===id),operation+' result')};};
- return{command,send,calls,results,posts,gates,tabs,async target(){const r=await command('createTarget',{url:'https://chatgpt.com/c/owned-'+(tabId+1)}).result();return r.result.id;}};
+ return{command,send,calls,results,posts,gates,tabs,async target(){const id=++tabId,url='https://chatgpt.com/c/owned-'+id;tabs.set(id,{id,url});const challenge='fixture-challenge-'+id,targetId='ext:s:CDP'+id;const r=await command('registerTarget',{targetId,expectedUrl:url,challenge,mac:createHmac('sha256',config.installationKey).update(challenge).digest('hex')}).result();assert.equal(r.ok,true);return targetId;}};
 }
 
-for(const stage of ['headers','body'])test('a stalled result '+stage+' cannot block the next turn createTarget; reporting is bounded',async t=>{
- const f=await fixture(t),gate=deferred();f.gates.result={stage,promise:gate.promise};
- const old=f.command('createTarget',{url:'https://chatgpt.com/c/old'});await old.result();f.gates.result=null;
- const fresh=await f.command('createTarget',{url:'https://chatgpt.com/c/new'}).result();assert.equal(fresh.ok,true);assert.equal(f.calls.filter(x=>x[0]==='create').length,2);
- const post=f.posts.find(x=>x.body.id===old.id);assert.ok(post.signal,'transport deadline must abort the actual fetch');await wait(()=>post.signal.aborted,'HTTP reporting deadline');
- gate.resolve();await new Promise(r=>setImmediate(r));assert.equal(f.results.filter(x=>x.id===fresh.id).length,1);
+for(const stage of ['headers','body'])test('a stalled result '+stage+' cannot block another observation; reporting is bounded',async t=>{
+ const f=await fixture(t),target=await f.target(),gate=deferred();f.gates.result={stage,promise:gate.promise};
+ const old=f.command('snapshot',{targetId:target});await old.result();f.gates.result=null;
+ const fresh=await f.command('recoveryInput',{targetId:target}).result();assert.equal(fresh.ok,true);
+ const post=f.posts.find(x=>x.body.id===old.id);await wait(()=>post.signal.aborted,'HTTP reporting deadline');gate.resolve();
+ assert.equal(f.results.filter(x=>x.id===old.id).length,1);
 });
-test('a pending progress read cannot occupy receipt or due recovery-input execution',async t=>{
+test('a pending progress read cannot occupy recovery read or disposal',async t=>{
  const f=await fixture(t),target=await f.target(),gate=deferred();f.gates.snapshot=gate.promise;
  const progress=f.command('progress',{targetId:target});await wait(()=>f.calls.some(x=>x[0]==='selfrun.content.snapshot'));
- const receipt=await f.command('receiptSnapshot',{targetId:target,key:{intent_id:'i',generation:'g'}}).result();assert.equal(receipt.ok,true);
- const input=await f.command('recoveryInput',{targetId:target}).result();assert.equal(input.ok,true);assert.equal(input.result.composer,true);
- f.send({kind:'cancel',id:progress.id,connectionId:'c'});assert.equal((await progress.result()).ok,false);gate.resolve();
+ assert.equal((await f.command('recoveryInput',{targetId:target}).result()).ok,true);
+ assert.equal((await f.command('discardTarget',{targetId:target}).result()).result.discarded,true);
+ assert.equal((await progress.result()).ok,false);gate.resolve();
 });
-test('turn cancellation settles its old mutation while another active target and a new turn remain usable',async t=>{
- const f=await fixture(t),oldTarget=await f.target(),otherTarget=await f.target(),gate=deferred();
- await f.command('receiptArm',{targetId:oldTarget,key:{intent_id:'old',generation:'g1'}}).result();f.gates.script=gate.promise;
- const old=f.command('submit',{targetId:oldTarget});await wait(()=>f.calls.some(x=>x[0]==='script'&&x[1]==='submit'));
- f.gates.result={stage:'headers',promise:new Promise(()=>{})};f.send({kind:'cancel',id:old.id,connectionId:'c'});
- const cancelled=await old.result();assert.equal(cancelled.error.released,true);f.gates.result=null;
- assert.equal((await f.command('recoveryInput',{targetId:otherTarget}).result()).ok,true);
- const fresh=await f.command('createTarget',{url:'https://chatgpt.com/c/new-turn'}).result();assert.equal(fresh.ok,true);
- const blocked=await f.command('receiptArm',{targetId:oldTarget,key:{intent_id:'unsafe',generation:'g2'}}).result();assert.equal(blocked.error.code,'TARGET_MUTATION_PENDING');
- gate.resolve();await new Promise(r=>setImmediate(r));assert.equal(f.results.filter(x=>x.id===old.id).length,1,'late old execution cannot replace its cancellation response');assert.equal(f.results.filter(x=>x.id===fresh.id).length,1);
+test('cancelled observation cannot replace its cancellation response after completion',async t=>{
+ const f=await fixture(t),target=await f.target(),gate=deferred();f.gates.snapshot=gate.promise;
+ const old=f.command('progress',{targetId:target});await wait(()=>f.calls.some(x=>x[0]==='selfrun.content.snapshot'));
+ f.send({kind:'cancel',id:old.id,connectionId:'c'});assert.equal((await old.result()).ok,false);gate.resolve();await new Promise(r=>setImmediate(r));
+ assert.equal(f.results.filter(x=>x.id===old.id).length,1);assert.equal((await f.command('recoveryInput',{targetId:target}).result()).ok,true);
 });
-test('cancelled queued old-turn command never executes when an earlier command settles',async t=>{
- const f=await fixture(t),target=await f.target(),gate=deferred();await f.command('receiptArm',{targetId:target,key:{intent_id:'old',generation:'g'}}).result();f.gates.script=gate.promise;
- const first=f.command('submit',{targetId:target});await wait(()=>f.calls.some(x=>x[0]==='script'&&x[1]==='submit'));
- const queued=f.command('createTarget',{url:'https://chatgpt.com/c/obsolete'});f.send({kind:'cancel',id:queued.id,connectionId:'c'});f.send({kind:'cancel',id:first.id,connectionId:'c'});
- assert.equal((await queued.result()).ok,false);assert.equal(f.calls.filter(x=>x[0]==='create').length,1);gate.resolve();
- assert.equal((await f.command('createTarget',{url:'https://chatgpt.com/c/current'}).result()).ok,true);
+test('discarded target cannot regain authority from an old queued observation',async t=>{
+ const f=await fixture(t),target=await f.target();await f.command('discardTarget',{targetId:target}).result();
+ assert.equal((await f.command('progress',{targetId:target}).result()).error.code,'TARGET_NOT_OWNED');
+ const fresh=await f.target();assert.equal((await f.command('progress',{targetId:fresh}).result()).ok,true);
 });

@@ -1,3 +1,4 @@
+import { projection } from './helpers/legacy-projection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
@@ -20,7 +21,7 @@ function entryFixture() {
     connectTarget:async target=>({transport:'extension',close(){},
       async run(operation,payload={}) {
         if(operation==='initialize')return {};
-        if(operation==='navigate'){targets.get(target.id).url=payload.url;return {};}
+        if(operation==='navigate'){if(f.navigationError)throw f.navigationError;targets.get(target.id).url=payload.url;return {};}
         assert.equal(operation,'snapshot');
         if(f.snapshotError)throw f.snapshotError;
         const current=targets.get(target.id);
@@ -103,14 +104,14 @@ test('failed explicit readiness with confirmed owned-tab disposal can retry entr
   await f.controller.quiesceForStandby();
 });
 
-test('fresh preparation cannot accumulate owned entry tabs while prior cleanup is unconfirmed',async()=>{
-  const f=entryFixture();f.body.client_status='CREATE_REQUESTED';f.snapshotError=Error('synthetic snapshot unavailable');f.closeDenied=true;
+test('fresh preparation retries failed navigation on the same owned tab',async()=>{
+  const f=entryFixture();f.body.client_status='CREATE_REQUESTED';f.navigationError=Error('synthetic navigation unavailable');f.closeDenied=true;
   await f.ingest();const priorId=f.record().target_id;assert.equal(f.targets.size,1);
   for(let i=0;i<3;i++){await f.elapsed();await f.controller.tick(f.transport);}
   assert.equal(f.calls.prepare.at(-1).previousTargetId,priorId);
   assert.equal(f.calls.create.length,1);assert.equal(f.targets.size,1);assert.equal(f.sends,0);
-  f.closeDenied=false;f.snapshotError=null;await f.elapsed();await f.controller.tick(f.transport);
-  assert.equal(f.calls.create.length,2);assert.equal(f.targets.size,1);assert.equal(f.record().state,'PREPARED');
+  f.closeDenied=false;f.navigationError=null;await f.elapsed();await f.controller.tick(f.transport);
+  assert.equal(f.calls.create.length,1);assert.equal(f.targets.size,1);assert.equal(f.record().state,'PREPARED');
   assert.equal(f.sends,0);await f.controller.quiesceForStandby();
 });
 
@@ -136,7 +137,7 @@ test('client cancellation retires pending entry without replay from its old disp
   const oldBody=structuredClone(f.rows.get(f.path));f.body.client_status='CANCELLED';await f.ingest();
   await f.controller.ingest(f.path,oldBody,f.transport);
   for(let i=0;i<3;i++)await f.controller.tick(f.transport);
-  assert.equal(f.calls.create.length,1);assert.equal(f.record(),null);
+  assert.equal(f.calls.create.length,1);assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);
   assert.equal(f.controller.sessions.size,0);assert.equal(f.sends,0);
 });
 
@@ -186,8 +187,8 @@ test('matching explicit PAUSED to RUNNING app URL grants a new entry',async()=>{
 
 test('cold Drive lifecycle projection cannot import pending entry authorization',async()=>{
   const f=entryFixture();await f.existing();await f.controller.quiesceForStandby();
-  const body=structuredClone(f.rows.get(f.path));
-  body.lifecycle_record.browser_entry={control_epoch:1,conversation_url:f.probe.url};
+  const body=projection(f.record());
+  body.lifecycle_record.browser_entry={control_epoch:1,conversation_url:f.probe.url};f.rows.set(f.path,body);
   f.targets.clear();f.store=new MemoryStore();f.controller=f.recreate();
   await f.controller.ingest(f.path,body,f.transport);
   assert.equal(f.calls.resume.at(-1).automaticRecovery,true);assert.equal(f.calls.create.length,1);
@@ -205,7 +206,7 @@ test('successful explicit RESUME remains observation-only after a local server r
 test('cold PAUSED projection accepts the newer explicit app URL control as entry provenance',async()=>{
   const f=entryFixture();await f.existing();
   f.control={...f.control,state:'PAUSED',control_epoch:2};await f.controller.control(null,f.control,f.transport);
-  const body=structuredClone(f.rows.get(f.path));assert.equal(body.lifecycle_record.state,'PAUSED');
+  const body=projection(f.record());assert.equal(body.lifecycle_record.state,'PAUSED');
   f.targets.clear();f.store=new MemoryStore();f.controller=f.recreate();
   f.control={...f.control,state:'RUNNING',control_epoch:3,conversation_url:f.probe.url};
   await f.controller.ingest(f.path,body,f.transport);
@@ -216,7 +217,7 @@ test('cold PAUSED projection accepts the newer explicit app URL control as entry
 test('current app URL grants entry without consulting an old PAUSED audit',async()=>{
   const f=entryFixture();await f.existing();
   f.control={...f.control,state:'PAUSED',control_epoch:2};await f.controller.control(null,f.control,f.transport);
-  const staleBody=structuredClone(f.rows.get(f.path));f.targets.clear();await f.resume();
+  const staleBody=projection(f.record());f.targets.clear();await f.resume();
   const acceptedRevision=f.record().revision;await f.controller.quiesceForStandby();
   f.targets.clear();f.store=new MemoryStore();f.controller=f.recreate();await f.controller.initialize();
   f.controller.repository.history.audits.set(keyFor(f.body),acceptedRevision);
@@ -226,7 +227,7 @@ test('current app URL grants entry without consulting an old PAUSED audit',async
 });
 
 for(const state of ['STOPPED','CANCELLED'])test('stale cold '+state+' projection cannot veto a current explicit URL command',async()=>{
-  const f=entryFixture();await f.existing();const staleBody=structuredClone(f.rows.get(f.path));
+  const f=entryFixture();await f.existing();const staleBody=projection(f.record());
   await f.stop();await f.controller.cleanupTerminalResources();
   Object.assign(staleBody.lifecycle_record,{state,control_state:'STOPPED',control_epoch:2,revision:staleBody.lifecycle_record.revision});
   Object.assign(staleBody,{lifecycle_state:state,server_control_state:'STOPPED',server_control_epoch:2,client_status:'CANCELLED'});

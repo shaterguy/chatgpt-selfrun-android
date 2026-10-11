@@ -106,10 +106,10 @@ for(const [kind,code] of [['missing','RESULT_UNAVAILABLE'],['unreadable','RESULT
  await f.controller.tick(f.transport);
  assert.equal(f.record().error?.code,code);assert.doesNotMatch(f.record().error.message,/secret|private.invalid/);
  assert.ok(f.record().result_retry_at>=Date.now()+29000);assert.equal(f.sends,0);
- const before={reads,writes,revision:f.record().revision};
+ const before={reads,writes};
  for(let i=0;i<4;i++){await f.controller.tick(f.transport);await f.observe({status:'STALLED'});}
- assert.deepEqual({reads,writes,revision:f.record().revision},before,'unchanged unavailable Result does not busy-read or busy-write');
- assert.equal(f.rows.get(f.path).server_error_class,code);
+ assert.deepEqual({reads,writes},before,'unchanged unavailable Result does not busy-read or busy-write');
+ assert.equal(f.rows.get(f.path).server_error_class,undefined);
  assert.equal(f.record().last_progress_at,123);
  f.transport.readGoogleDocText=async id=>{reads++;return read(id);};f.result(false);
  if(kind==='missing')await f.controller.repository.ingest(f.path,{...f.body,result_document_id:'RESULT-1'});
@@ -117,11 +117,11 @@ for(const [kind,code] of [['missing','RESULT_UNAVAILABLE'],['unreadable','RESULT
  assert.equal(f.sends,1);assert.equal(f.record().error,null);
 });
 
-test('malformed Result reason differs from transport failure and committed proof still needs exact second read',async()=>{
+test('Result deadline check uses one strict read of the current document',async()=>{
  const f=fixture();await f.existing();f.result(true);
  let reads=0;const raw=f.docs.get('RESULT-1');
  const result=await readResult({readGoogleDocText:async()=>++reads===1?raw:raw+' '},f.record());
- assert.equal(reads,2);assert.equal(result.code,'RESULT_READBACK_CHANGED');assert.equal(result.state,'UNAVAILABLE');
+ assert.equal(reads,1);assert.equal(result.state,'COMMITTED');
 });
 
 test('canonical live resume attaches for observation even while composer is absent',async()=>{
@@ -206,25 +206,16 @@ test('genuine CDP loss during a recovery callback detaches and retries the same 
  assert.equal(f.resumes,2);assert.equal(f.prepares,0);assert.equal(f.sends,0);
 });
 
-test('Result failure at final pre-send check durably defers only a never-called recovery submission',async t=>{
- let now=1000000;const window=600000;t.mock.method(Date,'now',()=>now);
- const f=fixture();f.controller.config.stallAfterMs=window;await f.existing();await f.observe({});let invalidate=true;
- const write=f.transport.write;
- f.transport.write=async(name,body)=>{await write(name,body);if(invalidate&&body.lifecycle_record?.reason==='SUBMISSION_INTENT_DURABLE')f.docs.set('RESULT-1','invalid');};
- now+=window;await f.observe({status:'STALLED'});assert.equal(f.sends,0);assert.equal(f.record().intent.outcome,'ABSENT');
- assert.equal(f.record().intent.absence_proof,'NOT_SUBMITTED_RESULT_GATE');
- assert.equal(f.record().state,'POST_UNCERTAIN');assert.equal(f.record().error.code,'RESULT_JSON_INVALID');
- for(let i=0;i<3;i++) {
-  now+=30000;f.result(false);await f.controller.tick(f.transport);await f.observe({status:'STALLED'});
-  assert.equal(f.sends,0);assert.equal(f.record().intent.outcome,'ABSENT');assert.equal(f.record().intent.sends,0);
- }
- await f.controller.quiesceForStandby();f.controller=f.recreate();
- invalidate=false;f.result(false);now+=window;await f.controller.tick(f.transport);await f.observe({status:'STALLED'});
- assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
+test('recovery reads Result once at the deadline and does not add final pre-send business gates',async t=>{
+ let now=1000000;t.mock.method(Date,'now',()=>now);
+ const f=fixture();await f.existing();await f.observe({});let reads=0;const read=f.transport.readGoogleDocText;
+ f.transport.readGoogleDocText=async id=>{reads++;return read(id);};f.onQuiesce=()=>f.result(true);
+ now+=600000;await f.observe({status:'STALLED'});assert.equal(reads,1);assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
+ await f.controller.quiesceForStandby();
 });
 
 
-test('app WAITING fences a pending observation error publication',async()=>{
+test('app WAITING retains the observer through a pending observation error publication',async()=>{
  const f=fixture();await f.existing();await f.observe({});
  await f.controller.repository.move(keyFor(f.body),'STALLED','test stalled',{last_progress_at:0});
  f.browser.quiesce=async()=>{throw Error('Timed out waiting for stuck stream cleanup');};
@@ -234,7 +225,7 @@ test('app WAITING fences a pending observation error publication',async()=>{
  f.control={...f.control,state:'WAITING_USER_INTERVENTION',control_epoch:2};
  await f.controller.controlDurable(null,f.control,f.transport);
  const revision=f.record().revision;release.resolve();await pending;
- assert.equal(f.record().state,'PAUSED');assert.equal(f.record().revision,revision);
+ assert.equal(f.record().control_state,'WAITING_USER_INTERVENTION');assert.ok(f.record().revision>=revision);assert.equal(f.controller.sessions.size,1);assert.equal(f.sends,0);
 });
 
 test('restarted uncertain initial receipt uses paced CDP retry without resending',async()=>{

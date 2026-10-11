@@ -8,11 +8,11 @@ import { keyFor, transition } from '../src/lifecycle.mjs';
 import { DriveDispatchWatcher } from '../src/drive-watcher.mjs';
 import { fixture, MemoryStore, deferred } from './helpers/lifecycle-fixture.mjs';
 
-test('01 confirmed POST and exact Result commit retire observation',async()=>{
+test('01 confirmed POST and committed business Result retain observation',async()=>{
   const f=fixture();await f.ingest();assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
-  await f.observe({responseTextLength:1000});f.result(true);await f.observe({});
-  assert.equal(f.record(),null);
-  assert.equal(f.observations.at(-1).signal.aborted,true);
+  await f.observe({responseTextLength:1000});f.result(true);await f.stall();
+  assert.equal(f.record().result_state,'COMMITTED');
+  assert.equal(f.observations.at(-1).signal.aborted,false);
 });
 test('02 initial POST accepted but timed out is read back without duplicate',async()=>{
   const f=fixture();f.mode='accepted-timeout';await f.ingest();
@@ -44,16 +44,16 @@ test('08 unchanged streaming cursor stalls and quiesces before recovery',async()
 });
 test('09 recovery success is durably confirmed',async()=>{
   const f=fixture();await f.existing();await f.stall();assert.equal(f.record().recovery_count,1);
-  assert.equal(f.record().intent.outcome,'CONFIRMED');assert.equal(f.rows.get(f.path).recovery_count,1);
+  assert.equal(f.record().intent.outcome,'CONFIRMED');assert.equal(f.rows.get(f.path).recovery_count,undefined);
 });
 test('10 recovery POST timeout accepted readback prevents duplicate',async()=>{
   const f=fixture();f.mode='accepted-timeout';await f.existing();await f.stall();await f.controller.tick(f.transport);
   assert.equal(f.sends,1);assert.equal(f.record().intent.outcome,'CONFIRMED');
 });
-test('11 Result commit during recovery suppresses SEND and retires observation',async()=>{
+test('11 recovery uses its single deadline Result sample and keeps monitoring',async()=>{
   const f=fixture();f.onQuiesce=()=>f.result(true);await f.existing();await f.stall();
-  assert.equal(f.sends,0);assert.equal(f.record(),null);
-  assert.equal(f.record(),null);assert.equal(f.observations.at(-1).signal.aborted,true);
+  assert.equal(f.sends,1);assert.equal(f.record().state,'OBSERVING');
+  assert.equal(f.observations.at(-1).signal.aborted,false);
 });
 test('12 STOP during POST fences late completion',async()=>{
   const f=fixture();const gate=deferred(),entered=deferred();f.onSubmit=async()=>{entered.resolve();await gate.promise;};
@@ -87,14 +87,14 @@ test('17 duplicate concurrent scans do not duplicate prepare or submission',asyn
   assert.equal(f.prepares,1);assert.equal(f.sends,1);
 });
 test('18 pending event and Drive projection replay from canonical state after restart',async()=>{
-  const f=fixture();await f.existing();f.writeFail=true;
+  const f=fixture();await f.existing();delete f.rows.get(f.path).conversation_url;f.writeFail=true;
   await assert.rejects(f.controller.repository.flush({...f.transport,read:async p=>f.rows.get(p),write:async()=>{throw new Error('fail');}}).then(async()=>{
     await f.controller.repository.move(keyFor(f.body),'STALLED','test durable');
     await f.controller.repository.flush(f.transport);
   }));
   f.controller=f.recreate();f.writeFail=false;await f.controller.repository.flush(f.transport);
-  assert.equal(f.rows.get(f.path).lifecycle_state,'STALLED');
-  assert.equal(f.rows.get(f.path).lifecycle_revision,f.record().revision);
+  assert.equal(f.rows.get(f.path).conversation_url,f.probe.url);assert.equal(f.rows.get(f.path).lifecycle_state,undefined);
+  assert.equal(f.rows.get(f.path).lifecycle_revision,undefined);
 });
 test('19 existing conversation timeout keeps retrying beyond the former cap',async()=>{
   const f=fixture();f.attachError=new Error('Timed out waiting for existing conversation');await f.existing();
@@ -108,7 +108,7 @@ test('20 stalled canonical POST timeout stays uncertain with monotonic recovery 
   const f=fixture();f.mode='unknown';await f.existing();await f.stall();
   assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().intent.outcome,'UNKNOWN');assert.equal(f.record().recovery_count,1);
   await f.controller.tick(f.transport);assert.equal(f.sends,1);
-  assert.match(f.rows.get(f.path).server_error,/POST timeout/);
+  assert.match(f.record().error.message,/POST timeout/);assert.equal(f.rows.get(f.path).server_error,undefined);
 });
 test('disk failure cannot expose an unpersisted snapshot',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'selfrun-state-'));
@@ -161,7 +161,7 @@ test('Drive publishing preserves current client claim and prompt fields',async()
 });
 test('slow Drive publication cannot block local STOP persistence',async()=>{
   const f=fixture();await f.existing();
-  await f.controller.repository.move(keyFor(f.body),'STALLED','test publication');
+  await f.controller.repository.move(keyFor(f.body),'STALLED','test publication');delete f.rows.get(f.path).conversation_url;
   const gate=deferred(),entered=deferred();
   const publishing=f.controller.repository.flush({...f.transport,write:async()=>{entered.resolve();await gate.promise;}});
   await entered.promise;
@@ -183,12 +183,12 @@ test('real disk restart restores request and exact intent',async()=>{
     await f.controller.quiesceForStandby();await f.controller.repository.tail;await second.writeQueue;
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
-test('Drive durable record can restore without previous process memory',async()=>{
+test('Drive URL-only record restores monitoring without importing prior process retry state',async()=>{
   const f=fixture();await f.existing();f.mode='unknown';await f.stall();
   const projected=structuredClone(f.rows.get(f.path)),id=f.record().intent.id;
   await f.controller.quiesceForStandby();f.store=new MemoryStore();f.controller=f.recreate();
   await f.controller.ingest(f.path,projected,f.transport);
-  assert.equal(f.record().intent.id,id);assert.equal(f.sends,1);
+  assert.equal(f.record().intent,null);assert.equal(f.record().conversation_url,f.probe.url);assert.equal(f.sends,1);
 });
 
 test('legacy uncertain POST does not preserve executable state after STOP',async()=>{

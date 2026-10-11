@@ -1,6 +1,7 @@
-import os from 'node:os';import fs from 'node:fs';import fsp from 'node:fs/promises';import path from 'node:path';import {spawn} from 'node:child_process';import {randomUUID} from 'node:crypto';
+import os from 'node:os';import fs from 'node:fs';import fsp from 'node:fs/promises';import path from 'node:path';import {spawn} from 'node:child_process';import {randomUUID,createHash,createHmac} from 'node:crypto';
 import {canonicalUrl,digest} from '../lifecycle.mjs';
 import {applyExtensionClientProfile,extensionProfileFingerprint} from './extension-profile-bootstrap.mjs';
+import {connectServerAction,browserAction,attestController,purgeInactiveAction} from './server-action-session.mjs';
 import {ExtensionBridge} from './extension-bridge.mjs';import {buildExtensionFiles,EXTENSION_ID} from './extension-package.mjs';
 const fail=(message,code)=>Object.assign(new Error(message),{code});
 function processIdentity(pid){try{const stat=fs.readFileSync(`/proc/${pid}/stat`,'utf8'),fields=stat.slice(stat.lastIndexOf(')')+2).split(' ');return{pid:Number(pid),state:fields[0],startTime:fields[19],args:fs.readFileSync(`/proc/${pid}/cmdline`,'utf8').split('\0').filter(Boolean)};}catch{return null;}}
@@ -64,10 +65,16 @@ async function atomicJson(file,value,guard=()=>true){
   }finally{if(pending)await fsp.unlink(temp).catch(error=>{if(error.code!=='ENOENT')throw error;});}
 }
 export class ExtensionManager {
-  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),findOwnedBrowserRoots,...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.targetClosures=new Map();this.targetRemovalGeneration=0;this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.lastActivityAt=Date.now();this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.profileLeases=new Map();this.profileGapCount=0;this.profileContinuityUnverified=false;}
+  constructor(config,deps={}){this.config=config;this.deps={processIdentity,processExists,bootId,profileBusy,launch,readCdpMetadata,connectServerAction,browserAction,attestController,purgeInactiveAction,signalProcess:(pid)=>process.kill(pid,'SIGTERM'),delay:ms=>new Promise(r=>setTimeout(r,ms)),applyProfile:applyExtensionClientProfile,bridgeFactory:o=>new ExtensionBridge(o),findOwnedBrowserRoots,...deps};this.transport='extension';this.recoveryNavigationDisabled=true;this.owned=new Set();this.closing=new Set();this.guards={};this.queue=Promise.resolve();this.targetClosures=new Map();this.targetRemovalGeneration=0;this.bridge=null;this.journal=null;this.initPromise=null;this.stopped=false;this.lastActivityAt=Date.now();this.saveChain=Promise.resolve();this.profileInitializations=new Map();this.bootstrapCdpCommands=0;this.actionSessions=new Map();this.profileLeases=new Map();this.sessions=new Map();this.pendingAcquisitions=new Set();this.profileGapCount=0;this.profileContinuityUnverified=false;}
   #serial(fn){const p=this.queue.then(fn,fn);this.queue=p.catch(()=>{});return p;}
   #allowed(guard,...args){try{return !guard||guard(...args)===true;}catch{return false;}}
   setLifecycleGuards(guards={}){this.guards=guards;}
+  #activeOwnedTargets(){
+    const active=this.guards.activeTargetIds?.();
+    if(!Array.isArray(active))return [...this.owned];
+    for(const id of this.pendingAcquisitions)if(active.includes(id))this.pendingAcquisitions.delete(id);
+    return [...new Set([...active.filter(id=>this.owned.has(id)),...this.pendingAcquisitions])];
+  }
   isOwnedTarget(id){return this.owned.has(String(id));}
   async inspectCleanupDisposition(id){
     await this.#initialize();
@@ -100,7 +107,7 @@ export class ExtensionManager {
     this.saveChain=write;return write;
   }
   async #save(){
-    const owner=this.journal,snapshot=structuredClone({...owner,targets:[...this.owned]});
+    const owner=this.journal;owner.targets=[...this.owned];const snapshot=structuredClone(owner);
     await this.#persistJournal(snapshot,()=>this.journal===owner);
   }
   #processOwned(){return extensionProcessMatches(this.journal?.process,this.deps.processIdentity(this.journal?.process?.pid),this.deps.bootId());}
@@ -139,10 +146,17 @@ export class ExtensionManager {
       if(!this.#processExited())throw fail('Recorded browser identity changed or is unreadable','EXTENSION_OWNERSHIP_UNCERTAIN');
       this.journal={...this.journal,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};
     }
+    this.installationKey=createHash('sha256').update('selfrun-page-bootstrap:'+pair.capability+':'+this.journal.browserSessionId).digest('hex');
     this.journal.targetMetadata??={};this.owned=new Set(this.journal.targets||[]);
-    const bridge=this.deps.bridgeFactory({port:cfg.extensionBridgePort,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId});
+    const active=this.guards.activeTargetIds?.();
+    if(Array.isArray(active)){
+      for(const id of [...this.owned])if(!active.includes(id))this.owned.delete(id);
+      for(const id of Object.keys(this.journal.targetMetadata))if(!this.owned.has(id))delete this.journal.targetMetadata[id];
+    }
+    const bridge=this.deps.bridgeFactory({port:cfg.extensionBridgePort,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId,activeOwnedTargets:()=>this.#activeOwnedTargets()});
     await bridge.start();this.bridge=bridge;
-    bridge.on('targetRemoved',({targetId})=>{if(this.bridge!==bridge||!String(targetId).startsWith(`ext:${this.journal.browserSessionId}:`))return;this.targetRemovalGeneration++;if(this.owned.delete(targetId)){this.profileLeases.get(targetId)?.release();this.profileLeases.delete(targetId);this.closing.delete(targetId);delete this.journal.targetMetadata[targetId];void this.#save().catch(()=>{});}});
+    bridge.on('ready',()=>{void this.reconcileInactiveActions().catch(()=>{});});
+    bridge.on('targetRemoved',({targetId})=>{if(this.bridge!==bridge||!String(targetId).startsWith(`ext:${this.journal.browserSessionId}:`))return;this.targetRemovalGeneration++;const action=this.actionSessions.get(targetId);this.actionSessions.delete(targetId);action?.close();if(this.owned.delete(targetId)){this.pendingAcquisitions.delete(targetId);for(const session of this.sessions.get(targetId)||[])session.abort();this.sessions.delete(targetId);this.profileInitializations.delete(targetId);this.profileLeases.get(targetId)?.release();this.profileLeases.delete(targetId);this.closing.delete(targetId);delete this.journal.targetMetadata[targetId];void this.#save().catch(()=>{});}});
     // Runtime config contains the local capability; it is never committed or logged.
     await fsp.mkdir(this.extensionPath,{recursive:true,mode:0o700});
     const files=buildExtensionFiles({bridgeUrl:bridge.url,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId,fixtureOrigin:cfg.extensionFixtureOrigin||null});
@@ -178,9 +192,10 @@ export class ExtensionManager {
     try{this.deps.signalProcess(proof.pid);}catch(error){if(error.code!=='ESRCH')return false;}
     for(let n=0;n<100&&Date.now()<deadline;n++){if(this.#processExited())return true;if(!this.#processOwned())return false;await this.deps.delay(50);}return this.#processExited();
   }
-  async #ensure({signal,guard=()=>true}={}){
+  async #ensure({signal,guard=()=>true,observerReady=true}={}){
     const check=()=>{if(this.stopped||signal?.aborted||!this.#allowed(guard))throw Object.assign(fail('Browser acquisition cancelled','ABORT_ERR'),{name:'AbortError'});};
     check();await this.#initialize();check();if(this.#processOwned()){
+      if(!observerReady&&!this.journal.retiringProcess&&!this.journal.controllerStopPending)return;
       if(!this.journal.retiringProcess){try{
         // The retained controller reconnects with up to 10s backoff. Await its
         // authenticated hello using the existing cold-start budget, waking on
@@ -204,85 +219,132 @@ export class ExtensionManager {
     const args=['--headless=new','--single-process','--no-zygote','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',`--user-data-dir=${cfg.browserProfile}`,`--load-extension=${this.extensionPath}`,...(cfg.browserClientProfile==='android-webview'?['--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${cfg.browserPort}`]:[]),`--selfrun-extension-owner=${this.journal.ownerId}`,`chrome-extension://${EXTENSION_ID}/controller.html`];
     check();const child=await this.deps.launch(cfg.extensionChromiumCommand,args,{logFile:cfg.browserLogFile,env:{...process.env,TMPDIR:cfg.extensionTempDir}});
     const row=this.deps.processIdentity(child.pid),boot=this.deps.bootId();const proof={pid:child.pid,startTime:row?.startTime,bootId:boot,profile:cfg.browserProfile,extensionPath:this.extensionPath,ownerId:this.journal.ownerId,...(cfg.browserClientProfile==='android-webview'?{cdpPort:Number(cfg.browserPort)}:{})};
-    if(!extensionProcessMatches(proof,row,boot))throw fail('Started browser ownership is unproven','EXTENSION_OWNERSHIP_UNCERTAIN');this.journal.process=proof;await this.#save();await this.bridge.waitReady(20000,{signal,guard:()=>!this.stopped&&this.#allowed(guard)&&this.#processOwned()});check();
+    if(!extensionProcessMatches(proof,row,boot))throw fail('Started browser ownership is unproven','EXTENSION_OWNERSHIP_UNCERTAIN');this.journal.process=proof;await this.#save();if(observerReady)await this.bridge.waitReady(20000,{signal,guard:()=>!this.stopped&&this.#allowed(guard)&&this.#processOwned()});check();
   }
   ensureStarted(){this.lastActivityAt=Date.now();return this.#serial(()=>this.#ensure());}
-  createTarget(url='about:blank',options={}){this.lastActivityAt=Date.now();return this.#serial(async()=>{await this.#ensure(options);const target=await this.bridge.request('createTarget',{url,deferNavigation:this.config.browserClientProfile==='android-webview'},{signal:options.signal});if(!String(target?.id).startsWith(`ext:${this.journal.browserSessionId}:`))throw fail('Invalid target identity','EXTENSION_TARGET_INVALID');this.owned.add(target.id);this.journal.targetMetadata[target.id]={bootstrapUrl:target.bootstrapUrl||null,pendingUrl:target.pendingUrl||null,entryUrl:target.entryUrl||(url!=='about:blank'?url:null),profileFingerprint:null};await this.#save();if(this.config.browserClientProfile==='android-webview'){const deadline=Date.now()+1000,signal=AbortSignal.timeout(1000);for(let n=0;n<20&&Date.now()<deadline&&!this.journal.process.browserKey;n++){try{await this.#bindBrowserEndpoint(null,target.bootstrapUrl,signal,()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id));await this.#save();break;}catch{/* Initialization retries this proof; never strand an unreported owned target. */}await this.deps.delay(50);}}return target;});}
+  createTarget(url='about:blank',options={}){this.lastActivityAt=Date.now();return this.#serial(async()=>{
+    await this.#ensure({...options,observerReady:false});
+    const guard=()=>!this.stopped&&!options.signal?.aborted&&this.#allowed(options.guard)&&this.#processOwned();
+    let version;const acquisitionDeadline=Date.now()+20000;
+    for(let attempt=0;attempt<200&&guard();attempt++){
+      try{version=await this.deps.readCdpMetadata(Number(this.config.browserPort),'version',options);break;}
+      catch(error){if(!guard()||Date.now()>=acquisitionDeadline)throw error;await this.deps.delay(100);}
+    }
+    if(!guard()||!validBrowserKey(version?.webSocketDebuggerUrl,Number(this.config.browserPort)))throw fail('Owned action endpoint unavailable','ACTION_ENDPOINT_UNAVAILABLE');
+    if(this.journal.process.browserKey&&this.journal.process.browserKey!==version.webSocketDebuggerUrl)throw fail('Browser endpoint changed','EXTENSION_OWNERSHIP_UNCERTAIN');
+    if(!this.journal.process.browserKey){
+      let proven=false;
+      for(let attempt=0;attempt<200&&guard()&&Date.now()<acquisitionDeadline;attempt++){
+        const challenge=randomUUID(),expected=createHmac('sha256',this.installationKey).update(challenge).digest('hex');
+        const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',options);
+        for(const row of Array.isArray(rows)?rows:[])if(row.type==='page'&&row.url===`chrome-extension://${EXTENSION_ID}/controller.html`){
+          try{if(await this.deps.attestController({row,port:Number(this.config.browserPort),challenge,signal:options.signal})===expected){proven=true;break;}}catch{}
+        }
+        const after=await this.deps.readCdpMetadata(Number(this.config.browserPort),'version',options);
+        if(!guard()||after?.webSocketDebuggerUrl!==version.webSocketDebuggerUrl)throw fail('Browser endpoint ownership is unproven','EXTENSION_PROFILE_UNPROVEN');
+        if(proven)break;await this.deps.delay(100);
+      }
+      if(!proven)throw fail('Browser endpoint ownership is unproven','EXTENSION_PROFILE_UNPROVEN');
+      this.journal.process.browserKey=version.webSocketDebuggerUrl;
+    }
+    const bootstrapUrl=this.bridge.url+'/bootstrap/'+randomUUID();
+    let created;
+    try{created=await this.deps.browserAction({browserKey:version.webSocketDebuggerUrl,port:Number(this.config.browserPort),method:'Target.createTarget',params:{url:bootstrapUrl},signal:options.signal,guard});}
+    catch(error){
+      // One in-flight reconciliation only: recover the exact random bootstrap
+      // under the same proven browser. Nothing is queued or retained afterwards.
+      try{
+        const cleanupSignal=AbortSignal.timeout(2000);
+        const current=await this.deps.readCdpMetadata(Number(this.config.browserPort),'version',{signal:cleanupSignal});
+        if(this.#processOwned()&&current?.webSocketDebuggerUrl===version.webSocketDebuggerUrl){
+          for(let attempt=0;attempt<10&&!cleanupSignal.aborted;attempt++){
+            const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal:cleanupSignal});
+            const matches=rows.filter(row=>row.type==='page'&&row.url===bootstrapUrl);
+            if(matches.length===1){created={targetId:matches[0].id};break;}
+            if(matches.length>1)break;await this.deps.delay(100);
+          }
+        }
+      }catch{}
+      if(!created)throw error;
+    }
+    if(typeof created?.targetId!=='string'||!created.targetId)throw fail('Created target identity unavailable','ACTION_TARGET_UNAVAILABLE');
+    if(!guard()){
+      try{await this.deps.browserAction({browserKey:version.webSocketDebuggerUrl,port:Number(this.config.browserPort),method:'Target.closeTarget',params:{targetId:created.targetId},expectedUrl:bootstrapUrl,guard:()=>this.#processOwned()&&this.journal.process.browserKey===version.webSocketDebuggerUrl});}catch{}
+      throw fail('Created target owner ended','ABORT_ERR');
+    }
+    const id='ext:'+this.journal.browserSessionId+':'+created.targetId;
+    this.owned.add(id);this.pendingAcquisitions.add(id);
+    this.journal.targetMetadata[id]={bootstrapUrl,pendingUrl:url==='about:blank'?null:url,entryUrl:url==='about:blank'?null:url,profileFingerprint:null,cdpTargetId:created.targetId,observerTabId:null};await this.#save();
+    if(!guard()){await this.closeOwnedTarget(id,{guard:row=>!row||row.url===bootstrapUrl});if(this.owned.has(id))await this.discardOwnedTarget(id,{remote:false});throw fail('Created target owner ended','ABORT_ERR');}
+    return{id,type:'page',url:bootstrapUrl,bootstrapUrl,entryUrl:url==='about:blank'?null:url,entryPending:true};
+  });}
   async listExistingTargets(timeoutMs=1500){try{
     await this.#initialize();if(!this.#processOwned())return null;
-    const journal=this.journal,removalGeneration=this.targetRemovalGeneration;
-    const current=()=>this.journal===journal&&this.targetRemovalGeneration===removalGeneration;
-    await this.bridge.waitReady(timeoutMs);let targets=await this.bridge.request('listTargets',{}, {timeoutMs});
-    if(!Array.isArray(targets)||!current())return null;
-    for(const id of this.owned){
-      if(!current())return null;
-      if(targets.some(t=>t.id===id)||this.closing.has(id))continue;
-      if(await this.#restoreLostControllerTarget(id)){
-        targets=await this.bridge.request('listTargets',{}, {timeoutMs});
-        if(!Array.isArray(targets)||!current())return null;
-      }
-    }
-    for(const target of targets)if(String(target.id).startsWith(`ext:${journal.browserSessionId}:`))this.owned.add(target.id);
-    await this.#save();return current()?targets:null;
+    const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal:AbortSignal.timeout(timeoutMs)});
+    if(!Array.isArray(rows)||!this.#processOwned())return null;
+    return [...this.owned].flatMap(id=>{const meta=this.journal.targetMetadata[id],row=rows.find(r=>r.id===meta?.cdpTargetId&&r.type==='page');return row?[{...row,id,bootstrapUrl:meta.bootstrapUrl,entryUrl:meta.entryUrl,entryPending:row.url===meta.bootstrapUrl}]:[];});
   }catch{return null;}}
+  async reconcileInactiveActions(){
+    const owner=this.journal,proof=owner?.process;
+    if(this.stopped||!proof?.browserKey||!this.#processOwned())return;
+    const stillOwned=()=>!this.stopped&&this.journal===owner&&owner.process===proof&&this.#processOwned();
+    const version=await this.deps.readCdpMetadata(Number(this.config.browserPort),'version',{signal:AbortSignal.timeout(2000)});
+    if(!stillOwned()||version?.webSocketDebuggerUrl!==proof.browserKey)return;
+    const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal:AbortSignal.timeout(2000)});
+    for(const row of Array.isArray(rows)?rows:[]){
+      const id='ext:'+owner.browserSessionId+':'+row.id;
+      let allowedOrigin=false;try{allowedOrigin=new URL(row.url).origin===(this.config.extensionFixtureOrigin||'https://chatgpt.com');}catch{}
+      const inactive=()=>stillOwned()&&!this.owned.has(id)&&!this.pendingAcquisitions.has(id)&&!(this.guards.activeTargetIds?.()||[]).includes(id);
+      if(row.type!=='page'||!allowedOrigin||!inactive())continue;
+      try{await this.deps.purgeInactiveAction({row,port:Number(this.config.browserPort),installationKey:createHmac('sha256',this.installationKey).update(id).digest('hex'),guard:inactive});}catch{}
+    }
+  }
+  async #actionSession(target,signal){
+    let existing=this.actionSessions.get(target.id);if(existing&&!existing.closed)return existing;
+    const meta=this.journal.targetMetadata[target.id];
+    const guard=()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)&&this.#processOwned();
+    const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal});
+    const row=rows?.find(r=>r.id===meta?.cdpTargetId&&r.type==='page');if(!row||!guard())throw fail('Owned action target unavailable','TARGET_LOST');
+    const session=await this.deps.connectServerAction({row,port:Number(this.config.browserPort),installationKey:createHmac('sha256',this.installationKey).update(target.id).digest('hex'),guard,allowedOrigins:[this.config.extensionFixtureOrigin||'https://chatgpt.com'],onReconnect:()=>{void this.reconcileInactiveActions().catch(()=>{});},signal});
+    if(!guard()){session.close();throw fail('Action owner changed','TARGET_NOT_OWNED');}
+    this.actionSessions.set(target.id,session);void this.reconcileInactiveActions().catch(()=>{});return session;
+  }
+  async #registerObserver(target,signal){
+    const meta=this.journal.targetMetadata[target.id];if(!meta||!this.isOwnedTarget(target.id))throw fail('Observation target unavailable','TARGET_NOT_OWNED');
+    const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal}),row=rows?.find(r=>r.id===meta.cdpTargetId&&r.type==='page');
+    if(!row)throw fail('Observation target unavailable','TARGET_LOST');
+    this.actionSessions.get(target.id)?.verifyUrl(row.url);
+    await this.bridge.waitReady(5000,{signal,guard:()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)&&this.#processOwned()});
+    const challenge=randomUUID(),key=createHmac('sha256',this.installationKey).update(target.id).digest('hex'),mac=createHmac('sha256',key).update(challenge).digest('hex');
+    const registered=await this.bridge.request('registerTarget',{targetId:target.id,tabId:meta.observerTabId,expectedUrl:row.url,bootstrapUrl:meta.bootstrapUrl,challenge,mac},{signal});
+    if(!this.isOwnedTarget(target.id)||this.journal.targetMetadata[target.id]!==meta)throw fail('Observation owner changed','TARGET_NOT_OWNED');
+    meta.observerTabId=registered.tabId;await this.#save();return true;
+  }
   async #initializeTarget(target,payload,signal){
     const mode=this.config.browserClientProfile||'native';if(payload.clientProfile!==mode)throw fail('Browser client profile differs from configured contract','BROWSER_PROFILE_UNSUPPORTED');
-    if(mode==='native')return this.bridge.request('initialize',{...payload,targetId:target.id},{signal});
-    if(mode!=='android-webview'||this.config.extensionProfileBootstrap!=='cdp-emulation')throw fail('Explicit profile bootstrap selection is required','EXTENSION_PROFILE_BOOTSTRAP_REQUIRED');
-    const metadata=this.journal.targetMetadata[target.id],fingerprint=extensionProfileFingerprint(this.config);
-    if(!metadata)throw fail('Original target bootstrap proof is unavailable','EXTENSION_PROFILE_UNPROVEN');
-    const guard=()=>!signal?.aborted&&this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)&&this.#processOwned();
-    const priorLease=this.profileLeases.get(target.id);
-    if(metadata.profileFingerprint!==fingerprint||!priorLease?.isAlive()){
-      if(metadata.cdpTargetId&&!priorLease?.isAlive())this.profileContinuityUnverified=true;
-      priorLease?.release();this.profileLeases.delete(target.id);
-      let current;for(let attempt=0;attempt<40;attempt++){const inventory=await this.bridge.request('listTargets',{}, {signal});current=inventory.find(entry=>entry.id===target.id);if(!current||current.url===metadata.bootstrapUrl||(current.url&&current.url!=='about:blank')||metadata.cdpTargetId)break;await new Promise(resolve=>setTimeout(resolve,50));if(signal?.aborted)throw signal.reason||Error('Profile initialization aborted');}
-      if(!current)throw fail('Original profile target is unavailable','EXTENSION_PROFILE_UNPROVEN');
-      let rebind=null;
-      if(current.url!==metadata.bootstrapUrl){
-        if(!metadata.cdpTargetId)throw fail('Fresh initial target is required for profile bootstrap','EXTENSION_PROFILE_UNPROVEN');
-        const verified=await this.bridge.request('recoveryInput',{targetId:target.id},{signal});
-        if(verified?.url!==current.url)throw fail('Owned page document changed before profile restoration','EXTENSION_PROFILE_UNPROVEN');
-        rebind={cdpTargetId:metadata.cdpTargetId,expectedUrl:current.url};
-      }
-      if(!guard())throw fail('Target owner changed before profile bootstrap','EXTENSION_PROFILE_UNPROVEN');
-      const applied=await this.deps.applyProfile({target:{...target,bootstrapUrl:metadata.bootstrapUrl},config:this.config,signal,guard,rebind,bootstrapOrigin:this.bridge.url,
-        onLost:()=>{if(this.closing.has(target.id)||!this.isOwnedTarget(target.id))return;this.profileContinuityUnverified=true;this.profileGapCount++;console.warn(JSON.stringify({event:'EXTENSION_PROFILE_CONNECTION_LOST',target_id:target.id,page_preserved:true}));}});
-      if(!guard()){applied.release();throw fail('Target owner changed after profile bootstrap','EXTENSION_PROFILE_UNPROVEN');}
-      try{await this.#bindBrowserEndpoint(applied.cdpTargetId,current.url,signal,guard);if(!guard())throw fail('Target owner changed after endpoint binding','EXTENSION_PROFILE_UNPROVEN');}catch(error){applied.release();throw error;}
-      this.profileLeases.set(target.id,applied);this.bootstrapCdpCommands+=applied.cdpCommands;metadata.profileFingerprint=fingerprint;metadata.cdpTargetId=applied.cdpTargetId;await this.#save();
+    const metadata=this.journal.targetMetadata[target.id],guard=()=>!signal?.aborted&&this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)&&this.#processOwned();
+    if(mode==='android-webview'&&(!this.profileLeases.get(target.id)?.isAlive()||metadata?.profileFingerprint!==extensionProfileFingerprint(this.config))){
+      const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal}),row=rows?.find(r=>r.id===metadata?.cdpTargetId);
+      if(!row)throw fail('Profile target unavailable','TARGET_LOST');
+      if(row.url!==metadata.bootstrapUrl&&!metadata.profileFingerprint)throw fail('Fresh initial target is required for profile bootstrap','EXTENSION_PROFILE_UNPROVEN');
+      this.actionSessions.get(target.id)?.verifyUrl(row.url);
+      const applied=await this.deps.applyProfile({target:{...target,bootstrapUrl:metadata.bootstrapUrl},config:this.config,signal,guard,
+        rebind:row.url===metadata.bootstrapUrl?null:{cdpTargetId:metadata.cdpTargetId,expectedUrl:row.url},bootstrapOrigin:this.bridge.url,
+        onLost:()=>{if(guard()){this.profileContinuityUnverified=true;this.profileGapCount++;}}});
+      if(!guard()){applied.release();throw fail('Profile owner changed','TARGET_NOT_OWNED');}
+      this.profileLeases.get(target.id)?.release();this.profileLeases.set(target.id,applied);this.bootstrapCdpCommands+=applied.cdpCommands;
+      metadata.profileFingerprint=extensionProfileFingerprint(this.config);await this.#save();
     }
-    await this.bridge.request('initialize',{...payload,targetId:target.id,profileApplied:true},{signal});
-    if(metadata.pendingUrl){const targets=await this.bridge.request('listTargets',{}, {signal});const current=targets.find(t=>t.id===target.id);if(!current)throw fail('Initial target disappeared','TARGET_LOST');
-      if(current.url===metadata.bootstrapUrl)await this.bridge.request('navigate',{targetId:target.id,url:metadata.pendingUrl},{signal});
-      else if(current.url!==metadata.pendingUrl)throw fail('Initial target URL changed','TARGET_SCOPE_CHANGED');
-      metadata.pendingUrl=null;await this.#save();
-    }
+    let action;try{action=await this.#actionSession(target,signal);}catch(error){if(!guard()){this.profileLeases.get(target.id)?.release();this.profileLeases.delete(target.id);}throw error;}await action.install({signal,timeoutMs:5000});
+    if(metadata.pendingUrl){await action.run('navigate',{url:metadata.pendingUrl},{signal,timeoutMs:5000});metadata.pendingUrl=null;await this.#save();}
     return true;
   }
-  async #restoreLostControllerTarget(id,{signal}={}){
-    const meta=this.journal?.targetMetadata?.[id],proof=this.journal?.process;
-    if(!this.isOwnedTarget(id)||this.targetClosing(id)||!this.#processOwned()||!meta?.cdpTargetId||!proof?.browserKey)return false;
-    try{
-      const port=Number(this.config.browserPort),version=await this.deps.readCdpMetadata(port,'version',{signal});
-      if(version?.webSocketDebuggerUrl!==proof.browserKey)return false;
-      const rows=await this.deps.readCdpMetadata(port,'list',{signal});
-      const row=Array.isArray(rows)?rows.find(x=>x.id===meta.cdpTargetId&&x.type==='page'):null;
-      if(!row||typeof row.url!=='string')return false;
-      const bootstrap=row.url===meta.bootstrapUrl;
-      const expectedOrigin=new URL(this.config.extensionFixtureOrigin||'https://chatgpt.com').origin;
-      if(!bootstrap&&new URL(row.url).origin!==expectedOrigin)return false;
-      if(!this.#processOwned()||!this.isOwnedTarget(id)||this.targetClosing(id))return false;
-      const result=await this.bridge.request('restoreTarget',{
-        targetId:id,expectedUrl:row.url,bootstrapUrl:meta.bootstrapUrl||null,
-        pendingUrl:meta.pendingUrl||null,entryUrl:meta.entryUrl||null},{signal,timeoutMs:4000});
-      return result?.restored===true;
-    }catch{return false;}
-  }
+  async #restoreLostControllerTarget(id,{signal}={}){try{return await this.#registerObserver({id},signal);}catch{return false;}}
   async connectTarget(target){
     if(!this.isOwnedTarget(target?.id)||this.targetClosing(target.id))throw fail('Target is not available for this owner','TARGET_NOT_OWNED');
     const abort=new AbortController(),manager=this;
-    return{transport:'extension',close(){abort.abort();},async run(operation,payload={},options={}){
+    const sessions=this.sessions.get(target.id)||new Set();sessions.add(abort);this.sessions.set(target.id,sessions);
+    return{transport:'extension',close(){abort.abort();sessions.delete(abort);if(!sessions.size&&manager.sessions.get(target.id)===sessions)manager.sessions.delete(target.id);},async run(operation,payload={},options={}){
       if(abort.signal.aborted)throw Object.assign(fail('Extension session closed','ABORT_ERR'),{name:'AbortError'});
       manager.lastActivityAt=Date.now();
       if(!manager.isOwnedTarget(target.id)||manager.targetClosing(target.id))throw fail('Target ownership changed','TARGET_NOT_OWNED');
@@ -297,16 +359,12 @@ export class ExtensionManager {
         finally{if(onAbort)signal.removeEventListener('abort',onAbort);}
         if(operation==='initialize')return true;
       }
-      const command=()=>manager.bridge.request(operation,{...payload,targetId:target.id},
-        {...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});
-      try{return await command();}
-      catch(error){
-        // A rejected pre-effect command can be retried after exact target repair.
-        // Never retry a submission whose effect may already have been released.
-        if(error?.code!=='TARGET_NOT_OWNED'||error?.released===true||signal.aborted)throw error;
-        if(!await manager.#restoreLostControllerTarget(target.id,{signal}))throw error;
-        return command();
+      if(!['snapshot','progress'].includes(operation)){
+        const action=await manager.#actionSession(target,signal);
+        return action.run(operation,payload,{...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});
       }
+      await manager.#registerObserver(target,signal);
+      return manager.bridge.request(operation,{targetId:target.id},{...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});
     }};
   }
 
@@ -317,14 +375,14 @@ export class ExtensionManager {
     const alreadyRemoved=()=>this.journal===ownership?.journal&&this.targetRemovalGeneration>ownership.removalGeneration&&!this.owned.has(id)&&this.journal.targetMetadata[id]===undefined;
     const skip=reason=>({closed:false,absent:false,reason});
     if(!this.isOwnedTarget(id))return skip('unowned_target');if(!allowed())return skip('guard_rejected');
-    const targets=await this.listExistingTargets();if(alreadyRemoved())return authority()?{absent:true,reason:'already_removed'}:skip('guard_rejected');if(!targets)return skip('targets_unavailable');
+    const targets=await this.listExistingTargets();if(alreadyRemoved()){await this.saveChain;return authority()?{absent:true,reason:'already_removed'}:skip('guard_rejected');}if(!targets)return skip('targets_unavailable');
     const target=targets.find(t=>t.id===id);if(!allowed(target))return skip('guard_rejected');
-    if(!target){if(this.owned.delete(id))this.targetRemovalGeneration++;this.closing.delete(id);this.profileLeases.get(id)?.release();this.profileLeases.delete(id);delete this.journal.targetMetadata[id];await this.#save();return{absent:true,reason:'already_absent'};}
+    if(!target){await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});return{absent:true,reason:'already_absent'};}
     this.closing.add(id);
-    try{const result=await this.bridge.request('closeTarget',{targetId:id,expectedUrl:target.url},{timeoutMs:5000});
+    try{const out=await this.deps.browserAction({browserKey:this.journal.process.browserKey,port:Number(this.config.browserPort),method:'Target.closeTarget',params:{targetId:this.journal.targetMetadata[id].cdpTargetId},expectedUrl:target.url,guard:fresh=>allowed(fresh?{...target,url:fresh.url}:target)&&this.#processOwned()});const result={closed:out?.success===true};
       if(result?.closed||result?.absent){
         if(!sameOwner()&&!alreadyRemoved())return skip('guard_rejected');
-        if(this.owned.delete(id))this.targetRemovalGeneration++;this.profileLeases.get(id)?.release();this.profileLeases.delete(id);this.closing.delete(id);delete this.journal.targetMetadata[id];await this.#save();
+        if(this.owned.has(id))await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});else await this.saveChain;
       }
       return result;
     }catch{return skip('close_unconfirmed');}
@@ -336,6 +394,23 @@ export class ExtensionManager {
     work.finally(()=>{if(this.targetClosures.get(id)===work)this.targetClosures.delete(id);}).catch(()=>{});return work;
   }
   closeOwnedTarget(id,options={}){return this.#closeSerial(id,options);}
+  async discardOwnedTarget(id,{guard,remote=true}={}) {
+    const journal=this.journal;
+    if(!journal||!this.isOwnedTarget(id)||!this.#allowed(guard))return {localDiscarded:false,remoteCachePurged:false,reason:'ownership_guard_rejected'};
+    const action=this.actionSessions.get(id);this.actionSessions.delete(id);
+    // Revoke local authority before independent best-effort remote cache disposal.
+    this.owned.delete(id);this.closing.delete(id);this.pendingAcquisitions.delete(id);this.targetRemovalGeneration++;
+    delete journal.targetMetadata[id];this.profileLeases.get(id)?.release();this.profileLeases.delete(id);
+    for(const session of this.sessions.get(id)||[])session.abort();this.sessions.delete(id);this.profileInitializations.delete(id);
+    await this.#save();
+    let actionCachePurged=!action;
+    if(action)try{actionCachePurged=await action.dispose({timeoutMs:1500})===true;}catch{action.close();}
+    let remoteCachePurged=false;
+    if(remote&&this.journal===journal&&!this.owned.has(id)&&this.#allowed(guard))try{
+      const result=await this.bridge?.request('discardTarget',{targetId:id},{timeoutMs:2500});remoteCachePurged=result?.discarded===true&&result?.pageCachePurged===true;
+    }catch{}
+    return {localDiscarded:true,remoteCachePurged:remoteCachePurged&&actionCachePurged,actionCachePurged};
+  }
   async closeTarget(id,{guard}={}){const r=await this.#closeSerial(id,{guard,caller:typeof guard==='function'});return r.closed===true||r.absent===true;}
   async #finishReleasedBrowser(allowed){
     const current=this.journal,proof=current?.process,retiring=current?.retiringProcess;
@@ -373,5 +448,5 @@ export class ExtensionManager {
   });}
 
   async probe(){await this.ensureStarted();const targets=await this.listExistingTargets();return{ready:true,adapter:'extension',browser:'Chromium extension',protocolVersion:null,targets:targets?.length??null};}
-  async close(){this.stopped=true;for(const lease of this.profileLeases.values())lease.release();this.profileLeases.clear();await this.bridge?.close();}
+  async close(){this.stopped=true;for(const action of this.actionSessions.values())action.close();this.actionSessions.clear();for(const sessions of this.sessions.values())for(const session of sessions)session.abort();this.sessions.clear();for(const lease of this.profileLeases.values())lease.release();this.profileLeases.clear();await this.bridge?.close();}
 }

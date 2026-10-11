@@ -32,25 +32,8 @@ export function cancelledCleanupConfirmed(data,marker) {
   if(marker?.browser_cleanup)return ['CLOSED','ABSENT'].includes(marker.browser_cleanup.status);
   return marker?.browser_generation===0&&marker?.pre_submit_proof?.schema===1;
 }
-export function queueCancelledProjection(data,marker) {
-  if(marker?.state!=='CANCELLED'||marker.cancel_projection_schema===1||!marker.path)return;
-  data.completionOutbox??={};
-  data.completionOutbox[marker.key]={...Object.fromEntries(
-    ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at','control_epoch'].map(k=>[k,marker[k]])),
-    completion_reason:'CLIENT_CANCELLED'};
-}
 export function retireRecord(data,record) {
   const completedCleanup=queueTargetCleanup(data,record);
-  const control=data.controls?.[record.task_id];
-  const appDone=record.state==='STOPPED'&&record.control_state==='DONE'
-    &&control?.state==='DONE'&&keyFor(control)===record.key&&control.control_epoch===record.control_epoch;
-  const clientCancelled=record.state==='CANCELLED'&&record.reason==='CLIENT_CANCELLED_INGRESS';
-  if(record.reason==='RESULT_COMMITTED_TERMINAL'||appDone||clientCancelled) {
-    data.completionOutbox??={};
-    data.completionOutbox[record.key]={...Object.fromEntries(
-      ['key','path','task_id','turn_id','request_id','dispatch_attempt','revision','updated_at'].map(k=>[k,record[k]])),
-      ...(clientCancelled?{completion_reason:'CLIENT_CANCELLED',control_epoch:record.control_epoch}:appDone?{completion_reason:'APP_DONE',control_epoch:record.control_epoch,result_state:record.result_state||'UNKNOWN'}:{})};
-  }
   const marker=Object.fromEntries(['key','path','task_id','turn_id','request_id','dispatch_attempt','state','revision',
     'run_generation','browser_generation','control_epoch','control_state','updated_at','stop_status','result_recovery','pre_submit_proof','browser_open_pending'].map(k=>[k,record[k]]));
   if(completedCleanup)marker.browser_cleanup=completedCleanup;

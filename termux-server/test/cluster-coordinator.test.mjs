@@ -190,7 +190,7 @@ test('real standby quiesce stops sessions while preserving observation for a lat
   assert.equal(f.controller.sessions.size,0);
   assert.equal(transport.writes.get(cluster.memberFileName()).active_count,0);
   assert.equal(f.store.snapshot().activeCount,1);
-  assert.equal(f.record().result_state,'NOT_COMMITTED');
+  assert.equal(f.record().result_state,'UNKNOWN');
   transport.states=[];now+=1;await cluster.refresh();await f.controller.tick(f.transport);
   assert.equal(cluster.canDispatch(),true);
   assert.equal(f.controller.sessions.size,1);

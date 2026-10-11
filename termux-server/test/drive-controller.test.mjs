@@ -13,7 +13,7 @@ test('idle browser remains reusable for a full hour instead of being retired at 
 test('CREATE_REQUESTED prepares without bypassing the app send handshake',async()=>{
  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
  assert.equal(f.sends,0);assert.equal(f.record().state,'PREPARED');
- assert.equal(f.rows.get(f.path).server_status,'READY_TO_SUBMIT');
+ assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
  f.body.client_status='SEND_REQUESTED';await f.ingest();
  assert.equal(f.sends,1);assert.equal(f.record().intent?.outcome,'CONFIRMED');
 });
@@ -25,7 +25,7 @@ test('canonical conversation URL is projected before later submission uncertaint
  assert.equal(f.sends,1);
  assert.equal(f.record().conversation_url,'https://chatgpt.com/c/test-owned');
  assert.equal(f.rows.get(f.path).conversation_url,'https://chatgpt.com/c/test-owned');
- assert.equal(f.rows.get(f.path).server_status,'STARTED');
+ assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
  assert.equal(f.record().state,'OBSERVING');
  assert.equal(f.record().intent.outcome,'UNKNOWN');
  assert.equal(f.record().submission_confirmed,false);

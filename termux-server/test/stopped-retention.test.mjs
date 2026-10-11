@@ -1,3 +1,4 @@
+import { projection } from './helpers/legacy-projection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, deferred, MemoryStore } from './helpers/lifecycle-fixture.mjs';
@@ -30,8 +31,8 @@ test('APP STOP never invokes remote generation stop across ticks or restart',asy
  assert.deepEqual(io,{reads:0,writes:0});assert.equal(f.record(),null);
 });
 test('cold historical STOP import has no readback, browser, outbox or active request',async()=>{
- const f=fixture();await f.existing();await f.stop();
- const body=structuredClone(f.rows.get(f.path));body.lifecycle_state='STOPPED';body.server_control_state='STOPPED';
+ const f=fixture();await f.existing();const body=projection(f.record());await f.stop();
+ body.lifecycle_state='STOPPED';body.server_control_state='STOPPED';
  body.server_control_epoch=2;body.lifecycle_record={...body.lifecycle_record,state:'STOPPED',control_state:'STOPPED',control_epoch:2};
  f.rows.set(f.path,body);f.store=new MemoryStore();f.controller=f.recreate();const io=countIo(f);
  await f.controller.ingest(f.path,body,f.transport);await f.controller.tick(f.transport);
@@ -47,8 +48,8 @@ test('CANCELLED and DONE retire without browser reopen or repeated publication',
   assert.deepEqual(active(f),[]);assert.deepEqual(f.store.snapshot().lifecycle.outbox,{});
   assert.deepEqual(io,{reads:0,writes:0});
   if(state==='CANCELLED') {
-    assert.equal(f.rows.get(f.path).server_status,'CANCELLED');
-    assert.equal(f.rows.get(f.path).server_cancel_proof.never_submitted,false);
+    assert.equal(f.rows.get(f.path).server_status,f.body.server_status);
+    assert.equal(f.rows.get(f.path).server_cancel_proof,undefined);assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);
     await f.controller.tick(f.transport);assert.deepEqual(io,{reads:0,writes:0});
   }
   assert.equal(f.resumes,1);assert.equal(f.controller.sessions.size,0);
@@ -176,7 +177,7 @@ test('cold cancelled input cannot infer never-submitted from missing fields or o
 });
 test('cold import consumes a newer explicit app resume without raising the old retirement epoch',async()=>{
  for(const state of ['STOPPED','CANCELLED']){
-  const f=fixture();await f.existing();const body=structuredClone(f.rows.get(f.path));await f.controller.quiesceForStandby();
+  const f=fixture();await f.existing();const body=projection(f.record());await f.controller.quiesceForStandby();
   body.lifecycle_record.state=state;body.lifecycle_record.control_epoch=2;body.lifecycle_record.control_state='STOPPED';
   body.lifecycle_state=state;body.server_control_epoch=2;body.server_control_state='STOPPED';body.client_status='CANCELLED';
   f.control={...f.control,state:'RUNNING',control_epoch:3,conversation_url:f.probe.url};f.rows.set(f.path,body);

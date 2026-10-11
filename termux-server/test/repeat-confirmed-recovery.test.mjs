@@ -67,7 +67,7 @@ test('unchanged confirmed recovery sends one fresh intent per complete ten-minut
     assert.equal(ids.has(r.intent.id), false);
     assert.equal(generations.has(r.intent.receipt_generation), false);
     ids.add(r.intent.id); generations.add(r.intent.receipt_generation);
-    assert.equal(f.rows.get(f.path).lifecycle_record.intent.id, r.intent.id);
+    assert.equal(f.rows.get(f.path).lifecycle_record,undefined);assert.equal(f.store.snapshot().lifecycle.requests[keyFor(f.body)].intent.id,r.intent.id);
     await Promise.all([f.observe({status: 'RUNNING'}), f.observe({status: 'RUNNING'})]);
     assert.equal(f.sends, interval, 'same-time observations cannot flood');
   }
@@ -87,12 +87,17 @@ test('stale browser STALLED labels cannot bypass the renewed durable deadline', 
 });
 
 for (const source of ['local', 'Drive']) {
-  test(`${source} restart preserves confirmed attempt identity and remaining quiet time`, async t => {
+  test(`${source} restart preserves only its authorized local state or observed URL`, async t => {
     const {f, advance} = clockFixture(t);
     await start(f);
     advance(WINDOW); await f.observe({status: 'RUNNING'});
     const confirmed = f.record();
     advance(540000); await restart(f, source);
+    if(source==='Drive') {
+      assert.equal(f.record().intent,null);assert.equal(f.record().last_nudge_attempt_at,undefined);
+      advance(WINDOW-1);await f.controller.tick(f.transport);assert.equal(f.sends,1);
+      advance(1);await f.controller.tick(f.transport);await f.settle();assert.equal(f.sends,2);return;
+    }
     assert.equal(f.record().last_progress_at, confirmed.last_progress_at);
     assert.equal(f.record().last_nudge_attempt_at, confirmed.last_nudge_attempt_at);
     assert.deepEqual(f.record().intent, confirmed.intent);
@@ -236,16 +241,16 @@ test('old permanent no-progress recovery blocks resume the interval policy after
   assert.equal(f.sends, 2);
 });
 
-test('recovery attempt time and identity are durable locally and in Drive before browser submission', async t => {
+test('recovery attempt time and identity are durable locally and never sent to the app', async t => {
   const {f, advance, now} = clockFixture(t), submit = f.browser.submitIntent;
   let inspected = false;
   f.browser.submitIntent = async args => {
     const local = f.store.snapshot().lifecycle.requests[keyFor(f.body)];
     const remote = f.rows.get(f.path).lifecycle_record;
     assert.equal(local.last_nudge_attempt_at, now());
-    assert.equal(remote.last_nudge_attempt_at, now());
+    assert.equal(remote,undefined);
     assert.equal(local.intent.id, args.intent.id);
-    assert.equal(remote.intent.receipt_generation, args.intent.receipt_generation);
+    assert.equal(local.intent.receipt_generation,args.intent.receipt_generation);
     inspected = true;
     return submit(args);
   };

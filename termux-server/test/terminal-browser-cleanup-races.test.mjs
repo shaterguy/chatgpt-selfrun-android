@@ -35,7 +35,7 @@ test('CANCELLED commit racing target acquisition retains cleanup for an existing
   cancelSaveGate.resolve();await cancelling;await attaching;
   await f.controller.cleanupTerminalResources();
   assert.deepEqual(closed,['target-owned']);
-  assert.equal(f.record(),null);
+  assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);
   assert.equal(f.controller.sessions.size,0);
   assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
   assert.equal(f.sends,0);

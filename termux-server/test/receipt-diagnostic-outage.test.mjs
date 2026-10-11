@@ -11,7 +11,7 @@ test('a diagnostic publication outage cannot terminate the Node process',()=>{
     const entered=deferred(),release=deferred();
     f.browser.readSubmission=async()=>{entered.resolve();await release.promise;return {state:'UNKNOWN'};};
     await f.controller.tick(f.transport);await entered.promise;
-    f.writeFail=true;release.resolve();
+    delete f.rows.get(f.path).conversation_url;f.writeFail=true;release.resolve();
     await new Promise(resolve=>setTimeout(resolve,30));
     f.writeFail=false;await f.controller.quiesceForStandby();
     console.log('SURVIVED');

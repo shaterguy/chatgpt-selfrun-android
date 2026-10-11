@@ -1,3 +1,4 @@
+import { projection } from './helpers/legacy-projection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, deferred, MemoryStore } from './helpers/lifecycle-fixture.mjs';
@@ -57,14 +58,14 @@ for(const result of ['false','missing','read failure'])test('next-turn entry dis
   if(result!=='missing')assert.equal(f.docs.get('RESULT-1'),raw);
 });
 
-test('a pending old Result read cannot delay next-turn exact owned-tab disposal',async t=>{
+test('next-turn exact owned-tab disposal does not start a displaced business Result read',async t=>{
   const f=disposalFixture(),readGate=deferred();t.after(()=>{readGate.resolve();return f.controller.quiesceForStandby();});
   await f.existing();const read=f.transport.readGoogleDocText;let reading=false;
   f.transport.readGoogleDocText=async id=>{if(id==='RESULT-1'){reading=true;await readGate.promise;}return read(id);};
-  await f.next();await f.clean();assert.equal(reading,true);
+  await f.next();await f.clean();assert.equal(reading,false);
   assert.deepEqual(f.closed,['old-owned']);assert.equal(f.pages.has('new-owned'),true);
   assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.equal(f.sends,0);assert.equal(f.uiStops,0);
-  readGate.resolve();await Promise.all([...f.controller.resultRetirements.values()]);
+  readGate.resolve();assert.equal(f.controller.resultRetirements,undefined);
 });
 
 test('failed displaced cleanup retains exact source generations and retries only that tab after restart',async t=>{
@@ -181,22 +182,22 @@ for(const restart of [false,true])test('confirmed displaced disposal stays inert
   assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 
-for(const status of ['CLOSED','ABSENT'])test('a real later Result commit reuses exact displaced '+status+' evidence',async t=>{
+for(const status of ['CLOSED','ABSENT'])test('a later business Result commit cannot change displaced '+status+' evidence',async t=>{
   let now=1000000;t.mock.method(Date,'now',()=>now);
   const f=disposalFixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();
   if(status==='ABSENT')f.beforeClose=async id=>{if(id==='old-owned'){f.pages.delete(id);f.owned.delete(id);}};
   await f.next();await f.clean();
-  await Promise.all([...f.controller.resultRetirements.values()]);
+  assert.equal(f.controller.resultRetirements,undefined);
   const successful=structuredClone(f.controller.repository.data.browserCleanupOutcomes['old-owned']);
   assert.equal(successful.status,status);assert.equal(f.controller.repository.get(f.firstKey).state,'PAUSED');
   const close=f.browser.chromium.closeOwnedTarget;
   f.browser.chromium.closeOwnedTarget=async(id,options)=>!f.owned.has(id)?{closed:false,reason:'unowned_target'}:close(id,options);
-  f.result(true);now=f.controller.repository.get(f.firstKey).result_retirement_retry_at+1;
-  await f.controller.tick(f.transport);await Promise.all([...f.controller.resultRetirements.values()]);await f.clean();
+  f.result(true);now+=600001;
+  await f.controller.tick(f.transport);assert.equal(f.controller.resultRetirements,undefined);await f.clean();
   const committed=f.controller.repository.get(f.firstKey);
-  assert.equal(committed,null);
+  assert.equal(committed.state,'PAUSED');
   assert.deepEqual(f.controller.repository.data.browserCleanup,{},'real business retirement must not reopen disposed resource cleanup');
-  assert.equal(f.controller.repository.data.browserCleanupOutcomes['old-owned'],undefined);
+  assert.deepEqual(f.controller.repository.data.browserCleanupOutcomes['old-owned'],successful);
   assert.deepEqual(f.closed,status==='CLOSED'?['old-owned']:[]);assert.equal(f.pages.has('new-owned'),true);assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 
@@ -233,7 +234,7 @@ test('two fresh successor controls preserve the first original generation for a 
 
 test('cold Drive projection cannot grant displaced disposal on a same-successor metadata refresh',async t=>{
   const f=disposalFixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const body=structuredClone(f.rows.get(f.path)),source=body.lifecycle_record;
+  const body=projection(f.record()),source=body.lifecycle_record;
   Object.assign(source,{state:'PAUSED',control_epoch:2,control_state:'RUNNING',browser_cleanup_displacement:{
     target_id:'old-owned',browser_generation:source.browser_generation,run_generation:source.run_generation,
     control_epoch:2,successor_key:f.nextKey,
@@ -246,7 +247,7 @@ test('cold Drive projection cannot grant displaced disposal on a same-successor 
   assert.deepEqual(f.closed,[]);assert.equal(f.pages.has('old-owned'),true);assert.equal(f.uiStops,0);
 });
 
-for(const terminal of ['STOPPED','COMMITTED'])test('late '+terminal+' acquisition disposes a manager-proven pending owned bootstrap',async t=>{
+for(const terminal of ['STOPPED','DONE'])test('late '+terminal+' acquisition disposes a manager-proven pending owned bootstrap',async t=>{
   const f=disposalFixture(),opening=deferred(),gate=deferred();t.after(()=>{gate.resolve();return f.controller.quiesceForStandby();});
   const bootstrapUrl='http://127.0.0.1:19821/bootstrap/11111111-1111-1111-1111-111111111111';
   f.browser.chromium.isOwnedBootstrapTarget=(target,conversationDigest)=>f.owned.has(target.id)
@@ -259,11 +260,11 @@ for(const terminal of ['STOPPED','COMMITTED'])test('late '+terminal+' acquisitio
   };
   const first=f.existing();await opening.promise;
   if(terminal==='STOPPED')await f.stop();
-  else {f.result(true);await f.next();await Promise.all([...f.controller.resultRetirements.values()]);}
-  assert.equal(f.controller.repository.get(f.firstKey).state,terminal);
+  else {f.control={...f.control,state:'DONE',control_epoch:2};await f.controller.controlDurable(null,f.control,f.transport);}
+  assert.equal(f.controller.repository.get(f.firstKey),null);
   gate.resolve();await first;await f.clean();
   assert.deepEqual(f.closed,['old-owned']);assert.deepEqual(f.controller.repository.data.browserCleanup,{});
-  if(terminal==='COMMITTED')assert.equal(f.pages.has('new-owned'),true);
+  if(terminal==='DONE')assert.equal(f.pages.has('new-owned'),false);
   assert.equal(f.sends,0);assert.equal(f.uiStops,0);
 });
 

@@ -13,7 +13,7 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
   const profile=privateRefs(requestProfileDocumentStartSource())
     .replace('const nativeFetch=window.fetch.bind(window);','const nativeFetch=(...args)=>Reflect.apply(originalFetch,window,args);')
     .replace('window.fetch=async function','profileFetch=async function')
-    .replace('const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send,metadata=new WeakMap();','const nativeOpen=originalOpen,nativeSend=originalSend,metadata=new WeakMap();')
+    .replace('const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;let metadata=new WeakMap();','const nativeOpen=originalOpen,nativeSend=originalSend;let metadata=new WeakMap();')
     .replace('XMLHttpRequest.prototype.open=function','profileOpen=function')
     .replace('XMLHttpRequest.prototype.send=function','profileSend=function');
   const receipt=privateRefs(receiptObserverDocumentStartSource())
@@ -24,7 +24,7 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     newChat:newChatExpression(),input,sendReady:sendReadyExpression(),submit:submitExpression(),
     installProfile:profile,profileConfigure:configure,installReceipt:receipt,
     receiptArm:'receiptObserver.arm(payload.key)',receiptSnapshot:'receiptObserver?.snapshot(payload.key)||null',
-    receiptRetire:'receiptObserver?.retire(payload.key)',pauseAnimations:DECORATIVE_ANIMATION_PAUSE_SOURCE,quiesce:QUIESCE_EXPRESSION};
+    receiptRetire:'receiptObserver?.retire(payload.key)',terminalDispose:'terminalDispose()',pauseAnimations:DECORATIVE_ANIMATION_PAUSE_SOURCE,quiesce:QUIESCE_EXPRESSION};
   return `(()=>{'use strict';const version='selfrun-extension-page-v1';
     if(window.__selfrunExtensionPage)throw new Error('Unexpected page helper');
     const nativeNow=Date.now.bind(Date);
@@ -32,12 +32,20 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     const encoder=new TextEncoder(),encode=encoder.encode.bind(encoder),subtle=crypto.subtle,importKey=subtle.importKey.bind(subtle),sign=subtle.sign.bind(subtle);let attestKey=null;
     const attest=async challenge=>{if(typeof challenge!=='string'||challenge.length>200)throw new Error('Invalid attestation challenge');attestKey??=importKey('raw',encode(installationKey),{name:'HMAC',hash:'SHA-256'},false,['sign']);const bytes=new Uint8Array(await sign('HMAC',await attestKey,encode(challenge)));return Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('');};
     const originalFetch=window.fetch,xhr=typeof XMLHttpRequest==='function'?XMLHttpRequest.prototype:null;
-    const originalOpen=xhr?.open,originalSend=xhr?.send,activeXhr=new WeakSet();
+    const originalOpen=xhr?.open,originalSend=xhr?.send;let activeXhr=new WeakSet();
     let profileEngine=null,receiptObserver=null,profileFetch=null,receiptFetch=null,profileOpen=null,profileSend=null;
     let ownership=null,active=false,revoked=false,allowInitialConversation=false,armedKey=null,entryTransition=null;
     const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
     const conversation=url=>{try{return /\\/c\\/[A-Za-z0-9_-]+\\/?$/.test(new URL(url).pathname);}catch{return false;}};
-    const revoke=()=>{active=false;revoked=true;try{if(armedKey)receiptObserver?.retire(armedKey);}catch{}};
+    const terminalDispose=()=>{
+      active=false;revoked=true;
+      try{receiptObserver?.dispose();}catch{}
+      try{profileEngine?.dispose();}catch{}
+      ownership=null;armedKey=null;entryTransition=null;allowInitialConversation=false;
+      receiptObserver=null;profileEngine=null;profileFetch=null;receiptFetch=null;profileOpen=null;profileSend=null;activeXhr=new WeakSet();
+      return true;
+    };
+    const revoke=terminalDispose;
     const ownerMatches=()=>{if(revoked||!ownership)return false;const now=urlKey(location.href);if(now===ownership.url)return true;if(entryTransition?.deadline>nativeNow()&&entryTransition.allowed.includes(now)){ownership.url=now;return true;}
       if(allowInitialConversation&&!conversation(ownership.url)&&conversation(now)){ownership.url=now;allowInitialConversation=false;return true;}revoke();return false;};
     const ownerActive=()=>active&&ownerMatches();
@@ -64,8 +72,8 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
       if(operation==='submit')allowInitialConversation=!conversation(ownership.url);
       const result=actions[operation](payload);
       if(operation==='profileConfigure'){ownership.url=urlKey(expectedUrl);entryTransition=null;active=true;}
-      if(operation==='receiptArm')armedKey=payload.key;
-      if(operation==='receiptRetire')armedKey=null;
+      if(operation==='receiptArm')armedKey={intent_id:payload.key.intent_id,generation:payload.key.generation};
+      if(operation==='receiptRetire'&&armedKey?.intent_id===payload.key?.intent_id&&armedKey?.generation===payload.key?.generation)armedKey=null;
       return result;
     };
     Object.defineProperty(window,'__selfrunExtensionPage',{value:Object.freeze({version,attest,run}),writable:false,configurable:false});
@@ -75,19 +83,24 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
 export function contentRuntime(snapshot,recoveryInput) {
   'use strict';
   const nonce=crypto.randomUUID();let active=false,dirty=true,cache=null,observer=null;
+  let revoked=false;
+  const deactivate=()=>{active=false;observer?.disconnect();observer=null;cache=null;dirty=true;};
+  const dispose=()=>{revoked=true;deactivate();};
   const ownSender=sender=>sender.id===chrome.runtime.id&&String(sender.url||'').startsWith(chrome.runtime.getURL('controller.html'));
   const hello=()=>chrome.runtime.sendMessage({kind:'selfrun.content.hello',nonce}).catch(()=>{});
   const changed=()=>{if(!active||dirty)return;dirty=true;chrome.runtime.sendMessage({kind:'selfrun.content.dirty',nonce}).catch(()=>{});};
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(!ownSender(sender))return;
-    if(message?.kind==='selfrun.content.helloRequest'){void hello();reply({ok:true});return;}
+    if(message?.kind==='selfrun.content.helloRequest'){if(revoked)return;void hello();reply({ok:true});return;}
     if(message?.nonce!==nonce)return;
+    if(message.kind==='selfrun.content.dispose'){dispose();reply({ok:true});return;}
+    if(revoked){reply({ok:false,error:'Page content disposed'});return;}
     if(message.kind==='selfrun.content.activate') {
       active=true;dirty=true;
       if(!observer){observer=new MutationObserver(changed);observer.observe(document,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','style','hidden','aria-hidden','aria-disabled','disabled']});}
       reply({ok:true});return;
     }
-    if(message.kind==='selfrun.content.deactivate') {active=false;observer?.disconnect();observer=null;cache=null;dirty=true;reply({ok:true});return;}
+    if(message.kind==='selfrun.content.deactivate') {deactivate();reply({ok:true});return;}
     if(!active)return;
     try {
       if(!Number.isFinite(message.deadlineAt)||Date.now()>=message.deadlineAt)throw Error('Page observation expired');
@@ -99,7 +112,7 @@ export function contentRuntime(snapshot,recoveryInput) {
       } else if(message.kind==='selfrun.content.recoveryInput')reply({ok:true,nonce,snapshot:recoveryInput(),sampledAt:Date.now()});
     }catch(error){reply({ok:false,error:String(error?.message||error).slice(0,200)});}
   });
-  addEventListener('pagehide',()=>{active=false;observer?.disconnect();observer=null;},{once:true});
+  addEventListener('pagehide',dispose,{once:true});
   void hello();
 }
 

@@ -30,7 +30,7 @@ test('extension prepare initializes and navigates a new owned target without CDP
   assert.equal(result.target.id,'ext:7');assert.deepEqual(seen,['ext:7']);
   assert.equal(f.calls.filter(x=>x[0]==='navigate').length,1);
   assert.equal(f.calls.find(x=>x[0]==='navigate')[1].url,snapshot.url);
-  assert.equal(result.baseline.userCount,0);
+  assert.deepEqual(result.baseline,{});
 });
 test('extension submission preserves profile and immutable intent through named operations',async()=>{
   const f=fixture(),prompt='Synthetic prompt';
@@ -38,7 +38,7 @@ test('extension submission preserves profile and immutable intent through named 
     {op:'REMOVE',path:'conversation_origin'},{op:'REMOVE',path:'service_tier'}];
   const result=await f.browser.submitIntent({session:f.session,prompt,kind:'initial',
     intent:{id:'intent1',receipt_generation:'generation1',prompt},profileOperations:operations,guard:()=>true});
-  assert.equal(result.url,'https://chatgpt.com/c/extension-synthetic');
+  assert.deepEqual(result,{submitted:true});
   assert.equal(f.calls.filter(x=>x[0]==='submit').length,1);
   assert.deepEqual(f.calls.find(x=>x[0]==='profileConfigure')[1].operations,operations);
   assert.equal(f.calls.find(x=>x[0]==='receiptArm')[1].key.prompt,prompt);

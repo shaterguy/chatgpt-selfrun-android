@@ -1,3 +1,4 @@
+import { digest } from './lifecycle.mjs';
 import { inputFingerprint } from './retired-requests.mjs';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const fingerprint=file=>file?file.modTime+'|'+file.size:null;
@@ -20,6 +21,16 @@ export class DriveDispatchWatcher {
     this.files=new Map();this.jobs=new Map();this.controls=new Map();this.reads=new Map();this.readFailures=new Map();this.priority=new Map();this.failures=new Map();
     this.lanes=new Set();this.listed=false;this.completedScans=0;
     this.runningControls=new Map();
+    this.controller.onTerminalDiscard?.(records=>this.#discardTerminal(records));
+  }
+  #discardTerminal(records) {
+    for(const r of records) {
+      for(const file of [...this.files.values()])if(file.path===r.path||matches(file.path,{...r,schema:'selfrun-task-control-v1',state:'RUNNING'}))this.#forget(file.path);
+      const control=this.controller.controlForTask(r.task_id);
+      if(!control||control.turn_id===r.turn_id&&control.request_id===r.request_id) {
+        this.runningControls.delete(r.task_id);this.#forget('__SELFRUN_CONTROL__'+r.task_id+'.json');
+      }
+    }
   }
   status(){return {dispatchEnabled:!this.stopped&&this.canDispatch(),completedScans:this.completedScans,
     scanning:this.scanning,pendingFiles:this.jobs.size,pendingReads:this.reads.size,
@@ -34,7 +45,7 @@ export class DriveDispatchWatcher {
   }
   stop(){this.running=false;this.stopped=true;this.runningControls.clear();}
   #error(event,error) {console.error(JSON.stringify({event,error:String(error?.message||error).slice(0,300)}));}
-  #current(file) {return !this.stopped&&this.canDispatch()&&fingerprint(this.files.get(file.path))===fingerprint(file);}
+  #current(file) {return !this.stopped&&this.canDispatch()&&fingerprint(this.files.get(file.path))===fingerprint(file)&&this.files.get(file.path)?.workToken===file.workToken;}
   #tick() {
     if(this.stopped||!this.canDispatch()||this.ticking)return;
     this.ticking=true;
@@ -64,6 +75,7 @@ export class DriveDispatchWatcher {
       this.lanes.add(lane);
       const fp=fingerprint(file);
       const job=Promise.resolve().then(()=>this.#process(file)).then(()=>{
+        if(this.jobs.get(file.path)!==job)return;
         this.failures.delete(file.path);
         if(this.seen.get(file.path)===fp&&this.priority.get(file.path)===fp)this.priority.delete(file.path);
       },error=>{
@@ -71,10 +83,10 @@ export class DriveDispatchWatcher {
         if(this.#current(file))this.failures.set(file.path,{fp,attempts,retryAt:Math.max(error.watchRetryAt||0,Date.now()+Math.min(60000,1000*2**Math.min(attempts-1,6)))});
         throw error;
       }).finally(()=>{
-        this.jobs.delete(file.path);this.lanes.delete(lane);
+        if(this.jobs.get(file.path)===job){this.jobs.delete(file.path);this.lanes.delete(lane);}
         this.#drain();
       });
-      this.jobs.set(file.path,job);
+      job.watchLane=lane;this.jobs.set(file.path,job);
       void job.catch(error=>this.#error('DRIVE_WATCH_FILE_ERROR',error));
     }
   }
@@ -98,7 +110,7 @@ export class DriveDispatchWatcher {
         if((this.listed&&fingerprint(this.files.get(file.path))!==fingerprint(file))
           ||(taskId&&activeTasks.has(taskId)))this.priority.set(file.path,fingerprint(file));
       }
-      this.files=new Map(files.map(file=>[file.path,file]));this.listed=true;
+      this.files=new Map(files.map(file=>[file.path,{...file,workToken:this.files.get(file.path)?.workToken||{}}]));this.listed=true;
       for(const map of [this.seen,this.inputs,this.deferred,this.priority,this.failures,this.readFailures])for(const path of map.keys())if(!this.files.has(path))map.delete(path);
       for(const task of this.runningControls.keys())if(!this.files.has('__SELFRUN_CONTROL__'+task+'.json'))this.runningControls.delete(task);
       this.#drain();
@@ -118,13 +130,16 @@ export class DriveDispatchWatcher {
     const fp=fingerprint(this.files.get(path)),failed=this.readFailures.get(path);
     if(failed?.fp===fp&&failed.retryAt>Date.now())return Promise.reject(failed.error);
     const job=Promise.resolve().then(()=>this.transport.read(path)).then(body=>{
-      this.readFailures.delete(path);return body;
+      if(this.reads.get(path)===job)this.readFailures.delete(path);return body;
     },error=>{
+      if(this.reads.get(path)!==job)throw error;
       throw this.#pace(path,fp,error,failed);
-    }).finally(()=>this.reads.delete(path));
+    }).finally(()=>{if(this.reads.get(path)===job)this.reads.delete(path);});
     this.reads.set(path,job);return job;
   }
   #forget(path) {
+    const job=this.jobs.get(path);if(job){this.jobs.delete(path);this.lanes.delete(job.watchLane);}
+    this.reads.delete(path);this.controls.delete(path);
     this.files.delete(path);
     for(const map of [this.seen,this.inputs,this.deferred,this.priority,this.failures,this.readFailures])map.delete(path);
   }
@@ -141,7 +156,7 @@ export class DriveDispatchWatcher {
   async #control(file,unlisted=false) {
     if(this.controls.has(file.path))return this.controls.get(file.path);
     const fp=unlisted?null:fingerprint(file),failed=this.readFailures.get(file.path);
-    const current=()=>unlisted?(!this.stopped&&this.canDispatch()&&!this.files.has(file.path)):this.#current(file);
+    const current=()=>this.controls.get(file.path)===job&&(unlisted?(!this.stopped&&this.canDispatch()&&!this.files.has(file.path)):this.#current(file));
     const job=(async()=>{
       const body=await this.#read(file.path);
       if(!current())return;
@@ -153,9 +168,10 @@ export class DriveDispatchWatcher {
       if(!unlisted&&body.state==='RUNNING')this.seen.set(file.path,fp);
       return body;
     })().catch(error=>{
+      if(this.controls.get(file.path)!==job)return;
       if(error.watchRetryAt>Date.now())throw error;
       throw this.#pace(file.path,fp,error,failed);
-    }).finally(()=>this.controls.delete(file.path));
+    }).finally(()=>{if(this.controls.get(file.path)===job)this.controls.delete(file.path);});
     this.controls.set(file.path,job);return job;
   }
   async #process(file) {
@@ -181,7 +197,7 @@ export class DriveDispatchWatcher {
     if(!matches(file.path,control)||control.task_id!==body.task_id||control.turn_id!==body.turn_id||control.request_id!==body.request_id){this.#forget(file.path);return;}
     const controlFp=fingerprint(this.files.get(controlPath));
     this.deferred.delete(file.path);
-    const input=inputFingerprint(body);
+    const input=digest(inputFingerprint(body));
     if(this.inputs.get(file.path)===input){this.seen.set(file.path,fp);return;}
     const accepted=await (this.controller.ingestDurable?.(file.path,body,this.transport)??this.controller.ingest(file.path,body,this.transport));
     if(!this.#current(file))return;

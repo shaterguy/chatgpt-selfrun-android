@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {buildContentSource,buildPageRuntimeSource} from './extension-page-source.mjs';
+import {buildContentSource} from './extension-page-source.mjs';
 import {controllerRuntime} from './extension-controller-source.mjs';
 export {buildPageRuntimeSource} from './extension-page-source.mjs';
 export const EXTENSION_ID='pcjeefeplaheaablkijhaanjcjknnelj';
@@ -13,11 +13,11 @@ export function buildExtensionFiles({bridgeUrl,ownerId,capability,browserSession
   const installationKey=createHash('sha256').update('selfrun-page-bootstrap:'+capability+':'+browserSessionId).digest('hex');
   const manifest={manifest_version:3,name:'SelfRun browser adapter',version:'1.0.2',key:PUBLIC_KEY,
     permissions:['scripting','storage'],host_permissions:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*','http://127.0.0.1/*'],
-    content_scripts:[{matches:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*'],js:['page-runtime.js'],run_at:'document_start',world:'MAIN',all_frames:false},{matches:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*'],js:['content.js'],run_at:'document_start',all_frames:false}],
+    content_scripts:[{matches:fixtureOrigin?['http://127.0.0.1/*']:['https://chatgpt.com/*'],js:['content.js'],run_at:'document_start',all_frames:false}],
     content_security_policy:{extension_pages:"script-src 'self'; object-src 'self'"}};
   const config={bridgeUrl:bridge.origin,ownerId,capability,browserSessionId,targetOrigins,installationKey};
   return {'manifest.json':JSON.stringify(manifest,null,2)+'\n',
     'controller.html':'<!doctype html><meta charset="utf-8"><title>SelfRun controller</title><script src="controller.js"></script>\n',
     'controller.js':`(${controllerRuntime.toString()})(${JSON.stringify(config)});\n`,
-    'content.js':buildContentSource(),'page-runtime.js':buildPageRuntimeSource({installationKey})};
+    'content.js':buildContentSource()};
 }

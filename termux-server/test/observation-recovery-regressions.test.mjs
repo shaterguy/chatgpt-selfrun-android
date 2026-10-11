@@ -14,7 +14,7 @@ test('response progress survives eleven minutes of Result transport failure with
     await f.observe({});
     assert.equal(f.record().last_progress_at,now);
     assert.equal(f.record().cursor.responseFingerprint,f.probe.responseFingerprint);
-    assert.equal(f.record().error.code,'RESULT_READ_FAILED');
+    assert.equal(f.record().error,null);
     assert.equal(f.sends,0);assert.equal(f.quiesces,0);
   }
   f.transport.readGoogleDocText=read;now+=31000;
@@ -22,14 +22,14 @@ test('response progress survives eleven minutes of Result transport failure with
   assert.equal(f.sends,0);assert.equal(f.quiesces,0);assert.equal(f.record().error,null);
 });
 
-test('progress within the Result retry window is retained without rereading or clearing its error',async t=>{
+test('ordinary progress does not read Result or create an availability error',async t=>{
   let now=1700000000000;t.mock.method(Date,'now',()=>now);
   const f=fixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();await f.observe({});
   let reads=0;f.transport.readGoogleDocText=async()=>{reads++;throw Error('unavailable');};
   now+=1000;await f.observe({});const firstReads=reads;
   now+=1000;await f.observe({responseFingerprint:'during-retry',responseTextLength:1000});
   assert.equal(reads,firstReads);assert.equal(f.record().last_progress_at,now);
-  assert.equal(f.record().error.code,'RESULT_READ_FAILED');assert.equal(f.sends,0);
+  assert.equal(f.record().error,null);assert.equal(f.sends,0);
 });
 
 test('normal identical observation clears its own outage warning without inventing progress',async t=>{
@@ -41,7 +41,7 @@ test('normal identical observation clears its own outage warning without inventi
   const progressAt=f.record().last_progress_at;
   now+=2000;await f.controller.tick(f.transport);await f.settle();await f.observe({});
   assert.equal(f.record().error,null);assert.equal(f.record().last_progress_at,progressAt);
-  assert.equal(f.rows.get(f.path).server_error_class,null);assert.equal(f.sends,0);
+  assert.equal(f.rows.get(f.path).server_error_class,undefined);assert.equal(f.sends,0);
 });
 
 test('normal identical observation does not erase a composer warning',async t=>{
@@ -50,7 +50,7 @@ test('normal identical observation does not erase a composer warning',async t=>{
   await f.observe({});assert.equal(f.record().error.code,'COMPOSER_UNAVAILABLE');
 });
 
-test('exact committed Result is consumed even when the observed page has left the owned conversation',async t=>{
+test('observed ownership mismatch blocks input without business Result reads',async t=>{
   const f=fixture();let closed=0;
   f.browser.chromium={isOwnedTarget:()=>true,closeOwnedTarget:async(id,{guard})=>{
     if(!guard({id,url:'https://chatgpt.com/c/other'}))return {closed:false};closed++;return {closed:true};
@@ -58,7 +58,7 @@ test('exact committed Result is consumed even when the observed page has left th
   f.controller=f.recreate();t.after(()=>f.controller.quiesceForStandby());await f.existing();await f.observe({});
   f.result(true);await f.observe({url:'https://chatgpt.com/c/other'});await f.controller.tick(f.transport);await f.settle();
   await f.controller.cleanupTerminalResources();await f.controller.flush(f.transport);
-  assert.equal(f.rows.get(f.path).lifecycle_state,'COMMITTED');assert.equal(f.rows.get(f.path).server_status,'COMPLETED');
+  assert.equal(f.record().state,'BLOCKED');assert.equal(f.record().error.code,'IDENTITY_MISMATCH');assert.equal(f.rows.get(f.path).lifecycle_state,undefined);
   assert.equal(f.sends,0);assert.equal(f.quiesces,0);assert.equal(closed,0);
   assert.equal(f.controller.sessions.size,0);
 });

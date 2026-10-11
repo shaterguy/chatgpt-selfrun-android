@@ -14,6 +14,7 @@ export class TerminalBrowserCleanup {
         return !!entry&&this.canClose(entry,target);
       },
       canRelease:()=>this.canRelease(),
+      activeTargetIds:()=>this.repository.records().filter(r=>!retiredState(r)).map(r=>r.target_id).filter(Boolean),
     });
   }
   currentControls() {
@@ -28,8 +29,8 @@ export class TerminalBrowserCleanup {
     const prior=this.controls.get(control.task_id);
     if(!prior||control.control_epoch>=prior.control_epoch)this.controls.set(control.task_id,structuredClone(control));
   }
-  canClose(entry,target=null) {
-    if(!this.available())return false;
+  canClose(entry,target=null,{ignoreAvailability=false}={}) {
+    if(!ignoreAvailability&&!this.available())return false;
     if(target&&entry.conversation_digest&&digest(canonicalUrl(target.url))!==entry.conversation_digest
       &&!(target.id===entry.target_id&&this.chromium?.isOwnedBootstrapTarget?.(target,entry.conversation_digest)===true))return false;
     const data=this.repository.data,marker=data.retired[entry.key],candidate=this.currentControls().get(entry.task_id),control=this.repository.controlQuarantined(candidate)?null:candidate;
@@ -46,7 +47,8 @@ export class TerminalBrowserCleanup {
         &&digest(canonicalUrl(body.conversation_url))===entry.conversation_digest);
     // A known old conversation can be disposed independently of the new watch.
     // A preparation target without a conversation retains the newer-control fence.
-    const independentCleanup=consumed(marker)||displaced||resource&&!!entry.conversation_digest;
+    const consumedResource=consumed(marker)||resource&&['COMMITTED','COMPLETED'].includes(entry.terminal_state);
+    const independentCleanup=consumedResource||displaced||resource&&!!entry.conversation_digest;
     // A normal same-request app retry refresh is not authority for a new target.
     // Only a locally proven unsent cancellation may finish its owned cleanup.
     const cancelledRefresh=body=>marker?.state==='CANCELLED'&&marker.never_submitted===true
@@ -55,7 +57,7 @@ export class TerminalBrowserCleanup {
     if(independentCleanup) {
       // A successor owns its own resources, not every target belonging to this task.
       for(const c of this.currentControls().values())if(!this.repository.controlQuarantined(c)&&!['STOPPED','DONE'].includes(c.state)
-        &&!consumed(this.repository.get(keyFor(c)))&&conflicts(c))return false;
+        &&!consumed(this.repository.get(keyFor(c)))&&!(consumedResource&&keyFor(c)===entry.key)&&conflicts(c))return false;
     } else if(control&&control.control_epoch>entry.control_epoch&&!['STOPPED','DONE'].includes(control.state)&&!cancelledRefresh(control))return false;
     // HTTP acceptance is durable before the lifecycle control catches up.
     for(const body of Object.values(this.stateStore.snapshot().httpIngress?.files||{})) {
@@ -119,7 +121,11 @@ export class TerminalBrowserCleanup {
     return true;
   }
   run({force=true}={}) {
-    if(!this.chromium?.closeOwnedTarget||!this.available()&&!this.idleReleaseAllowed())return Promise.resolve();
+    if(!this.chromium?.closeOwnedTarget&&!this.chromium?.discardOwnedTarget) {
+      for(const [id,entry]of this.repository.resourceCleanups)if(entry.terminal_state)this.repository.resourceCleanups.delete(id);
+      this.currentControls();return Promise.resolve();
+    }
+    if(!this.available()&&!this.idleReleaseAllowed()&&!this.repository.cleanupEntries().some(entry=>entry.terminal_state))return Promise.resolve();
     if(!force&&Date.now()<this.nextAttempt)return this.running||Promise.resolve();
     this.requested=true;
     if(this.running)return this.running;
@@ -127,9 +133,10 @@ export class TerminalBrowserCleanup {
       do {
         this.requested=false;
         let quarantined=false,resourceConfirmed=false;
-        if(this.available())for(const entry of this.repository.cleanupEntries()) {
+        for(const entry of this.repository.cleanupEntries()) {
+          if(!this.available()&&!entry.terminal_state)continue;
           let disposition;
-          try{disposition=this.chromium?.inspectCleanupDisposition
+          try{disposition=!this.available()?null:this.chromium?.inspectCleanupDisposition
             ?await this.chromium.inspectCleanupDisposition(entry.target_id)
             :this.chromium?.cleanupDisposition?.(entry.target_id);}catch{disposition=null;}
           if(this.canQuarantine(entry,disposition)) {
@@ -138,12 +145,15 @@ export class TerminalBrowserCleanup {
             continue;
           }
           let result;
-          if(!this.canClose(entry))result={reason:'guard_rejected'};
+          if(!this.available()||!this.chromium?.closeOwnedTarget)result={reason:'unavailable'};
+          else if(!this.canClose(entry))result={reason:'guard_rejected'};
           else try {
             result=await this.chromium.closeOwnedTarget(entry.target_id,{guard:target=>this.canClose(entry,target)});
           } catch(error) {
             result={reason:'close_error',error:String(error?.message||error).slice(0,300)};
           }
+          if(entry.terminal_state)try{await this.chromium?.discardOwnedTarget?.(entry.target_id,{guard:()=>this.canClose(entry,null,{ignoreAvailability:true}),remote:this.available()});}
+          catch{/* This one finalization is consumed even if local or remote disposal failed. */}
           const status=result?.closed===true?'CLOSED':result?.absent===true?'ABSENT':'PENDING';
           resourceConfirmed||=status==='CLOSED'||status==='ABSENT';
           await this.repository.recordTargetCleanup(entry,{status,observed_at_ms:Date.now(),

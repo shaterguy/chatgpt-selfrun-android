@@ -4,6 +4,8 @@ import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
 import { keyFor, newIntent, initialRecord, preparationInputDigest } from '../src/lifecycle.mjs';
 
+const cancelledProof=f=>{assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);assert.equal(f.record().intent,undefined);assert.deepEqual(f.controller.repository.records(),[]);};
+
 test('Page.enable preparation failure stays provably unsubmitted through cancellation and higher attempt', async()=>{
   const f=fixture();f.body.client_status='CREATE_REQUESTED';
   const closed=[],calls=[];
@@ -12,15 +14,15 @@ test('Page.enable preparation failure stays provably unsubmitted through cancell
     isOwnedTarget:id=>id==='failed-owned',
     connectTarget:async()=>({call:async method=>{calls.push(method);throw Error('CDP command timeout: Page.enable');},close(){}}),
     closeTarget:async(id,{guard})=>{if(guard())closed.push(id);return {closed:true};},
-    closeOwnedTarget:async id=>({absent:closed.includes(id)}),
+    closeOwnedTarget:async id=>{closed.push(id);return {closed:true};},
   };
   f.browser=new ChatGptBrowser(chromium,{});f.controller=f.recreate();
   await f.ingest();
   assert.equal(f.record().state,'BLOCKED');assert.equal(f.record().reason,'ATTACH_FAILED');
   assert.equal(f.record().intent,null);assert.equal(f.record().conversation_url,'');
-  assert.deepEqual(calls,['Page.enable']);assert.deepEqual(closed,['failed-owned']);
+  assert.deepEqual(calls,['Page.enable']);assert.deepEqual(closed,[]);
   f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
-  assert.equal(f.record(),null,'finished cancellation leaves no terminal proof or job record');
+  cancelledProof(f);assert.equal(f.record().pre_submit_proof.schema,1);
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};
   f.browser.prepare=async()=>({target:{id:'new'},session:{close(){}},baseline:{}});
   await f.ingest();
@@ -38,13 +40,13 @@ async function cancelAndRetry(f){
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:f.body.dispatch_attempt+1};
   await f.ingest();
 }
-test('ongoing pre-submit proof survives restart; completed cancellation is absent and old callbacks stay fenced',async()=>{
+test('current-run pre-submit proof survives cancellation and restart while old callbacks stay fenced',async()=>{
   const f=await blockedPreparation(),old=f.controller.repository.token(keyFor(f.body));
   await f.controller.quiesceForStandby();f.controller=f.recreate();await f.controller.initialize();
   assert.equal(f.record().pre_submit_proof.schema,1);
   f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
   f.controller=f.recreate();await f.controller.initialize();
-  assert.equal(f.record(),null);
+  cancelledProof(f);
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};
   f.browser.prepare=async()=>{f.prepares++;return {target:{id:'replacement'},session:{close(){}},baseline:{}};};
   await f.ingest();assert.equal(f.record().state,'PREPARED');assert.equal(f.prepares,2);
@@ -67,7 +69,7 @@ test(state+' control cannot reopen a preparation cancellation',async()=>{
   const f=await blockedPreparation();f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
   f.control={...f.control,state,control_epoch:2};await f.controller.control(null,f.control,f.transport);
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
-  assert.equal(f.prepares,1);assert.equal(f.sends,0);if(['STOPPED','DONE'].includes(state))assert.equal(f.record(),null);else{assert.equal(f.record().state,'PAUSED');assert.equal(f.record().control_state,state);}
+  assert.equal(f.prepares,1);assert.equal(f.sends,0);if(['STOPPED','DONE'].includes(state))assert.equal(f.record(),null);else{cancelledProof(f);assert.equal(f.controller.controlForTask(f.body.task_id).state,state);}
 });
 for(const outcome of ['PENDING','UNKNOWN','ABSENT','CONFIRMED'])
 test('durable '+outcome+' intent revokes no-submit proof before cancellation',async()=>{
@@ -77,7 +79,7 @@ test('durable '+outcome+' intent revokes no-submit proof before cancellation',as
   assert.equal(f.record().pre_submit_proof,null);
   await f.controller.repository.move(keyFor(f.body),'BLOCKED','transport failed');
   assert.equal(f.record().pre_submit_proof,null);
-  await cancelAndRetry(f);assert.equal(f.prepares,2);assert.equal(f.sends,0);assert.equal(f.record().intent,null);
+  await cancelAndRetry(f);assert.equal(f.prepares,1);assert.equal(f.sends,0);cancelledProof(f);assert.equal(f.record().never_submitted,false);
 });
 test('explicit current URL resumes observation; finished Result does not become a historical veto',async()=>{
   const f=fixture();await f.existing();await f.stop();assert.equal(f.record(),null);
@@ -93,9 +95,9 @@ test('historical BLOCKED records with absent or even explicit empty fields do no
     if(missing){delete r.intent;delete r.submission_confirmed;}
     f.store.value.lifecycle={schema:1,requests:{[r.key]:r},retired:{},controls:{[f.control.task_id]:f.control},events:[],outbox:{}};
     f.controller=f.recreate();await f.controller.initialize();assert.notEqual(f.record().pre_submit_proof?.schema,1);f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
-    assert.equal(f.record(),null);
+    cancelledProof(f);
     f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
-    assert.equal(f.prepares,1);assert.ok(f.record());
+    assert.equal(f.prepares,0);assert.ok(f.record());
   }
 });
 for(const importedState of ['BLOCKED','PREPARING','DISCOVERED','CANCELLED'])
@@ -105,7 +107,7 @@ test('cold Drive '+importedState+' cannot inject durable preparation proof',asyn
     pre_submit_proof:{schema:1,input_digest:preparationInputDigest(f.body)},never_submitted:true};
   await f.ingest();
   if(importedState==='CANCELLED')assert.equal(f.record(),null);else assert.notEqual(f.record().pre_submit_proof?.schema,1,'remote proof is not local submit-boundary evidence');
-  f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();assert.equal(f.record(),null);
+  f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();if(importedState==='CANCELLED')assert.equal(f.record(),null);else cancelledProof(f);
   const prepares=f.prepares;
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
   if(importedState==='CANCELLED')assert.equal(f.record(),null);else{assert.ok(f.record());assert.notEqual(f.record().pre_submit_proof?.schema,1);assert.equal(f.sends,0);}
@@ -116,7 +118,7 @@ test('cold historical PREPARING without a proof cannot establish fresh local pro
   f.browser.prepare=async args=>{f.prepares++;await args.onTarget({id:'failed-owned'});throw Error('CDP command timeout: Page.enable');};
   await f.ingest();assert.equal(f.record().state,'BLOCKED');
   f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
-  assert.equal(f.record(),null);
+  cancelledProof(f);
 });
 test('fresh locally authorized intake is provably unsubmitted even before browser preparation',async()=>{
   const f=fixture();f.body.client_status='CREATE_REQUESTED';
@@ -130,5 +132,5 @@ test('a local historical DISCOVERED snapshot with no proof cannot manufacture it
   const f=fixture();f.body.client_status='CREATE_REQUESTED';const r=initialRecord(f.path,f.body);
   f.store.value.lifecycle={schema:1,requests:{[r.key]:r},retired:{},controls:{[f.control.task_id]:f.control},events:[],outbox:{}};
   f.controller=f.recreate();await f.ingest();f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
-  assert.equal(f.record(),null);
+  cancelledProof(f);
 });

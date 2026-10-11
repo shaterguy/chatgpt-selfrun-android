@@ -216,12 +216,12 @@ async function startStalledResume({ resultText, resultError, snapshot,
 test('regression: POST timeout preserves uncertain recovery intent and count', async () => {
   const cursor=stalledActivity({streaming:true,stopButtonVisible:true,responseTurnId:'turn-stuck',responseTextLength:955,responseFingerprint:'fixture-fingerprint'});
   const run=await startStalledResume({resultText:'{"committed":false}',snapshot:cursor,activity:cursor,sendError:new Error('Canonical conversation POST timeout')});
-  const last=run.writes.at(-1).body;
+  const last=run.controller.repository.records()[0];assert.deepEqual(run.writes,[]);
   assert.equal(last.recovery_count,1);
-  assert.equal(last.lifecycle_state,'OBSERVING');
-  assert.equal(last.post_outcome,'UNKNOWN');
-  assert.ok(last.lifecycle_record.last_nudge_attempt_at);
-  assert.match(last.server_error,/POST timeout/);
+  assert.equal(last.state,'OBSERVING');
+  assert.equal(last.intent.outcome,'UNKNOWN');
+  assert.ok(last.last_nudge_attempt_at);
+  assert.match(last.error.message,/POST timeout/);
 });
 test('regression: attaching existing conversation does not send an independent continuation', async () => {
   const run=await startStalledResume({resultText:'{"committed":false}',snapshot:stalledActivity(),activity:stalledActivity(),sendError:new Error('Canonical conversation POST timeout')});
@@ -232,9 +232,10 @@ test('regression: repeated existing conversation timeout stops after bounded att
   let calls=0;
   const browser={chromium:{closeTarget:async()=>true},resume:async()=>{calls++;throw new Error('Timed out waiting for existing conversation');}};
   const controller=new DriveDispatchController({browser,stateStore,config:{resumeRetryMs:1,maxAttachAttempts:3}});
-  let stored=dispatch({client_status:'SEND_REQUESTED',server_status:'STARTED',conversation_url:'https://chatgpt.com/c/abc-123'});
-  const transport=transportWithControl({read:async()=>stored,write:async(_p,b)=>{stored=structuredClone(b);}},controller);
+  let stored=dispatch({client_status:'SEND_REQUESTED',server_status:'STARTED',conversation_url:'https://chatgpt.com/c/abc-123',result_document_id:'RESULT-DOC'});
+  const transport=transportWithControl({read:async()=>stored,write:async(_p,b)=>{stored=structuredClone(b);},
+    readGoogleDocText:async()=>JSON.stringify({schema:'selfrun-turn-result-v3',task_id:stored.task_id,turn_id:stored.turn_id,turn:1,document_id:'RESULT-DOC',event_id:stored.turn_id+':result',committed:false})},controller);
   for(let n=0;n<6;n++) await controller.resume('retry.json',stored,transport);
   assert.ok(calls<=3,'same failure cannot retry indefinitely');
-  assert.equal(stored.lifecycle_state,'BLOCKED');
+  assert.equal(controller.repository.records()[0].state,'BLOCKED');assert.equal(stored.lifecycle_state,undefined);
 });

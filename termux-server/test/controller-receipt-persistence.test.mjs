@@ -13,13 +13,13 @@ const evidence = (intent, overrides = {}) => ({
 const confirmed = f => ({state: 'CONFIRMED', messageId: 'receipt-user', probe: {...f.probe}});
 
 // Browser I/O is stubbed; assertions cover the real controller and durable lifecycle store.
-test('receipt generation is persisted locally and projected before the initial send', async () => {
+test('receipt generation is persisted locally before send and never projected to the app', async () => {
   const f = fixture(), submit = f.browser.submitIntent;
   f.browser.submitIntent = async args => {
     assert.equal(typeof args.intent.receipt_generation, 'string');
     assert.ok(args.intent.receipt_generation.length > 0);
     assert.equal(stored(f).intent.receipt_generation, args.intent.receipt_generation);
-    assert.equal(f.rows.get(f.path).lifecycle_record.intent.receipt_generation, args.intent.receipt_generation);
+    assert.equal(f.rows.get(f.path).lifecycle_record,undefined);
     return submit(args);
   };
   await f.ingest();
@@ -44,7 +44,7 @@ for (const outcome of ['CONFIRMED', 'UNKNOWN']) {
     };
     await f.ingest();
     assert.deepEqual(f.record().intent.receipt, expected.receipt);
-    assert.deepEqual(f.rows.get(f.path).lifecycle_record.intent.receipt, expected.receipt);
+    assert.equal(f.rows.get(f.path).lifecycle_record,undefined);
     assert.equal(f.record().intent.outcome, outcome);
   });
 }
@@ -57,7 +57,7 @@ test('a receipt persistence failure cannot reach confirmed state', async () => {
     await onRequest(evidence(intent));
     return confirmed(f);
   };
-  await assert.rejects(f.ingest(), /disk failed/);
+  await f.ingest();await f.settle();
   assert.notEqual(f.record().intent.outcome, 'CONFIRMED');
   assert.notEqual(stored(f).submission_confirmed, true);
   assert.equal(stored(f).intent.receipt, undefined);
@@ -109,7 +109,7 @@ test('restart preserves acknowledged receipt generation and reconciles without a
     await onRequest(saved);
     return confirmed(f);
   };
-  await f.controller.tick(f.transport);
+  await f.controller.tick(f.transport);await f.settle();
   assert.equal(f.sends, 1);
   assert.equal(f.prepares, 1);
   assert.ok(f.record().run_generation > original.run_generation);
@@ -189,7 +189,7 @@ test('leadership loss during receipt persistence prevents confirmed success', as
   await Promise.race([entered.promise, running]);
   f.controller.canDispatch = () => false;
   release.resolve();
-  await assert.rejects(running, /stale/i);
+  await running;await f.settle();
   assert.notEqual(f.record().intent.outcome, 'CONFIRMED');
   assert.notEqual(f.record().submission_confirmed, true);
 });
@@ -219,17 +219,18 @@ for (const crash of ['before', 'after']) {
       await onRequest(evidence(intent));
       throw new Error('simulated process exit after metadata commit');
     };
-    await assert.rejects(f.ingest(), crash === 'before' ? /disk failed/ : /simulated process exit/);
+    await f.ingest();await f.settle();
     const original = stored(f).intent;
     assert.equal(original.receipt?.ack, crash === 'after' ? 'cot_token' : undefined);
     f.store.fail = false;
     f.controller = f.recreate();
+    await f.controller.repository.move(keyFor(f.body),f.record().state,'test retry elapsed',{retry_at:0});
     f.browser.readSubmission = async ({intent}) => {
       assert.equal(intent.receipt_generation, original.receipt_generation);
       assert.deepEqual(intent.receipt, original.receipt);
       return {...confirmed(f), state: intent.receipt?.ack ? 'CONFIRMED' : 'UNKNOWN'};
     };
-    await f.controller.tick(f.transport);
+    await f.controller.tick(f.transport);await f.settle();
     assert.equal(f.sends, 1);
     assert.equal(f.prepares, 1);
     assert.equal(f.record().intent.outcome, crash === 'after' ? 'CONFIRMED' : 'UNKNOWN');

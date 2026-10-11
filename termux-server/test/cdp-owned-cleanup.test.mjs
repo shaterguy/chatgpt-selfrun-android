@@ -412,7 +412,7 @@ test('unreadable process evidence after restart is not proof of exit and remains
   await assert.rejects(restored.ensureStarted(), /BROWSER_TERMINATING/);
 });
 
-test('verified committed Result closes real owned fixture process and a genuinely new request still starts', async (t) => {
+test('explicit DONE closes real owned fixture process and a genuinely new request still starts', async (t) => {
   const { fixture: lifecycleFixture } = await import('./helpers/lifecycle-fixture.mjs');
   const { manager } = await makeManager(t);const f=lifecycleFixture();
   f.browser.chromium=manager;
@@ -421,7 +421,7 @@ test('verified committed Result closes real owned fixture process and a genuinel
     return {target,session:{close(){}},baseline:{...f.probe}};
   };
   f.controller=f.recreate();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const first=manager.child,oldKey=f.record().key;f.result(true);await f.observe({});await f.controller.cleanupTerminalResources();
+  const first=manager.child,oldKey=f.record().key;f.control={...f.control,state:'DONE',control_epoch:2};await f.controller.control(null,f.control,f.transport);await f.controller.cleanupTerminalResources();
   assert.equal(f.record(),null);assert.equal(f.controller.sessions.size,0);
   assert.equal(fs.existsSync(`/proc/${first.pid}`),false);
   f.probe.url='https://chatgpt.com/c/next-owned';

@@ -1,4 +1,4 @@
-import { digest, keyFor, preparationInputDigest, projection, runningTaskControl } from '../src/lifecycle.mjs';
+import { digest, keyFor, preparationInputDigest, runningTaskControl } from '../src/lifecycle.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { serverFields } from '../src/retired-requests.mjs';
 
@@ -59,7 +59,15 @@ export function repairPreparationCancellation(snapshot,{
     &&r.result_state==='UNKNOWN'&&r.recovery_count===0
     &&r.run_generation===2&&r.browser_generation===1&&r.target_owned===true&&Boolean(r.target_id)
     &&r.error?.message==='CDP command timeout: Page.enable'&&noSubmission(r),'explicit A1 pre-submit failure proof required');
-  const expectedA1=projection({...r,body:a1});
+  // Validate this offline incident's historical dev25 fields. Current server
+  // output is URL-only and cannot be used to validate an old projection.
+  const expectedA1={server_status:'ERROR',lifecycle_state:r.state,lifecycle_revision:r.revision,
+    server_generation:r.server_generation||0,request_generation:r.run_generation,browser_generation:r.browser_generation,
+    conversation_url:r.conversation_url,recovery_count:r.recovery_count,recovery_attempt_id:null,
+    post_correlation:null,post_outcome:null,server_error:r.error?.message||'',server_error_class:r.error?.code||null,
+    server_control_state:r.control_state,server_control_epoch:r.control_epoch,resume_retry_count:r.attach_attempts,
+    resume_retry_at_ms:r.retry_at||0,result_state:r.result_state,response_cursor:r.cursor,
+    response_status:r.response_status||'UNKNOWN',stop_status:r.stop_status||null,updated_at_ms:r.updated_at};
   requireProof(Object.keys(a1).every(key=>!serverFields.has(key)||['lifecycle_record','server_completion_reason'].includes(key)
     ||isDeepStrictEqual(a1[key],expectedA1[key])),'A1 server projection contradicts preparation record');
   const expected=[['DISCOVERED','DISCOVERED','INGEST_CONTROL_RECONCILED'],['DISCOVERED','PREPARING','BROWSER_PREPARE'],

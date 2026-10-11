@@ -4,7 +4,7 @@ import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
 
 test('general and current-task publication never write the same Drive revision concurrently',async t=>{
   const f=fixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const key=f.record().key;
+  const key=f.record().key;delete f.rows.get(f.path).conversation_url;
   await f.controller.repository.move(key,'OBSERVING','test pending projection');
   let version=1,writes=0;const entered=deferred(),release=deferred();
   const write=f.transport.write,read=f.transport.read;
@@ -27,7 +27,7 @@ test('general and current-task publication never write the same Drive revision c
 
 test('a failed conditional publication leaves the pending state retryable',async t=>{
   const f=fixture();t.after(()=>f.controller.quiesceForStandby());await f.existing();
-  const key=f.record().key;await f.controller.repository.move(key,'OBSERVING','test pending projection');
+  const key=f.record().key;delete f.rows.get(f.path).conversation_url;await f.controller.repository.move(key,'OBSERVING','test pending projection');
   const write=f.transport.write;let attempts=0;
   f.transport.write=async(...args)=>{if(++attempts===1)throw Error('Drive write HTTP 412');return write(...args);};
   await assert.rejects(f.controller.repository.flushCurrent(f.transport,key),/412/);

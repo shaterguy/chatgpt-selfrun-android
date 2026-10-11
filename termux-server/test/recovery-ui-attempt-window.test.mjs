@@ -3,20 +3,20 @@ import assert from 'node:assert/strict';
 import { fixture, MemoryStore } from './helpers/lifecycle-fixture.mjs';
 
 const WINDOW=600000;
-for(const restart of ['none','local','Drive'])test('failed recovery UI attempt keeps a durable ten-minute window across '+restart,async t=>{
+for(const restart of ['none','local'])test('failed recovery UI attempt keeps a durable ten-minute window across '+restart,async t=>{
   let now=1000000;t.mock.method(Date,'now',()=>now);
   const f=fixture();f.controller.config.stallAfterMs=WINDOW;t.after(()=>f.controller.quiesceForStandby());
   let attempts=0,expectedAt=0;const observed=[];
   f.browser.quiesce=async()=>{
     attempts++;
-    observed.push({local:f.record().last_nudge_attempt_at,remote:f.rows.get(f.path).lifecycle_record.last_nudge_attempt_at});
+    observed.push({local:f.record().last_nudge_attempt_at,remote:f.rows.get(f.path).lifecycle_record});
     throw Error('temporary quiesce failure');
   };
   await f.existing();await f.observe({});now+=WINDOW;expectedAt=now;
   await f.observe({status:'STALLED'});
   assert.equal(f.record().error.code,'OBSERVATION_CALLBACK_FAILED');
   assert.equal(attempts,1);assert.equal(f.sends,0);
-  assert.deepEqual(observed[0],{local:expectedAt,remote:expectedAt});
+  assert.deepEqual(observed[0],{local:expectedAt,remote:undefined});
   if(restart!=='none'){
     const projected=structuredClone(f.rows.get(f.path));await f.controller.quiesceForStandby();
     if(restart==='Drive')f.store=new MemoryStore();f.controller=f.recreate();
@@ -27,5 +27,14 @@ for(const restart of ['none','local','Drive'])test('failed recovery UI attempt k
   now+=1;expectedAt=now;await f.observe({status:'STALLED'});
   assert.equal(f.record().error.code,'OBSERVATION_CALLBACK_FAILED');
   assert.equal(attempts,2);assert.equal(f.sends,0);
-  assert.deepEqual(observed[1],{local:expectedAt,remote:expectedAt});
+  assert.deepEqual(observed[1],{local:expectedAt,remote:undefined});
+});
+
+test('a cold URL-only Drive watch creates a fresh quiet window without importing a retry body',async t=>{
+ let now=1000000;t.mock.method(Date,'now',()=>now);const f=fixture();await f.existing();await f.observe({});
+ now+=WINDOW;await f.stall();const sends=f.sends;await f.controller.quiesceForStandby();
+ f.store=new MemoryStore();f.controller=f.recreate();await f.controller.ingest(f.path,f.rows.get(f.path),f.transport);
+ assert.equal(f.record().intent,null);assert.equal(f.record().last_nudge_attempt_at,undefined);
+ now+=WINDOW-1;await f.controller.tick(f.transport);assert.equal(f.sends,sends);
+ await f.controller.quiesceForStandby();
 });

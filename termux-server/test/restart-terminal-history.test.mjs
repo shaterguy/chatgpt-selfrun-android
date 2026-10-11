@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from './helpers/lifecycle-fixture.mjs';
-import { initialRecord, keyFor, projection } from '../src/lifecycle.mjs';
+import { initialRecord, keyFor} from '../src/lifecycle.mjs';
+import { projection } from './helpers/legacy-projection.mjs';
 
 async function terminalFixture(state, {control=true, activeCount=0}={}) {
   const f=fixture();
@@ -63,15 +64,15 @@ test('restart recomputes a stale active summary and removes terminal records',as
   
   assert.deepEqual(f.controller.repository.records(),[]);
 });
-test('a verified committed Result remains consumed across restart',async()=>{
-  const f=fixture();await f.existing();f.result(true);await f.observe({});
-  assert.equal(f.record(),null);
+test('a committed Result suppresses continuation across local restart without discarding monitoring',async()=>{
+  const f=fixture();await f.existing();f.result(true);await f.stall();
+  assert.equal(f.record().result_state,'COMMITTED');
   
   await f.controller.quiesceForStandby();f.controller=f.recreate();
   await f.controller.tick(f.transport);
-  assert.equal(f.resumes,1);assert.equal(f.sends,0);
-  assert.equal(f.controller.sessions.size,0);
-  assert.equal(f.store.snapshot().activeCount,0);
+  assert.equal(f.resumes,2);assert.equal(f.sends,0);
+  assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.store.snapshot().activeCount,1);
   await f.controller.quiesceForStandby();
 });
 test('a fresh app request can prepare without reviving its historical predecessor',async()=>{
