@@ -69,7 +69,15 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
       if(ownership.nonce!==nonce)throw new Error('Page owner mismatch');
       if(active&&!ownerActive())throw new Error('Page ownership revoked');
       if(operation==='newChat'){const u=new URL(ownership.url),prefix=u.pathname.split('/c/')[0];entryTransition={allowed:[u.origin+'/',u.origin+prefix,u.origin+prefix+'/project'],deadline};}
-      if(operation==='submit')allowInitialConversation=!conversation(ownership.url);
+      if(operation==='submit'){
+        const expected=payload.expectedArm;
+        // This check and the click run synchronously in the same document.
+        // A new document cannot inherit another document's profile/receipt arm.
+        if(!active||!profileEngine||!receiptObserver||!armedKey||!expected
+          ||armedKey.intent_id!==expected.intent_id||armedKey.generation!==expected.generation)
+          return {status:'NOT_SUBMITTED',reason:'PREPARATION_LOST',intent_id:expected?.intent_id,generation:expected?.generation};
+        allowInitialConversation=!conversation(ownership.url);
+      }
       const result=actions[operation](payload);
       if(operation==='profileConfigure'){ownership.url=urlKey(expectedUrl);entryTransition=null;active=true;}
       if(operation==='receiptArm')armedKey={intent_id:payload.key.intent_id,generation:payload.key.generation};

@@ -1,4 +1,5 @@
 import { canonicalUrl, cursor } from '../lifecycle.mjs';
+import { isActionNotSubmitted } from './server-action-errors.mjs';
 
 // Local call-stack evidence only. Page errors and imported Drive records cannot
 // manufacture proof that this invocation never reached the submit operation.
@@ -1016,7 +1017,8 @@ export class ChatGptBrowser {
       }
     }
     } catch(error) {
-      if(!submitCalled&&error&&typeof error==='object')preSubmitFailures.set(error,stage);
+      if(isActionNotSubmitted(error))preSubmitFailures.set(error,'input');
+      else if(!submitCalled&&error&&typeof error==='object')preSubmitFailures.set(error,stage);
       throw error;
     }
   }

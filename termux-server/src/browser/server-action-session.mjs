@@ -1,22 +1,24 @@
 import {createHmac,randomUUID} from 'node:crypto';
 import {CdpSession} from './cdp.mjs';
 import {buildPageRuntimeSource} from './extension-page-source.mjs';
+import {actionNotSubmittedError,isActionNotSubmitted} from './server-action-errors.mjs';
 
 const commands=new Set(['newChat','input','sendReady','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptSnapshot','receiptRetire','pauseAnimations','quiesce','terminalDispose','recoveryInput']);
 const allowedEndpoint=(value,port,path)=>{try{const u=new URL(value);return u.protocol==='ws:'&&u.hostname==='127.0.0.1'&&Number(u.port)===port&&u.pathname===path&&!u.search&&!u.hash;}catch{return false;}};
 const connectDefault=async(url,{signal}={})=>{const session=new CdpSession(url);const abort=()=>session.close();signal?.addEventListener('abort',abort,{once:true});try{if(signal?.aborted)throw signal.reason;await session.connect();if(signal?.aborted)throw signal.reason;return session;}catch(error){session.close();throw error;}finally{signal?.removeEventListener('abort',abort);}};
 
-// Server-owned action connection. It never enables Page/Runtime/Network domains
-// and never performs progress polling. The extension owns only DOM observation.
+// Server-owned action connection. Page initialization delivers document-start
+// scripts; Runtime/Network enable and progress polling remain absent.
+// The extension owns only DOM observation.
 export class ServerActionSession {
-  constructor({session,reconnect=null,onReconnect=null,installationKey,guard=()=>true,allowedOrigins=[],initialUrl=null}){this.boundUrl=initialUrl;this.entryTransition=null;this.pendingNavigation=null;this.reconnect=reconnect;this.onReconnect=onReconnect;this.reconnecting=null;this.transportLost=false;this.session=session;this.installationKey=installationKey;this.guard=guard;this.allowedOrigins=allowedOrigins;this.documentInstalled=false;this.closed=false;this.armed=null;this.released=null;}
+  constructor({session,reconnect=null,onReconnect=null,installationKey,guard=()=>true,allowedOrigins=[],initialUrl=null}){this.boundUrl=initialUrl;this.entryTransition=null;this.pendingNavigation=null;this.reconnect=reconnect;this.onReconnect=onReconnect;this.reconnecting=null;this.transportLost=false;this.session=session;this.installationKey=installationKey;this.guard=guard;this.allowedOrigins=allowedOrigins;this.documentScriptRegistered=false;this.closed=false;this.armed=null;this.released=null;}
   isAlive(){return !this.closed&&!this.transportLost&&(!this.session.socket||this.session.socket.readyState===1);}
   check(signal){if(this.closed||signal?.aborted||!this.guard())throw Object.assign(signal?.reason||Error('Server action owner unavailable'),{code:'ACTION_CANCELLED'});}
   async connection(options={}){
     this.check(options.signal);
     if(this.transportLost||(this.session.socket&&this.session.socket.readyState!==1)){
       if(!this.reconnect)throw Error('Server action connection unavailable');
-      if(!this.reconnecting)this.reconnecting=(async()=>{const prior=this.session;const next=await this.reconnect(options);try{this.check(options.signal);}catch(error){next.close();throw error;}prior.close();this.session=next;this.transportLost=false;this.documentInstalled=false;if(this.scriptIdentifier){try{await next.call('Page.removeScriptToEvaluateOnNewDocument',{identifier:this.scriptIdentifier},options);}catch{}this.scriptIdentifier=null;}this.onReconnect?.();return next;})().finally(()=>{this.reconnecting=null;});
+      if(!this.reconnecting)this.reconnecting=(async()=>{const prior=this.session;const next=await this.reconnect(options);try{this.check(options.signal);}catch(error){next.close();throw error;}prior.close();this.session=next;this.transportLost=false;this.documentScriptRegistered=false;if(this.scriptIdentifier){try{await next.call('Page.removeScriptToEvaluateOnNewDocument',{identifier:this.scriptIdentifier},options);}catch{}this.scriptIdentifier=null;}this.onReconnect?.();return next;})().finally(()=>{this.reconnecting=null;});
       await this.reconnecting;this.check(options.signal);
     }
     return this.session;
@@ -25,13 +27,21 @@ export class ServerActionSession {
   async evaluate(expression,options={}){const value=await this.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},options);if(value.exceptionDetails)throw Error(value.exceptionDetails.exception?.description||value.exceptionDetails.text||'Server action failed');return value.result?.value;}
   async install(options={}){
     await this.connection(options);
-    if(this.documentInstalled)return true;
     const source=buildPageRuntimeSource({installationKey:this.installationKey});
-    const installed=await this.call('Page.addScriptToEvaluateOnNewDocument',{source},options);this.scriptIdentifier=installed.identifier;
+    // Registration belongs to this connection, not to any current document.
+    // A navigation (including an unchanged URL) replaces the document globals;
+    // never treat an earlier document's proof as evidence for the next one.
+    if(!this.documentScriptRegistered){
+      // Chromium's Page agent must receive new-document instrumentation before
+      // navigation. Registration alone may succeed without delivering scripts.
+      await this.call('Page.enable',{},options);
+      const installed=await this.call('Page.addScriptToEvaluateOnNewDocument',{source},options);this.scriptIdentifier=installed.identifier;
+      this.documentScriptRegistered=true;
+    }
     const challenge=randomUUID(),expected=createHmac('sha256',this.installationKey).update(challenge).digest('hex');
     const proof=await this.evaluate(`(async()=>{if(!window.__selfrunExtensionPage){${source}}return window.__selfrunExtensionPage.attest(${JSON.stringify(challenge)});})()`,options);
     if(proof!==expected)throw Error('Server page runtime ownership unverified');
-    this.documentInstalled=true;return true;
+    return true;
   }
   verifyUrl(value){
     const key=v=>{const u=new URL(v);return u.origin+u.pathname;};
@@ -56,16 +66,25 @@ export class ServerActionSession {
     if(!commands.has(operation))throw Error('Unsupported server action');
     await this.install(options);this.check(options.signal);
     if(operation==='receiptArm')this.armed={intentId:payload.key?.intent_id,generation:payload.key?.generation};
+    const priorReleased=this.released;let releaseAttempt=null;
     if(operation==='submit'){
       if(!this.armed)throw Error('Submission intent unavailable');
       if(this.released?.intentId===this.armed.intentId&&this.released?.generation===this.armed.generation)throw Object.assign(Error('Submission may already have been released'),{code:'SUBMISSION_UNCERTAIN',released:true});
       // Set before the effectful call; a lost response never authorizes replay.
-      this.released={...this.armed};
+      releaseAttempt={...this.armed};this.released=releaseAttempt;
+      payload={...payload,expectedArm:{intent_id:releaseAttempt.intentId,generation:releaseAttempt.generation}};
     }
     const deadline=Date.now()+Math.max(1,Number(options.timeoutMs)||5000);
     const expression=`(()=>{const helper=window.__selfrunExtensionPage;if(!helper)throw Error('Page action runtime unavailable');const u=new URL(location.href);if(!${JSON.stringify(this.allowedOrigins)}.includes(u.origin))throw Error('Action target left approved scope');return helper.run(${JSON.stringify(operation)},${JSON.stringify(payload)},${JSON.stringify('server-action-owner')},${JSON.stringify(this.boundUrl)}||u.origin+u.pathname,${deadline},${JSON.stringify(this.installationKey)});})()`;
-    try{const result=await this.evaluate(expression,options);if(operation==='newChat'&&this.boundUrl){const u=new URL(this.boundUrl),prefix=u.pathname.split('/c/')[0];this.entryTransition={deadline,allowed:[u.origin+'/',u.origin+prefix,u.origin+prefix+'/project']};}if(operation==='submit'&&result?.status!=='SUBMITTED')this.released=null;return result;}
-    catch(error){if(operation==='submit')error.released=true;throw error;}
+    try{const result=await this.evaluate(expression,options);
+      if(operation==='submit'&&result?.status==='NOT_SUBMITTED'&&result.reason==='PREPARATION_LOST'
+        &&result.intent_id===releaseAttempt.intentId&&result.generation===releaseAttempt.generation){
+        if(this.released===releaseAttempt)this.released=priorReleased;
+        throw actionNotSubmittedError();
+      }
+      if(operation==='submit'&&result?.status!=='SUBMITTED')throw Error('Server submission outcome unavailable');
+      if(operation==='newChat'&&this.boundUrl){const u=new URL(this.boundUrl),prefix=u.pathname.split('/c/')[0];this.entryTransition={deadline,allowed:[u.origin+'/',u.origin+prefix,u.origin+prefix+'/project']};}return result;}
+    catch(error){if(operation==='submit'&&!isActionNotSubmitted(error))error.released=true;throw error;}
   }
   async dispose(options={}){
     // Captured connection can only erase its page-local runtime after ownership
