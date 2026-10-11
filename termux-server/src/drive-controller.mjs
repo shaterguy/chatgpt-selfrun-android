@@ -16,14 +16,16 @@ const connectionLost=error=>classifyAttach(error)==='BROWSER_DEAD'||['TARGET_LOS
 const errorInfo = (error,code) => ({code:code||error?.code||'BROWSER_ERROR',message:String(error?.message||error).slice(0,300)});
 
 export class DriveDispatchController {
-  constructor({browser,stateStore,config,promptDirectives=null,canDispatch=()=>true}) {
+  constructor({browser,stateStore,config,promptDirectives=null,canDispatch=()=>true,executionClaims=null}) {
     this.canDispatch=canDispatch;this.browser=browser;this.stateStore=stateStore;this.config=config;this.promptDirectives=promptDirectives;
-    this.repository=new LifecycleStore(stateStore,{onTerminal:records=>this.#discardRuntime(records)});
+    this.executionClaims=executionClaims;
+    this.repository=new LifecycleStore(stateStore,{onTerminal:records=>this.#discardRuntime(records),
+      canPublish:key=>!this.executionClaims||this.#observationAvailable(key)});
     this.sessions=new Map();this.operations=new Map();this.standby=false;
     this.browserOpenings=new Map();this.admissions=new Set();this.terminalDiscardListeners=new Set();
     this.serverGeneration=Date.now();
     this.browserCleanup=new TerminalBrowserCleanup({repository:this.repository,chromium:browser.chromium,stateStore,
-      available:()=>!this.standby&&this.canDispatch(),idleReleaseAllowed:()=>{
+      available:()=>!!this.executionClaims||!this.standby&&this.canDispatch(),idleReleaseAllowed:()=>{
         // Retain a reusable authenticated Chromium for the configured one-hour
         // inactivity window instead of retiring it after every idle tick.
         const idleMs=Math.max(0,Number(config.browserTargetIdleMs)||0);
@@ -48,9 +50,53 @@ export class DriveDispatchController {
   controlForTask(taskId) {return this.repository.control(taskId);}
   async flush(transport) {this.repository.transport=transport;await this.repository.flush(transport,{awaitTerminal:true});}
   onTerminalDiscard(listener) {this.terminalDiscardListeners.add(listener);return ()=>this.terminalDiscardListeners.delete(listener);}
+  hasCurrentExecutions() {return this.repository.records().some(r=>!terminal(r))||this.admissions.size>0;}
+  #executionAvailable(key) {return this.executionClaims?this.executionClaims.localOwns(key):!this.standby&&this.canDispatch();}
+  #observationAvailable(key) {
+    if(this.#executionAvailable(key))return true;
+    const record=this.repository.get(key);
+    // The durable current request-to-target mapping is read-only authority.
+    // It cannot create a tab or input, and does not depend on remote claim I/O.
+    return !!this.executionClaims&&!terminal(record)&&!!record.target_id
+      &&observingTaskControl(this.repository.control(record.task_id),record);
+  }
+  #admissionCurrent(admission) {
+    return this.admissions.has(admission)&&(!this.executionClaims||admission.claim
+      &&this.executionClaims.localOwns(admission.key,admission.claim.token)
+      &&(this.canDispatch()||!!this.repository.get(admission.key)||!admission.claim.created));
+  }
+  async #claimAdmission(admission,control,transport) {
+    if(!this.executionClaims)return this.admissions.has(admission);
+    if(!control||!['RUNNING','WAITING_USER_INTERVENTION'].includes(control.state)||!this.admissions.has(admission))return false;
+    admission.claim=await this.executionClaims.acquire(control,{createAllowed:this.canDispatch()});
+    if(!admission.claim||!this.#admissionCurrent(admission))return false;
+    // An existing claim with missing local effect history is not proof that an
+    // initial send never happened. Only a current URL may restore observation.
+    if(!admission.claim.created&&!this.repository.get(admission.key)&&!canonicalUrl(control.conversation_url))return false;
+    // A STOP or successor may arrive while the CAS response is delayed.
+    const latest=await transport.read('__SELFRUN_CONTROL__'+control.task_id+'.json');
+    if(!latest||latest.schema!=='selfrun-task-control-v1'||keyFor(latest)!==admission.key
+      ||latest.control_epoch!==control.control_epoch||latest.state!==control.state)return false;
+    return this.#admissionCurrent(admission);
+  }
+  async #finishAdmission(admission) {
+    this.admissions.delete(admission);
+    if(admission.claim?.created&&!this.repository.get(admission.key)
+      &&![...this.admissions].some(a=>a.key===admission.key)) {
+      try {await this.executionClaims.release(admission.key,admission.claim.token);}
+      catch(error){console.error(JSON.stringify({event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)}));}
+    }
+  }
   #discardRuntime(records) {
     for(const r of records) {
       for(const admission of this.admissions)if(admission.key===r.key)this.admissions.delete(admission);
+      const claim=this.executionClaims?.current(r.key);
+      const control=this.repository.control(r.task_id);
+      const ended=['STOPPED','DONE','COMMITTED','COMPLETED'].includes(r.state)
+        ||control&&control.control_epoch>=r.control_epoch&&keyFor(control)!==r.key;
+      if(claim&&ended)void this.executionClaims.release(r.key,claim.token).catch(error=>console.error(JSON.stringify({
+        event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)})));
+      else if(claim)this.executionClaims.forget(r.key,claim.token);
       const pending=new Set([this.sessions.get(r.key),...this.browserOpenings.values()].filter(a=>a&&(a.key===r.key||a===this.sessions.get(r.key))));
       for(const a of pending) {
         a.terminalResource={key:r.key,task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,
@@ -125,11 +171,36 @@ export class DriveDispatchController {
   }
   async #fresh(key,transport) {
     const r=this.repository.get(key);
-    if(!r||this.standby||!this.canDispatch())return false;
+    if(!r)return false;
+    if(!this.executionClaims&&(this.standby||!this.canDispatch()))return false;
     const token=this.repository.token(key);
     const c=await this.#readCurrentControl(r,transport),latest=this.repository.get(key);
     if(!this.repository.matches(key,token))return false;
     const allowed=observingTaskControl(c,latest)&&!terminal(latest);
+    if(allowed&&this.executionClaims) {
+      try {
+        const ownership=await this.executionClaims.verify(latest);
+        if(!this.repository.matches(key,token)) {
+          const stale=this.executionClaims.current(key);
+          if(stale&&!this.repository.get(key))await this.executionClaims.release(key,stale.token).catch(error=>console.error(JSON.stringify({
+            event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)})));
+          return false;
+        }
+        if(ownership!=='OWNED') {
+          await this.#invalidateControl(latest);
+          if(ownership==='FOREIGN') {
+            this.#detach(key);
+            if(await this.repository.removeMissingRequest(latest))this.#discardRuntime([latest]);
+          } else if(ownership==='REPLACED')this.#detach(key);
+          return false;
+        }
+        if(this.executionClaims.current(key).control_epoch<c.control_epoch) {
+          await this.#applyControl(c,transport);
+          if(!this.repository.matches(key,token))return false;
+        }
+      }
+      catch(error){await this.#invalidateControl(latest);throw error;}
+    }
     if(allowed){const active=this.sessions.get(key);if(active)active.inputAuthorized=true;}
     else if(c)this.#detach(key);
     return allowed;
@@ -139,11 +210,43 @@ export class DriveDispatchController {
     if(!c||!controlStates.has(c.state)||this.repository.controlQuarantined(c))return false;
     if(c.schema!=='selfrun-task-control-v1'||!c.task_id||!Number.isSafeInteger(c.control_epoch)||c.control_epoch<1)
       throw new Error('invalid task control');
+    const old=this.repository.control(c.task_id);
+    if(old&&c.control_epoch<old.control_epoch)return false;
+    if(old&&c.control_epoch===old.control_epoch&&(c.state!==old.state||keyFor(c)!==keyFor(old)))throw new Error('control epoch conflict');
+    for(const admission of this.admissions)if(admission.task_id===c.task_id&&admission.control) {
+      if(c.control_epoch<admission.control.control_epoch)return false;
+      if(c.control_epoch===admission.control.control_epoch&&(c.state!==admission.control.state||keyFor(c)!==admission.key))throw new Error('control epoch conflict');
+    }
+    for(const [key,current]of this.executionClaims?.local||[])if(JSON.parse(key)[0]===c.task_id) {
+      if(c.control_epoch<current.control_epoch)return false;
+      if(c.control_epoch===current.control_epoch&&(['STOPPED','DONE'].includes(c.state)||keyFor(c)!==key))throw new Error('control epoch conflict');
+    }
+    const claim=this.executionClaims?.current(keyFor(c));
+    if(claim&&claim.control_epoch<c.control_epoch&&['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state)) {
+      await this.#invalidateControl(c);
+      const refresh={task_id:c.task_id,key:keyFor(c),control:{...c}};this.admissions.add(refresh);
+      try {
+        const updated=await this.executionClaims.acquire(c,{createAllowed:false});
+        if(!this.admissions.has(refresh)) {
+          if(updated)await this.executionClaims.release(refresh.key,updated.token).catch(error=>console.error(JSON.stringify({
+            event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)})));
+          return false;
+        }
+      }
+      catch(error){await this.#invalidateControl(c);throw error;}
+      finally {this.admissions.delete(refresh);}
+    }
     for(const admission of this.admissions)if(admission.task_id===c.task_id) {
       if(!admission.control)admission.control={...c};
       else if(c.control_epoch>admission.control.control_epoch
         ||c.control_epoch===admission.control.control_epoch&&(c.state!==admission.control.state||keyFor(c)!==keyFor(admission.control)))this.admissions.delete(admission);
       if(['STOPPED','DONE'].includes(c.state)&&c.control_epoch>=Number(admission.control?.control_epoch||0))this.admissions.delete(admission);
+    }
+    if(this.executionClaims&&['STOPPED','DONE'].includes(c.state)) {
+      for(const [key,claim]of this.executionClaims.local)if(JSON.parse(key)[0]===c.task_id&&claim.control_epoch<=c.control_epoch)
+        this.executionClaims.forget(key,claim.token);
+      void this.executionClaims.releaseControl(c).catch(error=>console.error(JSON.stringify({
+        event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)})));
     }
     this.browserCleanup.observeControl(c);
     if(!this.repository.records().some(r=>r.task_id===c.task_id)) {
@@ -158,8 +261,6 @@ export class DriveDispatchController {
       if(Object.values(this.repository.data.retired).some(r=>r.task_id===c.task_id))await this.repository.applyControl(c);
       return !!await this.#restoreCurrentControl(c,transport);
     }
-    const old=this.repository.control(c.task_id);
-    if(old&&c.control_epoch<old.control_epoch) return false;
     if(old&&c.control_epoch===old.control_epoch) {
       await this.repository.applyControl(c);
       if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
@@ -189,7 +290,7 @@ export class DriveDispatchController {
   async #restoreCurrentControl(c,transport,body=null,dispatchPath=null) {
     const admission={task_id:c.task_id,key:keyFor(c),control:{...c}};this.admissions.add(admission);
     try{return await this.#restoreAdmittedControl(c,transport,body,dispatchPath,admission);}
-    finally{this.admissions.delete(admission);}
+    finally{await this.#finishAdmission(admission);}
   }
   async #restoreAdmittedControl(c,transport,body,dispatchPath,admission) {
     if(!transport||c.state!=='RUNNING'||!canonicalUrl(c.conversation_url)||this.repository.records().some(r=>keyFor(r)===keyFor(c)))return null;
@@ -215,7 +316,8 @@ export class DriveDispatchController {
     const latest=await transport.read('__SELFRUN_CONTROL__'+c.task_id+'.json');
     if(!latest||latest.schema!=='selfrun-task-control-v1'||keyFor(latest)!==keyFor(c)||latest.state!=='RUNNING'
       ||latest.control_epoch!==c.control_epoch||canonicalUrl(latest.conversation_url)!==canonicalUrl(c.conversation_url))return null;
-    const restored=await this.repository.ingest(dispatchPath,clean,latest,{resumeFrom:body,admissionGuard:()=>this.admissions.has(admission)});
+    if(!await this.#claimAdmission(admission,latest,transport))return null;
+    const restored=await this.repository.ingest(dispatchPath,clean,latest,{resumeFrom:body,admissionGuard:()=>this.#admissionCurrent(admission)});
     return this.admissions.has(admission)?restored:null;
   }
   async #disposeStoppedAttachment(record,attached,control) {
@@ -244,6 +346,11 @@ export class DriveDispatchController {
     // Soft detach preserves targets for pause, standby and connection recovery.
   }
   async quiesceForStandby() {
+    if(this.executionClaims) {
+      this.standby=false;
+      for(const key of this.sessions.keys())if(!this.#observationAvailable(key))this.#detach(key);
+      return;
+    }
     this.standby=true;
     for(const key of this.sessions.keys())this.#detach(key);
   }
@@ -254,7 +361,7 @@ export class DriveDispatchController {
   async #ingestRecord(path,body,transport) {
     const admission={task_id:body?.task_id,key:keyFor(body||{}),control:null};this.admissions.add(admission);
     try{return await this.#ingestAdmittedRecord(path,body,transport,admission);}
-    finally{this.admissions.delete(admission);}
+    finally{await this.#finishAdmission(admission);}
   }
   async #ingestAdmittedRecord(path,body,transport,admission) {
     this.repository.transport=transport;
@@ -294,7 +401,8 @@ export class DriveDispatchController {
       if(!authorized)return null;
     }
     if(!prior&&['STOPPED','DONE'].includes(authorized?.state))return undefined;
-    let record=await this.repository.ingest(path,body,authorized,{admissionGuard:()=>this.admissions.has(admission)});
+    if(!await this.#claimAdmission(admission,authorized,transport))return null;
+    let record=await this.repository.ingest(path,body,authorized,{admissionGuard:()=>this.#admissionCurrent(admission)});
     if(!record||!this.admissions.has(admission))return null;
     const control=this.repository.control(record.task_id);
     if(record.retired&&control?.state==='RUNNING'&&control.control_epoch>record.control_epoch&&canonicalUrl(control.conversation_url))
@@ -326,7 +434,7 @@ export class DriveDispatchController {
   async tick(transport) {
     this.repository.transport=transport;
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
-    if(!this.canDispatch()){await this.quiesceForStandby();await this.cleanupTerminalResources({force:false});return;}
+    if(!this.executionClaims&&!this.canDispatch()){await this.quiesceForStandby();await this.cleanupTerminalResources({force:false});return;}
     this.standby=false;
     await transport?.purgeStopped?.();
     // The independent quiet deadline must not join a pending URL publication.
@@ -343,12 +451,12 @@ export class DriveDispatchController {
     await this.cleanupTerminalResources({force:false});
   }
   async #result(key,transport,token) {
-    if(this.standby||!this.canDispatch())return 'UNAVAILABLE';
+    if(!this.#executionAvailable(key))return 'UNAVAILABLE';
     const r=this.repository.get(key);
     if(!r||!this.repository.current(key,token))return 'UNAVAILABLE';
     const fence={...token,result_document_id:r.body.result_document_id,dispatch_attempt:r.dispatch_attempt};
     const result=await readResult(transport,r);
-    if(this.standby||!this.canDispatch()||!this.repository.current(key,fence))return 'UNAVAILABLE';
+    if(!this.#executionAvailable(key)||!this.repository.current(key,fence))return 'UNAVAILABLE';
     const retryAt=result.state==='UNAVAILABLE'?Date.now()+Math.max(1000,Number(this.config.resultRetryMs)||30000):0;
     await this.#move(key,r.state,'RECOVERY_RESULT_OBSERVED',{result_state:result.state,result_retry_at:retryAt,
       ...(result.state==='COMMITTED'?{last_recovery_check_at:Date.now()}:{}),
@@ -369,7 +477,7 @@ export class DriveDispatchController {
     const adopted=await this.#adoptInitialConversation(key,transport,this.sessions.get(key));
     const observationToken=this.repository.token(key);
     const reconnectObservation=async()=>{
-      if(this.standby||!this.canDispatch()||!this.repository.current(key,observationToken))return;
+      if(!this.#observationAvailable(key)||!this.repository.current(key,observationToken))return;
       const observed=this.repository.get(key);
       if(!this.sessions.get(key)&&observed?.conversation_url&&observed.target_id&&observed.retry_at<=Date.now()) {
         const observer=await this.#open(key,transport,'target',{observationOnly:true});
@@ -470,7 +578,7 @@ export class DriveDispatchController {
     const r=this.repository.get(key);
     if(!r||r.conversation_url||!this.browser.ownedConversationUrl)return false;
     const token=a?.token||this.repository.token(key);
-    const guard=a?.guard||(()=>this.repository.current(key,token)&&!this.standby&&this.canDispatch());
+    const guard=a?.guard||(()=>this.repository.current(key,token)&&this.#observationAvailable(key));
     if(!guard())return false;
     const observed=await this.browser.ownedConversationUrl({targetId:r.target_id,projectUrl:r.body.project_url,signal:a?.abort.signal,guard});
     if(!observed||!guard())return false;
@@ -504,7 +612,8 @@ export class DriveDispatchController {
     const pending={abort,token,key,openingId:JSON.stringify([key,token]),session:null,target:null,monitoring:false,...(observationOnly?{inputAuthorized:false}:{})};
     this.browserOpenings.set(pending.openingId,pending);
     this.sessions.set(key,pending);
-    const guard=()=>this.sessions.get(key)===pending&&!abort.signal.aborted&&this.repository.current(key,token)&&!this.standby&&this.canDispatch();
+    const guard=()=>this.sessions.get(key)===pending&&!abort.signal.aborted&&this.repository.current(key,token)
+      &&(observationOnly?this.#observationAvailable(key):this.#executionAvailable(key));
     const onTarget=async target=>{
       const owned=this.browser.chromium?.isOwnedTarget?.(target.id)===true;
       const saved=guard()?await this.#move(key,this.repository.get(key).state,'BROWSER_TARGET_ACQUIRED',
@@ -611,7 +720,7 @@ export class DriveDispatchController {
     })).catch(()=>{});
   }
   async #observe(key,transport,p,token,sampledCursor,observationGeneration) {
-    if(this.standby||!this.sessions.get(key)?.guard?.()||!this.repository.current(key,token))return;
+    if(!this.#observationAvailable(key)||!this.sessions.get(key)?.guard?.()||!this.repository.current(key,token))return;
     if((this.repository.get(key)?.intent?.receipt_generation||null)!==observationGeneration)return;
     let r=this.repository.get(key);
     const observedUrl=observedConversationUrl(p.url||p.pageUrl),url=canonicalUrl(observedUrl);

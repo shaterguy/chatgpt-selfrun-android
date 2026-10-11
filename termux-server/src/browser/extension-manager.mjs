@@ -311,13 +311,27 @@ export class ExtensionManager {
   }
   async #registerObserver(target,signal){
     const meta=this.journal.targetMetadata[target.id];if(!meta||!this.isOwnedTarget(target.id))throw fail('Observation target unavailable','TARGET_NOT_OWNED');
-    const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal}),row=rows?.find(r=>r.id===meta.cdpTargetId&&r.type==='page');
-    if(!row)throw fail('Observation target unavailable','TARGET_LOST');
-    await this.bridge.waitReady(5000,{signal,guard:()=>this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)&&this.#processOwned()});
-    const challenge=randomUUID(),key=createHmac('sha256',this.installationKey).update(target.id).digest('hex'),mac=createHmac('sha256',key).update(challenge).digest('hex');
-    const registered=await this.bridge.request('registerTarget',{targetId:target.id,tabId:meta.observerTabId,expectedUrl:row.url,bootstrapUrl:meta.bootstrapUrl,challenge,mac},{signal});
-    if(!this.isOwnedTarget(target.id)||this.journal.targetMetadata[target.id]!==meta)throw fail('Observation owner changed','TARGET_NOT_OWNED');
-    meta.observerTabId=registered.tabId;await this.#save();return true;
+    const current=()=>!signal?.aborted&&this.isOwnedTarget(target.id)&&!this.targetClosing(target.id)
+      &&this.journal.targetMetadata[target.id]===meta&&this.#processOwned();
+    let previousUrl,previousError;
+    for(let attempt=0;attempt<2;attempt++) {
+      if(!current())throw signal?.reason||fail('Observation owner changed','TARGET_NOT_OWNED');
+      const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal}),row=rows?.find(r=>r.id===meta.cdpTargetId&&r.type==='page');
+      if(!row)throw fail('Observation target unavailable','TARGET_LOST');
+      if(attempt&&row.url===previousUrl)throw previousError;
+      await this.bridge.waitReady(5000,{signal,guard:current});
+      const challenge=randomUUID(),key=createHmac('sha256',this.installationKey).update(target.id).digest('hex'),mac=createHmac('sha256',key).update(challenge).digest('hex');
+      let registered;
+      try {registered=await this.bridge.request('registerTarget',{targetId:target.id,tabId:meta.observerTabId,expectedUrl:row.url,bootstrapUrl:meta.bootstrapUrl,challenge,mac},{signal});}
+      catch(error) {
+        // A same-tab route can change after metadata was sampled. Retry only
+        // that read-only registration, with a fresh exact URL and full proof.
+        if(attempt||error?.code!=='TARGET_NOT_OWNED'||!current())throw error;
+        previousUrl=row.url;previousError=error;continue;
+      }
+      if(!current())throw fail('Observation owner changed','TARGET_NOT_OWNED');
+      meta.observerTabId=registered.tabId;await this.#save();return true;
+    }
   }
   async #initializeTarget(target,payload,signal){
     const mode=this.config.browserClientProfile||'native';if(payload.clientProfile!==mode)throw fail('Browser client profile differs from configured contract','BROWSER_PROFILE_UNSUPPORTED');

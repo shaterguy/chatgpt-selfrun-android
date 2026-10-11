@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GoogleOAuthTokenProvider } from './google-oauth.mjs';
+import { ExecutionClaims } from './execution-claims.mjs';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
@@ -50,11 +51,12 @@ function stateTimestampMs(state) {
   return Number.isFinite(value) ? value : 0;
 }
 
-class SelfRunClusterTransport {
+export class SelfRunClusterTransport {
   constructor(config) {
     this.folderId = config.driveRunsFolderId;
     this.auth = new GoogleOAuthTokenProvider(config);
     this.ids = new Map();
+    this.etags = new WeakMap();
   }
 
   async #token() {
@@ -153,6 +155,42 @@ class SelfRunClusterTransport {
     const raw = await response.text();
     if (!response.ok) throw new Error('SelfRun cluster write HTTP ' + response.status);
   }
+
+  async #clusterId() {
+    const response=await this.#fetch(API+'/files?'+new URLSearchParams({
+      q:"'"+this.folderId+"' in parents and trashed=false and name='"+CLUSTER_FILE+"'",
+      spaces:'drive',fields:'files(id,name),nextPageToken',pageSize:'100',
+    }));
+    if(!response.ok)throw new Error('SelfRun cluster resolve HTTP '+response.status);
+    const listing=JSON.parse(await response.text()),files=listing.files||[];
+    if(files.length!==1||listing.nextPageToken)throw new Error('cluster authority requires one canonical file');
+    return files[0].id;
+  }
+  async #version(id) {
+    const response=await this.#fetch('https://www.googleapis.com/drive/v2/files/'+encodeURIComponent(id)+'?fields=id,etag');
+    if(!response.ok)throw new Error('SelfRun cluster version HTTP '+response.status);
+    const body=JSON.parse(await response.text());if(!body.etag)throw new Error('cluster authority ETag unavailable');
+    return body.etag;
+  }
+  async readCluster() {
+    const id=await this.#clusterId();
+    for(let attempt=0;attempt<3;attempt++) {
+      const before=await this.#version(id),response=await this.#fetch(API+'/files/'+encodeURIComponent(id)+'?alt=media');
+      if(!response.ok)throw new Error('SelfRun cluster read HTTP '+response.status);
+      const body=JSON.parse(await response.text()),after=await this.#version(id);
+      if(before!==after)continue;
+      if(!body||body.schema!=='selfrun-cluster-state-v1')throw new Error('invalid cluster authority');
+      this.etags.set(body,{id,etag:after});return body;
+    }
+    throw new Error('cluster authority changed repeatedly');
+  }
+  async writeCluster(body,{expected}) {
+    const version=this.etags.get(expected);if(!version)throw new Error('cluster conditional update requires an ETag');
+    const response=await this.#fetch('https://www.googleapis.com/upload/drive/v2/files/'+encodeURIComponent(version.id)+'?uploadType=media',{
+      method:'PUT',headers:{'content-type':'application/json; charset=utf-8','if-match':version.etag},body:JSON.stringify(body)+'\n',
+    });
+    if(!response.ok)throw Object.assign(new Error('SelfRun cluster conditional update HTTP '+response.status),{http_status:response.status});
+  }
 }
 
 export class SelfRunClusterCoordinator {
@@ -193,6 +231,8 @@ export class SelfRunClusterCoordinator {
     this.lastTransitionAt = null;
     this.running = false;
     this.loopPromise = null;
+    this.executionClaims = new ExecutionClaims({transport:this.transport,node:this.serverName});
+    this.onRefresh = null;
   }
 
   memberFileName() {
@@ -348,7 +388,7 @@ export class SelfRunClusterCoordinator {
     await this.transport.upsertJson(this.memberFileName(), memberBody);
 
     if (this.role === 'ACTIVE') {
-      await this.transport.upsertJson(CLUSTER_FILE, {
+      const summary = {
         schema: 'selfrun-cluster-state-v1',
         version: this.config.version,
         updated_at: new Date(now).toISOString(),
@@ -358,8 +398,14 @@ export class SelfRunClusterCoordinator {
         settle_ms: this.settleMs,
         claim_ready_at: new Date(this.claimReadyAt || 0).toISOString(),
         claim_ready: this.canDispatch(now),
-      });
+      };
+      // Production cluster summaries and execution claims use the same CAS
+      // document. The alternate transport is only the pre-existing test adapter.
+      if(this.transport.readCluster)await this.executionClaims.publish(summary);
+      else await this.transport.upsertJson(CLUSTER_FILE,summary);
     }
+
+    if(this.onRefresh)await this.onRefresh();
 
     return this.snapshot();
   }

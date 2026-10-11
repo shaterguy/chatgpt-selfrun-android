@@ -10,6 +10,8 @@ import { DriveDispatchTransport } from './drive-transport.mjs';
 import { DriveDispatchController } from './drive-controller.mjs';
 import { DriveDispatchWatcher } from './drive-watcher.mjs';
 import { SelfRunClusterCoordinator } from './cluster-coordinator.mjs';
+import { wireExecutionClaims } from './execution-claims.mjs';
+import { keyFor } from './lifecycle.mjs';
 import { PromptDirectiveStore, PROMPT_DIRECTIVES_SCHEMA } from './prompt-directives.mjs';
 
 const startedAt = new Date().toISOString();
@@ -36,11 +38,12 @@ const cluster = new SelfRunClusterCoordinator({
     if (role === 'STANDBY') await driveController.quiesceForStandby();
   },
 });
+const canProcessDrive=wireExecutionClaims({cluster,controller:driveController,transport:driveTransport});
 const driveWatcher = new DriveDispatchWatcher({
   transport: driveTransport,
   controller: driveController,
   config,
-  canDispatch: () => cluster.canDispatch(),
+  canDispatch: canProcessDrive,
 });
 cluster.start();
 void driveWatcher.start();
@@ -111,8 +114,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/signals') {
-      if(!cluster.canDispatch())return json(res,409,{error:'server_not_active'});
       const body = await readJson(req);
+      const identity=body.envelope?{task_id:body.envelope.TASK_ID,turn_id:body.envelope.TURN_ID,request_id:body.envelope.REQUEST_ID}:body;
+      const cancelling=['STOP','PAUSE'].includes(String(body.type||'').trim().toUpperCase())
+        &&!!driveController.repository.get(keyFor(identity));
+      if(!cluster.canDispatch()&&!cluster.executionClaims.localOwns(keyFor(identity))&&!cancelling)return json(res,409,{error:'server_not_active'});
       const result = await controller.accept(body);
       return json(res, 202, result);
     }

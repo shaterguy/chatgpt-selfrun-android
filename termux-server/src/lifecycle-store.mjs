@@ -38,8 +38,9 @@ let nextRequestGeneration=0;
 // A single durable snapshot owns both current records and the publication outboxes.
 // Audit/Drive writes are projections; neither can make an uncommitted transition authoritative.
 export class LifecycleStore {
-  constructor(stateStore,{onTerminal=()=>{}}={}) {
+  constructor(stateStore,{onTerminal=()=>{},canPublish=()=>true}={}) {
     this.onTerminal=onTerminal;
+    this.canPublish=canPublish;
     this.store=stateStore;
     this.data=structuredClone(stateStore.snapshot().lifecycle||{schema:1,requests:{},controls:{},events:[],outbox:{}});
     this.data.retired??={};this.data.browserCleanup??={};this.data.completionOutbox??={};
@@ -444,19 +445,19 @@ export class LifecycleStore {
     });
   }
   async flushCurrent(transport,key) {
-    if(!transport)return;
+    if(!transport||!this.canPublish(key))return;
     const pending=this.data.outbox[key];
     if(!pending)return;
     return this.#publish(pending.path,async()=>{
       const item=this.data.outbox[key];
-      if(!item)return;
+      if(!item||!this.canPublish(key))return;
       if(!canonicalUrl(item.body.conversation_url)){
         await this.serial(async()=>{const next=structuredClone(this.data);if(next.outbox[key]?.revision===item.revision)delete next.outbox[key];await this.save(next);});
         return;
       }
       let remote;
       try{remote=await transport.read(item.path);}catch(error){throw projectionError(error,'read');}
-      if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision)return;
+      if(!this.data.requests[key]||this.data.outbox[key]?.revision!==item.revision||!this.canPublish(key))return;
       if(remote?.request_id!==item.body.request_id||remote?.turn_id!==item.body.turn_id||remote?.task_id!==item.body.task_id)
         throw new Error('Drive projection identity conflict');
       if(Number(remote.dispatch_attempt)!==Number(item.body.dispatch_attempt))throw new Error('Drive projection attempt conflict');
