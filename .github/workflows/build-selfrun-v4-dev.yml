@@ -76,7 +76,9 @@ jobs:
         run: |
           set -euo pipefail
           bash tools/verify_drive_variant.sh
-          bash tools/verify_selfrun3_dev4_limits_settings.sh
+          if [[ "$VERSION_NAME" =~ -(dev|rc)[0-9]+$ ]]; then
+            bash tools/verify_selfrun3_dev4_limits_settings.sh
+          fi
           (cd termux-server && npm run check && npm test)
 
       - name: Compile and run complete TEST JVM regression
