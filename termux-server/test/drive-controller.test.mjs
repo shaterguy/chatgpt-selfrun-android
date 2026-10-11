@@ -3,6 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keyFor } from '../src/lifecycle.mjs';
 import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
+test('idle browser remains reusable for a full hour instead of being retired at task completion',()=>{
+ const f=fixture();f.controller.config.browserTargetIdleMs=3600000;
+ f.browser.chromium={lastActivityAt:Date.now()};
+ assert.equal(f.controller.browserCleanup.idleReleaseAllowed(),false);
+ f.browser.chromium.lastActivityAt=Date.now()-3600001;
+ assert.equal(f.controller.browserCleanup.idleReleaseAllowed(),true);
+});
 test('CREATE_REQUESTED prepares without bypassing the app send handshake',async()=>{
  const f=fixture();f.body.client_status='CREATE_REQUESTED';await f.ingest();
  assert.equal(f.sends,0);assert.equal(f.record().state,'PREPARED');

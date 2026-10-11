@@ -21,6 +21,13 @@ test('lost registry on active Android tab heals and retries only the explicitly 
  const answer=await session.run('snapshot');assert.equal(answer.url,'https://chatgpt.com/');
  assert.equal(restorations,1);assert.equal(f.launches,1);assert.equal(f.manager.isOwnedTarget(target.id),true);
 });
+test('valid browser activity renews the idle retention clock',async t=>{
+ const f=await fixture(t);f.manager.lastActivityAt=1;
+ const target=await f.manager.createTarget();assert.ok(f.manager.lastActivityAt>1);
+ const session=await f.manager.connectTarget(target);f.manager.lastActivityAt=1;
+ await session.run('snapshot');assert.ok(f.manager.lastActivityAt>1);
+ f.manager.lastActivityAt=1;await f.manager.ensureStarted();assert.ok(f.manager.lastActivityAt>1);
+});
 test('process identity requires boot, start time, exact profile, extension and owner marker',()=>{const proof={pid:7,startTime:'1',bootId:'b',profile:'/p',extensionPath:'/e',ownerId:'o'};const row={pid:7,startTime:'1',args:['chrome','--user-data-dir=/p','--load-extension=/e','--selfrun-extension-owner=o']};assert.equal(extensionProcessMatches(proof,row,'b'),true);for(const bad of [{...row,startTime:'2'},{...row,args:row.args.filter(a=>!a.startsWith('--load'))}])assert.equal(extensionProcessMatches(proof,bad,'b'),false);assert.equal(extensionProcessMatches(proof,row,'other'),false);});
 test('target close rechecks caller guard and never touches an unowned target',async t=>{const f=await fixture(t),target=await f.manager.createTarget();f.bridge.targets=[{...target,url:'https://chatgpt.com/c/a'}];assert.equal((await f.manager.closeOwnedTarget('foreign')).reason,'unowned_target');assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>false})).reason,'guard_rejected');assert.equal(f.calls.filter(x=>x[0]==='closeTarget').length,0);assert.equal((await f.manager.closeOwnedTarget(target.id,{guard:()=>true})).closed,true);assert.equal(f.manager.isOwnedTarget(target.id),false);});
 async function closeWithoutAcknowledgement(t){

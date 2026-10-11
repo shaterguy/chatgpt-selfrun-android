@@ -21,7 +21,13 @@ export class DriveDispatchController {
     this.sessions=new Map();this.operations=new Map();this.resultRetirements=new Map();this.standby=false;
     this.serverGeneration=Date.now();
     this.browserCleanup=new TerminalBrowserCleanup({repository:this.repository,chromium:browser.chromium,stateStore,
-      available:()=>!this.standby&&this.canDispatch(),idleReleaseAllowed:()=>true,busy:()=>this.sessions.size>0||this.operations.size>0});
+      available:()=>!this.standby&&this.canDispatch(),idleReleaseAllowed:()=>{
+        // Retain a reusable authenticated Chromium for the configured one-hour
+        // inactivity window instead of retiring it after every idle tick.
+        const idleMs=Math.max(0,Number(config.browserTargetIdleMs)||0);
+        const last=Number(browser.chromium?.lastActivityAt);
+        return !(idleMs>0&&Number.isFinite(last)&&Date.now()-last<idleMs);
+      },busy:()=>this.sessions.size>0||this.operations.size>0});
   }
   async initialize() {
     await this.repository.initialize((await this.#directives()).turnContinueDirective||this.config.recoveryPrompt);
