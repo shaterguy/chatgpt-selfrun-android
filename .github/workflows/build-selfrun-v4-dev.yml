@@ -5,6 +5,15 @@ on:
     branches:
       - 'selfrun-v4/v4.0.10-dev4'
   workflow_dispatch:
+    inputs:
+      test_only:
+        description: Build and sign only the persistent TEST lineage
+        type: boolean
+        default: true
+      expected_source_sha:
+        description: Exact reviewed source commit SHA
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -15,7 +24,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_ARTIFACT: selfrun-v4-4010-dev4-${{ github.run_id }}-${{ github.run_attempt }}
+  TEST_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_only }}
+  EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha || github.sha }}
+  BUILD_ARTIFACT: selfrun-v4-4010-dev5-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   build-dev:
@@ -45,14 +56,17 @@ jobs:
           gradle-version: '9.5.0'
           cache-read-only: false
 
-      - name: Resolve 4.0.10-dev4 identities
+      - name: Resolve 4.0.10-dev5 identities
         shell: bash
         run: |
           set -euo pipefail
           VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
           VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
-          [[ "$VERSION_NAME" == '4.0.10-dev4' ]]
-          [[ "$VERSION_CODE" == '4002017' ]]
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$EXPECTED_SOURCE_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]]
+          [[ "$VERSION_NAME" == '4.0.10-dev5' ]]
+          [[ "$VERSION_CODE" == '4002018' ]]
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
           grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           printf 'VERSION_NAME=%s\nVERSION_CODE=%s\n' "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
@@ -69,9 +83,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          FORMAL_COMPILE=()
+          if [[ "$TEST_ONLY" != 'true' ]]; then FORMAL_COMPILE+=(:app:compileReleaseJavaWithJavac); fi
           gradle --build-cache --no-daemon --console=plain --stacktrace \
             :app:verifyDriveVariantIdentity \
-            :app:compileReleaseJavaWithJavac \
+            "${FORMAL_COMPILE[@]}" \
             :app:compileQaAppJavaWithJavac \
             :app:compileQaAppUnitTestJavaWithJavac \
             :app:compileQaAppAndroidTestJavaWithJavac
@@ -82,15 +98,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          FORMAL_BUILD=()
+          if [[ "$TEST_ONLY" != 'true' ]]; then FORMAL_BUILD+=(:app:assembleRelease); fi
           gradle --build-cache --no-daemon --console=plain --stacktrace \
-            :app:assembleRelease :app:assembleQaApp :app:assembleQaAppAndroidTest
+            "${FORMAL_BUILD[@]}" :app:assembleQaApp :app:assembleQaAppAndroidTest
           BT="$ANDROID_HOME/build-tools/36.0.0"
           FORMAL_RAW=app/build/outputs/apk/release/app-release-unsigned.apk
           TEST_RAW="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*.apk' -print -quit)"
           ANDROID_TEST_RAW="$(find app/build/outputs/apk/androidTest -type f -name '*.apk' -print -quit)"
-          test -s "$FORMAL_RAW"; test -s "$TEST_RAW"; test -s "$ANDROID_TEST_RAW"
+          if [[ "$TEST_ONLY" != 'true' ]]; then test -s "$FORMAL_RAW"; fi
+          test -s "$TEST_RAW"; test -s "$ANDROID_TEST_RAW"
           mkdir -p release-output
-          "$BT/zipalign" -p -f 4 "$FORMAL_RAW" release-output/formal-aligned.apk
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            "$BT/zipalign" -p -f 4 "$FORMAL_RAW" release-output/formal-aligned.apk
+          fi
           "$BT/zipalign" -p -f 4 "$TEST_RAW" release-output/test-aligned.apk
           "$BT/zipalign" -p -f 4 "$ANDROID_TEST_RAW" release-output/androidTest-aligned.apk
 
@@ -119,9 +140,11 @@ jobs:
           TEST="release-output/SelfRun-Drive-TEST-v${VERSION_NAME}.apk"
           ANDROID_TEST="release-output/SelfRun-Drive-TEST-v${VERSION_NAME}-androidTest.apk"
 
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh \
-            release-output/formal-aligned.apk "$PASS_FILE" "$FORMAL" \
-            > release-output/FORMAL_APKSIGNER_VERIFY.txt
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            APKSIGNER="$BT/apksigner" bash tools/sign_release.sh \
+              release-output/formal-aligned.apk "$PASS_FILE" "$FORMAL" \
+              > release-output/FORMAL_APKSIGNER_VERIFY.txt
+          fi
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh \
             release-output/test-aligned.apk "$PASS_FILE" "$TEST" \
             > release-output/TEST_APKSIGNER_VERIFY.txt
@@ -129,31 +152,47 @@ jobs:
             release-output/androidTest-aligned.apk "$PASS_FILE" "$ANDROID_TEST" \
             > release-output/ANDROIDTEST_APKSIGNER_VERIFY.txt
 
-          "$BT/apksigner" verify --verbose --print-certs "$FORMAL" > release-output/FORMAL_CERT.txt
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            "$BT/apksigner" verify --verbose --print-certs "$FORMAL" > release-output/FORMAL_CERT.txt
+          fi
           "$BT/apksigner" verify --verbose --print-certs "$TEST" > release-output/TEST_CERT.txt
           "$BT/apksigner" verify --verbose --print-certs "$ANDROID_TEST" > release-output/ANDROIDTEST_CERT.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/FORMAL_CERT.txt
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/FORMAL_CERT.txt
+          fi
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' release-output/TEST_CERT.txt
           grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' release-output/ANDROIDTEST_CERT.txt
 
-          FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL")"
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            FORMAL_BADGING="$($BT/aapt dump badging "$FORMAL")"
+          fi
           TEST_BADGING="$($BT/aapt dump badging "$TEST")"
           ANDROID_TEST_BADGING="$($BT/aapt dump badging "$ANDROID_TEST")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionCode='${VERSION_CODE}'" <<<"$FORMAL_BADGING"
-          grep -Fq "versionName='${VERSION_NAME}'" <<<"$FORMAL_BADGING"
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$FORMAL_BADGING"
+            grep -Fq "versionCode='${VERSION_CODE}'" <<<"$FORMAL_BADGING"
+            grep -Fq "versionName='${VERSION_NAME}'" <<<"$FORMAL_BADGING"
+          fi
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" <<<"$TEST_BADGING"
           grep -Fq "versionCode='${VERSION_CODE}'" <<<"$TEST_BADGING"
           grep -Fq "versionName='${VERSION_NAME}'" <<<"$TEST_BADGING"
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test.test'" <<<"$ANDROID_TEST_BADGING"
 
-          sha256sum "$FORMAL" > release-output/SHA256SUMS.txt
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            sha256sum "$FORMAL" > release-output/SHA256SUMS.txt
+          fi
           sha256sum "$TEST" "$ANDROID_TEST" > release-output/TEST_SHA256SUMS.txt
           printf '%s\n' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
-          printf 'package=com.shaterguy.chatgptselfrun.drive\nversionName=%s\nversionCode=%s\ncertificateSha256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe\n' \
-            "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
+          if [[ "$TEST_ONLY" != 'true' ]]; then
+            printf 'package=com.shaterguy.chatgptselfrun.drive\nversionName=%s\nversionCode=%s\ncertificateSha256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe\n' \
+              "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
+          fi
+
+          printf 'package=com.shaterguy.chatgptselfrun.drive.test\nversionName=%s\nversionCode=%s\ncertificateSha256=2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e\ntestOnly=%s\n' \
+            "$VERSION_NAME" "$VERSION_CODE" "$TEST_ONLY" > release-output/TEST_IDENTITY.txt
 
       - name: Prepare 4.0.8 upgrade baseline
+        if: env.TEST_ONLY != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -188,14 +227,61 @@ jobs:
           grep -Fq "versionCode='4001000'" <<<"$TABLET_BADGING"
           grep -Fq "versionName='4.0.0'" <<<"$TABLET_BADGING"
 
+      - name: Prepare immutable dev4 TEST update and stable co-install fixtures
+        if: env.TEST_ONLY == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p current stable
+          cp "release-output/SelfRun-Drive-TEST-v${VERSION_NAME}.apk" current/test.apk
+          cp "release-output/SelfRun-Drive-TEST-v${VERSION_NAME}-androidTest.apk" current/androidTest.apk
+          [[ "$(tr -d '[:space:]' < release-output/SOURCE_COMMIT.txt)" == "$EXPECTED_SOURCE_SHA" ]]
+          gh release download selfrun-drive-test-v4.0.10-dev4-sr59pxha --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SelfRun-Drive-TEST-v4.0.10-dev4.apk' --dir stable
+          gh release download drive-v4.0.8 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chatgpt-selfrun-drive-v4.0.8.apk' --dir stable
+          echo '1e76d9f4ad4ca4e0232590bee655b270047fd876d0f9fbf620ae5c93869b7c8e  stable/SelfRun-Drive-TEST-v4.0.10-dev4.apk' | sha256sum -c -
+          echo 'd9a186d97bab55a57123d46e33e2fb1376fbcacfabc734da4b9850af37cd6a15  stable/chatgpt-selfrun-drive-v4.0.8.apk' | sha256sum -c -
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/apksigner" verify --verbose --print-certs stable/SelfRun-Drive-TEST-v4.0.10-dev4.apk > stable/TEST_BASELINE_CERT.txt
+          "$BT/apksigner" verify --verbose --print-certs stable/chatgpt-selfrun-drive-v4.0.8.apk > stable/STABLE_CERT.txt
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' stable/TEST_BASELINE_CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' stable/STABLE_CERT.txt
+          "$BT/aapt" dump badging stable/SelfRun-Drive-TEST-v4.0.10-dev4.apk > stable/TEST_BASELINE_PACKAGE.txt
+          "$BT/aapt" dump badging stable/chatgpt-selfrun-drive-v4.0.8.apk > stable/STABLE_PACKAGE.txt
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" stable/TEST_BASELINE_PACKAGE.txt
+          grep -Fq "versionName='4.0.10-dev4'" stable/TEST_BASELINE_PACKAGE.txt
+          grep -Fq "versionCode='4002017'" stable/TEST_BASELINE_PACKAGE.txt
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" stable/STABLE_PACKAGE.txt
+          grep -Fq "versionName='4.0.8'" stable/STABLE_PACKAGE.txt
+          grep -Fq "versionCode='4002010'" stable/STABLE_PACKAGE.txt
+
+      - name: Check existing TEST emulator access without changing host permissions
+        id: test-runtime-access
+        if: env.TEST_ONLY == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            printf 'TEST_RUNTIME_UNVERIFIED\nreason=Existing /dev/kvm access unavailable; host permissions unchanged\n' > selfrun-test-update-runtime-evidence.txt
+            echo '::warning::TEST APK is built and signed; emulator update/runtime validation is unavailable without existing KVM access.'
+          fi
+
       - name: Enable hardware acceleration
+        if: env.TEST_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
 
-      - name: Verify phone 4.0.8 and tablet 4.0.0 upgrades to 4.0.10-dev4 with TEST co-install
+      - name: Verify phone 4.0.8 and tablet 4.0.0 upgrades to 4.0.10-dev5 with TEST co-install
+        if: env.TEST_ONLY != 'true' || steps.test-runtime-access.outputs.available == 'true'
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 36
@@ -208,28 +294,36 @@ jobs:
             -camera-back none -camera-front none -memory 2048
           disable-animations: true
           script: |
-            bash tools/verify_selfrun3_release_emulator.sh
-            cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.8-evidence.txt
-            BASE_VERSION_NAME=4.0.0 BASE_VERSION_CODE=4001000 bash tools/verify_selfrun3_release_emulator.sh
-            cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.0-evidence.txt
+            if [[ "$TEST_ONLY" == 'true' ]]; then
+              bash tools/verify_selfrun_test_update_emulator.sh
+            else
+              bash tools/verify_selfrun3_release_emulator.sh
+              cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.8-evidence.txt
+              BASE_VERSION_NAME=4.0.0 BASE_VERSION_CODE=4001000 bash tools/verify_selfrun3_release_emulator.sh
+              cp selfrun-v3-release-runtime-evidence.txt selfrun-upgrade-4.0.0-evidence.txt
+            fi
             bash tools/verify_last_used_execution_profile_emulator.sh
 
-      - name: Upload SelfRun 4.0.10-dev4 DEV and TEST APKs
+      - name: Upload SelfRun 4.0.10-dev5 DEV and TEST APKs
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ env.BUILD_ARTIFACT }}
           path: |
-            release-output/SelfRun-Drive-v4.0.10-dev4.apk
-            release-output/SelfRun-Drive-TEST-v4.0.10-dev4.apk
-            release-output/SelfRun-Drive-TEST-v4.0.10-dev4-androidTest.apk
+            release-output/SelfRun-Drive-v4.0.10-dev5.apk
+            release-output/SelfRun-Drive-TEST-v4.0.10-dev5.apk
+            release-output/SelfRun-Drive-TEST-v4.0.10-dev5-androidTest.apk
             release-output/SHA256SUMS.txt
             release-output/TEST_SHA256SUMS.txt
             release-output/*APKSIGNER_VERIFY.txt
             release-output/*CERT.txt
             release-output/SOURCE_COMMIT.txt
             release-output/IDENTITY.txt
+            release-output/TEST_IDENTITY.txt
             stable/STABLE_CERT.txt
+            stable/TEST_BASELINE_CERT.txt
+            stable/TEST_BASELINE_PACKAGE.txt
+            selfrun-test-update-runtime-evidence.txt
             stable/TABLET_STABLE_CERT.txt
             selfrun-upgrade-4.0.*-evidence.txt
             selfrun-last-used-profile-runtime-evidence.txt

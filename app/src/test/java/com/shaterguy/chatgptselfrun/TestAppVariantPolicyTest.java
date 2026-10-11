@@ -13,8 +13,8 @@ public final class TestAppVariantPolicyTest {
         String manifest = read("app/src/main/AndroidManifest.xml", "src/main/AndroidManifest.xml");
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive TEST'"));
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002017"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.10-dev4'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002018"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.10-dev5'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertTrue(manifest.contains("android:label=\"${selfRunAppLabel}\""));
     }
@@ -39,7 +39,7 @@ public final class TestAppVariantPolicyTest {
         assertTrue(candidate.contains("-PselfRunServerChecks=true"));
     }
 
-    @Test public void v4DevWorkflowBuildsUpgradeableFormalDevAndSeparateTestPackage() throws Exception {
+    @Test public void v4DevWorkflowKeepsFormalBranchAndDefaultsToTestOnly() throws Exception {
         String workflow = read(".github/workflows/build-selfrun-v4-dev.yml", "../.github/workflows/build-selfrun-v4-dev.yml");
         assertTrue(workflow.contains("      - 'selfrun-v4/v4.0.10-dev4'"));
         assertTrue(workflow.contains(":app:assembleRelease"));
@@ -49,12 +49,19 @@ public final class TestAppVariantPolicyTest {
         assertTrue(workflow.contains("tools/sign_test.sh"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.test"));
-        assertTrue(workflow.contains("SelfRun-Drive-v4.0.10-dev4.apk"));
-        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.10-dev4.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-v4.0.10-dev5.apk"));
+        assertTrue(workflow.contains("SelfRun-Drive-TEST-v4.0.10-dev5.apk"));
         assertTrue(workflow.contains("drive-v4.0.8"));
         assertTrue(workflow.contains("BASE_VERSION_NAME=4.0.8"));
         assertTrue(workflow.contains("bash tools/verify_selfrun3_release_emulator.sh"));
         assertTrue(workflow.contains("github.run_attempt"));
+        assertTrue(workflow.contains("      test_only:"));
+        assertTrue(workflow.contains("        default: true"));
+        assertTrue(workflow.contains("      expected_source_sha:"));
+        assertTrue(workflow.contains("env.TEST_ONLY != 'true'"));
+        assertTrue(workflow.contains("tools/verify_selfrun_test_update_emulator.sh"));
+        assertTrue(workflow.contains("selfrun-drive-test-v4.0.10-dev4-sr59pxha"));
+        assertFalse(workflow.contains("      - 'selfrun-v4/v4.0.10-dev5'"));
     }
 
     @Test public void serverProductCapabilityIsIndependentFromServerOnlyTestSelection() throws Exception {

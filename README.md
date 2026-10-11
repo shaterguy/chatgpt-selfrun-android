@@ -1,3 +1,7 @@
+# SelfRun URL-only server handoff candidate 4.0.10-dev5
+
+The server adapter advances from a correlated, trusted conversation URL without consuming server READY, STARTED, or COMPLETED status gates. App-authored dispatch/cancellation controls and the existing Result/Vercel completion authority remain separate.
+
 # SelfRun mode-specific last-used model profiles 4.0.10-dev4
 
 New tasks restore independently recorded CHAT, WORK, and HYBRID bootstrap profiles after successful task creation. Existing 4.0.10-dev3 cancellation recovery behavior is preserved.

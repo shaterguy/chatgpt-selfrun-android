@@ -419,6 +419,7 @@ final class SelfRun4DriveWebAdapter {
                     dispatchBody = body;
                     trace("V4_SERVER_DISPATCH_CREATED", "turn=" + snapshot.turn()
                             + ";attempt=" + attempt + ";file=" + id);
+                    notifyDispatchCreated();
                     poll(expectedGeneration, request);
                 });
             } catch (Throwable error) {
@@ -433,7 +434,6 @@ final class SelfRun4DriveWebAdapter {
         JSONObject body = new JSONObject();
         body.put("schema", SCHEMA);
         body.put("client_status", "CREATE_REQUESTED");
-        body.put("server_status", "PENDING");
         body.put("task_id", snapshot.taskId());
         body.put("turn_id", snapshot.turnId());
         body.put("request_id", snapshot.requestId());
@@ -495,40 +495,24 @@ final class SelfRun4DriveWebAdapter {
     private void handleRemote(int expectedGeneration, String request, JSONObject body) {
         requireMain();
         if (!active(expectedGeneration, request)) return;
+        if (!SCHEMA.equals(body.optString("schema"))
+                || !state.taskId().equals(body.optString("task_id"))
+                || !state.turnId().equals(body.optString("turn_id"))
+                || !request.equals(body.optString("request_id"))) return;
         dispatchBody = body;
-        SelfRunCancelledDispatchPolicy.Decision cancellation = SelfRunCancelledDispatchPolicy.evaluate(
-                body, state.taskId(), state.turnId(), state.requestId(), controlEpoch);
-        if (cancellation != SelfRunCancelledDispatchPolicy.Decision.NONE) {
-            // Never rewrite or poll an already cancelled dispatch. Only server-proven
-            // unsent work may release its claim for a higher preparation attempt.
+        // App-authored cancellation is authoritative. Server telemetry is not an app signal.
+        String clientStatus = body.optString("client_status", "");
+        if ("CANCELLED".equals(clientStatus) || "SUPERSEDED".equals(clientStatus)) {
             cancelLocalAttempt(false);
-            if (cancellation == SelfRunCancelledDispatchPolicy.Decision.PROVEN_UNSENT)
-                listener.onUnsent(state.taskId(), state.turnId(), state.requestId(), "SERVER_CANCELLED_UNSENT:" + body.optLong("dispatch_attempt"));
-            else listener.onFailure(state.taskId(), state.turnId(), state.requestId(), "SERVER_CANCELLED_UNPROVEN");
             return;
-        }
-        String serverStatus = body.optString("server_status", "PENDING");
-        if ("ERROR".equals(serverStatus)) {
-            fail("SERVER_DISPATCH_ERROR");
-            return;
-        }
-        if ("CANCELLED".equals(serverStatus) || "SUPERSEDED".equals(serverStatus)) {
-            fail("SERVER_DISPATCH_CANCELLED");
-            return;
-        }
-        if ("READY_TO_SUBMIT".equals(serverStatus) && !preparedNotified) {
-            preparedNotified = true;
-            listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
         }
         String url = body.optString("conversation_url", "");
-        boolean conversationReady = serverConversationReady(serverStatus);
-        boolean validConversation = conversationReady && SelfRun3WebAdapter.trusted(url)
-                && !SelfRunScript.conversationId(url).isEmpty();
+        boolean validConversation = validConversationUrl(url);
         if (validConversation && !preparedNotified
                 && state.stage() == SelfRun3Engine.Stage.READY) {
             preparedNotified = true;
             trace("V4_SERVER_DIRECT_START_RECONCILE", "turn=" + state.turn()
-                    + ";attempt=" + preparationAttempt + ";status=" + serverStatus);
+                    + ";attempt=" + preparationAttempt);
             listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
             return;
         }
@@ -558,10 +542,10 @@ final class SelfRun4DriveWebAdapter {
         state = claimed;
         if (submitRequested) return;
         submitRequested = true;
-        String remoteStatus = dispatchBody == null ? "" : dispatchBody.optString("server_status", "");
-        if (serverConversationReady(remoteStatus)) {
+        String remoteUrl = dispatchBody == null ? "" : dispatchBody.optString("conversation_url", "");
+        if (validConversationUrl(remoteUrl)) {
             trace("V4_SERVER_SEND_CLAIM_RECONCILED", "turn=" + state.turn()
-                    + ";attempt=" + preparationAttempt + ";status=" + remoteStatus);
+                    + ";attempt=" + preparationAttempt);
             poll(generation, state.requestId());
             return;
         }
@@ -593,12 +577,17 @@ final class SelfRun4DriveWebAdapter {
         });
     }
 
-    private static boolean serverConversationReady(String serverStatus) {
-        return "STARTED".equals(serverStatus)
-                || "COMPLETED".equals(serverStatus)
-                || "RECOVERY_SENDING".equals(serverStatus)
-                || "RECOVERY_SENT".equals(serverStatus)
-                || "PAGE_ERROR".equals(serverStatus);
+    private void notifyDispatchCreated() {
+        // The app created its request successfully. Claim/send remains an app decision;
+        // it never waits for a server preparation or response-completion verdict.
+        if (!preparedNotified && state != null && state.stage() == SelfRun3Engine.Stage.READY) {
+            preparedNotified = true;
+            listener.onPrepared(state.taskId(), state.turnId(), state.requestId());
+        }
+    }
+
+    private static boolean validConversationUrl(String url) {
+        return SelfRun3WebAdapter.trusted(url) && !SelfRunScript.conversationId(url).isEmpty();
     }
 
     void detach() {

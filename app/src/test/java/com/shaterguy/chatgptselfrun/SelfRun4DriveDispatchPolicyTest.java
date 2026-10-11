@@ -28,7 +28,9 @@ public final class SelfRun4DriveDispatchPolicyTest {
         assertTrue(adapter.contains("selfrun-server-dispatch-v1"));
         assertTrue(adapter.contains("CREATE_REQUESTED"));
         assertTrue(adapter.contains("SEND_REQUESTED"));
-        assertTrue(adapter.contains("READY_TO_SUBMIT"));
+        assertFalse(adapter.contains("READY_TO_SUBMIT"));
+        assertFalse(adapter.contains("server_status"));
+        assertTrue(adapter.contains("notifyDispatchCreated();"));
         assertTrue(adapter.contains("conversation_url"));
         assertTrue(drive.contains("createServerDispatchFile"));
         assertTrue(drive.contains("readServerDispatchFile"));
@@ -50,7 +52,7 @@ public final class SelfRun4DriveDispatchPolicyTest {
         assertTrue(conversation > reconcileReturn);
 
         int submit = adapter.indexOf("void submit(SelfRun3Engine.State claimed)");
-        int alreadyStarted = adapter.indexOf("serverConversationReady(remoteStatus)", submit);
+        int alreadyStarted = adapter.indexOf("validConversationUrl(remoteUrl)", submit);
         int reconciled = adapter.indexOf("V4_SERVER_SEND_CLAIM_RECONCILED", alreadyStarted);
         int write = adapter.indexOf("api.writeServerDispatchFile", submit);
         assertTrue(submit >= 0 && alreadyStarted > submit);
