@@ -55,6 +55,11 @@ public final class SelfRunDebugUiAndroidTest {
                 find(activity.getWindow().getDecorView(), "실행 정보").performClick();
                 assertTrue(info.isTextSelectable());
                 assertTrue(info.isLongClickable());
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            scenario.onActivity(activity -> {
+                TextView info = field(activity, "technicalDetails");
+                assertTrue("technical details layout pending", info.getWidth() > 0 && info.getLayout() != null);
                 info.requestRectangleOnScreen(new Rect(0, 0, info.getWidth(), Ui.dp(activity, 40)), true);
             });
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -64,6 +69,10 @@ public final class SelfRunDebugUiAndroidTest {
                 int offset = info.getText().toString().indexOf(TASK) + 4;
                 touch[0] += info.getTotalPaddingLeft() + (int) info.getLayout().getPrimaryHorizontal(offset);
                 touch[1] += info.getTotalPaddingTop() + info.getLineHeight() / 2;
+                Rect visible = new Rect();
+                assertTrue("technical details not visible after scroll", info.getGlobalVisibleRect(visible));
+                assertTrue("long press touch point outside visible text bounds: " + touch[0] + "," + touch[1]
+                        + " vs " + visible, visible.contains(touch[0], touch[1]));
             });
             long down = SystemClock.uptimeMillis();
             inject(down, down, MotionEvent.ACTION_DOWN, touch);
