@@ -184,3 +184,51 @@ test('failed idle SIGTERM does not erase ownership or report cleanup success',as
   const f=await fixture(t);await f.manager.createTarget();f.manager.deps.signalProcess=()=>{};
   const result=await f.manager.releaseIfUnused({guard:()=>true});assert.equal(result.reason,'browser_exit_unconfirmed');assert.equal(result.released,false);assert.ok(f.manager.journal.process);
 });
+
+
+test('ownership journal waits for an older delayed save before committing idle retirement',async t=>{
+  const f=await fixture(t),target=await f.manager.createTarget();
+  const file=path.join(f.config.dataDir,'extension-ownership.json');
+  let reached,unblock;const entering=new Promise(resolve=>reached=resolve),gate=new Promise(resolve=>unblock=resolve);
+  t.after(()=>unblock());
+  const original=fs.rename.bind(fs);let held=false;
+  t.mock.method(fs,'rename',async(...args)=>{
+    if(!held&&args[1]===file){held=true;reached();await gate;}
+    return original(...args);
+  });
+  f.bridge.emit('targetRemoved',{targetId:target.id});
+  await Promise.race([entering,new Promise((_,reject)=>setTimeout(()=>reject(Error('old save did not start')),1500))]);
+  f.setProcess(null);
+  let finished=false;
+  const cleanup=f.manager.releaseIfUnused({guard:()=>true}).then(result=>{finished=true;return result;});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(finished,false,'idle clear must not bypass the earlier ownership file write');
+  unblock();
+  assert.equal((await cleanup).released,true);
+  await f.manager.saveChain;
+  const disk=JSON.parse(await fs.readFile(file,'utf8'));
+  assert.equal(disk.process,null);assert.deepEqual(disk.targets,[]);assert.deepEqual(disk.targetMetadata,{});
+  assert.equal(f.manager.journal.process,null);
+});
+
+test('a callback queued after idle retirement cannot restore a stale process owner',async t=>{
+  const f=await fixture(t),target=await f.manager.createTarget();
+  const file=path.join(f.config.dataDir,'extension-ownership.json');
+  f.setProcess(null);
+  let reached,unblock;const entering=new Promise(resolve=>reached=resolve),gate=new Promise(resolve=>unblock=resolve);
+  t.after(()=>unblock());
+  const original=fs.rename.bind(fs);let held=false,writes=0;
+  t.mock.method(fs,'rename',async(...args)=>{
+    if(args[1]===file){writes++;if(!held){held=true;reached();await gate;}}
+    return original(...args);
+  });
+  const cleanup=f.manager.releaseIfUnused({guard:()=>true});
+  await Promise.race([entering,new Promise((_,reject)=>setTimeout(()=>reject(Error('idle clear did not start')),1500))]);
+  f.bridge.emit('targetRemoved',{targetId:target.id});
+  unblock();
+  assert.equal((await cleanup).released,true);
+  await f.manager.saveChain;
+  const disk=JSON.parse(await fs.readFile(file,'utf8'));
+  assert.equal(disk.process,null);assert.deepEqual(disk.targets,[]);assert.deepEqual(disk.targetMetadata,{});
+  assert.equal(writes,1,'late old-generation snapshot must be fenced before rename');
+});

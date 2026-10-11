@@ -93,7 +93,16 @@ export class ExtensionManager {
     return url.origin===this.bridge?.url&&/^\/bootstrap\/[0-9a-f-]{36}$/.test(url.pathname)&&!url.search&&!url.hash&&target.url===metadata.bootstrapUrl&&target.bootstrapUrl===metadata.bootstrapUrl&&target.entryUrl===metadata.entryUrl&&!!canonicalUrl(metadata.entryUrl)&&digest(canonicalUrl(metadata.entryUrl))===conversationDigest;
   }
   status(){return{...(this.bridge?.status()||{adapter:'extension',connected:false,pending:0,commandCount:0}),profileBootstrap:this.config.extensionProfileBootstrap||'none',bootstrapCdpCommands:this.bootstrapCdpCommands,profileConnections:[...this.profileLeases.values()].filter(lease=>lease.isAlive()).length,profileGapCount:this.profileGapCount,profileContinuityUnverified:this.profileContinuityUnverified};}
-  async #save(){const snapshot=structuredClone({...this.journal,targets:[...this.owned]});const write=this.saveChain.catch(()=>{}).then(()=>atomicJson(this.journalFile,snapshot));this.saveChain=write;await write;}
+  // Ownership snapshots and idle retirement must share one disk-write lane.
+  // A delayed callback from a retired browser cannot resurrect that generation.
+  #persistJournal(snapshot,guard=()=>true){
+    const write=this.saveChain.catch(()=>{}).then(()=>atomicJson(this.journalFile,snapshot,guard));
+    this.saveChain=write;return write;
+  }
+  async #save(){
+    const owner=this.journal,snapshot=structuredClone({...owner,targets:[...this.owned]});
+    await this.#persistJournal(snapshot,()=>this.journal===owner);
+  }
   #processOwned(){return extensionProcessMatches(this.journal?.process,this.deps.processIdentity(this.journal?.process?.pid),this.deps.bootId());}
   #processExited(){return !this.journal?.process||extensionProcessExited(this.journal.process,this.deps);}
   #ownedRoots(){
@@ -111,7 +120,7 @@ export class ExtensionManager {
       return true;
     }
     const previous=this.journal,next={...previous,browserSessionId:randomUUID(),process:null,targets:[],targetMetadata:{},controllerStopPending:false,retiringProcess:null};
-    if(!await atomicJson(this.journalFile,next,()=>allowed()&&this.journal===previous&&!this.#ownedRoots()?.length))return false;
+    if(!await this.#persistJournal(next,()=>allowed()&&this.journal===previous&&!this.#ownedRoots()?.length))return false;
     this.journal=next;this.targetRemovalGeneration++;this.owned.clear();this.closing.clear();this.targetClosures.clear();
     for(const lease of this.profileLeases.values())lease.release();this.profileLeases.clear();
     if(this.bridge){const bridge=this.bridge;this.bridge=null;this.initPromise=null;await bridge.close();}
@@ -296,7 +305,7 @@ export class ExtensionManager {
     const valid=()=>this.journal===current&&this.journal?.process===proof&&this.journal?.retiringProcess===retiring&&!!candidate();
     const next=candidate();if(!next||!valid())return false;
     if(current.controllerStopPending===false&&current.retiringProcess===null)return true;
-    const write=this.saveChain.catch(()=>{}).then(()=>atomicJson(this.journalFile,next,valid));this.saveChain=write;
+    const write=this.#persistJournal(next,valid);
     if(!await write)return false;
     current.controllerStopPending=false;current.retiringProcess=null;return true;
   }
