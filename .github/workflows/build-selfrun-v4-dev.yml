@@ -5,6 +5,11 @@ on:
     branches:
       - 'selfrun-v4/v4.0.8-dev1'
   workflow_dispatch:
+    inputs:
+      run_android_emulator:
+        description: 'Explicit opt-in to hosted Android emulator tests (local verification is the default)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -154,6 +159,7 @@ jobs:
             "$VERSION_NAME" "$VERSION_CODE" > release-output/IDENTITY.txt
 
       - name: Prepare 4.0.7 upgrade baseline
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_android_emulator == true }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -179,6 +185,7 @@ jobs:
             "$VERSION_NAME" "$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Enable hardware acceleration
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_android_emulator == true }}
         shell: bash
         run: |
           set -euo pipefail
@@ -186,6 +193,7 @@ jobs:
           sudo chmod 0666 /dev/kvm
 
       - name: Verify 4.0.7 to 4.0.8-dev1 update and TEST co-install
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_android_emulator == true }}
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 36
