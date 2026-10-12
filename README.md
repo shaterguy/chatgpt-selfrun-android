@@ -113,4 +113,4 @@ Vercel `selfrun-command-bridge`의 server-side `FIREBASE_PROJECT_ID`, `FIREBASE_
 
 개발 TEST application ID는 `com.shaterguy.chatgptselfrun.drive.test`, 정식 application ID는 `com.shaterguy.chatgptselfrun.drive`입니다. TEST와 정식판은 별도 UID로 동시 설치됩니다.
 
-정식 릴리즈는 해당 버전의 release workflow에서 정확한 source/version identity, 정식 업데이트 계보, TEST 병행 설치와 필요한 런타임 검증을 확인합니다. dev·rc·stable 채널과 승격 규칙의 현재 원본은 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)입니다.
+정식 릴리즈는 `tools/selfrun_stable_release.sh`를 단일 진입점으로 사용하며, 로컬 검증 증거를 확인한 뒤 GitHub에서는 `sign-selfrun-drive-stable.yml`로 정식 APK만 서명합니다. 서명 APK의 업데이트·TEST 병행 설치 검증은 로컬에서 마치고, 검증된 동일 파일을 GitHub Release에 게시합니다. 실행 명령·증거 계약·예외는 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)를 따릅니다.
