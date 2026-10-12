@@ -1,15 +1,14 @@
 name: Release SelfRun 4.0.8
 run-name: SelfRun Drive 4.0.8 Release (${{ github.ref_name }}) #${{ github.run_number }} attempt-${{ github.run_attempt }}
 
+# Historical v4.0.8 release: never run automatically on future version changes.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - release/v4.0.8
-    paths:
-      - app/build.gradle
-      - .github/workflows/release-drive-v332.yml
+    inputs:
+      run_legacy_emulator_release:
+        description: 'Explicit opt-in to legacy v4.0.8 GitHub emulator and publish pipeline'
+        type: boolean
+        default: false
 
 concurrency:
   group: selfrun-v408-release-${{ github.ref }}
@@ -20,7 +19,7 @@ env:
 
 jobs:
   build-release:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.8'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.8') && inputs.run_legacy_emulator_release == true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -365,7 +364,7 @@ jobs:
           retention-days: 30
 
   publish-release:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.8'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/v4.0.8') && inputs.run_legacy_emulator_release == true
     needs: [build-release, verify-release-emulator, verify-formal-fcm]
     runs-on: ubuntu-latest
     timeout-minutes: 20
