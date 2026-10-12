@@ -20,7 +20,7 @@ test('Page.enable preparation failure stays provably unsubmitted through cancell
   await f.ingest();
   assert.equal(f.record().state,'BLOCKED');assert.equal(f.record().reason,'ATTACH_FAILED');
   assert.equal(f.record().intent,null);assert.equal(f.record().conversation_url,'');
-  assert.deepEqual(calls,['Page.enable']);assert.deepEqual(closed,[]);
+  assert.deepEqual(calls,['Page.enable']);assert.deepEqual(closed,['failed-owned']);assert.equal(f.record().preparation_target_disposed,true);
   f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
   cancelledProof(f);assert.equal(f.record().pre_submit_proof.schema,1);
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};
@@ -133,4 +133,71 @@ test('a local historical DISCOVERED snapshot with no proof cannot manufacture it
   f.store.value.lifecycle={schema:1,requests:{[r.key]:r},retired:{},controls:{[f.control.task_id]:f.control},events:[],outbox:{}};
   f.controller=f.recreate();await f.ingest();f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
   cancelledProof(f);
+});
+
+test('new unresponsive CDP preparation tab is closed and fresh target is used on automatic retry',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';
+  const created=[],previous=[],closed=[];
+  f.browser.chromium={
+    isOwnedTarget:id=>created.includes(id),
+    closeOwnedTarget:async(id,{caller,guard})=>{assert.equal(caller,true);assert.equal(guard(),true);closed.push(id);return {closed:true};},
+  };
+  f.browser.prepare=async({onTarget,previousTargetId})=>{
+    f.prepares++;previous.push(previousTargetId);
+    const id=previousTargetId||'fresh-'+f.prepares;
+    if(!previousTargetId)created.push(id);
+    await onTarget({id});
+    if(f.prepares===1)throw Error('CDP command timeout: Emulation.setUserAgentOverride');
+    return {target:{id},session:{close(){}},baseline:{}};
+  };
+  f.controller=f.recreate();await f.ingest();
+  assert.equal(f.record().state,'BLOCKED');
+  assert.equal(f.record().preparation_target_disposed,true);
+  assert.deepEqual(closed,['fresh-1']);
+  assert.equal(f.sends,0);
+  await f.controller.repository.move(keyFor(f.body),'BLOCKED','TEST_RETRY_DUE',{retry_at:0});
+  await f.controller.tick(f.transport);await f.settle();
+  assert.equal(f.record().state,'PREPARED');
+  assert.deepEqual(previous,[null,null]);
+  assert.deepEqual(created,['fresh-1','fresh-2']);
+  assert.equal(f.sends,0);
+});
+test('unconfirmed tab closure preserves target identity and cannot create replacement',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';
+  const previous=[],closed=[];
+  f.browser.chromium={
+    isOwnedTarget:id=>id==='original-tab',
+    closeOwnedTarget:async(id,{caller,guard})=>{assert.equal(caller,true);assert.equal(guard(),true);closed.push(id);return {closed:false,reason:'close_unconfirmed'};},
+  };
+  f.browser.prepare=async({onTarget,previousTargetId})=>{
+    f.prepares++;previous.push(previousTargetId);
+    await onTarget({id:'original-tab'});
+    throw Error('CDP command timeout: Emulation.setUserAgentOverride');
+  };
+  f.controller=f.recreate();await f.ingest();
+  assert.equal(f.record().target_id,'original-tab');
+  await f.controller.repository.move(keyFor(f.body),'BLOCKED','TEST_RETRY_DUE',{retry_at:0});
+  await f.controller.tick(f.transport);await f.settle();
+  assert.deepEqual(previous,[null,'original-tab']);
+  assert.deepEqual(closed,['original-tab','original-tab']);
+  assert.equal(f.sends,0);
+});
+test('non-CDP preparation failure preserves target for normal retry',async()=>{
+  const f=fixture();f.body.client_status='CREATE_REQUESTED';
+  const previous=[],closed=[];
+  f.browser.chromium={isOwnedTarget:()=>true,closeOwnedTarget:async id=>{closed.push(id);return {closed:true};}};
+  f.browser.prepare=async({onTarget,previousTargetId})=>{
+    f.prepares++;previous.push(previousTargetId);
+    await onTarget({id:'normal-retry-tab'});
+    if(f.prepares===1)throw Error('navigation currently unavailable');
+    return {target:{id:'normal-retry-tab'},session:{close(){}},baseline:{}};
+  };
+  f.controller=f.recreate();await f.ingest();
+  assert.equal(f.record().target_id,'normal-retry-tab');
+  await f.controller.repository.move(keyFor(f.body),'BLOCKED','TEST_RETRY_DUE',{retry_at:0});
+  await f.controller.tick(f.transport);await f.settle();
+  assert.equal(f.record().state,'PREPARED');
+  assert.deepEqual(previous,[null,'normal-retry-tab']);
+  assert.deepEqual(closed,[]);
+  assert.equal(f.sends,0);
 });

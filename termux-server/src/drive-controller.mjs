@@ -507,7 +507,7 @@ export class DriveDispatchController {
     const onTarget=async target=>{
       const owned=this.browser.chromium?.isOwnedTarget?.(target.id)===true;
       const saved=guard()?await this.#move(key,this.repository.get(key).state,'BROWSER_TARGET_ACQUIRED',
-        {target_id:target.id,target_owned:owned},token):null;
+        {target_id:target.id,target_owned:owned,preparation_target_disposed:false},token):null;
       // Retirement may commit while the acquisition write waits in the store queue.
       if(!saved&&owned){if(!await this.#discardedTarget(pending,target.id))await this.repository.queueTargetCleanup(key,target.id,token);void this.cleanupTerminalResources();}
     };
@@ -517,7 +517,7 @@ export class DriveDispatchController {
         const directives=await this.#directives();
         attached=await this.browser.prepare({projectUrl:r.body.project_url,
           prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard,
-          previousTargetId:r.target_id||null});
+          previousTargetId:r.preparation_target_disposed?null:r.target_id||null});
       } else if(mode==='target') {
         attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal,onTarget,guard,...(observationOnly?{observationOnly:true}:{})});
       } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal,onTarget,guard,automaticRecovery,
@@ -547,8 +547,28 @@ export class DriveDispatchController {
         return null;
       }
       const code=classifyAttach(error),attempts=r.attach_attempts+1;
+      const failed=this.repository.get(key);
+      // Retire only an owned, unsent preparation tab that stopped answering CDP.
+      // A pending submission must keep its original target for readback.
+      const failedBeforeSubmit=mode==='prepare'&&!!failed?.target_id&&failed.target_owned===true
+        &&!failed.intent&&!failed.conversation_url&&!failed.submission_confirmed
+        &&(/CDP (?:command|query|websocket connect) timeout/i.test(String(error?.message||error))
+          ||['CDP_COMMAND_TIMEOUT','CDP_QUERY_TIMEOUT'].includes(error?.code));
+      let retired=false;
+      if(failedBeforeSubmit) {
+        const targetId=failed.target_id;
+        const stillOwned=()=>guard()&&this.repository.get(key)?.target_id===targetId
+          &&!this.repository.get(key)?.intent&&!this.repository.get(key)?.conversation_url
+          &&!this.repository.get(key)?.submission_confirmed;
+        try {
+          const closed=await this.browser.chromium?.closeOwnedTarget?.(targetId,{caller:true,guard:stillOwned});
+          retired=!!(closed?.closed||closed?.absent);
+        } catch {}
+        if(!guard())return null;
+      }
       this.#detach(key);
       await this.#move(key,'BLOCKED','ATTACH_FAILED',{attach_attempts:attempts,failure_epoch:r.control_epoch,
+        ...(retired?{preparation_target_disposed:true}:{}),
         blocked_epoch:null,retry_at:Date.now()+Math.max(1000,Number(this.config.resumeRetryMs)||30000),error:errorInfo(error,code)});
       await this.repository.flush(transport);
       return null;
