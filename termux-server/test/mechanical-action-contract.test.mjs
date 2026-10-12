@@ -96,7 +96,7 @@ for(const mode of ['confirmed','unknown'])test(`cancelled ${mode} input retains 
  assert.equal(f.record().state,'CANCELLED');assert.equal(f.record().body,undefined);assert.equal(f.record().intent,undefined);
  await f.controller.quiesceForStandby();f.controller=f.recreate();await f.controller.initialize();
  f.body={...f.body,client_status:'SEND_REQUESTED',dispatch_attempt:2};await f.ingest();
- assert.equal(f.sends,1);assert.equal(f.prepares,1);await f.stop();assert.equal(f.record(),null);
+ assert.equal(f.sends,2);assert.equal(f.prepares,2);await f.stop();assert.equal(f.record(),null);
  assert.deepEqual(f.controller.repository.data.controls,{});assert.deepEqual(f.controller.repository.data.retired,{});
 });
 test('cancelled current-run proof cannot block a fresh successor authorized by current CONTROL',async()=>{
@@ -112,5 +112,5 @@ for(const state of ['PAUSED','WAITING_USER_INTERVENTION'])test(`a ${state} round
  await f.controller.quiesceForStandby();f.controller=f.recreate();await f.controller.initialize();
  f.control={...f.control,state:'RUNNING',control_epoch:3};await f.controller.control(null,f.control,f.transport);
  f.body={...f.body,client_status:'SEND_REQUESTED',dispatch_attempt:2};await f.ingest();
- assert.equal(f.sends,1);assert.equal(f.prepares,1);await f.stop();assert.equal(f.record(),null);
+ assert.equal(f.sends,2);assert.equal(f.prepares,2);await f.stop();assert.equal(f.record(),null);
 });

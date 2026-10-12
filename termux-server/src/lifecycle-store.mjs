@@ -149,16 +149,10 @@ export class LifecycleStore {
         &&runningTaskControl(currentControl,retired)&&currentControl.control_epoch>retired.control_epoch
         &&canonicalUrl(body.conversation_url)===canonicalUrl(currentControl.conversation_url)&&!!canonicalUrl(body.conversation_url)
         &&!retired.browser_open_pending;
-      if(retired&&!currentWatch) {
-        if(retired.state!=='CANCELLED'||!retired.never_submitted||retired.pre_submit_proof?.schema!==1||body.dispatch_attempt<=retired.dispatch_attempt
-          ||['CANCELLED','SUPERSEDED'].includes(body.client_status))return structuredClone(retired);
-        const control=this.control(body.task_id);
-        if(!runningTaskControl(control,retired)||retired.conversation_digest||control.conversation_url||body.conversation_url)return structuredClone(retired);
-        if(preparationInputDigest(body)!==retired.pre_submit_proof.input_digest)
-          throw new Error('accepted preparation input/profile is immutable');
-        if(!cancelledCleanupConfirmed(this.data,retired))return structuredClone(retired);
-        body={...appInput(body),server_control_epoch:control?.control_epoch||retired.control_epoch};
-      }
+      const appRetry=retired?.state==='CANCELLED'&&['CREATE_REQUESTED','SEND_REQUESTED'].includes(body.client_status)
+        &&body.dispatch_attempt>retired.dispatch_attempt&&runningTaskControl(currentControl,retired);
+      if(retired&&!currentWatch&&!appRetry) return structuredClone(retired);
+      if(appRetry)body={...appInput(body),server_control_epoch:currentControl.control_epoch};
       const incoming=canonicalUrl(body.conversation_url);
       if(incoming&&this.records().some(r=>r.key!==key&&r.conversation_url===incoming&&!['COMPLETED','CANCELLED'].includes(r.state)))
         throw new Error('canonical conversation is already owned by another request');
@@ -207,7 +201,8 @@ export class LifecycleStore {
       r.browser_entry=null;
       r.browser_cleanup_displacement=null;
       if(retired){delete next.retired[key];r.run_generation=(retired.run_generation||0)+1;r.revision=(retired.revision||0)+1;
-        r.pre_submit_proof=currentWatch?null:structuredClone(retired.pre_submit_proof);
+        if(currentWatch)r.pre_submit_proof=null;
+        else if(!appRetry)r.pre_submit_proof=structuredClone(retired.pre_submit_proof);
         if(currentWatch){
           delete next.completionOutbox[key];
           for(const entry of Object.values(next.browserCleanup))if(entry.key===key)resources.push(structuredClone(entry));

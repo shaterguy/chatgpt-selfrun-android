@@ -79,7 +79,7 @@ test('durable '+outcome+' intent revokes no-submit proof before cancellation',as
   assert.equal(f.record().pre_submit_proof,null);
   await f.controller.repository.move(keyFor(f.body),'BLOCKED','transport failed');
   assert.equal(f.record().pre_submit_proof,null);
-  await cancelAndRetry(f);assert.equal(f.prepares,1);assert.equal(f.sends,0);cancelledProof(f);assert.equal(f.record().never_submitted,false);
+  await cancelAndRetry(f);assert.equal(f.prepares,2);assert.equal(f.sends,0);assert.equal(f.record().state,'PREPARED');assert.equal(f.record().dispatch_attempt,2);
 });
 test('explicit current URL resumes observation; finished Result does not become a historical veto',async()=>{
   const f=fixture();await f.existing();await f.stop();assert.equal(f.record(),null);
@@ -97,7 +97,7 @@ test('historical BLOCKED records with absent or even explicit empty fields do no
     f.controller=f.recreate();await f.controller.initialize();assert.notEqual(f.record().pre_submit_proof?.schema,1);f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();
     cancelledProof(f);
     f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
-    assert.equal(f.prepares,0);assert.ok(f.record());
+    assert.equal(f.prepares,1);assert.equal(f.record().state,'PREPARED');
   }
 });
 for(const importedState of ['BLOCKED','PREPARING','DISCOVERED','CANCELLED'])
@@ -110,7 +110,7 @@ test('cold Drive '+importedState+' cannot inject durable preparation proof',asyn
   f.body.client_status='CANCELLED';await f.ingest();await f.controller.cleanupTerminalResources();cancelledProof(f);
   const prepares=f.prepares;
   f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
-  assert.ok(f.record());assert.notEqual(f.record().pre_submit_proof?.schema,1);assert.equal(f.sends,0);assert.equal(f.prepares,prepares);
+  assert.equal(f.record().state,'PREPARED');assert.equal(f.record().pre_submit_proof?.schema,1);assert.equal(f.sends,0);assert.equal(f.prepares,prepares+1);
 });
 test('cold historical PREPARING without a proof cannot establish fresh local proof',async()=>{
   const f=fixture();f.body.client_status='CREATE_REQUESTED';f.body.lifecycle_state='PREPARING';

@@ -392,7 +392,9 @@ export class DriveDispatchController {
       return undefined;
     }
     const currentControl=this.repository.control(body.task_id);
-    const retry=imported.never_submitted&&body.dispatch_attempt>imported.dispatch_attempt;
+    const retry=(imported.state==='CANCELLED'&&['CREATE_REQUESTED','SEND_REQUESTED'].includes(body.client_status)
+      &&body.dispatch_attempt>imported.dispatch_attempt)
+      ||(imported.never_submitted&&body.dispatch_attempt>imported.dispatch_attempt);
     const resume=currentControl?.state==='RUNNING'&&currentControl.control_epoch>imported.control_epoch
       &&canonicalUrl(currentControl.conversation_url)&&!['COMMITTED','COMPLETED'].includes(imported.state);
     let authorized=currentControl;

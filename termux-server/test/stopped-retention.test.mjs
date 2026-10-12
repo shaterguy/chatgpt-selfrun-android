@@ -125,12 +125,12 @@ test('new explicit cancelled-attempt dispatch can prepare without old intent rep
  f.body={...f.body,client_status:'CREATE_REQUESTED',dispatch_attempt:2};await f.ingest();
  assert.equal(f.prepares,2);assert.equal(f.sends,0);assert.equal(f.record().state,'PREPARED');
 });
-test('higher dispatch attempt alone cannot replay a retired accepted or uncertain input',async()=>{
+test('explicit higher app attempt retries a cancelled request regardless of previous POST outcome',async()=>{
  for(const mode of ['accepted','unknown']){
   const f=fixture();if(mode==='unknown')f.mode=mode;await f.ingest();
   f.body.client_status='CANCELLED';await f.ingest();
   f.body={...f.rows.get(f.path),dispatch_attempt:2,client_status:'SEND_REQUESTED'};await f.ingest();
-  assert.equal(f.sends,1);assert.equal(f.prepares,1);assert.deepEqual(active(f),[]);
+  assert.equal(f.sends,2);assert.equal(f.prepares,2);assert.equal(active(f).length,1);
  }
 });
 test('watcher explicit resume ignores the old cancelled dispatch while preserving app URL',async()=>{
