@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 'feature/ondevice-v3-submit-common-signal-20261002'
+      - 'ci-fallback/**'
   workflow_dispatch:
 
 permissions:
@@ -20,6 +21,8 @@ env:
 
 jobs:
   static-test-build:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:selfrun-dual-submission.yml]'))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -168,6 +171,8 @@ jobs:
           retention-days: 30
 
   emulator-regression:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:selfrun-dual-submission.yml]'))
     needs: static-test-build
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -245,6 +250,8 @@ jobs:
           retention-days: 30
 
   publish-direct-test-apk:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:selfrun-dual-submission.yml]'))
     needs: [static-test-build, emulator-regression]
     permissions:
       contents: write

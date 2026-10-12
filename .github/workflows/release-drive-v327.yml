@@ -8,6 +8,7 @@ on:
       - selfrun-drive/v3.2.7-rc3
       - main
 
+      - 'ci-fallback/**'
 concurrency:
   group: selfrun-v327-release-${{ github.ref }}
   cancel-in-progress: false
@@ -18,9 +19,8 @@ env:
 jobs:
   build-release:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.ref == 'refs/heads/selfrun-drive/v3.2.7-rc3' ||
-      (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: SelfRun Drive 3.2.7'))
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:release-drive-v327.yml]')) &&
+      (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/selfrun-drive/v3.2.7-rc3' || (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: SelfRun Drive 3.2.7')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -179,6 +179,8 @@ jobs:
           retention-days: 30
 
   verify-release-emulator:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:release-drive-v327.yml]'))
     needs: build-release
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -259,6 +261,8 @@ jobs:
           retention-days: 30
 
   verify-formal-fcm:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:release-drive-v327.yml]'))
     needs: build-release
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -364,7 +368,9 @@ jobs:
           retention-days: 30
 
   publish-release:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:release-drive-v327.yml]')) &&
+      (github.ref == 'refs/heads/main')
     needs: [build-release, verify-release-emulator, verify-formal-fcm]
     runs-on: ubuntu-latest
     timeout-minutes: 20

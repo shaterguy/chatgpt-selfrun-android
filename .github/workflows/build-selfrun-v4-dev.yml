@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'selfrun-v4/v4.0.8-dev1'
+      - 'ci-fallback/**'
   workflow_dispatch:
     inputs:
       run_android_emulator:
@@ -24,6 +25,8 @@ env:
 
 jobs:
   build-dev:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:build-selfrun-v4-dev.yml]'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
