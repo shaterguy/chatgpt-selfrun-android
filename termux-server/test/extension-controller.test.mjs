@@ -5,7 +5,7 @@ test('controller registers the exact server-owned tab without any create or send
  const f=await monitorRuntimeFixture(t),{t:page,s}=await target(f);await s.run('progress');
  assert.equal(f.manager.journal.targetMetadata[page.id].observerTabId,1);assert.equal(f.requests.some(r=>r.body?.operation==='createTarget'||r.body?.operation==='submit'),false);
 });
-for(const op of ['createTarget','navigate','input','submit','receiptArm','closeTarget','evaluate'])test('controller transport excludes action '+op,async t=>{
+for(const op of ['createTarget','navigate','input','submit','receiptArm','evaluate'])test('controller transport excludes action '+op,async t=>{
  const f=await monitorRuntimeFixture(t),{t:page,s}=await target(f);await s.run('progress');await assert.rejects(f.bridge.request(op,{targetId:page.id}),e=>e.code==='EXTENSION_UNSUPPORTED');assert.equal(f.tabs.has(1),true);
 });
 test('monitor registration rejects a foreign session and wrong HMAC without adopting a user tab',async t=>{
@@ -37,4 +37,11 @@ test('a lost Android profile lease cannot gate observation or authorize profile 
  alive=false;f.tabs.get(1).url='https://chatgpt.com/g/other/c/other';
  assert.equal((await session.run('progress')).url,'https://chatgpt.com/g/other/c/other');assert.equal(profiles,1);
  await assert.rejects(session.run('initialize',{clientProfile:'android-webview'}),/repurposed/);assert.equal(profiles,1);
+});
+
+test('controller closeTarget requires the exact registered URL before closing a tab',async t=>{
+ const f=await monitorRuntimeFixture(t),{t:page,s}=await target(f);await s.run('progress');
+ await assert.rejects(f.bridge.request('closeTarget',{targetId:page.id}),e=>e.code==='TARGET_SCOPE_CHANGED');
+ await assert.rejects(f.bridge.request('closeTarget',{targetId:page.id,expectedUrl:'https://chatgpt.com/c/wrong'}),e=>e.code==='TARGET_SCOPE_CHANGED');
+ assert.equal(f.tabs.has(1),true);
 });

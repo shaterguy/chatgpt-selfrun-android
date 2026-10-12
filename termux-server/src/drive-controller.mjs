@@ -600,6 +600,13 @@ export class DriveDispatchController {
     const next=mode==='prepare'?'PREPARING':'ATTACHING';
     if(r.control_state!=='RUNNING'&&!(r.control_state==='WAITING_USER_INTERVENTION'&&mode!=='prepare'))return null;
     const beforeOpen=this.repository.token(key);
+    if(mode==='prepare'&&this.browser.chromium?.transport==='extension'
+      &&this.repository.cleanupEntries().some(entry=>entry.task_id===r.task_id&&entry.key!==key)) {
+      // A successor cannot compete with its predecessor's target close and CDP
+      // profile lease. This is the same fresh preparation path as turn one.
+      await this.cleanupTerminalResources();
+      if(!this.repository.current(key,beforeOpen))return null;
+    }
     if(mode==='target'&&r.state!=='ATTACHING') {
       // ATTACHING retains the durable send intent even before a URL was known.
     }

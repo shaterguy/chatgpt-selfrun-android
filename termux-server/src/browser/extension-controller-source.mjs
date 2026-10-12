@@ -17,7 +17,7 @@ export function controllerRuntime(config) {
   const originAllowed=url=>{try{return config.targetOrigins.includes(new URL(url).origin);}catch{return false;}};
   const mutating=new Set();
   const observations=new Set(['snapshot','progress','recoveryInput','receiptSnapshot']);
-  const cleanup=new Set(['listTargets','idleStatus','discardTarget','registerTarget']);
+  const cleanup=new Set(['listTargets','idleStatus','discardTarget','closeTarget','registerTarget']);
   const targetId=id=>'ext:'+config.browserSessionId+':'+id;
   const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
   // Observation follows the registered tab; input ownership belongs to the server.
@@ -120,6 +120,12 @@ export function controllerRuntime(config) {
     if(operation==='idleStatus') {const tabs=await chrome.tabs.query({});return{stopping:stopping===true,ownedCount:targets.size,unrelatedCount:tabs.filter(t=>t.id!==currentTabId&&!targets.has(targetId(t.id))).length};}
     if(operation==='controllerStop') {const tabs=await chrome.tabs.query({});check();if(targets.size||tabs.some(tab=>tab.id!==currentTabId))return{stopped:false,reason:'browser_in_use'};stopping=true;setTimeout(()=>{streamAbort?.abort();void chrome.tabs.remove(currentTabId);},100);return{stopped:true};}
     if(operation==='discardTarget'){cancelTargetWork(payload.targetId);const t=targets.get(payload.targetId);return t?disposeTarget(t,check):{discarded:true,pageCachePurged:true};}
+    if(operation==='closeTarget') {
+      const t=validTarget(payload.targetId),tab=await chrome.tabs.get(t.tabId);
+      if(t.tabId===currentTabId||String(tab.url||'')!==String(payload.expectedUrl||'')
+        ||String(tab.url||'')!==String(t.url||''))throw fail('Owned target URL changed','TARGET_SCOPE_CHANGED');
+      check();t.closing=true;await chrome.tabs.remove(t.tabId);return {closed:true};
+    }
     const t=validTarget(payload.targetId);
     const live=await liveTarget(t.id);if(!originAllowed(live.url))throw fail('Target is not at approved page','PAGE_UNAVAILABLE');
     if(operation==='snapshot'||operation==='progress')return (await content(t,'selfrun.content.snapshot',check)).snapshot;

@@ -3,7 +3,7 @@ import {EventEmitter} from 'node:events';
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {EXTENSION_ID} from './extension-package.mjs';
 const LIMIT=2*1024*1024;
-export const EXTENSION_OPERATIONS=new Set(['registerTarget','listTargets','idleStatus','controllerStop','discardTarget','snapshot','progress','recoveryInput']);
+export const EXTENSION_OPERATIONS=new Set(['registerTarget','listTargets','idleStatus','controllerStop','discardTarget','closeTarget','snapshot','progress','recoveryInput']);
 const error=(message,code,released=false)=>Object.assign(new Error(message),{code,released});
 const aborted=(signal,released=false)=>Object.assign(error('Extension command aborted',
   signal?.reason?.code==='OBSERVATION_SUPERSEDED'?'OBSERVATION_SUPERSEDED':signal?.reason?.name==='TimeoutError'?'EXTENSION_TIMEOUT':'ABORT_ERR',released),{name:'AbortError',cause:signal?.reason});

@@ -398,7 +398,19 @@ export class ExtensionManager {
         if(this.owned.has(id))await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});else await this.saveChain;
       }
       return result;
-    }catch{return skip('close_unconfirmed');}
+    }catch{
+      // Chromium's CDP may stop responding even when the owned extension tab
+      // remains controllable. Only the same registered tab and exact URL can be closed.
+      if(!allowed(target))return skip('guard_rejected');
+      try {
+        const response=await this.bridge?.request('closeTarget',{targetId:id,expectedUrl:target.url},{timeoutMs:2500});
+        if(response?.closed===true&&(sameOwner()||alreadyRemoved())){
+          if(this.owned.has(id))await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});
+          return {closed:true,reason:'extension_close'};
+        }
+      }catch{}
+      return skip('close_unconfirmed');
+    }
   }
   #closeSerial(id,options){
     const ownership={journal:this.journal,metadata:this.journal?.targetMetadata?.[id],removalGeneration:this.targetRemovalGeneration};
