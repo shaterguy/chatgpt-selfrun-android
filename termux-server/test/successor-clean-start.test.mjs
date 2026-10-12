@@ -98,3 +98,46 @@ test('successor closure releases an Android CDP profile lease before another fre
   const next=await wire.manager.createTarget('about:blank');
   assert.notEqual(next.id,old.id);
 });
+
+test('unregistered unique bootstrap can be closed when its first CDP emulation command times out',async t=>{
+ const wire=await monitorRuntimeFixture(t);
+ const target=await wire.manager.createTarget('about:blank');
+ assert.equal(target.entryPending,true);
+ const prior=wire.manager.deps.browserAction;
+ wire.manager.deps.browserAction=async args=>args.method==='Target.closeTarget'
+   ?Promise.reject(Error('CDP command timeout')):prior(args);
+ const closed=await wire.manager.closeOwnedTarget(target.id,{caller:true,guard:()=>true});
+ assert.equal(closed.closed,true);assert.equal(wire.manager.isOwnedTarget(target.id),false);
+ assert.equal([...wire.tabs.values()].some(tab=>tab.url===target.bootstrapUrl),false);
+ assert.equal(wire.tabs.has(99),true);
+});
+
+test('unregistered bootstrap fallback does not close ambiguous or repurposed tabs',async t=>{
+ const wire=await monitorRuntimeFixture(t);
+ const target=await wire.manager.createTarget('about:blank');
+ const prior=wire.manager.deps.browserAction;
+ wire.manager.deps.browserAction=async args=>args.method==='Target.closeTarget'
+   ?Promise.reject(Error('CDP command timeout')):prior(args);
+ wire.tabs.set(777,{id:777,url:target.bootstrapUrl});
+ const closed=await wire.manager.closeOwnedTarget(target.id,{caller:true,guard:()=>true});
+ assert.equal(closed.closed,false);assert.equal(wire.tabs.has(1),true);assert.equal(wire.tabs.has(777),true);
+});
+
+test('failed initial profile command leaves only a clean new-target path for preparation retry',async t=>{
+ const wire=await monitorRuntimeFixture(t);
+ wire.config.browserClientProfile='android-webview';wire.config.extensionProfileBootstrap='cdp-emulation';
+ wire.manager.deps.applyProfile=async()=>{throw Error('CDP command timeout: Emulation.setUserAgentOverride');};
+ const { ChatGptBrowser }=await import('../src/browser/chatgpt.mjs');
+ const browser=new ChatGptBrowser(wire.manager,wire.config);
+ let prior;
+ await assert.rejects(browser.prepare({projectUrl:'https://chatgpt.com/g/test/project',guard:()=>true,
+   onTarget:async target=>{prior=target;}}),/CDP command timeout/);
+ assert.ok(prior?.bootstrapUrl);assert.equal(wire.manager.isOwnedTarget(prior.id),true);
+ const oldAction=wire.manager.deps.browserAction;
+ wire.manager.deps.browserAction=async args=>args.method==='Target.closeTarget'
+   ?Promise.reject(Error('CDP target closing timed out')):oldAction(args);
+ const disposed=await wire.manager.closeOwnedTarget(prior.id,{caller:true,guard:()=>true});
+ assert.equal(disposed.closed,true);assert.equal(wire.manager.isOwnedTarget(prior.id),false);
+ const next=await wire.manager.createTarget('about:blank');
+ assert.notEqual(next.id,prior.id);assert.equal([...wire.tabs.values()].some(tab=>tab.url===prior.bootstrapUrl),false);
+});

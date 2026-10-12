@@ -121,6 +121,18 @@ export function controllerRuntime(config) {
     if(operation==='controllerStop') {const tabs=await chrome.tabs.query({});check();if(targets.size||tabs.some(tab=>tab.id!==currentTabId))return{stopped:false,reason:'browser_in_use'};stopping=true;setTimeout(()=>{streamAbort?.abort();void chrome.tabs.remove(currentTabId);},100);return{stopped:true};}
     if(operation==='discardTarget'){cancelTargetWork(payload.targetId);const t=targets.get(payload.targetId);return t?disposeTarget(t,check):{discarded:true,pageCachePurged:true};}
     if(operation==='closeTarget') {
+      if(!targets.has(payload.targetId)) {
+        // Before the page/observer is registered, only the server's uniquely
+        // generated loopback bootstrap tab can be located without a tab-id guess.
+        let url;try{url=new URL(payload.expectedUrl);}catch{}
+        const origin=new URL(config.bridgeUrl).origin;
+        if(typeof payload.targetId!=='string'||!payload.targetId.startsWith('ext:'+config.browserSessionId+':')
+          ||!url||url.origin!==origin||!/^\/bootstrap\/[0-9a-f-]{36}$/.test(url.pathname)||url.search||url.hash)
+          throw fail('Unregistered target is not an owned bootstrap','TARGET_NOT_OWNED');
+        const matches=(await chrome.tabs.query({})).filter(tab=>tab.id!==currentTabId&&String(tab.url||'')===url.href);
+        if(matches.length!==1)throw fail('Bootstrap target identity is ambiguous','TARGET_NOT_OWNED');
+        check();await chrome.tabs.remove(matches[0].id);return {closed:true,bootstrap:true};
+      }
       const t=validTarget(payload.targetId),tab=await chrome.tabs.get(t.tabId);
       if(t.tabId===currentTabId||String(tab.url||'')!==String(payload.expectedUrl||'')
         ||String(tab.url||'')!==String(t.url||''))throw fail('Owned target URL changed','TARGET_SCOPE_CHANGED');
