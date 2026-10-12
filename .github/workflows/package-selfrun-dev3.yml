@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - 'selfrun-v4/v4.0.4-dev3'
+      - 'ci-fallback/**'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -10,6 +12,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   package-dev:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:package-selfrun-dev3.yml]'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:

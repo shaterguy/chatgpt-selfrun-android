@@ -8,6 +8,7 @@ on:
       - 'selfrun-v3/v3.*-rc*'
       - 'v3.*-dev*'
       - 'v3.*-rc*'
+      - 'ci-fallback/**'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,8 @@ env:
 
 jobs:
   static-test-build:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:build-selfrun-v3-candidate.yml]'))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -170,6 +173,8 @@ jobs:
           retention-days: 30
 
   emulator-regression:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:build-selfrun-v3-candidate.yml]'))
     needs: static-test-build
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -246,6 +251,8 @@ jobs:
           retention-days: 30
 
   publish-direct-test-apk:
+    if: >-
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[gh-fallback:build-selfrun-v3-candidate.yml]'))
     needs: [static-test-build, emulator-regression]
     permissions:
       contents: write
