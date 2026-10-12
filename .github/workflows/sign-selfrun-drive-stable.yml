@@ -1,0 +1,153 @@
+# Stable signing runs on GitHub only because the formal signing secret is stored here.
+# Validate the pinned candidate locally before dispatch. Retrieve the signed APK,
+# verify local in-place upgrades and TEST co-install, then publish the exact bytes.
+# Do not add an Android emulator or JVM/runtime regression job to this workflow.
+name: Sign SelfRun Drive Stable APK
+run-name: "Sign SelfRun Drive v${{ inputs.expected_version_name }} (${{ inputs.expected_source_sha }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_sha:
+        description: 'Full 40-character SHA of the locally verified release candidate'
+        type: string
+        required: true
+      expected_version_name:
+        description: 'Expected stable versionName (for example 4.0.11)'
+        type: string
+        required: true
+      expected_version_code:
+        description: 'Expected numeric versionCode'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selfrun-drive-stable-sign-${{ inputs.expected_source_sha }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+  EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name }}
+  EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code }}
+
+jobs:
+  sign-stable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
+      SELFRUN_FIREBASE_APPLICATION_ID: ${{ secrets.SELFRUN_FIREBASE_APPLICATION_ID }}
+      SELFRUN_FIREBASE_PROJECT_ID: ${{ secrets.SELFRUN_FIREBASE_PROJECT_ID }}
+      SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
+    steps:
+      - name: Validate explicit release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_VERSION_CODE" =~ ^[0-9]+$ ]]
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.expected_source_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '11076708'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: false
+
+      - name: Confirm exact source, application and stable version
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]]
+          VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" app/build.gradle | head -1)"
+          VERSION_CODE="$(sed -n 's/.*selfRunDriveVersionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          [[ "$VERSION_NAME" == "$EXPECTED_VERSION_NAME" ]]
+          [[ "$VERSION_CODE" == "$EXPECTED_VERSION_CODE" ]]
+          grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
+          grep -Fq "applicationIdSuffix '.test'" app/build.gradle
+          bash tools/verify_drive_variant.sh
+
+      - name: Build only the formal stable APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --build-cache --no-daemon --console=plain --stacktrace \
+            :app:verifyDriveVariantIdentity :app:assembleRelease
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p release-output
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            release-output/formal-aligned.apk
+
+      - name: Install pinned signing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+
+      - name: Sign APK and verify signer, identity and checksum
+        shell: bash
+        env:
+          SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_PASSPHRASE"
+          PASS_FILE="$RUNNER_TEMP/selfrun-drive-stable-pass"
+          trap 'rm -f "$PASS_FILE"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
+
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          FORMAL="release-output/SelfRun-Drive-v${EXPECTED_VERSION_NAME}.apk"
+          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh \
+            release-output/formal-aligned.apk "$PASS_FILE" "$FORMAL" \
+            > release-output/FORMAL_APKSIGNER_VERIFY.txt
+          "$BT/apksigner" verify --verbose --print-certs "$FORMAL" \
+            > release-output/FORMAL_CERT.txt
+          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' release-output/FORMAL_CERT.txt
+
+          BADGING="$("$BT/aapt" dump badging "$FORMAL")"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" <<<"$BADGING"
+          grep -Fq "versionCode='${EXPECTED_VERSION_CODE}'" <<<"$BADGING"
+          grep -Fq "versionName='${EXPECTED_VERSION_NAME}'" <<<"$BADGING"
+
+          sha256sum "$FORMAL" > release-output/SHA256SUMS.txt
+          printf '%s\n' "$EXPECTED_SOURCE_SHA" > release-output/SOURCE_COMMIT.txt
+          printf 'package=com.shaterguy.chatgptselfrun.drive\nversionName=%s\nversionCode=%s\nsourceSha=%s\ncertificateSha256=b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe\n' \
+            "$EXPECTED_VERSION_NAME" "$EXPECTED_VERSION_CODE" "$EXPECTED_SOURCE_SHA" \
+            > release-output/IDENTITY.txt
+
+      - name: Upload exact signed APK and provenance (not a release)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: selfrun-drive-stable-${{ inputs.expected_version_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            release-output/SelfRun-Drive-v*.apk
+            release-output/SHA256SUMS.txt
+            release-output/SOURCE_COMMIT.txt
+            release-output/IDENTITY.txt
+            release-output/FORMAL_CERT.txt
+            release-output/FORMAL_APKSIGNER_VERIFY.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
