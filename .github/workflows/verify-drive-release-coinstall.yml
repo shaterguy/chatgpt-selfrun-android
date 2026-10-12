@@ -2,10 +2,12 @@ name: Verify SelfRun Drive Release Co-install
 run-name: SelfRun Drive Release Co-install (${{ github.ref_name }}) #${{ github.run_number }}
 
 on:
-  push:
-    branches:
-      - 'selfrun-drive/v*-rc*'
   workflow_dispatch:
+    inputs:
+      run_android_emulator:
+        description: 'Explicitly allow GitHub-hosted emulator verification (local verification is the default)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,6 +18,7 @@ concurrency:
 
 jobs:
   verify-release-coinstall:
+    if: ${{ inputs.run_android_emulator == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
