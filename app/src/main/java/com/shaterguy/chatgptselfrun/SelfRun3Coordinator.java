@@ -87,6 +87,7 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         wakeLock = power == null ? null : power.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, BuildConfig.APPLICATION_ID + ":selfrun3-active");
         if (wakeLock != null) wakeLock.setReferenceCounted(false);
+        SelfRunTerminalControlWorker.recoverPending(service);
     }
 
     boolean ownsCurrentRun() {
@@ -96,6 +97,8 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
     void onStoppedResumeAuthorized(String token) {
         requireMain();
         if (store.stopControlPending()) throw new IllegalStateException("STOP_CONTROL_PENDING");
+        // An explicit user resume alone is permitted to lift the terminal fence.
+        SelfRunTerminalControlWorker.explicitResume(service, store.runId());
         stopRequested = false;
         setAccessToken(token);
         web.restoreAccessToken(token);
@@ -928,6 +931,15 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
                     serverRegisteredTurns.remove(current.turnId());
                     serverFallbackTurns.remove(current.turnId());
                     authoritativeReadCheckedTurns.remove(current.turnId());
+                    if (after.stage() == SelfRun3Engine.Stage.DONE) {
+                        try {
+                            SelfRunTerminalControlWorker.terminate(
+                                    service, after.taskId(), after, "DONE", "TASK_COMPLETED");
+                        } catch (Throwable error) {
+                            log.record(store, "V3_TERMINAL_OUTBOX_FAILED",
+                                    "state=DONE;error=" + error.getClass().getSimpleName());
+                        }
+                    }
                     syncProjection(after);
                     syncSuccessorWatchdog(after, "commit");
                     if (SelfRun3SuccessorTransitionPolicy.armed(after)) {
@@ -1508,7 +1520,10 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
 
     private void stop() {
         requireMain();
-        if (store.runId().isEmpty() || !ownsCurrentRun()) return;
+        // STOP always closes the active local session, regardless of phase or Result.
+        String task = store.runId();
+        if (task.isEmpty()) { service.stopSelf(); return; }
+        if (stopRequested) return;
         stopRequested = true;
         epoch++;
         cancelServerWaitState();
@@ -1516,72 +1531,18 @@ final class SelfRun3Coordinator implements SelfRun3WebAdapter.Listener {
         preparingRequest = "";
         web.quiesce();
         releaseWakeLock();
-        int expectedEpoch = epoch;
-        String task = store.runId();
-        if (!store.stopControlPending()) store.markStopRequested();
-        io.execute(() -> {
-            SelfRun3Engine.State snapshot;
-            try {
-                if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
-                SelfRun3Engine.State loaded = ledger.load(task);
-                if (loaded == null) throw new IllegalStateException("STOP_TASK_NOT_FOUND");
-                snapshot = loaded.terminal() ? loaded : ledger.apply(event(loaded,
-                        task + ":stop-local:" + UUID.randomUUID(), SelfRun3Engine.Kind.STOP, new JSONObject()));
-            } catch (Throwable error) {
-                main.post(() -> onStopControlResult(task, expectedEpoch, error));
-                return;
-            }
-            main.post(() -> {
-                if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
-                web.publishControlStateConfirmed(snapshot, "STOPPED", "USER_STOP",
-                        new SelfRun4DriveWebAdapter.ControlWriteCallback() {
-                            @Override public void onConfirmed() {
-                                onStopControlResult(task, expectedEpoch, null);
-                            }
-                            @Override public void onFailure(Throwable error) {
-                                onStopControlResult(task, expectedEpoch, error);
-                            }
-                        });
-            });
-        });
-    }
-
-    private void onStopControlResult(String task, int expectedEpoch, Throwable error) {
-        requireMain();
-        if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
-        if (error != null) {
-            store.setStatus("앱 중지됨 · 서버 중지 전달 실패, 재시도 중");
-            store.setLastError("V3_STOP_CONTROL_PENDING", "앱 실행은 중지되었습니다. 서버 중지 명령은 아직 전달 확인되지 않았습니다.");
-            log.record(store, "V3_STOP_CONTROL_RETRY", "error=" + error.getClass().getSimpleName());
-            main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);
-            return;
-        }
-        finalizeConfirmedStop(task, expectedEpoch);
-    }
-
-    private void finalizeConfirmedStop(String task, int expectedEpoch) {
-        requireMain();
-        io.execute(() -> finalizeStopLedger(task, expectedEpoch));
-    }
-
-    private void finalizeStopLedger(String task, int expectedEpoch) {
+        // Persist a terminal outbox entry for the independent worker.
         try {
-            SelfRun3Engine.State state = ledger.load(task);
-            if (state != null && !state.terminal()) {
-                ledger.apply(event(state, task + ":stop:" + UUID.randomUUID(),
-                        SelfRun3Engine.Kind.STOP, new JSONObject()));
-            }
-        } catch (Throwable ignored) { }
-        main.post(() -> finishLocalStop(task, expectedEpoch));
-    }
-
-    private void finishLocalStop(String task, int expectedEpoch) {
-        requireMain();
-        if (!validEpoch(expectedEpoch) || !task.equals(store.runId())) return;
+            SelfRunTerminalControlWorker.terminate(service, task, null,
+                    "STOPPED", "USER_STOP");
+        } catch (Throwable error) {
+            log.record(store, "V3_TERMINAL_OUTBOX_FAILED",
+                    "state=STOPPED;error=" + error.getClass().getSimpleName());
+        }
         store.stopByUser();
-        store.clearLastError();
-        log.record(store, "V3_STOP", "user_stop_control_confirmed");
+        log.record(store, "V3_STOP", "user_stop_local_terminal");
         SelfRunDebugLogSync.requestStored(service, task, "STOP");
+        web.close();
         service.stopSelf();
     }
 

@@ -38,21 +38,24 @@ public final class SelfRun4TaskControlPolicyTest {
         assertTrue(adapter.contains("default -> \"RUNNING\""));
     }
 
-    @Test public void explicitPauseResumeStopAndDonePreserveControlOrdering() throws Exception {
+    @Test public void stopAndDoneOverridePhaseAndOutliveTheService() throws Exception {
         String coordinator = source("SelfRun3Coordinator.java");
+        String service = source("SelfRunService.java");
+        String adapter = source("SelfRun4DriveWebAdapter.java");
+        String worker = source("SelfRunTerminalControlWorker.java");
         assertOrdered(coordinator, "web.publishControlState(\"PAUSED\", reason)", "web.quiesce()");
         assertOrdered(coordinator, "web.publishControlState(\"RESUME_REQUESTED\", \"USER_RESUME\")", "SelfRun3Engine.Kind.RESUME");
         int stop = coordinator.indexOf("private void stop()");
-        int stopQuiesce = coordinator.indexOf("web.quiesce();", stop);
-        int confirmedStop = coordinator.indexOf("web.publishControlStateConfirmed(snapshot, \"STOPPED\", \"USER_STOP\"", stop);
-        int retry = coordinator.indexOf("main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS);", confirmedStop);
-        int finalize = coordinator.indexOf("finalizeConfirmedStop(task, expectedEpoch);", confirmedStop);
-        assertTrue(stop >= 0 && stopQuiesce > stop && confirmedStop > stopQuiesce);
-        assertTrue(retry > confirmedStop && finalize > confirmedStop);
-        int projection = coordinator.indexOf("syncProjection(after);");
-        int done = coordinator.indexOf("if (after.stage() == SelfRun3Engine.Stage.DONE)", projection);
-        int close = coordinator.indexOf("web.close();", done);
-        assertTrue(projection >= 0 && done > projection && close > done);
+        int terminal = coordinator.indexOf("SelfRunTerminalControlWorker.terminate(service, task, null,", stop);
+        int local = coordinator.indexOf("store.stopByUser();", stop);
+        int stopSelf = coordinator.indexOf("service.stopSelf();", local);
+        assertTrue(stop >= 0 && terminal > stop && local > terminal && stopSelf > local);
+        assertTrue(service.indexOf("if (ACTION_STOP.equals(action)) {") < service.indexOf("if (ACTION_PUSH_RESULT.equals(action))"));
+        int done = coordinator.indexOf("if (after.stage() == SelfRun3Engine.Stage.DONE)");
+        assertTrue(coordinator.indexOf("SelfRunTerminalControlWorker.terminate(", done) > done);
+        assertTrue(adapter.contains("SelfRunTerminalControlWorker.hasTerminalFence(context, taskId)"));
+        assertTrue(worker.contains("ExistingWorkPolicy.REPLACE"));
+        assertTrue(worker.contains("Result.retry()"));
     }
 
     private static void assertOrdered(String source, String first, String second) {

@@ -57,6 +57,14 @@ public final class SelfRunService extends Service {
             return START_NOT_STICKY;
         }
 
+        // STOP wins over ownership, active, phase and Result checks.
+        if (ACTION_STOP.equals(action)) {
+            stoppedResume.cancelPending();
+            startForegroundCompat();
+            coordinator.onStart(action);
+            return START_NOT_STICKY;
+        }
+
         if (ACTION_PUSH_RESULT.equals(action)) {
             startForegroundCompat();
             turnStallNotifier.start();

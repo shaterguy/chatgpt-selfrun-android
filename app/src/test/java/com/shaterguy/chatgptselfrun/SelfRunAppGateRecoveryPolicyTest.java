@@ -29,22 +29,23 @@ public final class SelfRunAppGateRecoveryPolicyTest {
 
     @Test public void stopLocallyPersistsBeforeAnyExternalAcknowledgment() throws Exception {
         String stop = method(source("SelfRun3Coordinator"), "    private void stop()");
-        assertTrue(stop.indexOf("store.markStopRequested();") < stop.indexOf("io.execute("));
-        assertTrue(stop.indexOf("SelfRun3Engine.Kind.STOP") < stop.indexOf("web.publishControlStateConfirmed("));
-        String store = source("SelfRunStore");
-        assertTrue(store.contains("boolean stopControlPending() { return active() && userStopped(); }"));
-        String mark = method(store, "    void markStopRequested()");
-        assertTrue(mark.contains("commitOrThrow"));
-        assertTrue(mark.contains(".putBoolean(\"userStopped\", true)"));
-        assertFalse(mark.contains(".putBoolean(\"active\", false)"));
+        int persisted = stop.indexOf("SelfRunTerminalControlWorker.terminate(");
+        int localStop = stop.indexOf("store.stopByUser();");
+        assertTrue(persisted >= 0 && localStop > persisted);
+        assertFalse(stop.contains("web.publishControlStateConfirmed("));
+        String worker = source("SelfRunTerminalControlWorker");
+        assertTrue(worker.contains(".putString(PREFIX + taskId, record.toString()).commit()"));
+        assertTrue(worker.contains("Result.retry()"));
     }
 
     @Test public void stopDeliveryFailureRemainsVisibleWithoutReactivation() throws Exception {
-        String failure = method(source("SelfRun3Coordinator"), "    private void onStopControlResult(");
-        assertTrue(failure.contains("V3_STOP_CONTROL_PENDING"));
-        assertTrue(failure.contains("main.postDelayed(this::stop, STOP_CONTROL_RETRY_MS)"));
-        assertFalse(failure.contains("setUserStopped(false)"));
-        assertFalse(failure.contains("startOrRecover"));
+        String worker = source("SelfRunTerminalControlWorker");
+        assertTrue(worker.contains("recoverPending(Context context)"));
+        assertTrue(worker.contains("BackoffPolicy.EXPONENTIAL"));
+        assertTrue(worker.contains("Result.retry()"));
+        String coordinator = source("SelfRun3Coordinator");
+        assertTrue(coordinator.contains("SelfRunTerminalControlWorker.recoverPending(service)"));
+        assertFalse(method(coordinator, "    private void stop()").contains("startOrRecover"));
     }
 
     @Test public void restartAndDirectResumePreservePendingStopOwner() throws Exception {

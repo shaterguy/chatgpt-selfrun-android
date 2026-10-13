@@ -78,7 +78,7 @@ final class SelfRun4DriveWebAdapter {
 
     void syncControlState(SelfRun3Engine.State snapshot) {
         requireMain();
-        if (snapshot == null) return;
+        if (snapshot == null || SelfRunTerminalControlWorker.hasTerminalFence(context, snapshot.taskId())) return;
         String control = switch (snapshot.stage()) {
             case WAITING_USER_INTERVENTION -> "WAITING_USER_INTERVENTION";
             case PAUSED -> "PAUSED";
@@ -169,6 +169,8 @@ final class SelfRun4DriveWebAdapter {
     private void writeTaskControl(String token, SelfRun3Engine.State snapshot,
                                   String control, String reason) throws Exception {
         String taskId = snapshot.taskId();
+        // No pending/stale RUNNING write may overwrite a terminal STOP/DONE.
+        if (SelfRunTerminalControlWorker.hasTerminalFence(context, taskId)) return;
         String parentId = snapshot.resource("folderId");
         if (taskId.isEmpty() || parentId.isEmpty()) return;
         if (!taskId.equals(controlTaskId)) {
@@ -209,6 +211,7 @@ final class SelfRun4DriveWebAdapter {
                 .put("reason", reason == null ? "" : reason)
                 .put("conversation_url", snapshot.resource("conversationUrl"))
                 .put("updated_at_ms", System.currentTimeMillis());
+        if (SelfRunTerminalControlWorker.hasTerminalFence(context, taskId)) return;
         if (create) api.createTaskControlFile(token, controlFileId, taskId, parentId, body);
         else api.writeServerDispatchFile(token, controlFileId, body);
 
