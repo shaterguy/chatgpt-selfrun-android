@@ -2,6 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatGptBrowser } from '../src/browser/chatgpt.mjs';
 
+test('new turn preparation ignores the old tab and always creates a fresh tab',async()=>{
+  const created=[];
+  const chromium={
+    createTarget:async url=>{created.push(url);return{id:'fresh-tab'};},
+    listExistingTargets:async()=>{throw Error('old tab must not be inspected');},
+    connectTarget:async()=>{throw Error('intentional test interruption');},
+  };
+  const browser=new ChatGptBrowser(chromium,{});
+  await assert.rejects(browser.prepare({
+    projectUrl:'https://chatgpt.com/g/project',previousTargetId:'old-tab',
+  }),/intentional test interruption/);
+  assert.deepEqual(created,['about:blank']);
+});
+
 for(const mode of ['prepare','resume'])test(mode+' closes a newly created target when durable ownership callback fails',async()=>{
   let closed=0,connected=0;
   const chromium={listExistingTargets:async()=>[],createTarget:async()=>({id:'new-owned'}),

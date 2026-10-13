@@ -832,21 +832,11 @@ export class ChatGptBrowser {
     return pending.promise;
   }
 
-  async prepare({ projectUrl, signal, onTarget, guard=()=>true, previousTargetId=null }) {
+  async prepare({ projectUrl, signal, onTarget, guard=()=>true }) {
     const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale preparation');};
     check();
-    // A failed navigation owns its acquired tab. Retry that action there rather
-    // than closing it and replaying successful creation.
-    let target;
-    if(previousTargetId) {
-      if(this.chromium.isOwnedTarget?.(previousTargetId)!==true)
-        throw Object.assign(new Error('Preparation retry target is not owned'),{code:'TARGET_OWNERSHIP_REQUIRED'});
-      const targets=await this.chromium.listExistingTargets();
-      if(!Array.isArray(targets))throw Object.assign(new Error('Preparation target inventory unavailable'),{code:'PAGE_UNAVAILABLE'});
-      target=targets.find(t=>t.id===previousTargetId&&t.type==='page');
-      if(!target)throw Object.assign(new Error('Preparation retry target unavailable'),{code:'TARGET_LOST'});
-    }
-    target??=await this.chromium.createTarget('about:blank',{signal,guard});
+    // Every app-issued turn or retry starts with a new browser tab.
+    const target=await this.chromium.createTarget('about:blank',{signal,guard});
     let session,acquired=false;
     try {
       await onTarget?.(target);acquired=true;check();

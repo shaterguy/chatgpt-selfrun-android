@@ -104,14 +104,15 @@ test('unavailable initial DOM does not gate explicit entry or create a replaceme
   await f.controller.quiesceForStandby();
 });
 
-test('fresh preparation retries failed navigation on the same owned tab',async()=>{
+test('failed project navigation retries with a fresh owned tab each time',async()=>{
   const f=entryFixture();f.body.client_status='CREATE_REQUESTED';f.navigationError=Error('synthetic navigation unavailable');f.closeDenied=true;
   await f.ingest();const priorId=f.record().target_id;assert.equal(f.targets.size,1);
   for(let i=0;i<3;i++){await f.elapsed();await f.controller.tick(f.transport);}
-  assert.equal(f.calls.prepare.at(-1).previousTargetId,priorId);
-  assert.equal(f.calls.create.length,1);assert.equal(f.targets.size,1);assert.equal(f.sends,0);
+  assert.equal(f.calls.prepare.at(-1).previousTargetId,undefined);
+  assert.equal(f.calls.create.length,4);assert.equal(f.targets.size,1);assert.equal(f.sends,0);
+  assert.equal(f.targets.has(priorId),false);
   f.closeDenied=false;f.navigationError=null;await f.elapsed();await f.controller.tick(f.transport);
-  assert.equal(f.calls.create.length,1);assert.equal(f.targets.size,1);assert.equal(f.record().state,'PREPARED');
+  assert.equal(f.calls.create.length,5);assert.equal(f.targets.size,1);assert.equal(f.record().state,'PREPARED');
   assert.equal(f.sends,0);await f.controller.quiesceForStandby();
 });
 

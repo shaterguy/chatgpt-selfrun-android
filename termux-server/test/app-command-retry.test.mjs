@@ -2,6 +2,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/lifecycle-fixture.mjs';
 import {keyFor,newIntent} from '../src/lifecycle.mjs';
+import {ExecutionClaims} from '../src/execution-claims.mjs';
+
+test('cancelled attempt releases its cluster claim before app retry',async()=>{
+  const f=fixture();let cluster={schema:'selfrun-cluster-state-v1',execution_claims:{}};
+  const claims=new ExecutionClaims({
+    transport:{
+      readCluster:async()=>structuredClone(cluster),
+      writeCluster:async value=>{cluster=structuredClone(value);},
+    },
+    node:'fixture-device',
+  });
+  f.controller.executionClaims=claims;
+  f.body.client_status='CREATE_REQUESTED';
+  await f.ingest();
+  const key=keyFor(f.body);
+  assert.ok(cluster.execution_claims[key]);
+  f.body.client_status='CANCELLED';
+  await f.ingest();
+  f.body={...f.body,client_status:'SEND_REQUESTED',dispatch_attempt:2};
+  f.path='__SELFRUN_DISPATCH__'+f.body.request_id+'__A2.json';
+  await f.ingest();
+  assert.equal(f.sends,1);
+  assert.equal(f.record().retired,undefined);
+  assert.ok(cluster.execution_claims[key]);
+});
+
+test('new signal starts a fresh turn even if turn numbers skip or go backwards',async()=>{
+  const f=fixture();
+  f.body.client_status='CREATE_REQUESTED';
+  await f.ingest();
+  for(const turn of [100,0,4]){
+    f.control={...f.control,turn_id:'SAFE-TEST:turn:'+turn,request_id:'SAFE-TEST:turn:'+turn+'-request',control_epoch:f.control.control_epoch+1,conversation_url:''};
+    f.body={...f.body,turn_id:f.control.turn_id,request_id:f.control.request_id,dispatch_attempt:1};
+    f.path='__SELFRUN_DISPATCH__'+f.body.request_id+'__A1.json';
+    await f.ingest();
+    assert.equal(f.record().state,'PREPARED');
+  }
+  assert.equal(f.prepares,4);
+  assert.equal(f.sends,0);
+});
+
+test('app DONE forces same-task browser cleanup without a result decision',async()=>{
+  const f=fixture(),calls=[];
+  const cleanup=f.controller.cleanupTerminalResources.bind(f.controller);
+  f.controller.cleanupTerminalResources=async options=>{calls.push(options);return cleanup(options);};
+  await f.ingest();
+  f.control={...f.control,state:'DONE',control_epoch:2};
+  await f.controller.control(null,f.control,f.transport);
+  assert.ok(calls.some(x=>x?.force===true));
+  assert.equal(f.record(),null);
+});
 
 for(const reason of ['UNKNOWN_PRIOR_POST','PRE_SUBMIT_RETRY'])test('fresh app retry after cancelled '+reason+' is admitted even without retained proof',async()=>{
  const f=fixture(); f.body.client_status='CREATE_REQUESTED';

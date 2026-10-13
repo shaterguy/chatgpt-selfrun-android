@@ -4,7 +4,7 @@ import { fixture, deferred } from './helpers/lifecycle-fixture.mjs';
 import { monitorRuntimeFixture } from './helpers/monitor-runtime-fixture.mjs';
 
 // This tests the real controller scheduling, not just the browser close helper.
-test('next turn does not prepare a new tab before the prior owned tab has closed', async t=>{
+test('next turn creates a new tab without waiting for the prior tab close response', async t=>{
   const f=fixture(),closeStarted=deferred(),allowClose=deferred(),owned=new Set(['old-owned']);
   let closes=0,prepares=0,sessionClosures=0;
   t.after(()=>{allowClose.resolve();return f.controller.quiesceForStandby();});
@@ -20,8 +20,8 @@ test('next turn does not prepare a new tab before the prior owned tab has closed
     return {target,session:{close(){sessionClosures++;}},baseline:{...f.probe}};
   };
   f.browser.prepare=async args=>{
-    prepares++;assert.equal(owned.has('old-owned'),false,'old owned tab cannot overlap the next fresh prepare');
-    assert.equal(args.previousTargetId,null);
+    prepares++;assert.equal(sessionClosures>0,true,'predecessor observer is detached before new prepare');
+    assert.equal(args.previousTargetId,undefined);
     const target={id:'new-owned'};owned.add(target.id);await args.onTarget(target);
     return {target,session:{close(){}},baseline:{...f.probe}};
   };
@@ -35,9 +35,12 @@ test('next turn does not prepare a new tab before the prior owned tab has closed
   const path='__SELFRUN_DISPATCH__'+body.request_id+'__A1.json';f.rows.set(path,structuredClone(body));
   const next=f.controller.ingest(path,body,f.transport);
   await closeStarted.promise;await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(prepares,0,'new target must not be created while old CDP/tab close is unresolved');
-  allowClose.resolve();await next;await f.settle();
-  assert.equal(prepares,1);assert.equal(closes,1);assert.equal(sessionClosures>0,true);
+  await next;
+  assert.equal(prepares,1,'fresh preparation does not wait for old CDP close');
+  assert.equal(owned.has('old-owned'),true,'old remote close is still pending');
+  allowClose.resolve();await f.controller.cleanupTerminalResources({force:true});await f.settle();
+  assert.equal(owned.has('old-owned'),false);
+  assert.equal(closes,1);assert.equal(sessionClosures>0,true);
 });
 
 test('first turn without a predecessor follows the same fresh prepare path',async t=>{

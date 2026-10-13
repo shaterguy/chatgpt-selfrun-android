@@ -23,6 +23,7 @@ export class DriveDispatchController {
       canPublish:key=>!this.executionClaims||this.#observationAvailable(key)});
     this.sessions=new Map();this.operations=new Map();this.standby=false;
     this.browserOpenings=new Map();this.admissions=new Set();this.terminalDiscardListeners=new Set();
+    this.claimReleases=new Map();
     this.serverGeneration=Date.now();
     this.browserCleanup=new TerminalBrowserCleanup({repository:this.repository,chromium:browser.chromium,stateStore,
       available:()=>!!this.executionClaims||!this.standby&&this.canDispatch(),idleReleaseAllowed:()=>{
@@ -68,6 +69,8 @@ export class DriveDispatchController {
   async #claimAdmission(admission,control,transport) {
     if(!this.executionClaims)return this.admissions.has(admission);
     if(!control||!['RUNNING','WAITING_USER_INTERVENTION'].includes(control.state)||!this.admissions.has(admission))return false;
+    // A cancelled attempt releases its claim before the app's next attempt.
+    await this.claimReleases.get(admission.key);
     admission.claim=await this.executionClaims.acquire(control,{createAllowed:this.canDispatch()});
     if(!admission.claim||!this.#admissionCurrent(admission))return false;
     // An existing claim with missing local effect history is not proof that an
@@ -92,11 +95,14 @@ export class DriveDispatchController {
       for(const admission of this.admissions)if(admission.key===r.key)this.admissions.delete(admission);
       const claim=this.executionClaims?.current(r.key);
       const control=this.repository.control(r.task_id);
-      const ended=['STOPPED','DONE','COMMITTED','COMPLETED'].includes(r.state)
+      const ended=['STOPPED','DONE','COMMITTED','COMPLETED','CANCELLED'].includes(r.state)
         ||control&&control.control_epoch>=r.control_epoch&&keyFor(control)!==r.key;
-      if(claim&&ended)void this.executionClaims.release(r.key,claim.token).catch(error=>console.error(JSON.stringify({
-        event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)})));
-      else if(claim)this.executionClaims.forget(r.key,claim.token);
+      if(claim&&ended) {
+        const release=this.executionClaims.release(r.key,claim.token).catch(error=>console.error(JSON.stringify({
+          event:'EXECUTION_CLAIM_RELEASE_FAILED',error:String(error?.message||error).slice(0,200)})));
+        this.claimReleases.set(r.key,release);
+        void release.finally(()=>{if(this.claimReleases.get(r.key)===release)this.claimReleases.delete(r.key);});
+      } else if(claim)this.executionClaims.forget(r.key,claim.token);
       const pending=new Set([this.sessions.get(r.key),...this.browserOpenings.values()].filter(a=>a&&(a.key===r.key||a===this.sessions.get(r.key))));
       for(const a of pending) {
         a.terminalResource={key:r.key,task_id:r.task_id,turn_id:r.turn_id,request_id:r.request_id,
@@ -256,7 +262,7 @@ export class DriveDispatchController {
         const changed=await this.repository.applyControl(c);
         if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
         for(const listener of this.terminalDiscardListeners)listener([{task_id:c.task_id,turn_id:c.turn_id,request_id:c.request_id,key:keyFor(c),control_epoch:c.control_epoch,state:'STOPPED'}]);
-        void this.cleanupTerminalResources();return changed;
+        void this.cleanupTerminalResources({force:true});return changed;
       }
       if(Object.values(this.repository.data.retired).some(r=>r.task_id===c.task_id))await this.repository.applyControl(c);
       return !!await this.#restoreCurrentControl(c,transport);
@@ -264,7 +270,9 @@ export class DriveDispatchController {
     if(old&&c.control_epoch===old.control_epoch) {
       await this.repository.applyControl(c);
       if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
-      await this.#restoreCurrentControl(old,transport);return false;
+      if(['STOPPED','DONE'].includes(c.state))void this.cleanupTerminalResources({force:true});
+      else await this.#restoreCurrentControl(old,transport);
+      return false;
     }
     const sameRunningIdentity=old&&['RUNNING','WAITING_USER_INTERVENTION'].includes(old.state)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state)
       &&old.turn_id===c.turn_id&&old.request_id===c.request_id;
@@ -284,7 +292,8 @@ export class DriveDispatchController {
     for(const item of stopping)await this.#disposeStoppedAttachment(item.r,item.a,c);
     if(c.state==='STOPPED')await transport?.purgeStopped?.(c);
     await this.#restoreCurrentControl(c,transport);
-    if(['STOPPED','DONE'].includes(c.state)||c.state==='RUNNING'&&!sameRunningIdentity)void this.cleanupTerminalResources();
+    if(['STOPPED','DONE'].includes(c.state)||c.state==='RUNNING'&&!sameRunningIdentity)
+      void this.cleanupTerminalResources({force:true});
     return true;
   }
   async #restoreCurrentControl(c,transport,body=null,dispatchPath=null) {
@@ -417,13 +426,13 @@ export class DriveDispatchController {
   async ingest(path,body,transport) {
     const r=await this.#ingestRecord(path,body,transport);
     if(!r)return r;
-    if(r.retired){await this.browserCleanup.run();await this.repository.flush(transport);return r;}
+    if(r.retired){await this.browserCleanup.run({force:true});await this.repository.flush(transport);return r;}
     return this.#serial(r.key,()=>this.#advance(r.key,transport));
   }
   async ingestDurable(path,body,transport) {
     const r=await this.#ingestRecord(path,body,transport);
     if(r&&!r.retired)this.#scheduleAdvance(r.key,transport);
-    else if(r?.retired)void this.browserCleanup.run().then(()=>this.repository.flush(transport)).catch(error=>console.error(JSON.stringify({event:'TERMINAL_FINALIZATION_FAILED',error:String(error?.message||error).slice(0,300)})));
+    else if(r?.retired)void this.browserCleanup.run({force:true}).then(()=>this.repository.flush(transport)).catch(error=>console.error(JSON.stringify({event:'TERMINAL_FINALIZATION_FAILED',error:String(error?.message||error).slice(0,300)})));
     return r;
   }
   prepare(path,body,transport) {return this.ingest(path,body,transport);}
@@ -600,12 +609,25 @@ export class DriveDispatchController {
     const next=mode==='prepare'?'PREPARING':'ATTACHING';
     if(r.control_state!=='RUNNING'&&!(r.control_state==='WAITING_USER_INTERVENTION'&&mode!=='prepare'))return null;
     const beforeOpen=this.repository.token(key);
-    if(mode==='prepare'&&this.browser.chromium?.transport==='extension'
-      &&this.repository.cleanupEntries().some(entry=>entry.task_id===r.task_id&&entry.key!==key)) {
-      // A successor cannot compete with its predecessor's target close and CDP
-      // profile lease. This is the same fresh preparation path as turn one.
-      await this.cleanupTerminalResources();
-      if(!this.repository.current(key,beforeOpen))return null;
+    if(mode==='prepare') {
+      // Discard this request's unsent preparation tab before opening a new one.
+      const priorTarget=r.target_id;
+      if(priorTarget&&r.target_owned&&!r.intent&&!r.conversation_url
+        &&this.browser.chromium?.isOwnedTarget?.(priorTarget)) {
+        // CDP tab closure is best-effort and must never block fresh-tab opening.
+        try {
+          void this.browser.chromium.closeOwnedTarget(priorTarget,{
+            caller:true,guard:()=>this.repository.current(key,beforeOpen)
+              &&this.repository.get(key)?.target_id===priorTarget,
+          }).catch(()=>{});
+        } catch {}
+        if(!this.repository.current(key,beforeOpen))return null;
+      }
+      // New turns do not inherit a predecessor tab, monitor or cleanup delay.
+      if(this.repository.cleanupEntries().some(entry=>entry.task_id===r.task_id&&entry.key!==key)) {
+        // Initiate old-tab disposal, but never block new-turn admission on CDP.
+        void this.cleanupTerminalResources({force:true});
+      }
     }
     if(mode==='target'&&r.state!=='ATTACHING') {
       // ATTACHING retains the durable send intent even before a URL was known.
@@ -635,8 +657,7 @@ export class DriveDispatchController {
       if(mode==='prepare') {
         const directives=await this.#directives();
         attached=await this.browser.prepare({projectUrl:r.body.project_url,
-          prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard,
-          previousTargetId:r.preparation_target_disposed?null:r.target_id||null});
+          prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard});
       } else if(mode==='target') {
         attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal,onTarget,guard,...(observationOnly?{observationOnly:true}:{})});
       } else attached=await this.browser.resume({conversationUrl:r.conversation_url,signal:abort.signal,onTarget,guard,automaticRecovery,

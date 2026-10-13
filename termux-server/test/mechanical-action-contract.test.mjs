@@ -70,13 +70,13 @@ test('create preparation is just owned tab creation then project navigation, wit
  await browser.prepare({projectUrl:'https://chatgpt.com/g/test/project',onTarget:async()=>{},guard:()=>true});
  assert.deepEqual(calls.filter(([op])=>['create','navigate','input','submit','snapshot'].includes(op)),[['create','about:blank'],['navigate',{url:'https://chatgpt.com/g/test/project'}]]);
 });
-test('a failed project navigation retries on its already acquired owned tab',async()=>{
+test('failed navigation starts a fresh tab on the next preparation',async()=>{
  let creates=0,navigations=0,closes=0;
  const session={transport:'extension',async run(op){if(op==='navigate'&&++navigations===1)throw Error('navigation interrupted');return true;},close(){}};
  const chromium={createTarget:async()=>{creates++;return {id:'owned'};},isOwnedTarget:id=>id==='owned',listExistingTargets:async()=>[{id:'owned',type:'page'}],connectTarget:async()=>session,closeTarget:async()=>{closes++;return true;}};
  const browser=new ChatGptBrowser(chromium,{}),args={projectUrl:'https://chatgpt.com/g/test/project',onTarget:async()=>{},guard:()=>true};
  await assert.rejects(browser.prepare(args),/navigation interrupted/);await browser.prepare({...args,previousTargetId:'owned'});
- assert.equal(creates,1);assert.equal(navigations,2);assert.equal(closes,0);
+ assert.equal(creates,2);assert.equal(navigations,2);assert.equal(closes,0);
 });
 test('initial input does not require a server metadata roundtrip after durable local intent',async()=>{
  const f=fixture();const read=f.transport.read;
