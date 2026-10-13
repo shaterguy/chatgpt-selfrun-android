@@ -404,11 +404,11 @@ export class LifecycleStore {
       const sameRunningIdentity=prior&&['RUNNING','WAITING_USER_INTERVENTION'].includes(prior.state)&&['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state)
         &&prior.turn_id===c.turn_id&&prior.request_id===c.request_id;
       for(const [key,old] of Object.entries(next.requests)) {
-        if(old.task_id!==c.task_id||['COMMITTED','COMPLETED'].includes(old.state)
+        if(old.task_id!==c.task_id||(['COMMITTED','COMPLETED'].includes(old.state)&&!['STOPPED','DONE'].includes(c.state))
           ||(old.state==='CANCELLED'&&!(c.state==='STOPPED'&&old.request_id===c.request_id&&old.turn_id===c.turn_id)))continue;
         const matching=old.request_id===c.request_id&&old.turn_id===c.turn_id;
         let state=old.state;
-        if(c.state==='STOPPED'||c.state==='DONE') state='STOPPED';
+        if(c.state==='STOPPED'||c.state==='DONE') state=['COMMITTED','COMPLETED'].includes(old.state)?'COMPLETED':'STOPPED';
         else if(!['RUNNING','WAITING_USER_INTERVENTION'].includes(c.state)||!matching) state='PAUSED';
         const preserveGeneration=sameRunningIdentity&&matching&&['RUNNING','WAITING_USER_INTERVENTION'].includes(old.control_state);
         const pendingEntry=old.browser_entry?.control_epoch===old.control_epoch

@@ -111,3 +111,18 @@ test('cold DONE control and dispatch leave no local work or browser activity',as
  assert.equal(f.quiesces,0);assert.equal(f.controller.sessions.size,0);assert.deepEqual(f.store.snapshot().lifecycle.requests,{});
  assert.deepEqual(f.store.snapshot().lifecycle.completionOutbox,{});
 });
+
+for(const terminalState of ['STOPPED','DONE'])test('terminal '+terminalState+' retires an already committed observer without consulting Result',async t=>{
+  const f=doneFixture(t);
+  await f.existing();
+  const observer=f.observations.at(-1);
+  const record=f.record();
+  f.controller.repository.data.requests[record.key].state='COMMITTED';
+  f.control={...f.control,state:terminalState,control_epoch:2};
+  await f.controller.control(null,f.control,f.transport);
+  await f.controller.cleanupTerminalResources();
+  assert.equal(f.record(),null);
+  assert.equal(f.controller.sessions.size,0);
+  assert.equal(observer.signal.aborted,true);
+  assert.equal(f.resultReads,0);
+});
