@@ -65,6 +65,32 @@ public final class SelfRun3SuccessorTransitionPolicyTest {
                 recovered, 91_000L, 100_000L, 7));
     }
 
+    @Test public void cancelledBrowserAttemptWithServerNoPostProofReusesTurnAndRetries() {
+        JSONObject config = new JSONObject();
+        SelfRun3Engine.put(config, "taskMode", "CHAT");
+        SelfRun3Engine.put(config, "mode", "CHAT");
+        SelfRun3Engine.State initial = SelfRun3Engine.create(
+                "SR-RETRY", "SR-RETRY:turn:1", config);
+        JSONObject inFlight = initial.json();
+        SelfRun3Engine.put(inFlight, "stage", "DISPATCHING");
+        SelfRun3Engine.put(inFlight, "sendClaimed", true);
+        SelfRun3Engine.put(inFlight, "dispatchObserved", false);
+        SelfRun3Engine.put(inFlight, "accepted", false);
+        SelfRun3Engine.State claimed = new SelfRun3Engine.State(inFlight);
+        String turn = claimed.turnId();
+        String request = claimed.requestId();
+        JSONObject proof = new JSONObject();
+        SelfRun3Engine.put(proof, "status", "SERVER_CANCELLED_UNSENT:1");
+        SelfRun3Engine.put(proof, "requestId", request);
+        SelfRun3Engine.State recovered = reduce(claimed, "verified-unsent",
+                SelfRun3Engine.Kind.UNSENT, proof);
+        assertEquals(SelfRun3Engine.Stage.READY, recovered.stage());
+        assertEquals(SelfRun3Engine.Action.PREPARE_WEB, SelfRun3Engine.nextAction(recovered));
+        assertFalse(recovered.flag("sendClaimed"));
+        assertEquals(turn, recovered.turnId());
+        assertEquals(request, recovered.requestId());
+    }
+
     @Test public void confirmedCanonicalSuccessorStopsWatchdogWithoutChangingRequestIdentity() {
         SelfRun3Engine.State source = claimedState();
         SelfRun3Engine.State successor = reduce(acceptSerial(source,

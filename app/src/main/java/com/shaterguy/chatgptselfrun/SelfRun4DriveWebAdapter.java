@@ -305,7 +305,8 @@ final class SelfRun4DriveWebAdapter {
                 state, prepareStarted, System.currentTimeMillis(), currentBootCount());
         prepareTimeoutMs = successorRemaining >= 0L
                 ? Math.max(1L, successorRemaining) : runtimeSettings.webPreparationMs();
-        long attempt = ++preparationAttempt;
+        // Reattaching to a cancelled A1 must not consume the A2 attempt ordinal.
+        long attempt = recoveringExisting ? preparationAttempt : ++preparationAttempt;
         int expectedGeneration = generation;
         String request = state.requestId();
         trace("V4_SERVER_PREPARATION_WATCHDOG",
@@ -507,10 +508,39 @@ final class SelfRun4DriveWebAdapter {
             return;
         }
         dispatchBody = body;
-        // App-authored cancellation is authoritative. Server telemetry is not an app signal.
+        // CANCELLED retires only this browser attempt. A verified server no-POST
+        // receipt returns the same logical turn to READY for a fresh tab attempt.
         String clientStatus = body.optString("client_status", "");
         if ("CANCELLED".equals(clientStatus) || "SUPERSEDED".equals(clientStatus)) {
-            cancelLocalAttempt(false);
+            JSONObject proof = body.optJSONObject("server_cancel_proof");
+            boolean verifiedUnsent = "CANCELLED".equals(clientStatus)
+                    && proof != null && proof.optBoolean("never_submitted")
+                    && proof.optBoolean("cleanup_confirmed")
+                    && state.stage() == SelfRun3Engine.Stage.DISPATCHING
+                    && state.flag("sendClaimed") && !state.flag("dispatchObserved")
+                    && !state.flag("accepted") && state.resource("conversationUrl").isEmpty()
+                    && state.taskId().equals(proof.optString("task_id"))
+                    && state.turnId().equals(proof.optString("turn_id"))
+                    && request.equals(proof.optString("request_id"))
+                    && proof.optInt("dispatch_attempt", -1) == body.optInt("dispatch_attempt", -2)
+                    && proof.optLong("control_epoch", -1) > 0;
+            if (verifiedUnsent) {
+                SelfRun3Engine.State confirmed = state;
+                int attempted = proof.optInt("dispatch_attempt");
+                trace("V4_SERVER_CANCELLED_UNSENT_RETRY",
+                        "turn=" + confirmed.turn() + ";attempt=" + attempted);
+                cancelLocalAttempt(false);
+                listener.onUnsent(confirmed.taskId(), confirmed.turnId(), confirmed.requestId(),
+                        "SERVER_CANCELLED_UNSENT:" + attempted);
+                return;
+            }
+            if ("SUPERSEDED".equals(clientStatus)) {
+                cancelLocalAttempt(false);
+                return;
+            }
+            // No proof yet: await the server's asynchronous cancellation projection.
+            // An uncertain POST must never be resent just because a local timer expired.
+            later(() -> poll(expectedGeneration, request), POLL_MS);
             return;
         }
         String url = body.optString("conversation_url", "");
