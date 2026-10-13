@@ -1,14 +1,18 @@
-name: Sign SelfRun Drive 4.0.11-dev2
+name: Sign SelfRun Drive 4.0.11-dev2 TEST only
+
 on:
   push:
     branches:
       - fix/selfrun-411dev2-cancelled-no-post-retry
     paths:
       - .github/workflows/selfrun-411dev2-sign.yml
+
 permissions:
   contents: read
+
 jobs:
-  sign-formal:
+  sign-test-only:
+    name: Build and sign TEST APK only
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -28,15 +32,16 @@ jobs:
         with:
           gradle-version: '9.5.0'
           cache-read-only: false
-      - name: Check exact source and formal APK identity
+      - name: Verify TEST variant and exact DEV revision
         shell: bash
         run: |
           set -euo pipefail
           grep -Fq "def selfRunDriveVersionName = '4.0.11-dev2'" app/build.gradle
           grep -Fq 'def selfRunDriveVersionCode = 4002024' app/build.gradle
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
+          grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           bash tools/verify_drive_variant.sh
-      - name: Build formal unsigned APK for trusted remote signing
+      - name: Package TEST variant only
         shell: bash
         env:
           SELFRUN_FIREBASE_API_KEY: ${{ secrets.SELFRUN_FIREBASE_API_KEY }}
@@ -45,48 +50,55 @@ jobs:
           SELFRUN_FIREBASE_SENDER_ID: ${{ secrets.SELFRUN_FIREBASE_SENDER_ID }}
         run: |
           set -euo pipefail
-          gradle --build-cache --no-daemon --console=plain :app:assembleRelease
-          test -s app/build/outputs/apk/release/app-release-unsigned.apk
-          mkdir -p signed-output
+          gradle --build-cache --no-daemon --console=plain :app:assembleQaApp
+          test -s app/build/outputs/apk/qaApp/app-qaApp-unsigned.apk
+          mkdir -p signed-test
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 \
-            app/build/outputs/apk/release/app-release-unsigned.apk signed-output/unsigned-aligned.apk
-      - name: Install pinned signing libraries
+            app/build/outputs/apk/qaApp/app-qaApp-unsigned.apk signed-test/qa-aligned.apk
+      - name: Install pinned signing dependencies
         shell: bash
         run: |
-          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r tools/signing-requirements-linux-x86_64-py312.txt
-      - name: Sign verified formal update
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r tools/signing-requirements-linux-x86_64-py312.txt
+      - name: Sign TEST lineage and verify package/certificate
         shell: bash
         env:
           SIGNING_PASSPHRASE: ${{ secrets.SELFRUN_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
           test -n "$SIGNING_PASSPHRASE"
-          PASS_FILE="$RUNNER_TEMP/selfrun-signing-pass"
+          PASS_FILE="$RUNNER_TEMP/qa-test-signing-pass"
           umask 077
           trap 'rm -f "$PASS_FILE"' EXIT
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          APK=signed-output/SelfRun-Drive-v4.0.11-dev2.apk
-          APKSIGNER="$BT/apksigner" bash tools/sign_release.sh signed-output/unsigned-aligned.apk "$PASS_FILE" "$APK" > signed-output/SIGNATURE_VERIFICATION.txt
-          "$BT/apksigner" verify --verbose --print-certs "$APK" > signed-output/CERTIFICATE.txt
-          grep -Fqi 'b3ea944ac1e31438ad697482af6d289c5ffeb0119e89c2e54a755c49c48644fe' signed-output/CERTIFICATE.txt
-          "$BT/aapt" dump badging "$APK" > signed-output/PACKAGE.txt
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive'" signed-output/PACKAGE.txt
-          grep -Fq "versionCode='4002024'" signed-output/PACKAGE.txt
-          grep -Fq "versionName='4.0.11-dev2'" signed-output/PACKAGE.txt
-          sha256sum "$APK" > signed-output/SHA256SUMS.txt
-          git rev-parse HEAD > signed-output/SOURCE_SHA.txt
-          rm signed-output/unsigned-aligned.apk
+          APK="signed-test/SelfRun-Drive-TEST-v4.0.11-dev2.apk"
+          APKSIGNER="$BT/apksigner" bash tools/sign_test.sh \
+            signed-test/qa-aligned.apk "$PASS_FILE" "$APK" \
+            > signed-test/SIGNATURE_VERIFICATION.txt
+          "$BT/apksigner" verify --verbose --print-certs "$APK" \
+            > signed-test/CERTIFICATE.txt
+          grep -Fqi '2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e' \
+            signed-test/CERTIFICATE.txt
+          "$BT/aapt" dump badging "$APK" > signed-test/PACKAGE.txt
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test'" signed-test/PACKAGE.txt
+          grep -Fq "versionCode='4002024'" signed-test/PACKAGE.txt
+          grep -Fq "versionName='4.0.11-dev2'" signed-test/PACKAGE.txt
+          sha256sum "$APK" > signed-test/SHA256SUMS.txt
+          git rev-parse HEAD > signed-test/SOURCE_SHA.txt
+          rm -f signed-test/qa-aligned.apk
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-drive-v4.0.11-dev2-formal
+          name: selfrun-drive-test-v4.0.11-dev2-qa
           path: |
-            signed-output/SelfRun-Drive-v4.0.11-dev2.apk
-            signed-output/SIGNATURE_VERIFICATION.txt
-            signed-output/CERTIFICATE.txt
-            signed-output/PACKAGE.txt
-            signed-output/SHA256SUMS.txt
-            signed-output/SOURCE_SHA.txt
+            signed-test/SelfRun-Drive-TEST-v4.0.11-dev2.apk
+            signed-test/SIGNATURE_VERIFICATION.txt
+            signed-test/CERTIFICATE.txt
+            signed-test/PACKAGE.txt
+            signed-test/SHA256SUMS.txt
+            signed-test/SOURCE_SHA.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
