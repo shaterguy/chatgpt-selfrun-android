@@ -329,3 +329,13 @@ test('startup keeps the exact active-owned target while dropping stale sibling r
  assert.deepEqual([...next.owned],[active.id]);assert.deepEqual(next.journal.targets,[active.id]);assert.deepEqual(Object.keys(next.journal.targetMetadata),[active.id]);
  assert.deepEqual(next.journal.targetMetadata[active.id],journal.targetMetadata[active.id]);assert.equal(f.signals,0);assert.equal(f.launches,1);
 });
+
+test('Chromium startup uses multiprocess and extension-owned controller bootstrap without weakening ownership',async t=>{
+ const f=await fixture(t);Object.assign(f.config,{browserClientProfile:'android-webview',extensionProfileBootstrap:'cdp-emulation'});let args;
+ const launch=f.manager.deps.launch;f.manager.deps.launch=async(...values)=>{args=values[1];return launch(...values);};
+ await f.manager.createTarget();
+ assert.equal(args.includes('--single-process'),false);assert.equal(args.includes('--no-startup-window'),true);
+ assert.equal(args.some(a=>a.startsWith('chrome-extension://')),false);
+ for(const a of ['--headless=new','--no-zygote','--no-sandbox','--remote-debugging-address=127.0.0.1','--remote-debugging-port=19227',`--user-data-dir=${f.config.browserProfile}`,'--selfrun-extension-owner=owner'])assert.ok(args.includes(a),a);
+ assert.ok(args.some(a=>a.startsWith('--load-extension=')));
+});

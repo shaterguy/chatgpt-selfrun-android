@@ -1,6 +1,10 @@
-# SelfRun Termux Server 4.0.0-dev20
+## 4.0.0-dev39 Chromium startup repair
 
-Dev20 preserves matching receipt diagnostics when an independent progress query fails, while confirmation still requires current conversation proof. Concurrent content readiness waits remain isolated through cancellation and target removal. Controller and page operations share the same bounded deadline. STOP removes its queued commands, cancels active commands and closes only its owned target without waiting behind another task's execution or browser acquisition. The current authenticated extension connection reports its manifest version. Extension package version: 1.0.2.
+Remove the single-process launch flag that reproducibly crashes installed Chromium155.0.8059.79. The extension opens its own controller on install/startup, preserving endpoint HMAC attestation before browser actions. No new extension permissions or security-disabling flags. The original SR-20261017-120527-2PNAPG remains stopped.
+
+# SelfRun Termux Server 4.0.0-dev39
+
+Dev20 preserves matching receipt diagnostics when an independent progress query fails, while confirmation still requires current conversation proof. Concurrent content readiness waits remain isolated through cancellation and target removal. Controller and page operations share the same bounded deadline. STOP removes its queued commands, cancels active commands and closes only its owned target without waiting behind another task's execution or browser acquisition. The current authenticated extension connection reports its manifest version. Extension package version: 1.0.3.
 
 Dev19 bounds local extension HTTP reporting and separates it from command execution. Read-only progress, receipt and recovery-input queries can proceed independently while mutations retain ordering, cancellation, ownership and duplicate-submission guards. Expired content observations are refused; original timeout/generation/STOP cancellation reasons survive the bridge. The independent ten-minute continuation policy is unchanged.
 

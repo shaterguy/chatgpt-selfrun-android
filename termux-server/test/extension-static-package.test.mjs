@@ -7,7 +7,7 @@ test('static extension package has a narrow manifest and no runtime source evalu
   assert.equal(typeof mod.buildExtensionFiles,'function','static extension packager is required');
   const files=mod.buildExtensionFiles({bridgeUrl:'http://127.0.0.1:17832',ownerId:'owner-test',capability:'local-test-capability'});
   const manifest=JSON.parse(files['manifest.json']);
-  assert.equal(manifest.version,'1.0.2');
+  assert.equal(manifest.version,'1.0.3');
   assert.deepEqual(manifest.permissions,['scripting','storage']);
   assert.deepEqual(manifest.host_permissions,['https://chatgpt.com/*','http://127.0.0.1/*']);
   assert.equal(manifest.permissions.includes('debugger'),false);
