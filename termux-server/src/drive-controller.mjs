@@ -1016,12 +1016,18 @@ export class DriveDispatchController {
       this.#publishAfterSubmission(key,transport);
       this.#monitor(key,transport);
     } else if(outcome.state==='ABSENT'&&r.intent.kind!=='recovery'&&!latest.conversation_url&&r.intent.sends<2) {
+      if(latest.state==='OBSERVING') {
+        if(!await this.#move(key,'RECONCILING','POST_ABSENCE_RECONCILE',{},token)||!a.guard()||!sameIntent(this.repository.get(key)?.intent,r.intent))return;
+      }
       await this.#move(key,'POST_UNCERTAIN','POST_ABSENCE_PROVEN',{intent:{...latest.intent,outcome:'ABSENT'}},token);
       await this.#post(key,transport,r.intent.kind,r.intent.prompt,true);
     } else {
       // Generic recovery input may be attempted again after its durable quiet window, even without an ACK.
       const recovery=r.intent.kind==='recovery',observe=!!latest.conversation_url;
-      await this.#move(key,observe?'OBSERVING':'POST_UNCERTAIN','POST_READBACK_UNKNOWN',
+      // A concurrent observation/recovery may have advanced the phase while readback awaited.
+      // Diagnostic UNKNOWN must not roll that newer phase backwards.
+      const phase=observe?'OBSERVING':latest.state==='RECONCILING'?'POST_UNCERTAIN':latest.state;
+      await this.#move(key,phase,'POST_READBACK_UNKNOWN',
         {intent:{...latest.intent,outcome:recovery&&outcome.state==='ABSENT'?'ABSENT':'UNKNOWN'},
         error:latest.error||{code:'POST_UNCERTAIN',message:'submission readback remains inconclusive'}},token);
       this.#publishAfterSubmission(key,transport);

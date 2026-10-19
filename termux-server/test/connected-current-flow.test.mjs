@@ -452,7 +452,7 @@ for(const loseReply of [false,true])test('actual first click creates exact named
 });
 
 test('a later conversation on the same owned tab is published and monitored without transferring input authority',async t=>{
- const f=await setup(t,{conversationUrlOnSend:actualConversation});f.life.body.project_url=actualProjectEntry;await start(f);
+ const f=await setup(t,{manualClock:false,conversationUrlOnSend:actualConversation});f.life.body.project_url=actualProjectEntry;await start(f);
  const page=f.wire.pageRuntimes.get(1),original=f.life.record().conversation_url,actor=f.wire.manager.actionSessions.get(f.life.record().target_id),late=f.late[0];
  const other='https://chatgpt.com/g/different-project/c/later-owned-tab-address';page.context.window.history.pushState({},'',other);
  await wait(()=>f.life.rows.get(f.life.path).conversation_url===appUrl(other),'updated owned-tab URL publication');
@@ -460,7 +460,17 @@ test('a later conversation on the same owned tab is published and monitored with
  assert.equal(f.life.record().observed_conversation_url,other);await f.life.controller.flush(f.life.transport);
  await fs.writeFile(new URL('../evidence/dev31-connected-later-dispatch.json',import.meta.url),JSON.stringify(f.life.rows.get(f.life.path),null,2)+'\n');
  await assert.rejects(actor.run('input',{prompt:'do not transfer'}),/repurposed/);
- f.life.result(false);await f.tickAfter(TEN_MINUTES);await f.sample();
+ // Age only the lifecycle liveness evidence. Advancing global Date also expires
+ // an in-flight extension command and does not model elapsed idle time.
+ const elapsed=Date.now()-TEN_MINUTES-1;
+ assert.ok(Number(f.life.record().last_nudge_attempt_at||0)<=elapsed);
+ assert.ok(Number(f.life.record().last_recovery_check_at||0)<=elapsed);
+ const resultReadsBefore=f.resultReads.length,attemptStarted=Date.now();
+ await f.life.controller.repository.move(keyFor(f.life.body),f.life.record().state,'TEST_LIVENESS_ELAPSED',
+  {last_progress_at:elapsed});
+ f.life.result(false);await f.life.controller.tick(f.life.transport);await f.life.settle();await f.sample();
+ assert.ok(f.resultReads.length>resultReadsBefore);
+ assert.ok(f.life.record().last_nudge_attempt_at>=attemptStarted);
  assert.equal(late.signal.aborted,false);assert.equal(f.inputs(),1);assert.equal(f.clicks(),1);assert.equal(f.life.rows.get(f.life.path).conversation_url,appUrl(other));
  const before=JSON.stringify(f.life.record().cursor);page.appendResponse('later address still observed after refused effect');
  await wait(()=>JSON.stringify(f.life.record()?.cursor)!==before,'cursor remains live after refused cross-conversation input');

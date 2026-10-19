@@ -1,8 +1,12 @@
+## 4.0.0-dev40 optimistic initial route and late receipt repair
+
+Preserve one bounded, arm-owned optimistic WEB route while the first request body is read; WEB remains non-canonical and cannot authorize a server action or receipt confirmation. Recheck ownership and receipt generation immediately before the native fetch. Late UNKNOWN diagnostics preserve newer observation phases; proven absence uses an explicit fenced reconciliation step. STOP and unknown-send no-replay behavior are unchanged.
+
 ## 4.0.0-dev39 Chromium startup repair
 
 Remove the single-process launch flag that reproducibly crashes installed Chromium155.0.8059.79. The extension opens its own controller on install/startup, preserving endpoint HMAC attestation before browser actions. No new extension permissions or security-disabling flags. The original SR-20261017-120527-2PNAPG remains stopped.
 
-# SelfRun Termux Server 4.0.0-dev39
+# SelfRun Termux Server 4.0.0-dev40
 
 Dev20 preserves matching receipt diagnostics when an independent progress query fails, while confirmation still requires current conversation proof. Concurrent content readiness waits remain isolated through cancellation and target removal. Controller and page operations share the same bounded deadline. STOP removes its queued commands, cancels active commands and closes only its owned target without waiting behind another task's execution or browser acquisition. The current authenticated extension connection reports its manifest version. Extension package version: 1.0.3.
 
