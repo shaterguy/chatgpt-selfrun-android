@@ -47,11 +47,6 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
-        devApp {
-            initWith release
-            applicationIdSuffix '.dev'
-            manifestPlaceholders = [selfRunAppLabel: 'SelfRun Drive DEV', selfRunServerFeaturesEnabled: selfRunServerFeaturesEnabled ? 'true' : 'false']
-        }
         qaApp {
             initWith release
             applicationIdSuffix '.test'
