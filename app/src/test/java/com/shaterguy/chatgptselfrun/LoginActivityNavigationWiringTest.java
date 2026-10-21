@@ -8,8 +8,20 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 public class LoginActivityNavigationWiringTest {
+    @Test public void projectNameCaptureDoesNotUseGreetingHeading() throws Exception {
+        String source = src("LoginActivity.java");
+        assertTrue(source.contains("const usable=v=>"));
+        assertTrue(source.contains("document.title"));
+        assertTrue(source.contains("name=usable(t);"));
+        assertTrue(source.contains("u.pathname!==canonical"));
+        assertFalse(source.contains("querySelector('main h1"));
+        assertTrue(source.indexOf("document.title") <
+                source.indexOf("for(const a of document.querySelectorAll('a[href]'))"));
+    }
+
     @Test public void topBarUsesDedicatedCloseAction() throws Exception {
         String source = src("LoginActivity.java");
         assertTrue(source.contains("menu.getMenu().add(\"닫기\")"));

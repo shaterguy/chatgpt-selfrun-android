@@ -13,7 +13,10 @@ public class ProjectDisplayNameWiringTest {
     @Test public void registrationCapturesNameFromTheVisitedProjectPage() throws Exception {
         String source = src("LoginActivity.java");
         assertTrue(source.contains("document.querySelectorAll('a[href]')"));
-        assertTrue(source.contains("u.pathname===canonical"));
+        assertTrue(source.contains("u.pathname!==canonical"));
+        assertTrue(source.contains("name=usable(t)"));
+        assertTrue(source.contains("document.title"));
+        assertTrue(source.contains("const usable=v=>"));
         assertTrue(source.contains("onReceivedTitle"));
         assertTrue(source.contains("catalog.addVisitedProject(ref.canonicalUrl, visit.name)"));
     }

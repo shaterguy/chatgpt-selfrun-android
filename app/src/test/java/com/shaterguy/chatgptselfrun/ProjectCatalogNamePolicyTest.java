@@ -16,6 +16,26 @@ public class ProjectCatalogNamePolicyTest {
         assertEquals("", ProjectCatalog.normalizeDisplayName("\n\t\r"));
     }
 
+    @Test public void rejectsGreetingAndKeepsRealProjectTitles() {
+        assertEquals("", ProjectCatalog.validDisplayName("진수님 반갑습니다"));
+        assertEquals("", ProjectCatalog.validDisplayName("진수님, 반갑습니다."));
+        assertEquals("", ProjectCatalog.validDisplayName("진수님 안녕하세요!"));
+        assertEquals("", ProjectCatalog.validDisplayName("오늘은 무엇을 해볼까요?"));
+        assertEquals("", ProjectCatalog.validDisplayName("ChatGPT"));
+        assertEquals("⏳ General Automation", ProjectCatalog.validDisplayName(" ⏳ General Automation "));
+        assertEquals("💾 Vibe Coding", ProjectCatalog.validDisplayName("💾 Vibe Coding"));
+    }
+
+    @Test public void savedBadAliasDoesNotResurface() {
+        String id = "g-p-6a582c824ba08191ac7e74e9bad721fc";
+        Map<String,Object> values = new HashMap<>();
+        values.put("project_name:" + id, "진수님 반갑습니다");
+        values.put("project_name:" + id + "-alias", "진수님, 반갑습니다.");
+        assertEquals("", ProjectCatalog.legacyDisplayName(values, id));
+        values.put("project_name:" + id + "-alias", "정상 이름");
+        assertEquals("정상 이름", ProjectCatalog.legacyDisplayName(values, id));
+    }
+
     @Test public void limitsStoredDisplayNameLength() {
         StringBuilder input = new StringBuilder();
         for (int i = 0; i < 140; i++) input.append('가');

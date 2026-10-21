@@ -39,7 +39,7 @@ final class ProjectCatalog {
         if (raw == null || !urls.equals(raw)) migration = prefs.edit().putStringSet(KEY_URLS, urls);
         Map<String, ?> values = prefs.getAll();
         for (ProjectUrlPolicy.ProjectRef ref : out) {
-            String exact = normalizeDisplayName(stringValue(values.get(nameKey(ref.projectId))));
+            String exact = validDisplayName(stringValue(values.get(nameKey(ref.projectId))));
             if (!exact.isEmpty()) continue;
             String recovered = legacyDisplayName(values, ref.projectId);
             if (recovered.isEmpty()) continue;
@@ -67,8 +67,8 @@ final class ProjectCatalog {
         if (!alreadyPresent) urls.add(ref.canonicalUrl);
         while (urls.size() > MAX_ENTRIES) urls.remove(urls.iterator().next());
 
-        String cleanedName = normalizeDisplayName(displayName);
-        String priorName = normalizeDisplayName(prefs.getString(nameKey(ref.projectId), ""));
+        String cleanedName = validDisplayName(displayName);
+        String priorName = validDisplayName(prefs.getString(nameKey(ref.projectId), ""));
         boolean nameChanged = !cleanedName.isEmpty() && !cleanedName.equals(priorName);
         if (alreadyPresent && !nameChanged && prefs.getInt(KEY_SCHEMA, 0) == SCHEMA) return false;
 
@@ -83,7 +83,7 @@ final class ProjectCatalog {
 
     String displayName(ProjectUrlPolicy.ProjectRef ref) {
         if (ref == null) return fallbackDisplayName(null);
-        String stored = normalizeDisplayName(prefs.getString(nameKey(ref.projectId), ""));
+        String stored = validDisplayName(prefs.getString(nameKey(ref.projectId), ""));
         if (!stored.isEmpty()) return stored;
         String recovered = legacyDisplayName(prefs.getAll(), ref.projectId);
         if (!recovered.isEmpty()) {
@@ -106,7 +106,7 @@ final class ProjectCatalog {
     static String legacyDisplayName(Map<String, ?> values, String projectId) {
         if (values == null || projectId == null || projectId.isEmpty()) return "";
         String exactKey = nameKey(projectId);
-        String exact = normalizeDisplayName(stringValue(values.get(exactKey)));
+        String exact = validDisplayName(stringValue(values.get(exactKey)));
         if (!exact.isEmpty()) return exact;
 
         ArrayList<String> aliases = new ArrayList<>();
@@ -117,7 +117,7 @@ final class ProjectCatalog {
         for (String key : aliases) {
             String sourceId = key.substring(KEY_NAME_PREFIX.length());
             if (!projectId.equals(ProjectUrlPolicy.canonicalProjectId(sourceId))) continue;
-            String candidate = normalizeDisplayName(stringValue(values.get(key)));
+            String candidate = validDisplayName(stringValue(values.get(key)));
             if (!candidate.isEmpty()) return candidate;
         }
         return "";
@@ -138,6 +138,18 @@ final class ProjectCatalog {
             if (out.length() < MAX_DISPLAY_NAME_LENGTH) out.append(c);
         }
         return out.toString().trim();
+    }
+
+    static String validDisplayName(String value) {
+        String name = normalizeDisplayName(value);
+        if (name.isEmpty() || name.equalsIgnoreCase("ChatGPT")
+                || name.equalsIgnoreCase("Projects") || name.equals("프로젝트")
+                || name.matches("^.{1,60}님[, ]*(?:반갑습니다|안녕하세요)[.!?]?$")
+                || name.startsWith("오늘은 무엇을 해볼까요")
+                || name.toLowerCase(java.util.Locale.ROOT).startsWith("how can i help you today")) {
+            return "";
+        }
+        return name;
     }
 
     static String fallbackDisplayName(ProjectUrlPolicy.ProjectRef ref) {
