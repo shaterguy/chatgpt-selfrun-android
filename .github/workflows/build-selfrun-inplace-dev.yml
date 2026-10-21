@@ -77,8 +77,7 @@ jobs:
           grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test' versionCode='4002025' versionName='4.0.11-dev3'" <<< "$BADGING"
           grep -Fq "application-label:'SelfRun Drive DEV'" <<< "$BADGING"
           sha256sum "$APK" > release-output/SHA256SUMS.txt
-          printf '%s
-' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
+          printf '%s' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
 
       - name: Publish single updatable DEV APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
