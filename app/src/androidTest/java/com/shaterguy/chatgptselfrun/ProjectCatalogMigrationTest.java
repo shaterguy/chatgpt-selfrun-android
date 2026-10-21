@@ -45,6 +45,17 @@ public class ProjectCatalogMigrationTest {
         assertFalse(catalog.addVisitedProject(URL, "Vibe Coding"));
     }
 
+    @Test public void greetingCannotOverwriteRealProjectName() {
+        ProjectCatalog catalog = new ProjectCatalog(context);
+        assertTrue(catalog.addVisitedProject(URL, "진수님 반갑습니다"));
+        assertEquals(ProjectCatalog.fallbackDisplayName(catalog.entries().get(0)),
+                catalog.displayName(catalog.entries().get(0)));
+        assertTrue(catalog.addVisitedProject(URL, "Vibe Coding"));
+        assertEquals("Vibe Coding", catalog.displayName(catalog.entries().get(0)));
+        assertFalse(catalog.addVisitedProject(URL, "진수님 반갑습니다."));
+        assertEquals("Vibe Coding", catalog.displayName(catalog.entries().get(0)));
+    }
+
     @Test public void renamedProjectUpdatesWithoutDuplicatingTheUrl() {
         ProjectCatalog catalog = new ProjectCatalog(context);
         assertTrue(catalog.addVisitedProject(URL, "Old name"));
