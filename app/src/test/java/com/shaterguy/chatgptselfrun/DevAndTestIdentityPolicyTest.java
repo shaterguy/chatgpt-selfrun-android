@@ -7,25 +7,33 @@ import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public final class DevAndTestIdentityPolicyTest {
-    @Test public void devAndTestRemainSeparateFromFormalAndKeepUpdateLineage() throws Exception {
+    @Test public void devUsesOriginalInstalledTestPackageAndNotNewDevPackage() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
-        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002024"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.11-dev2'"));
+        assertTrue(gradle.contains("selfRunDriveVersionCode = 4002025"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.11-dev3'"));
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
-        assertTrue(gradle.contains("applicationIdSuffix '.dev'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
-        assertTrue(gradle.contains("SelfRun Drive DEV"));
-        String workflow = read(".github/workflows/build-selfrun-dev-separated.yml",
-                "../.github/workflows/build-selfrun-dev-separated.yml");
-        assertTrue(workflow.contains(":app:assembleDevApp :app:assembleQaApp"));
+        assertFalse(gradle.contains("applicationIdSuffix '.dev'"));
+        assertFalse(gradle.contains("devApp {"));
+        assertTrue(gradle.contains("selfRunAppLabel: 'SelfRun Drive DEV'"));
+    }
+
+    @Test public void buildPublishesOneInPlaceDevApkUsingOldTestSigner() throws Exception {
+        String workflow = read(".github/workflows/build-selfrun-inplace-dev.yml",
+                "../.github/workflows/build-selfrun-inplace-dev.yml");
+        assertTrue(workflow.contains("selfrun-v4/v4.0.11-dev3"));
+        assertTrue(workflow.contains(":app:assembleQaApp"));
+        assertFalse(workflow.contains(":app:assembleDevApp"));
+        assertFalse(workflow.contains(":app:assembleRelease"));
         assertTrue(workflow.contains("tools/sign_test.sh"));
         assertFalse(workflow.contains("tools/sign_release.sh"));
-        assertFalse(workflow.contains(":app:assembleRelease"));
-        assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.dev"));
         assertTrue(workflow.contains("com.shaterguy.chatgptselfrun.drive.test"));
-        assertTrue(workflow.contains("versionCode='4002024'"));
+        assertFalse(workflow.contains("com.shaterguy.chatgptselfrun.drive.dev"));
+        assertTrue(workflow.contains("versionCode='4002025'"));
         assertTrue(workflow.contains("2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e"));
         assertFalse(workflow.contains("android-emulator-runner"));
+        assertTrue(workflow.contains("SelfRun-Drive-v4.0.11-dev3.apk"));
+        assertFalse(Files.exists(Path.of(".github/workflows/build-selfrun-dev-separated.yml")));
     }
     private static String read(String first, String second) throws Exception {
         Path path = Path.of(first);
