@@ -2,8 +2,9 @@ import {observedConversationUrl,actionConversationUrl,probeExpression,recoveryIn
   submitExpression,requestProfileDocumentStartSource,receiptObserverDocumentStartSource,
   configureRequestProfileExpression,normalizeProfileOperations,DECORATIVE_ANIMATION_PAUSE_SOURCE,
   QUIESCE_EXPRESSION} from './chatgpt.mjs';
+import {inputParentRuntime} from './input-parent-sync.mjs';
 
-export function buildPageRuntimeSource({installationKey='selfrun-static-test-key'}={}) {
+export function buildPageRuntimeSource({installationKey='selfrun-static-test-key',allowLegacy=false}={}) {
   const placeholder='__SELFRUN_STATIC_PROMPT_PLACEHOLDER_8b1c__';
   const input=inputExpression(placeholder).replace(JSON.stringify(placeholder),'String(payload.prompt??\'\')');
   const operations=['model','thinking_effort','conversation_origin','service_tier'].map(path=>({op:'REMOVE',path}));
@@ -11,38 +12,44 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
   const configure=privateRefs(configureRequestProfileExpression(operations))
     .replace(JSON.stringify(normalizeProfileOperations(operations)),'normalizeProfileOperations(payload.operations)');
   const profile=privateRefs(requestProfileDocumentStartSource())
-    .replace('const nativeFetch=window.fetch.bind(window);','const nativeFetch=(...args)=>Reflect.apply(originalFetch,window,args);')
+    .replace('const nativeFetch=window.fetch.bind(window);','const nativeFetch=(...args)=>parentSync.fetch(...args);')
     .replace('window.fetch=async function','profileFetch=async function')
-    .replace('const probe=fetchProbe(input,init);','const pageArm=armedKey?{...armedKey}:null;const probe=fetchProbe(input,init);')
-    .replace('const patched=patchText(request.url,request.method,text);',"if(!ownerActive()||(pageArm&&(!armedKey||pageArm.intent_id!==armedKey.intent_id||pageArm.generation!==armedKey.generation)))fail('runtime_disposed');const patched=patchText(request.url,request.method,text);")
-    .replace('const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;let metadata=new WeakMap();','const nativeOpen=originalOpen,nativeSend=originalSend;let metadata=new WeakMap();')
+    .replace('const probe=fetchProbe(input,init);','const pageGeneration=runtimeGeneration,pageArm=armedKey?{...armedKey}:null;const probe=fetchProbe(input,init);')
+    .replace('const patched=patchText(request.url,request.method,text);',"if(pageGeneration!==runtimeGeneration||!ownerActive()||(pageArm&&(!armedKey||pageArm.intent_id!==armedKey.intent_id||pageArm.generation!==armedKey.generation)))fail('runtime_disposed');const patched=patchText(request.url,request.method,text);")
+    .replace('const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;let metadata=new WeakMap();','const nativeOpen=originalOpen,nativeSend=function(body){return parentSync.sendXhr(this,body,originalSend);};let metadata=new WeakMap();')
     .replace('XMLHttpRequest.prototype.open=function','profileOpen=function')
     .replace('XMLHttpRequest.prototype.send=function','profileSend=function');
   const receipt=privateRefs(receiptObserverDocumentStartSource())
     .replace('const downstreamFetch=window.fetch;','const downstreamFetch=function(...args){return Reflect.apply(profileFetch||originalFetch,this,args);};')
     .replace('window.fetch=function','receiptFetch=function')
     .replace('current===entry&&!entry.retired&&!entry.invalid','current===entry&&!entry.retired&&!entry.invalid&&ownerActive()');
-  const actions={snapshot:probeExpression(),progress:probeExpression(),recoveryInput:recoveryInputExpression(),
+  const actions={prepareInput:'legacy?true:parentSync.prepare(payload.prompt)',snapshot:probeExpression(),progress:probeExpression(),recoveryInput:recoveryInputExpression(),
     newChat:newChatExpression(),input,sendReady:sendReadyExpression(),submit:submitExpression(),
     installProfile:profile,profileConfigure:configure,installReceipt:receipt,
     receiptArm:'receiptObserver.arm(payload.key)',receiptSnapshot:'receiptObserver?.snapshot(payload.key)||null',
     receiptRetire:'receiptObserver?.retire(payload.key)',terminalDispose:'terminalDispose()',pauseAnimations:DECORATIVE_ANIMATION_PAUSE_SOURCE,quiesce:QUIESCE_EXPRESSION};
-  return `(()=>{'use strict';const version='selfrun-extension-page-v1';
-    if(window.__selfrunExtensionPage)throw new Error('Unexpected page helper');
+  return `(()=>{'use strict';const version='selfrun-extension-page-v2';
+    if(window.__selfrunExtensionPageV2)return;
+    const legacy=window.__selfrunExtensionPage;
+    if(legacy&&!${allowLegacy})throw new Error('Unexpected page helper');
     const nativeNow=Date.now.bind(Date);
     const installationKey=${JSON.stringify(installationKey)};
     const encoder=new TextEncoder(),encode=encoder.encode.bind(encoder),subtle=crypto.subtle,importKey=subtle.importKey.bind(subtle),sign=subtle.sign.bind(subtle);let attestKey=null;
     const attest=async challenge=>{if(typeof challenge!=='string'||challenge.length>200)throw new Error('Invalid attestation challenge');attestKey??=importKey('raw',encode(installationKey),{name:'HMAC',hash:'SHA-256'},false,['sign']);const bytes=new Uint8Array(await sign('HMAC',await attestKey,encode(challenge)));return Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('');};
+    if(legacy){try{legacy.run('terminalDispose',{},'server-action-owner',location.href,Date.now()+5000,installationKey);}catch{}}
+    const nativeApply=Reflect.apply;
     const originalFetch=window.fetch,xhr=typeof XMLHttpRequest==='function'?XMLHttpRequest.prototype:null;
-    const originalOpen=xhr?.open,originalSend=xhr?.send;let activeXhr=new WeakSet();
+    const originalOpen=xhr?.open,originalSend=xhr?.send,originalSetHeader=xhr?.setRequestHeader;let activeXhr=new WeakSet();
+    const parentSync=(${inputParentRuntime.toString()})({nativeFetch:(...args)=>nativeApply(originalFetch,window,args),href:()=>location.href,apply:nativeApply});
     let profileEngine=null,receiptObserver=null,profileFetch=null,receiptFetch=null,profileOpen=null,profileSend=null;
     let ownership=null,active=false,revoked=false,armedKey=null,entryTransition=null;
+    let runtimeGeneration=0;
     let initialPostTransition=null;
     const urlKey=url=>{try{const u=new URL(url);return u.origin+u.pathname;}catch{return '';}};
     const observedConversationUrl=${observedConversationUrl.toString()};
     const actionConversationUrl=${actionConversationUrl.toString()};
     const terminalDispose=()=>{
-      active=false;revoked=true;
+      active=false;revoked=true;runtimeGeneration++;parentSync.dispose();
       try{receiptObserver?.dispose();}catch{}
       try{profileEngine?.dispose();}catch{}
       ownership=null;armedKey=null;entryTransition=null;initialPostTransition=null;
@@ -78,12 +85,13 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     const ownerActive=()=>active&&ownerMatches();
     // Inactive paths do not inspect URL, arguments, body, response, or Promise.
     // These non-async wrappers preserve the original receiver, return and throw.
-    window.fetch=function(){if(!active)return Reflect.apply(originalFetch,this,arguments);if(!ownerActive())return Reflect.apply(originalFetch,this,arguments);const transition=captureInitialPost(arguments[0],arguments[1]);
-      let result;try{result=Reflect.apply(receiptFetch||profileFetch||originalFetch,this,arguments);}catch(error){if(transition&&initialPostTransition===transition)revoke();throw error;}
+    window.fetch=function(){if(!active)return nativeApply(originalFetch,this,arguments);if(!ownerActive())return nativeApply(originalFetch,this,arguments);const transition=captureInitialPost(arguments[0],arguments[1]);
+      let result;try{result=nativeApply(receiptFetch||profileFetch||originalFetch,this,arguments);}catch(error){if(transition&&initialPostTransition===transition)revoke();throw error;}
       if(transition)return Promise.resolve(result).catch(error=>{if(initialPostTransition===transition)revoke();throw error;});
       return result;};
-    if(xhr){xhr.open=function(){if(!active||!ownerActive())return Reflect.apply(originalOpen,this,arguments);const result=Reflect.apply(profileOpen||originalOpen,this,arguments);activeXhr.add(this);return result;};
-      xhr.send=function(){if(!active||!ownerActive())return Reflect.apply(originalSend,this,arguments);if(profileSend&&!activeXhr.has(this))throw new Error('REQUEST_PROFILE:untracked_active_xhr');return Reflect.apply(profileSend||originalSend,this,arguments);};}
+    if(xhr){xhr.open=function(){if(!active||!ownerActive())return nativeApply(originalOpen,this,arguments);parentSync.openXhr(this,arguments[0],arguments[1]);const result=nativeApply(profileOpen||originalOpen,this,arguments);activeXhr.add(this);return result;};
+      if(originalSetHeader)xhr.setRequestHeader=function(){if(active)parentSync.headerXhr(this,arguments[0],arguments[1]);return nativeApply(originalSetHeader,this,arguments);};
+      xhr.send=function(){if(!active||!ownerActive())return nativeApply(originalSend,this,arguments);if(profileSend&&!activeXhr.has(this))throw new Error('REQUEST_PROFILE:untracked_active_xhr');return nativeApply(profileSend||originalSend,this,arguments);};}
     const history=window.history;
     if(history)for(const name of ['pushState','replaceState']){const original=history[name];if(typeof original==='function')history[name]=function(){const result=Reflect.apply(original,this,arguments);if(ownership)ownerMatches();return result;};}
     window.addEventListener?.('pagehide',revoke,{once:true});window.addEventListener?.('popstate',()=>{if(ownership)ownerMatches();});window.addEventListener?.('hashchange',()=>{if(ownership)ownerMatches();});
@@ -94,6 +102,9 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
       if(!Object.hasOwn(actions,operation))throw new Error('Unsupported page operation');
       if(activationKey!==installationKey)throw new Error('Page activation unauthorized');
       if(!Number.isFinite(deadline)||nativeNow()>=deadline)throw new Error('Page command expired');
+      // Only the explicit input path renews a disposed generation. The stable
+      // transport facade is retained, including references captured at startup.
+      if(operation==='prepareInput'&&(urlKey(location.href)===urlKey(expectedUrl)||actionConversationUrl(expectedUrl,location.href))){terminalDispose();revoked=false;}
       if(revoked||typeof nonce!=='string'||nonce.length<16||(urlKey(location.href)!==urlKey(expectedUrl)&&!actionConversationUrl(expectedUrl,location.href)))throw new Error('Page ownership unavailable');
       if(!ownership)ownership={nonce,url:urlKey(expectedUrl)};
       if(ownership.nonce!==nonce)throw new Error('Page owner mismatch');
@@ -114,10 +125,12 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
         return {status:'NOT_SUBMITTED',reason:result.status,intent_id:payload.expectedArm.intent_id,generation:payload.expectedArm.generation};
       if(operation==='profileConfigure'){ownership.url=urlKey(expectedUrl);entryTransition=null;active=true;}
       if(operation==='receiptArm'){if(initialPostTransition&&(initialPostTransition.intent_id!==payload.key.intent_id||initialPostTransition.generation!==payload.key.generation)){revoke();throw new Error('Initial POST generation changed');}armedKey={intent_id:payload.key.intent_id,generation:payload.key.generation};}
-      if(operation==='receiptRetire'&&armedKey?.intent_id===payload.key?.intent_id&&armedKey?.generation===payload.key?.generation){armedKey=null;if(initialPostTransition)revoke();}
+      if(operation==='receiptRetire'&&armedKey?.intent_id===payload.key?.intent_id&&armedKey?.generation===payload.key?.generation){armedKey=null;parentSync.dispose();if(initialPostTransition)revoke();}
       return result;
     };
-    Object.defineProperty(window,'__selfrunExtensionPage',{value:Object.freeze({version,attest,run}),writable:false,configurable:false});
+    const facade=Object.freeze({version,attest,run,legacyTransport:!!legacy});
+    Object.defineProperty(window,'__selfrunExtensionPageV2',{value:facade,writable:false,configurable:false});
+    if(!legacy)Object.defineProperty(window,'__selfrunExtensionPage',{value:facade,writable:false,configurable:false});
   })();\n`;
 }
 

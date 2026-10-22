@@ -772,6 +772,7 @@ export function pageActionExpression(operation,payload={}) {
     case 'snapshot': return probeExpression();
     case 'progress': return `(() => { const started = performance.now(); const value = (${probeExpression()});
       return {...value, __selfrun_engine_elapsed_ms: Math.max(0, Math.round(performance.now() - started))}; })()`;
+    case 'prepareInput': return 'true';
     case 'recoveryInput': return recoveryInputExpression();
     case 'newChat': return newChatExpression();
     case 'input': return inputExpression(payload.prompt);
@@ -968,6 +969,7 @@ export class ChatGptBrowser {
     try {
     const existing=await findConversation();if(existing)return existing;
     check();
+    await run('prepareInput',{prompt,operations:profileOperations});
     const probe=await run('recoveryInput');
     const observed=await handoff(probe?.url);if(observed)return observed;
     if(conversationUrl&&conversationId(probe.url)!==conversationId(conversationUrl))

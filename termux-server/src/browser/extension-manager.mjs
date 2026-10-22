@@ -399,7 +399,8 @@ export class ExtensionManager {
       }
       if(!['snapshot','progress'].includes(operation)){
         const action=await manager.#actionSession(target,signal);
-        return action.run(operation,payload,{...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});
+        return action.run(operation,payload,{...options,timeoutMs:Math.max(1,deadline-Date.now()),signal,
+          lifetimeSignal:AbortSignal.any([abort.signal,...(options.signal?[options.signal]:[])])});
       }
       await manager.#registerObserver(target,signal);
       return manager.bridge.request(operation,{targetId:target.id},{...options,timeoutMs:Math.max(1,deadline-Date.now()),signal});

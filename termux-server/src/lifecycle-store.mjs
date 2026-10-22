@@ -405,7 +405,7 @@ export class LifecycleStore {
         &&prior.turn_id===c.turn_id&&prior.request_id===c.request_id;
       for(const [key,old] of Object.entries(next.requests)) {
         if(old.task_id!==c.task_id||(['COMMITTED','COMPLETED'].includes(old.state)&&!['STOPPED','DONE'].includes(c.state))
-          ||(old.state==='CANCELLED'&&!(c.state==='STOPPED'&&old.request_id===c.request_id&&old.turn_id===c.turn_id)))continue;
+          ||(old.state==='CANCELLED'&&!['STOPPED','DONE'].includes(c.state)))continue;
         const matching=old.request_id===c.request_id&&old.turn_id===c.turn_id;
         let state=old.state;
         if(c.state==='STOPPED'||c.state==='DONE') state=['COMMITTED','COMPLETED'].includes(old.state)?'COMPLETED':'STOPPED';
