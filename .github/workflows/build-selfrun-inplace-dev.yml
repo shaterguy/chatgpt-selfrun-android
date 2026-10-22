@@ -3,10 +3,10 @@ name: Build SelfRun in-place DEV update
 on:
   push:
     branches:
-      - 'selfrun-v4/v4.0.11-dev3'
+      - 'selfrun-v4/v4.0.11-dev4'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sign-existing-dev:
@@ -23,30 +23,37 @@ jobs:
           cmdline-tools-version: '11076708'
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
-        with:
-          gradle-version: '9.5.0'
-          cache-read-only: true
-
       - name: Validate historical in-place DEV lineage
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq "selfRunDriveVersionCode = 4002025" app/build.gradle
-          grep -Fq "selfRunDriveVersionName = '4.0.11-dev3'" app/build.gradle
+          grep -Fq "selfRunDriveVersionCode = 4002026" app/build.gradle
+          grep -Fq "selfRunDriveVersionName = '4.0.11-dev4'" app/build.gradle
           grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" app/build.gradle
           grep -Fq "applicationIdSuffix '.test'" app/build.gradle
           ! grep -Fq "applicationIdSuffix '.dev'" app/build.gradle
 
-      - name: Build only historical installed DEV package
+      - name: Verify prepared APK without rebuilding
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gradle --no-daemon --console=plain :app:verifyDriveVariantIdentity :app:assembleQaApp
-          RAW="$(find app/build/outputs/apk/qaApp -maxdepth 1 -type f -name '*unsigned.apk' -print -quit)"
-          test -s "$RAW"
-          mkdir -p release-output
-          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 "$RAW" release-output/legacy-dev-aligned.apk
+          mkdir -p build-input release-output
+          gh release download selfrun-v4.0.11-dev4-build-input --repo "$GITHUB_REPOSITORY" --dir build-input
+          python3 - <<'CHECK'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path('build-input'); proof=json.loads((root/'BUILD_INPUT.json').read_text())
+          assert proof['source_sha']==os.environ['GITHUB_SHA']
+          assert proof['version_name']=='4.0.11-dev4' and proof['version_code']==4002026
+          assert proof['package']=='com.shaterguy.chatgptselfrun.drive.test'
+          assert hashlib.sha256((root/'app-qaApp-unsigned.apk').read_bytes()).hexdigest()==proof['unsigned_sha256']
+          assert proof['validation_passed'] is True
+          CHECK
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/aapt" dump badging build-input/app-qaApp-unsigned.apk > build-input/BADGING.txt
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test' versionCode='4002026' versionName='4.0.11-dev4'" build-input/BADGING.txt
+          "$BT/zipalign" -p -f 4 build-input/app-qaApp-unsigned.apk release-output/legacy-dev-aligned.apk
 
       - name: Prepare existing development signer
         shell: bash
@@ -66,7 +73,7 @@ jobs:
           trap 'rm -f "$PASS_FILE"' EXIT
           printf '%s' "$SIGNING_PASSPHRASE" > "$PASS_FILE"
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          APK="release-output/SelfRun-Drive-v4.0.11-dev3.apk"
+          APK="release-output/SelfRun-Drive-v4.0.11-dev4.apk"
           APKSIGNER="$BT/apksigner" bash tools/sign_test.sh             release-output/legacy-dev-aligned.apk "$PASS_FILE" "$APK"             > release-output/SIGN_REPORT.txt
           "$BT/apksigner" verify --verbose --print-certs "$APK" > release-output/DEV_CERT.txt
           CERT='2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e'
@@ -74,7 +81,7 @@ jobs:
           grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' release-output/DEV_CERT.txt
           grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' release-output/DEV_CERT.txt
           BADGING="$("$BT/aapt" dump badging "$APK")"
-          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test' versionCode='4002025' versionName='4.0.11-dev3'" <<< "$BADGING"
+          grep -Fq "package: name='com.shaterguy.chatgptselfrun.drive.test' versionCode='4002026' versionName='4.0.11-dev4'" <<< "$BADGING"
           grep -Fq "application-label:'SelfRun Drive DEV'" <<< "$BADGING"
           sha256sum "$APK" > release-output/SHA256SUMS.txt
           printf '%s' "$GITHUB_SHA" > release-output/SOURCE_COMMIT.txt
@@ -82,12 +89,21 @@ jobs:
       - name: Publish single updatable DEV APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: selfrun-drive-dev3-${{ github.run_id }}-${{ github.run_attempt }}
+          name: selfrun-drive-dev4-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            release-output/SelfRun-Drive-v4.0.11-dev3.apk
+            release-output/SelfRun-Drive-v4.0.11-dev4.apk
             release-output/SHA256SUMS.txt
             release-output/SOURCE_COMMIT.txt
             release-output/DEV_CERT.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+      - name: Publish in-place DEV prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v4.0.11-dev4 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'SelfRun Drive 4.0.11-dev4' --notes 'Input helper recovery, current parent synchronization on input, and durable completion/stop delivery. Existing DEV package and certificate are preserved.'
+          gh release upload v4.0.11-dev4 --repo "$GITHUB_REPOSITORY" release-output/SelfRun-Drive-v4.0.11-dev4.apk release-output/SHA256SUMS.txt release-output/SOURCE_COMMIT.txt release-output/DEV_CERT.txt build-input/BUILD_INPUT.json

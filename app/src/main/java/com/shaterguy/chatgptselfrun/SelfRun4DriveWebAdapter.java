@@ -58,6 +58,7 @@ final class SelfRun4DriveWebAdapter {
     private String controlFileId = "";
     private long controlEpoch;
     private String lastControlPublishedKey = "";
+    private volatile String terminalTaskId = "";
     private boolean registryRefreshPending;
     private String registryRefreshRequest = "";
 
@@ -74,6 +75,8 @@ final class SelfRun4DriveWebAdapter {
         if (io.isShutdown()) throw new IllegalStateException("WEB_ADAPTER_CLOSED");
         accessToken = token == null ? "" : token.trim();
         if (accessToken.isEmpty()) throw new IllegalArgumentException("DRIVE_TOKEN_EMPTY");
+        if (!terminalTaskId.isEmpty()) SelfRunTerminalControlWorker.cancel(context, terminalTaskId);
+        terminalTaskId = "";
     }
 
     void syncControlState(SelfRun3Engine.State snapshot) {
@@ -101,7 +104,11 @@ final class SelfRun4DriveWebAdapter {
             callback.onFailure(new IllegalStateException("TASK_CONTROL_UNAVAILABLE"));
             return;
         }
-        if (!accessToken.isEmpty()) {
+        if ("STOPPED".equals(control) || "DONE".equals(control)) {
+            terminalTaskId = snapshot.taskId();
+            SelfRunTerminalControlWorker.enqueueAfter(context, snapshot, control, reason, io);
+        }
+        if (!accessToken.isEmpty() && !"STOPPED".equals(control) && !"DONE".equals(control)) {
             submitConfirmedControlWrite(accessToken, snapshot, control, reason, callback);
             return;
         }
@@ -133,6 +140,8 @@ final class SelfRun4DriveWebAdapter {
             io.execute(() -> {
                 try {
                     writeTaskControl(token, snapshot, control, reason);
+                    if ("STOPPED".equals(control) || "DONE".equals(control))
+                        SelfRunTerminalControlWorker.cancel(context, snapshot.taskId());
                     main.post(callback::onConfirmed);
                 } catch (Throwable error) {
                     main.post(() -> {
@@ -147,6 +156,11 @@ final class SelfRun4DriveWebAdapter {
     }
 
     void publishControlState(SelfRun3Engine.State snapshot, String control, String reason) {
+        if ("STOPPED".equals(control) || "DONE".equals(control)) {
+            if (snapshot != null) terminalTaskId = snapshot.taskId();
+            SelfRunTerminalControlWorker.enqueueAfter(context, snapshot, control, reason, io);
+            return;
+        }
         if (snapshot == null || accessToken.isEmpty() || io.isShutdown()) return;
         String token = accessToken;
         try {
@@ -170,6 +184,8 @@ final class SelfRun4DriveWebAdapter {
                                   String control, String reason) throws Exception {
         String taskId = snapshot.taskId();
         String parentId = snapshot.resource("folderId");
+        boolean terminal = "STOPPED".equals(control) || "DONE".equals(control);
+        if (!terminal && taskId.equals(terminalTaskId)) return;
         if (taskId.isEmpty() || parentId.isEmpty()) return;
         if (!taskId.equals(controlTaskId)) {
             controlTaskId = taskId;
@@ -209,6 +225,7 @@ final class SelfRun4DriveWebAdapter {
                 .put("reason", reason == null ? "" : reason)
                 .put("conversation_url", snapshot.resource("conversationUrl"))
                 .put("updated_at_ms", System.currentTimeMillis());
+        if (!terminal && taskId.equals(terminalTaskId)) return;
         if (create) api.createTaskControlFile(token, controlFileId, taskId, parentId, body);
         else api.writeServerDispatchFile(token, controlFileId, body);
 
