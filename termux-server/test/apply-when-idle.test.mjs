@@ -132,3 +132,10 @@ test('resumeExact cannot signal a reused or mismatched process identity', async 
     assert.ok(!['T','t'].includes(module.processIdentity(child.pid).state));
   } finally {child.kill('SIGKILL');}
 });
+
+test('the owned monitor controller is idle while every ordinary page remains a resource',async()=>{
+ const {EXTENSION_ID}=await import('../src/browser/extension-package.mjs');
+ assert.equal(module.idleBrowserTargets([{type:'page',url:`chrome-extension://${EXTENSION_ID}/controller.html`}]),true);
+ for(const url of ['https://chatgpt.com/c/owned','https://example.test/manual','chrome-extension://foreign/controller.html'])
+  assert.equal(module.idleBrowserTargets([{type:'page',url}]),false);
+});

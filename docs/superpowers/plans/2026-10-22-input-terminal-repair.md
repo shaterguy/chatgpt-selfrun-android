@@ -4,7 +4,7 @@ Goal: repair the page helper only after a send decision, append to the current s
 
 The user's three requested behaviors and input-only scope are the design brief. Existing observation, character-count monitoring, profile controls and task scheduling remain the execution paths. No new readiness barrier or task error state is introduced.
 
-Active workspaces: server at b8e88e5a (v4.0.0-dev42 branch); Android at f9edc2f8 (selfrun-v4/v4.0.11-dev4 branch). The separate existing release tracks preserve the newer DEV package lineage.
+Active workspaces: server at b8e88e5a (v4.0.0-dev43 branch); Android at f9edc2f8 (selfrun-v4/v4.0.11-dev4 branch). The separate existing release tracks preserve the newer DEV package lineage.
 
 Applicable prevention rules: PR-003 (update version references together), PR-008 (use the live conversation response and historical parent implementation), PR-009 (keep delivery metadata from blocking the functional result).
 

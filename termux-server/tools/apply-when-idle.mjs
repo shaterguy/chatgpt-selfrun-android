@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import {createHash, randomUUID} from 'node:crypto';
+import {createHash, createHmac, randomUUID} from 'node:crypto';
 import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
+import {EXTENSION_ID} from '../src/browser/extension-package.mjs';
+import {attestController} from '../src/browser/server-action-session.mjs';
 
 const exec = promisify(execFile);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -12,6 +14,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const emptyObject = value => object(value) && Object.keys(value).length === 0;
 const terminalControl = value => ['STOPPED','DONE'].includes(value?.state);
+export const idleBrowserTargets = targets => Array.isArray(targets)&&!targets.some(target=>target.type==='page'&&target.url!==`chrome-extension://${EXTENSION_ID}/controller.html`);
 
 // A paused, blocked, or intervention task is still work. No task is retired here.
 export function idleSnapshot(state) {
@@ -169,10 +172,20 @@ export async function realDependencies(manifest) {
     if (!extensionProcessMatches(proof,processIdentity(proof.pid),browserDeps.bootId())) throw Error('browser process proof unavailable');
     const endpoint = 'http://127.0.0.1:' + m.browserPort;
     const version = await fetch(endpoint + '/json/version',{signal:AbortSignal.timeout(2000)}).then(r => r.json());
-    if (version.webSocketDebuggerUrl !== proof.browserKey) throw Error('browser endpoint changed');
+    if (proof.browserKey && version.webSocketDebuggerUrl !== proof.browserKey) throw Error('browser endpoint changed');
     const targets = await fetch(endpoint + '/json/list',{signal:AbortSignal.timeout(2000)}).then(r => r.json());
     if (!Array.isArray(targets)) throw Error('browser inventory unavailable');
-    return !targets.some(target => target.type === 'page');
+    if(!proof.browserKey){
+      // A probe-only browser has not bound an action endpoint yet. Prove the
+      // exact paired monitor on this endpoint before treating it as empty.
+      const pair=await jsonFile(path.join(m.dataDir,'extension-pairing.json'));
+      if(pair.ownerId!==journal.ownerId||typeof pair.capability!=='string')return false;
+      const key=hash('selfrun-page-bootstrap:'+pair.capability+':'+journal.browserSessionId),challenge=randomUUID();
+      const expected=createHmac('sha256',key).update(challenge).digest('hex');
+      const row=targets.find(target=>target.type==='page'&&target.url===`chrome-extension://${EXTENSION_ID}/controller.html`);
+      if(!row||await attestController({row,port:m.browserPort,challenge,signal:AbortSignal.timeout(2000)})!==expected)return false;
+    }
+    return idleBrowserTargets(targets);
   };
   const assertFrozen = async proof => {
     const current = processIdentity(proof.pid);
@@ -201,7 +214,9 @@ export async function realDependencies(manifest) {
       else {
         const h = await health(), w = h.drive_watcher;
         if (h.version !== m.currentVersion || h.generation !== state.generation) return {idle:false,reason:'server_changed'};
-        if (!w || w.scanning || w.pendingFiles || w.pendingReads || h.browser_runtime?.pending) return {idle:false,reason:'intake_in_flight'};
+        // Queued discovery reads are not active tasks. The direct Drive read below
+        // is repeated with the exact process frozen before any launcher swap.
+        if (!w || h.browser_runtime?.pending) return {idle:false,reason:'intake_in_flight'};
       }
       const raw = await fsp.readFile(journalPath,'utf8'), journal = JSON.parse(raw);
       if (!await ownerCheck(journal)) return {idle:false,reason:'browser_resources'};

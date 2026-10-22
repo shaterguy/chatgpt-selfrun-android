@@ -293,8 +293,9 @@ export class ExtensionManager {
     const target={id,type:'page',url:bootstrapUrl,bootstrapUrl,entryUrl:url==='about:blank'?null:url,entryPending:true};
     try{await this.#save();}catch(error){error.createdTarget=target;throw error;}
     if(!guard()){
-      // The caller must register this exact late resource even when close fails.
+      // A cancelled creation has one disposal attempt and no retained owner.
       try{await this.closeOwnedTarget(id,{caller:true,guard:row=>!row||row.url===bootstrapUrl});}catch{}
+      await this.discardOwnedTarget(id,{guard:()=>!guard()});
       const error=fail('Created target owner ended','ABORT_ERR');error.createdTarget=target;throw error;
     }
     return target;

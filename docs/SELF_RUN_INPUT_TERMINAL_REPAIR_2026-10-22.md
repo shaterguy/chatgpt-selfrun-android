@@ -1,6 +1,6 @@
 # Input preparation and terminal delivery repair
 
-Server: 4.0.0-dev42. Android DEV: 4.0.11-dev4, version code 4002026,
+Server: 4.0.0-dev43. Android DEV: 4.0.11-dev4, version code 4002026,
 package `com.shaterguy.chatgptselfrun.drive.test`.
 
 ## Findings
@@ -59,16 +59,22 @@ including CANCELLED, and releases their attached resources.
   Existing signer SHA-256:
   `2c95a5644a0ef2959eaecf10460e300fe2ee7a4ebcede685a82a52634c22e86e`.
   Both source/hash and APK signature were independently read back on the tablet.
-- 116 focused server tests and syntax checks passed after the final cancellation
+- 182 selected server tests (181 passed, one platform-specific skip) and syntax
+  checks passed after the final cancellation
   refinements.
   Coverage includes immutable-v1 migration, revoked helper renewal, captured
   fetch, newest parent, superseded body parsing, transient reads, STOP, and
   DONE/STOPPED across all 24 lifecycle states.
-- A broader 125-test selection had 122 passes and three old assertions in
-  `extension-terminal-discard.test.mjs`. The exact same three failures were
-  reproduced on unmodified released b8e88e5a. The repository-wide suite also
-  contains older incompatible contracts and hanging tests; it is not reported
+- Broader verification reproduced failed-close cleanup retention on released
+  b8e88e5a. Terminal cleanup now discards the extension ownership and consumes
+  its cleanup entry even when CDP/extension close attempts fail; cancelled
+  in-flight creation also releases its owner. The related regression tests
+  now pass. The remaining repository-wide historical suite is not reported
   as passing.
+- Deferred installation now uses the authoritative repeated Drive proof and
+  frozen task snapshot rather than treating queued discovery reads as active
+  work. Its own extension controller page is recognized as idle; ordinary
+  browser pages continue to prevent browser retirement.
 - `tools/input-repair-live-smoke.mjs` reads the real conversation graph and
   fulfills the synthetic POST through CDP. It does not submit a real message.
   On Galaxy-Tab-S11-Ultra the live probe passed: the released v1 captured

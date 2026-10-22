@@ -36,11 +36,11 @@ for(const state of ['STOPPED','DONE'])test(state+' closes the owned task tab wit
   assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
   assert.ok(f.releases>=1);
 });
-test('failed terminal cleanup retains disposal proof and retries without restarting work',async()=>{
+test('failed terminal cleanup consumes disposal work without restarting or retrying',async()=>{
   const f=ownedFixture();await f.existing();f.closeFails=true;await f.stop();await f.clean();
-  assert.equal(f.controller.repository.cleanupEntries().length,1);assert.equal(f.pages.size,1);
+  assert.equal(f.controller.repository.cleanupEntries().length,0);assert.equal(f.pages.size,1);
   f.closeFails=false;await f.clean();
-  assert.deepEqual(f.closed,['target-owned']);assert.equal(f.controller.repository.cleanupEntries().length,0);
+  assert.deepEqual(f.closed,[]);assert.equal(f.controller.repository.cleanupEntries().length,0);
   assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,0);
 });
 test('manual matching-conversation attachment is never owned or closed',async()=>{
@@ -208,9 +208,9 @@ test('explicit DONE discard does not claim tab closure when one disposal fails',
   const f=ownedFixture();await f.existing();f.closeFails=true;
   f.control={...f.control,state:'DONE',control_epoch:2};await f.controller.control(null,f.control,f.transport);await f.clean();
   assert.equal(f.record(),null);assert.equal(f.pages.has('target-owned'),true);
-  assert.equal(f.controller.repository.cleanupEntries().length,1);assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
+  assert.equal(f.controller.repository.cleanupEntries().length,0);assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
   f.closeFails=false;await f.clean();
-  assert.deepEqual(f.closed,['target-owned']);assert.equal(f.pages.size,0);
+  assert.deepEqual(f.closed,[]);assert.equal(f.pages.size,1);
 });
 
 test('already absent owned target clears cleanup without reporting an observed close', async () => {
@@ -223,14 +223,14 @@ test('terminal cleanup exception leaves the tab untouched and no future executio
   const f=ownedFixture();await f.existing();let attempts=0;
   f.beforeClose=async()=>{attempts++;throw new Error('test CDP outage');};
   await f.stop();await f.clean();await f.clean();
-  assert.equal(f.record(),null);assert.ok(attempts>=2);assert.equal(f.pages.has('target-owned'),true);
-  assert.equal(f.controller.repository.cleanupEntries().length,1);assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
+  assert.equal(f.record(),null);assert.equal(attempts,1);assert.equal(f.pages.has('target-owned'),true);
+  assert.equal(f.controller.repository.cleanupEntries().length,0);assert.deepEqual(f.store.snapshot().lifecycle.browserCleanup,{});
 });
 
-test('repurposed target is preserved with unresolved physical disposal proof', async () => {
+test('repurposed physical page is preserved without retaining ended-task cleanup', async () => {
   const f=ownedFixture();await f.existing();f.targetUrl='https://example.test/manual-browsing';
   await f.stop();await f.clean();
-  assert.equal(f.record(),null);assert.equal(f.controller.repository.cleanupEntries().length,1);
+  assert.equal(f.record(),null);assert.equal(f.controller.repository.cleanupEntries().length,0);
   assert.deepEqual(f.closed,[]);
   assert.equal(f.pages.has('target-owned'),true);
 });
@@ -247,10 +247,10 @@ for(const state of ['STOPPED','DONE'])test(state+' closes its exact owned tab ev
  assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,0);
 });
 
-test('failed physical close never discards ownership through the extension cache-disposal path',async()=>{
+test('failed physical close attempts owner disposal once and cannot retain future cleanup',async()=>{
  const f=ownedFixture();await f.existing();f.closeFails=true;let disposals=0;
  f.browser.chromium.discardOwnedTarget=async()=>{disposals++;throw Error('synthetic disposal storage failure');};
  await f.stop();await f.clean();await f.clean();
- assert.equal(disposals,0);assert.equal(f.controller.repository.resourceCleanups.size,1);assert.equal(f.pages.size,1);
- f.closeFails=false;await f.clean();assert.equal(f.pages.size,0);assert.equal(f.controller.repository.cleanupEntries().length,0);
+ assert.equal(disposals,1);assert.equal(f.controller.repository.resourceCleanups.size,0);assert.equal(f.pages.size,1);
+ f.closeFails=false;await f.clean();assert.equal(f.pages.size,1);assert.equal(f.controller.repository.cleanupEntries().length,0);assert.equal(disposals,1);
 });

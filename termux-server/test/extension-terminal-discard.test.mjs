@@ -98,13 +98,13 @@ test('one terminal close remains addressable after lifecycle removes the active 
  assert.equal(JSON.stringify(f.manager.journal).includes(target.id),false);
 });
 
-test('cancelled in-flight creation forgets its new target even if its one close fails',async t=>{
+test('cancelled in-flight creation forgets its target after bounded CDP and extension close failures',async t=>{
  const f=await extensionRuntimeFixture(t);await f.manager.ensureStarted();const gate=deferred(),abort=new AbortController();
  f.gates.create=gate.promise;f.gates.removeError=Error('synthetic close failure');
  const creating=f.manager.createTarget('https://chatgpt.com/c/cancelled',{signal:abort.signal}).catch(e=>e);
  await wait(()=>f.calls.some(row=>row[0]==='createRequested'));abort.abort();gate.resolve();assert.equal((await creating).code,'ABORT_ERR');
  await wait(()=>f.calls.some(row=>row[0]==='removed'));await new Promise(r=>setTimeout(r,30));
- assert.deepEqual(Object.keys(stored(f)),[]);assert.equal(f.manager.owned.size,0);assert.equal(f.calls.filter(row=>row[0]==='removed').length,1);
+ assert.deepEqual(Object.keys(stored(f)),[]);assert.equal(f.manager.owned.size,0);assert.equal(f.calls.filter(row=>row[0]==='removed').length,2);
 });
 
 
