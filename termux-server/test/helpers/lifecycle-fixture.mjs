@@ -16,7 +16,7 @@ class MemoryStore {
 }
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function fixture(options={}) {
-  const f={sends:0,prepares:0,resumes:0,quiesces:0,readbacks:0,store:options.store||new MemoryStore(),observations:[],sent:[]};
+  const f={sends:0,prepares:0,resumes:0,attaches:0,quiesces:0,readbacks:0,store:options.store||new MemoryStore(),observations:[],sent:[]};
   f.body={schema:'selfrun-server-dispatch-v1',task_id:'SAFE-TEST',turn_id:'SAFE-TEST:turn:1',request_id:'SAFE-TEST:turn:1-request',
     dispatch_attempt:1,project_url:'https://chatgpt.com/g/test/project',prompt:'test input',profile_operations:[],
     result_document_id:'RESULT-1',client_status:'SEND_REQUESTED',server_status:'PENDING',server_control_epoch:1};
@@ -41,7 +41,7 @@ function fixture(options={}) {
   f.browser={
     prepare:async()=>{f.prepares++;return {target:{id:'target-new'},session:session(),baseline:{...f.probe}};},
     resume:async()=>{f.resumes++;if(f.attachError)throw f.attachError;return {target:{id:'target-owned'},session:session(),baseline:{...f.probe}};},
-    attachTarget:async({targetId})=>({target:{id:targetId},session:session(),baseline:{...f.probe}}),
+    attachTarget:async({targetId})=>{f.attaches++;return {target:{id:targetId},session:session(),baseline:{...f.probe}};},
     livenessSnapshot:async()=>({...f.probe}),
     recoveryInputSnapshot:async()=>({...f.probe}),
     quiesce:async()=>{f.quiesces++;f.probe.streaming=false;f.probe.stopButtonVisible=false;await f.onQuiesce?.();},
@@ -78,7 +78,7 @@ function fixture(options={}) {
   f.stall=async()=>{
     await f.observe({});
     await f.controller.repository.move(keyFor(f.body),'OBSERVING','test elapsed time',{last_progress_at:Date.now()-f.controller.config.stallAfterMs});
-    await f.observe({status:'STALLED'});
+    await f.observe({status:'STALLED'});await f.controller.tick(f.transport);await f.settle();
   };
   f.stop=async()=>{f.control={...f.control,state:'STOPPED',control_epoch:f.control.control_epoch+1};await f.controller.control(null,f.control,f.transport);};
   f.resume=async()=>{f.control={...f.control,state:'RUNNING',control_epoch:f.control.control_epoch+1,conversation_url:f.probe.url};await f.controller.control(null,f.control,f.transport);await f.controller.tick(f.transport);};

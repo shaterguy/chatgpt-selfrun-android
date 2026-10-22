@@ -17,6 +17,19 @@ export function observedConversationUrl(value) {
   } catch {return '';}
 }
 
+// Optimistic WEB routes are the same owned tab's pending initial navigation.
+// Their age cannot establish failure; a different optimistic route is not adopted.
+export function pendingConversationTransition(fromUrl,value) {
+  try {
+    const from=new URL(fromUrl),to=new URL(value);
+    if(from.origin!=='https://chatgpt.com'||to.origin!==from.origin||from.username||from.password||to.username||to.password)return false;
+    const pending=u=>/^\/(?:g\/[^/]+\/)?c\/WEB:[0-9a-f-]{36}\/?$/i.test(u.pathname);
+    if(!pending(to))return false;
+    if(pending(from))return from.pathname===to.pathname;
+    return from.pathname==='/'||/^\/g\/[^/]+(?:\/project)?\/?$/.test(from.pathname);
+  } catch{return false;}
+}
+
 // Action ownership follows the first conversation on the already owned tab.
 // Once bound to a conversation, another conversation cannot inherit its input
 // authority. Route aliases of that same conversation are harmless.
@@ -27,7 +40,7 @@ export function actionConversationUrl(fromUrl,value) {
     const previous=observedConversationUrl(fromUrl);
     if(previous)return new URL(previous).pathname.split('/c/')[1].replace(/\/$/,'')===new URL(to).pathname.split('/c/')[1].replace(/\/$/,'')?to:'';
     const entry=from.pathname.replace(/\/$/,'');
-    return entry===''||/^\/g\/[^/]+(?:\/project)?$/.test(entry)?to:'';
+    return entry===''||/^\/g\/[^/]+(?:\/project)?$/.test(entry)||/^\/(?:g\/[^/]+\/)?c\/WEB:[0-9a-f-]{36}$/.test(entry)?to:'';
   } catch {return '';}
 }
 
@@ -832,14 +845,17 @@ export class ChatGptBrowser {
     return pending.promise;
   }
 
-  async prepare({ projectUrl, signal, onTarget, guard=()=>true }) {
+  async prepare({ projectUrl, signal, onTarget, guard=()=>true, ownerTaskId=null }) {
     const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale preparation');};
     check();
     // Every app-issued turn or retry starts with a new browser tab.
-    const target=await this.chromium.createTarget('about:blank',{signal,guard});
+    let target;
+    try{target=await this.chromium.createTarget('about:blank',{signal,guard,ownerTaskId});}
+    catch(error){if(error.createdTarget)await onTarget?.(error.createdTarget);throw error;}
     let session,acquired=false;
     try {
       await onTarget?.(target);acquired=true;check();
+      await this.chromium.acknowledgeTarget?.(target.id);check();
       session=await this.chromium.connectTarget(target);check();
       await initializePageSession(session,this.config);check();
       await navigatePageSession(session,projectUrl);check();
@@ -851,7 +867,7 @@ export class ChatGptBrowser {
     }
   }
 
-  async resume({ conversationUrl, signal, onTarget, guard=()=>true, automaticRecovery=false, previousTargetId=null }) {
+  async resume({ conversationUrl, signal, onTarget, guard=()=>true, automaticRecovery=false, previousTargetId=null, ownerTaskId=null }) {
     const expectedUrl = canonicalUrl(conversationUrl);
     if (!expectedUrl) throw new Error('canonical conversation URL unavailable for resume');
 
@@ -863,11 +879,14 @@ export class ChatGptBrowser {
       throw Object.assign(new Error('Previous owned entry target is not safely disposed; no replacement navigation allowed'),{code:'PAGE_UNAVAILABLE'});
     if(!existing&&automaticRecovery&&this.chromium.recoveryNavigationDisabled)
       throw Object.assign(new Error('Existing conversation page unavailable; automatic navigation is disabled'),{code:'PAGE_UNAVAILABLE'});
-    const target = existing || await this.chromium.createTarget(conversationUrl,{signal,guard});
+    let target=existing;
+    if(!target)try{target=await this.chromium.createTarget(conversationUrl,{signal,guard,ownerTaskId});}
+    catch(error){if(error.createdTarget)await onTarget?.(error.createdTarget);throw error;}
     let session;
     try {
       await onTarget?.(target);
-      if(signal?.aborted)throw signal.reason||new Error('aborted');
+      if(signal?.aborted||!guard())throw signal?.reason||new Error('stale attachment');
+      await this.chromium.acknowledgeTarget?.(target.id);
       session = await this.chromium.connectTarget(target);
       await initializePageSession(session,this.config);
       if(signal?.aborted||!guard())throw signal?.reason||new Error('stale attachment');
@@ -1073,137 +1092,14 @@ export class ChatGptBrowser {
     throw new Error('Timed out waiting for stuck stream cleanup');
   }
 
-  async monitor({ session, baseline, signal, onActivity, livenessGate }) {
-    let previous = { ...baseline, streaming: false, paused: false, url: null };
-    let lastActivityAt = Date.now();
-    let stalled = false;
-    let lastReportedStatus = null;
-    let lastGateToken = null;
-    let nextStalledVerificationAt = 0;
-    let evaluateTimeoutRetries = 0;
-    let conversationStateMissingSince = 0;
-
-    while (!signal?.aborted) {
-      let probe;
-      const sampledGate = await livenessGate?.() || {};
-      try {
-        probe = await this.#observeProgress(session, signal, sampledGate.observationGeneration || null);
-        evaluateTimeoutRetries = 0;
-      } catch (error) {
-        if (signal?.aborted) throw signal.reason || new Error('aborted');
-        if (error?.code === 'OBSERVATION_SUPERSEDED') continue;
-        const message = String(error?.message || error);
-        if (message !== 'CDP command timeout: Runtime.evaluate'
-            || evaluateTimeoutRetries >= 3) {
-          throw error;
-        }
-        evaluateTimeoutRetries += 1;
-        await delay(this.config.probeIntervalMs, signal);
-        continue;
-      }
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
-      const gate = await livenessGate?.() || {};
-      if (signal?.aborted) throw signal.reason || new Error('aborted');
-      if (gate.observationGeneration !== sampledGate.observationGeneration) continue;
-      const gateState = String(gate.state || 'UNKNOWN');
-      const gateEpoch = Number(gate.epoch || 0);
-      const gateToken = gateState + ':' + gateEpoch;
-      if (gateToken !== lastGateToken) {
-        lastGateToken = gateToken;
-        lastActivityAt = Date.now();
-        stalled = false;
-      }
-      const livenessSuspended = gateState !== 'RUNNING';
-      if (livenessSuspended) {
-        lastActivityAt = Date.now();
-        stalled = false;
-      }
-      const observedCursor=cursor(probe),previousCursor=cursor(previous);
-      const progressDetected =
-        observedCursor.assistantCount !== previousCursor.assistantCount ||
-        observedCursor.assistantTextLength !== previousCursor.assistantTextLength ||
-        observedCursor.assistantMessageId !== previousCursor.assistantMessageId ||
-        probe.responseTurnId !== previous.responseTurnId ||
-        probe.responseTextLength !== previous.responseTextLength ||
-        probe.responseFingerprint !== previous.responseFingerprint ||
-        probe.userCount !== previous.userCount ||
-        probe.userTextLength !== previous.userTextLength ||
-        probe.userMessageId !== previous.userMessageId;
-      const changed =
-        probe.url !== previous.url ||
-        probe.paused !== previous.paused ||
-        progressDetected;
-
-      if (changed) {
-        lastActivityAt = Date.now();
-        stalled = false;
-      }
-
-      const structurallyReady = conversationStateReady(probe);
-      const resumeReady = conversationResumeReady(probe);
-      const conversationAvailable = structurallyReady || resumeReady;
-      if (conversationAvailable) conversationStateMissingSince = 0;
-      else if (!conversationStateMissingSince) conversationStateMissingSince = Date.now();
-      const stateGraceMs = Math.max(0, Number(this.config.conversationStateGraceMs ?? 5000));
-      const conversationStateUnavailable = !livenessSuspended
-        && conversationStateMissingSince > 0
-        && Date.now() - conversationStateMissingSince >= stateGraceMs;
-
-      // ChatGPT response lifecycle is telemetry only. It must never terminate a SelfRun dispatch.
-      const isStalled = !livenessSuspended
-        && Date.now() - lastActivityAt >= this.config.stallAfterMs;
-      if (isStalled) stalled = true;
-
-      // A live page with temporarily missing DOM is not a lost target.
-      const pageError = probe.loginPage ? 'ChatGPT browser profile requires sign-in' : conversationAvailable ? null : probe.errorText;
-      let status = conversationStateUnavailable ? 'OBSERVATION_UNKNOWN' : 'RUNNING';
-      if (pageError) status = 'PAGE_ERROR';
-      else if (stalled) status = 'STALLED';
-
-      const verificationRetry = status === 'STALLED'
-        && nextStalledVerificationAt > 0
-        && Date.now() >= nextStalledVerificationAt;
-      { // Every observation permits Result reconciliation even when UI telemetry is stale.
-        const action = await onActivity?.({
-          status,
-          pageUrl: probe.url,
-          streaming: probe.streaming,
-          stopButtonVisible: probe.stopButtonVisible,
-          paused: probe.paused,
-          assistantCount: probe.assistantCount,
-          assistantTextLength: probe.assistantTextLength,
-          assistantMessageId: probe.assistantMessageId,
-          responseAssistantCount: probe.responseAssistantCount,
-          responseAssistantTextLength: probe.responseAssistantTextLength,
-          responseAssistantMessageId: probe.responseAssistantMessageId,
-          responseTurnId: probe.responseTurnId,
-          responseTextLength: probe.responseTextLength,
-          responseFingerprint: probe.responseFingerprint,
-          userCount: probe.userCount,
-          userTextLength: probe.userTextLength,
-          userMessageId: probe.userMessageId,
-          lastActivityAt: new Date(lastActivityAt).toISOString(),
-          pageError,
-          conversationStateReady: structurallyReady,
-          verificationRetry,
-          progressDetected,
-        }, sampledGate.observationGeneration || null);
-        if (action?.resetLiveness) {
-          lastActivityAt = Date.now();
-          stalled = false;
-          nextStalledVerificationAt = 0;
-        } else if (status === 'STALLED' && Number(action?.retryAfterMs) > 0) {
-          nextStalledVerificationAt = Date.now() + Number(action.retryAfterMs);
-        } else if (status !== 'STALLED') {
-          nextStalledVerificationAt = 0;
-        }
-        lastReportedStatus = status;
-      }
-
-      previous = probe;
-      await delay(this.config.probeIntervalMs, signal);
+  async monitor({session,signal,onActivity}) {
+    while(!signal?.aborted) {
+      const probe=await this.#observeProgress(session,signal);
+      if(signal?.aborted)break;
+      await onActivity?.({url:probe?.url,pageUrl:probe?.url,
+        responseTextLength:probe?.responseTextLength??probe?.assistantTextLength});
+      await delay(this.config.probeIntervalMs||60000,signal);
     }
-
-    return { status: 'ABORTED' };
+    return {status:'ABORTED'};
   }
 }

@@ -146,14 +146,14 @@ export class TerminalBrowserCleanup {
             continue;
           }
           let result;
-          if(!this.available()||!this.chromium?.closeOwnedTarget)result={reason:'unavailable'};
-          else if(!this.canClose(entry))result={reason:'guard_rejected'};
+          if(!this.chromium?.closeOwnedTarget)result={reason:'unavailable'};
+          else if(!this.canClose(entry,null,{ignoreAvailability:!!entry.terminal_state}))result={reason:'guard_rejected'};
           else try {
-            result=await this.chromium.closeOwnedTarget(entry.target_id,{guard:target=>this.canClose(entry,target)});
+            result=await this.chromium.closeOwnedTarget(entry.target_id,{caller:!!entry.terminal_state,guard:target=>this.canClose(entry,target,{ignoreAvailability:!!entry.terminal_state})});
           } catch(error) {
             result={reason:'close_error',error:String(error?.message||error).slice(0,300)};
           }
-          if(entry.terminal_state)try{await this.chromium?.discardOwnedTarget?.(entry.target_id,{guard:()=>this.canClose(entry,null,{ignoreAvailability:true}),remote:this.available()});}
+          if(entry.terminal_state&&(result?.closed||result?.absent))try{await this.chromium?.discardOwnedTarget?.(entry.target_id,{guard:()=>this.canClose(entry,null,{ignoreAvailability:true}),remote:this.available()});}
           catch{/* This one finalization is consumed even if local or remote disposal failed. */}
           const status=result?.closed===true?'CLOSED':result?.absent===true?'ABSENT':'PENDING';
           resourceConfirmed||=status==='CLOSED'||status==='ABSENT';

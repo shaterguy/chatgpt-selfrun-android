@@ -103,6 +103,6 @@ export class SignalDispatchTransport {
       return {...state,httpIngress:http};
     });
   }
-  readGoogleDocText(id){return this.base.readGoogleDocText(id);}
+  readGoogleDocText(id,options){return this.base.readGoogleDocText(id,options);}
   close(){return this.base.close();}
 }

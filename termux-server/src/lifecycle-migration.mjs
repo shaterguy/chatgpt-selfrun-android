@@ -34,9 +34,8 @@ export function migrateLegacy(record,history,prompt) {
   record.recovery_count=Math.max(record.recovery_count,old.recovery_count);
   if(old.unknown_post&&!record.intent&&!['COMMITTED','COMPLETED'].includes(record.state)) {
     record.intent={...newIntent(record,'recovery',prompt,old.baseline||{}),outcome:'UNKNOWN',sends:1,legacy:true,released:false};
-    record.state='POST_UNCERTAIN';
-    record.error={code:'LEGACY_POST_UNCERTAIN',message:old.error};
-    record.recovery_stage='LEGACY_POST_READBACK_REQUIRED';
+    record.error=null;
+    // Keep historical send identity only to avoid replay; no inferred error or recovery gate.
   }
   return record;
 }

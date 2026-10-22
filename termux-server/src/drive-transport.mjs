@@ -234,12 +234,12 @@ export class DriveDispatchTransport {
     await this.#text('write', response);
   }
 
-  async readGoogleDocText(documentId) {
+  async readGoogleDocText(documentId,{signal}={}) {
     const id = String(documentId || '').trim();
     if (!id) throw new Error('Google Doc id required');
     const url = API + '/files/' + encodeURIComponent(id) + '/export?'
       + new URLSearchParams({ mimeType: 'text/plain' });
-    const response = await this.#fetch('export', url);
+    const response = await this.#fetch('export', url,{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(30000)]):AbortSignal.timeout(30000)});
     const text = await this.#text('export', response);
     return text;
   }

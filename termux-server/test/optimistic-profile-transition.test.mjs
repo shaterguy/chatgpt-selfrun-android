@@ -50,7 +50,7 @@ test('initial owned POST survives optimistic WEB route during body read without 
 });
 
 const entry='https://chatgpt.com/g/test/project',temp='/c/WEB:00000000-0000-4000-8000-000000000001';
-for(const cause of ['second-WEB','return-entry','other-origin','pagehide','retire','rearm','expire'])test('optimistic transition remains fail-closed for '+cause,async t=>{
+for(const cause of ['second-WEB','return-entry','other-origin','pagehide','retire','rearm','expire'])test((cause==='expire'?'optimistic transition survives elapsed route age: ':'optimistic transition remains fail-closed for ')+cause,async t=>{
  let now=1700000000000;t.mock.method(Date,'now',()=>now);
  const read=deferred(),calls=[];class SlowRequest extends Request{clone(){const r=super.clone();return{text:()=>read.promise.then(()=>r.text())};}}
  const armKey={...key,conversation_id:null};const f=fixture(t,{RequestType:SlowRequest,initialUrl:entry,armKey,native:r=>{calls.push(r);return Promise.resolve(new Response(''));}});
@@ -62,7 +62,7 @@ for(const cause of ['second-WEB','return-entry','other-origin','pagehide','retir
  if(cause==='retire')f.run('receiptRetire',{key:armKey});
  if(cause==='rearm')assert.throws(()=>f.run('receiptArm',{key:{...armKey,generation:'another'}}),/generation|disposed/);
  if(cause==='expire'){now+=30001;f.window.history.pushState({},'',temp);}
- read.resolve();assert.match(String(await result),/disposed/);assert.equal(calls.length,0);assert.equal(f.audit.page().revoked,true);
+ read.resolve();if(cause==='expire'){assert.equal(await result,null);assert.equal(calls.length,1);assert.equal(f.audit.page().revoked,false);}else{assert.match(String(await result),/disposed/);assert.equal(calls.length,0);assert.equal(f.audit.page().revoked,true);}
 });
 test('only the first canonical route binds after optimistic initial send',async t=>{
  const f=fixture(t,{initialUrl:entry,armKey:{...key,conversation_id:null}});f.start();
@@ -81,12 +81,12 @@ test('an owned durable conversation cannot transfer into optimistic route',async
  await outcome;assert.equal(f.audit.page().revoked,true);
 });
 
-test('expired optimistic lease is checked immediately before native fetch without another navigation',async t=>{
+test('elapsed optimistic route age does not block a pending native fetch',async t=>{
  let now=1700000000000;t.mock.method(Date,'now',()=>now);const read=deferred(),calls=[];
  class SlowRequest extends Request{clone(){const r=super.clone();return{text:()=>read.promise.then(()=>r.text())};}}
  const f=fixture(t,{RequestType:SlowRequest,initialUrl:entry,armKey:{...key,conversation_id:null},native:r=>{calls.push(r);return Promise.resolve(new Response(''));}});
  f.start();const outcome=f.send().then(()=>null,e=>e);await tick();f.window.history.pushState({},'',temp);now+=30001;read.resolve();
- assert.match(String(await outcome),/disposed/);assert.equal(calls.length,0);
+ assert.equal(await outcome,null);assert.equal(calls.length,1);assert.equal(f.audit.page().revoked,false);
 });
 for(const endpoint of ['/backend-api/conversation/','/backend-api/CONVERSATION','/backend-api/f/conversation'])test('existing eligible route normalization '+endpoint,async t=>{
  const calls=[];const f=fixture(t,{initialUrl:entry,armKey:{...key,conversation_id:null},native:r=>{calls.push(r);return Promise.resolve(new Response(''));}});f.start();
@@ -94,13 +94,13 @@ for(const endpoint of ['/backend-api/conversation/','/backend-api/CONVERSATION',
  f.window.history.pushState({},'',temp);await sent;assert.equal(calls.length,1);assert.equal(f.audit.page().revoked,false);
 });
 
-test('duplicate eligible request does not renew an initial transition lease',async t=>{
+test('elapsed route age does not invent failure for separately invoked page fetches',async t=>{
  let now=1700000000000;t.mock.method(Date,'now',()=>now);const read=deferred(),calls=[];
  class SlowRequest extends Request{clone(){const r=super.clone();return{text:()=>read.promise.then(()=>r.text())};}}
  const f=fixture(t,{RequestType:SlowRequest,initialUrl:entry,armKey:{...key,conversation_id:null},native:r=>{calls.push(r);return Promise.resolve(new Response(''));}});
  f.start();const first=f.send().then(()=>null,e=>e);await tick();f.window.history.pushState({},'',temp);
  now+=20000;const second=f.send().then(()=>null,e=>e);now+=10001;read.resolve();
- assert.match(String(await first),/disposed/);assert.match(String(await second),/disposed/);assert.equal(calls.length,0);
+ assert.equal(await first,null);assert.equal(await second,null);assert.equal(calls.length,2);assert.equal(f.audit.page().revoked,false);
 });
 for(const cause of ['body-unreadable','native-rejection'])test('initial transition revokes on '+cause,async t=>{
  class Unreadable extends Request{clone(){return{text:()=>Promise.reject(new Error('unreadable'))};}}
@@ -120,7 +120,7 @@ test('page request and strict action/readback seam keep WEB unknown until canoni
  }};
  const browser=new ChatGptBrowser(null,{navigationTimeoutMs:5}),intent={id:key.intent_id,receipt_generation:key.generation,prompt:key.prompt,sends:1,baseline:{userCount:0}};
  const read=()=>browser.readSubmission({session,intent,prompt:key.prompt,conversationUrl:'',guard:()=>true,onRequest:async evidence=>Object.assign(intent,evidence)});
- assert.equal((await read()).state,'UNKNOWN');assert.equal(action.boundUrl,entry);assert.equal(calls,1);
+ assert.equal((await read()).state,'UNKNOWN');assert.equal(action.boundUrl,'https://chatgpt.com'+temp);assert.equal(calls,1);
  f.window.history.pushState({},'','/c/saved-canonical');
  assert.equal((await read()).state,'CONFIRMED');assert.equal(action.boundUrl,'https://chatgpt.com/c/saved-canonical');assert.equal(calls,1);
 });

@@ -21,3 +21,25 @@ export async function readResult(transport,record,documentId=record.body.result_
     return unavailable('RESULT_IDENTITY_MISMATCH','Result identity or schema does not match; retry pending');
   return {state:value.committed?'COMMITTED':'NOT_COMMITTED'};
 }
+
+
+// The only business-status read in the deterministic executor: the user-defined
+// continuation exception. Unknown text never becomes an invented task status.
+export async function readUserIntervention(transport,record,{signal}={}) {
+  const id=record.body.result_document_id;
+  if(!id||typeof transport.readGoogleDocText!=='function')return {state:'UNKNOWN'};
+  const abort=signal?AbortSignal.any([signal,AbortSignal.timeout(30000)]):AbortSignal.timeout(30000);
+  let onAbort;
+  try {
+    const raw=await Promise.race([transport.readGoogleDocText(id,{signal:abort}),new Promise((_,reject)=>{
+      onAbort=()=>reject(abort.reason);if(abort.aborted)onAbort();else abort.addEventListener('abort',onAbort,{once:true});
+    })]);
+    if(typeof raw!=='string')return {state:'UNKNOWN'};
+    let value;try{value=JSON.parse(raw.replace(/^\uFEFF/,''));}catch{return {state:'UNKNOWN'};}
+    if(!identityMatches(value,record,id,false))return {state:'UNKNOWN'};
+    return {state:value.status==='USER_ACTION_REQUIRED'?'INTERVENTION':'CONTINUE'};
+  } catch(error) {
+    if(signal?.aborted)throw signal.reason;
+    return {state:'UNKNOWN',ioError:true};
+  } finally {if(onAbort)abort.removeEventListener('abort',onAbort);}
+}

@@ -338,7 +338,7 @@ export class LifecycleStore {
     return this.serial(async()=>{
       if(this.independentResource(entry)) {
         // A terminal disposal has one current attempt only; it cannot become future work.
-        if(entry.terminal_state||['CLOSED','ABSENT'].includes(outcome.status))this.resourceCleanups.delete(entry.target_id);
+        if(['CLOSED','ABSENT'].includes(outcome.status))this.resourceCleanups.delete(entry.target_id);
         return true;
       }
       if(JSON.stringify(this.data.browserCleanup[entry.target_id])!==JSON.stringify(entry))return false;

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalUrl } from './lifecycle.mjs';
 
 const DISPATCH_TYPES = new Set(['START', 'NEXT']);
-const CONTROL_TYPES = new Set(['START', 'NEXT', 'PAUSE', 'STOP', 'RESUME']);
+const CONTROL_TYPES = new Set(['START', 'NEXT', 'PAUSE', 'STOP', 'DONE', 'RESUME']);
 const ENVELOPE_KEYS = [
   'TASK_ID',
   'TURN_ID',
@@ -31,7 +31,8 @@ function normalizeProjectUrl(value) {
 export function normalizeSignal(raw, config) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Signal body must be an object');
   const signalId = cleanString(raw.signalId);
-  const type = cleanString(raw.type).toUpperCase();
+  const rawType = cleanString(raw.type).toUpperCase();
+  const type = ['COMPLETE','COMPLETED'].includes(rawType) ? 'DONE' : rawType;
   if (!signalId) throw new Error('signalId is required');
   if (!CONTROL_TYPES.has(type)) throw new Error('Unsupported signal type');
 
@@ -101,7 +102,7 @@ export class SelfRunController {
         throw new Error('stale or unscoped HTTP control');
       const control={schema:'selfrun-task-control-v1',task_id:task,turn_id:turn,request_id:request,
         ...(signal.type==='RESUME'?{conversation_url:cleanString(raw.conversation_url)}:{}),
-        control_epoch:epoch,state:signal.type==='STOP'?'STOPPED':signal.type==='RESUME'?'RUNNING':'PAUSED',updated_at_ms:Date.now()};
+        control_epoch:epoch,state:signal.type==='STOP'?'STOPPED':signal.type==='DONE'?'DONE':signal.type==='RESUME'?'RUNNING':'PAUSED',updated_at_ms:Date.now()};
       const path='__SELFRUN_CONTROL__'+task+'.json';
       await this.transport.setControl(signal.signalId,path,control);
       await this.lifecycle.control(path,control,this.transport);

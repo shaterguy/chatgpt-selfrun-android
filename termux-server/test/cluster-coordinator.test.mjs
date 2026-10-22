@@ -194,6 +194,6 @@ test('real standby quiesce stops sessions while preserving observation for a lat
   transport.states=[];now+=1;await cluster.refresh();await f.controller.tick(f.transport);
   assert.equal(cluster.canDispatch(),true);
   assert.equal(f.controller.sessions.size,1);
-  assert.equal(f.resumes,2);assert.equal(f.sends,0);
+  assert.equal(f.resumes+f.attaches,2);assert.equal(f.sends,0);
   await f.controller.quiesceForStandby();
 });

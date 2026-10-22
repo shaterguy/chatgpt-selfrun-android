@@ -34,7 +34,7 @@ test('current RUNNING control URL starts observation despite historical completi
   assert.equal(f.record().state,'OBSERVING');assert.equal(f.record().conversation_url,f.probe.url);
   assert.equal(f.resumes,1);assert.equal(f.sends,0);assert.equal(f.prepares,0);
   const observer=f.observations.at(-1);await f.stall();
-  assert.equal(f.sends,0);assert.equal(observer.signal.aborted,false);assert.equal(f.controller.sessions.size,1);
+  assert.equal(f.sends,1);assert.equal(observer.signal.aborted,false);assert.equal(f.controller.sessions.size,1);
   await f.controller.quiesceForStandby();
 });
 

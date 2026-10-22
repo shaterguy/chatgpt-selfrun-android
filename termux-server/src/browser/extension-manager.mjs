@@ -148,9 +148,10 @@ export class ExtensionManager {
     }
     this.installationKey=createHash('sha256').update('selfrun-page-bootstrap:'+pair.capability+':'+this.journal.browserSessionId).digest('hex');
     this.journal.targetMetadata??={};this.owned=new Set(this.journal.targets||[]);
+    for(const [id,meta]of Object.entries(this.journal.targetMetadata))if(meta.acquisitionPending)this.pendingAcquisitions.add(id);
     const active=this.guards.activeTargetIds?.();
     if(Array.isArray(active)){
-      for(const id of [...this.owned])if(!active.includes(id))this.owned.delete(id);
+      for(const id of [...this.owned])if(!active.includes(id)&&!this.journal.targetMetadata[id]?.acquisitionPending)this.owned.delete(id);
       for(const id of Object.keys(this.journal.targetMetadata))if(!this.owned.has(id))delete this.journal.targetMetadata[id];
     }
     const bridge=this.deps.bridgeFactory({port:cfg.extensionBridgePort,ownerId:pair.ownerId,capability:pair.capability,browserSessionId:this.journal.browserSessionId,activeOwnedTargets:()=>this.#activeOwnedTargets()});
@@ -247,7 +248,21 @@ export class ExtensionManager {
       if(!proven)throw fail('Browser endpoint ownership is unproven','EXTENSION_PROFILE_UNPROVEN');
       this.journal.process.browserKey=version.webSocketDebuggerUrl;
     }
+    // Record the exact create nonce before releasing a browser effect. An
+    // unanswered command can still create its page after a transport timeout.
+    for(const [id,meta]of Object.entries(this.journal.targetMetadata))if(meta.acquisitionPending
+      &&meta.ownerTaskId===(options.ownerTaskId||null)) {
+      const closed=await this.closeOwnedTarget(id,{caller:true,guard:()=>true});
+      if(!closed.closed&&!closed.absent)throw fail('Previous browser creation is not disposed','TAB_CLOSE_FAILED');
+    }
+    if(!guard())throw fail('Created target owner ended','ABORT_ERR');
     const bootstrapUrl=this.bridge.url+'/bootstrap/'+randomUUID();
+    const pendingId='ext:'+this.journal.browserSessionId+':pending-'+randomUUID();
+    const metadata={bootstrapUrl,pendingUrl:url==='about:blank'?null:url,entryUrl:url==='about:blank'?null:url,
+      profileFingerprint:null,cdpTargetId:null,observerTabId:null,acquisitionPending:true,creationPending:true,
+      ownerTaskId:options.ownerTaskId||null};
+    this.owned.add(pendingId);this.pendingAcquisitions.add(pendingId);this.journal.targetMetadata[pendingId]=metadata;
+    try{await this.#save();}catch(error){error.createdTarget={id:pendingId,type:'page',url:bootstrapUrl,bootstrapUrl};throw error;}
     let created;
     try{created=await this.deps.browserAction({browserKey:version.webSocketDebuggerUrl,port:Number(this.config.browserPort),method:'Target.createTarget',params:{url:bootstrapUrl},signal:options.signal,guard});}
     catch(error){
@@ -265,19 +280,29 @@ export class ExtensionManager {
           }
         }
       }catch{}
-      if(!created)throw error;
+      if(!created){error.createdTarget={id:pendingId,type:'page',url:bootstrapUrl,bootstrapUrl};throw error;}
     }
-    if(typeof created?.targetId!=='string'||!created.targetId)throw fail('Created target identity unavailable','ACTION_TARGET_UNAVAILABLE');
-    if(!guard()){
-      try{await this.deps.browserAction({browserKey:version.webSocketDebuggerUrl,port:Number(this.config.browserPort),method:'Target.closeTarget',params:{targetId:created.targetId},expectedUrl:bootstrapUrl,guard:()=>this.#processOwned()&&this.journal.process.browserKey===version.webSocketDebuggerUrl});}catch{}
-      throw fail('Created target owner ended','ABORT_ERR');
+    if(typeof created?.targetId!=='string'||!created.targetId){
+      const error=fail('Created target identity unavailable','ACTION_TARGET_UNAVAILABLE');
+      error.createdTarget={id:pendingId,type:'page',url:bootstrapUrl,bootstrapUrl};throw error;
     }
     const id='ext:'+this.journal.browserSessionId+':'+created.targetId;
+    this.owned.delete(pendingId);this.pendingAcquisitions.delete(pendingId);delete this.journal.targetMetadata[pendingId];
     this.owned.add(id);this.pendingAcquisitions.add(id);
-    this.journal.targetMetadata[id]={bootstrapUrl,pendingUrl:url==='about:blank'?null:url,entryUrl:url==='about:blank'?null:url,profileFingerprint:null,cdpTargetId:created.targetId,observerTabId:null};await this.#save();
-    if(!guard()){await this.closeOwnedTarget(id,{guard:row=>!row||row.url===bootstrapUrl});if(this.owned.has(id))await this.discardOwnedTarget(id,{remote:false});throw fail('Created target owner ended','ABORT_ERR');}
-    return{id,type:'page',url:bootstrapUrl,bootstrapUrl,entryUrl:url==='about:blank'?null:url,entryPending:true};
+    this.journal.targetMetadata[id]={...metadata,cdpTargetId:created.targetId,creationPending:false,acquisitionPending:!!options.ownerTaskId};
+    const target={id,type:'page',url:bootstrapUrl,bootstrapUrl,entryUrl:url==='about:blank'?null:url,entryPending:true};
+    try{await this.#save();}catch(error){error.createdTarget=target;throw error;}
+    if(!guard()){
+      // The caller must register this exact late resource even when close fails.
+      try{await this.closeOwnedTarget(id,{caller:true,guard:row=>!row||row.url===bootstrapUrl});}catch{}
+      const error=fail('Created target owner ended','ABORT_ERR');error.createdTarget=target;throw error;
+    }
+    return target;
   });}
+  async acknowledgeTarget(id){
+    const meta=this.journal?.targetMetadata?.[id];if(!meta||meta.creationPending)return;
+    meta.acquisitionPending=false;await this.#save();
+  }
   async listExistingTargets(timeoutMs=1500){try{
     await this.#initialize();if(!this.#processOwned())return null;
     const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal:AbortSignal.timeout(timeoutMs)});
@@ -294,7 +319,7 @@ export class ExtensionManager {
     for(const row of Array.isArray(rows)?rows:[]){
       const id='ext:'+owner.browserSessionId+':'+row.id;
       let allowedOrigin=false;try{allowedOrigin=new URL(row.url).origin===(this.config.extensionFixtureOrigin||'https://chatgpt.com');}catch{}
-      const inactive=()=>stillOwned()&&!this.owned.has(id)&&!this.pendingAcquisitions.has(id)&&!(this.guards.activeTargetIds?.()||[]).includes(id);
+      const inactive=()=>stillOwned()&&!Object.values(owner.targetMetadata).some(meta=>meta.cdpTargetId===row.id)&&!this.owned.has(id)&&!this.pendingAcquisitions.has(id)&&!(this.guards.activeTargetIds?.()||[]).includes(id);
       if(row.type!=='page'||!allowedOrigin||!inactive())continue;
       try{await this.deps.purgeInactiveAction({row,port:Number(this.config.browserPort),installationKey:createHmac('sha256',this.installationKey).update(id).digest('hex'),guard:inactive});}catch{}
     }
@@ -381,18 +406,41 @@ export class ExtensionManager {
     }};
   }
 
+  async confirmTargetAbsent(id) {
+    await this.#initialize();
+    const owner=this.journal,prefix='ext:'+owner.browserSessionId+':';
+    if(typeof id!=='string'||!id.startsWith(prefix))return false;
+    if(this.#processExited())return true;
+    if(!this.#processOwned())return false;
+    const meta=owner.targetMetadata[id];if(meta?.creationPending)return false;
+    const physical=meta?.cdpTargetId||id.slice(prefix.length);
+    const rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal:AbortSignal.timeout(2000)});
+    return this.journal===owner&&this.#processOwned()&&Array.isArray(rows)&&!rows.some(row=>row.id===physical);
+  }
   async #closeTarget(id,{guard,caller=false,ownership}={}){
     const sameOwner=()=>!ownership||(this.journal===ownership.journal&&this.journal?.targetMetadata?.[id]===ownership.metadata);
     const authority=target=>this.#allowed(guard,target)&&(caller||this.#allowed(this.guards.canCloseTarget,id,target));
     const allowed=target=>sameOwner()&&authority(target);
     const alreadyRemoved=()=>this.journal===ownership?.journal&&this.targetRemovalGeneration>ownership.removalGeneration&&!this.owned.has(id)&&this.journal.targetMetadata[id]===undefined;
     const skip=reason=>({closed:false,absent:false,reason});
-    if(!this.isOwnedTarget(id))return skip('unowned_target');if(!allowed())return skip('guard_rejected');
+    if(!allowed())return skip('guard_rejected');if(!this.isOwnedTarget(id))return await this.confirmTargetAbsent(id)?{absent:true,reason:'already_absent'}:skip('unowned_target');
+    const meta=this.journal?.targetMetadata?.[id];
+    if(meta?.creationPending){
+      if(this.#processExited()){await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});return {absent:true,reason:'browser_exited'};}
+      if(!this.#processOwned())return skip('ownership_unproven');
+      const owner=this.journal,proof=owner.process;
+      let version,rows;try{version=await this.deps.readCdpMetadata(Number(this.config.browserPort),'version',{signal:AbortSignal.timeout(2000)});
+        rows=await this.deps.readCdpMetadata(Number(this.config.browserPort),'list',{signal:AbortSignal.timeout(2000)});}catch{return skip('targets_unavailable');}
+      if(this.journal!==owner||owner.process!==proof||!this.#processOwned()||version?.webSocketDebuggerUrl!==proof.browserKey||!allowed())return skip('ownership_unproven');
+      const matches=Array.isArray(rows)?rows.filter(row=>row.type==='page'&&row.url===meta.bootstrapUrl):[];
+      if(matches.length!==1)return skip('creation_unresolved');
+      meta.cdpTargetId=matches[0].id;meta.creationPending=false;await this.#save();
+    }
     const targets=await this.listExistingTargets();if(alreadyRemoved()){await this.saveChain;return authority()?{absent:true,reason:'already_removed'}:skip('guard_rejected');}if(!targets)return skip('targets_unavailable');
     const target=targets.find(t=>t.id===id);if(!allowed(target))return skip('guard_rejected');
     if(!target){await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});return{absent:true,reason:'already_absent'};}
     this.closing.add(id);
-    try{const out=await this.deps.browserAction({browserKey:this.journal.process.browserKey,port:Number(this.config.browserPort),method:'Target.closeTarget',params:{targetId:this.journal.targetMetadata[id].cdpTargetId},expectedUrl:target.url,guard:fresh=>allowed(fresh?{...target,url:fresh.url}:target)&&this.#processOwned()});const result={closed:out?.success===true};
+    try{const out=await this.deps.browserAction({browserKey:this.journal.process.browserKey,port:Number(this.config.browserPort),method:'Target.closeTarget',params:{targetId:this.journal.targetMetadata[id].cdpTargetId},expectedUrl:target.url,guard:fresh=>allowed(fresh?{...target,url:fresh.url}:target)&&this.#processOwned()});const after=out?.success===true?await this.listExistingTargets():null;const result={closed:Array.isArray(after)&&!after.some(row=>row.id===id)};
       if(result?.closed||result?.absent){
         if(!sameOwner()&&!alreadyRemoved())return skip('guard_rejected');
         if(this.owned.has(id))await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});else await this.saveChain;
@@ -404,7 +452,8 @@ export class ExtensionManager {
       if(!allowed(target))return skip('guard_rejected');
       try {
         const response=await this.bridge?.request('closeTarget',{targetId:id,expectedUrl:target.url},{timeoutMs:2500});
-        if(response?.closed===true&&(sameOwner()||alreadyRemoved())){
+        const after=response?.closed===true?await this.listExistingTargets():null;
+        if(Array.isArray(after)&&!after.some(row=>row.id===id)&&(sameOwner()||alreadyRemoved())){
           if(this.owned.has(id))await this.discardOwnedTarget(id,{guard:()=>allowed(),remote:false});
           return {closed:true,reason:'extension_close'};
         }

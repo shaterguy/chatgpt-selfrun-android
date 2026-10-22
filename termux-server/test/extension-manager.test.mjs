@@ -339,3 +339,42 @@ test('Chromium startup uses multiprocess and extension-owned controller bootstra
  for(const a of ['--headless=new','--no-zygote','--no-sandbox','--remote-debugging-address=127.0.0.1','--remote-debugging-port=19227',`--user-data-dir=${f.config.browserProfile}`,'--selfrun-extension-owner=owner'])assert.ok(args.includes(a),a);
  assert.ok(args.some(a=>a.startsWith('--load-extension=')));
 });
+
+
+test('late create after STOP retains exact target when physical close fails',async t=>{
+ const f=await fixture(t),action=f.manager.deps.browserAction;let current=true;
+ f.manager.deps.browserAction=async args=>{
+  if(args.method==='Target.closeTarget')return {success:true}; // ACK is not absence.
+  const result=await action(args);current=false;return result;
+ };
+ let error;try{await f.manager.createTarget('about:blank',{guard:()=>current,ownerTaskId:'task'});}catch(value){error=value;}
+ assert.equal(error?.code,'ABORT_ERR');const id=error.createdTarget.id;
+ assert.equal(f.manager.isOwnedTarget(id),true);assert.equal((await f.manager.listExistingTargets()).length,1);
+ await assert.rejects(f.manager.createTarget('about:blank',{ownerTaskId:'task'}),e=>e.code==='TAB_CLOSE_FAILED');
+ assert.equal(f.calls.filter(x=>x[0]==='Target.createTarget').length,1);
+ f.manager.deps.browserAction=action;assert.equal((await f.manager.closeOwnedTarget(id,{caller:true,guard:()=>true})).closed,true);
+ assert.equal(f.manager.isOwnedTarget(id),false);
+});
+
+test('unanswered create keeps nonce proof until its late effect is physically disposed',async t=>{
+ const f=await fixture(t),action=f.manager.deps.browserAction;let nonce;
+ f.manager.deps.browserAction=async args=>{if(args.method==='Target.createTarget'){nonce=args.params.url;throw Error('CDP command timeout');}return action(args);};
+ let error;try{await f.manager.createTarget('about:blank',{ownerTaskId:'task'});}catch(value){error=value;}
+ const pending=error.createdTarget.id;assert.ok(pending.includes(':pending-'));
+ assert.equal(await f.manager.confirmTargetAbsent(pending),false);
+ assert.equal((await f.manager.closeOwnedTarget(pending,{caller:true,guard:()=>true})).reason,'creation_unresolved');
+ await assert.rejects(f.manager.createTarget('about:blank',{ownerTaskId:'task'}),e=>e.code==='TAB_CLOSE_FAILED');
+ const saved=JSON.parse(await fs.readFile(f.manager.journalFile,'utf8'));assert.equal(saved.targetMetadata[pending].bootstrapUrl,nonce);
+ f.setExtra([{id:'late-created',type:'page',url:nonce}]);
+ f.manager.deps.browserAction=async args=>{if(args.method==='Target.closeTarget'){assert.equal(args.params.targetId,'late-created');f.setExtra([]);return {success:true};}return action(args);};
+ assert.equal((await f.manager.closeOwnedTarget(pending,{caller:true,guard:()=>true})).closed,true);
+ assert.equal(f.manager.isOwnedTarget(pending),false);
+});
+
+test('cold acquisition preserves unresolved nonce despite absent lifecycle target',async t=>{
+ const f=await fixture(t);f.manager.deps.browserAction=async()=>{throw Error('transport unanswered');};let error;
+ try{await f.manager.createTarget('about:blank',{ownerTaskId:'task'});}catch(value){error=value;}
+ await f.manager.close();const next=f.fresh();t.after(()=>next.close());next.setLifecycleGuards({activeTargetIds:()=>[]});
+ await next.inspectCleanupDisposition('legacy');assert.equal(next.isOwnedTarget(error.createdTarget.id),true);
+ assert.equal((await next.closeOwnedTarget(error.createdTarget.id,{caller:true,guard:()=>true})).reason,'creation_unresolved');
+});

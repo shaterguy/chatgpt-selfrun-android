@@ -52,7 +52,7 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
     const revoke=terminalDispose;
     const transientMatches=now=>{
       const t=initialPostTransition;if(!t)return false;
-      if(t.deadline<=nativeNow()||!armedKey||t.intent_id!==armedKey.intent_id||t.generation!==armedKey.generation){revoke();return false;}
+      if(!armedKey||t.intent_id!==armedKey.intent_id||t.generation!==armedKey.generation){revoke();return false;}
       if(now===t.entry&&!t.optimistic)return true;
       let u;try{u=new URL(now);}catch{return false;}
       const optimistic=u.origin==='https://chatgpt.com'&&/^\\/(?:g\\/[^/]+\\/)?c\\/WEB:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\/?$/i.test(u.pathname);

@@ -1,6 +1,6 @@
 import {createHmac,randomUUID} from 'node:crypto';
 import {CdpSession} from './cdp.mjs';
-import {actionConversationUrl} from './chatgpt.mjs';
+import {actionConversationUrl,pendingConversationTransition} from './chatgpt.mjs';
 import {buildPageRuntimeSource} from './extension-page-source.mjs';
 import {actionNotSubmittedError,isActionNotSubmitted} from './server-action-errors.mjs';
 
@@ -50,7 +50,7 @@ export class ServerActionSession {
     if(!this.boundUrl){this.boundUrl=value;return value;}
     if(key(value)===key(this.boundUrl))return value;
     if(this.pendingNavigation&&key(value)===key(this.pendingNavigation.to)){this.boundUrl=value;this.pendingNavigation=null;return value;}
-    if(this.entryTransition?.deadline>Date.now()&&this.entryTransition.allowed.includes(key(value))||actionConversationUrl(this.boundUrl,value)){this.boundUrl=value;return value;}
+    if(this.entryTransition?.deadline>Date.now()&&this.entryTransition.allowed.includes(key(value))||actionConversationUrl(this.boundUrl,value)||pendingConversationTransition(this.boundUrl,value)){this.boundUrl=value;return value;}
     throw Error('Owned action page was repurposed');
   }
   async run(operation,payload={},options={}){

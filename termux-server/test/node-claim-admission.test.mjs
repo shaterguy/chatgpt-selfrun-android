@@ -71,7 +71,7 @@ test('same-node process restart reattaches the existing claim without resubmissi
   a.coordinator.executionClaims.local.clear();
   try {
     assert.equal(a.canProcess(),true);await a.controller.tick(a.transport);await a.settle();
-    assert.equal(a.resumes,2);assert.equal(a.sends,0);assert.equal(a.controller.sessions.size,1);
+    assert.equal(a.resumes+a.attaches,2);assert.equal(a.sends,0);assert.equal(a.controller.sessions.size,1);
     assert.equal(shared.body.execution_claims[key].token,token);
   } finally {a.controller.executionClaims=null;await a.controller.quiesceForStandby();}
 });
@@ -216,12 +216,12 @@ test('unknown CONTROL or claim read preserves owned observation and URL handoff 
   try {
     f.coordinator.role='STANDBY';await f.controller.quiesceForStandby();
     f.transport.read=async path=>{if(path.startsWith('__SELFRUN_CONTROL__'))throw new Error('unknown CONTROL');return originalRead(path);};
-    await assert.rejects(f.controller.tick(f.transport),/unknown CONTROL/);
+    await assert.doesNotReject(f.controller.tick(f.transport));
     await f.observe({url:'https://chatgpt.com/g/changed/c/observed-new-url',responseTextLength:2000});
     assert.equal(f.rows.get(f.path).conversation_url,'https://chatgpt.com/c/observed-new-url');
     assert.equal(f.controller.sessions.size,1);assert.equal(f.sends,0);
     f.transport.read=originalRead;shared.readCluster=async()=>{throw new Error('unknown claim');};
-    await assert.rejects(f.controller.tick(f.transport),/unknown claim/);
+    await assert.doesNotReject(f.controller.tick(f.transport));
     await f.observe({responseTextLength:2100});assert.equal(f.controller.sessions.size,1);assert.equal(f.sends,0);
   } finally {shared.readCluster=clusterRead;f.controller.executionClaims=null;await f.controller.quiesceForStandby();}
 });
@@ -320,8 +320,8 @@ for(const mode of ['committed','intervention'])test('standby owned '+mode+' keep
   const shared=new ClusterMemory(),f=node(shared,'Tablet');await f.existing();
   try {f.coordinator.role='STANDBY';await f.controller.quiesceForStandby();
     if(mode==='committed')f.result(true);
-    else {f.control={...f.control,state:'WAITING_USER_INTERVENTION',control_epoch:2};await f.controller.control(null,f.control,f.transport);}
-    await f.stall();assert.equal(f.sends,0);assert.equal(f.controller.sessions.size,1);assert.ok(f.record());
+    else {f.docs.set('RESULT-1',JSON.stringify({...JSON.parse(f.docs.get('RESULT-1')),status:'USER_ACTION_REQUIRED'}));f.control={...f.control,state:'WAITING_USER_INTERVENTION',control_epoch:2};await f.controller.control(null,f.control,f.transport);}
+    await f.stall();assert.equal(f.sends,mode==='committed'?1:0);assert.equal(f.controller.sessions.size,1);assert.ok(f.record());
     await f.observe({responseTextLength:2400});assert.equal(f.record().cursor.responseTextLength,2400);
     f.control={...f.control,state:'DONE',control_epoch:3};await f.controller.control(null,f.control,f.transport);await f.settle();
     assert.equal(f.record(),null);assert.equal(shared.body.execution_claims,undefined);
@@ -336,13 +336,13 @@ test('same-node restart hands off exact owned target URL even if shared claim re
   f.browser.submitIntent=args=>realBrowser.submitIntent(args);
   f.browser.ownedConversationUrl=args=>realBrowser.ownedConversationUrl(args);
   try {
-    await f.ingest();assert.equal(f.record().reason,'PRE_SUBMIT_RETRY');
+    await f.ingest();assert.equal(f.record().reason,'INPUT_NOT_SENT');
     f.controller.executionClaims=null;await f.controller.quiesceForStandby();f.controller=f.recreate();
     f.controller.canDispatch=()=>f.coordinator.canDispatch();f.coordinator.executionClaims.local.clear();
     wireExecutionClaims({cluster:f.coordinator,controller:f.controller,transport:f.transport});
     await f.controller.initialize();url='https://chatgpt.com/c/restart-owned-url';const before=metadataReads;
     shared.readCluster=async()=>{throw Error('synthetic shared claim unavailable');};
-    await assert.rejects(f.controller.tick(f.transport),/shared claim unavailable/);await f.settle();
+    await assert.doesNotReject(f.controller.tick(f.transport));await f.settle();
     console.log(JSON.stringify({case:'restart_url_unknown_claim',newMetadataReads:metadataReads-before,url:f.rows.get(f.path).conversation_url??null,localClaimCount:f.coordinator.executionClaims.local.size}));
     assert.equal(f.rows.get(f.path).conversation_url,url,'exact owned target URL must not depend on remote claim read');
   } finally {f.controller.executionClaims=null;await f.controller.quiesceForStandby();}

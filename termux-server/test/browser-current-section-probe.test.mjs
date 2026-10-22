@@ -118,28 +118,27 @@ test('unchanged pre-answer thinking and minute clock labels recover once per ten
     f.probe=await dom.probe();await f.existing();await f.observe({});const initialProgress=f.record().last_progress_at;
     assert.equal(f.probe.assistantCount,0);assert.equal(f.probe.streaming,true);assert.ok(f.probe.responseTextLength>0);
     for(let minute=1;minute<=9;minute++){
-      now+=60000;dom.setText(clock,'Thinking for '+minute+' minutes');f.probe=await dom.probe();await f.observe({status:'RUNNING'});
+      now+=60000;dom.setText(clock,'Thinking for '+minute+' minutes');f.probe=await dom.probe();await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();
       assert.equal(f.sends,0,'a one-minute observation is not a ten-minute stall');assert.equal(f.record().last_progress_at,initialProgress,'clock-only changes and probes are not progress');
     }
-    now+=60000;dom.setText(clock,'Thinking for 10 minutes');f.probe=await dom.probe();await f.observe({status:'RUNNING'});
+    now+=60000;dom.setText(clock,'Thinking for 10 minutes');f.probe=await dom.probe();await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();
     assert.equal(f.sends,1);assert.equal(f.quiesces,0);assert.equal(f.sent[0].prompt,'configured thinking continuation');assert.equal(f.sent[0].kind,'recovery');assert.equal(f.prepares,0);
-    for(let minute=1;minute<=9;minute++){now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);}
-    now+=60000;await f.observe({status:'RUNNING'});
+    for(let minute=1;minute<=9;minute++){now+=60000;await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();assert.equal(f.sends,1);}
+    now+=60000;await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();
     assert.equal(f.sends,2,'a fresh ten-minute quiet interval permits one new recovery');
   }finally{await f.controller.quiesceForStandby();Date.now=originalNow;}
 });
 
-test('same-length pre-answer tool progress resets the ten-minute controller deadline',async()=>{
+test('same-length tool content does not reset the ten-minute character deadline',async()=>{
   const originalNow=Date.now;let now=1000000;Date.now=()=>now;
   const dom=fixture({bubble:false,turnAttribute:null});dom.main.append(el('button',{'data-testid':'stop-button'}));
   const tool=el('button',{'aria-label':'Read synthetic source'},'Reading file A');dom.response.append(tool);
   const f=controllerFixture();f.controller.config.stallAfterMs=600000;
   try{
     f.probe=await dom.probe();await f.existing();await f.observe({});const before=f.probe;
-    now+=540000;dom.setText(tool,'Reading file B');f.probe=await dom.probe();await f.observe({status:'RUNNING'});
-    assert.equal(f.probe.assistantCount,0);assert.equal(f.probe.responseTextLength,before.responseTextLength);assert.notEqual(f.probe.responseFingerprint,before.responseFingerprint);assert.equal(f.record().last_progress_at,now);
-    now+=540000;await f.observe({status:'RUNNING'});assert.equal(f.sends,0,'eighteen minutes since start is only nine minutes since real tool progress');
-    now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);assert.equal(f.quiesces,0);
+    now+=540000;dom.setText(tool,'Reading file B');f.probe=await dom.probe();await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();
+    assert.equal(f.probe.assistantCount,0);assert.equal(f.probe.responseTextLength,before.responseTextLength);assert.notEqual(f.probe.responseFingerprint,before.responseFingerprint);assert.equal(f.record().last_progress_at,1000000);
+    now+=60000;await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();assert.equal(f.sends,1,'equal length content is not character progress');assert.equal(f.quiesces,0);
   }finally{await f.controller.quiesceForStandby();Date.now=originalNow;}
 });
 
@@ -179,9 +178,9 @@ test('browser monitor ignores prior assistant changes using the same scoped curs
   const f=fixture();appendPendingUser(f);f.main.append(el('section',{'data-turn-id':'response-2','data-testid':'conversation-turn-4'},'Inspecting current input'));
   const baseline=await f.probe(),original=f.session.call,abort=new AbortController(),activities=[];let calls=0;
   f.session.call=async(...args)=>{if(++calls===2)alterOldAssistant(f);return original(...args);};
-  const browser=new ChatGptBrowser(null,{probeIntervalMs:0,stallAfterMs:600000,conversationStateGraceMs:5000});
+  const browser=new ChatGptBrowser(null,{probeIntervalMs:1,stallAfterMs:600000,conversationStateGraceMs:5000});
   await assert.rejects(browser.monitor({session:f.session,baseline,signal:abort.signal,livenessGate:()=>({state:'RUNNING',epoch:1}),onActivity:async p=>{activities.push(p);if(activities.length===2)abort.abort(new Error('fixture complete'));}}),/fixture complete/);
-  assert.equal(activities[1].assistantCount,2);assert.equal(activities[1].responseAssistantCount,0);assert.equal(activities[1].progressDetected,false);assert.equal(sameCursor(activities[0],activities[1]),true);
+  assert.equal(activities[1].responseTextLength,activities[0].responseTextLength);assert.equal(activities[1].progressDetected,undefined);assert.equal(sameCursor(activities[0],activities[1]),true);
 });
 test('prior assistant changes cannot postpone the current thinking recovery deadline',async()=>{
   const originalNow=Date.now;let now=1000000;Date.now=()=>now;
@@ -189,7 +188,7 @@ test('prior assistant changes cannot postpone the current thinking recovery dead
   const f=controllerFixture();f.controller.config.stallAfterMs=600000;
   try{
     f.probe=await dom.probe();await f.existing();await f.observe({});const initial=f.record().last_progress_at;
-    now+=540000;alterOldAssistant(dom);f.probe=await dom.probe();await f.observe({status:'RUNNING'});assert.equal(f.record().last_progress_at,initial);assert.equal(f.sends,0);
-    now+=60000;await f.observe({status:'RUNNING'});assert.equal(f.sends,1);assert.equal(f.quiesces,0);
+    now+=540000;alterOldAssistant(dom);f.probe=await dom.probe();await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();assert.equal(f.record().last_progress_at,initial);assert.equal(f.sends,0);
+    now+=60000;await f.observe({status:'RUNNING'});await f.controller.tick(f.transport);await f.settle();assert.equal(f.sends,1);assert.equal(f.quiesces,0);
   }finally{await f.controller.quiesceForStandby();Date.now=originalNow;}
 });
