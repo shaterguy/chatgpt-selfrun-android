@@ -10,7 +10,7 @@ public final class DevAndTestIdentityPolicyTest {
     @Test public void devUsesOriginalInstalledTestPackageAndNotNewDevPackage() throws Exception {
         String gradle = read("app/build.gradle", "build.gradle");
         assertTrue(gradle.contains("selfRunDriveVersionCode = 4002026"));
-        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.11-dev4'"));
+        assertTrue(gradle.contains("selfRunDriveVersionName = '4.0.11'"));
         assertTrue(gradle.contains("applicationId 'com.shaterguy.chatgptselfrun.drive'"));
         assertTrue(gradle.contains("applicationIdSuffix '.test'"));
         assertFalse(gradle.contains("applicationIdSuffix '.dev'"));

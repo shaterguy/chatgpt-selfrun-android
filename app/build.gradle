@@ -3,7 +3,7 @@ plugins {
 }
 
 def selfRunDriveVersionCode = 4002026
-def selfRunDriveVersionName = '4.0.11-dev4'
+def selfRunDriveVersionName = '4.0.11'
 def selfRunServerChecks = (project.findProperty('selfRunServerChecks')?.toString()?.toBoolean()) ?: false
 def selfRunServerFeaturesEnabled = true
 def selfRun3VersionPattern = ~/^(?:3|4)\.[0-9]+\.[0-9]+(?:-(?:dev|rc)[0-9]+)?$/

@@ -53,7 +53,7 @@ VERSION_NAME="$(sed -n "s/.*selfRunDriveVersionName = '\([^']*\)'.*/\1/p" "$BUIL
 [[ "$VERSION_NAME" =~ ^(3|4)\.[0-9]+\.[0-9]+(-(dev|rc)[0-9]+)?$ ]]
 grep -Fq "applicationId 'com.shaterguy.chatgptselfrun.drive'" "$BUILD"
 grep -Fq "applicationIdSuffix '.test'" "$BUILD"
-grep -Fq "selfRunAppLabel: 'SelfRun Drive TEST'" "$BUILD"
+grep -Fq "selfRunAppLabel: 'SelfRun Drive DEV'" "$BUILD"
 grep -Fq 'android:label="${selfRunAppLabel}"' "$MANIFEST"
 ! grep -Fq 'android:sharedUserId' "$MANIFEST"
 
