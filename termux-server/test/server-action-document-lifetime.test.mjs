@@ -48,7 +48,7 @@ test('Page initialization delivers the registered helper before application star
   assert.ok(f.calls.findIndex(c=>c.method==='Page.enable')<f.calls.findIndex(c=>c.method==='Page.addScriptToEvaluateOnNewDocument'));
 });
 
-for(const mode of ['set-and-remove','remove-all'])test('application startup-captured fetch applies the four-field profile: '+mode,async()=>{
+for(const mode of ['set-and-remove','remove-all'])test('application startup-captured fetch preserves the native selection: '+mode,async()=>{
   const f=fixture({deliverNewDocument:'page-enabled'});await f.session.run('navigate',{url:project});
   await f.session.run('recoveryInput'); // Late repair alone must not make this test pass.
   await f.session.run('installProfile');
@@ -62,10 +62,8 @@ for(const mode of ['set-and-remove','remove-all'])test('application startup-capt
       content:{parts:['synthetic prompt']}}],model:'old',thinking_effort:'old',
       conversation_origin:'old',service_tier:'old',unrelated:'keep'})});
   assert.equal(f.requests.length,1);
-  if(mode==='remove-all')for(const {path} of operations)assert.equal(path in f.requests[0],false,path);
-  else{assert.equal(f.requests[0].model,'test-model');assert.equal(f.requests[0].thinking_effort,'max');}
-  assert.equal('conversation_origin' in f.requests[0],false);
-  assert.equal('service_tier' in f.requests[0],false);assert.equal(f.requests[0].unrelated,'keep');
+  for(const {path} of operations)assert.equal(f.requests[0][path],'old',path);
+  assert.equal(f.requests[0].unrelated,'keep');
 });
 
 test('failed Page initialization does not register scripts, navigate, or release a submission',async()=>{

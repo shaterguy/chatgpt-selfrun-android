@@ -66,7 +66,7 @@ test('preparing another input fences an older pending body parse',async t=>{
  await session.run('installProfile');await session.run('profileConfigure',{operations});
  let release;const stream=new ReadableStream({start(controller){release=()=>{controller.enqueue(new TextEncoder().encode(JSON.stringify({conversation_id:'owned',messages:[{author:{role:'user'},content:{parts:['old']}}]})));controller.close();};}});
  const pending=page.context.window.fetch(new Request('https://chatgpt.com/backend-api/conversation',{method:'POST',body:stream,duplex:'half'}));
- const rejected=assert.rejects(pending,/runtime_disposed/);
+ const rejected=assert.rejects(pending,/disposed/i);
  await session.run('prepareInput',{prompt:'next'});release();await rejected;
  assert.equal(page.requests.length,0);
 });

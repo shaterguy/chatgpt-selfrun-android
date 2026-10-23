@@ -630,7 +630,7 @@ export class DriveDispatchController {
       let attached;
       if(mode==='prepare') {
         const directives=await this.#directives();
-        attached=await this.browser.prepare({projectUrl:r.body.project_url,ownerTaskId:r.task_id,
+        attached=await this.browser.prepare({projectUrl:r.body.project_url,profileOperations:r.body.profile_operations,ownerTaskId:r.task_id,
           prompt:appendTurnStartDirective(humanizeSelfRunPrompt(r.body.prompt),directives.turnStartDirective),signal:abort.signal,onTarget,guard});
       } else if(mode==='target') {
         attached=await this.browser.attachTarget({targetId:r.target_id,signal:abort.signal,onTarget,guard,...(observationOnly?{observationOnly:true}:{})});

@@ -42,7 +42,7 @@ function engineFixture() {
   ]);
   return {window,seen};
 }
-test('scheduler-style profile engine changes only the four control fields',async()=>{
+test('profile facade preserves all native conversation fields',async()=>{
   const f=engineFixture();
   const original={model:'instant-default',requested_default_model:'instant-default',thinking_effort:'standard',
     conversation_origin:'chat',service_tier:'default',conversation_id:'existing-profile',
@@ -50,11 +50,11 @@ test('scheduler-style profile engine changes only the four control fields',async
   await f.window.fetch('https://chatgpt.com/backend-api/f/conversation',{method:'POST',body:JSON.stringify(original)});
   assert.equal(f.seen.length,1);
   const body=JSON.parse(f.seen[0].body);
-  assert.equal(body.model,'gpt-5-6-thinking');
-  assert.equal(body.thinking_effort,'max');
+  assert.equal(body.model,'instant-default');
+  assert.equal(body.thinking_effort,'standard');
   assert.equal(body.requested_default_model,'instant-default');
-  assert.equal('conversation_origin' in body,false);
-  assert.equal('service_tier' in body,false);
+  assert.equal(body.conversation_origin,'chat');
+  assert.equal(body.service_tier,'default');
   assert.equal(body.conversation_id,'existing-profile');
   assert.deepEqual(body.messages,original.messages);
   assert.deepEqual(body.metadata,original.metadata);

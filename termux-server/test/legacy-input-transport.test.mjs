@@ -12,7 +12,7 @@ function fixture({evaluate=async()=> 'latest-tip',closeTarget=async()=>true}={})
 test('legacy interception patches exactly the decided POST and immediately detaches',async()=>{
  const f=fixture();await f.transport.install();await f.transport.paused(f.event);
  const send=f.calls.find(x=>x.method==='Fetch.continueRequest');const body=JSON.parse(Buffer.from(send.params.postData,'base64'));
- assert.equal(body.parent_message_id,'latest-tip');assert.equal(body.model,'chosen');assert.equal(body.other,'keep');assert.ok(!('thinking_effort'in body));
+ assert.equal(body.parent_message_id,'latest-tip');assert.equal(body.model,'old');assert.equal(body.other,'keep');assert.equal(body.thinking_effort,'old');
  assert.equal(f.listener,null);assert.equal(f.calls.at(-1).method,'Fetch.disable');
 });
 test('legacy interception leaves unrelated traffic unchanged',async()=>{

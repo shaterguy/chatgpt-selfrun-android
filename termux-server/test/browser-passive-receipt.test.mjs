@@ -103,13 +103,13 @@ test('duplicate eligible POST invalidates receipt even when first is positive',a
   const f=fixture();t.after(f.close);await f.send();await f.send();await f.emit(block(marker()));await f.emit(block(marker()),1);
   assert.equal(f.snapshot().ack,null);assert.ok(f.snapshot().invalid);
 });
-test('reinstallation and identical arm preserve observer identity, current v1 profile and body fields',async t=>{
+test('reinstallation and identical arm preserve observer identity, native model and body fields',async t=>{
   const f=fixture({profile:true});t.after(f.close);const wrapped=f.window.fetch,profile=f.window.__selfrunRequestProfileEngine;
   f.install();f.arm({});assert.equal(f.window.fetch,wrapped);assert.equal(f.window.__selfrunRequestProfileEngine,profile);
   const original=body({model:'old',thinking_effort:'low',conversation_origin:'chat',service_tier:'default',parent_message_id:'parent-uuid',metadata:{keep:true}});
   await f.send(original);await f.emit(block(marker()));
-  const sent=JSON.parse(await f.calls[0].input.clone().text());
-  assert.equal(sent.model,'new-model');assert.equal(sent.thinking_effort,'max');assert.equal('conversation_origin' in sent,false);assert.equal('service_tier' in sent,false);
+  const sent=JSON.parse(await new Request(f.calls[0].input,f.calls[0].init).text());
+  assert.equal(sent.model,'old');assert.equal(sent.thinking_effort,'low');assert.equal(sent.conversation_origin,'chat');assert.equal(sent.service_tier,'default');
   for(const key of ['messages','conversation_id','parent_message_id','metadata'])assert.deepEqual(sent[key],original[key]);
   assert.equal(f.snapshot().ack,'cot_token');assert.equal(f.calls.length,1);
 });

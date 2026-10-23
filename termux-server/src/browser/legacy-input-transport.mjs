@@ -15,8 +15,8 @@ export async function readInputParent(id, authorization) {
   } catch {return null;}
 }
 export class LegacyInputTransport {
-  constructor({session,evaluate,prompt,conversationId,operations,signal,guard=()=>true,retryMs=500,closeTarget=async()=>false}) {
-    Object.assign(this,{session,evaluate,prompt,conversationId,operations,signal,guard,retryMs,closeTarget});
+  constructor({session,evaluate,prompt,conversationId,signal,guard=()=>true,retryMs=500,closeTarget=async()=>false}) {
+    Object.assign(this,{session,evaluate,prompt,conversationId,signal,guard,retryMs,closeTarget});
     this.pending=new Set();this.active=true;
     this.cancel=()=>{void this.dispose(true);};
   }
@@ -48,7 +48,6 @@ export class LegacyInputTransport {
     }
     if(!this.current()){await this.fail(id);return;}
     if(this.conversationId)body.parent_message_id=parent;
-    for(const [op,path,value] of this.operations){if(op==='set')body[path]=value;else delete body[path];}
     await this.session.call('Fetch.continueRequest',{requestId:id,postData:Buffer.from(JSON.stringify(body)).toString('base64')});
     this.pending.delete(id);await this.dispose();
   }

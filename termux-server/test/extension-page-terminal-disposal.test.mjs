@@ -70,13 +70,13 @@ test('terminalDispose clears owned private runtime, blocks rearm and leaves a li
   assert.equal(sibling.run('receiptSnapshot',{key:{...key,generation:'sibling-next'}}).generation,'sibling-next');
 });
 
-test('terminal disposal prevents an already awaiting profile body read from sending or restoring operations',async t=>{
+test('terminal disposal clears profile state after native forwarding without a profile body wait',async t=>{
   const read=deferred(),nativeCalls=[];
   class SlowRequest {constructor(input,init){this.url=typeof input==='string'?input:input.url;this.method=init?.method||input.method;}clone(){return{text:()=>read.promise};}}
   const f=fixture(t,{RequestType:SlowRequest,native:(...args)=>{nativeCalls.push(args);return Promise.resolve(new Response(''));}});
-  f.start();const sending=f.send();const rejected=assert.rejects(sending,/disposed/i);await tick();
-  f.run('terminalDispose');read.resolve(body());await rejected;
-  assert.equal(nativeCalls.length,0);assert.equal(f.audit.profile.operations,null);assert.equal(f.audit.receipt(),null);
+  f.start();const sending=f.send();await tick();
+  f.run('terminalDispose');read.resolve(body());await sending;
+  assert.equal(nativeCalls.length,1);assert.equal(f.audit.profile.operations,null);assert.equal(f.audit.receipt(),null);
 });
 
 test('terminal disposal does not require a still-armed receipt key',t=>{

@@ -11,14 +11,7 @@ export function buildPageRuntimeSource({installationKey='selfrun-static-test-key
   const privateRefs=source=>source.replaceAll('window.__selfrunRequestProfileEngine','profileEngine').replaceAll('window.__selfrunReceiptObserver','receiptObserver');
   const configure=privateRefs(configureRequestProfileExpression(operations))
     .replace(JSON.stringify(normalizeProfileOperations(operations)),'normalizeProfileOperations(payload.operations)');
-  const profile=privateRefs(requestProfileDocumentStartSource())
-    .replace('const nativeFetch=window.fetch.bind(window);','const nativeFetch=(...args)=>parentSync.fetch(...args);')
-    .replace('window.fetch=async function','profileFetch=async function')
-    .replace('const probe=fetchProbe(input,init);','const pageGeneration=runtimeGeneration,pageArm=armedKey?{...armedKey}:null;const probe=fetchProbe(input,init);')
-    .replace('const patched=patchText(request.url,request.method,text);',"if(pageGeneration!==runtimeGeneration||!ownerActive()||(pageArm&&(!armedKey||pageArm.intent_id!==armedKey.intent_id||pageArm.generation!==armedKey.generation)))fail('runtime_disposed');const patched=patchText(request.url,request.method,text);")
-    .replace('const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;let metadata=new WeakMap();','const nativeOpen=originalOpen,nativeSend=function(body){return parentSync.sendXhr(this,body,originalSend);};let metadata=new WeakMap();')
-    .replace('XMLHttpRequest.prototype.open=function','profileOpen=function')
-    .replace('XMLHttpRequest.prototype.send=function','profileSend=function');
+  const profile="(()=>{profileFetch=(...args)=>parentSync.fetch(...args);profileOpen=originalOpen;profileSend=function(body){return parentSync.sendXhr(this,body,originalSend);};return "+privateRefs(requestProfileDocumentStartSource())+";})()";
   const receipt=privateRefs(receiptObserverDocumentStartSource())
     .replace('const downstreamFetch=window.fetch;','const downstreamFetch=function(...args){return Reflect.apply(profileFetch||originalFetch,this,args);};')
     .replace('window.fetch=function','receiptFetch=function')

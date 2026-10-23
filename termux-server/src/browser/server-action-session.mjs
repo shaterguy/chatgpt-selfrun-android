@@ -1,11 +1,12 @@
+import {nativePreferenceExpression} from './native-profile-preparation.mjs';
 import {createHmac,randomUUID} from 'node:crypto';
 import {CdpSession} from './cdp.mjs';
-import {actionConversationUrl,pendingConversationTransition,normalizeProfileOperations} from './chatgpt.mjs';
+import {actionConversationUrl,pendingConversationTransition} from './chatgpt.mjs';
 import {buildPageRuntimeSource} from './extension-page-source.mjs';
 import {LegacyInputTransport} from './legacy-input-transport.mjs';
 import {actionNotSubmittedError,isActionNotSubmitted} from './server-action-errors.mjs';
 
-const commands=new Set(['prepareInput','newChat','input','sendReady','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptSnapshot','receiptRetire','pauseAnimations','quiesce','terminalDispose','recoveryInput']);
+const commands=new Set(['prepareInput','prepareProfile','newChat','input','sendReady','submit','installProfile','profileConfigure','installReceipt','receiptArm','receiptSnapshot','receiptRetire','pauseAnimations','quiesce','terminalDispose','recoveryInput']);
 const allowedEndpoint=(value,port,path)=>{try{const u=new URL(value);return u.protocol==='ws:'&&u.hostname==='127.0.0.1'&&Number(u.port)===port&&u.pathname===path&&!u.search&&!u.hash;}catch{return false;}};
 const connectDefault=async(url,{signal}={})=>{const session=new CdpSession(url);const abort=()=>session.close();signal?.addEventListener('abort',abort,{once:true});try{if(signal?.aborted)throw signal.reason;await session.connect();if(signal?.aborted)throw signal.reason;return session;}catch(error){session.close();throw error;}finally{signal?.removeEventListener('abort',abort);}};
 
@@ -67,6 +68,7 @@ export class ServerActionSession {
     }
     if(!commands.has(operation))throw Error('Unsupported server action');
     await this.install(options,operation==='prepareInput');this.check(options.signal);
+    if(operation==='prepareProfile')return this.evaluate(nativePreferenceExpression(payload.operations),options);
     if(operation==='prepareInput'){
       const previous=this.legacyInput;
       while(previous&&!await previous.dispose()){this.check(options.signal);await new Promise(resolve=>setTimeout(resolve,100));}
@@ -74,7 +76,7 @@ export class ServerActionSession {
       if(await this.evaluate('window.__selfrunExtensionPageV2?.legacyTransport===true',options)===true){
         const physicalSession=this.session,ownedUrl=this.boundUrl;
         this.legacyInput=new LegacyInputTransport({session:physicalSession,evaluate:async(expression,opts)=>{const value=await physicalSession.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},opts);if(value.exceptionDetails)throw Error('Parent lookup pending');return value.result?.value;},prompt:payload.prompt,
-          conversationId:new URL(this.boundUrl).pathname.match(/\/c\/([^/]+)\/?$/)?.[1]||'',operations:normalizeProfileOperations(payload.operations),
+          conversationId:new URL(this.boundUrl).pathname.match(/\/c\/([^/]+)\/?$/)?.[1]||'',
           signal:options.lifetimeSignal||options.signal,guard:()=>!this.closed&&this.guard(),closeTarget:()=>this.closeInputTarget(physicalSession,ownedUrl)});
         await this.legacyInput.install();
       }

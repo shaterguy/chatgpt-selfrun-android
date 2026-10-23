@@ -40,17 +40,17 @@ function fixture(t,{native=()=>Promise.resolve(new Response('')),RequestType=Req
 test('initial owned POST survives optimistic WEB route during body read without claiming canonical receipt',async t=>{
  const read=deferred(),calls=[];
  class SlowRequest extends Request {clone(){const original=super.clone();return {text:()=>read.promise.then(()=>original.text())};}}
- const f=fixture(t,{RequestType:SlowRequest,initialUrl:'https://chatgpt.com/g/test/project',armKey:{...key,conversation_id:null},native:req=>{calls.push(req);return Promise.resolve(new Response(''));}});
+ const f=fixture(t,{RequestType:SlowRequest,initialUrl:'https://chatgpt.com/g/test/project',armKey:{...key,conversation_id:null},native:(input,init)=>{calls.push(new Request(input,init));return Promise.resolve(new Response(''));}});
  f.start();const sending=f.send();const outcome=sending.then(()=>null,e=>e);await tick();
  f.window.history.pushState({},'', '/c/WEB:00000000-0000-4000-8000-000000000001');
  read.resolve();const error=await outcome;
  assert.equal(error,null,'owned optimistic transition must not dispose in-flight profile');
- assert.equal(calls.length,1);assert.equal(JSON.parse(await calls[0].text()).model,'private-model');
+ assert.equal(calls.length,1);assert.equal(Object.hasOwn(JSON.parse(await calls[0].text()),'model'),false);
  assert.ok(!f.run('receiptSnapshot',{key:{...key,conversation_id:null}}).conversation_id);
 });
 
 const entry='https://chatgpt.com/g/test/project',temp='/c/WEB:00000000-0000-4000-8000-000000000001';
-for(const cause of ['second-WEB','return-entry','other-origin','pagehide','retire','rearm','expire'])test((cause==='expire'?'optimistic transition survives elapsed route age: ':'optimistic transition remains fail-closed for ')+cause,async t=>{
+for(const cause of ['second-WEB','return-entry','other-origin','pagehide','retire','rearm','expire'])test((cause==='expire'?'optimistic transition survives elapsed route age: ':'route revocation after native forwarding clears runtime for ')+cause,async t=>{
  let now=1700000000000;t.mock.method(Date,'now',()=>now);
  const read=deferred(),calls=[];class SlowRequest extends Request{clone(){const r=super.clone();return{text:()=>read.promise.then(()=>r.text())};}}
  const armKey={...key,conversation_id:null};const f=fixture(t,{RequestType:SlowRequest,initialUrl:entry,armKey,native:r=>{calls.push(r);return Promise.resolve(new Response(''));}});
@@ -62,7 +62,7 @@ for(const cause of ['second-WEB','return-entry','other-origin','pagehide','retir
  if(cause==='retire')f.run('receiptRetire',{key:armKey});
  if(cause==='rearm')assert.throws(()=>f.run('receiptArm',{key:{...armKey,generation:'another'}}),/generation|disposed/);
  if(cause==='expire'){now+=30001;f.window.history.pushState({},'',temp);}
- read.resolve();if(cause==='expire'){assert.equal(await result,null);assert.equal(calls.length,1);assert.equal(f.audit.page().revoked,false);}else{assert.match(String(await result),/disposed/);assert.equal(calls.length,0);assert.equal(f.audit.page().revoked,true);}
+ read.resolve();if(cause==='expire'){assert.equal(await result,null);assert.equal(calls.length,1);assert.equal(f.audit.page().revoked,false);}else{assert.equal(await result,null);assert.equal(calls.length,1);assert.equal(f.audit.page().revoked,true);}
 });
 test('only the first canonical route binds after optimistic initial send',async t=>{
  const f=fixture(t,{initialUrl:entry,armKey:{...key,conversation_id:null}});f.start();
@@ -106,7 +106,7 @@ for(const cause of ['body-unreadable','native-rejection'])test('initial transiti
  class Unreadable extends Request{clone(){return{text:()=>Promise.reject(new Error('unreadable'))};}}
  let calls=0;const f=fixture(t,{RequestType:cause==='body-unreadable'?Unreadable:Request,initialUrl:entry,armKey:{...key,conversation_id:null},native:()=>{calls++;return Promise.reject(new Error('native rejected'));}});
  f.start();const result=f.send().then(()=>null,e=>e);f.window.history.pushState({},'',temp);
- assert.ok(await result);assert.equal(f.audit.page().revoked,true);assert.equal(calls,cause==='body-unreadable'?0:1);
+ assert.ok(await result);assert.equal(f.audit.page().revoked,true);assert.equal(calls,1);
 });
 test('page request and strict action/readback seam keep WEB unknown until canonical proof',async t=>{
  let calls=0;const armKey={...key,conversation_id:null};
@@ -125,10 +125,10 @@ test('page request and strict action/readback seam keep WEB unknown until canoni
  assert.equal((await read()).state,'CONFIRMED');assert.equal(action.boundUrl,'https://chatgpt.com/c/saved-canonical');assert.equal(calls,1);
 });
 
-test('late body cannot cross an arm change even after canonical transition',async t=>{
+test('native request is forwarded once before a later arm change',async t=>{
  const read=deferred(),calls=[];class SlowRequest extends Request{clone(){const r=super.clone();return{text:()=>read.promise.then(()=>r.text())};}}
  const armKey={...key,conversation_id:null};const f=fixture(t,{RequestType:SlowRequest,initialUrl:entry,armKey,native:r=>{calls.push(r);return Promise.resolve(new Response(''));}});
  f.start();const result=f.send().then(()=>null,e=>e);await tick();f.window.history.pushState({},'',temp);
  f.window.history.pushState({},'','/c/saved-canonical');f.run('receiptRetire',{key:armKey});f.run('receiptArm',{key:{...armKey,generation:'new-generation',conversation_id:'saved-canonical'}});
- read.resolve();assert.match(String(await result),/disposed/);assert.equal(calls.length,0);
+ read.resolve();assert.equal(await result,null);assert.equal(calls.length,1);
 });

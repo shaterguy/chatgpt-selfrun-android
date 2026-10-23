@@ -55,7 +55,7 @@ test('current create, navigate, real input, one click, URL publication and real 
  assert.ok(effects.findIndex(e=>e.kind==='input')<effects.findIndex(e=>e.kind==='click'));
  assert.equal(page.requests[0].messages[0].content.parts[0],f.life.record().intent.prompt);
  assert.notEqual(f.life.record().intent.prompt,f.life.body.prompt,'the actual prepared prompt, including directive, is sent');
- for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(Object.hasOwn(page.requests[0],field),false);
+ for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(page.requests[0][field],'old');
  assert.equal(f.life.rows.get(f.life.path).conversation_url,'https://chatgpt.com/c/owned-1');
  assert.ok(f.wire.calls.some(c=>c[0]==='selfrun.content.snapshot'),'actual controller requested actual generated content probe');
  assert.ok(f.samples.some(s=>s.userCount===1&&s.assistantCount===1));
@@ -385,7 +385,7 @@ for(const [label,conversation,newDocument] of [
  await wait(()=>f.clicks()===1&&page.requests.length===1,'continuation on adopted conversation');await f.sample();
  assert.equal(f.inputs(),2);assert.deepEqual(f.resultReads,['RESULT-1']);
  assert.equal(page.requests[0].messages[0].content.parts[0],f.life.controller.config.recoveryPrompt);
- for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(Object.hasOwn(page.requests[0],field),false);
+ for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(page.requests[0][field],'old');
  assert.equal(f.life.record().conversation_url,canonical);assert.equal(f.life.record().state,'OBSERVING');assert.ok(f.life.record().cursor);
  const late=f.late[0],last=f.samples.at(-1),helper=page.context.window.__selfrunExtensionPage,actor=f.wire.manager.actionSessions.get(f.life.record().target_id),key=actor.installationKey;
  await f.life.stop();await f.life.controller.cleanupTerminalResources();await late.onActivity(last);
@@ -447,7 +447,7 @@ for(const loseReply of [false,true])test('actual first click creates exact named
  f.life.result(false);await f.tickAfter(TEN_MINUTES);await wait(()=>f.clicks()===2&&page.requests.length===2,'one real continuation');await f.sample();
  assert.equal(f.inputs(),2);assert.equal(f.life.record().target_id,target);assert.equal(f.life.record().state,'OBSERVING');assert.ok(f.life.record().cursor);
  assert.equal(page.requests[1].messages[0].content.parts[0],f.life.controller.config.recoveryPrompt);
- for(const request of page.requests)for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(Object.hasOwn(request,field),false);
+ for(const request of page.requests)for(const field of ['model','thinking_effort','conversation_origin','service_tier'])assert.equal(request[field],'old');
  await f.life.stop();await f.life.controller.cleanupTerminalResources();assert.equal(f.life.record(),null);assert.equal(f.inputs(),2);assert.equal(f.clicks(),2);
 });
 

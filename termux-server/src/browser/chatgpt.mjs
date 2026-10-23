@@ -1,3 +1,4 @@
+import {nativePreferenceExpression,nativePreferenceHomeUrl,nativeProfileFromOperations} from './native-profile-preparation.mjs';
 import { canonicalUrl, cursor } from '../lifecycle.mjs';
 import { isActionNotSubmitted, actionNotSubmittedStage } from './server-action-errors.mjs';
 
@@ -489,79 +490,15 @@ export function normalizeProfileOperations(operations=[]) {
 
 export function requestProfileDocumentStartSource() {
   const version=JSON.stringify(REQUEST_PROFILE_ENGINE_VERSION);
+  // Retain the input/receipt lifecycle facade; native settings own model selection.
   return `(()=>{
     if(window.__selfrunRequestProfileEngine?.version===${version})return true;
-    const CONTROL=['model','thinking_effort','conversation_origin','service_tier'];
     const state={operations:null,last:{ok:false,reason:'not_configured'}};
     let disposed=false;
-    const norm=value=>String(value??'').trim().toLowerCase();
-    const fail=reason=>{state.last={ok:false,reason:String(reason||'profile_failure').slice(0,100)};throw new Error('REQUEST_PROFILE:'+state.last.reason);};
-    const validateOps=operations=>{
-      if(!Array.isArray(operations)||operations.length!==CONTROL.length)fail('operation_count_invalid');
-      const seen=new Set(),out=[];
-      for(const raw of operations){
-        if(!Array.isArray(raw)||(raw.length!==2&&raw.length!==3))fail('operation_shape_invalid');
-        const kind=norm(raw[0]),path=String(raw[1]??'');
-        if(!CONTROL.includes(path)||seen.has(path))fail('control_allowlist_violation');
-        seen.add(path);
-        if(kind==='set'){
-          if(raw.length!==3||typeof raw[2]!=='string'||raw[2].length<1||raw[2].length>128)fail('control_value_invalid');
-          out.push(['set',path,raw[2]]);
-        }else if(kind==='remove'){
-          if(raw.length!==2)fail('remove_value_forbidden');
-          out.push(['remove',path]);
-        }else fail('unknown_operation');
-      }
-      if(seen.size!==CONTROL.length)fail('operation_set_incomplete');
-      return out;
-    };
-    const sameOrigin=url=>{try{return new URL(url,location.href).origin===location.origin;}catch(_){return false;}};
-    const conversationRoute=url=>{try{
-      const path=new URL(url,location.href).pathname.toLowerCase().replace(/\\/+$/,'');
-      return path==='/backend-api/conversation'||path==='/backend-api/f/conversation';
-    }catch(_){return false;}};
-    const strip=object=>{const copy={...object};for(const key of CONTROL)delete copy[key];return copy;};
-    const patchObject=(body,url)=>{
-      if(disposed)fail('runtime_disposed');
-      if(!conversationRoute(url))fail('conversation_route_not_allowed');
-      if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray(body.messages))fail('unknown_conversation_schema');
-      if(!state.operations)fail('target_not_ready');
-      const before=JSON.stringify(strip(body)),output={...body};
-      for(const [kind,path,value] of state.operations){if(kind==='set')output[path]=value;else delete output[path];}
-      if(JSON.stringify(strip(output))!==before)fail('data_plane_changed');
-      state.last={ok:true,reason:'patched'};
-      return output;
-    };
-    const patchText=(url,method,text)=>{
-      if(norm(method)!=='post'||!sameOrigin(url)||!conversationRoute(url))return null;
-      if(typeof text!=='string')fail('non_text_conversation_body');
-      let body;try{body=JSON.parse(text);}catch(_){fail('invalid_conversation_json');}
-      return JSON.stringify(patchObject(body,url));
-    };
-    const nativeFetch=window.fetch.bind(window);
-    const fetchProbe=(input,init)=>{try{
-      const requestInput=typeof Request!=='undefined'&&input instanceof Request;
-      const url=requestInput?input.url:String(input??'');
-      const method=init&&init.method!==undefined?init.method:(requestInput?input.method:'GET');
-      return{url,method,eligible:norm(method)==='post'&&sameOrigin(url)&&conversationRoute(url)};
-    }catch(_){return{url:'',method:'',eligible:false};}};
-    window.fetch=async function(input,init){
-      const probe=fetchProbe(input,init);
-      if(!probe.eligible)return nativeFetch(input,init);
-      let request;try{const source=typeof Request!=='undefined'&&input instanceof Request?input.clone():input;request=new Request(source,init);}catch(_){fail('request_construction_failed');}
-      let text;try{text=await request.clone().text();}catch(_){fail('request_body_unreadable');}
-      const patched=patchText(request.url,request.method,text);
-      if(patched===null)fail('target_patch_not_applied');
-      try{return nativeFetch(new Request(request,{body:patched}));}catch(_){fail('patched_request_construction_failed');}
-    };
-    const nativeOpen=XMLHttpRequest.prototype.open,nativeSend=XMLHttpRequest.prototype.send;let metadata=new WeakMap();
-    XMLHttpRequest.prototype.open=function(method,url,...rest){metadata.set(this,{method:String(method||''),url:String(url||'')});return nativeOpen.call(this,method,url,...rest);};
-    XMLHttpRequest.prototype.send=function(body){const request=metadata.get(this)||{method:'',url:''};const patched=patchText(request.url,request.method,body);return nativeSend.call(this,patched===null?body:patched);};
-    window.__selfrunRequestProfileEngine={
-      version:${version},
-      configure:operations=>{if(disposed)fail('runtime_disposed');state.operations=validateOps(operations);state.last={ok:true,reason:'target_ready'};return true;},
+    window.__selfrunRequestProfileEngine={version:${version},
+      configure:operations=>{if(disposed)throw new Error('REQUEST_PROFILE:runtime_disposed');state.operations=operations;state.last={ok:true,reason:'target_ready'};return true;},
       diagnostics:()=>({...state.last}),
-      dispose:()=>{disposed=true;state.operations=null;state.last={ok:false,reason:'disposed'};metadata=new WeakMap();return true;}
+      dispose:()=>{disposed=true;state.operations=null;state.last={ok:false,reason:'disposed'};return true;}
     };
     return true;
   })()`;
@@ -579,7 +516,7 @@ async function installRequestProfileEngine(session) {
   await evaluate(session,source);
 }
 
-// Receipt-only observer: the existing v1 request-profile engine remains the sole body mutator.
+// Receipt-only observer; native preferences own the model and effort values.
 // Event vocabulary/framing follows Android ChatGptTurnProtocolScript (436da865).
 function installReceiptObserver() {
   const version='selfrun-passive-receipt-v2';
@@ -773,6 +710,7 @@ export function pageActionExpression(operation,payload={}) {
     case 'progress': return `(() => { const started = performance.now(); const value = (${probeExpression()});
       return {...value, __selfrun_engine_elapsed_ms: Math.max(0, Math.round(performance.now() - started))}; })()`;
     case 'prepareInput': return 'true';
+    case 'prepareProfile': return nativePreferenceExpression(payload.operations);
     case 'recoveryInput': return recoveryInputExpression();
     case 'newChat': return newChatExpression();
     case 'input': return inputExpression(payload.prompt);
@@ -846,7 +784,7 @@ export class ChatGptBrowser {
     return pending.promise;
   }
 
-  async prepare({ projectUrl, signal, onTarget, guard=()=>true, ownerTaskId=null }) {
+  async prepare({ projectUrl, profileOperations=[], signal, onTarget, guard=()=>true, ownerTaskId=null }) {
     const check=()=>{if(signal?.aborted||!guard())throw signal?.reason||new Error('stale preparation');};
     check();
     // Every app-issued turn or retry starts with a new browser tab.
@@ -859,6 +797,18 @@ export class ChatGptBrowser {
       await this.chromium.acknowledgeTarget?.(target.id);check();
       session=await this.chromium.connectTarget(target);check();
       await initializePageSession(session,this.config);check();
+      if(nativeProfileFromOperations(profileOperations).model) {
+        await navigatePageSession(session,nativePreferenceHomeUrl(profileOperations));check();
+        // Wait for the seed page to load. No model/effort readback is performed.
+        let ready=false;
+        while(!ready) {
+          check();
+          try {ready=!!(await runPageAction(session,'recoveryInput',{},undefined,{signal}))?.composer;}
+          catch(error) {if(!/context|navigat|repurposed/i.test(String(error?.message||error)))throw error;}
+          if(!ready)await delay(100,signal);
+        }
+        await runPageAction(session,'prepareProfile',{operations:profileOperations},30000,{signal});check();
+      }
       await navigatePageSession(session,projectUrl);check();
       return {target,session,baseline:{}};
     } catch(error) {
