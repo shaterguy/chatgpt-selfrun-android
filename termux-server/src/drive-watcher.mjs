@@ -20,7 +20,7 @@ export class DriveDispatchWatcher {
     this.seen=new Map();this.inputs=new Map();this.deferred=new Map();
     this.files=new Map();this.jobs=new Map();this.controls=new Map();this.reads=new Map();this.readFailures=new Map();this.priority=new Map();this.failures=new Map();
     this.lanes=new Set();this.listed=false;this.completedScans=0;
-    this.runningControls=new Map();
+    this.runningControls=new Map();this.terminalFingerprints=new Map();
     this.controller.onTerminalDiscard?.(records=>this.#discardTerminal(records));
   }
   #discardTerminal(records) {
@@ -28,7 +28,10 @@ export class DriveDispatchWatcher {
       for(const file of [...this.files.values()])if(file.path===r.path||matches(file.path,{...r,schema:'selfrun-task-control-v1',state:'RUNNING'}))this.#forget(file.path);
       const control=this.controller.controlForTask(r.task_id);
       if(!control||control.turn_id===r.turn_id&&control.request_id===r.request_id) {
-        this.runningControls.delete(r.task_id);this.#forget('__SELFRUN_CONTROL__'+r.task_id+'.json');
+        this.runningControls.delete(r.task_id);
+        const path='__SELFRUN_CONTROL__'+r.task_id+'.json',fp=fingerprint(this.files.get(path));
+        if(fp!==null)this.terminalFingerprints.set(r.task_id,fp);
+        this.#forget(path);
       }
     }
   }
@@ -43,7 +46,7 @@ export class DriveDispatchWatcher {
       if(this.running)await delay(Math.max(500,Number(this.config.drivePollMs||1000)));
     }
   }
-  stop(){this.running=false;this.stopped=true;this.runningControls.clear();}
+  stop(){this.running=false;this.stopped=true;this.runningControls.clear();this.terminalFingerprints.clear();}
   #error(event,error) {console.error(JSON.stringify({event,error:String(error?.message||error).slice(0,300)}));}
   #current(file) {return !this.stopped&&this.canDispatch()&&fingerprint(this.files.get(file.path))===fingerprint(file)&&this.files.get(file.path)?.workToken===file.workToken;}
   #tick() {
@@ -96,8 +99,14 @@ export class DriveDispatchWatcher {
     this.scanning=true;
     try {
       // Age only orders discovery. Current app control decides execution authority.
-      const files=(await this.transport.list()).filter(file=>isControl(file)||taskFor(file.path))
+      const listed=(await this.transport.list()).filter(file=>isControl(file)||taskFor(file.path))
         .toSorted((a,b)=>modified(b)-modified(a));
+      const taskId=file=>isControl(file)?file.path.slice('__SELFRUN_CONTROL__'.length,-'.json'.length):taskFor(file.path);
+      const taskIds=new Set(listed.map(taskId));
+      const controlVersions=new Map(listed.filter(isControl).map(file=>[taskId(file),fingerprint(file)]));
+      for(const [task,fp] of this.terminalFingerprints)if(!taskIds.has(task)
+        ||(controlVersions.has(task)&&controlVersions.get(task)!==fp))this.terminalFingerprints.delete(task);
+      const files=listed.filter(file=>!this.terminalFingerprints.has(taskId(file)));
       if(this.stopped||!this.canDispatch())return;
       if(!this.listed) {
         // Start with the newest viable dispatch; it loads its own control before ingestion.
@@ -146,8 +155,8 @@ export class DriveDispatchWatcher {
   #observeControl(path,c) {
     const task=path.slice('__SELFRUN_CONTROL__'.length,-'.json'.length);
     const changed=this.runningControls.get(task)!==controlToken(c);
-    if(c.state==='RUNNING')this.runningControls.set(task,controlToken(c));
-    else {this.runningControls.delete(task);this.#forget(path);}
+    if(c.state==='RUNNING'){this.terminalFingerprints.delete(task);this.runningControls.set(task,controlToken(c));}
+    else {this.runningControls.delete(task);const fp=fingerprint(this.files.get(path));if(fp!==null)this.terminalFingerprints.set(task,fp);this.#forget(path);}
     for(const file of [...this.files.values()])if(taskFor(file.path)===task) {
       if(!matches(file.path,c))this.#forget(file.path);
       else if(changed)for(const map of [this.seen,this.inputs,this.deferred,this.failures,this.readFailures])map.delete(file.path);
