@@ -1,0 +1,22 @@
+{
+  "schema": "selfrun-login-bridge-path-maintenance-v1",
+  "date": "2026-11-21",
+  "base_repository": "shaterguy/chatgpt-selfrun-android",
+  "adopted_source_commit": "b03b9b57c1fea109154a6fda386a37b8de04f817",
+  "installed_path": "~/bin/selfrun-login-bridge.mjs",
+  "old_import": "~/work/selfrun-server-v4.0.0-dev40-tgwo3z-release/source-checkout/termux-server/src/browser/cdp.mjs",
+  "new_import": "~/work/selfrun-server-v4.0.0-dev44-release/source-checkout/termux-server/src/browser/cdp.mjs",
+  "wrapper_before_sha256": "f0f38cc696e43f0a0cce45f6037b3f4194f1fd46f36100a525d9ca0d54586932",
+  "wrapper_after_sha256": "f434d8c41eae8e582c61b44ac6fbb9cccfe66fa78ff58eb491adba5b68053dad",
+  "wrapper_after_bytes": 8089,
+  "mode": "0600",
+  "old_and_new_module_sha256": "fbd4fd79240b6a681f102600383e8613b2a82a1145f2f2d80da9e0809a4d934c",
+  "required_cdp_session_methods": [
+    "connect",
+    "call",
+    "close"
+  ],
+  "change": "Replace the single absolute import path with the active dev44 release path; retain all other wrapper bytes and existing runtime settings.",
+  "preservation": "The dev40 checkout remains the Git common directory for the dev44 worktree and must remain present.",
+  "validation": "Node syntax check and module API comparison without starting the login bridge or invoking browser/CDP actions."
+}
